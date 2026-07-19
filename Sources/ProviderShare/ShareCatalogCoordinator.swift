@@ -73,6 +73,26 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         self.artworkCacheLifecycle = artworkCacheLifecycle
     }
 
+    /// Step 6 composition: like the artwork-lifecycle init above, but the enrichment
+    /// pipeline is built with a user-override config and (optionally) a shared
+    /// provider runtime so Settings can read/adjust the running system. Passing
+    /// `.init()` for `metadataComposition` is byte-identical to the init above.
+    public init(
+        arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) },
+        artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle,
+        metadataComposition: ShareMetadataComposition
+    ) {
+        self.arbiterFactory = arbiterFactory
+        self.diagnostics = DefaultShareScanDiagnostics()
+        self.pipelineFactory = DefaultShareMetadataPipelineFactory(
+            clients: .production(
+                enrichmentConfig: metadataComposition.enrichmentConfig,
+                providerRuntime: metadataComposition.providerRuntime
+            )
+        )
+        self.artworkCacheLifecycle = artworkCacheLifecycle
+    }
+
     init(
         arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) },
         diagnostics: ShareScanDiagnostics = DefaultShareScanDiagnostics(),

@@ -152,4 +152,48 @@ extension ShareExternalMetadataClients {
             makeTVDBClient: { TVDBClientMetadataResolver(client: TVDBClient(config: $0)) }
         )
     }
+
+    /// Production composition (Step 6) that layers a user-override enrichment config
+    /// and a shared ``MetadataProviderRuntime`` onto the pipeline. `enrichmentConfig`
+    /// is read per pipeline build, so a newly registered share picks up the latest
+    /// merged override; `providerRuntime`, when present, shares one result cache +
+    /// breaker set across shares so `AppShell` can surface them in diagnostics.
+    static func production(
+        enrichmentConfig: @escaping @Sendable () -> MetadataEnrichmentConfig,
+        providerRuntime: MetadataProviderRuntime?
+    ) -> ShareExternalMetadataClients {
+        ShareExternalMetadataClients(
+            ids: KeylessIDResolverClient(),
+            artwork: SharedArtworkRouterClient(),
+            overview: SharedOverviewRouterClient(),
+            tvdbConfig: { TVDBConfig.resolved() },
+            makeTVDBClient: { TVDBClientMetadataResolver(client: TVDBClient(config: $0)) },
+            makePipeline: {
+                ProductionMetadataProviders.makePipeline(
+                    enrichmentConfig: enrichmentConfig(),
+                    runtime: providerRuntime
+                )
+            }
+        )
+    }
+}
+
+/// The Step 6 metadata composition inputs the app hands the share catalog
+/// coordinator: how to build the enrichment config (with user overrides layered on
+/// the Info.plist baseline) and an optional shared provider runtime for diagnostics.
+///
+/// The default value reproduces the Step 5 behaviour exactly (baseline config,
+/// per-pipeline caches/breakers), so a coordinator constructed without this input is
+/// unchanged.
+public struct ShareMetadataComposition: Sendable {
+    public var enrichmentConfig: @Sendable () -> MetadataEnrichmentConfig
+    public var providerRuntime: MetadataProviderRuntime?
+
+    public init(
+        enrichmentConfig: @escaping @Sendable () -> MetadataEnrichmentConfig = { .resolved() },
+        providerRuntime: MetadataProviderRuntime? = nil
+    ) {
+        self.enrichmentConfig = enrichmentConfig
+        self.providerRuntime = providerRuntime
+    }
 }

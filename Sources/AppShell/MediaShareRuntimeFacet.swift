@@ -141,4 +141,25 @@ public final class MediaShareRuntimeFacet {
         }
         Task { await shareProvider.rescan() }
     }
+
+    // MARK: - Metadata settings surface (Step 6)
+
+    /// A point-in-time diagnostics snapshot of the metadata enrichment subsystem for
+    /// the Settings "Diagnostics" section. Cross-actor and non-transactional — re-read
+    /// to refresh rather than expecting the fields to be mutually consistent.
+    public func metadataDiagnosticsSnapshot() async -> MetadataEnrichmentDiagnosticsSnapshot {
+        await runtime.metadataDiagnosticsSnapshot()
+    }
+
+    /// Applies the user's cache budgets to the live metadata + derived-artwork caches,
+    /// evicting immediately when a budget is lowered.
+    public func applyCacheBudgets(_ settings: CacheBudgetSettings) async {
+        await runtime.applyCacheBudgets(settings)
+    }
+
+    /// Clears the resolved-URL metadata cache and the derived-artwork cache
+    /// ("Clear cache now"). Distinct from a budget change.
+    public func clearMetadataCaches() async {
+        await runtime.clearMetadataCaches()
+    }
 }

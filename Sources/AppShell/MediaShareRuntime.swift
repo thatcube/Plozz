@@ -3,6 +3,7 @@ import CoreModels
 import CoreUI
 import FeatureAuth
 import MediaTransportCore
+import MetadataKit
 import ProviderShare
 import EnginePlozzigen
 
@@ -45,6 +46,27 @@ public protocol MediaShareRuntime: Sendable {
     /// Updates the active profile's preferred media-share account keys so their
     /// passive backlog drains before work retained for other profiles.
     func setPreferredAccountKeys(_ accountKeys: Set<String>, revision: UInt64) async
+
+    /// A point-in-time snapshot of the metadata enrichment subsystem for the Step 6
+    /// Settings "Diagnostics" section (per-source counts, cache bytes, breaker state,
+    /// scan/queue status). Default: an empty snapshot (test fakes need not implement).
+    func metadataDiagnosticsSnapshot() async -> MetadataEnrichmentDiagnosticsSnapshot
+
+    /// Applies the user's cache budgets to the metadata + derived-artwork caches,
+    /// evicting immediately (Step 6). Default: no-op.
+    func applyCacheBudgets(_ settings: CacheBudgetSettings) async
+
+    /// Clears the resolved-URL metadata cache and the derived-artwork cache
+    /// (Step 6 "Clear cache now"). Default: no-op.
+    func clearMetadataCaches() async
+}
+
+public extension MediaShareRuntime {
+    func metadataDiagnosticsSnapshot() async -> MetadataEnrichmentDiagnosticsSnapshot {
+        MetadataEnrichmentDiagnosticsSnapshot()
+    }
+    func applyCacheBudgets(_ settings: CacheBudgetSettings) async {}
+    func clearMetadataCaches() async {}
 }
 
 /// The single production `MediaShareRuntime`. Construct it only through
@@ -54,17 +76,22 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
     private let coordinator: ShareCatalogCoordinator
     private let composition: MediaShareTransportComposition
     private let artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle
+    /// The shared provider runtime (result cache + per-source breakers) the pipeline
+    /// runs on, retained so diagnostics can sample it (Step 6).
+    private let providerRuntime: MetadataProviderRuntime
     let networkFileResolver: any MediaTransportNetworkFileResolving
 
     private init(
         coordinator: ShareCatalogCoordinator,
         composition: MediaShareTransportComposition,
         artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle,
+        providerRuntime: MetadataProviderRuntime,
         networkFileResolver: any MediaTransportNetworkFileResolving
     ) {
         self.coordinator = coordinator
         self.composition = composition
         self.artworkCacheLifecycle = artworkCacheLifecycle
+        self.providerRuntime = providerRuntime
         self.networkFileResolver = networkFileResolver
     }
 
@@ -74,9 +101,30 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
     /// same composition. Nothing outside this method assembles the three pieces.
     static func make(accountStore: any AccountPersisting) -> DefaultMediaShareRuntime {
         let artworkCacheLifecycle = MediaShareLocalArtworkCacheLifecycle()
+        // Step 6: build the pipeline with a user-override enrichment config (layered
+        // on the Info.plist baseline) and a shared provider runtime so Settings can
+        // read diagnostics + apply cache budgets. Empty overrides => Step 5 config.
+        let providerRuntime = MetadataProviderRuntime.makeDefault()
+        let providerSettingsStore = MetadataProviderSettingsStore()
+        let enrichmentConfig: @Sendable () -> MetadataEnrichmentConfig = {
+            MetadataEnrichmentConfig.resolved().merged(
+                withUserOverrides: providerSettingsStore.load()
+            )
+        }
         let coordinator = ShareCatalogCoordinator(
-            artworkCacheLifecycle: artworkCacheLifecycle
+            artworkCacheLifecycle: artworkCacheLifecycle,
+            metadataComposition: ShareMetadataComposition(
+                enrichmentConfig: enrichmentConfig,
+                providerRuntime: providerRuntime
+            )
         )
+        // Apply persisted cache budgets to the live caches at startup (eviction runs
+        // immediately if a budget was lowered since last launch).
+        let cacheBudgets = CacheBudgetSettingsStore().load()
+        Task {
+            await MetadataDiskCache.shared.setMaxBytes(cacheBudgets.metadataCacheBytes)
+            await ArtworkImageCache.shared.setDerivedArtworkCacheByteCap(cacheBudgets.artworkCacheBytes)
+        }
         let composition = MediaShareTransportComposition.make(accountStore: accountStore)
         let resolver = MediaTransportNetworkFileResolver(
             registry: composition.resolverRegistry,
@@ -102,6 +150,7 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
             coordinator: coordinator,
             composition: composition,
             artworkCacheLifecycle: artworkCacheLifecycle,
+            providerRuntime: providerRuntime,
             networkFileResolver: resolver
         )
         // AppShell is the only layer that sees both the transport resolver and
@@ -171,6 +220,37 @@ final class DefaultMediaShareRuntime: MediaShareRuntime {
 
     func setPreferredAccountKeys(_ accountKeys: Set<String>, revision: UInt64) async {
         await coordinator.setPreferredAccountKeys(accountKeys, revision: revision)
+    }
+
+    func metadataDiagnosticsSnapshot() async -> MetadataEnrichmentDiagnosticsSnapshot {
+        // Point-in-time, cross-actor: capture the timestamp first, then gather each
+        // field from its own actor. The parts may be a few ms apart by design.
+        let capturedAt = Date()
+        let counts = await coordinator.metadataCountPerSource()
+        let work = await coordinator.metadataWorkStatus()
+        let artworkBytes = await ArtworkImageCache.shared.derivedArtworkCacheByteSize()
+        let metadataBytes = await MetadataDiskCache.shared.currentByteSize()
+        let breakers = await providerRuntime.breakerStates()
+        let resultCount = await providerRuntime.resultCacheEntryCount()
+        return MetadataEnrichmentDiagnosticsSnapshot(
+            capturedAt: capturedAt,
+            metadataCountPerSource: counts,
+            artworkCacheBytes: artworkBytes,
+            metadataCacheBytes: metadataBytes,
+            resultCacheEntryCount: resultCount,
+            providerBreakers: breakers,
+            work: work
+        )
+    }
+
+    func applyCacheBudgets(_ settings: CacheBudgetSettings) async {
+        await MetadataDiskCache.shared.setMaxBytes(settings.metadataCacheBytes)
+        await ArtworkImageCache.shared.setDerivedArtworkCacheByteCap(settings.artworkCacheBytes)
+    }
+
+    func clearMetadataCaches() async {
+        await MetadataDiskCache.shared.clear()
+        await ArtworkImageCache.shared.clearDerivedArtworkCache()
     }
 }
 

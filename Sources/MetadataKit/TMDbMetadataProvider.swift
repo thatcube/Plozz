@@ -1,5 +1,17 @@
 import Foundation
 
+/// A poster URL + original language resolved from one TMDb search response, so the
+/// enrichment adapter can fill both from a single call.
+public struct TMDbSearchSummary: Sendable, Equatable {
+    public var posterURL: URL?
+    public var originalLanguage: String?
+
+    public init(posterURL: URL? = nil, originalLanguage: String? = nil) {
+        self.posterURL = posterURL
+        self.originalLanguage = originalLanguage
+    }
+}
+
 /// TMDb-backed artwork (backdrops, posters, logos, per-episode stills) reached via
 /// the optional, maintainer-controlled ``TMDbAccess`` (proxy or local token).
 ///
@@ -52,11 +64,23 @@ public struct TMDbMetadataProvider: ArtworkProvider {
 
     /// The work's original language as ISO-639-1 (`en`, `ja`), from the top TMDb
     /// search match's `original_language`. `nil` when TMDb is disabled, the item is
-    /// music, or no match is found. One search call (the same one poster resolution
-    /// uses), so it adds no extra round-trip on the enrichment path.
+    /// music, or no match is found. The enrichment adapter resolves poster + original
+    /// language together via ``searchSummary(for:)`` (one search); this standalone
+    /// accessor exists for callers that need only the language.
     public func originalLanguage(for query: MetadataQuery) async -> String? {
         guard access.isEnabled, query.contentType != .music else { return nil }
         return await search(query)?.original_language
+    }
+
+    /// Poster URL + original language from a **single** search call, so the
+    /// enrichment adapter can resolve both without issuing two identical searches
+    /// (`artworkURL(.poster)` and `originalLanguage(for:)` each search on their own).
+    /// `nil` when disabled/music/no match; individual fields are `nil` when absent.
+    public func searchSummary(for query: MetadataQuery) async -> TMDbSearchSummary? {
+        guard access.isEnabled, query.contentType != .music,
+              let result = await search(query) else { return nil }
+        let posterURL = result.poster_path.flatMap { URL(string: "\(imageBase)/w500\($0)") }
+        return TMDbSearchSummary(posterURL: posterURL, originalLanguage: result.original_language)
     }
 
     public func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL? {

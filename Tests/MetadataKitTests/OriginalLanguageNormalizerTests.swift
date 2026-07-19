@@ -27,6 +27,21 @@ final class OriginalLanguageNormalizerTests: XCTestCase {
         XCTAssertEqual(OriginalLanguageNormalizer.normalized("Turkish"), "tr")
     }
 
+    func testMapsProviderAliasCodes() {
+        // TMDb's legacy `cn` for Chinese folds to canonical `zh`.
+        XCTAssertEqual(OriginalLanguageNormalizer.normalized("cn"), "zh")
+        XCTAssertEqual(OriginalLanguageNormalizer.normalized("CN"), "zh")
+    }
+
+    func testRejectsNoLanguageSentinels() {
+        // TMDb `xx` ("No Language"), ISO `zxx`/`und` must resolve to nil so the
+        // caller defers to the container default instead of a bogus track language.
+        XCTAssertNil(OriginalLanguageNormalizer.normalized("xx"))
+        XCTAssertNil(OriginalLanguageNormalizer.normalized("XX"))
+        XCTAssertNil(OriginalLanguageNormalizer.normalized("zxx"))
+        XCTAssertNil(OriginalLanguageNormalizer.normalized("und"))
+    }
+
     func testReturnsNilForUnknownOrEmpty() {
         XCTAssertNil(OriginalLanguageNormalizer.normalized(nil))
         XCTAssertNil(OriginalLanguageNormalizer.normalized(""))

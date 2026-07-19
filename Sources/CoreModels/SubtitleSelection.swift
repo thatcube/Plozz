@@ -181,6 +181,46 @@ public enum SubtitleSelector {
 // MARK: - Existing-subtitle suitability (drives auto-download)
 
 public extension Array where Element == MediaTrack {
+    /// The language of the audio the viewer will actually hear, used to gate the
+    /// `.forcedOnly` subtitle default so a forced track in a language foreign to the
+    /// audio (e.g. a Turkish forced track under English audio) is not auto-enabled.
+    ///
+    /// Resolves the race at initial load where the engine's *confirmed* active audio
+    /// id (`confirmedID`) can still read the container's (possibly foreign) default
+    /// for a beat before the load-time preferred pick settles — which would otherwise
+    /// re-introduce the exact foreign-forced-subtitle bug. Precedence:
+    ///  1. `pendingID` — an explicit in-flight optimistic pick is the clearest intent.
+    ///  2. `preferredLanguages` — the load-time requested language(s), but only when a
+    ///     matching audio track actually exists (that is the track the engine will
+    ///     settle on), so this beats a momentarily-lagging `confirmedID`.
+    ///  3. `confirmedID` — the engine's authoritatively-resolved active track.
+    ///  4. the container's default audio track (last resort).
+    /// `nil` when nothing is known, so the selector keeps its historical behavior.
+    func activeAudioLanguage(
+        pendingID: Int?,
+        confirmedID: Int?,
+        preferredLanguages: [String]
+    ) -> String? {
+        let audio = filter { $0.kind == .audio }
+        func language(ofTrackID id: Int?) -> String? {
+            guard let id, let track = audio.first(where: { $0.id == id }),
+                  let language = track.language, !language.isEmpty else { return nil }
+            return language
+        }
+        if let pending = language(ofTrackID: pendingID) { return pending }
+        for requested in preferredLanguages where !requested.isEmpty {
+            if audio.contains(where: { LanguageMatch.matches($0.language, requested) }) {
+                return LanguageMatch.normalized(requested) ?? requested
+            }
+        }
+        if let active = language(ofTrackID: confirmedID) { return active }
+        if let byDefault = (audio.first(where: { $0.isDefault }) ?? audio.first)?.language,
+           !byDefault.isEmpty {
+            return byDefault
+        }
+        return nil
+    }
+
     /// Whether this list already contains a subtitle stream usable for
     /// `language` (any subtitle when `language` is `nil`). When `false` and
     /// auto-download is enabled, the player should fetch one in the background.

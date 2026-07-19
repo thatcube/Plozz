@@ -171,6 +171,19 @@ public protocol TMDbEnriching: Sendable {
     func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL?
     /// The work's original language (ISO-639-1) from TMDb's `original_language`.
     func originalLanguage(for query: MetadataQuery) async -> String?
+    /// Poster URL + original language from a single search, so the adapter fills both
+    /// without two identical searches. Defaults to composing the two calls above (one
+    /// each) for conformers that don't optimize it.
+    func searchSummary(for query: MetadataQuery) async -> TMDbSearchSummary?
+}
+
+public extension TMDbEnriching {
+    func searchSummary(for query: MetadataQuery) async -> TMDbSearchSummary? {
+        let posterURL = await artworkURL(.poster, for: query)
+        let language = await originalLanguage(for: query)
+        guard posterURL != nil || language != nil else { return nil }
+        return TMDbSearchSummary(posterURL: posterURL, originalLanguage: language)
+    }
 }
 
 extension TMDbMetadataProvider: TMDbEnriching {}
@@ -198,18 +211,25 @@ public struct TMDbEnrichmentProvider: MetadataEnrichmentProvider {
             let urls = await provider.backdropURLs(for: query, limit: backdropLimit)
             out.backdropCandidates = urls.map { SourcedValue(value: $0, source: .tmdb) }
         }
-        if missing.contains(.posterURL), let url = await provider.artworkURL(.poster, for: query) {
-            out.posterURL = SourcedValue(value: url, source: .tmdb)
+        // Poster and original language both derive from the same TMDb search, so a
+        // single `searchSummary` call fills both without a duplicate round-trip.
+        let wantsPoster = missing.contains(.posterURL)
+        let wantsOriginalLanguage = missing.contains(.originalLanguage)
+        if wantsPoster || wantsOriginalLanguage {
+            let summary = await provider.searchSummary(for: query)
+            if wantsPoster, let url = summary?.posterURL {
+                out.posterURL = SourcedValue(value: url, source: .tmdb)
+            }
+            if wantsOriginalLanguage,
+               let code = OriginalLanguageNormalizer.normalized(summary?.originalLanguage) {
+                out.originalLanguage = SourcedValue(value: code, source: .tmdb)
+            }
         }
         if missing.contains(.logoURL), let url = await provider.artworkURL(.logo, for: query) {
             out.logoURL = SourcedValue(value: url, source: .tmdb)
         }
         if missing.contains(.episodeThumbnail), let url = await provider.artworkURL(.thumbnail, for: query) {
             out.episodeStillURL = SourcedValue(value: url, source: .tmdb)
-        }
-        if missing.contains(.originalLanguage),
-           let code = OriginalLanguageNormalizer.normalized(await provider.originalLanguage(for: query)) {
-            out.originalLanguage = SourcedValue(value: code, source: .tmdb)
         }
         return out
     }

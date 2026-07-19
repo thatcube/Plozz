@@ -342,27 +342,19 @@ final class SubtitleTrackController {
     /// The language of the audio the viewer is actually hearing, used to keep the
     /// `.forcedOnly` default from auto-enabling a forced subtitle in a language
     /// foreign to the audio (e.g. a Turkish forced track under English audio).
-    /// Prefers the engine's authoritatively-resolved active audio track; falls back
-    /// to the language the audio policy requested, then the container's default
-    /// audio track. `nil` when nothing is known — the selector then keeps its
-    /// historical "any forced" behavior.
+    ///
+    /// Delegates to the pure ``Array/activeAudioLanguage(pendingID:confirmedID:preferredLanguages:)``
+    /// resolver, feeding it the in-flight optimistic pick (`pendingAudioTrackID`), the
+    /// engine's confirmed active id, and the load-time requested languages — so the
+    /// intended original language wins during the initial-load window when the
+    /// confirmed id can still lag on the container's (foreign) default.
     private func activeAudioLanguage() -> String? {
         guard let host else { return nil }
-        let audio = host.trackEngine.audioTracks
-        if let activeID = host.trackEngine.currentAudioTrackID,
-           let active = audio.first(where: { $0.id == activeID }),
-           let language = active.language, !language.isEmpty {
-            return language
-        }
-        if let requested = host.trackRequest?.preferredAudioLanguages.first,
-           !requested.isEmpty {
-            return requested
-        }
-        if let byDefault = (audio.first(where: { $0.isDefault }) ?? audio.first)?.language,
-           !byDefault.isEmpty {
-            return byDefault
-        }
-        return nil
+        return host.trackEngine.audioTracks.activeAudioLanguage(
+            pendingID: pendingAudioTrackID,
+            confirmedID: host.trackEngine.currentAudioTrackID,
+            preferredLanguages: host.trackRequest?.preferredAudioLanguages ?? []
+        )
     }
 
     #if DEBUG

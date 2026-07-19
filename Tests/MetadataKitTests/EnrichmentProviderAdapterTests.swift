@@ -35,17 +35,24 @@ private struct FakeTMDb: TMDbEnriching {
     var logo: URL?
     var still: URL?
     var original: String?
+    let log = CallLog()
     var isEnabled: Bool { enabled }
     func backdropURLs(for query: MetadataQuery, limit: Int) async -> [URL] { Array(backdrops.prefix(limit)) }
     func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL? {
         switch kind {
-        case .poster: return poster
+        case .poster: log.record("artwork:poster"); return poster
         case .logo: return logo
         case .thumbnail: return still
         case .hero: return backdrops.first
         }
     }
-    func originalLanguage(for query: MetadataQuery) async -> String? { original }
+    func originalLanguage(for query: MetadataQuery) async -> String? { log.record("originalLanguage"); return original }
+    // Override the default seam so poster + original language come from ONE search.
+    func searchSummary(for query: MetadataQuery) async -> TMDbSearchSummary? {
+        log.record("searchSummary")
+        guard poster != nil || original != nil else { return nil }
+        return TMDbSearchSummary(posterURL: poster, originalLanguage: original)
+    }
 }
 
 private struct FakeAniList: AniListEnriching {
@@ -165,6 +172,19 @@ final class EnrichmentProviderAdapterTests: XCTestCase {
         let provider = TMDbEnrichmentProvider(provider: FakeTMDb(original: "en"))
         let out = await provider.enrich(query(.movie), missing: [.posterURL])
         XCTAssertNil(out.originalLanguage)
+    }
+
+    func testTMDbFillsPosterAndOriginalLanguageFromOneSearch() async {
+        // Poster + original language share the same TMDb search, so the adapter must
+        // resolve both via a single `searchSummary` call (no duplicate round-trip).
+        let fake = FakeTMDb(poster: URL(string: "https://p/p.jpg"), original: "en")
+        let provider = TMDbEnrichmentProvider(provider: fake)
+        let out = await provider.enrich(query(.movie), missing: [.posterURL, .originalLanguage])
+        XCTAssertEqual(out.posterURL?.value, URL(string: "https://p/p.jpg"))
+        XCTAssertEqual(out.originalLanguage?.value, "en")
+        XCTAssertEqual(fake.log.all.filter { $0 == "searchSummary" }.count, 1)
+        XCTAssertFalse(fake.log.all.contains("artwork:poster"), "Poster must come from the single searchSummary, not a second search")
+        XCTAssertFalse(fake.log.all.contains("originalLanguage"), "Original language must come from the single searchSummary")
     }
 
     func testTVmazeEmitsOriginalLanguageFromDisplayName() async {

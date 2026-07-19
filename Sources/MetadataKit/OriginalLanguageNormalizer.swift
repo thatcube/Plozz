@@ -22,6 +22,17 @@ enum OriginalLanguageNormalizer {
         let lowered = raw.lowercased()
         // Code-shaped (e.g. "en", "eng", "pt-BR"): fold to ISO-639-1 via LanguageMatch.
         if !lowered.contains(" "), lowered.count <= 3 || lowered.contains("-") || lowered.contains("_") {
+            let base = lowered
+                .split(whereSeparator: { $0 == "-" || $0 == "_" })
+                .first
+                .map(String.init) ?? lowered
+            // Sentinels meaning "no language" (TMDb `xx`, ISO-639 `zxx`/`und`) must
+            // NEVER become a real code — return nil so the caller defers to the
+            // container default rather than requesting a bogus track language.
+            if sentinelCodes.contains(base) { return nil }
+            // Provider aliases that `LanguageMatch` doesn't fold (e.g. TMDb's legacy
+            // `cn` for Chinese, whose canonical ISO-639-1 is `zh`).
+            if let aliased = codeAliases[base] { return aliased }
             if let code = LanguageMatch.normalized(lowered), code.count == 2 {
                 return code
             }
@@ -29,6 +40,15 @@ enum OriginalLanguageNormalizer {
         // Display name (e.g. "English", "Japanese").
         return nameToCode[lowered]
     }
+
+    /// "No language" sentinels providers emit that must resolve to `nil`, not a code:
+    /// TMDb `xx` ("No Language"), and the ISO-639 `zxx` ("no linguistic content") /
+    /// `und` ("undetermined").
+    private static let sentinelCodes: Set<String> = ["xx", "zxx", "und"]
+
+    /// Provider language-code aliases `LanguageMatch` doesn't cover, mapped to their
+    /// canonical ISO-639-1. TMDb historically used `cn` for Chinese (canonical `zh`).
+    private static let codeAliases: [String: String] = ["cn": "zh"]
 
     /// English language names → ISO-639-1, seeded from the shared picker catalog
     /// and extended with a few TVmaze/TheTVDB spellings.

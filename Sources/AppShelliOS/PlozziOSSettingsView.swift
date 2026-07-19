@@ -38,6 +38,11 @@ struct PlozziOSSettingsView: View {
         .environment(\.themePalette, palette)
         .environment(\.colorScheme, palette.isLight ? .light : .dark)
         .preferredColorScheme(palette.isLight ? .light : .dark)
+        .modifier(
+            PlozziOSSettingsListAppearance(
+                usesPureBlack: appModel.settings.theme.theme == .pureBlack
+            )
+        )
     }
 
     private var palette: ThemePalette {
@@ -45,6 +50,19 @@ struct PlozziOSSettingsView: View {
             for: appModel.settings.theme.theme,
             systemColorScheme: systemColorScheme
         )
+    }
+}
+
+private struct PlozziOSSettingsListAppearance: ViewModifier {
+    let usesPureBlack: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if usesPureBlack {
+            content.listStyle(.plain)
+        } else {
+            content
+        }
     }
 }
 
@@ -67,6 +85,7 @@ private enum PlozziOSSettingsDestination: Hashable {
 }
 
 private struct PlozziOSSettingsSplitView: View {
+    @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     let onClose: () -> Void
@@ -180,14 +199,19 @@ private struct PlozziOSSettingsSplitView: View {
             }
             .navigationTitle("Settings")
             .scrollContentBackground(.hidden)
+            .background { AppBackground(palette: palette) }
         } detail: {
             NavigationStack {
-                Group {
-                    settingsDetail
+                ZStack {
+                    AppBackground(palette: palette)
+                    Group {
+                        settingsDetail
+                    }
+                    .frame(maxWidth: 760)
+                    .frame(maxWidth: .infinity)
+                    .plozziOSSettingsSurface()
                 }
-                .frame(maxWidth: 760)
-                .frame(maxWidth: .infinity)
-                .plozziOSSettingsSurface()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .id(selection)
         }

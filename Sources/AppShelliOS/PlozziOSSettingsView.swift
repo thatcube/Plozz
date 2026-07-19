@@ -978,6 +978,7 @@ private struct PlozziOSAppearanceSettingsView: View {
                 }
                 .settingsListRowSurface()
             }
+            .settingsSectionSurface()
 
             Section("Library cards") {
                 Picker("Card style", selection: $cardStyle.style) {
@@ -1000,6 +1001,7 @@ private struct PlozziOSAppearanceSettingsView: View {
                 }
                 .settingsListRowSurface()
             }
+            .settingsSectionSurface()
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)

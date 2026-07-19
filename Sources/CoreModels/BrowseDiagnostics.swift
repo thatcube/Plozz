@@ -3,6 +3,32 @@ import Foundation
 import OSLog
 #endif
 
+private final class BrowseDiagnosticsFileSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handle: FileHandle?
+
+    init(enabled: Bool) {
+        guard enabled,
+              let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return
+        }
+        let url = caches.appendingPathComponent("plzxmem.log")
+        try? FileManager.default.removeItem(at: url)
+        guard FileManager.default.createFile(atPath: url.path, contents: nil) else { return }
+        handle = try? FileHandle(forWritingTo: url)
+    }
+
+    deinit {
+        try? handle?.close()
+    }
+
+    func write(_ data: Data) {
+        lock.withLock {
+            try? handle?.write(contentsOf: data)
+        }
+    }
+}
+
 /// On-device **library-browse performance** telemetry. Samples process memory,
 /// live playback-object counts, and SMB background scan/enrichment activity on a
 /// fixed interval while a browse grid is on screen, so scroll/navigation
@@ -30,6 +56,7 @@ public enum BrowseDiagnostics {
     #if canImport(OSLog)
     private static let logger = Logger(subsystem: "com.plozz.app", category: "browse")
     #endif
+    private static let fileSink = BrowseDiagnosticsFileSink(enabled: isEnabled)
 
     /// Emits one already-formatted telemetry line (the `PLZXMEM ` prefix is added).
     /// No-op when disabled.
@@ -38,7 +65,9 @@ public enum BrowseDiagnostics {
         #if canImport(OSLog)
         logger.notice("PLZXMEM \(line, privacy: .public)")
         #endif
-        try? FileHandle.standardOutput.write(contentsOf: Data(("PLZXMEM " + line + "\n").utf8))
+        let data = Data(("PLZXMEM " + line + "\n").utf8)
+        try? FileHandle.standardOutput.write(contentsOf: data)
+        fileSink.write(data)
     }
 
     private static let eventClockFmt: DateFormatter = {
@@ -94,9 +123,11 @@ public enum BrowseDiagnostics {
                     )
                 } ?? ""
                 emit(String(
-                    format: "sample %@ t=%.0fs mem=%.1fMB vms=%d nativeEng=%d shareScan=%d listers=%d peakListers=%d shareEnrich=%d%@",
+                    format: "sample %@ t=%.0fs mem=%.1fMB vms=%d nativeEng=%d shareScan=%d listers=%d peakListers=%d shareEnrich=%d artAssocPasses=%d artAssocRows=%d artAssocMaxRows=%d%@",
                     label, Date().timeIntervalSince(start), mem, vms, eng,
-                    share.scans, share.activeListers, share.peakListers, share.enrichPasses, artStr
+                    share.scans, share.activeListers, share.peakListers, share.enrichPasses,
+                    share.artworkAssociationPasses, share.artworkAssociationAssetRows,
+                    share.maximumArtworkAssociationRowsPerPass, artStr
                 ))
                 tick += 1
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
@@ -185,6 +216,9 @@ public enum ShareBackgroundActivity {
         /// High-watermark of concurrent listings since launch — reveals the true
         /// scan parallelism (e.g. 2 shares × 4-wide pools peaking near 8).
         public let peakListers: Int
+        public let artworkAssociationPasses: Int
+        public let artworkAssociationAssetRows: Int
+        public let maximumArtworkAssociationRowsPerPass: Int
     }
 
     private static let lock = NSLock()
@@ -192,6 +226,9 @@ public enum ShareBackgroundActivity {
     nonisolated(unsafe) private static var activeEnrichPasses = 0
     nonisolated(unsafe) private static var activeListers = 0
     nonisolated(unsafe) private static var peakListers = 0
+    nonisolated(unsafe) private static var artworkAssociationPasses = 0
+    nonisolated(unsafe) private static var artworkAssociationAssetRows = 0
+    nonisolated(unsafe) private static var maximumArtworkAssociationRowsPerPass = 0
 
     public static func scanStarted() { lock.lock(); activeScans += 1; lock.unlock() }
     public static func scanFinished() { lock.lock(); activeScans = max(0, activeScans - 1); lock.unlock() }
@@ -208,13 +245,24 @@ public enum ShareBackgroundActivity {
     }
     public static func listFinished() { lock.lock(); activeListers = max(0, activeListers - 1); lock.unlock() }
 
+    public static func artworkAssociationMaterialized(assetRows: Int) {
+        lock.lock()
+        artworkAssociationPasses += 1
+        artworkAssociationAssetRows += assetRows
+        maximumArtworkAssociationRowsPerPass = max(maximumArtworkAssociationRowsPerPass, assetRows)
+        lock.unlock()
+    }
+
     public static func snapshot() -> Snapshot {
         lock.lock(); defer { lock.unlock() }
         return Snapshot(
             scans: activeScans,
             enrichPasses: activeEnrichPasses,
             activeListers: activeListers,
-            peakListers: peakListers
+            peakListers: peakListers,
+            artworkAssociationPasses: artworkAssociationPasses,
+            artworkAssociationAssetRows: artworkAssociationAssetRows,
+            maximumArtworkAssociationRowsPerPass: maximumArtworkAssociationRowsPerPass
         )
     }
 }

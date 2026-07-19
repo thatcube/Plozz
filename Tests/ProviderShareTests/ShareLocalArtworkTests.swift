@@ -531,6 +531,62 @@ final class ShareLocalArtworkTests: XCTestCase {
         }
     }
 
+    func testIncrementalArtworkAssociationMaterializesOnlyRelevantCatalogRows() async throws {
+        let fixture = ShareCatalogSQLiteFixture()
+        defer { fixture.cleanup() }
+        let store = fixture.makeStore()
+        await store.configureArtworkReferenceContext(
+            accountID: "art-account",
+            credentialRevision: CredentialRevision()
+        )
+        var assets = [movie()]
+        assets.append(contentsOf: (0..<1_000).map { index in
+            let path = "Movies/Unrelated \(index)/Unrelated \(index).mkv"
+            return CatalogAsset(
+                relPath: path,
+                basename: (path as NSString).lastPathComponent,
+                size: 100,
+                modifiedAt: Date(timeIntervalSince1970: 100),
+                kind: .movie,
+                library: .movies,
+                title: "Unrelated \(index)",
+                year: 2020,
+                seriesTitle: nil,
+                seriesKey: nil,
+                season: nil,
+                episode: nil,
+                movieKey: "unrelated-\(index)",
+                movieTitleKey: "unrelated-\(index)"
+            )
+        })
+        await store.upsert(assets, scanID: 1)
+        await store.resetArtworkAssociationMaterializationStats()
+
+        await store.upsertArtwork([candidate("Movies/Film/poster.jpg")], scanID: 1)
+
+        let stats = await store.currentArtworkAssociationMaterializationStats()
+        XCTAssertEqual(stats.passes, 1, "one incremental artwork batch performs one bounded association pass")
+        XCTAssertEqual(stats.assetRowsLoaded, 1, "unrelated catalog rows must never be materialized")
+        XCTAssertEqual(stats.maximumRowsPerPass, 1)
+        let item = await store.item(id: ShareCatalogID.file("Movies/Film/Film.mkv"))
+        XCTAssertFalse(try XCTUnwrap(item).artworkReferences(for: .poster).isEmpty)
+
+        await store.upsert(assets, scanID: 2)
+        await store.upsertArtwork([candidate("Movies/Film/poster.jpg")], scanID: 2)
+        await store.resetArtworkAssociationMaterializationStats()
+        let finalized = await store.finalizeCleanScan(inScan: 2)
+
+        XCTAssertTrue(finalized)
+        let finalizationStats = await store.currentArtworkAssociationMaterializationStats()
+        XCTAssertEqual(finalizationStats.passes, 1, "clean finalization groups artwork by owner scope")
+        XCTAssertEqual(
+            finalizationStats.assetRowsLoaded,
+            1,
+            "clean finalization must not recreate a catalog-wide Cartesian materialization"
+        )
+        XCTAssertEqual(finalizationStats.maximumRowsPerPass, 1)
+    }
+
     func testCredentialRotationRestampsReferencesWithoutRescan() async throws {
         let fixture = ShareCatalogSQLiteFixture()
         defer { fixture.cleanup() }

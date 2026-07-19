@@ -21,6 +21,12 @@ import CoreNetworking
 /// An `actor` so the single SQLite connection is only ever touched from one task
 /// at a time (the connection is used single-threaded).
 actor ShareCatalogStore {
+    struct ArtworkAssociationMaterializationStats: Sendable, Equatable {
+        var passes: Int
+        var assetRowsLoaded: Int
+        var maximumRowsPerPass: Int
+    }
+
     private let url: URL
     private let enrichmentSaveFailurePoint: EnrichmentSaveFailurePoint?
     /// The actor-confined SQLite handle owner. Never escapes this actor and is only
@@ -72,6 +78,11 @@ actor ShareCatalogStore {
     /// This avoids rematerializing every item after a process relaunch while never
     /// storing credentials or artwork paths in catalog metadata.
     private static let artworkReferenceContextMetaKey = "artwork_reference_context_v1"
+    private var artworkAssociationMaterializationStats = ArtworkAssociationMaterializationStats(
+        passes: 0,
+        assetRowsLoaded: 0,
+        maximumRowsPerPass: 0
+    )
 
     /// Bounded catalog writes keep the actor cooperative with Home/grid/search
     /// reads while a large share is scanning.
@@ -566,12 +577,11 @@ actor ShareCatalogStore {
         let previous = allArtworkAssociatedItemIDs()
         guard artworkRepo.deleteStale(inScan: scanID) else { return false }
         let candidates = storedArtworkCandidates()
-        let assets = artworkCatalogAssets()
-        guard artworkRepo.replaceAllAssociations(
-            candidates.flatMap {
-                ShareArtworkAssociationPolicy.associations(candidate: $0, assets: assets)
-            }
-        ) else { return false }
+        let associations = artworkAssociations(for: candidates)
+        BrowseDiagnostics.event(
+            "artwork-finalize candidates=\(candidates.count) associations=\(associations.count)"
+        )
+        guard artworkRepo.replaceAllAssociations(associations) else { return false }
         let current = artworkAssociatedItemIDs(paths: candidates.map(\.relPath))
         for itemID in previous.union(current).sorted() {
             guard materializeArtworkSelectionsInTransaction(itemID: itemID) else { return false }
@@ -580,12 +590,9 @@ actor ShareCatalogStore {
     }
 
     private func associateArtworkInTransaction(_ artwork: [LocalArtworkCandidate]) -> Bool {
-        let assets = artworkCatalogAssets()
         return artworkRepo.replaceAssociations(
             forArtworkPaths: artwork.map(\.relPath),
-            values: artwork.flatMap {
-                ShareArtworkAssociationPolicy.associations(candidate: $0, assets: assets)
-            }
+            values: artworkAssociations(for: artwork)
         )
     }
 
@@ -617,12 +624,9 @@ actor ShareCatalogStore {
     private func reassociateAllArtworkInTransaction() -> Bool {
         let previous = allArtworkAssociatedItemIDs()
         let candidates = storedArtworkCandidates()
-        let assets = artworkCatalogAssets()
-        guard artworkRepo.replaceAllAssociations(
-            candidates.flatMap {
-                ShareArtworkAssociationPolicy.associations(candidate: $0, assets: assets)
-            }
-        ) else { return false }
+        guard artworkRepo.replaceAllAssociations(artworkAssociations(for: candidates)) else {
+            return false
+        }
         let current = artworkAssociatedItemIDs(paths: candidates.map(\.relPath))
         for itemID in previous.union(current).sorted() {
             guard materializeArtworkSelectionsInTransaction(itemID: itemID) else { return false }
@@ -630,7 +634,31 @@ actor ShareCatalogStore {
         return true
     }
 
-    private func artworkCatalogAssets() -> [ShareArtworkCatalogAsset] {
+    private func artworkAssociations(
+        for candidates: [LocalArtworkCandidate]
+    ) -> [ShareArtworkAssociation] {
+        let candidatesByDirectory = Dictionary(grouping: candidates, by: artworkOwnerDirectory)
+        return candidatesByDirectory.keys.sorted().reduce(into: []) { result, directory in
+            guard let scopedCandidates = candidatesByDirectory[directory] else { return }
+            let assets = artworkCatalogAssets(relevantTo: scopedCandidates)
+            let scopedAssociations = autoreleasepool {
+                scopedCandidates.flatMap {
+                    ShareArtworkAssociationPolicy.associations(candidate: $0, assets: assets)
+                }
+            }
+            result.append(contentsOf: scopedAssociations)
+        }
+    }
+
+    private func artworkOwnerDirectory(_ candidate: LocalArtworkCandidate) -> String {
+        candidate.isBackdropFolder
+            ? (candidate.parentDir as NSString).deletingLastPathComponent
+            : candidate.parentDir
+    }
+
+    private func artworkCatalogAssets(
+        relevantTo candidates: [LocalArtworkCandidate]
+    ) -> [ShareArtworkCatalogAsset] {
         struct Row {
             var relPath: String
             var kind: CatalogAssetKind
@@ -640,18 +668,61 @@ actor ShareCatalogStore {
             var metadataRoot: String?
         }
         var rows: [Row] = []
-        query("""
+        let directParents = Set(candidates.map(artworkOwnerDirectory))
+        guard !directParents.isEmpty else { return [] }
+        var sql = """
         SELECT rel_path, kind, COALESCE(movie_group_key,movie_key), series_key, season, metadata_root
-        FROM assets;
-        """) { stmt in
+        FROM assets
+        """
+        let orderedParents = Array(directParents).sorted()
+        let rootSeasons = Set(
+            candidates
+                .filter { artworkOwnerDirectory($0).isEmpty }
+                .compactMap(\.facts.season)
+        ).sorted()
+        if orderedParents == [""] {
+            sql += " WHERE metadata_root='' OR instr(rel_path,'/')=0"
+            if !rootSeasons.isEmpty {
+                let placeholders = Array(repeating: "?", count: rootSeasons.count).joined(separator: ",")
+                sql += " OR season IN (\(placeholders))"
+            }
+        } else {
+            sql += " WHERE " + orderedParents.map { _ in
+                "(metadata_root=? OR substr(rel_path,1,length(?)+1)=?||'/')"
+            }.joined(separator: " OR ")
+        }
+        sql += ";"
+        query(sql, bind: { stmt in
+            var offset: Int32 = 1
+            if orderedParents == [""] {
+                for season in rootSeasons {
+                    sqlite3_bind_int64(stmt, offset, Int64(season))
+                    offset += 1
+                }
+            } else {
+                for parent in orderedParents {
+                    self.bindText(stmt, offset, parent)
+                    self.bindText(stmt, offset + 1, parent)
+                    self.bindText(stmt, offset + 2, parent)
+                    offset += 3
+                }
+            }
+        }) { stmt in
             guard let path = self.columnText(stmt, 0),
                   let kind = CatalogAssetKind(rawValue: self.columnText(stmt, 1) ?? "") else { return }
             rows.append(.init(relPath: path, kind: kind, group: self.columnText(stmt, 2),
                               seriesKey: self.columnText(stmt, 3), season: self.columnOptInt(stmt, 4),
                               metadataRoot: self.columnText(stmt, 5)))
         }
-        let reps = Dictionary(grouping: rows.filter { $0.kind == .movie && $0.group != nil }, by: { $0.group! })
-            .mapValues { $0.map(\.relPath).min()! }
+        artworkAssociationMaterializationStats.passes += 1
+        artworkAssociationMaterializationStats.assetRowsLoaded += rows.count
+        artworkAssociationMaterializationStats.maximumRowsPerPass = max(
+            artworkAssociationMaterializationStats.maximumRowsPerPass,
+            rows.count
+        )
+        ShareBackgroundActivity.artworkAssociationMaterialized(assetRows: rows.count)
+        let groups = Set(rows.filter { $0.kind == .movie }.compactMap(\.group))
+        let reps = artworkMovieRepresentatives(groups: groups)
         return rows.map {
             .init(
                 relPath: $0.relPath, kind: $0.kind,
@@ -659,6 +730,46 @@ actor ShareCatalogStore {
                 seriesKey: $0.seriesKey, season: $0.season, metadataRoot: $0.metadataRoot
             )
         }
+    }
+
+    private func artworkMovieRepresentatives(groups: Set<String>) -> [String: String] {
+        guard !groups.isEmpty else { return [:] }
+        let ordered = Array(groups).sorted()
+        var result: [String: String] = [:]
+        var start = 0
+        while start < ordered.count {
+            let end = min(start + 500, ordered.count)
+            let chunk = Array(ordered[start..<end])
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            query("""
+            SELECT COALESCE(movie_group_key,movie_key), MIN(rel_path)
+            FROM assets
+            WHERE kind='movie' AND COALESCE(movie_group_key,movie_key) IN (\(placeholders))
+            GROUP BY COALESCE(movie_group_key,movie_key);
+            """, bind: { stmt in
+                for (offset, group) in chunk.enumerated() {
+                    self.bindText(stmt, Int32(offset + 1), group)
+                }
+            }) { stmt in
+                guard let group = self.columnText(stmt, 0),
+                      let relPath = self.columnText(stmt, 1) else { return }
+                result[group] = relPath
+            }
+            start = end
+        }
+        return result
+    }
+
+    func resetArtworkAssociationMaterializationStats() {
+        artworkAssociationMaterializationStats = .init(
+            passes: 0,
+            assetRowsLoaded: 0,
+            maximumRowsPerPass: 0
+        )
+    }
+
+    func currentArtworkAssociationMaterializationStats() -> ArtworkAssociationMaterializationStats {
+        artworkAssociationMaterializationStats
     }
 
     private func storedArtworkCandidates(

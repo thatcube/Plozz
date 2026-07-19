@@ -83,9 +83,13 @@ enum ShareMetadataWorkComposition {
         guard remaining > .zero, remainingItems > 0 else {
             return ShareEnrichmentSliceResult(attempted: localResult.attempted, hasMore: true)
         }
+        BrowseDiagnostics.event("artwork-slice+ \(accountKey)")
         let artworkResult = await artwork.resolvePendingSlice(
             maxItems: remainingItems,
             maxDuration: remaining
+        )
+        BrowseDiagnostics.event(
+            "artwork-slice- \(accountKey) attempted=\(artworkResult.attempted) more=\(artworkResult.hasMore)"
         )
         if isCancelled() {
             return ShareEnrichmentSliceResult(

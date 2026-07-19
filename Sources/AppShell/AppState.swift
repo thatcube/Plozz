@@ -468,6 +468,8 @@ public final class AppState {
     /// `PLZXMEM=1`). Held so it lives as long as the app state.
     @ObservationIgnored
     private var perfHitchProbeTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var perfMemorySamplerTask: Task<Void, Never>?
 
     private var machine = SessionStateMachine()
 
@@ -821,6 +823,9 @@ public final class AppState {
         // PLZXMEM=1) so we can measure whether background share scans stall the UI.
         if perfHitchProbeTask == nil {
             perfHitchProbeTask = BrowseDiagnostics.startMainThreadHitchProbe()
+        }
+        if perfMemorySamplerTask == nil {
+            perfMemorySamplerTask = BrowseDiagnostics.startSampler(label: "app")
         }
         do {
             try accountsProviders.accountStore.recoverCredentialMutations()

@@ -93,16 +93,24 @@ public enum ContentClassifier {
         return labels.contains { label in animeLabels.contains { label.contains($0) } }
     }
 
-    /// Best-effort ORIGINAL audio language (ISO-639, lowercased) for the
-    /// "prefer original language" audio policy. Providers expose no explicit
-    /// original-language field today, so this is heuristic: anime is
-    /// overwhelmingly Japanese-original, so `.anime` → `"ja"`. Everything else
-    /// returns `nil`, letting the caller defer to the container's default track
-    /// (the best available proxy for "original"). Seam: fill from real
-    /// provider/TMDB `original_language` metadata here for live-action foreign
-    /// films later.
+    /// Best-effort ORIGINAL audio language (ISO-639-1, lowercased) for the
+    /// "prefer original language" audio policy.
+    ///
+    /// Prefers **real metadata**: when the item carries an ``MediaItem/originalLanguage``
+    /// (filled from a provider's `original_language`/`originalLanguage`/`language`
+    /// field — see the Step-5 enrichment pipeline), that authoritative value wins,
+    /// normalized to ISO-639-1. Only when no metadata value exists does it fall back
+    /// to the heuristic that anime is overwhelmingly Japanese-original (`.anime` →
+    /// `"ja"`) — and that fallback is deliberately last so a non-Japanese "anime"
+    /// (Chinese donghua, Korean, …) whose true original language the providers
+    /// supplied is served correctly rather than always Japanese. Everything else with
+    /// no metadata returns `nil`, letting the caller defer to the container's default
+    /// track (the best available proxy for "original" when nothing is known).
     public static func originalAudioLanguage(for item: MediaItem) -> String? {
-        classify(item) == .anime ? "ja" : nil
+        if let normalized = LanguageMatch.normalized(item.originalLanguage) {
+            return normalized
+        }
+        return classify(item) == .anime ? "ja" : nil
     }
 }
 

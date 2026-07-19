@@ -53,6 +53,56 @@ final class MetadataKitTests: XCTestCase {
         XCTAssertNil(ContentClassifier.originalAudioLanguage(for: item(kind: .episode)))
     }
 
+    func testOriginalAudioLanguagePrefersRealMetadata() {
+        // The Spider-Man case: a live-action movie whose provider metadata says the
+        // original language is English → request 'en' (not the container default).
+        var spiderman = item(kind: .movie, providerIDs: ["Tmdb": "557"])
+        spiderman.originalLanguage = "en"
+        XCTAssertEqual(ContentClassifier.originalAudioLanguage(for: spiderman), "en")
+
+        // Real metadata is normalized to ISO-639-1 (accepts 3-letter / cased input).
+        var cased = item(kind: .movie)
+        cased.originalLanguage = "ENG"
+        XCTAssertEqual(ContentClassifier.originalAudioLanguage(for: cased), "en")
+    }
+
+    func testOriginalAudioLanguageMetadataSupersedesAnimeHeuristic() {
+        // A Chinese donghua classified as "anime": real metadata (zh) must win over
+        // the anime→ja last-resort fallback.
+        var donghua = item(genres: ["Anime"])
+        donghua.originalLanguage = "zh"
+        XCTAssertEqual(ContentClassifier.originalAudioLanguage(for: donghua), "zh")
+
+        // Anime with NO metadata still falls back to Japanese.
+        XCTAssertEqual(ContentClassifier.originalAudioLanguage(for: item(genres: ["Anime"])), "ja")
+    }
+
+    func testSpiderManOriginalAudioSelectsEnglishEndToEnd() {
+        // Full flow: a movie whose container default track is Turkish but whose true
+        // original language (per metadata) is English. Under `.original`, the policy
+        // must request 'en' so the engine picks the existing English track instead of
+        // the Turkish container default.
+        var spiderman = item(kind: .movie, providerIDs: ["Tmdb": "557"])
+        spiderman.originalLanguage = "en"
+        let requested = AudioLanguagePolicy.preferredAudioLanguages(
+            remembered: nil,
+            preference: .original,
+            originalLanguage: ContentClassifier.originalAudioLanguage(for: spiderman),
+            deviceLanguage: "tr"
+        )
+        XCTAssertEqual(requested, ["en"])
+
+        // Without metadata the same movie has no known original → no preference, so
+        // the engine falls back to the container default (today's behavior).
+        let unknown = AudioLanguagePolicy.preferredAudioLanguages(
+            remembered: nil,
+            preference: .original,
+            originalLanguage: ContentClassifier.originalAudioLanguage(for: item(kind: .movie)),
+            deviceLanguage: "tr"
+        )
+        XCTAssertEqual(unknown, [])
+    }
+
     func testContentTypeMapsToSubtitleCategory() {
         XCTAssertEqual(ContentType.anime.subtitleCategory, .anime)
         XCTAssertEqual(ContentType.movie.subtitleCategory, .movie)

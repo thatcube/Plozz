@@ -3,15 +3,29 @@ import SwiftUI
 
 public struct PlozziOSRootView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var appModel = PlozziOSAppModel()
     @State private var selection: PlozziOSDestination? = .home
+    @State private var showingAddServer = false
 
     public init() {}
 
     public var body: some View {
-        if horizontalSizeClass == .regular {
-            PlozziOSSplitShell(selection: $selection)
-        } else {
-            PlozziOSTabShell()
+        Group {
+            if horizontalSizeClass == .regular {
+                PlozziOSSplitShell(
+                    selection: $selection,
+                    appModel: appModel,
+                    onAddServer: { showingAddServer = true }
+                )
+            } else {
+                PlozziOSTabShell(
+                    appModel: appModel,
+                    onAddServer: { showingAddServer = true }
+                )
+            }
+        }
+        .sheet(isPresented: $showingAddServer) {
+            AddServerView(appModel: appModel)
         }
     }
 }
@@ -42,6 +56,8 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
 
 private struct PlozziOSSplitShell: View {
     @Binding var selection: PlozziOSDestination?
+    let appModel: PlozziOSAppModel
+    let onAddServer: () -> Void
 
     var body: some View {
         NavigationSplitView {
@@ -51,30 +67,49 @@ private struct PlozziOSSplitShell: View {
             .navigationTitle("Plozz")
         } detail: {
             NavigationStack {
-                PlozziOSDestinationView(destination: selection ?? .home)
+                PlozziOSDestinationView(
+                    destination: selection ?? .home,
+                    appModel: appModel,
+                    onAddServer: onAddServer
+                )
             }
         }
     }
 }
 
 private struct PlozziOSTabShell: View {
+    let appModel: PlozziOSAppModel
+    let onAddServer: () -> Void
+
     var body: some View {
         TabView {
             Tab("Home", systemImage: "house") {
                 NavigationStack {
-                    PlozziOSDestinationView(destination: .home)
+                    PlozziOSDestinationView(
+                        destination: .home,
+                        appModel: appModel,
+                        onAddServer: onAddServer
+                    )
                 }
             }
 
             Tab("Search", systemImage: "magnifyingglass") {
                 NavigationStack {
-                    PlozziOSDestinationView(destination: .search)
+                    PlozziOSDestinationView(
+                        destination: .search,
+                        appModel: appModel,
+                        onAddServer: onAddServer
+                    )
                 }
             }
 
             Tab("Settings", systemImage: "gear") {
                 NavigationStack {
-                    PlozziOSDestinationView(destination: .settings)
+                    PlozziOSDestinationView(
+                        destination: .settings,
+                        appModel: appModel,
+                        onAddServer: onAddServer
+                    )
                 }
             }
         }
@@ -83,14 +118,106 @@ private struct PlozziOSTabShell: View {
 
 private struct PlozziOSDestinationView: View {
     let destination: PlozziOSDestination
+    let appModel: PlozziOSAppModel
+    let onAddServer: () -> Void
 
     var body: some View {
-        ContentUnavailableView {
-            Label(destination.title, systemImage: destination.systemImage)
-        } description: {
-            Text("Connect a media source to start building your library.")
+        switch destination {
+        case .home:
+            PlozziOSHomeLandingView(
+                appModel: appModel,
+                onAddServer: onAddServer
+            )
+        case .search:
+            ContentUnavailableView(
+                "Search",
+                systemImage: "magnifyingglass",
+                description: Text("Search becomes available after Home loads your libraries.")
+            )
+            .navigationTitle("Search")
+        case .settings:
+            PlozziOSAccountSettingsView(
+                appModel: appModel,
+                onAddServer: onAddServer
+            )
+            .navigationTitle("Settings")
         }
-        .navigationTitle(destination.title)
+    }
+}
+
+private struct PlozziOSHomeLandingView: View {
+    let appModel: PlozziOSAppModel
+    let onAddServer: () -> Void
+
+    var body: some View {
+        if appModel.accounts.isEmpty {
+            ContentUnavailableView {
+                Label("Build your library", systemImage: "play.rectangle.on.rectangle")
+            } description: {
+                Text("Connect Jellyfin, Emby, or Plex to start watching.")
+            } actions: {
+                Button("Add Server", action: onAddServer)
+                    .buttonStyle(.borderedProminent)
+            }
+            .navigationTitle("Home")
+        } else {
+            List {
+                Section("Connected servers") {
+                    ForEach(appModel.accounts) { account in
+                        Label {
+                            VStack(alignment: .leading) {
+                                Text(account.server.name)
+                                Text(account.userName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "server.rack")
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Home")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Add Server", systemImage: "plus", action: onAddServer)
+                }
+            }
+        }
+    }
+}
+
+private struct PlozziOSAccountSettingsView: View {
+    let appModel: PlozziOSAppModel
+    let onAddServer: () -> Void
+
+    var body: some View {
+        List {
+            Section("Servers") {
+                ForEach(appModel.accounts) { account in
+                    VStack(alignment: .leading) {
+                        Text(account.server.name)
+                        Text(account.userName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .swipeActions {
+                        Button("Remove", role: .destructive) {
+                            appModel.removeAccount(id: account.id)
+                        }
+                    }
+                }
+
+                Button("Add Server", systemImage: "plus", action: onAddServer)
+            }
+
+            if let accountError = appModel.accountError {
+                Section {
+                    Label(accountError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                }
+            }
+        }
     }
 }
 #endif

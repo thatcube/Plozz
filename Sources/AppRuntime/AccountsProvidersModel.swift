@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import CoreModels
 import CoreNetworking
-import FeatureAuth
+import FeatureAuthCore
 
 /// The accounts + providers hub, extracted from `AppState`.
 ///

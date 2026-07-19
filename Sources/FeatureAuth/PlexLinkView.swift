@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import FeatureAuthCore
 import ProviderPlex
 
 /// TV-friendly Plex sign-in screen: shows the big link code with a live expiry

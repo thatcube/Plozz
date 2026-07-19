@@ -1,6 +1,6 @@
 import XCTest
 import CoreModels
-@testable import FeatureAuth
+@testable import FeatureAuthCore
 
 final class QuickConnectServiceTests: XCTestCase {
     private let server = MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin)

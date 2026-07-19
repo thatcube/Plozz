@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import FeatureAuthCore
 
 /// Authentication coordinator shown once a server is selected.
 ///

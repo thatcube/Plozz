@@ -35,6 +35,7 @@ let package = Package(
         .library(name: "SimklService", targets: ["SimklService"]),        .library(name: "AniListService", targets: ["AniListService"]),
         .library(name: "MALService", targets: ["MALService"]),
         .library(name: "LastFmService", targets: ["LastFmService"]),
+        .library(name: "FeatureAuthCore", targets: ["FeatureAuthCore"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
@@ -52,6 +53,7 @@ let package = Package(
         .library(name: "MediaTransportSFTP", targets: ["MediaTransportSFTP"]),
         .library(name: "TransportNFS", targets: ["TransportNFS"]),
         .library(name: "MediaTransportNFS", targets: ["MediaTransportNFS"]),
+        .library(name: "AppRuntime", targets: ["AppRuntime"]),
         .library(name: "AppShell", targets: ["AppShell"]),
         .library(name: "AppShelliOS", targets: ["AppShelliOS"])
     ],
@@ -244,8 +246,12 @@ let package = Package(
             dependencies: ["CoreModels", "CoreNetworking", "CoreUI"]
         ),
         .target(
+            name: "FeatureAuthCore",
+            dependencies: ["CoreModels", "CoreNetworking", "ProviderJellyfin", "ProviderPlex"]
+        ),
+        .target(
             name: "FeatureAuth",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "ProviderJellyfin", "ProviderPlex"]
+            dependencies: ["CoreModels", "CoreUI", "FeatureAuthCore", "ProviderPlex"]
         ),
         .target(
             name: "FeatureHome",
@@ -475,10 +481,22 @@ let package = Package(
             ]
         ),
 
+        .target(
+            name: "AppRuntime",
+            dependencies: [
+                "CoreModels",
+                "CoreNetworking",
+                "FeatureAuthCore",
+                "ProviderJellyfin",
+                "ProviderPlex",
+            ]
+        ),
+
         // MARK: App composition root
         .target(
             name: "AppShell",
             dependencies: [
+                "AppRuntime",
                 "CoreModels",
                 "CoreNetworking",
                 "CoreUI",
@@ -516,7 +534,14 @@ let package = Package(
             ]
         ),
         .target(
-            name: "AppShelliOS"
+            name: "AppShelliOS",
+            dependencies: [
+                "AppRuntime",
+                "CoreModels",
+                "CoreNetworking",
+                "FeatureAuthCore",
+                "ProviderPlex",
+            ]
         ),
 
         // MARK: Tests (pure logic, no UI required)
@@ -574,7 +599,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FeatureAuthTests",
-            dependencies: ["FeatureAuth", "CoreModels"]
+            dependencies: ["FeatureAuthCore", "CoreModels"]
         ),
         .testTarget(
             name: "FeatureHomeTests",

@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import FeatureAuthCore
 
 /// TV-friendly Quick Connect screen: shows the big code, a live expiry timer,
 /// and Cancel / Try Again, plus an optional low-emphasis secondary action.

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import AppRuntime
 import CoreModels
 import CoreNetworking
 import FeatureAuth

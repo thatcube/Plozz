@@ -19,7 +19,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             if let title {
                 Text(title)
                     .font(.footnote.weight(.semibold))
@@ -69,6 +69,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
         }
+        .padding(.top, 8)
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         #if !os(tvOS)

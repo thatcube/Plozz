@@ -219,7 +219,7 @@ private struct PlozziOSSettingsSplitView: View {
                     SettingsSectionGroup("This Profile") {
                         settingsRow(
                             .myLibraries,
-                            title: "Your Servers & Libraries",
+                            title: "My Libraries",
                             systemImage: "rectangle.stack"
                         )
                         settingsRow(.trackers, title: "Trackers", systemImage: "link")
@@ -459,7 +459,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                         onAddServer: onAddServer
                     )
                 } label: {
-                    Label("Your Servers & Libraries", systemImage: "rectangle.stack")
+                    Label("My Libraries", systemImage: "rectangle.stack")
                 }
                 NavigationLink {
                     PlozziOSTrackerSettingsView(appModel: appModel)

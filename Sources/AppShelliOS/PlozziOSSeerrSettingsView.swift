@@ -48,6 +48,7 @@ struct PlozziOSSeerrSettingsView: View {
                 }
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Seerr")
         .task {
             await appModel.seerService.refreshStatus()

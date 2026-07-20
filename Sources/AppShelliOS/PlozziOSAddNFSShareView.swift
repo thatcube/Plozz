@@ -83,6 +83,7 @@ struct PlozziOSAddNFSShareView: View {
                 }
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Add NFS Share")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

@@ -38,6 +38,7 @@ struct PlozziOSTrackerSettingsView: View {
                 MALSettingsContent(service: appModel.malService)
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Trackers")
         .task {
             async let trakt: Void = appModel.traktService.refreshStatus()

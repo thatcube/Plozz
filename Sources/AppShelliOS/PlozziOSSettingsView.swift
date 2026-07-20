@@ -341,6 +341,7 @@ private struct PlozziOSAboutSettingsView: View {
                 }
             }
         }
+        .plozziOSSettingsSurface()
         .navigationTitle("About")
     }
 }
@@ -655,6 +656,7 @@ private struct PlozziOSProfileDetailView: View {
                 }
             }
         }
+        .plozziOSSettingsSurface()
         .navigationTitle(currentProfile.name)
         .sheet(isPresented: $editing) {
             NavigationStack {
@@ -688,6 +690,7 @@ private struct PlozziOSAddProfileView: View {
                 TextField("Emoji", text: $emoji)
             }
         }
+        .plozziOSSettingsSurface()
         .navigationTitle("New Profile")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -754,6 +757,7 @@ private struct PlozziOSAccountDetailView: View {
                 }
             }
         }
+        .plozziOSSettingsSurface()
         .navigationTitle(account.server.name)
         .navigationBarTitleDisplayMode(.inline)
         .alert("Remove \(account.server.name)?", isPresented: $confirmRemoval) {
@@ -844,6 +848,7 @@ private struct PlozziOSPlexHomeUserSettingsView: View {
                 Text("PIN-protected users must unlock when their Plozz profile becomes active.")
             }
         }
+        .plozziOSSettingsSurface()
         .navigationTitle("Plex User")
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -964,12 +969,8 @@ private struct PlozziOSAppearanceSettingsView: View {
 }
 
 private struct PlozziOSSettingsSurface: ViewModifier {
-    @Environment(\.themePalette) private var palette
-
     func body(content: Content) -> some View {
-        content
-            .scrollContentBackground(.hidden)
-            .background { AppBackground(palette: palette) }
+        content.settingsPageSurface()
     }
 }
 
@@ -1120,6 +1121,7 @@ private struct PlozziOSHomeSettingsView: View {
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
+        .plozziOSSettingsSurface()
         .navigationTitle("Customize Home")
         .task(id: accounts.map(\.account.id)) {
             await loadLibraries()
@@ -1251,6 +1253,7 @@ private struct PlozziOSLibraryHomeSettingsView: View {
                 }
             }
         }
+        .plozziOSSettingsSurface()
         .navigationTitle(library.title)
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -1367,6 +1370,7 @@ private struct PlozziOSPlaybackSettingsView: View {
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
+        .plozziOSSettingsSurface()
         .navigationTitle("Playback")
     }
 
@@ -1497,6 +1501,7 @@ private struct PlozziOSSubtitleSettingsView: View {
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
+        .plozziOSSettingsSurface()
         .navigationTitle("Subtitles")
     }
 
@@ -1550,6 +1555,7 @@ private struct PlozziOSSpoilerSettingsView: View {
                 Text("Episode titles, summaries, and artwork can be hidden until you watch them.")
             }
         }
+        .plozziOSSettingsSurface()
         .navigationTitle("Spoilers")
     }
 }
@@ -1612,6 +1618,7 @@ private struct PlozziOSNightShiftSettingsView: View {
                 }
             }
         }
+        .plozziOSSettingsSurface()
         .navigationTitle("Circadian Mode")
         .onChange(of: model.settings.isEnabled) { _, enabled in
             if !enabled {
@@ -1709,6 +1716,7 @@ private struct PlozziOSAttributionsView: View {
                 }
             }
         }
+        .plozziOSSettingsSurface()
         .navigationTitle("Attributions")
     }
 }

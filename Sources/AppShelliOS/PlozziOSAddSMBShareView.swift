@@ -80,6 +80,7 @@ struct PlozziOSAddSMBShareView: View {
                 }
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Add SMB Share")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

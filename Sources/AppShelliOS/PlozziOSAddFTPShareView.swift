@@ -121,6 +121,7 @@ struct PlozziOSAddFTPShareView: View {
                 }
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Add FTP Share")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

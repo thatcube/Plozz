@@ -89,6 +89,7 @@ struct PlozziOSAddWebDAVShareView: View {
                 }
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Add WebDAV Share")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

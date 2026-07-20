@@ -101,6 +101,7 @@ struct PlozziOSDiagnosticsSettingsView: View {
                 Text("Troubleshooting overlays stay on this device and are off by default.")
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Help & Diagnostics")
         .onChange(of: crashReporting.settings.isEnabled) {
             appModel.applyCrashReportingPreference()
@@ -143,6 +144,7 @@ private struct PlozziOSRecentActivityView: View {
                 }
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Recent Activity")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {

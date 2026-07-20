@@ -45,6 +45,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
                     }
                 }
             }
+            .toggleStyle(SettingsSwitchToggleStyle(flushLeading: false))
             .background(
                 palette.cardOpaqueSurface,
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)

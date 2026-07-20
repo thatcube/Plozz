@@ -93,6 +93,7 @@ struct PlozziOSAddSFTPShareView: View {
                 }
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Add SFTP Share")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

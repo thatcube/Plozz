@@ -35,6 +35,7 @@ struct PlozziOSAddShareView: View {
                 }
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Add Network Share")
     }
 }

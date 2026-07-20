@@ -166,7 +166,7 @@ public extension ThemePalette {
         focusedCardGlassTint: Color.white.opacity(0.10),
         liftSurface: .white,
         cardOpaqueSurface: .black,
-        cardOpaqueBorder: Color.white.opacity(0.24),
+        cardOpaqueBorder: Color.white.opacity(0.12),
         isLight: false
     )
 

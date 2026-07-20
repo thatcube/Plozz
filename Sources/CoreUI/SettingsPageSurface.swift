@@ -8,7 +8,9 @@ public struct SettingsPageSurface: ViewModifier {
 
     public func body(content: Content) -> some View {
         content
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .contentMargins(.vertical, 24, for: .scrollContent)
             .background { AppBackground(palette: palette) }
             .toolbarBackground(.hidden, for: .navigationBar)
     }

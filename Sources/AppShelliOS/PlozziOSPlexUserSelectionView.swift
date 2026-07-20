@@ -1,6 +1,7 @@
 #if os(iOS)
 import AppRuntime
 import CoreModels
+import CoreUI
 import SwiftUI
 
 struct PlozziOSPlexUserSelectionView: View {
@@ -34,6 +35,7 @@ struct PlozziOSPlexUserSelectionView: View {
                     Text("You can change this later in Settings.")
                 }
             }
+            .settingsPageSurface()
             .navigationTitle("Which Plex User Are You?")
             .navigationBarTitleDisplayMode(.inline)
         }

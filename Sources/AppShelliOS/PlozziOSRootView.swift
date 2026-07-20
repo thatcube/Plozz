@@ -10,6 +10,8 @@ public struct PlozziOSRootView: View {
     private var systemReduceTransparency
     @State private var appModel = PlozziOSAppModel()
     @State private var showingAddServer = false
+    @State private var addServerPresentationColorScheme: ColorScheme = .dark
+    @State private var showingSettings = false
     @State private var completedLaunchProfileSelection = false
 
     public init() {}
@@ -30,6 +32,7 @@ public struct PlozziOSRootView: View {
                 PlozziOSTabShell(
                     appModel: appModel,
                     onAddServer: showAddServer,
+                    showingSettings: $showingSettings,
                     systemColorScheme: systemColorScheme
                 )
             }
@@ -66,6 +69,8 @@ public struct PlozziOSRootView: View {
             onDismiss: appModel.finishManagedServerPresentation
         ) {
             AddServerView(appModel: appModel)
+                .preferredColorScheme(addServerPresentationColorScheme)
+                .presentationSizing(.page)
         }
         .sheet(
             item: plexUserSelectionBinding
@@ -74,6 +79,7 @@ public struct PlozziOSRootView: View {
                 selection: selection,
                 onSelect: appModel.selectPlexUserDuringOnboarding
             )
+            .preferredColorScheme(addServerPresentationColorScheme)
         }
         .sheet(
             item: plexPINBinding
@@ -82,6 +88,7 @@ public struct PlozziOSRootView: View {
                 model: appModel.plexHomeUsers,
                 request: request
             )
+            .preferredColorScheme(addServerPresentationColorScheme)
         }
         .sheet(
             item: librarySelectionBinding
@@ -93,6 +100,7 @@ public struct PlozziOSRootView: View {
                 visibility: appModel.settings.homeVisibility,
                 onContinue: appModel.completeLibrarySelection
             )
+            .preferredColorScheme(addServerPresentationColorScheme)
         }
         .fullScreenCover(
             item: firstRunStepBinding
@@ -126,7 +134,11 @@ public struct PlozziOSRootView: View {
         Binding<PlexHomeUsersModel.PendingPlexUserSelection?>
     {
         Binding(
-            get: { appModel.plexHomeUsers.pendingPlexUserSelection },
+            get: {
+                showingSettings
+                    ? nil
+                    : appModel.plexHomeUsers.pendingPlexUserSelection
+            },
             set: { selection in
                 if selection == nil {
                     appModel.cancelPlexUserSelectionDuringOnboarding()
@@ -139,7 +151,11 @@ public struct PlozziOSRootView: View {
         Binding<PlexHomeUsersModel.PlexPINRequest?>
     {
         Binding(
-            get: { appModel.plexHomeUsers.pendingPlexPINRequest },
+            get: {
+                showingSettings
+                    ? nil
+                    : appModel.plexHomeUsers.pendingPlexPINRequest
+            },
             set: { request in
                 if request == nil {
                     appModel.plexHomeUsers.dismissPlexPINIfPresented()
@@ -152,7 +168,7 @@ public struct PlozziOSRootView: View {
         Binding<PlozziOSAppModel.PendingLibrarySelection?>
     {
         Binding(
-            get: { appModel.pendingLibrarySelection },
+            get: { showingSettings ? nil : appModel.pendingLibrarySelection },
             set: { selection in
                 if selection == nil {
                     appModel.completeLibrarySelection()
@@ -171,6 +187,7 @@ public struct PlozziOSRootView: View {
     }
 
     private func showAddServer() {
+        addServerPresentationColorScheme = resolvedPalette.isLight ? .light : .dark
         appModel.beginManagedServerPresentation()
         showingAddServer = true
     }
@@ -202,10 +219,10 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
 
 private struct PlozziOSTabShell: View {
     @Environment(\.themePalette) private var palette
-    @State private var showingSettings = false
     @State private var settingsPresentationColorScheme: ColorScheme = .dark
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
+    @Binding var showingSettings: Bool
     let systemColorScheme: ColorScheme
 
     var body: some View {
@@ -254,7 +271,6 @@ private struct PlozziOSTabShell: View {
         .sheet(isPresented: $showingSettings) {
             PlozziOSSettingsView(
                 appModel: appModel,
-                onAddServer: showAddServerFromSettings,
                 onClose: { showingSettings = false },
                 systemColorScheme: systemColorScheme
             )
@@ -275,12 +291,6 @@ private struct PlozziOSTabShell: View {
         showingSettings = true
     }
 
-    private func showAddServerFromSettings() {
-        showingSettings = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            onAddServer()
-        }
-    }
 }
 
 private struct PlozziOSDestinationView: View {

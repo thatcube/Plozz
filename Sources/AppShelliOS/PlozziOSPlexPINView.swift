@@ -1,5 +1,6 @@
 #if os(iOS)
 import AppRuntime
+import CoreUI
 import SwiftUI
 
 struct PlozziOSPlexPINView: View {
@@ -26,6 +27,7 @@ struct PlozziOSPlexPINView: View {
                     }
                 }
             }
+            .settingsPageSurface()
             .navigationTitle("Plex PIN")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

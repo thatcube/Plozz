@@ -1,6 +1,7 @@
 #if os(iOS)
 import CoreModels
 import CoreNetworking
+import CoreUI
 import FeatureAuthCore
 import FeatureDiscoveryCore
 import ProviderPlex
@@ -64,6 +65,7 @@ struct AddServerView: View {
                     .frame(maxWidth: .infinity)
                 }
             }
+            .settingsPageSurface()
             .navigationTitle("Add Server")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -272,6 +274,7 @@ private struct QuickConnectServerSignInView: View {
                 }
             }
         }
+        .settingsPageSurface()
         .navigationTitle(server.name)
         .navigationBarTitleDisplayMode(.inline)
         .task { viewModel.start() }
@@ -427,6 +430,7 @@ private struct PasswordServerSignInView: View {
                 }
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Sign In")
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear { viewModel.cancel() }
@@ -502,6 +506,7 @@ private struct PlexServerSignInView: View {
                 }
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Plex")
         .navigationBarTitleDisplayMode(.inline)
         .task { viewModel.startIfNeeded() }

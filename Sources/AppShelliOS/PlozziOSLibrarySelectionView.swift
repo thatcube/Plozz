@@ -1,6 +1,7 @@
 #if os(iOS)
 import AppRuntime
 import CoreModels
+import CoreUI
 import SwiftUI
 
 struct PlozziOSLibrarySelectionView: View {
@@ -25,6 +26,7 @@ struct PlozziOSLibrarySelectionView: View {
                     Text("You can change these choices later in Settings.")
                 }
             }
+            .settingsPageSurface()
             .navigationTitle("Choose Your Libraries")
             .navigationBarTitleDisplayMode(.inline)
             .task { await loadLibraries() }

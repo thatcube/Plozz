@@ -1,12 +1,15 @@
 #if os(iOS)
+import AppRuntime
 import CoreModels
 import CoreUI
 import SwiftUI
+import UIKit
 
 struct PlozziOSSettingsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var showingAddServer = false
+    @State private var addServerPresentationColorScheme: ColorScheme = .dark
     let appModel: PlozziOSAppModel
-    let onAddServer: () -> Void
     let onClose: () -> Void
     let systemColorScheme: ColorScheme
 
@@ -15,14 +18,14 @@ struct PlozziOSSettingsView: View {
             if horizontalSizeClass == .regular {
                 PlozziOSSettingsSplitView(
                     appModel: appModel,
-                    onAddServer: onAddServer,
+                    onAddServer: showAddServer,
                     onClose: onClose
                 )
             } else {
                 NavigationStack {
                     PlozziOSSettingsCompactMenu(
                         appModel: appModel,
-                        onAddServer: onAddServer
+                        onAddServer: showAddServer
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
@@ -42,6 +45,83 @@ struct PlozziOSSettingsView: View {
             PlozziOSSettingsListAppearance(
                 usesPureBlack: appModel.settings.theme.theme == .pureBlack
             )
+        )
+        .sheet(
+            isPresented: $showingAddServer,
+            onDismiss: appModel.finishManagedServerPresentation
+        ) {
+            AddServerView(appModel: appModel)
+                .preferredColorScheme(addServerPresentationColorScheme)
+                .presentationSizing(.page)
+        }
+        .sheet(item: plexUserSelectionBinding) { selection in
+            PlozziOSPlexUserSelectionView(
+                selection: selection,
+                onSelect: appModel.selectPlexUserDuringOnboarding
+            )
+            .preferredColorScheme(addServerPresentationColorScheme)
+        }
+        .sheet(item: plexPINBinding) { request in
+            PlozziOSPlexPINView(
+                model: appModel.plexHomeUsers,
+                request: request
+            )
+            .preferredColorScheme(addServerPresentationColorScheme)
+        }
+        .sheet(item: librarySelectionBinding) { selection in
+            PlozziOSLibrarySelectionView(
+                accounts: appModel.accountsProviders.resolvedAccounts(
+                    withIDs: selection.accountIDs
+                ),
+                visibility: appModel.settings.homeVisibility,
+                onContinue: appModel.completeLibrarySelection
+            )
+            .preferredColorScheme(addServerPresentationColorScheme)
+        }
+    }
+
+    private func showAddServer() {
+        addServerPresentationColorScheme = palette.isLight ? .light : .dark
+        appModel.beginManagedServerPresentation()
+        showingAddServer = true
+    }
+
+    private var plexUserSelectionBinding:
+        Binding<PlexHomeUsersModel.PendingPlexUserSelection?>
+    {
+        Binding(
+            get: { appModel.plexHomeUsers.pendingPlexUserSelection },
+            set: { selection in
+                if selection == nil {
+                    appModel.cancelPlexUserSelectionDuringOnboarding()
+                }
+            }
+        )
+    }
+
+    private var plexPINBinding:
+        Binding<PlexHomeUsersModel.PlexPINRequest?>
+    {
+        Binding(
+            get: { appModel.plexHomeUsers.pendingPlexPINRequest },
+            set: { request in
+                if request == nil {
+                    appModel.plexHomeUsers.dismissPlexPINIfPresented()
+                }
+            }
+        )
+    }
+
+    private var librarySelectionBinding:
+        Binding<PlozziOSAppModel.PendingLibrarySelection?>
+    {
+        Binding(
+            get: { appModel.pendingLibrarySelection },
+            set: { selection in
+                if selection == nil {
+                    appModel.completeLibrarySelection()
+                }
+            }
         )
     }
 
@@ -84,6 +164,14 @@ private enum PlozziOSSettingsDestination: Hashable {
     case about
 }
 
+private var deviceName: String {
+    UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+}
+
+private var deviceSettingsTitle: String {
+    "On This \(deviceName)"
+}
+
 private struct PlozziOSSettingsSplitView: View {
     @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
@@ -96,7 +184,7 @@ private struct PlozziOSSettingsSplitView: View {
         NavigationSplitView {
             ScrollView {
                 LazyVStack(spacing: 18) {
-                    SettingsSectionGroup("Profiles") {
+                    SettingsSectionGroup(deviceSettingsTitle) {
                         Button {
                             selection = .profiles
                         } label: {
@@ -108,17 +196,11 @@ private struct PlozziOSSettingsSplitView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                    }
-
-                    SettingsSectionGroup("Services") {
                         settingsRow(
                             .requests,
                             title: "Seerr",
                             systemImage: "sparkles.tv"
                         )
-                    }
-
-                    SettingsSectionGroup("Media sources") {
                         ForEach(appModel.accounts) { account in
                             Button {
                                 selection = .account(account.id)
@@ -152,17 +234,25 @@ private struct PlozziOSSettingsSplitView: View {
                             title: "Add Network Share",
                             systemImage: "externaldrive.connected.to.line.below"
                         )
+                        settingsRow(
+                            .downloads,
+                            title: "Downloads",
+                            systemImage: "arrow.down.circle"
+                        )
+                    } footer: {
+                        Text("Shared across every profile on this \(deviceName).")
                     }
 
-                    SettingsSectionGroup("Preferences") {
+                    SettingsSectionGroup("This Profile") {
                         settingsRow(.trackers, title: "Trackers", systemImage: "link")
                         settingsRow(.appearance, title: "Appearance", systemImage: "paintpalette")
                         settingsRow(.home, title: "Customize Home", systemImage: "house")
                         settingsRow(.playback, title: "Playback", systemImage: "play.rectangle")
-                        settingsRow(.downloads, title: "Downloads", systemImage: "arrow.down.circle")
                         settingsRow(.subtitles, title: "Subtitles", systemImage: "captions.bubble")
                         settingsRow(.spoilers, title: "Spoilers", systemImage: "eye.slash")
                         settingsRow(.nightShift, title: "Circadian Mode", systemImage: "moon.stars.fill")
+                    } footer: {
+                        Text("Saved for \(appModel.profiles.activeProfile.name).")
                     }
 
                     SettingsSectionGroup("Support") {
@@ -172,7 +262,7 @@ private struct PlozziOSSettingsSplitView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.vertical, 24)
             }
             .navigationTitle("Settings")
             .scrollContentBackground(.hidden)
@@ -353,7 +443,7 @@ private struct PlozziOSSettingsCompactMenu: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 18) {
-                SettingsSectionGroup("Profiles") {
+                SettingsSectionGroup(deviceSettingsTitle) {
                 NavigationLink {
                     PlozziOSProfilesView(appModel: appModel)
                 } label: {
@@ -362,17 +452,13 @@ private struct PlozziOSSettingsCompactMenu: View {
                         systemImage: "person.2"
                     )
                 }
-            }
 
-                SettingsSectionGroup("Services") {
                 NavigationLink {
                     PlozziOSSeerrSettingsView(appModel: appModel)
                 } label: {
                     Label("Seerr", systemImage: "sparkles.tv")
                 }
-            }
 
-                SettingsSectionGroup("Media sources") {
                 ForEach(appModel.accounts) { account in
                     NavigationLink {
                         PlozziOSAccountDetailView(
@@ -404,9 +490,16 @@ private struct PlozziOSSettingsCompactMenu: View {
                 } label: {
                     Label("Add Network Share", systemImage: "externaldrive.connected.to.line.below")
                 }
+                NavigationLink {
+                    PlozziOSDownloadSettingsView(model: appModel.downloads)
+                } label: {
+                    Label("Downloads", systemImage: "arrow.down.circle")
+                }
+            } footer: {
+                Text("Shared across every profile on this \(deviceName).")
             }
 
-                SettingsSectionGroup("Preferences") {
+                SettingsSectionGroup("This Profile") {
                 NavigationLink {
                     PlozziOSTrackerSettingsView(appModel: appModel)
                 } label: {
@@ -444,11 +537,6 @@ private struct PlozziOSSettingsCompactMenu: View {
                     Label("Playback", systemImage: "play.rectangle")
                 }
                 NavigationLink {
-                    PlozziOSDownloadSettingsView(model: appModel.downloads)
-                } label: {
-                    Label("Downloads", systemImage: "arrow.down.circle")
-                }
-                NavigationLink {
                     PlozziOSSubtitleSettingsView(
                         behavior: appModel.settings.subtitleBehavior,
                         policy: appModel.settings.subtitlePolicy,
@@ -467,6 +555,8 @@ private struct PlozziOSSettingsCompactMenu: View {
                 } label: {
                     Label("Circadian Mode", systemImage: "moon.stars.fill")
                 }
+            } footer: {
+                Text("Saved for \(appModel.profiles.activeProfile.name).")
             }
 
                 SettingsSectionGroup("Support") {
@@ -505,7 +595,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, 24)
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)

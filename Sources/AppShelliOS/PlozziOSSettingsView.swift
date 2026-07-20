@@ -178,10 +178,11 @@ private struct PlozziOSSettingsSplitView: View {
     let onAddServer: () -> Void
     let onClose: () -> Void
     @State private var selection: PlozziOSSettingsDestination? = .profiles
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var confirmSignOutAll = false
 
     var body: some View {
-        NavigationSplitView(columnVisibility: .constant(.all)) {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             ScrollView {
                 LazyVStack(spacing: 18) {
                     SettingsSectionGroup(deviceSettingsTitle) {
@@ -242,6 +243,7 @@ private struct PlozziOSSettingsSplitView: View {
                 .padding(.vertical, 24)
             }
             .navigationTitle("Settings")
+            .toolbar(removing: .sidebarToggle)
             .scrollContentBackground(.hidden)
             .background { AppBackground(palette: palette) }
         } detail: {
@@ -253,11 +255,13 @@ private struct PlozziOSSettingsSplitView: View {
                     }
                     .frame(maxWidth: 760, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24)
                     .plozziOSSettingsSurface()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .id(selection)
+            .toolbar(removing: .sidebarToggle)
         }
         .navigationSplitViewStyle(.balanced)
         .toolbar(removing: .sidebarToggle)
@@ -276,6 +280,11 @@ private struct PlozziOSSettingsSplitView: View {
             }
         } message: {
             Text("This removes every server and network share from this device.")
+        }
+        .onChange(of: columnVisibility) { _, visibility in
+            if visibility != .all {
+                columnVisibility = .all
+            }
         }
     }
 

@@ -27,6 +27,9 @@ struct PlozziOSHomeView: View {
                     namespace: appModel.profiles.activeNamespace
                 ),
                 identitySources: appModel.identityIndex.identitySourcesProvider,
+                currentVisibility: { [weak appModel] in
+                    appModel?.settings.homeVisibility.visibility ?? .default
+                },
                 pendingWatchMutations: { [weak appModel] in
                     await appModel?.pendingWatchMutations() ?? []
                 },
@@ -367,7 +370,8 @@ private struct PlozziOSHomeHero: View {
 }
 
 private struct PlozziOSFeaturedRow: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.plozzCardStyle) private var cardStyle
+    @Environment(\.plozzMetrics) private var metrics
     let items: [MediaItem]
     let appModel: PlozziOSAppModel
 
@@ -386,10 +390,10 @@ private struct PlozziOSFeaturedRow: View {
                             provider: appModel.accountsProviders.primaryProvider
                         )
                         .frame(
-                            width: appModel.settings.density.density
-                                .iOSHomePosterWidth(
-                                    horizontalSizeClass: horizontalSizeClass
-                                )
+                            width: metrics.cardSlotWidth(
+                                for: .poster,
+                                cardStyle: cardStyle
+                            )
                         )
                     }
                 }
@@ -402,6 +406,8 @@ private struct PlozziOSFeaturedRow: View {
 
 private struct PlozziOSHomeRowView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.plozzCardStyle) private var cardStyle
+    @Environment(\.plozzMetrics) private var metrics
     let row: HomeRow
     let appModel: PlozziOSAppModel
 
@@ -481,14 +487,9 @@ private struct PlozziOSHomeRowView: View {
     }
 
     private var mediaCardWidth: CGFloat {
-        let density = appModel.settings.density.density
-        if row.style == .landscape {
-            return density.iOSHomeLandscapeWidth(
-                horizontalSizeClass: horizontalSizeClass
-            )
-        }
-        return density.iOSHomePosterWidth(
-            horizontalSizeClass: horizontalSizeClass
+        metrics.cardSlotWidth(
+            for: row.style == .landscape ? .landscape : .poster,
+            cardStyle: cardStyle
         )
     }
 }

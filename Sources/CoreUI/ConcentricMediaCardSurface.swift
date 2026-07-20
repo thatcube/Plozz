@@ -27,7 +27,6 @@ private struct ConcentricMediaCardSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(metrics.cardInset)
             .plozzGlassCard(
                 cornerRadius: innerCornerRadius + metrics.cardInset,

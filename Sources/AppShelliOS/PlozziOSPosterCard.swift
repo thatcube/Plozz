@@ -52,18 +52,6 @@ extension UIDensity {
         ]
     }
 
-    func iOSHomePosterWidth(
-        horizontalSizeClass: UserInterfaceSizeClass?
-    ) -> CGFloat {
-        max(96, CGFloat((horizontalSizeClass == .regular ? 170 : 140) * scale))
-    }
-
-    func iOSHomeLandscapeWidth(
-        horizontalSizeClass: UserInterfaceSizeClass?
-    ) -> CGFloat {
-        max(180, CGFloat((horizontalSizeClass == .regular ? 300 : 250) * scale))
-    }
-
     func iOSHomeLibraryWidth(
         horizontalSizeClass: UserInterfaceSizeClass?
     ) -> CGFloat {

@@ -144,6 +144,24 @@ public struct PlozzMetrics: Equatable, Sendable {
         landscapeWidth + cardInset * 2
     }
 
+    /// Exact rail footprint for a shared media card. Home uses this instead of a
+    /// separate iOS width table so the slot can never be wider than the rendered
+    /// surface and create invisible inter-card spacing.
+    public func cardSlotWidth(
+        for style: PosterCardView.Style,
+        cardStyle: CardStyle
+    ) -> CGFloat {
+        let artworkWidth = switch style {
+        case .poster: posterWidth
+        case .landscape: landscapeWidth
+        }
+        let sideInset = switch cardStyle {
+        case .framed: cardInset
+        case .borderless: borderlessCardSideMargin
+        }
+        return artworkWidth + sideInset * 2
+    }
+
     // MARK: Concentric card corner radii (derived)
 
     /// Outer (glass) corner radius for a poster ("Browse") card: its fixed inner

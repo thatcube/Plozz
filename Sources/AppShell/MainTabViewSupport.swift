@@ -242,10 +242,11 @@ func makeHeroWatchStateRefresher(
 }
 
 /// Hydrates only sparse metadata needed by the hero chrome. List endpoints are kept
-/// lightweight, but some Plex show rows omit `contentRating` even though the full
-/// `/library/metadata/{id}` record contains it. Fetch at most four details at once,
-/// preserve curated identity/order/watch state, and copy only missing presentation
-/// fields so this cannot reseat the carousel or alter playback routing.
+/// lightweight, but some Plex show rows omit `contentRating` and Jellyfin Favorites
+/// omit `overview` / `taglines` even though the full item record contains them. Fetch
+/// at most four details at once, preserve curated identity/order/watch state, and
+/// copy only missing presentation fields so this cannot reseat the carousel or alter
+/// playback routing.
 func makeHeroMetadataEnricher(
     accounts: [ResolvedAccount],
     identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
@@ -258,7 +259,9 @@ func makeHeroMetadataEnricher(
         let targets = Dictionary(uniqueKeysWithValues: items.indices.compactMap { index -> (Int, MediaItem)? in
             let item = items[index]
             guard item.officialRating?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
-                    || item.productionYear == nil else { return nil }
+                    || item.productionYear == nil
+                    || item.overview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+                    || item.taglines.isEmpty else { return nil }
             let target = bestSourcePlayItem(
                 item,
                 accounts: accounts,
@@ -312,6 +315,12 @@ func makeHeroMetadataEnricher(
             }
             if enriched[index].genres.isEmpty {
                 enriched[index].genres = detail.genres
+            }
+            if enriched[index].overview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                enriched[index].overview = detail.overview
+            }
+            if enriched[index].taglines.isEmpty {
+                enriched[index].taglines = detail.taglines
             }
         }
         return enriched

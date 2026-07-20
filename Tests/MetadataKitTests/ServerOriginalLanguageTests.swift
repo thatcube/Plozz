@@ -219,6 +219,201 @@ final class ServerOriginalLanguageTests: XCTestCase {
     }
 }
 
+/// The MULTI-PROVIDER original-language chain: `ArtworkRouter.originalLanguage`
+/// no longer depends on TMDb alone. It walks the content-type-specific chain
+/// (`CurrentMetadataPriority.originalLanguageSources`: movie `[tmdb, tvdb]`;
+/// tvShow/anime `[tmdb, tvdb, tvmaze]`), returns the first AUTHORITATIVE value,
+/// falls a transient failure THROUGH to the next provider (never caching it), and
+/// caches an authoritative miss only when the WHOLE chain is exhausted — so a
+/// disabled/down TMDb no longer pins the container default (TheTVDB resolves it).
+final class MultiProviderOriginalLanguageTests: XCTestCase {
+
+    /// Records per-source lookups and returns a scripted outcome so tests can prove
+    /// ordering, short-circuiting, transient fall-through, and which providers a
+    /// given content type consults — without any network.
+    private final class ProviderRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private(set) var calls: [MetadataSource] = []
+        private var stub: @Sendable (MetadataSource, MetadataQuery) -> OriginalLanguageOutcome?
+        init(_ stub: @escaping @Sendable (MetadataSource, MetadataQuery) -> OriginalLanguageOutcome?) {
+            self.stub = stub
+        }
+        func outcome(_ source: MetadataSource, _ query: MetadataQuery) -> OriginalLanguageOutcome? {
+            lock.lock(); defer { lock.unlock() }
+            let out = stub(source, query)
+            if out != nil { calls.append(source) }   // record only sources that participated
+            return out
+        }
+        func count(of source: MetadataSource) -> Int {
+            lock.lock(); defer { lock.unlock() }
+            return calls.filter { $0 == source }.count
+        }
+        var total: Int { lock.lock(); defer { lock.unlock() }; return calls.count }
+    }
+
+    private func makeRouter(_ recorder: ProviderRecorder) -> ArtworkRouter {
+        ArtworkRouter(providerOriginalLanguageOutcomes: { recorder.outcome($0, $1) })
+    }
+
+    private func movie(_ ids: [String: String] = ["Tmdb": "557"]) -> MediaItem {
+        MediaItem(id: "m", title: "Spider-Man", kind: .movie, providerIDs: ids)
+    }
+    private func show(_ ids: [String: String] = ["Tmdb": "1399"]) -> MediaItem {
+        MediaItem(id: "s", title: "Some Show", kind: .series, providerIDs: ids)
+    }
+
+    // MARK: - The exact scenario that just broke: TMDb disabled, TheTVDB fills it
+
+    func testTMDbDisabledButTheTVDBResolvesEnglish() async {
+        // TMDb `.authoritative(nil)` mirrors a DISABLED tier (a deterministic no-op);
+        // TheTVDB then satisfies the chain — the bug fix.
+        let recorder = ProviderRecorder { source, _ in
+            switch source {
+            case .tmdb: return .authoritative(nil)
+            case .tvdb: return .authoritative("en")
+            default: return nil
+            }
+        }
+        let router = makeRouter(recorder)
+
+        let language = await router.originalLanguage(for: movie())
+
+        XCTAssertEqual(language, "en", "TheTVDB alone must resolve when TMDb is off")
+    }
+
+    // MARK: - Precedence + short-circuit
+
+    func testTMDbWinsWhenBothAuthoritative() async {
+        let recorder = ProviderRecorder { source, _ in
+            switch source {
+            case .tmdb: return .authoritative("ja")
+            case .tvdb: return .authoritative("en")
+            default: return nil
+            }
+        }
+        let router = makeRouter(recorder)
+
+        let language = await router.originalLanguage(for: movie())
+
+        XCTAssertEqual(language, "ja", "TMDb leads the chain")
+        XCTAssertEqual(recorder.count(of: .tvdb), 0, "A TMDb hit short-circuits before TheTVDB")
+    }
+
+    // MARK: - Transient fall-through (must NOT cache)
+
+    func testTransientTMDbFallsThroughToTheTVDB() async {
+        let recorder = ProviderRecorder { source, _ in
+            switch source {
+            case .tmdb: return .transient
+            case .tvdb: return .authoritative("en")
+            default: return nil
+            }
+        }
+        let router = makeRouter(recorder)
+
+        let language = await router.originalLanguage(for: movie())
+
+        XCTAssertEqual(language, "en", "A transient TMDb must fall through to TheTVDB")
+    }
+
+    func testTheTVDBTransientIsNotCachedAndLaterPlayRetries() async {
+        // Whole chain transient on the first play (TMDb miss, TheTVDB unreachable):
+        // returns nil for this play but must NOT be cached, so a later play retries.
+        let attempts = TestCounter()
+        let recorder = ProviderRecorder { source, _ in
+            switch source {
+            case .tmdb: return .authoritative(nil)
+            case .tvdb: return attempts.increment() == 1 ? .transient : .authoritative("en")
+            default: return nil
+            }
+        }
+        let router = makeRouter(recorder)
+        let item = movie()
+
+        let first = await router.originalLanguage(for: item)
+        let second = await router.originalLanguage(for: item)
+
+        XCTAssertNil(first, "A transient chain yields no value for this play")
+        XCTAssertEqual(second, "en", "The transient was not cached, so a later play succeeds")
+        XCTAssertEqual(recorder.count(of: .tvdb), 2, "TheTVDB was retried, not served from cache")
+    }
+
+    // MARK: - Content-type membership: movies skip TVmaze, TV uses it last
+
+    func testMovieSkipsTVmaze() async {
+        let recorder = ProviderRecorder { source, _ in
+            switch source {
+            case .tmdb, .tvdb: return .authoritative(nil)
+            case .tvmaze:
+                XCTFail("TVmaze has no movies — it must never be consulted for a movie")
+                return .authoritative(nil)
+            default: return nil
+            }
+        }
+        let router = makeRouter(recorder)
+
+        let language = await router.originalLanguage(for: movie())
+
+        XCTAssertNil(language)
+        XCTAssertEqual(recorder.count(of: .tvmaze), 0)
+    }
+
+    func testTVShowUsesTVmazeAsLastResort() async {
+        let recorder = ProviderRecorder { source, _ in
+            switch source {
+            case .tmdb, .tvdb: return .authoritative(nil)
+            case .tvmaze: return .authoritative("Japanese")   // English display name
+            default: return nil
+            }
+        }
+        let router = makeRouter(recorder)
+
+        let language = await router.originalLanguage(for: show())
+
+        XCTAssertEqual(language, "ja", "TVmaze fills last, normalized from its display name")
+        XCTAssertEqual(recorder.count(of: .tvmaze), 1)
+    }
+
+    // MARK: - Whole-chain authoritative miss IS cached
+
+    func testWholeChainAuthoritativeMissIsCached() async {
+        let recorder = ProviderRecorder { source, _ in
+            switch source {
+            case .tmdb, .tvdb: return .authoritative(nil)   // movie chain, both reachable misses
+            default: return nil
+            }
+        }
+        let router = makeRouter(recorder)
+        let item = movie()
+
+        let first = await router.originalLanguage(for: item)
+        let second = await router.originalLanguage(for: item)
+
+        XCTAssertNil(first)
+        XCTAssertNil(second)
+        XCTAssertEqual(recorder.total, 2,
+                       "An exhausted authoritative miss is cached: only the first play consults providers")
+    }
+
+    // MARK: - Normalization applies to whichever provider wins
+
+    func testNormalizationAppliedToWinningProvider() async {
+        // TheTVDB's ISO-639-2 `jpn` folds to `ja`.
+        let recorder = ProviderRecorder { source, _ in
+            switch source {
+            case .tmdb: return .authoritative(nil)
+            case .tvdb: return .authoritative("jpn")
+            default: return nil
+            }
+        }
+        let router = makeRouter(recorder)
+
+        let language = await router.originalLanguage(for: movie())
+
+        XCTAssertEqual(language, "ja")
+    }
+}
+
 /// A tiny thread-safe call counter for modeling "first attempt fails, later
 /// attempts succeed" without an actor.
 private final class TestCounter: @unchecked Sendable {

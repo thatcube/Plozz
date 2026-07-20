@@ -26,15 +26,30 @@ public actor ArtworkRouter {
     private let deezer = DeezerMusicProvider()
     private let musicBrainz = MusicBrainzArtworkProvider()
     private var tmdb: TMDbMetadataProvider
+    /// Bundled TheTVDB tier. The router holds the underlying ``TVDBClient`` directly
+    /// (not just via ``TVDBArtworkProvider``) so the original-language chain can call
+    /// its transient-aware `originalLanguageOutcome` lookups when TMDb is off.
+    private let tvdbClient = TVDBClient(config: .resolved())
+    /// Keyless TVmaze client for the TV-only original-language fallback (last in the
+    /// chain — TVmaze carries no movies).
+    private let tvmazeClient = TVmazeClient()
     /// Bundled TheTVDB backdrop tier (hero art only). Nil-safe when unconfigured.
-    private let tvdb = TVDBArtworkProvider(client: TVDBClient(config: .resolved()))
+    private let tvdb: TVDBArtworkProvider
     private let cache: MetadataDiskCache
 
     /// Test-only override for the exact-ID original-language lookup. `nil` in
-    /// production, where ``resolveExactOriginalLanguage(_:)`` calls the live TMDb
-    /// tier; injected by tests to exercise the cache/normalization/keying (and the
+    /// production, where ``resolveExactOriginalLanguage(_:)`` walks the live provider
+    /// chain; injected by tests to exercise the cache/normalization/keying (and the
     /// authoritative-vs-transient caching rule) without a network call.
     private let injectedOriginalLanguageResolver: (@Sendable (MetadataQuery) async -> OriginalLanguageOutcome)?
+
+    /// Test-only override for the PER-PROVIDER original-language outcome. `nil` in
+    /// production, where each source hits its live provider; injected by tests to
+    /// drive the chain's ordering, fall-through and whole-chain-miss caching (which
+    /// source wins, a transient falling through, a movie skipping TVmaze) against the
+    /// real ``CurrentMetadataPriority`` ordering, without any network. Returning
+    /// `nil` for a source means "not applicable" (the chain skips it).
+    private let injectedProviderOutcomes: (@Sendable (MetadataSource, MetadataQuery) async -> OriginalLanguageOutcome?)?
 
     /// Positive + negative in-memory cache of resolved original languages, keyed by
     /// the query's show-level external-id identity so every episode of a show — and
@@ -55,7 +70,9 @@ public actor ArtworkRouter {
     ) {
         self.tmdb = TMDbMetadataProvider(access: config.tmdb)
         self.cache = cache
+        self.tvdb = TVDBArtworkProvider(client: tvdbClient)
         self.injectedOriginalLanguageResolver = nil
+        self.injectedProviderOutcomes = nil
     }
 
     /// Testing seam: injects the exact-ID original-language resolver so unit tests
@@ -68,7 +85,25 @@ public actor ArtworkRouter {
     ) {
         self.tmdb = TMDbMetadataProvider(access: config.tmdb)
         self.cache = cache
+        self.tvdb = TVDBArtworkProvider(client: tvdbClient)
         self.injectedOriginalLanguageResolver = exactOriginalLanguageResolver
+        self.injectedProviderOutcomes = nil
+    }
+
+    /// Testing seam: injects a PER-PROVIDER original-language outcome so unit tests
+    /// can drive the multi-provider chain — ordering, transient fall-through, movies
+    /// skipping TVmaze, and whole-chain-miss caching — against the real
+    /// ``CurrentMetadataPriority`` ordering without any network.
+    init(
+        config: MetadataProviderConfig = MetadataProviderConfig(tmdb: .disabled),
+        cache: MetadataDiskCache = .shared,
+        providerOriginalLanguageOutcomes: @escaping @Sendable (MetadataSource, MetadataQuery) async -> OriginalLanguageOutcome?
+    ) {
+        self.tmdb = TMDbMetadataProvider(access: config.tmdb)
+        self.cache = cache
+        self.tvdb = TVDBArtworkProvider(client: tvdbClient)
+        self.injectedOriginalLanguageResolver = nil
+        self.injectedProviderOutcomes = providerOriginalLanguageOutcomes
     }
 
     /// Reconfigures the TMDb tier at runtime (e.g. after the user sets a proxy).
@@ -83,14 +118,19 @@ public actor ArtworkRouter {
 
     /// Best-effort ISO-639-1 original language for a SERVER-backed `item` whose
     /// provider gave none (Plex/Jellyfin/Emby never fill `original_language`),
-    /// resolved from an **exact external id** (TMDb, or IMDB via `/find`) with no
-    /// fuzzy title search, normalized to ISO-639-1, and cached. Returns `nil` when
-    /// TMDb is unconfigured, the item is music, it carries no usable external id, or
-    /// nothing was found — the caller then defers to the container default.
+    /// resolved from an ordered chain of FREE providers — TMDb (exact id, or IMDB via
+    /// `/find`), then TheTVDB (exact id, then title+year search), then TVmaze for TV —
+    /// returning the first authoritative value, normalized to ISO-639-1, and cached.
+    /// Because TheTVDB is the always-on bundled key, this resolves even when the
+    /// optional TMDb tier is disabled/down (the bug where a disabled TMDb pinned the
+    /// container default). Returns `nil` when the item is music, it carries no usable
+    /// identity, or every provider authoritatively found nothing — the caller then
+    /// defers to the container default.
     ///
-    /// Only **authoritative** answers are cached: a transient failure (offline,
-    /// timeout, 429, 5xx, …) returns `nil` for this call but is NOT written, so a
-    /// later play retries instead of being pinned to the container default. Reuses
+    /// Only **authoritative** answers are cached: a transient failure on any provider
+    /// (offline, timeout, 429, 5xx, …) returns `nil` for this call but is NOT written,
+    /// and an authoritative miss is cached only once the WHOLE chain is exhausted, so
+    /// a later play retries instead of being pinned to the container default. Reuses
     /// the same shared, self-configuring, provider-id-keyed external-metadata seam
     /// the artwork path already uses for server items, rather than a parallel
     /// subsystem, so the "prefer original language" audio policy works for server
@@ -132,7 +172,70 @@ public actor ArtworkRouter {
         if let injectedOriginalLanguageResolver {
             return await injectedOriginalLanguageResolver(query)
         }
-        return await tmdb.originalLanguageOutcome(forExactMatchOf: query)
+        // Walk the content-type-specific provider chain (movie `[.tmdb, .tvdb]`;
+        // tvShow/anime/unknown `[.tmdb, .tvdb, .tvmaze]`) and return the FIRST
+        // authoritative value — so the fill resolves even when TMDb is disabled/down
+        // (TheTVDB, the always-on bundled key, then satisfies it). Each provider is
+        // transient-aware: a transient failure falls THROUGH to the next provider and
+        // is never cached; an authoritative miss is only cached once the WHOLE chain
+        // is authoritatively exhausted (every provider returned a reachable "none").
+        var sawTransient = false
+        for source in CurrentMetadataPriority.originalLanguageSources(for: query.contentType) {
+            guard let outcome = await originalLanguageOutcome(from: source, for: query) else { continue }
+            switch outcome {
+            case .authoritative(let raw):
+                if let raw, !raw.isEmpty { return .authoritative(raw) }   // first authoritative value wins
+            case .transient:
+                sawTransient = true                                        // remember, but keep trying
+            }
+        }
+        return sawTransient ? .transient : .authoritative(nil)
+    }
+
+    /// One provider's transient-aware original-language outcome, or `nil` when the
+    /// source doesn't participate for this query (so the chain skips it).
+    private func originalLanguageOutcome(
+        from source: MetadataSource,
+        for query: MetadataQuery
+    ) async -> OriginalLanguageOutcome? {
+        if let injectedProviderOutcomes {
+            return await injectedProviderOutcomes(source, query)
+        }
+        switch source {
+        case .tmdb: return await tmdb.originalLanguageOutcome(forExactMatchOf: query)
+        case .tvdb: return await tvdbOriginalLanguageOutcome(for: query)
+        case .tvmaze: return await tvmazeClient.originalLanguageOutcome(for: query)
+        default: return nil
+        }
+    }
+
+    /// TheTVDB's transient-aware original-language outcome: prefer an EXACT
+    /// show-level TheTVDB id (an episode uses its `SeriesTvdb`, never the per-episode
+    /// id), then fall back to a title+year search. A by-id authoritative value wins;
+    /// otherwise the two attempts combine so any unreachable attempt yields
+    /// `.transient` (never a cached miss) and an authoritative miss requires both to
+    /// have reachably found nothing.
+    private func tvdbOriginalLanguageOutcome(for query: MetadataQuery) async -> OriginalLanguageOutcome {
+        let isMovie = !query.isTV
+        let tvdbID = query.providerIDs.providerID(.seriesTvdb)
+            ?? ((!query.isTV || query.kind == .series) ? query.providerIDs.providerID(.tvdb) : nil)
+
+        var sawTransient = false
+        if let tvdbID, !tvdbID.isEmpty {
+            switch await tvdbClient.originalLanguageOutcome(byTVDBID: tvdbID, isMovie: isMovie) {
+            case .authoritative(let raw):
+                if let raw, !raw.isEmpty { return .authoritative(raw) }
+            case .transient:
+                sawTransient = true
+            }
+        }
+        switch await tvdbClient.originalLanguageOutcome(titles: [query.title], year: query.year, isMovie: isMovie) {
+        case .authoritative(let raw):
+            if let raw, !raw.isEmpty { return .authoritative(raw) }
+        case .transient:
+            sawTransient = true
+        }
+        return sawTransient ? .transient : .authoritative(nil)
     }
 
     /// Awaits `operation` but returns `nil` if it doesn't finish within `timeout`,

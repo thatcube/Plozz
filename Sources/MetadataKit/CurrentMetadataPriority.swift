@@ -18,6 +18,17 @@ enum CurrentMetadataPriority {
         policy.sources(for: .overview, context: overviewContext(type))
     }
 
+    /// The ordered original-language provider chain for a content type — the data
+    /// the play-time audio fill walks (movie `[.tmdb, .tvdb]`; tvShow/anime/unknown
+    /// `[.tmdb, .tvdb, .tvmaze]`, TVmaze last as it carries no movies), returning the
+    /// first authoritative value so the fill resolves even when TMDb is disabled.
+    static func originalLanguageSources(for type: ContentType) -> [MetadataSource] {
+        policy.sources(
+            for: .originalLanguage,
+            context: MetadataPriorityContext(rawValue: "originalLanguage.\(type.rawValue)")
+        )
+    }
+
     private static let artworkRules: [MetadataPriorityRule] = [
         artwork(.anime, .hero, [.tmdb, .anilist, .kitsu]),
         artwork(.anime, .poster, [.anilist, .kitsu, .tmdb]),

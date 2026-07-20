@@ -97,6 +97,37 @@ public struct TVmazeClient: TVmazeEnriching {
         return await MetadataHTTP.get(Show.self, url: url)
     }
 
+    /// The show's original language as a **transient-aware** ``OriginalLanguageOutcome``
+    /// for the play-time audio chain. TVmaze's public API is keyless (no auth), so a
+    /// value is `.authoritative`, a reachable "not found" is an `.authoritative(nil)`
+    /// miss, and an unreachable call (offline / 5xx / throttle) is `.transient` — so
+    /// a TVmaze hiccup never gets cached as a permanent "no original language".
+    /// TVmaze is TV-only (it carries no movies), so the router only reaches this for
+    /// TV/anime/unknown content; the resolved `language` is an English display *name*
+    /// (`English`, `Japanese`) that ``OriginalLanguageNormalizer`` folds to a code.
+    public func originalLanguageOutcome(for query: MetadataQuery) async -> OriginalLanguageOutcome {
+        let (show, reachable) = await fetchShowWithStatus(for: query)
+        guard let show else { return reachable ? .authoritative(nil) : .transient }
+        return .authoritative(show.language?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyOrNil)
+    }
+
+    /// Like ``fetchShow(for:)`` but surfaces reachability so a transient TVmaze
+    /// failure is not mistaken for a real "no such show". An IMDb-id lookup that is
+    /// unreachable short-circuits as transient; a reachable IMDb miss falls through
+    /// to the title search, whose own reachability is returned.
+    private func fetchShowWithStatus(for query: MetadataQuery) async -> (Show?, reachable: Bool) {
+        if let imdb = query.providerIDs.providerID(.imdb), !imdb.isEmpty,
+           let url = URL(string: "https://api.tvmaze.com/lookup/shows?imdb=\(imdb)") {
+            let (show, reachable) = await MetadataHTTP.getWithStatus(Show.self, url: url)
+            if let show { return (show, true) }
+            if !reachable { return (nil, false) }
+        }
+        guard let escaped = metadataEscaped(query.title),
+              let url = URL(string: "https://api.tvmaze.com/singlesearch/shows?q=\(escaped)")
+        else { return (nil, true) }
+        return await MetadataHTTP.getWithStatus(Show.self, url: url)
+    }
+
     private func fetchEpisode(showID: Int, season: Int, episode: Int) async -> Episode? {
         guard let url = URL(string: "https://api.tvmaze.com/shows/\(showID)/episodebynumber?season=\(season)&number=\(episode)") else {
             return nil

@@ -251,6 +251,7 @@ struct PlozziOSProfileEditorView: View {
                 TextField("Emoji", text: $emoji)
             }
         }
+        .settingsPageSurface()
         .navigationTitle("Edit Profile")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

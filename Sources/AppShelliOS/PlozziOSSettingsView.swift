@@ -149,8 +149,8 @@ private struct PlozziOSSettingsListAppearance: ViewModifier {
 private enum PlozziOSSettingsDestination: Hashable {
     case profiles
     case requests
-    case account(String)
-    case addNetworkShare
+    case servers
+    case myLibraries
     case trackers
     case appearance
     case home
@@ -164,7 +164,7 @@ private enum PlozziOSSettingsDestination: Hashable {
     case about
 }
 
-private var deviceName: String {
+var deviceName: String {
     UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
 }
 
@@ -181,7 +181,7 @@ private struct PlozziOSSettingsSplitView: View {
     @State private var confirmSignOutAll = false
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
             ScrollView {
                 LazyVStack(spacing: 18) {
                     SettingsSectionGroup(deviceSettingsTitle) {
@@ -189,7 +189,7 @@ private struct PlozziOSSettingsSplitView: View {
                             selection = .profiles
                         } label: {
                             Label(
-                                appModel.profiles.activeProfile.name,
+                                "Profiles",
                                 systemImage: "person.2"
                             )
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -201,37 +201,9 @@ private struct PlozziOSSettingsSplitView: View {
                             title: "Seerr",
                             systemImage: "sparkles.tv"
                         )
-                        ForEach(appModel.accounts) { account in
-                            Button {
-                                selection = .account(account.id)
-                            } label: {
-                                Label {
-                                    VStack(alignment: .leading) {
-                                        Text(account.server.name)
-                                        if !account.userName.isEmpty {
-                                            Text(account.userName)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                } icon: {
-                                    Image(systemName: "server.rack")
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        Button(action: onAddServer) {
-                            Label("Add Server", systemImage: "plus")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
                         settingsRow(
-                            .addNetworkShare,
-                            title: "Add Network Share",
+                            .servers,
+                            title: "Servers",
                             systemImage: "externaldrive.connected.to.line.below"
                         )
                         settingsRow(
@@ -244,6 +216,11 @@ private struct PlozziOSSettingsSplitView: View {
                     }
 
                     SettingsSectionGroup("This Profile") {
+                        settingsRow(
+                            .myLibraries,
+                            title: "Your Servers & Libraries",
+                            systemImage: "rectangle.stack"
+                        )
                         settingsRow(.trackers, title: "Trackers", systemImage: "link")
                         settingsRow(.appearance, title: "Appearance", systemImage: "paintpalette")
                         settingsRow(.home, title: "Customize Home", systemImage: "house")
@@ -274,8 +251,8 @@ private struct PlozziOSSettingsSplitView: View {
                     Group {
                         settingsDetail
                     }
-                    .frame(maxWidth: 760)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: 760, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .plozziOSSettingsSurface()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -283,6 +260,7 @@ private struct PlozziOSSettingsSplitView: View {
             .id(selection)
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbar(removing: .sidebarToggle)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -323,27 +301,16 @@ private struct PlozziOSSettingsSplitView: View {
             PlozziOSProfilesView(appModel: appModel)
         case .requests:
             PlozziOSSeerrSettingsView(appModel: appModel)
-        case .account(let accountID):
-            if let account = appModel.accounts.first(where: {
-                $0.id == accountID
-            }) {
-                PlozziOSAccountDetailView(
-                    appModel: appModel,
-                    account: account,
-                    onRemove: {
-                        appModel.removeAccount(id: account.id)
-                        selection = .profiles
-                    }
-                )
-            } else {
-                ContentUnavailableView(
-                    "Source unavailable",
-                    systemImage: "server.rack",
-                    description: Text("Select another media source.")
-                )
-            }
-        case .addNetworkShare:
-            PlozziOSAddShareView(appModel: appModel)
+        case .servers:
+            PlozziOSServersSettingsView(
+                appModel: appModel,
+                onAddServer: onAddServer
+            )
+        case .myLibraries:
+            PlozziOSMyLibrariesSettingsView(
+                appModel: appModel,
+                onAddServer: onAddServer
+            )
         case .trackers:
             PlozziOSTrackerSettingsView(appModel: appModel)
         case .appearance:
@@ -448,7 +415,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                     PlozziOSProfilesView(appModel: appModel)
                 } label: {
                     Label(
-                        appModel.profiles.activeProfile.name,
+                        "Profiles",
                         systemImage: "person.2"
                     )
                 }
@@ -459,36 +426,13 @@ private struct PlozziOSSettingsCompactMenu: View {
                     Label("Seerr", systemImage: "sparkles.tv")
                 }
 
-                ForEach(appModel.accounts) { account in
-                    NavigationLink {
-                        PlozziOSAccountDetailView(
-                            appModel: appModel,
-                            account: account,
-                            onRemove: {
-                                appModel.removeAccount(id: account.id)
-                            }
-                        )
-                    } label: {
-                        Label {
-                            VStack(alignment: .leading) {
-                                Text(account.server.name)
-                                if !account.userName.isEmpty {
-                                    Text(account.userName)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        } icon: {
-                            Image(systemName: "server.rack")
-                        }
-                    }
-                }
-
-                Button("Add Server", systemImage: "plus", action: onAddServer)
                 NavigationLink {
-                    PlozziOSAddShareView(appModel: appModel)
+                    PlozziOSServersSettingsView(
+                        appModel: appModel,
+                        onAddServer: onAddServer
+                    )
                 } label: {
-                    Label("Add Network Share", systemImage: "externaldrive.connected.to.line.below")
+                    Label("Servers", systemImage: "externaldrive.connected.to.line.below")
                 }
                 NavigationLink {
                     PlozziOSDownloadSettingsView(model: appModel.downloads)
@@ -500,6 +444,14 @@ private struct PlozziOSSettingsCompactMenu: View {
             }
 
                 SettingsSectionGroup("This Profile") {
+                NavigationLink {
+                    PlozziOSMyLibrariesSettingsView(
+                        appModel: appModel,
+                        onAddServer: onAddServer
+                    )
+                } label: {
+                    Label("Your Servers & Libraries", systemImage: "rectangle.stack")
+                }
                 NavigationLink {
                     PlozziOSTrackerSettingsView(appModel: appModel)
                 } label: {
@@ -615,8 +567,10 @@ private struct PlozziOSSettingsCompactMenu: View {
 }
 
 private struct PlozziOSProfilesView: View {
+    @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     @State private var showingAddProfile = false
+    @State private var editingProfile: Profile?
 
     var body: some View {
         List {
@@ -637,6 +591,19 @@ private struct PlozziOSProfilesView: View {
                 .disabled(appModel.profiles.profiles.count > 1)
 
                 if appModel.profiles.profilesEnabled {
+                    if appModel.profiles.profiles.count > 1 {
+                        Picker(
+                            "Current Profile",
+                            selection: Binding(
+                                get: { appModel.profiles.activeProfileID },
+                                set: { appModel.selectProfile($0) }
+                            )
+                        ) {
+                            ForEach(appModel.profiles.profiles) { profile in
+                                Text(profile.name).tag(profile.id)
+                            }
+                        }
+                    }
                     Toggle(
                         "Ask Who’s Watching on Startup",
                         isOn: Binding(
@@ -659,11 +626,8 @@ private struct PlozziOSProfilesView: View {
 
             SettingsSectionGroup("Who’s watching?") {
                 ForEach(appModel.profiles.profiles) { profile in
-                    NavigationLink {
-                        PlozziOSProfileDetailView(
-                            appModel: appModel,
-                            profile: profile
-                        )
+                    Button {
+                        editingProfile = profile
                     } label: {
                         HStack {
                             PlozziOSProfileAvatar(profile: profile, size: 34)
@@ -673,6 +637,8 @@ private struct PlozziOSProfilesView: View {
                                 Image(systemName: "checkmark")
                                     .foregroundStyle(.tint)
                             }
+                            Image(systemName: "pencil")
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .swipeActions {
@@ -694,74 +660,24 @@ private struct PlozziOSProfilesView: View {
             NavigationStack {
                 PlozziOSAddProfileView(appModel: appModel)
             }
+            .preferredColorScheme(palette.isLight ? .light : .dark)
         }
-    }
-}
-
-private struct PlozziOSProfileDetailView: View {
-    let appModel: PlozziOSAppModel
-    let profile: Profile
-    @State private var editing = false
-
-    private var currentProfile: Profile {
-        appModel.profiles.profiles.first(where: { $0.id == profile.id }) ?? profile
-    }
-
-    var body: some View {
-        Form {
-            SettingsSectionGroup {
-                Button(
-                    currentProfile.id == appModel.profiles.activeProfileID
-                        ? "Current Profile"
-                        : "Switch to \(currentProfile.name)"
-                ) {
-                    appModel.selectProfile(currentProfile.id)
-                }
-                .disabled(currentProfile.id == appModel.profiles.activeProfileID)
-
-                Button("Edit Profile", systemImage: "pencil") {
-                    editing = true
-                }
-            }
-
-            SettingsSectionGroup("Media sources") {
-                ForEach(appModel.accounts) { account in
-                    Toggle(
-                        account.server.name,
-                        isOn: Binding(
-                            get: {
-                                appModel.activeAccountIDs(for: currentProfile.id)
-                                    .contains(account.id)
-                            },
-                            set: {
-                                appModel.setAccount(
-                                    account.id,
-                                    enabled: $0,
-                                    for: currentProfile.id
-                                )
-                            }
-                        )
-                    )
-                }
-            }
-        }
-        .plozziOSSettingsSurface()
-        .navigationTitle(currentProfile.name)
-        .sheet(isPresented: $editing) {
+        .sheet(item: $editingProfile) { profile in
             NavigationStack {
                 PlozziOSProfileEditorView(
-                    profile: currentProfile,
+                    profile: profile,
                     onSave: { name, emoji in
                         appModel.updateProfile(
-                            currentProfile.id,
+                            profile.id,
                             name: name,
                             emoji: emoji
                         )
-                        editing = false
+                        editingProfile = nil
                     },
-                    onCancel: { editing = false }
+                    onCancel: { editingProfile = nil }
                 )
             }
+            .preferredColorScheme(palette.isLight ? .light : .dark)
         }
     }
 }
@@ -797,7 +713,7 @@ private struct PlozziOSAddProfileView: View {
     }
 }
 
-private struct PlozziOSAccountDetailView: View {
+struct PlozziOSAccountDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     let appModel: PlozziOSAppModel
@@ -897,7 +813,7 @@ private struct PlozziOSShareScanSection: View {
     }
 }
 
-private struct PlozziOSPlexHomeUserSettingsView: View {
+struct PlozziOSPlexHomeUserSettingsView: View {
     let appModel: PlozziOSAppModel
     let account: Account
     @State private var users: [PlexHomeUser] = []

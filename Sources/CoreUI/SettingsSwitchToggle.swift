@@ -32,6 +32,58 @@ public struct SettingsSwitchToggleStyle: ToggleStyle {
     }
 }
 
+#if os(iOS)
+/// A touch-sized switch that uses the same monochrome state colors as the
+/// ten-foot tvOS control without carrying over its larger geometry or state word.
+public struct SettingsTouchSwitchToggleStyle: ToggleStyle {
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            HStack {
+                configuration.label
+                Spacer(minLength: 16)
+                SettingsTouchSwitchIndicator(isOn: configuration.isOn)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct SettingsTouchSwitchIndicator: View {
+    let isOn: Bool
+    @Environment(\.themePalette) private var palette
+
+    private let trackWidth: CGFloat = 51
+    private let trackHeight: CGFloat = 31
+    private let knobSize: CGFloat = 27
+
+    private var ink: Color { palette.isLight ? .black : .white }
+    private var paper: Color { palette.isLight ? .white : .black }
+    private var trackColor: Color { isOn ? ink : ink.opacity(0.18) }
+    private var knobColor: Color { isOn ? paper : ink }
+    private var travel: CGFloat { (trackWidth - knobSize) / 2 - 2 }
+
+    var body: some View {
+        ZStack {
+            Capsule(style: .continuous)
+                .fill(trackColor)
+            Circle()
+                .fill(knobColor)
+                .frame(width: knobSize, height: knobSize)
+                .shadow(color: .black.opacity(0.22), radius: 1.5, y: 1)
+                .offset(x: isOn ? travel : -travel)
+        }
+        .frame(width: trackWidth, height: trackHeight)
+        .animation(.easeOut(duration: 0.18), value: isOn)
+    }
+}
+#endif
+
 private struct SettingsSwitchToggleBody: View {
     let configuration: ToggleStyleConfiguration
     let flushLeading: Bool

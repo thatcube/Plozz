@@ -48,8 +48,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
             #if os(tvOS)
             .toggleStyle(SettingsSwitchToggleStyle(flushLeading: false))
             #else
-            .toggleStyle(.switch)
-            .tint(ThemePalette.brandBlue)
+            .toggleStyle(SettingsTouchSwitchToggleStyle())
             #endif
             .background(
                 palette.cardOpaqueSurface,

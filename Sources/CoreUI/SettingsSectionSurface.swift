@@ -48,7 +48,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(palette.cardOpaqueBorder, lineWidth: 1)
+                    .strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
                     .allowsHitTesting(false)
             }
 

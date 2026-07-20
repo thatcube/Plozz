@@ -95,114 +95,85 @@ private struct PlozziOSSettingsSplitView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selection) {
-                SettingsSectionGroup("Profiles") {
-                    Button {
-                        selection = .profiles
-                    } label: {
-                        Label(
-                            appModel.profiles.activeProfile.name,
-                            systemImage: "person.2"
+            ScrollView {
+                LazyVStack(spacing: 18) {
+                    SettingsSectionGroup("Profiles") {
+                        Button {
+                            selection = .profiles
+                        } label: {
+                            Label(
+                                appModel.profiles.activeProfile.name,
+                                systemImage: "person.2"
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    SettingsSectionGroup("Services") {
+                        settingsRow(
+                            .requests,
+                            title: "Seerr",
+                            systemImage: "sparkles.tv"
                         )
                     }
-                }
 
-                SettingsSectionGroup("Services") {
-                    settingsRow(
-                        .requests,
-                        title: "Seerr",
-                        systemImage: "sparkles.tv"
-                    )
-                }
-
-                SettingsSectionGroup("Media sources") {
-                    ForEach(appModel.accounts) { account in
-                        Button {
-                            selection = .account(account.id)
-                        } label: {
-                            Label {
-                                VStack(alignment: .leading) {
-                                    Text(account.server.name)
-                                    if !account.userName.isEmpty {
-                                        Text(account.userName)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                    SettingsSectionGroup("Media sources") {
+                        ForEach(appModel.accounts) { account in
+                            Button {
+                                selection = .account(account.id)
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading) {
+                                        Text(account.server.name)
+                                        if !account.userName.isEmpty {
+                                            Text(account.userName)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
+                                } icon: {
+                                    Image(systemName: "server.rack")
                                 }
-                            } icon: {
-                                Image(systemName: "server.rack")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
                         }
+
+                        Button(action: onAddServer) {
+                            Label("Add Server", systemImage: "plus")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        settingsRow(
+                            .addNetworkShare,
+                            title: "Add Network Share",
+                            systemImage: "externaldrive.connected.to.line.below"
+                        )
                     }
 
-                    Button("Add Server", systemImage: "plus", action: onAddServer)
-                    settingsRow(
-                        .addNetworkShare,
-                        title: "Add Network Share",
-                        systemImage: "externaldrive.connected.to.line.below"
-                    )
-                }
+                    SettingsSectionGroup("Preferences") {
+                        settingsRow(.trackers, title: "Trackers", systemImage: "link")
+                        settingsRow(.appearance, title: "Appearance", systemImage: "paintpalette")
+                        settingsRow(.home, title: "Customize Home", systemImage: "house")
+                        settingsRow(.playback, title: "Playback", systemImage: "play.rectangle")
+                        settingsRow(.downloads, title: "Downloads", systemImage: "arrow.down.circle")
+                        settingsRow(.subtitles, title: "Subtitles", systemImage: "captions.bubble")
+                        settingsRow(.spoilers, title: "Spoilers", systemImage: "eye.slash")
+                        settingsRow(.nightShift, title: "Circadian Mode", systemImage: "moon.stars.fill")
+                    }
 
-                SettingsSectionGroup("Preferences") {
-                    settingsRow(
-                        .trackers,
-                        title: "Trackers",
-                        systemImage: "link"
-                    )
-                    settingsRow(
-                        .appearance,
-                        title: "Appearance",
-                        systemImage: "paintpalette"
-                    )
-                    settingsRow(
-                        .home,
-                        title: "Customize Home",
-                        systemImage: "house"
-                    )
-                    settingsRow(
-                        .playback,
-                        title: "Playback",
-                        systemImage: "play.rectangle"
-                    )
-                    settingsRow(
-                        .downloads,
-                        title: "Downloads",
-                        systemImage: "arrow.down.circle"
-                    )
-                    settingsRow(
-                        .subtitles,
-                        title: "Subtitles",
-                        systemImage: "captions.bubble"
-                    )
-                    settingsRow(
-                        .spoilers,
-                        title: "Spoilers",
-                        systemImage: "eye.slash"
-                    )
-                    settingsRow(
-                        .nightShift,
-                        title: "Circadian Mode",
-                        systemImage: "moon.stars.fill"
-                    )
+                    SettingsSectionGroup("Support") {
+                        settingsRow(.diagnostics, title: "Help & Diagnostics", systemImage: "ladybug")
+                        settingsRow(.attributions, title: "Attributions & Licensing", systemImage: "doc.text.magnifyingglass")
+                        settingsRow(.about, title: "About", systemImage: "info.circle")
+                    }
                 }
-
-                SettingsSectionGroup("Support") {
-                    settingsRow(
-                        .diagnostics,
-                        title: "Help & Diagnostics",
-                        systemImage: "ladybug"
-                    )
-                    settingsRow(
-                        .attributions,
-                        title: "Attributions & Licensing",
-                        systemImage: "doc.text.magnifyingglass"
-                    )
-                    settingsRow(
-                        .about,
-                        title: "About",
-                        systemImage: "info.circle"
-                    )
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
             .navigationTitle("Settings")
             .scrollContentBackground(.hidden)
@@ -250,7 +221,10 @@ private struct PlozziOSSettingsSplitView: View {
             selection = destination
         } label: {
             Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

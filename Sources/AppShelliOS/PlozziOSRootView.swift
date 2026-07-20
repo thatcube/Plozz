@@ -203,6 +203,7 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
 private struct PlozziOSTabShell: View {
     @Environment(\.themePalette) private var palette
     @State private var showingSettings = false
+    @State private var settingsPresentationColorScheme: ColorScheme = .dark
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     let systemColorScheme: ColorScheme
@@ -215,7 +216,7 @@ private struct PlozziOSTabShell: View {
                         destination: .home,
                         appModel: appModel,
                         onAddServer: onAddServer,
-                        onShowSettings: { showingSettings = true }
+                        onShowSettings: showSettings
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
@@ -228,7 +229,7 @@ private struct PlozziOSTabShell: View {
                         destination: .search,
                         appModel: appModel,
                         onAddServer: onAddServer,
-                        onShowSettings: { showingSettings = true }
+                        onShowSettings: showSettings
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
@@ -241,7 +242,7 @@ private struct PlozziOSTabShell: View {
                         destination: .downloads,
                         appModel: appModel,
                         onAddServer: onAddServer,
-                        onShowSettings: { showingSettings = true }
+                        onShowSettings: showSettings
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
@@ -257,9 +258,7 @@ private struct PlozziOSTabShell: View {
                 onClose: { showingSettings = false },
                 systemColorScheme: systemColorScheme
             )
-            .preferredColorScheme(
-                settingsPalette.isLight ? .light : .dark
-            )
+            .preferredColorScheme(settingsPresentationColorScheme)
             .presentationSizing(.page)
         }
     }
@@ -269,6 +268,11 @@ private struct PlozziOSTabShell: View {
             for: appModel.settings.theme.theme,
             systemColorScheme: systemColorScheme
         )
+    }
+
+    private func showSettings() {
+        settingsPresentationColorScheme = settingsPalette.isLight ? .light : .dark
+        showingSettings = true
     }
 
     private func showAddServerFromSettings() {

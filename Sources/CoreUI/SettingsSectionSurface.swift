@@ -25,8 +25,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
+                    .padding(.top, 8)
             }
 
             VStack(spacing: 0) {

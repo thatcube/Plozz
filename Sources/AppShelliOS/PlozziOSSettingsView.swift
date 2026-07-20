@@ -253,8 +253,6 @@ private struct PlozziOSSettingsSplitView: View {
                     Group {
                         settingsDetail
                     }
-                    .frame(maxWidth: 760)
-                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 24)
                     .plozziOSSettingsSurface()
                 }
@@ -561,8 +559,6 @@ private struct PlozziOSSettingsCompactMenu: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 24)
         }
-        .frame(maxWidth: 760)
-        .frame(maxWidth: .infinity)
         .plozziOSSettingsSurface()
         .navigationTitle("Settings")
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
@@ -978,8 +974,6 @@ private struct PlozziOSAppearanceSettingsView: View {
                 }
             }
         }
-        .frame(maxWidth: 760)
-        .frame(maxWidth: .infinity)
         .plozziOSSettingsSurface()
         .navigationTitle("Appearance")
     }
@@ -1136,8 +1130,6 @@ private struct PlozziOSHomeSettingsView: View {
                 }
             }
         }
-        .frame(maxWidth: 760)
-        .frame(maxWidth: .infinity)
         .plozziOSSettingsSurface()
         .navigationTitle("Customize Home")
         .task(id: accounts.map(\.account.id)) {
@@ -1385,8 +1377,6 @@ private struct PlozziOSPlaybackSettingsView: View {
                 )
             }
         }
-        .frame(maxWidth: 760)
-        .frame(maxWidth: .infinity)
         .plozziOSSettingsSurface()
         .navigationTitle("Playback")
     }
@@ -1516,8 +1506,6 @@ private struct PlozziOSSubtitleSettingsView: View {
                 }
             }
         }
-        .frame(maxWidth: 760)
-        .frame(maxWidth: .infinity)
         .plozziOSSettingsSurface()
         .navigationTitle("Subtitles")
     }

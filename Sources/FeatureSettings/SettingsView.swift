@@ -728,7 +728,7 @@ public struct SettingsView: View {
     }
 
     /// Compact, read-only glance of the servers **this profile is watching**,
-    /// rendered as the SECOND line of the "Your Servers & Libraries" row. It
+    /// rendered as the SECOND line of the "Libraries" row. It
     /// mirrors the page's master toggles, so turning a server off inside drops it
     /// here too — the entry point is a truthful preview, not a household dump.
     /// Server-forward (provider logo + server name) to match the redesigned cards;

@@ -26,6 +26,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
                     .padding(.horizontal, 16)
+                    .padding(.top, 4)
             }
 
             VStack(spacing: 0) {

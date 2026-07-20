@@ -243,11 +243,6 @@ private struct PlozziOSSettingsSplitView: View {
                 .padding(.vertical, 24)
             }
             .navigationTitle("Settings")
-            .navigationSplitViewColumnWidth(
-                min: 300,
-                ideal: 320,
-                max: 360
-            )
             .toolbar(removing: .sidebarToggle)
             .scrollContentBackground(.hidden)
             .background { AppBackground(palette: palette) }

@@ -472,6 +472,12 @@ public struct ItemDetailView: View {
         let effectiveSource = effectiveSource(for: detail.item, sources: sources, serverChoices: serverChoices)
         let effectiveVersions = effectiveVersions(for: detail.item, sources: sources, activeAccountID: effectiveSource?.accountID)
         let effectiveVersionID = effectiveVersionID(for: detail.item, in: effectiveVersions)
+        // A not-in-library Plex Discover title (a Watchlist movie the user doesn't
+        // own on any server) resolves to a global Discover stub with nothing to
+        // play — so it must NOT offer a dead Play button. The body (overview/cast/
+        // ratings) still renders; the Watchlist toggle keeps the row focusable.
+        // Cross-server discovery restores Play the instant it folds in a real copy.
+        let canPlay = isPlayable(detail.item) && hasPlayableTarget(detail.item, sources: sources)
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 32) {
@@ -479,8 +485,8 @@ public struct ItemDetailView: View {
                         item: detail.item,
                         heroHeightFraction: detail.children.isEmpty ? 1.0 : 0.8,
                         spoilerSettings: spoilerSettings,
-                        playTitle: isPlayable(detail.item) ? viewModel.playButtonTitle(for: detail.item) : nil,
-                        onPlay: isPlayable(detail.item) ? {
+                        playTitle: canPlay ? viewModel.playButtonTitle(for: detail.item) : nil,
+                        onPlay: canPlay ? {
                             // CRITICAL: re-resolve sources/versions from the
                             // view model at FIRE time, not from the body-eval
                             // capture. Without this, a tap that races a
@@ -499,9 +505,9 @@ public struct ItemDetailView: View {
                             let liveVersionID = self.effectiveVersionID(for: detail.item, in: liveVersions)
                             onPlay(self.playItem(for: detail.item, sources: liveSources, activeAccountID: liveSource?.accountID, versionID: liveVersionID))
                         } : nil,
-                        playProgress: isPlayable(detail.item) ? detail.item.resumeProgressFraction : nil,
-                        playRemainingText: isPlayable(detail.item) ? detail.item.resumeRemainingText : nil,
-                        playSeasonEpisodeText: isPlayable(detail.item) ? HeroForegroundModelBuilder.seasonEpisodeButtonText(for: detail.item) : nil,
+                        playProgress: canPlay ? detail.item.resumeProgressFraction : nil,
+                        playRemainingText: canPlay ? detail.item.resumeRemainingText : nil,
+                        playSeasonEpisodeText: canPlay ? HeroForegroundModelBuilder.seasonEpisodeButtonText(for: detail.item) : nil,
                         onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
                         versions: effectiveVersions,
                         selectedVersionID: effectiveVersionID,
@@ -576,6 +582,26 @@ public struct ItemDetailView: View {
         case .movie, .episode, .video: return true
         default: return false
         }
+    }
+
+    /// Whether a leaf item actually has something to play — used to suppress a
+    /// dead Play button on a not-in-library Plex **Discover** title (a Watchlist
+    /// movie the user doesn't own on any server), which resolves to a global
+    /// Discover stub addressed by the `plex://…/<id>` guid tail that no Plex Media
+    /// Server can play (see the twin-stub filter in `MainTabViewSupport`).
+    ///
+    /// Non-Plex items (no `PlexGuid`) and any Plex item pointing at a real
+    /// per-server `ratingKey` (`item.id != guidTail`, e.g. an owned title opened
+    /// from a library) are unchanged — always playable. A Discover stub becomes
+    /// playable the moment cross-server discovery folds in a real library copy
+    /// (`sources` gains a ref whose `itemID != guidTail`), so an owned copy — here
+    /// or on another server — still gets Play.
+    private func hasPlayableTarget(_ item: MediaItem, sources: [MediaSourceRef]) -> Bool {
+        guard let guidTail = item.providerIDs["PlexGuid"]?
+            .split(separator: "/").last.map(String.init)
+        else { return true }
+        if item.id != guidTail { return true }
+        return sources.contains { $0.itemID != guidTail }
     }
 
     /// A folder/collection that finished loading with no playable contents. Only

@@ -592,6 +592,65 @@ public struct PlexClient: Sendable {
         return id.isEmpty ? nil : id
     }
 
+    /// The Discover metadata id for either a full `plex://<type>/<id>` guid or an
+    /// id that is *already* a bare Discover id (the 24-char hex string Plex assigns
+    /// account-level titles). Returns `nil` for a per-server PMS `ratingKey` (a
+    /// plain integer) and any other token, so a library id is never mistaken for a
+    /// Discover id.
+    ///
+    /// Watchlist tiles surface the Discover id both as the item's `ratingKey`
+    /// (→ `MediaItem.id`) *and* inside its `plex://` guid, so detail opens arrive
+    /// here as the bare hex id while the watchlist writer keys on the guid tail;
+    /// both forms must resolve to the same Discover id.
+    static func discoverMetadataID(from idOrGuid: String) -> String? {
+        // A `plex://<type>/<id>` guid: reuse the watchlist tail extractor.
+        if let fromGuid = watchlistMetadataID(fromGuid: idOrGuid) { return fromGuid }
+        let trimmed = idOrGuid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        // A bare Discover id is a hex string that (unlike a numeric PMS ratingKey)
+        // contains at least one letter. Require hex-only + a letter so integer
+        // ratingKeys stay on the library path and arbitrary slugs are ignored.
+        let isHex = trimmed.allSatisfy(\.isHexDigit)
+        let hasLetter = trimmed.contains { $0.isLetter }
+        return (isHex && hasLetter) ? trimmed : nil
+    }
+
+    /// `GET https://discover.provider.plex.tv/library/metadata/{metadataID}` — the
+    /// **full** Discover (plex.tv) metadata for an account-level title, keyed by its
+    /// global Discover id. Used to render the Info body (overview / cast / ratings /
+    /// art / runtime / genres) for a *watchlisted* title the user doesn't own on any
+    /// server, since the per-server `metadata(ratingKey:)` 404s on a global id.
+    ///
+    /// Hits the fixed Discover host directly with the account token + the same
+    /// X-Plex headers the watchlist calls use (bypassing the per-server connection
+    /// resolver), mirroring `watchlist()`. The legacy `metadata.provider.plex.tv`
+    /// read host now 404s — reads were migrated to `discover.provider.plex.tv`.
+    /// `includeGuids=1` inlines the external ids (imdb/tmdb/tvdb) so the mapped item
+    /// carries the provider ids cross-server discovery + the request path match on.
+    func discoverMetadata(metadataID: String) async throws -> PlexMetadata {
+        let endpoint = Endpoint(
+            path: "/library/metadata/\(metadataID)",
+            queryItems: [
+                URLQueryItem(name: "X-Plex-Token", value: token),
+                URLQueryItem(name: "includeGuids", value: "1")
+            ],
+            headers: headers
+        )
+        let (data, _) = try await http.send(endpoint, baseURL: Self.watchlistBase)
+        do {
+            guard let item = try JSONDecoder.plozz
+                .decode(PlexMediaContainerResponse.self, from: data)
+                .MediaContainer.Metadata?.first
+            else { throw AppError.notFound }
+            return item
+        } catch let error as AppError {
+            throw error
+        } catch {
+            PlozzLog.networking.error("Decoding Plex Discover metadata failed")
+            throw AppError.decoding
+        }
+    }
+
     /// `PUT https://discover.provider.plex.tv/actions/{addToWatchlist|
     /// removeFromWatchlist}?ratingKey={metadataID}` — adds/removes the item from
     /// the account watchlist. `metadataID` is the guid tail (see

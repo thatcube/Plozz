@@ -242,7 +242,28 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     }
 
     public func item(id: String) async throws -> MediaItem {
-        map(metadata: try await client.metadata(ratingKey: id))
+        // A *watchlisted* (account-level) title carries a global Plex Discover id
+        // (a `plex://` guid tail / 24-hex id), NOT a per-server `ratingKey`, so the
+        // per-server `metadata(ratingKey:)` 404s on it. Resolve library-FIRST so an
+        // OWNED copy renders full playable detail (Play + version/server picker),
+        // and fall back to the Discover host only when the id is unmistakably a
+        // global Discover id or the library can't resolve it — that fetches the full
+        // overview/cast/ratings/art so a not-owned watchlist item is no longer a
+        // blank hero. The mapped item keeps `providerIDs["PlexGuid"]`, so the
+        // watchlist toggle + cross-server discovery (which can still surface an
+        // owned copy on another server) keep working.
+        if let discoverID = PlexClient.discoverMetadataID(from: id) {
+            return map(metadata: try await client.discoverMetadata(metadataID: discoverID))
+        }
+        do {
+            return map(metadata: try await client.metadata(ratingKey: id))
+        } catch let error as AppError where error == .notFound {
+            // A numeric-looking id the server no longer has *might* actually be a
+            // global Discover id (defensive) — retry against Discover if derivable,
+            // otherwise surface the original notFound.
+            guard let discoverID = PlexClient.discoverMetadataID(from: id) else { throw error }
+            return map(metadata: try await client.discoverMetadata(metadataID: discoverID))
+        }
     }
 
     public func trailers(for itemID: String) async throws -> [MediaItem] {

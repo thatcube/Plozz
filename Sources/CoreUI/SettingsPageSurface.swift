@@ -1,4 +1,4 @@
-#if canImport(SwiftUI)
+#if os(iOS) && canImport(SwiftUI)
 import SwiftUI
 
 public struct SettingsPageSurface: ViewModifier {

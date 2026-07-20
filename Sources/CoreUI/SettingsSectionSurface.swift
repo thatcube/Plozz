@@ -45,7 +45,12 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
                     }
                 }
             }
+            #if os(tvOS)
             .toggleStyle(SettingsSwitchToggleStyle(flushLeading: false))
+            #else
+            .toggleStyle(.switch)
+            .tint(palette.primaryText)
+            #endif
             .background(
                 palette.cardOpaqueSurface,
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -66,7 +71,9 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
         }
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
+        #if !os(tvOS)
         .listRowSeparator(.hidden)
+        #endif
     }
 
     private var hairlineWidth: CGFloat {

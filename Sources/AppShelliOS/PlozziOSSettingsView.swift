@@ -351,8 +351,9 @@ private struct PlozziOSSettingsCompactMenu: View {
     @State private var confirmSignOutAll = false
 
     var body: some View {
-        List {
-            SettingsSectionGroup("Profiles") {
+        ScrollView {
+            LazyVStack(spacing: 18) {
+                SettingsSectionGroup("Profiles") {
                 NavigationLink {
                     PlozziOSProfilesView(appModel: appModel)
                 } label: {
@@ -363,7 +364,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
             }
 
-            SettingsSectionGroup("Services") {
+                SettingsSectionGroup("Services") {
                 NavigationLink {
                     PlozziOSSeerrSettingsView(appModel: appModel)
                 } label: {
@@ -371,7 +372,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
             }
 
-            SettingsSectionGroup("Media sources") {
+                SettingsSectionGroup("Media sources") {
                 ForEach(appModel.accounts) { account in
                     NavigationLink {
                         PlozziOSAccountDetailView(
@@ -405,7 +406,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
             }
 
-            SettingsSectionGroup("Preferences") {
+                SettingsSectionGroup("Preferences") {
                 NavigationLink {
                     PlozziOSTrackerSettingsView(appModel: appModel)
                 } label: {
@@ -468,7 +469,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
             }
 
-            SettingsSectionGroup("Support") {
+                SettingsSectionGroup("Support") {
                 NavigationLink {
                     PlozziOSDiagnosticsSettingsView(
                         appModel: appModel,
@@ -496,12 +497,15 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
             }
 
-            if let accountError = appModel.accountError {
-                SettingsSectionGroup {
-                    Label(accountError, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
+                if let accountError = appModel.accountError {
+                    SettingsSectionGroup {
+                        Label(accountError, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                    }
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)

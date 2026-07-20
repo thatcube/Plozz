@@ -216,7 +216,8 @@ struct PlozziOSItemDetailView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollClipDisabled()
-        .navigationTitle(detail.item.title)
+        .ignoresSafeArea(.container, edges: .top)
+        .navigationTitle("")
         .task(id: downloadLookupID(for: detail.item)) {
             downloadRecord = await appModel.downloads.record(
                 for: playbackItem(for: detail.item)

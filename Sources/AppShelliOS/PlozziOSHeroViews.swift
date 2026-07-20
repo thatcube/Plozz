@@ -1,4 +1,5 @@
 #if os(iOS)
+import AVFoundation
 import CoreModels
 import CoreUI
 import FeatureHomeCore
@@ -122,6 +123,7 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
             PlozziOSFullWidthHeroStage(height: height) {
                 PlozziOSHeroBackdrop(
                     presentation: presentation,
+                    style: style,
                     itemID: item.id,
                     height: height,
                     surfaceRole: surfaceRole,
@@ -246,6 +248,7 @@ private struct PlozziOSHeroBackdrop: View {
     @Environment(\.themePalette) private var palette
 
     let presentation: HeroPresentation
+    let style: HeroArtworkStyle
     let itemID: String
     let height: CGFloat
     let surfaceRole: HeroTrailerSurfaceRole
@@ -272,21 +275,38 @@ private struct PlozziOSHeroBackdrop: View {
 
             LinearGradient(
                 colors: [
-                    .black.opacity(0.08),
-                    .black.opacity(0.2),
-                    .black.opacity(0.72),
-                    palette.backgroundBase
+                    .black.opacity(0.04),
+                    .black.opacity(0.14),
+                    .black.opacity(0.58),
+                    .black.opacity(0.82)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            LinearGradient(
-                colors: [.black.opacity(0.62), .clear],
-                startPoint: .leading,
-                endPoint: .center
-            )
+            if style == .landscape {
+                LinearGradient(
+                    colors: [.black.opacity(0.62), .clear],
+                    startPoint: .leading,
+                    endPoint: .center
+                )
+            }
         }
         .frame(height: height)
+        // Fade the complete artwork/video stack to transparent rather than
+        // painting an approximate background color over its bottom edge. The
+        // actual themed page background then shows through with no visible seam.
+        .mask {
+            LinearGradient(
+                stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: 0.76),
+                    .init(color: .black.opacity(0.72), location: 0.88),
+                    .init(color: .clear, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
         .clipped()
         .ignoresSafeArea(edges: [.top, .horizontal])
     }
@@ -338,7 +358,7 @@ private struct PlozziOSHomeHeroForeground: View {
                     systemImage: "play.fill"
                 )
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .primary))
         }
 
         if let provider {
@@ -352,7 +372,7 @@ private struct PlozziOSHomeHeroForeground: View {
             } label: {
                 Label("More Info", systemImage: "info.circle")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .secondary))
         }
     }
 }
@@ -404,7 +424,7 @@ private struct PlozziOSDetailHeroForeground: View {
                     systemImage: "play.fill"
                 )
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .primary))
 
             if presentation.isResumable {
                 Button {
@@ -415,7 +435,7 @@ private struct PlozziOSDetailHeroForeground: View {
                         systemImage: "arrow.counterclockwise"
                     )
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .secondary))
             }
         }
 
@@ -436,8 +456,44 @@ private struct PlozziOSDetailHeroForeground: View {
             } label: {
                 Label("More", systemImage: "ellipsis")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .secondary))
         }
+    }
+}
+
+private struct PlozziOSHeroActionButtonStyle: ButtonStyle {
+    enum Kind {
+        case primary
+        case secondary
+    }
+
+    let kind: Kind
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(kind == .primary ? Color.black : Color.white)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .frame(minHeight: 48)
+            .background {
+                Capsule()
+                    .fill(
+                        kind == .primary
+                            ? Color.white
+                            : Color.black.opacity(0.72)
+                    )
+                    .overlay {
+                        if kind == .secondary {
+                            Capsule()
+                                .strokeBorder(.white.opacity(0.2), lineWidth: 1)
+                        }
+                    }
+            }
+            .contentShape(Capsule())
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.86 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -462,6 +518,8 @@ private struct PlozziOSHeroMetadata: View {
                     .foregroundStyle(.white)
                     .lineLimit(2)
             }
+            .accessibilityLabel(Text(presentation.title))
+            .accessibilityAddTraits(.isHeader)
 
             if presentation.certification != nil
                 || presentation.metadataText != nil {
@@ -517,6 +575,91 @@ private struct PlozziOSHeroMuteButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(.white)
         .accessibilityLabel(isMuted ? "Unmute trailer" : "Mute trailer")
+    }
+}
+
+struct PlozziOSHeroPagingIndicator: View {
+    let itemIDs: [String]
+    let selectedItemID: String?
+    let autoAdvance: Bool
+    let autoAdvanceSeconds: Int
+    let dwellStart: Date
+    let trailerController: HeroTrailerController
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: !autoAdvance)) { context in
+            HStack(spacing: 5) {
+                ForEach(itemIDs, id: \.self) { itemID in
+                    let isSelected = itemID == selectedItemID
+                    Capsule()
+                        .fill(.white.opacity(isSelected ? 0.3 : 0.24))
+                        .overlay(alignment: .leading) {
+                            if isSelected {
+                                GeometryReader { proxy in
+                                    Capsule()
+                                        .fill(.white)
+                                        .frame(
+                                            width: proxy.size.width
+                                                * progress(at: context.date)
+                                        )
+                                }
+                            }
+                        }
+                        .frame(width: indicatorWidth, height: 4)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.black.opacity(0.58), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(.white.opacity(0.16), lineWidth: 1)
+            }
+            .animation(.easeInOut(duration: 0.22), value: selectedItemID)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Hero item")
+            .accessibilityValue(accessibilityValue)
+        }
+    }
+
+    private var indicatorWidth: CGFloat {
+        itemIDs.count > 12 ? 12 : 24
+    }
+
+    private func progress(at date: Date) -> CGFloat {
+        guard autoAdvance else { return 1 }
+        if let selectedItemID,
+           trailerController.isShowing(selectedItemID) {
+            guard trailerController.duration > 0 else { return 0 }
+            return min(
+                max(
+                    CGFloat(
+                        trailerController.player.currentTime().seconds
+                            / trailerController.duration
+                    ),
+                    0
+                ),
+                1
+            )
+        }
+        return min(
+            max(
+                CGFloat(
+                    date.timeIntervalSince(dwellStart)
+                        / Double(max(autoAdvanceSeconds, 1))
+                ),
+                0
+            ),
+            1
+        )
+    }
+
+    private var accessibilityValue: String {
+        guard let selectedItemID,
+              let index = itemIDs.firstIndex(of: selectedItemID) else {
+            return ""
+        }
+        return "\(index + 1) of \(itemIDs.count)"
     }
 }
 

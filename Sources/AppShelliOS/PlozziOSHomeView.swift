@@ -71,7 +71,7 @@ struct PlozziOSHomeView: View {
                 loadedContent(content)
             }
         }
-        .navigationTitle("Home")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -118,7 +118,7 @@ struct PlozziOSHomeView: View {
             isLibraryVisible: visibility.isVisibleOnHome,
             isGlobalRowEnabled: visibility.isGlobalRowEnabled
         )
-        return ScrollView {
+        let scroll = ScrollView {
             LazyVStack(alignment: .leading, spacing: 30) {
                 if !heroItems.isEmpty {
                     PlozziOSHomeHeroCarousel(
@@ -173,7 +173,14 @@ struct PlozziOSHomeView: View {
                     }
                 }
             }
-            .padding(.vertical)
+            .padding(.bottom)
+        }
+        return Group {
+            if heroItems.isEmpty {
+                scroll
+            } else {
+                scroll.ignoresSafeArea(.container, edges: .top)
+            }
         }
         .scrollClipDisabled()
         .refreshable {
@@ -309,6 +316,7 @@ private struct PlozziOSHomeHeroCarousel: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(HeroTrailerController.self) private var trailerController
     @State private var selectedItemID: String?
+    @State private var dwellStart = Date()
 
     let items: [MediaItem]
     let autoAdvance: Bool
@@ -328,7 +336,7 @@ private struct PlozziOSHomeHeroCarousel: View {
             }
         }
         .tabViewStyle(
-            .page(indexDisplayMode: items.count > 1 ? .automatic : .never)
+            .page(indexDisplayMode: .never)
         )
         .scrollClipDisabled()
         .frame(
@@ -339,9 +347,24 @@ private struct PlozziOSHomeHeroCarousel: View {
                 dynamicTypeSize: dynamicTypeSize
             )
         )
+        .overlay(alignment: .bottom) {
+            if items.count > 1 {
+                PlozziOSHeroPagingIndicator(
+                    itemIDs: items.map(\.id),
+                    selectedItemID: selectedItemID,
+                    autoAdvance: autoAdvance,
+                    autoAdvanceSeconds: autoAdvanceSeconds,
+                    dwellStart: dwellStart,
+                    trailerController: trailerController
+                )
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
+            }
+        }
         .onChange(of: items.map(\.id), initial: true) { _, itemIDs in
             if selectedItemID == nil || !itemIDs.contains(selectedItemID ?? "") {
                 selectedItemID = itemIDs.first
+                dwellStart = .now
             }
         }
         .task(
@@ -377,6 +400,7 @@ private struct PlozziOSHomeHeroCarousel: View {
             }
         }
         .onChange(of: selectedItemID, initial: true) {
+            dwellStart = .now
             installTrailerEndHandler()
         }
         .onAppear(perform: installTrailerEndHandler)

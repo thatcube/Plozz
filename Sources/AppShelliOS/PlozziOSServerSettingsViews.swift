@@ -183,7 +183,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
             }
         }
         .settingsPageSurface()
-        .navigationTitle("Your Servers & Libraries")
+        .navigationTitle(SettingsCopy.libraries)
         .task(id: appModel.accounts.map(\.credentialRevision)) {
             await loadLibraries()
         }

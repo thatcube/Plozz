@@ -397,7 +397,7 @@ public struct SettingsView: View {
             // Per-profile "Your Libraries": who you watch as + what shows on THIS
             // profile's Home. The personal mirror of This Apple TV › Servers.
             // Its second line glances the household's server sign-ins.
-            navRow("Your Servers & Libraries", icon: "rectangle.stack",
+            navRow(SettingsCopy.libraries, icon: "rectangle.stack",
                    value: nil,
                    route: .myLibraries) {
                 signedInStrip

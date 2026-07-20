@@ -219,7 +219,7 @@ private struct PlozziOSSettingsSplitView: View {
                     SettingsSectionGroup("This Profile") {
                         settingsRow(
                             .myLibraries,
-                            title: "My Libraries",
+                            title: SettingsCopy.libraries,
                             systemImage: "rectangle.stack"
                         )
                         settingsRow(.trackers, title: "Trackers", systemImage: "link")
@@ -243,6 +243,11 @@ private struct PlozziOSSettingsSplitView: View {
                 .padding(.vertical, 24)
             }
             .navigationTitle("Settings")
+            .navigationSplitViewColumnWidth(
+                min: 300,
+                ideal: 320,
+                max: 360
+            )
             .toolbar(removing: .sidebarToggle)
             .scrollContentBackground(.hidden)
             .background { AppBackground(palette: palette) }
@@ -253,8 +258,8 @@ private struct PlozziOSSettingsSplitView: View {
                     Group {
                         settingsDetail
                     }
-                    .frame(maxWidth: 760, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: 760)
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 24)
                     .plozziOSSettingsSurface()
                 }
@@ -290,7 +295,7 @@ private struct PlozziOSSettingsSplitView: View {
 
     private func settingsRow(
         _ destination: PlozziOSSettingsDestination,
-        title: LocalizedStringResource,
+        title: String,
         systemImage: String
     ) -> some View {
         Button {
@@ -459,7 +464,10 @@ private struct PlozziOSSettingsCompactMenu: View {
                         onAddServer: onAddServer
                     )
                 } label: {
-                    Label("My Libraries", systemImage: "rectangle.stack")
+                    Label(
+                        SettingsCopy.libraries,
+                        systemImage: "rectangle.stack"
+                    )
                 }
                 NavigationLink {
                     PlozziOSTrackerSettingsView(appModel: appModel)

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # One-command incremental build, install, and launch for Plozz on iPhone/iPad.
-# Direct USB installation uses libimobiledevice instead of CoreDevice's RSD
-# tunnel, which is substantially more reliable on this machine.
+# Installation uses ios-deploy/MobileDevice instead of CoreDevice's RSD tunnel,
+# which is substantially more reliable on this machine.
 #
 # Usage:
 #   tools/deploy-ios.sh                 # deploy to both configured devices
@@ -93,46 +93,17 @@ if command -v idevice_id >/dev/null 2>&1; then
   NETWORK_DEVICES="$(idevice_id -n -l 2>/dev/null || true)"
 fi
 
-IPA=""
-TEMP_DIR=""
-make_ipa() {
-  [[ -n "$IPA" ]] && return
-  if ! command -v ideviceinstaller >/dev/null 2>&1; then
-    return
-  fi
-
-  TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/plozz-ios-deploy.XXXXXX")"
-  mkdir "$TEMP_DIR/Payload"
-  COPYFILE_DISABLE=1 ditto "$APP_PATH" "$TEMP_DIR/Payload/Plozz.app"
-  find "$TEMP_DIR/Payload" -name '._*' -delete
-  (
-    cd "$TEMP_DIR"
-    COPYFILE_DISABLE=1 zip -qry Plozz.ipa Payload
-  )
-  if zipinfo -1 "$TEMP_DIR/Plozz.ipa" | grep -q '/\._'; then
-    echo "✗ IPA contains AppleDouble files; refusing to install a broken signature." >&2
-    exit 1
-  fi
-  IPA="$TEMP_DIR/Plozz.ipa"
-}
-
-cleanup() {
-  [[ -n "$TEMP_DIR" ]] && rm -rf "$TEMP_DIR"
-}
-trap cleanup EXIT
-
 install_device() {
   local name="$1"
   local udid="$2"
   local core_id="$3"
-  local direct_flag=""
+  local transport_args=()
 
   if grep -qx "$udid" <<<"$USB_DEVICES"; then
-    direct_flag=""
+    transport_args+=(--no-wifi)
     echo "▸ Installing build $BUILD on $name over direct USB…"
   elif grep -qx "$udid" <<<"$NETWORK_DEVICES"; then
-    direct_flag="-n"
-    echo "▸ Installing build $BUILD on $name over usbmuxd Wi-Fi…"
+    echo "▸ Installing build $BUILD on $name over MobileDevice Wi-Fi…"
   else
     echo "▸ $name is not visible through usbmuxd; trying CoreDevice once…"
     if ! xcrun devicectl device install app \
@@ -156,19 +127,16 @@ install_device() {
       --device "$core_id" --pid "$running_pid" --timeout 20 >/dev/null || true
   fi
 
-  make_ipa
-  if [[ -z "$IPA" ]]; then
-    echo "✗ Direct installer unavailable. Run: brew install ideviceinstaller" >&2
+  if ! command -v ios-deploy >/dev/null 2>&1; then
+    echo "✗ MobileDevice installer unavailable. Run: brew install ios-deploy" >&2
     return 1
   fi
 
-  if ideviceinstaller $direct_flag -u "$udid" list --user \
-      --bundle-identifier "$BUNDLE_ID" 2>/dev/null \
-      | grep -q "$BUNDLE_ID"; then
-    ideviceinstaller $direct_flag -u "$udid" upgrade "$IPA"
-  else
-    ideviceinstaller $direct_flag -u "$udid" install "$IPA"
-  fi
+  ios-deploy \
+    --id "$udid" \
+    --bundle "$APP_PATH" \
+    --timeout 30 \
+    "${transport_args[@]}"
   launch_device "$name" "$core_id"
 }
 

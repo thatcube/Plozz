@@ -239,7 +239,6 @@ final class PlozziOSAppModel {
             self?.plexHomeUsers.effectiveCredentialRevision(for: account)
                 ?? account.credentialRevision
         }
-        accountError = launchErrors.isEmpty ? nil : launchErrors.joined(separator: "\n")
         authenticatedHTTPResolver.configure { [weak accountsProviders] locator in
             guard let accountsProviders,
                   let account = accountsProviders.accounts.first(where: {
@@ -278,7 +277,22 @@ final class PlozziOSAppModel {
                 token: token
             )
         }
+        do {
+            try accountStore.recoverCredentialMutations()
+        } catch {
+            PlozzLog.auth.error(
+                "Credential recovery failed; incomplete shares remain hidden"
+            )
+            launchErrors.append(
+                "An interrupted network-share update could not be recovered."
+            )
+        }
+        accountError = launchErrors.isEmpty ? nil : launchErrors.joined(separator: "\n")
         accountsProviders.reloadAccounts()
+        if !accountsProviders.accounts.isEmpty,
+           !profiles.firstRunProfileSetupComplete {
+            pendingFirstRunStep = .profiles
+        }
         identityIndex.warmIdentityIndex()
         let scanReporter = shareScanStatus.reporter()
         Task { await mediaShareRuntime.configure(reporter: scanReporter) }

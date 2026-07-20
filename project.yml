@@ -261,6 +261,16 @@ targets:
         PlozzSentryDSN: "$(PLOZZ_SENTRY_DSN)"
         UILaunchScreen: {}
         UIRequiresFullScreen: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UIAppFonts:
           - "AtkinsonHyperlegible-Regular.ttf"
           - "AtkinsonHyperlegible-Italic.ttf"

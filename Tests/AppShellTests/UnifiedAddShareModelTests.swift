@@ -366,9 +366,7 @@ final class UnifiedAddShareModelTests: XCTestCase {
         var listing: SFTPDirectoryListing = .success([])
         func captureHostKey(
             host: String,
-            port: Int,
-            username: String,
-            password: String
+            port: Int
         ) async -> SFTPOnboardingProbeResult {
             result
         }

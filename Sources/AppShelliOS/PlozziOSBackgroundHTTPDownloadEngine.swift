@@ -108,12 +108,15 @@ private enum BackgroundDownloadError: LocalizedError {
     case missingSource
     case missingTaskIdentity
     case missingTemporaryFile
+    case unexpectedHTTPStatus(Int)
 
     var errorDescription: String? {
         switch self {
         case .missingSource: "The managed download source is unavailable."
         case .missingTaskIdentity: "The background download lost its identity."
         case .missingTemporaryFile: "The downloaded file could not be finalized."
+        case let .unexpectedHTTPStatus(status):
+            "The media server returned HTTP \(status) instead of a media file."
         }
     }
 }
@@ -220,27 +223,20 @@ private final class BackgroundDownloadCoordinator:
                         return
                     }
 
-                    let resumeURL = Self.resumeDataURL(for: destination)
+                    // Older builds persisted URLSession resume blobs containing
+                    // token-bearing request URLs. Remove any legacy blob and
+                    // always restart managed authenticated downloads with the
+                    // freshly resolved URL.
+                    try? FileManager.default.removeItem(
+                        at: destination.appendingPathExtension("resume")
+                    )
                     let policy = lock.withLock { self.policy }
                     var request = URLRequest(url: url)
                     request.allowsExpensiveNetworkAccess =
                         policy.allowsExpensiveNetwork
                     request.allowsConstrainedNetworkAccess =
                         !policy.pausesOnConstrainedNetwork
-                    var task: URLSessionDownloadTask
-                    if let data = try? Data(contentsOf: resumeURL), !data.isEmpty {
-                        task = session.downloadTask(withResumeData: data)
-                        if task.originalRequest?.allowsExpensiveNetworkAccess
-                            != request.allowsExpensiveNetworkAccess
-                            || task.originalRequest?.allowsConstrainedNetworkAccess
-                            != request.allowsConstrainedNetworkAccess {
-                            task.cancel()
-                            try? FileManager.default.removeItem(at: resumeURL)
-                            task = session.downloadTask(with: request)
-                        }
-                    } else {
-                        task = session.downloadTask(with: request)
-                    }
+                    let task = session.downloadTask(with: request)
                     task.taskDescription = taskID
                     if hasTransfer(taskID) {
                         task.resume()
@@ -271,9 +267,7 @@ private final class BackgroundDownloadCoordinator:
             finish(taskID: taskID, result: .failure(CancellationError()))
             return
         }
-        task.cancel { [weak self] resumeData in
-            self?.persistResumeData(resumeData, taskID: taskID)
-        }
+        task.cancel()
     }
 
     private func hasTransfer(_ taskID: String) -> Bool {
@@ -318,6 +312,14 @@ private final class BackgroundDownloadCoordinator:
             return
         }
         do {
+            guard let response = downloadTask.response as? HTTPURLResponse else {
+                throw BackgroundDownloadError.missingTemporaryFile
+            }
+            guard (200...299).contains(response.statusCode) else {
+                throw BackgroundDownloadError.unexpectedHTTPStatus(
+                    response.statusCode
+                )
+            }
             let destination = try BackgroundTaskDescriptor
                 .decode(taskID)
                 .destinationURL()
@@ -330,7 +332,6 @@ private final class BackgroundDownloadCoordinator:
                 try fileManager.removeItem(at: destination)
             }
             try fileManager.moveItem(at: location, to: destination)
-            try? fileManager.removeItem(at: Self.resumeDataURL(for: destination))
             let values = try destination.resourceValues(forKeys: [.fileSizeKey])
             let bytes = Int64(values.fileSize ?? 0)
             lock.lock()
@@ -356,10 +357,6 @@ private final class BackgroundDownloadCoordinator:
     ) {
         guard let taskID = task.taskDescription else { return }
         if let error {
-            let resumeData = (error as NSError).userInfo[
-                NSURLSessionDownloadTaskResumeData
-            ] as? Data
-            persistResumeData(resumeData, taskID: taskID)
             let result: Result<Int64, Error> = (error as NSError).code == NSURLErrorCancelled
                 ? .failure(CancellationError())
                 : .failure(error)
@@ -380,17 +377,6 @@ private final class BackgroundDownloadCoordinator:
         PlozziOSBackgroundSessionBridge.finishEvents(identifier: identifier)
     }
 
-    private func persistResumeData(_ data: Data?, taskID: String) {
-        guard let data, !data.isEmpty else { return }
-        lock.lock()
-        let inMemoryDestination = transfers[taskID]?.destination
-        lock.unlock()
-        let destination = inMemoryDestination
-            ?? (try? BackgroundTaskDescriptor.decode(taskID).destinationURL())
-        guard let destination else { return }
-        try? data.write(to: Self.resumeDataURL(for: destination), options: .atomic)
-    }
-
     private func finish(taskID: String, result: Result<Int64, Error>) {
         lock.lock()
         guard var transfer = transfers.removeValue(forKey: taskID) else {
@@ -408,8 +394,5 @@ private final class BackgroundDownloadCoordinator:
         }
     }
 
-    private static func resumeDataURL(for destination: URL) -> URL {
-        destination.appendingPathExtension("resume")
-    }
 }
 #endif

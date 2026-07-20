@@ -109,5 +109,32 @@ final class OfflineRequestRewriteTests: XCTestCase {
         let result = PlayerViewModel.applyingOfflineRewrite(to: request, localURL: nil)
         XCTAssertEqual(result, request)
     }
+
+    @MainActor
+    func testOfflineFastPathOnlyAppliesToTheRequestedItem() {
+        let current = MediaItem(id: "episode-1", title: "Episode 1", kind: .episode)
+
+        XCTAssertTrue(
+            PlayerViewModel.shouldUseOfflineFastPath(
+                offlineItem: current,
+                requestedItemID: "episode-1",
+                forceTranscode: false
+            )
+        )
+        XCTAssertFalse(
+            PlayerViewModel.shouldUseOfflineFastPath(
+                offlineItem: current,
+                requestedItemID: "episode-2",
+                forceTranscode: false
+            )
+        )
+        XCTAssertFalse(
+            PlayerViewModel.shouldUseOfflineFastPath(
+                offlineItem: current,
+                requestedItemID: "episode-1",
+                forceTranscode: true
+            )
+        )
+    }
 }
 #endif

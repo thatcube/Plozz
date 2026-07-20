@@ -19,6 +19,10 @@ struct PlozziOSSearchView: View {
             initialValue: SearchViewModel(
                 accounts: appModel.accountsProviders.homeAccounts,
                 identitySources: appModel.identityIndex.identitySourcesProvider,
+                disabledLibraryKeys: { [weak appModel] in
+                    appModel?.settings.homeVisibility.visibility.disabledKeys
+                        ?? []
+                },
                 seerSearch: { [seer = appModel.seerService] query in
                     (try? await seer.search(query)) ?? []
                 },

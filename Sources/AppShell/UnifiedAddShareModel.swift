@@ -520,21 +520,17 @@ final class UnifiedAddShareModel {
         return path.isEmpty ? "/" : path
     }
 
-    /// SFTP first-connect: capture the server's host key (and confirm the
-    /// credentials authenticate) in one `.captureTrustOnFirstUse` connect, then
-    /// route to the verify step for explicit approval before pinning + saving.
+    /// SFTP first-connect: capture the server's host key with no user credential,
+    /// then route to explicit approval. Real authentication happens only on the
+    /// pinned reconnect after approval.
     private func beginSFTP(host: String, port: Int) {
         workTask?.cancel()
         detecting = true
-        let user = username.trimmingCharacters(in: .whitespaces)
-        let pass = password
         workTask = Task { [sftpProbe] in
             defer { self.detecting = false }
             let result = await sftpProbe.captureHostKey(
                 host: host,
-                port: port,
-                username: user,
-                password: pass
+                port: port
             )
             if Task.isCancelled { return }
             switch result {
@@ -542,7 +538,7 @@ final class UnifiedAddShareModel {
                 self.pendingSFTPHostKey = sha256
                 self.step = .verifyTrust(sha256: sha256)
             case .authenticationFailed:
-                self.connectError = "That username or password was rejected."
+                self.connectError = "Couldn’t capture this server’s host key."
             case .unreachable:
                 self.connectError = "Couldn’t reach that server. Check the address and network."
             case .failed(let message):
@@ -960,7 +956,7 @@ final class UnifiedAddShareModel {
         // SFTP: the fingerprint is an SSH host key already captured by the connect
         // probe. Approving pins it and opens a folder browser rooted at the typed
         // path (or `/`), so the user can drill into a subfolder to use as the share
-        // root. The credentials were already validated during capture.
+        // root. That pinned reconnect is the first time real credentials are sent.
         if let hostKey = pendingSFTPHostKey {
             pendingSFTPHostKey = nil
             approvedHostKeyPin = hostKey

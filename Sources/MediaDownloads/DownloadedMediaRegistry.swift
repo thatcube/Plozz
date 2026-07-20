@@ -65,12 +65,18 @@ public actor DownloadedMediaRegistry {
                 return record
             }
         }
+        let expectedAccountSource = item.sourceAccountID.map {
+            "\(DownloadMediaIdentity.accountSourcePrefix)\($0)"
+        }
         let sourceScopedMatches = state.records.values.filter {
             guard case .external(let source, let value) = $0.identity else {
                 return false
             }
+            guard value == item.id else { return false }
+            if let expectedAccountSource {
+                return source == expectedAccountSource
+            }
             return source.hasPrefix(DownloadMediaIdentity.accountSourcePrefix)
-                && value == item.id
         }
         return sourceScopedMatches.count == 1 ? sourceScopedMatches[0] : nil
     }

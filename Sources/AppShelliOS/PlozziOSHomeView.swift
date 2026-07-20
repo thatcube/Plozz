@@ -128,11 +128,40 @@ struct PlozziOSHomeView: View {
                     )
                 }
 
-                ForEach(rows) { row in
-                    PlozziOSHomeRowView(
-                        row: row,
-                        appModel: appModel
-                    )
+                if content.mergeLibraries {
+                    ForEach(rows) { row in
+                        PlozziOSHomeRowView(
+                            row: row,
+                            appModel: appModel
+                        )
+                    }
+                } else {
+                    ForEach(rows.filter { $0.kind != .libraries }) { row in
+                        PlozziOSHomeRowView(
+                            row: row,
+                            appModel: appModel
+                        )
+                    }
+                    ForEach(content.librarySections) { group in
+                        ForEach(group.sections) { section in
+                            PlozziOSHomeMediaRail(
+                                title: section.title,
+                                items: section.items,
+                                style: section.style == .landscape
+                                    ? .landscape
+                                    : .poster,
+                                appModel: appModel
+                            )
+                        }
+                    }
+                    if let libraries = rows.first(where: {
+                        $0.kind == .libraries
+                    }) {
+                        PlozziOSHomeRowView(
+                            row: libraries,
+                            appModel: appModel
+                        )
+                    }
                 }
             }
             .padding(.vertical)
@@ -406,40 +435,27 @@ private struct PlozziOSFeaturedRow: View {
 
 private struct PlozziOSHomeRowView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.plozzCardStyle) private var cardStyle
-    @Environment(\.plozzMetrics) private var metrics
     let row: HomeRow
     let appModel: PlozziOSAppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(row.title)
-                .font(.title2.bold())
-                .padding(.horizontal)
-
+        Group {
             if row.kind == .libraries {
-                libraryRow
-            } else {
-                mediaRow
-            }
-        }
-    }
-
-    private var mediaRow: some View {
-        ScrollView(.horizontal) {
-            LazyHStack(alignment: .top, spacing: 14) {
-                ForEach(row.items) { item in
-                    PlozziOSHomeMediaCard(
-                        item: item,
-                        isLandscape: row.style == .landscape,
-                        provider: provider(for: item)
-                    )
-                    .frame(width: mediaCardWidth)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(row.title)
+                        .font(.title2.bold())
+                        .padding(.horizontal)
+                    libraryRow
                 }
+            } else {
+                PlozziOSHomeMediaRail(
+                    title: row.title,
+                    items: row.items,
+                    style: row.style == .landscape ? .landscape : .poster,
+                    appModel: appModel
+                )
             }
-            .padding(.horizontal)
         }
-        .scrollIndicators(.hidden)
     }
 
     private var libraryRow: some View {
@@ -479,18 +495,50 @@ private struct PlozziOSHomeRowView: View {
         .scrollIndicators(.hidden)
     }
 
+}
+
+private struct PlozziOSHomeMediaRail: View {
+    @Environment(\.plozzCardStyle) private var cardStyle
+    @Environment(\.plozzMetrics) private var metrics
+
+    let title: String
+    let items: [MediaItem]
+    let style: PosterCardView.Style
+    let appModel: PlozziOSAppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.title2.bold())
+                .padding(.horizontal)
+
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 14) {
+                    ForEach(items) { item in
+                        PlozziOSHomeMediaCard(
+                            item: item,
+                            isLandscape: style == .landscape,
+                            provider: provider(for: item)
+                        )
+                        .frame(
+                            width: metrics.cardSlotWidth(
+                                for: style,
+                                cardStyle: cardStyle
+                            )
+                        )
+                    }
+                }
+                .padding(.horizontal)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
     private func provider(for item: MediaItem) -> (any MediaProvider)? {
         if let accountID = item.sourceAccountID {
             return appModel.accountsProviders.provider(forAccountID: accountID)
         }
         return appModel.accountsProviders.primaryProvider
-    }
-
-    private var mediaCardWidth: CGFloat {
-        metrics.cardSlotWidth(
-            for: row.style == .landscape ? .landscape : .poster,
-            cardStyle: cardStyle
-        )
     }
 }
 

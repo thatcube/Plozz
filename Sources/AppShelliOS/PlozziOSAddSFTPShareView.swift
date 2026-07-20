@@ -158,9 +158,7 @@ struct PlozziOSAddSFTPShareView: View {
 
         switch await probe.captureHostKey(
             host: host.trimmingCharacters(in: .whitespaces),
-            port: parsedPort,
-            username: username.trimmingCharacters(in: .whitespaces),
-            password: password
+            port: parsedPort
         ) {
         case let .success(hostKeySHA256):
             pendingHostKey = hostKeySHA256

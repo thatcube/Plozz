@@ -43,19 +43,14 @@ public enum SFTPDirectoryListing: Sendable, Equatable {
 /// implementation drives a one-shot `.captureTrustOnFirstUse` SSH connect; tests
 /// substitute a stub so the AppShell onboarding state machine runs offline.
 ///
-/// Capturing the host key and authenticating happen in the SAME connect: SSH
-/// presents its host key during the handshake (before auth), and a
-/// `.captureTrustOnFirstUse` connect accepts it and records its fingerprint, then
-/// proceeds to authenticate. A `.success` therefore proves BOTH that the entered
-/// credentials work AND yields the key to pin — exactly what first-connect needs.
-/// This is the standard SSH trust-on-first-use tradeoff: the first connection
-/// trusts the key it's shown, and the user confirms the fingerprint afterward.
+/// Host-key capture deliberately uses a non-secret probe credential. SSH presents
+/// its host key before user authentication, so onboarding can show and approve the
+/// fingerprint without exposing the user's real password to an untrusted first
+/// connection. The approved pinned reconnect performs real authentication.
 public protocol SFTPOnboardingProbing: Sendable {
     func captureHostKey(
         host: String,
-        port: Int,
-        username: String,
-        password: String
+        port: Int
     ) async -> SFTPOnboardingProbeResult
 
     /// Lists the child directories of `path`, connecting `.pinned` to the
@@ -73,17 +68,15 @@ public protocol SFTPOnboardingProbing: Sendable {
 }
 
 /// The production ``SFTPOnboardingProbing``: a one-shot `.captureTrustOnFirstUse`
-/// connect over `NIOSSHSFTPBackend`, returning the captured host-key SHA-256. The
-/// connection is torn down immediately — onboarding only needs the key + a proof
-/// the credentials authenticate; playback opens its own pinned session later.
+/// connect over `NIOSSHSFTPBackend`, returning the captured host-key SHA-256. No
+/// user credential is sent until the caller approves this key and reconnects
+/// `.pinned`.
 public struct SFTPOnboardingProbe: SFTPOnboardingProbing {
     public init() {}
 
     public func captureHostKey(
         host: String,
-        port: Int,
-        username: String,
-        password: String
+        port: Int
     ) async -> SFTPOnboardingProbeResult {
         let backend = NIOSSHSFTPBackend()
         defer { Task { await backend.shutdown() } }
@@ -91,10 +84,17 @@ public struct SFTPOnboardingProbe: SFTPOnboardingProbing {
             try await backend.connect(
                 host: host,
                 port: port,
-                credential: .password(username: username, password: password),
+                credential: .password(
+                    username: "plozz-host-key-probe",
+                    password: ""
+                ),
                 hostKeyPolicy: .captureTrustOnFirstUse
             )
         } catch {
+            if let fingerprint = backend.capturedHostKeyFingerprint,
+               fingerprint.count == 32 {
+                return .success(hostKeySHA256: Data(fingerprint))
+            }
             return Self.classify(error)
         }
         guard let fingerprint = backend.capturedHostKeyFingerprint, fingerprint.count == 32 else {

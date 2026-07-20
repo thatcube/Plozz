@@ -847,8 +847,12 @@ public final class PlayerViewModel {
         mediaSourceID: String?,
         forceTranscode: Bool
     ) async throws -> PrefetchedPlayback {
-        if !forceTranscode,
-           let offlineItem,
+        if let offlineItem,
+           Self.shouldUseOfflineFastPath(
+               offlineItem: offlineItem,
+               requestedItemID: itemID,
+               forceTranscode: forceTranscode
+           ),
            let localURL = await offlinePlaybackResolver?
                .localPlaybackURL(for: offlineItem) {
             var request = PlaybackRequest(
@@ -885,6 +889,14 @@ public final class PlayerViewModel {
         request.preferredAudioLanguages = preferredAudioLanguages(for: request.item)
         let kind = routeEngine(for: request, forceTranscode: forceTranscode)
         return PrefetchedPlayback(itemID: itemID, request: request, engineKind: kind)
+    }
+
+    static func shouldUseOfflineFastPath(
+        offlineItem: MediaItem,
+        requestedItemID: String,
+        forceTranscode: Bool
+    ) -> Bool {
+        !forceTranscode && offlineItem.id == requestedItemID
     }
 
     /// Rewrites a resolved request to play a local `file://` asset when a completed

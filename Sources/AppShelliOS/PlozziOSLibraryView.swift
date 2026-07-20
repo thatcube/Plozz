@@ -287,7 +287,7 @@ struct PlozziOSLibraryGridView: View {
                     await viewModel.setSort(
                         CoreModels.SortDescriptor(
                             field: field,
-                            direction: viewModel.sort.direction
+                            direction: field.defaultDirection
                         )
                     )
                 }

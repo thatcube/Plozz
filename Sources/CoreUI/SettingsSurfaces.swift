@@ -7,7 +7,7 @@ public struct SettingsPageBackground: View {
     public init() {}
 
     public var body: some View {
-        palette.backgroundSecondary
+        palette.settingsBackground
             .ignoresSafeArea()
     }
 }

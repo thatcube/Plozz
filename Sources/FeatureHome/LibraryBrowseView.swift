@@ -219,7 +219,14 @@ public struct LibraryBrowseView: View {
         Binding(
             get: { viewModel.sort.field },
             set: { field in
-                Task { await viewModel.setSort(CoreModels.SortDescriptor(field: field, direction: viewModel.sort.direction)) }
+                Task {
+                    await viewModel.setSort(
+                        CoreModels.SortDescriptor(
+                            field: field,
+                            direction: field.defaultDirection
+                        )
+                    )
+                }
             }
         )
     }

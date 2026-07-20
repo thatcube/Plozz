@@ -18,6 +18,10 @@ public struct ThemePalette: Equatable, Sendable {
     /// Bottom stop of the vertical background gradient. The two stay close in
     /// value so the shift reads as a soft, low-contrast wash.
     public let backgroundSecondary: Color
+    /// Solid page color used by modal Settings surfaces. Kept separate from the
+    /// app gradient so iOS/iPadOS Settings does not stack a gradient over the
+    /// already-themed app beneath it.
+    public let settingsBackground: Color
     /// Fill used for card / surface chrome.
     public let cardSurface: Color
     /// Hairline border drawn around a card surface.
@@ -65,6 +69,7 @@ public struct ThemePalette: Equatable, Sendable {
     init(
         backgroundBase: Color,
         backgroundSecondary: Color,
+        settingsBackground: Color,
         cardSurface: Color,
         cardBorder: Color,
         primaryText: Color,
@@ -80,6 +85,7 @@ public struct ThemePalette: Equatable, Sendable {
     ) {
         self.backgroundBase = backgroundBase
         self.backgroundSecondary = backgroundSecondary
+        self.settingsBackground = settingsBackground
         self.cardSurface = cardSurface
         self.cardBorder = cardBorder
         self.primaryText = primaryText
@@ -137,6 +143,7 @@ public extension ThemePalette {
     static let dark = ThemePalette(
         backgroundBase: Color(red: 0.13, green: 0.13, blue: 0.14),
         backgroundSecondary: Color(red: 0.09, green: 0.09, blue: 0.10),
+        settingsBackground: Color(red: 0.09, green: 0.09, blue: 0.10),
         cardSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
         cardBorder: Color.white.opacity(0.16),
         primaryText: .white,
@@ -156,6 +163,7 @@ public extension ThemePalette {
     static let pureBlack = ThemePalette(
         backgroundBase: Color(red: 0.025, green: 0.025, blue: 0.03),
         backgroundSecondary: Color(red: 0.012, green: 0.012, blue: 0.016),
+        settingsBackground: Color(red: 0.012, green: 0.012, blue: 0.016),
         cardSurface: Color(red: 0.045, green: 0.045, blue: 0.055),
         cardBorder: Color.white.opacity(0.16),
         primaryText: .white,
@@ -170,19 +178,19 @@ public extension ThemePalette {
         isLight: false
     )
 
-    /// Light theme. Uses Apple's grouped Settings contrast: a neutral
-    /// system-grouped gray page, white grouped surfaces, and restrained
-    /// separators so controls read clearly without a decorative color cast.
+    /// Light app theme keeps the shared app gradient and glow. Settings uses the
+    /// separate neutral grouped-page token instead.
     static let light = ThemePalette(
-        backgroundBase: Color(red: 0.949, green: 0.949, blue: 0.969),
-        backgroundSecondary: Color(red: 0.949, green: 0.949, blue: 0.969),
+        backgroundBase: Color(white: 1.0),
+        backgroundSecondary: Color(white: 0.97),
+        settingsBackground: Color(red: 0.949, green: 0.949, blue: 0.969),
         cardSurface: .white,
         cardBorder: Color.black.opacity(0.08),
         primaryText: Color.black.opacity(0.90),
         secondaryText: Color.black.opacity(0.60),
         accent: ThemePalette.brandAccent,
         errorText: Color(red: 0.78, green: 0.11, blue: 0.09),
-        topGlow: nil,
+        topGlow: ThemePalette.brandBlue.opacity(0.14),
         focusedCardGlassTint: Color.black.opacity(0.05),
         liftSurface: .white,
         cardOpaqueSurface: .white,

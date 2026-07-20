@@ -42,8 +42,9 @@ public struct PlozziOSRootView: View {
         .environment(\.themePalette, resolvedPalette)
         .environment(
             \.plozzMetrics,
-            PlozzMetrics(density: appModel.settings.density.density)
+            PlozzMetrics.touch(density: appModel.settings.density.density)
         )
+        .mediaItemActionHandler(appModel.mediaItemActionHandler)
         .environment(
             \.plozzCardStyle,
             appModel.settings.cardStyle.style

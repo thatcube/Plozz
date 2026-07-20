@@ -1,5 +1,6 @@
 #if os(iOS)
 import CoreModels
+import CoreUI
 import FeatureHomeCore
 import Observation
 import SwiftUI
@@ -120,9 +121,23 @@ private struct PlozziOSLibraryList: View {
 }
 
 private struct PlozziOSLibraryCard: View {
+    @Environment(\.plozzCardStyle) private var cardStyle
     let library: MediaLibrary
 
+    @ViewBuilder
     var body: some View {
+        if cardStyle == .framed {
+            content
+                .plozzFramedMediaCard(
+                    innerCornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
+                )
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
             AsyncImage(url: library.imageURL) { image in
                 image
@@ -139,7 +154,15 @@ private struct PlozziOSLibraryCard: View {
             }
             .frame(maxWidth: .infinity)
             .aspectRatio(16 / 10, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
+                    style: .continuous
+                )
+            )
+            .plozzMediaEdge(
+                cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
+            )
 
             Text(library.title)
                 .font(.headline)
@@ -197,8 +220,6 @@ struct PlozziOSLibraryGridView: View {
                                     slot: viewModel.slot(at: index),
                                     index: index,
                                     provider: provider,
-                                    cardStyle: settings.cardStyle.style,
-                                    watchIndicator: settings.watchIndicator.indicator,
                                     onAppear: { await viewModel.itemAppeared(at: index) },
                                     onDisappear: { viewModel.itemDisappeared(at: index) }
                                 )
@@ -287,8 +308,6 @@ private struct PlozziOSLibraryItemCell: View {
     let slot: LibrarySlot?
     let index: Int
     let provider: any MediaProvider
-    let cardStyle: CardStyle
-    let watchIndicator: WatchStatusIndicator
     let onAppear: () async -> Void
     let onDisappear: () -> Void
 
@@ -316,9 +335,7 @@ private struct PlozziOSLibraryItemCell: View {
 
     private var card: some View {
         PlozziOSPosterCard(
-            item: slot?.item,
-            cardStyle: cardStyle,
-            watchIndicator: watchIndicator
+            item: slot?.item
         )
     }
 }

@@ -1,5 +1,6 @@
 #if os(iOS)
 import CoreModels
+import CoreUI
 import FeatureHomeCore
 import SwiftUI
 
@@ -382,8 +383,7 @@ private struct PlozziOSFeaturedRow: View {
                         PlozziOSHomeMediaCard(
                             item: item,
                             isLandscape: false,
-                            provider: appModel.accountsProviders.primaryProvider,
-                            settings: appModel.settings
+                            provider: appModel.accountsProviders.primaryProvider
                         )
                         .frame(
                             width: appModel.settings.density.density
@@ -426,8 +426,7 @@ private struct PlozziOSHomeRowView: View {
                     PlozziOSHomeMediaCard(
                         item: item,
                         isLandscape: row.style == .landscape,
-                        provider: provider(for: item),
-                        settings: appModel.settings
+                        provider: provider(for: item)
                     )
                     .frame(width: mediaCardWidth)
                 }
@@ -499,7 +498,6 @@ private struct PlozziOSHomeMediaCard: View {
     let item: MediaItem
     let isLandscape: Bool
     let provider: (any MediaProvider)?
-    let settings: PlozziOSSettingsModel
 
     var body: some View {
         Group {
@@ -523,45 +521,41 @@ private struct PlozziOSHomeMediaCard: View {
 
     @ViewBuilder
     private var card: some View {
-        if isLandscape {
-            VStack(alignment: .leading, spacing: 7) {
-                AsyncImage(url: item.backdropURL ?? item.posterURL) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } placeholder: {
-                    Rectangle()
-                        .fill(.secondary.opacity(0.14))
-                }
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                Text(item.title)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(2)
-            }
-        } else {
-            PlozziOSPosterCard(
-                item: item,
-                cardStyle: settings.cardStyle.style,
-                watchIndicator: settings.watchIndicator.indicator
-            )
-        }
+        PlozziOSPosterCard(
+            item: item,
+            style: isLandscape ? .landscape : .poster
+        )
     }
 }
 
 private struct PlozziOSHomeLibraryCard: View {
+    @Environment(\.plozzCardStyle) private var cardStyle
     let library: AggregatedLibrary
     let width: CGFloat
 
+    @ViewBuilder
     var body: some View {
+        if cardStyle == .framed {
+            content
+                .plozzFramedMediaCard(
+                    innerCornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
+                )
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 8) {
             AsyncImage(url: library.library.imageURL) { image in
                 image
                     .resizable()
                     .scaledToFill()
             } placeholder: {
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(
+                    cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
+                )
                     .fill(.secondary.opacity(0.14))
                     .overlay {
                         Image(systemName: library.library.kind == .series ? "tv" : "film")
@@ -570,7 +564,15 @@ private struct PlozziOSHomeLibraryCard: View {
                     }
             }
             .frame(width: width, height: width * 0.6)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
+                    style: .continuous
+                )
+            )
+            .plozzMediaEdge(
+                cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
+            )
 
             Text(library.library.title)
                 .font(.headline)

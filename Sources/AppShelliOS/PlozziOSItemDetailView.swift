@@ -1,6 +1,7 @@
 #if os(iOS)
 import AppRuntime
 import CoreModels
+import CoreUI
 import FeatureHomeCore
 import MediaDownloads
 import SeerService
@@ -210,8 +211,7 @@ struct PlozziOSItemDetailView: View {
                                     )
                                 } label: {
                                     PlozziOSSeasonRow(
-                                        season: season,
-                                        isWide: horizontalSizeClass == .regular
+                                        season: season
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -878,10 +878,23 @@ private struct PlozziOSDetailHero: View {
 }
 
 private struct PlozziOSSeasonRow: View {
+    @Environment(\.plozzCardStyle) private var cardStyle
     let season: MediaItem
-    let isWide: Bool
 
+    @ViewBuilder
     var body: some View {
+        if cardStyle == .framed {
+            content
+                .plozzFramedMediaCard(
+                    innerCornerRadius: PlozzTheme.Metrics.posterArtCornerRadius
+                )
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         HStack(spacing: 14) {
             AsyncImage(url: season.posterURL) { image in
                 image
@@ -896,7 +909,24 @@ private struct PlozziOSSeasonRow: View {
                     }
             }
             .frame(width: 72, height: 108)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                MediaCardPlaybackIndicators(
+                    item: season,
+                    badgeInset: 5,
+                    progressHeight: 9,
+                    progressHorizontalInset: 7,
+                    progressBottomInset: 7
+                )
+            }
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius,
+                    style: .continuous
+                )
+            )
+            .plozzMediaEdge(
+                cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius
+            )
 
             Text(season.title)
                 .font(.headline)
@@ -907,19 +937,13 @@ private struct PlozziOSSeasonRow: View {
                 .font(.caption.bold())
                 .foregroundStyle(.tertiary)
         }
-        .padding(isWide ? 12 : 0)
-        .background {
-            if isWide {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.thinMaterial)
-            }
-        }
         .contentShape(Rectangle())
     }
 }
 
 private struct PlozziOSSeasonEpisodesView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.plozzCardStyle) private var cardStyle
     @Environment(PlozziOSAppModel.self) private var appModel
 
     let viewModel: ItemDetailViewModel
@@ -964,12 +988,13 @@ private struct PlozziOSSeasonEpisodesView: View {
         }
     }
 
+    @ViewBuilder
     private func episodeEntry(
         _ episode: MediaItem,
         episodes: [MediaItem],
         isWide: Bool
     ) -> some View {
-        HStack {
+        let content = HStack {
             Button {
                 onPlay(episode, false)
             } label: {
@@ -992,12 +1017,15 @@ private struct PlozziOSSeasonEpisodesView: View {
 
             PlozziOSEpisodeDownloadButton(episode: episode)
         }
-        .padding(isWide ? 14 : 0)
-        .background {
-            if isWide {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.thinMaterial)
-            }
+
+        if cardStyle == .framed {
+            content
+                .plozzFramedMediaCard(
+                    innerCornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
+                )
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        } else {
+            content
         }
     }
 
@@ -1112,6 +1140,7 @@ private struct PlozziOSEpisodeDownloadButton: View {
 }
 
 private struct PlozziOSEpisodeRow: View {
+    @Environment(\.plozzMetrics) private var metrics
     let episode: MediaItem
     let isWide: Bool
 
@@ -1129,7 +1158,24 @@ private struct PlozziOSEpisodeRow: View {
                 width: isWide ? 180 : 120,
                 height: isWide ? 101 : 68
             )
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                MediaCardPlaybackIndicators(
+                    item: episode,
+                    badgeInset: 6,
+                    progressHeight: metrics.progressBarHeight,
+                    progressHorizontalInset: 8,
+                    progressBottomInset: 7
+                )
+            }
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
+                    style: .continuous
+                )
+            )
+            .plozzMediaEdge(
+                cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
+            )
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(episode.episodeLabel)

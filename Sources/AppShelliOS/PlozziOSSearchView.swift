@@ -108,9 +108,7 @@ struct PlozziOSSearchView: View {
                             ForEach(section.items) { item in
                                 PlozziOSSearchResultCard(
                                     item: item,
-                                    provider: provider(for: item),
-                                    cardStyle: appModel.settings.cardStyle.style,
-                                    watchIndicator: appModel.settings.watchIndicator.indicator
+                                    provider: provider(for: item)
                                 )
                             }
                         }
@@ -133,8 +131,6 @@ private struct PlozziOSSearchResultCard: View {
     @Environment(PlozziOSAppModel.self) private var appModel
     let item: MediaItem
     let provider: (any MediaProvider)?
-    let cardStyle: CardStyle
-    let watchIndicator: WatchStatusIndicator
 
     var body: some View {
         Group {
@@ -159,9 +155,7 @@ private struct PlozziOSSearchResultCard: View {
     private var card: some View {
         VStack(alignment: .leading, spacing: 6) {
             PlozziOSPosterCard(
-                item: item,
-                cardStyle: cardStyle,
-                watchIndicator: watchIndicator
+                item: item
             )
             if let cue = SearchSection.availabilityCue(for: item) {
                 Label(cue, systemImage: "rectangle.stack.badge.plus")

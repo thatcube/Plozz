@@ -45,6 +45,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
                     }
                 }
             }
+            .buttonStyle(SettingsSectionButtonStyle())
             #if os(tvOS)
             .toggleStyle(SettingsSwitchToggleStyle(flushLeading: false))
             #else
@@ -77,6 +78,15 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
 
     private var hairlineWidth: CGFloat {
         1 / max(displayScale, 1)
+    }
+}
+
+private struct SettingsSectionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 

@@ -641,57 +641,23 @@ private struct PlozziOSProfilesView: View {
         .navigationTitle("Profiles")
         .sheet(isPresented: $showingAddProfile) {
             NavigationStack {
-                PlozziOSAddProfileView(appModel: appModel)
+                PlozziOSProfileEditorHost(
+                    appModel: appModel,
+                    onFinished: { showingAddProfile = false }
+                )
             }
             .preferredColorScheme(palette.isLight ? .light : .dark)
         }
         .sheet(item: $editingProfile) { profile in
             NavigationStack {
-                PlozziOSProfileEditorView(
-                    profile: profile,
-                    onSave: { name, emoji in
-                        appModel.updateProfile(
-                            profile.id,
-                            name: name,
-                            emoji: emoji
-                        )
-                        editingProfile = nil
-                    },
-                    onCancel: { editingProfile = nil }
+                PlozziOSProfileEditorHost(
+                    appModel: appModel,
+                    editingProfile: profile,
+                    canDelete: !appModel.profiles.isDefault(profile),
+                    onFinished: { editingProfile = nil }
                 )
             }
             .preferredColorScheme(palette.isLight ? .light : .dark)
-        }
-    }
-}
-
-private struct PlozziOSAddProfileView: View {
-    @Environment(\.dismiss) private var dismiss
-    let appModel: PlozziOSAppModel
-    @State private var name = ""
-    @State private var emoji = "👤"
-
-    var body: some View {
-        Form {
-            SettingsSectionGroup("Profile") {
-                TextField("Name", text: $name)
-                TextField("Emoji", text: $emoji)
-            }
-        }
-        .settingsPageSurface()
-        .navigationTitle("New Profile")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Add") {
-                    appModel.addProfile(name: name, emoji: emoji)
-                    dismiss()
-                }
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
         }
     }
 }

@@ -127,7 +127,7 @@ public struct ProfileEditorView: View {
     @State private var showDeleteConfirmation = false
     @FocusState private var nameFieldFocused: Bool
 
-    private enum AvatarMode: Hashable { case symbol, emoji, photo }
+    fileprivate enum AvatarMode: Hashable { case symbol, emoji, photo }
 
     /// Current tvOS version, so the emoji picker can hide glyphs the device is
     /// too old to render (they'd otherwise show as empty "tofu" boxes).
@@ -231,6 +231,20 @@ public struct ProfileEditorView: View {
     /// borrowed photo ignores it.
     private var colorApplies: Bool { avatarMode != .photo }
 
+    private func symbolAccessibilityName(_ symbol: String) -> String {
+        symbol
+            .replacingOccurrences(of: ".fill", with: "")
+            .replacingOccurrences(of: ".inverse", with: "")
+            .replacingOccurrences(of: "holdinghands", with: "holding hands")
+            .replacingOccurrences(of: "gamecontroller", with: "game controller")
+            .replacingOccurrences(of: "soccerball", with: "soccer ball")
+            .replacingOccurrences(of: "puzzlepiece", with: "puzzle piece")
+            .replacingOccurrences(of: "paintpalette", with: "paint palette")
+            .replacingOccurrences(of: "pawprint", with: "paw print")
+            .replacingOccurrences(of: ".", with: " ")
+            .localizedCapitalized
+    }
+
     /// The draft the current UI state represents.
     private var currentDraft: ProfileDraft {
         ProfileDraft(
@@ -263,6 +277,16 @@ public struct ProfileEditorView: View {
     }
 
     public var body: some View {
+        #if os(tvOS)
+        tvOSBody
+        #else
+        iOSBody
+        #endif
+    }
+
+    #if os(tvOS)
+
+    private var tvOSBody: some View {
         ZStack {
             AppBackground(palette: palette).ignoresSafeArea()
 
@@ -374,6 +398,8 @@ public struct ProfileEditorView: View {
         .accessibilityLabel(Text("Delete Profile"))
     }
 
+    #endif
+
     // MARK: Exit / discard / revert
 
     private func handleExit() {
@@ -403,6 +429,8 @@ public struct ProfileEditorView: View {
     }
 
     // MARK: Left column — always-visible live preview + colour
+
+    #if os(tvOS)
 
     private var previewColumn: some View {
         VStack(alignment: .leading, spacing: 32) {
@@ -441,6 +469,8 @@ public struct ProfileEditorView: View {
         .frame(width: 460, alignment: .leading)
     }
 
+    #endif
+
     private var previewProfile: Profile {
         Profile(
             id: editingProfile?.id ?? "preview",
@@ -469,6 +499,8 @@ public struct ProfileEditorView: View {
     }
 
     // MARK: Right column — scrolling editor
+
+    #if os(tvOS)
 
     private var pickerColumn: some View {
         ScrollView {
@@ -623,7 +655,7 @@ public struct ProfileEditorView: View {
         }
         .buttonStyle(CircularSelectionButtonStyle(diameter: diameter))
         .focusEffectDisabled()
-        .accessibilityLabel(Text(symbol))
+        .accessibilityLabel(Text(symbolAccessibilityName(symbol)))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
@@ -799,7 +831,7 @@ public struct ProfileEditorView: View {
         }
         .buttonStyle(CircularSelectionButtonStyle(diameter: diameter))
         .focusEffectDisabled()
-        .accessibilityLabel(Text("Color \(index + 1)"))
+        .accessibilityLabel(Text(ProfileTileColor.accessibilityName(forIndex: index)))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
@@ -906,6 +938,8 @@ public struct ProfileEditorView: View {
             .foregroundStyle(palette.secondaryText)
     }
 
+    #endif
+
     private func loadPhotoCandidates() async {
         // Pull Plex Home users for every signed-in Plex account in parallel
         // so the photo grid has every borrowable face on first render.
@@ -936,6 +970,609 @@ public struct ProfileEditorView: View {
     }
 }
 
+#if os(iOS)
+
+// MARK: - iOS touch layout
+//
+// A scrollable vertical editor that renders the SAME shared state
+// (`currentDraft`, photo candidates, avatar mode) as the tvOS focus layout —
+// only the presentation differs. It reuses `ProfileAvatarView` for the live
+// preview and `ProfileTileColor` for the swatches, so photo / emoji / symbol /
+// colour all render identically to every other avatar surface. Selection uses
+// plain touch buttons (no focus engine) with a highlighted ring, native
+// segmented mode control, and adaptive grids that reflow for compact vs regular
+// width. Save/Create/Cancel/Delete live in the host's navigation toolbar.
+extension ProfileEditorView {
+    var iOSBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                IOSProfilePreviewSection(
+                    profileID: editingProfile?.id ?? "preview",
+                    profileName: trimmedName,
+                    displayName: previewName,
+                    subtitle: previewSubtitle,
+                    avatarSymbol: avatarSymbol,
+                    colorIndex: colorIndex,
+                    avatarImageURL: effectiveImageURL,
+                    avatarEmoji: effectiveEmoji,
+                    avatarEmojiColorIndex: effectiveEmojiColorIndex
+                )
+                IOSProfileNameSection(name: $name)
+                IOSProfileAvatarSection(
+                    avatarMode: $avatarMode,
+                    avatarSymbol: $avatarSymbol,
+                    colorIndex: colorIndex,
+                    avatarEmoji: $avatarEmoji,
+                    avatarImageURL: $avatarImageURL,
+                    photoCandidates: photoCandidates,
+                    osMajorVersion: osVersion.majorVersion,
+                    osMinorVersion: osVersion.minorVersion
+                )
+                if colorApplies {
+                    IOSProfileColorSection(
+                        avatarMode: avatarMode,
+                        colorIndex: $colorIndex,
+                        emojiColorIndex: $emojiColorIndex
+                    )
+                }
+                if isEditing, canDelete, onDelete != nil {
+                    IOSProfileDeleteSection(showConfirmation: $showDeleteConfirmation)
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: 640)
+            .frame(maxWidth: .infinity)
+        }
+        .background { AppBackground(palette: palette).ignoresSafeArea() }
+        .scrollContentBackground(.hidden)
+        .environment(\.colorScheme, palette.isLight ? .light : .dark)
+        .navigationTitle(isEditing ? "Edit Profile" : "New Profile")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await loadPhotoCandidates() }
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel", action: attemptCancel)
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(isEditing ? "Save" : "Create", action: save)
+                    .disabled(!canSave)
+            }
+        }
+        .alert("Discard changes?", isPresented: $showDiscardConfirmation) {
+            Button("Discard", role: .destructive, action: onCancel)
+            Button("Keep Editing", role: .cancel) {}
+        } message: {
+            Text("You've made changes that haven't been saved. Going back now will lose them.")
+        }
+        .alert("Delete this profile?", isPresented: $showDeleteConfirmation) {
+            Button("Delete Profile", role: .destructive) { onDelete?() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Deleting removes this profile's preferences (theme, captions, spoilers, Trakt) and which servers it includes. Signed-in server accounts stay in the household pool.")
+        }
+    }
+}
+
+fileprivate struct IOSProfilePreviewSection: View {
+    let profileID: String
+    let profileName: String
+    let displayName: String
+    let subtitle: String
+    let avatarSymbol: String
+    let colorIndex: Int
+    let avatarImageURL: String?
+    let avatarEmoji: String?
+    let avatarEmojiColorIndex: Int?
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        let profile = Profile(
+            id: profileID,
+            name: profileName,
+            avatarSymbol: avatarSymbol,
+            colorIndex: colorIndex,
+            avatarImageURL: avatarImageURL,
+            avatarEmoji: avatarEmoji,
+            avatarEmojiColorIndex: avatarEmojiColorIndex
+        )
+        VStack(spacing: 12) {
+            ProfileAvatarView(profile: profile, size: 104)
+                .shadow(color: .black.opacity(0.2), radius: 12, y: 5)
+            Text(displayName)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(palette.primaryText)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(palette.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("Preview: \(displayName), \(subtitle)"))
+    }
+}
+
+fileprivate struct IOSProfileNameSection: View {
+    @Binding var name: String
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            IOSProfileSectionHeader(text: "Name")
+            TextField("Profile name", text: $name)
+                .textContentType(.name)
+                .autocorrectionDisabled()
+                .font(.title3)
+                .foregroundStyle(palette.primaryText)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(minHeight: 44)
+                .background {
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
+                        .fill(palette.cardSurface)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
+                                .strokeBorder(palette.cardBorder, lineWidth: 1)
+                        }
+                }
+                .accessibilityLabel(Text("Profile name"))
+        }
+    }
+}
+
+fileprivate struct IOSProfileAvatarSection: View {
+    @Binding var avatarMode: ProfileEditorView.AvatarMode
+    @Binding var avatarSymbol: String
+    let colorIndex: Int
+    @Binding var avatarEmoji: String?
+    @Binding var avatarImageURL: String?
+    let photoCandidates: [ProfilePhotoCandidate]
+    let osMajorVersion: Int
+    let osMinorVersion: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            IOSProfileSectionHeader(text: "Avatar")
+            IOSProfileAvatarModePicker(avatarMode: $avatarMode)
+            IOSProfileAvatarPicker(
+                avatarMode: avatarMode,
+                avatarSymbol: $avatarSymbol,
+                colorIndex: colorIndex,
+                avatarEmoji: $avatarEmoji,
+                avatarImageURL: $avatarImageURL,
+                photoCandidates: photoCandidates,
+                osMajorVersion: osMajorVersion,
+                osMinorVersion: osMinorVersion
+            )
+        }
+    }
+}
+
+fileprivate struct IOSProfileAvatarModePicker: View {
+    @Binding var avatarMode: ProfileEditorView.AvatarMode
+
+    var body: some View {
+        Picker("Avatar style", selection: $avatarMode) {
+            Text("Emoji").tag(ProfileEditorView.AvatarMode.emoji)
+            Text("Photo").tag(ProfileEditorView.AvatarMode.photo)
+            Text("Symbol").tag(ProfileEditorView.AvatarMode.symbol)
+        }
+        .pickerStyle(.segmented)
+    }
+}
+
+fileprivate struct IOSProfileAvatarPicker: View {
+    let avatarMode: ProfileEditorView.AvatarMode
+    @Binding var avatarSymbol: String
+    let colorIndex: Int
+    @Binding var avatarEmoji: String?
+    @Binding var avatarImageURL: String?
+    let photoCandidates: [ProfilePhotoCandidate]
+    let osMajorVersion: Int
+    let osMinorVersion: Int
+
+    var body: some View {
+        switch avatarMode {
+        case .symbol:
+            IOSProfileSymbolPicker(
+                avatarSymbol: $avatarSymbol,
+                colorIndex: colorIndex
+            )
+        case .emoji:
+            IOSProfileEmojiPicker(
+                avatarEmoji: $avatarEmoji,
+                osMajorVersion: osMajorVersion,
+                osMinorVersion: osMinorVersion
+            )
+        case .photo:
+            IOSProfilePhotoPicker(
+                photoCandidates: photoCandidates,
+                avatarImageURL: $avatarImageURL
+            )
+        }
+    }
+}
+
+fileprivate struct IOSProfileSymbolPicker: View {
+    @Binding var avatarSymbol: String
+    let colorIndex: Int
+
+    private let columns = [GridItem(.adaptive(minimum: 60, maximum: 84), spacing: 12)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            ForEach(Profile.avatarSymbolCategories) { category in
+                VStack(alignment: .leading, spacing: 10) {
+                    IOSProfileCategoryHeader(text: category.title)
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(category.symbols, id: \.self) { symbol in
+                            IOSProfileSymbolTile(
+                                symbol: symbol,
+                                avatarSymbol: $avatarSymbol,
+                                colorIndex: colorIndex
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fileprivate struct IOSProfileSymbolTile: View {
+    let symbol: String
+    @Binding var avatarSymbol: String
+    let colorIndex: Int
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        let isSelected = symbol == avatarSymbol
+        let diameter: CGFloat = 60
+        Button {
+            avatarSymbol = symbol
+        } label: {
+            ZStack {
+                Circle().fill(isSelected
+                    ? AnyShapeStyle(ProfileTileColor.color(forIndex: colorIndex))
+                    : AnyShapeStyle(palette.cardSurface))
+                Image(systemName: symbol)
+                    .font(.system(size: 27, weight: .semibold))
+                    .foregroundStyle(isSelected
+                        ? ProfileTileColor.legibleForeground(forIndex: colorIndex)
+                        : palette.primaryText)
+            }
+            .frame(width: diameter, height: diameter)
+            .overlay(IOSProfileSelectionRing(isSelected: isSelected))
+            .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(iOSProfileSymbolAccessibilityName(symbol)))
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+fileprivate struct IOSProfileEmojiPicker: View {
+    @Binding var avatarEmoji: String?
+    let osMajorVersion: Int
+    let osMinorVersion: Int
+
+    private let columns = [GridItem(.adaptive(minimum: 60, maximum: 84), spacing: 12)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            ForEach(Profile.avatarEmojiCategories) { category in
+                let available = category.availableEmojis(
+                    osMajor: osMajorVersion,
+                    osMinor: osMinorVersion
+                ).map(\.value)
+                if !available.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        IOSProfileCategoryHeader(text: category.title)
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(available, id: \.self) { emoji in
+                                IOSProfileEmojiTile(
+                                    emoji: emoji,
+                                    avatarEmoji: $avatarEmoji
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fileprivate struct IOSProfileEmojiTile: View {
+    let emoji: String
+    @Binding var avatarEmoji: String?
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        let isSelected = emoji == avatarEmoji
+        let diameter: CGFloat = 60
+        Button {
+            avatarEmoji = emoji
+        } label: {
+            ZStack {
+                Circle().fill(palette.cardSurface)
+                Text(emoji).font(.system(size: 30))
+            }
+            .frame(width: diameter, height: diameter)
+            .overlay(IOSProfileSelectionRing(isSelected: isSelected))
+            .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("Emoji \(emoji)"))
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+fileprivate struct IOSProfilePhotoPicker: View {
+    let photoCandidates: [ProfilePhotoCandidate]
+    @Binding var avatarImageURL: String?
+
+    @Environment(\.themePalette) private var palette
+
+    @ViewBuilder
+    var body: some View {
+        if photoCandidates.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("No photos to borrow yet", systemImage: "photo.on.rectangle")
+                    .font(.headline)
+                    .foregroundStyle(palette.primaryText)
+                Text("Sign in to a Plex Home user or Jellyfin user that has a profile photo, then come back to use it here. In the meantime, an emoji or symbol works great.")
+                    .font(.subheadline)
+                    .foregroundStyle(palette.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 8)
+        } else {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 96, maximum: 132), spacing: 18)],
+                spacing: 18
+            ) {
+                ForEach(photoCandidates) { candidate in
+                    IOSProfilePhotoTile(
+                        candidate: candidate,
+                        avatarImageURL: $avatarImageURL
+                    )
+                }
+            }
+        }
+    }
+}
+
+fileprivate struct IOSProfilePhotoTile: View {
+    let candidate: ProfilePhotoCandidate
+    @Binding var avatarImageURL: String?
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        let isSelected = avatarImageURL == candidate.imageURL.absoluteString
+        let diameter: CGFloat = 88
+        VStack(spacing: 8) {
+            Button {
+                avatarImageURL = candidate.imageURL.absoluteString
+            } label: {
+                ZStack {
+                    Circle().fill(palette.cardSurface)
+                    FallbackAsyncImage(urls: [candidate.imageURL], variant: .musicThumbnail) {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 30))
+                            .foregroundStyle(palette.secondaryText)
+                    }
+                    .frame(width: diameter, height: diameter)
+                    .clipShape(Circle())
+                }
+                .frame(width: diameter, height: diameter)
+                .overlay(IOSProfileSelectionRing(isSelected: isSelected))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Photo from \(candidate.detailLabel)"))
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+
+            VStack(spacing: 1) {
+                Text(candidate.providerLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(palette.primaryText)
+                Text(candidate.detailLabel)
+                    .font(.caption2)
+                    .foregroundStyle(palette.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+        }
+    }
+}
+
+fileprivate struct IOSProfileColorSection: View {
+    let avatarMode: ProfileEditorView.AvatarMode
+    @Binding var colorIndex: Int
+    @Binding var emojiColorIndex: Int?
+
+    var body: some View {
+        let emojiMode = avatarMode == .emoji
+        VStack(alignment: .leading, spacing: 12) {
+            IOSProfileSectionHeader(text: "Color")
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 44, maximum: 56), spacing: 12)],
+                spacing: 12
+            ) {
+                if emojiMode {
+                    IOSProfileNeutralSwatch(emojiColorIndex: $emojiColorIndex)
+                }
+                ForEach(0..<ProfileTileColor.palette.count, id: \.self) { index in
+                    IOSProfileColorSwatch(
+                        index: index,
+                        emojiMode: emojiMode,
+                        colorIndex: $colorIndex,
+                        emojiColorIndex: $emojiColorIndex
+                    )
+                }
+            }
+        }
+    }
+}
+
+fileprivate struct IOSProfileNeutralSwatch: View {
+    @Binding var emojiColorIndex: Int?
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        let isSelected = emojiColorIndex == nil
+        let diameter: CGFloat = 44
+        Button {
+            emojiColorIndex = nil
+        } label: {
+            Circle()
+                .fill(Color.gray.opacity(0.35))
+                .frame(width: diameter, height: diameter)
+                .overlay {
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 17, weight: .heavy))
+                            .foregroundStyle(.white)
+                    } else {
+                        Image(systemName: "slash.circle")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(palette.secondaryText)
+                    }
+                }
+                .overlay(IOSProfileSwatchRing(isSelected: isSelected))
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("Neutral background"))
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+fileprivate struct IOSProfileColorSwatch: View {
+    let index: Int
+    let emojiMode: Bool
+    @Binding var colorIndex: Int
+    @Binding var emojiColorIndex: Int?
+
+    var body: some View {
+        let isSelected = emojiMode ? (emojiColorIndex == index) : (index == colorIndex)
+        let diameter: CGFloat = 44
+        Button {
+            if emojiMode { emojiColorIndex = index } else { colorIndex = index }
+        } label: {
+            Circle()
+                .fill(ProfileTileColor.color(forIndex: index))
+                .frame(width: diameter, height: diameter)
+                .overlay {
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 17, weight: .heavy))
+                            .foregroundStyle(ProfileTileColor.legibleForeground(forIndex: index))
+                    }
+                }
+                .overlay(IOSProfileSwatchRing(isSelected: isSelected))
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(ProfileTileColor.accessibilityName(forIndex: index)))
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+fileprivate struct IOSProfileDeleteSection: View {
+    @Binding var showConfirmation: Bool
+
+    var body: some View {
+        Button(role: .destructive) {
+            showConfirmation = true
+        } label: {
+            Label("Delete Profile", systemImage: "trash")
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.bordered)
+        .tint(.red)
+        .padding(.top, 8)
+    }
+}
+
+fileprivate struct IOSProfileSelectionRing: View {
+    let isSelected: Bool
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        Circle().strokeBorder(
+            isSelected ? palette.accent : palette.cardBorder,
+            lineWidth: isSelected ? 3 : 1
+        )
+    }
+}
+
+fileprivate struct IOSProfileSwatchRing: View {
+    let isSelected: Bool
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        Circle().strokeBorder(
+            isSelected ? palette.accent : palette.cardBorder,
+            lineWidth: isSelected ? 3 : 1
+        )
+    }
+}
+
+fileprivate struct IOSProfileSectionHeader: View {
+    let text: String
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(.subheadline.weight(.bold))
+            .tracking(1.4)
+            .foregroundStyle(palette.secondaryText)
+    }
+}
+
+fileprivate struct IOSProfileCategoryHeader: View {
+    let text: String
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        Text(text)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(palette.secondaryText)
+    }
+}
+
+fileprivate func iOSProfileSymbolAccessibilityName(_ symbol: String) -> String {
+    symbol
+        .replacingOccurrences(of: ".fill", with: "")
+        .replacingOccurrences(of: ".inverse", with: "")
+        .replacingOccurrences(of: "holdinghands", with: "holding hands")
+        .replacingOccurrences(of: "gamecontroller", with: "game controller")
+        .replacingOccurrences(of: "soccerball", with: "soccer ball")
+        .replacingOccurrences(of: "puzzlepiece", with: "puzzle piece")
+        .replacingOccurrences(of: "paintpalette", with: "paint palette")
+        .replacingOccurrences(of: "pawprint", with: "paw print")
+        .replacingOccurrences(of: ".", with: " ")
+        .localizedCapitalized
+}
+
+#endif
+
+#if os(tvOS)
+
 /// Circular focus treatment for the symbol / colour selection tiles: the app's
 /// shared liquid-glass halo (`plozzFocusHalo`) blooming around the round tile on
 /// focus, with a small press dip. Owning focus in a `ButtonStyle` (plus
@@ -965,4 +1602,6 @@ private struct CircularSelectionButtonStyle: ButtonStyle {
         }
     }
 }
+
+#endif
 #endif

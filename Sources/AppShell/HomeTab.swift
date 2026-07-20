@@ -3,6 +3,7 @@ import SwiftUI
 import CoreModels
 import CoreUI
 import FeatureHome
+import FeatureHomeCore
 import FeatureMusic
 import FeaturePlayback
 import MediaTransportCore
@@ -94,38 +95,14 @@ struct HomeTab: View {
     /// cross-server copy. Online YouTube ids are deliberately rejected on Home.
     private func makeHeroTrailerResolver() -> HeroTrailerResolving {
         { item in
-            var sources = identitySources(item)
-            if let accountID = item.sourceAccountID,
-               !sources.contains(where: { $0.accountID == accountID && $0.itemID == item.id }) {
-                sources.insert(
-                    MediaSourceRef(accountID: accountID, itemID: item.id, kind: item.kind),
-                    at: 0
-                )
-            }
-            for source in sources {
-                guard let provider = resolveOptionalProvider(source.accountID, in: accounts) else { continue }
-                let trailers = (try? await provider.trailers(for: source.itemID)) ?? []
-                guard let local = trailers.first(where: { !$0.isYouTubeTrailer }) else { continue }
-                guard let request = try? await provider.playbackInfo(for: local.id) else { continue }
-                let url: URL?
-                if let streamURL = request.streamURL {
-                    url = streamURL
-                } else if case .some(.authenticatedHTTP(let locator)) = request.playbackSource {
-                    url = try? await authenticatedHTTPResolver.resolve(locator)
-                } else {
-                    url = request.playbackSource?.publicURL
-                }
-                if let url,
-                   let duration = await HeroTrailerController.resolvedDuration(of: url) {
-                    return HeroTrailerSource(
-                        ownerItemID: item.id,
-                        trailerItemID: local.id,
-                        url: url,
-                        duration: duration
-                    )
-                }
-            }
-            return nil
+            await FastHeroTrailerResolver.resolve(
+                item: item,
+                identitySources: identitySources(item),
+                providerForAccountID: {
+                    resolveOptionalProvider($0, in: accounts)
+                },
+                authenticatedHTTPResolver: authenticatedHTTPResolver
+            )
         }
     }
 

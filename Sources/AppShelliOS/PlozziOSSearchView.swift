@@ -34,37 +34,39 @@ struct PlozziOSSearchView: View {
     }
 
     var body: some View {
-        content
-            .navigationTitle("Search")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(
-                        "Settings",
-                        systemImage: "gear",
-                        action: onShowSettings
-                    )
-                }
-            }
-            .searchable(
-                text: $viewModel.query,
-                prompt: "Movies, shows, and episodes"
+        VStack(spacing: 0) {
+            PlozziOSSearchHeader(
+                query: $viewModel.query,
+                onShowSettings: onShowSettings
             )
-            .task(id: viewModel.query) {
-                await viewModel.search()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
-                if let mutation = MediaItemMutation.from(note) {
-                    viewModel.applyWatchedState(mutation)
-                } else {
-                    Task { await viewModel.search() }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
-                guard !viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    return
-                }
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        // Compact tabs do not need a second bar above the explicit Search header.
+        // Regular-width iPad keeps the bar so the system sidebar toggle remains
+        // reachable when the adaptable tab sidebar is collapsed.
+        .toolbar(
+            horizontalSizeClass == .compact ? .hidden : .visible,
+            for: .navigationBar
+        )
+        .navigationTitle(horizontalSizeClass == .compact ? "" : "Search")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: viewModel.query) {
+            await viewModel.search()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
+            if let mutation = MediaItemMutation.from(note) {
+                viewModel.applyWatchedState(mutation)
+            } else {
                 Task { await viewModel.search() }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
+            guard !viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+            Task { await viewModel.search() }
+        }
     }
 
     @ViewBuilder
@@ -128,6 +130,51 @@ struct PlozziOSSearchView: View {
             return appModel.accountsProviders.provider(forAccountID: accountID)
         }
         return appModel.accountsProviders.primaryProvider
+    }
+}
+
+/// Explicit top header: a touch-friendly search field that takes all available
+/// width with the active-profile settings avatar immediately to its right.
+private struct PlozziOSSearchHeader: View {
+    @Binding var query: String
+    let onShowSettings: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField(
+                    "Movies, shows, and episodes",
+                    text: $query
+                )
+                .textFieldStyle(.plain)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .accessibilityLabel("Search your libraries")
+                if !query.isEmpty {
+                    Button {
+                        query = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(.thinMaterial, in: Capsule())
+            .frame(maxWidth: .infinity)
+
+            PlozziOSSettingsAvatarButton(action: onShowSettings)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
     }
 }
 

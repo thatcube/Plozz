@@ -2,6 +2,7 @@
 import AppRuntime
 import CoreModels
 import CoreUI
+import FeatureHomeCore
 import SwiftUI
 
 public struct PlozziOSRootView: View {
@@ -9,6 +10,7 @@ public struct PlozziOSRootView: View {
     @Environment(\.accessibilityReduceTransparency)
     private var systemReduceTransparency
     @State private var appModel = PlozziOSAppModel()
+    @State private var heroTrailerController = HeroTrailerController()
     @State private var showingAddServer = false
     @State private var addServerPresentationColorScheme: ColorScheme = .dark
     @State private var showingSettings = false
@@ -64,7 +66,11 @@ public struct PlozziOSRootView: View {
             resolvedPalette.isLight ? .light : .dark
         )
         .environment(appModel)
+        .environment(heroTrailerController)
         .id(shellIdentity)
+        .onChange(of: shellIdentity) {
+            heroTrailerController.stop()
+        }
         .sheet(
             isPresented: $showingAddServer,
             onDismiss: appModel.finishManagedServerPresentation
@@ -355,11 +361,7 @@ private struct PlozziOSHomeLandingView: View {
             .navigationTitle("Home")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(
-                        "Settings",
-                        systemImage: "gear",
-                        action: onShowSettings
-                    )
+                    PlozziOSSettingsAvatarButton(action: onShowSettings)
                 }
             }
         } else {

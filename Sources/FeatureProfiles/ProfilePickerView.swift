@@ -1,4 +1,4 @@
-#if canImport(SwiftUI)
+#if os(tvOS)
 import SwiftUI
 import CoreModels
 import CoreUI

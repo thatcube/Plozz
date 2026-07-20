@@ -8,6 +8,7 @@ struct PlozziOSHomeView: View {
     @State private var viewModel: HomeViewModel
     @State private var featuredItems: [MediaItem] = []
     @State private var heroItems: [MediaItem] = []
+    @State private var playbackRequest: PlozziOSPlaybackRequest?
     private let appModel: PlozziOSAppModel
     private let onAddServer: () -> Void
     private let onShowSettings: () -> Void
@@ -71,13 +72,10 @@ struct PlozziOSHomeView: View {
             }
         }
         .navigationTitle("Home")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(
-                    "Settings",
-                    systemImage: "gear",
-                    action: onShowSettings
-                )
+                PlozziOSSettingsAvatarButton(action: onShowSettings)
             }
         }
         .task(id: appModel.settings.homeVisibility.visibility) {
@@ -101,6 +99,16 @@ struct PlozziOSHomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
             viewModel.scheduleReenrich()
         }
+        .fullScreenCover(item: $playbackRequest) { request in
+            if let provider = appModel.provider(for: request.item) {
+                PlozziOSPlayerView(request: request, provider: provider)
+            } else {
+                ContentUnavailableView(
+                    "Server unavailable",
+                    systemImage: "server.rack"
+                )
+            }
+        }
     }
 
     private func loadedContent(_ content: HomeViewModel.Content) -> some View {
@@ -117,7 +125,8 @@ struct PlozziOSHomeView: View {
                         items: heroItems,
                         autoAdvance: appModel.settings.hero.settings.autoAdvance,
                         autoAdvanceSeconds:
-                            appModel.settings.hero.settings.autoAdvanceSeconds
+                            appModel.settings.hero.settings.autoAdvanceSeconds,
+                        onPlay: play
                     )
                 }
 
@@ -166,6 +175,7 @@ struct PlozziOSHomeView: View {
             }
             .padding(.vertical)
         }
+        .scrollClipDisabled()
         .refreshable {
             await viewModel.load()
             await loadFeatured()
@@ -193,6 +203,13 @@ struct PlozziOSHomeView: View {
         let trending = (try? await appModel.seerService.trending(limit: hero.maxItems)) ?? []
         guard !Task.isCancelled else { return }
         featuredItems = trending.filter(\.isNotInLibraryDiscovery)
+    }
+
+    private func play(_ item: MediaItem) {
+        playbackRequest = PlozziOSPlaybackRequest(
+            item: item,
+            startPosition: item.resumePosition ?? 0
+        )
     }
 
     private func loadHero(from content: HomeViewModel.Content) async {
@@ -262,25 +279,50 @@ private struct FeaturedLoadID: Equatable {
 }
 
 private struct PlozziOSHeroLoadID: Equatable {
-    let content: HomeViewModel.Content
+    let continueWatching: [MediaItem]
+    let watchlist: [MediaItem]
+    let libraries: [AggregatedLibrary]
     let settings: HeroSettings
     let featuredItems: [MediaItem]
     let visibility: HomeLibraryVisibility
+
+    init(
+        content: HomeViewModel.Content,
+        settings: HeroSettings,
+        featuredItems: [MediaItem],
+        visibility: HomeLibraryVisibility
+    ) {
+        // Hero curation never reads latest or per-library section rows. Keeping
+        // those large arrays out of task identity avoids deep comparisons and
+        // needless curation restarts when unrelated Home rows refresh.
+        continueWatching = content.continueWatching
+        watchlist = content.watchlist
+        libraries = content.libraries
+        self.settings = settings
+        self.featuredItems = featuredItems
+        self.visibility = visibility
+    }
 }
 
 private struct PlozziOSHomeHeroCarousel: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(HeroTrailerController.self) private var trailerController
     @State private var selectedItemID: String?
 
     let items: [MediaItem]
     let autoAdvance: Bool
     let autoAdvanceSeconds: Int
+    let onPlay: (MediaItem) -> Void
 
     var body: some View {
         TabView(selection: $selectedItemID) {
             ForEach(items) { item in
-                PlozziOSHomeHero(
+                PlozziOSHomeHeroSlide(
                     item: item,
-                    provider: provider(for: item)
+                    provider: provider(for: item),
+                    isSelected: item.id == selectedItemID,
+                    onPlay: onPlay
                 )
                 .tag(Optional(item.id))
             }
@@ -288,8 +330,15 @@ private struct PlozziOSHomeHeroCarousel: View {
         .tabViewStyle(
             .page(indexDisplayMode: items.count > 1 ? .automatic : .never)
         )
-        .aspectRatio(16 / 8.5, contentMode: .fit)
-        .padding(.horizontal)
+        .scrollClipDisabled()
+        .frame(
+            height: PlozziOSHeroMetrics.height(
+                style: horizontalSizeClass == .compact
+                    ? .compactPortrait
+                    : .landscape,
+                dynamicTypeSize: dynamicTypeSize
+            )
+        )
         .onChange(of: items.map(\.id), initial: true) { _, itemIDs in
             if selectedItemID == nil || !itemIDs.contains(selectedItemID ?? "") {
                 selectedItemID = itemIDs.first
@@ -303,19 +352,36 @@ private struct PlozziOSHomeHeroCarousel: View {
             )
         ) {
             guard autoAdvance, items.count > 1 else { return }
+            var elapsed = 0
+            var countdownItemID = selectedItemID
             while !Task.isCancelled {
                 do {
-                    try await Task.sleep(for: .seconds(autoAdvanceSeconds))
+                    try await Task.sleep(for: .seconds(1))
                 } catch {
                     return
                 }
-                withAnimation(.easeInOut(duration: 0.35)) {
-                    let currentIndex = items.firstIndex {
-                        $0.id == selectedItemID
-                    } ?? -1
-                    selectedItemID = items[(currentIndex + 1) % items.count].id
+                if countdownItemID != selectedItemID {
+                    countdownItemID = selectedItemID
+                    elapsed = 0
+                }
+                if let selectedItemID,
+                   trailerController.isShowing(selectedItemID) {
+                    continue
+                }
+                elapsed += 1
+                if elapsed >= autoAdvanceSeconds {
+                    advance()
+                    countdownItemID = selectedItemID
+                    elapsed = 0
                 }
             }
+        }
+        .onChange(of: selectedItemID, initial: true) {
+            installTrailerEndHandler()
+        }
+        .onAppear(perform: installTrailerEndHandler)
+        .onDisappear {
+            trailerController.clearEndHandler(ownerID: endHandlerOwnerID)
         }
     }
 
@@ -327,75 +393,33 @@ private struct PlozziOSHomeHeroCarousel: View {
         }
         return appModel.accountsProviders.primaryProvider
     }
+
+    private var endHandlerOwnerID: String { "ios-home-carousel" }
+
+    private func installTrailerEndHandler() {
+        guard autoAdvance, items.count > 1 else {
+            trailerController.clearEndHandler(ownerID: endHandlerOwnerID)
+            return
+        }
+        trailerController.setEndHandler(ownerID: endHandlerOwnerID) {
+            advance()
+        }
+    }
+
+    private func advance() {
+        withAnimation(.easeInOut(duration: 0.35)) {
+            let currentIndex = items.firstIndex {
+                $0.id == selectedItemID
+            } ?? -1
+            selectedItemID = items[(currentIndex + 1) % items.count].id
+        }
+    }
 }
 
 private struct PlozziOSHeroTimerID: Equatable {
     let itemIDs: [String]
     let autoAdvance: Bool
     let seconds: Int
-}
-
-private struct PlozziOSHomeHero: View {
-    @Environment(PlozziOSAppModel.self) private var appModel
-    let item: MediaItem
-    let provider: (any MediaProvider)?
-
-    var body: some View {
-        Group {
-            if let provider {
-                NavigationLink {
-                    PlozziOSItemDetailView(
-                        appModel: appModel,
-                        provider: provider,
-                        item: item,
-                        seerService: appModel.seerService
-                    )
-                } label: {
-                    hero
-                }
-
-                .buttonStyle(.plain)
-            } else {
-                hero
-            }
-        }
-    }
-
-    private var hero: some View {
-        ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: item.backdropURL ?? item.posterURL) { image in
-                image
-                    .resizable()
-                    .scaledToFill()
-            } placeholder: {
-                Rectangle()
-                    .fill(.secondary.opacity(0.14))
-            }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(16 / 8.5, contentMode: .fit)
-            .clipped()
-
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.82)],
-                startPoint: .center,
-                endPoint: .bottom
-            )
-
-            VStack(alignment: .leading, spacing: 6) {
-                if item.resumePosition != nil {
-                    Text("CONTINUE WATCHING")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.white.opacity(0.78))
-                }
-                Text(item.title)
-                    .font(.title.bold())
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-            }
-            .padding()
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 22))
-    }
 }
 
 private struct PlozziOSFeaturedRow: View {

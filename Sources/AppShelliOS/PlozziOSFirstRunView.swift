@@ -1,6 +1,7 @@
 #if os(iOS)
 import CoreModels
 import CoreUI
+import FeatureProfiles
 import Foundation
 import SwiftUI
 
@@ -146,13 +147,11 @@ private struct PlozziOSFirstProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $editing) {
             NavigationStack {
-                PlozziOSProfileEditorView(
-                    profile: profile,
-                    onSave: { name, emoji in
-                        appModel.updateProfile(profile.id, name: name, emoji: emoji)
-                        editing = false
-                    },
-                    onCancel: { editing = false }
+                PlozziOSProfileEditorHost(
+                    appModel: appModel,
+                    editingProfile: profile,
+                    canDelete: false,
+                    onFinished: { editing = false }
                 )
             }
         }
@@ -223,85 +222,15 @@ private struct PlozziOSThemeWelcomeView: View {
     }
 }
 
-struct PlozziOSProfileEditorView: View {
-    let profile: Profile
-    let onSave: (String, String?) -> Void
-    let onCancel: () -> Void
-
-    @State private var name: String
-    @State private var emoji: String
-
-    init(
-        profile: Profile,
-        onSave: @escaping (String, String?) -> Void,
-        onCancel: @escaping () -> Void
-    ) {
-        self.profile = profile
-        self.onSave = onSave
-        self.onCancel = onCancel
-        _name = State(initialValue: profile.name)
-        _emoji = State(initialValue: profile.avatarEmoji ?? "👤")
-    }
-
-    var body: some View {
-        Form {
-            Section("Profile") {
-                TextField("Name", text: $name)
-                    .textContentType(.name)
-                TextField("Emoji", text: $emoji)
-            }
-        }
-        .settingsPageSurface()
-        .navigationTitle("Edit Profile")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel", action: onCancel)
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") {
-                    onSave(name, emoji)
-                }
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-    }
-}
-
 struct PlozziOSProfileAvatar: View {
     let profile: Profile
     let size: CGFloat
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.accentColor.opacity(0.15))
-
-            if let source = profile.avatarImageURL,
-               let url = URL(string: source) {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    fallback
-                }
-            } else {
-                fallback
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-    }
-
-    @ViewBuilder
-    private var fallback: some View {
-        if let emoji = profile.avatarEmoji, !emoji.isEmpty {
-            Text(emoji)
-                .font(.system(size: size * 0.46))
-        } else {
-            Image(systemName: profile.avatarSymbol)
-                .font(.system(size: size * 0.38, weight: .semibold))
-                .foregroundStyle(.tint)
-        }
+        // Delegate to the shared renderer so the first-run / settings avatars
+        // match every other avatar surface (photo, emoji, or symbol on the
+        // chosen colour) exactly.
+        ProfileAvatarView(profile: profile, size: size)
     }
 }
 

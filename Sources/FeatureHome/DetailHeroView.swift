@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import FeatureHomeCore
 import MetadataKit
 #if canImport(UIKit)
 import UIKit
@@ -1052,7 +1053,9 @@ struct DetailHeroView: View {
     /// page (title + focusable buttons) off the left edge.
     private func titleText(hideText: Bool) -> some View {
         let title = titleFallbackOverride
-            ?? (hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
+            ?? (hideText
+                ? spoilerSettings.maskedTitle(for: item)
+                : HeroPresentation.normalizedTitle(for: item))
         return Text(title)
             .font(.system(size: 64, weight: .bold))
             .lineLimit(2)

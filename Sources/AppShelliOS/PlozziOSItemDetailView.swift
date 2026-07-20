@@ -152,7 +152,22 @@ struct PlozziOSItemDetailView: View {
     private func detailContent(_ detail: ItemDetailViewModel.Detail) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PlozziOSDetailHero(item: detail.item)
+                PlozziOSDetailHeroSection(
+                    item: detail.item,
+                    playableItem: detailPlayableItem(for: detail.item),
+                    actionHandler: appModel.mediaItemActionHandler,
+                    onPlay: play
+                )
+
+                if detail.item.kind == .series {
+                    PlozziOSInlineSeriesBrowser(
+                        viewModel: viewModel,
+                        seasons: detail.children.filter { $0.kind == .season },
+                        looseEpisodes: detail.children.filter { $0.kind == .episode },
+                        onPlay: play
+                    )
+                }
+
                 sourceAndVersionControls(for: detail.item)
 
                 if isDiscoveryItem {
@@ -165,10 +180,6 @@ struct PlozziOSItemDetailView: View {
                         onRequest: { beginRequest($0) }
                     )
                 } else {
-                    PlozziOSDetailManagementActions(
-                        item: detail.item,
-                        handler: appModel.mediaItemActionHandler
-                    )
                     if detail.item.kind == .series,
                        let seasonRequestAvailability,
                        seasonRequestAvailability.hasSeasonRequestContent {
@@ -183,7 +194,6 @@ struct PlozziOSItemDetailView: View {
                     }
                     if detail.item.kind == .movie || detail.item.kind == .episode {
                         let playableItem = playbackItem(for: detail.item)
-                        PlozziOSPlaybackActions(item: playableItem, onPlay: play)
                         PlozziOSDownloadAction(
                             item: playableItem,
                             record: currentDownloadRecord,
@@ -196,30 +206,6 @@ struct PlozziOSItemDetailView: View {
                     }
                 }
 
-                if detail.item.kind == .series, !detail.children.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Seasons")
-                            .font(.title2.bold())
-
-                        LazyVGrid(columns: seasonColumns, spacing: 16) {
-                            ForEach(detail.children) { season in
-                                NavigationLink {
-                                    PlozziOSSeasonEpisodesView(
-                                        viewModel: viewModel,
-                                        season: season,
-                                        onPlay: play
-                                    )
-                                } label: {
-                                    PlozziOSSeasonRow(
-                                        season: season
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-
                 if !detail.item.people.filter(\.isCast).isEmpty {
                     PlozziOSCastSection(people: detail.item.people.filter(\.isCast))
                 }
@@ -229,6 +215,7 @@ struct PlozziOSItemDetailView: View {
             .frame(maxWidth: detailMaximumWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .scrollClipDisabled()
         .navigationTitle(detail.item.title)
         .task(id: downloadLookupID(for: detail.item)) {
             downloadRecord = await appModel.downloads.record(
@@ -248,17 +235,14 @@ struct PlozziOSItemDetailView: View {
         horizontalSizeClass == .regular ? 920 : nil
     }
 
-    private var seasonColumns: [GridItem] {
-        guard horizontalSizeClass == .regular else {
-            return [GridItem(.flexible())]
+    private func detailPlayableItem(for item: MediaItem) -> MediaItem? {
+        guard !isDiscoveryItem,
+              item.kind == .movie
+                || item.kind == .episode
+                || item.kind == .video else {
+            return nil
         }
-        return [
-            GridItem(
-                .adaptive(minimum: 280, maximum: 420),
-                spacing: 16,
-                alignment: .top
-            )
-        ]
+        return playbackItem(for: item)
     }
 
     @ViewBuilder
@@ -775,118 +759,135 @@ private struct PlozziOSDownloadAction: View {
     }
 }
 
-private struct PlozziOSPlaybackActions: View {
-    let item: MediaItem
+private struct PlozziOSInlineSeriesBrowser: View {
+    @State private var selectedSeasonID: String?
+
+    let viewModel: ItemDetailViewModel
+    let seasons: [MediaItem]
+    let looseEpisodes: [MediaItem]
     let onPlay: (MediaItem, Bool) -> Void
 
     var body: some View {
-        HStack {
-            Button {
-                onPlay(item, false)
-            } label: {
-                Label(primaryTitle, systemImage: "play.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-
-            if hasResumePosition {
-                Button {
-                    onPlay(item, true)
-                } label: {
-                    Label("Start Over", systemImage: "arrow.counterclockwise")
+        if !seasons.isEmpty || !looseEpisodes.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                if !seasons.isEmpty {
+                    Text("Seasons")
+                        .font(.title2.bold())
+                    ScrollView(.horizontal) {
+                        LazyHStack(spacing: 10) {
+                            ForEach(seasons) { season in
+                                PlozziOSSeasonButton(
+                                    title: season.title,
+                                    isSelected: season.id == selectedSeasonID
+                                ) {
+                                    selectedSeasonID = season.id
+                                }
+                            }
+                        }
+                    }
+                    .scrollIndicators(.hidden)
                 }
-                .buttonStyle(.bordered)
+
+                PlozziOSInlineEpisodeRail(
+                    episodes: displayedEpisodes,
+                    isLoading: !seasons.isEmpty
+                        && selectedSeasonID != nil
+                        && displayedEpisodes == nil,
+                    onPlay: onPlay
+                )
+            }
+            .onChange(of: seasons.map(\.id), initial: true) { _, ids in
+                if selectedSeasonID == nil
+                    || !ids.contains(selectedSeasonID ?? "") {
+                    selectedSeasonID = ids.first
+                }
+            }
+            .task(id: selectedSeasonID) {
+                guard let selectedSeasonID else { return }
+                await viewModel.loadEpisodes(for: selectedSeasonID)
             }
         }
-        .controlSize(.large)
     }
 
-    private var hasResumePosition: Bool {
-        (item.resumePosition ?? 0) > 1
-    }
-
-    private var primaryTitle: LocalizedStringKey {
-        hasResumePosition ? "Resume" : "Play"
+    private var displayedEpisodes: [MediaItem]? {
+        if seasons.isEmpty {
+            return looseEpisodes
+        }
+        guard let selectedSeasonID else { return nil }
+        return viewModel.episodes(for: selectedSeasonID)
     }
 }
 
-private struct PlozziOSDetailHero: View {
-    let item: MediaItem
+private struct PlozziOSSeasonButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            ZStack(alignment: .bottomLeading) {
-                AsyncImage(url: item.backdropURL ?? item.posterURL) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } placeholder: {
-                    Rectangle()
-                        .fill(.secondary.opacity(0.14))
-                }
-                .frame(maxWidth: .infinity)
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .clipped()
-
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.78)],
-                    startPoint: .center,
-                    endPoint: .bottom
+        Button(action: action) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(isSelected ? Color.white : Color.primary)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(
+                    isSelected
+                        ? Color.accentColor
+                        : Color.primary.opacity(0.1),
+                    in: Capsule()
                 )
-
-                Text(item.title)
-                    .font(.largeTitle.bold())
-                    .foregroundStyle(.white)
-                    .padding()
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-
-            if !metadata.isEmpty {
-                Text(metadata.joined(separator: "  •  "))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let overview = item.overview, !overview.isEmpty {
-                Text(overview)
-                    .font(.body)
-                    .textSelection(.enabled)
-            }
-
-            if !item.genres.isEmpty {
-                Text(item.genres.prefix(4).joined(separator: "  •  "))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
         }
-    }
-
-    private var metadata: [String] {
-        var values: [String] = []
-        if let year = item.productionYear {
-            values.append(year.formatted())
-        }
-        if let rating = item.officialRating, !rating.isEmpty {
-            values.append(rating)
-        }
-        if let runtime = item.runtime, runtime > 0 {
-            let minutes = Int(runtime / 60)
-            values.append("\(minutes / 60)h \(minutes % 60)m")
-        }
-        return values
+        .buttonStyle(.plain)
     }
 }
 
-private struct PlozziOSSeasonRow: View {
+private struct PlozziOSInlineEpisodeRail: View {
+    let episodes: [MediaItem]?
+    let isLoading: Bool
+    let onPlay: (MediaItem, Bool) -> Void
+
+    var body: some View {
+        if isLoading {
+            ProgressView("Loading episodes…")
+                .frame(minHeight: 180)
+        } else if let episodes, episodes.isEmpty {
+            ContentUnavailableView(
+                "No episodes",
+                systemImage: "play.rectangle"
+            )
+            .frame(minHeight: 180)
+        } else if let episodes {
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 14) {
+                    ForEach(episodes) { episode in
+                        PlozziOSInlineEpisodeEntry(
+                            episode: episode,
+                            episodes: episodes,
+                            onPlay: onPlay
+                        )
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+}
+
+private struct PlozziOSInlineEpisodeEntry: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.plozzCardStyle) private var cardStyle
-    let season: MediaItem
+    @Environment(PlozziOSAppModel.self) private var appModel
+
+    let episode: MediaItem
+    let episodes: [MediaItem]
+    let onPlay: (MediaItem, Bool) -> Void
 
     @ViewBuilder
     var body: some View {
         if cardStyle == .framed {
             content
                 .plozzFramedMediaCard(
-                    innerCornerRadius: PlozzTheme.Metrics.posterArtCornerRadius
+                    innerCornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
                 )
                 .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
         } else {
@@ -895,114 +896,18 @@ private struct PlozziOSSeasonRow: View {
     }
 
     private var content: some View {
-        HStack(spacing: 14) {
-            AsyncImage(url: season.posterURL) { image in
-                image
-                    .resizable()
-                    .scaledToFill()
-            } placeholder: {
-                Rectangle()
-                    .fill(.secondary.opacity(0.14))
-                    .overlay {
-                        Image(systemName: "rectangle.stack")
-                            .foregroundStyle(.secondary)
-                    }
-            }
-            .frame(width: 72, height: 108)
-            .overlay {
-                MediaCardPlaybackIndicators(
-                    item: season,
-                    badgeInset: 5,
-                    progressHeight: 9,
-                    progressHorizontalInset: 7,
-                    progressBottomInset: 7
-                )
-            }
-            .clipShape(
-                RoundedRectangle(
-                    cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius,
-                    style: .continuous
-                )
-            )
-            .plozzMediaEdge(
-                cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius
-            )
-
-            Text(season.title)
-                .font(.headline)
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.caption.bold())
-                .foregroundStyle(.tertiary)
-        }
-        .contentShape(Rectangle())
-    }
-}
-
-private struct PlozziOSSeasonEpisodesView: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.plozzCardStyle) private var cardStyle
-    @Environment(PlozziOSAppModel.self) private var appModel
-
-    let viewModel: ItemDetailViewModel
-    let season: MediaItem
-    let onPlay: (MediaItem, Bool) -> Void
-
-    var body: some View {
-        Group {
-            if let episodes = viewModel.episodes(for: season.id) {
-                if episodes.isEmpty {
-                    ContentUnavailableView(
-                        "No episodes",
-                        systemImage: "play.rectangle"
-                    )
-                } else if horizontalSizeClass == .regular {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(episodes) { episode in
-                                episodeEntry(episode, episodes: episodes, isWide: true)
-                            }
-                        }
-                        .padding()
-                        .frame(maxWidth: 920)
-                        .frame(maxWidth: .infinity)
-                    }
-                } else {
-                    List(episodes) { episode in
-                        episodeEntry(episode, episodes: episodes, isWide: false)
-                    }
-                    .listStyle(.plain)
-                }
-            } else {
-                ProgressView("Loading episodes…")
-            }
-        }
-        .navigationTitle(season.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await viewModel.loadEpisodes(for: season.id) }
-        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
-            guard let mutation = MediaItemMutation.from(note) else { return }
-            viewModel.applyWatchedState(mutation)
-        }
-    }
-
-    @ViewBuilder
-    private func episodeEntry(
-        _ episode: MediaItem,
-        episodes: [MediaItem],
-        isWide: Bool
-    ) -> some View {
-        let content = HStack {
+        HStack(alignment: .top, spacing: 4) {
             Button {
                 onPlay(episode, false)
             } label: {
-                PlozziOSEpisodeRow(episode: episode, isWide: isWide)
+                PlozziOSEpisodeRow(
+                    episode: episode,
+                    isWide: horizontalSizeClass == .regular
+                )
             }
             .buttonStyle(.plain)
             .contextMenu {
-                ForEach(actions(for: episode, episodes: episodes)) { action in
+                ForEach(actions) { action in
                     Button(action.title, systemImage: action.systemImage) {
                         appModel.mediaItemActionHandler.perform(
                             action,
@@ -1017,22 +922,11 @@ private struct PlozziOSSeasonEpisodesView: View {
 
             PlozziOSEpisodeDownloadButton(episode: episode)
         }
-
-        if cardStyle == .framed {
-            content
-                .plozzFramedMediaCard(
-                    innerCornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
-                )
-                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
-        } else {
-            content
-        }
+        .frame(width: horizontalSizeClass == .regular ? 430 : 330)
+        .padding(cardStyle == .framed ? 10 : 0)
     }
 
-    private func actions(
-        for episode: MediaItem,
-        episodes: [MediaItem]
-    ) -> [MediaItemAction] {
+    private var actions: [MediaItemAction] {
         appModel.mediaItemActionHandler.actions(
             for: episode,
             context: MediaItemActionContext(orderedSiblings: episodes)

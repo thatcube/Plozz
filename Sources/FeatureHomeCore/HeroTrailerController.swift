@@ -10,7 +10,7 @@ import UIKit
 import SwiftUI
 #endif
 
-/// A fast hero-trailer source already resolved to a directly playable URL.
+/// A fast, shared hero-trailer source already resolved to a directly playable URL.
 /// Home intentionally accepts only local/server-resolved sources here — never
 /// a YouTube id that would require the slow/heavy on-device extraction path.
 public struct HeroTrailerSource: Sendable, Equatable {
@@ -34,7 +34,7 @@ public struct HeroTrailerSource: Sendable, Equatable {
 
 public typealias HeroTrailerResolving = @Sendable (MediaItem) async -> HeroTrailerSource?
 
-public enum HeroTrailerSurfaceRole: Sendable {
+public enum HeroTrailerSurfaceRole: Sendable, Equatable {
     case home
     case detail
 }
@@ -61,6 +61,7 @@ public final class HeroTrailerController {
     public private(set) var isReady = false
     public private(set) var isPaused = false
     public private(set) var pauseStartedAt: Date?
+    public private(set) var activeSurfaceRole: HeroTrailerSurfaceRole?
     /// The resolved trailer duration in seconds once known (`0` until ready).
     /// Drives the hero's dwell length so the progress bar spans the full trailer.
     public private(set) var duration: TimeInterval = 0
@@ -116,6 +117,22 @@ public final class HeroTrailerController {
     /// hand-off for the same title can keep playing rather than reload).
     public func isShowing(_ itemID: String) -> Bool {
         currentItemID == itemID && currentItemID != nil
+    }
+
+    /// Marks the frontmost renderer. Touch surfaces use this to keep a Home →
+    /// detail handoff alive while still stopping playback when Home truly leaves.
+    public func claimSurface(_ role: HeroTrailerSurfaceRole, itemID: String) {
+        guard currentItemID == nil || currentItemID == itemID else { return }
+        activeSurfaceRole = role
+    }
+
+    public func isClaimed(by role: HeroTrailerSurfaceRole, itemID: String) -> Bool {
+        activeSurfaceRole == role && currentItemID == itemID
+    }
+
+    public func releaseSurface(_ role: HeroTrailerSurfaceRole) {
+        guard activeSurfaceRole == role else { return }
+        activeSurfaceRole = nil
     }
 
     /// Installs the current frontmost surface's end handler. Ownership prevents
@@ -285,6 +302,7 @@ public final class HeroTrailerController {
             isPaused = false
             pauseStartedAt = nil
             currentItemID = nil
+            activeSurfaceRole = nil
             duration = 0
         }
     }

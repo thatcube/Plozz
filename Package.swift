@@ -577,6 +577,7 @@ let package = Package(
                 "FeatureDiscoveryCore",
                 "FeatureHomeCore",
                 "FeaturePlayback",
+                "FeatureProfiles",
                 "FeatureSearchCore",
                 "MediaDownloads",
                 "MediaTransportCore",

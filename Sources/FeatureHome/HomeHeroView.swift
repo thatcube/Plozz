@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 import CoreModels
 import CoreUI
+import FeatureHomeCore
 import MetadataKit
 
 /// Pure timeline policy for the hero's single linear progress gauge.

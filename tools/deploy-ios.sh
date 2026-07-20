@@ -11,6 +11,7 @@
 #   tools/deploy-ios.sh --build-only    # compile, do not install
 #   tools/deploy-ios.sh --no-build      # reinstall the latest built app
 #   tools/deploy-ios.sh --regen         # regenerate the Xcode project first
+#   tools/deploy-ios.sh --metadata-keys # explicitly include TMDb/OMDb keys
 #
 set -euo pipefail
 
@@ -29,6 +30,7 @@ DEPLOY_IPAD=1
 BUILD_ONLY=0
 NO_BUILD=0
 REGEN=0
+INCLUDE_METADATA_KEYS=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -37,12 +39,21 @@ for arg in "$@"; do
     --build-only) BUILD_ONLY=1 ;;
     --no-build) NO_BUILD=1 ;;
     --regen) REGEN=1 ;;
+    --metadata-keys) INCLUDE_METADATA_KEYS=1 ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown flag: $arg (try --help)" >&2; exit 2 ;;
   esac
 done
 
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS-'safe.bareRepository=all'}"
+
+BUILD_SETTING_OVERRIDES=()
+if [[ "$INCLUDE_METADATA_KEYS" != "1" ]]; then
+  # Device builds are keyless by default. Account-level integrations such as
+  # Trakt remain available through Secrets.xcconfig; only optional metadata keys
+  # are blanked unless the caller explicitly opts in.
+  BUILD_SETTING_OVERRIDES+=("TMDB_BEARER_TOKEN=" "OMDB_API_KEY=")
+fi
 
 if [[ "$REGEN" == "1" ]]; then
   tools/generate-project.sh
@@ -57,6 +68,7 @@ if [[ "$NO_BUILD" != "1" ]]; then
     -configuration "$CONFIG" \
     -destination "generic/platform=iOS" \
     -allowProvisioningUpdates \
+    "${BUILD_SETTING_OVERRIDES[@]}" \
     build \
     | { command -v xcbeautify >/dev/null 2>&1 && xcbeautify || cat; }
 fi
@@ -67,6 +79,7 @@ APP_PATH="$(
     -scheme "$SCHEME" \
     -configuration "$CONFIG" \
     -destination "generic/platform=iOS" \
+    "${BUILD_SETTING_OVERRIDES[@]}" \
     -showBuildSettings 2>/dev/null \
     | awk -F' = ' '/ CODESIGNING_FOLDER_PATH / { print $2; exit }'
 )"
@@ -79,6 +92,17 @@ fi
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")"
 codesign --verify --deep --strict "$APP_PATH"
+
+if [[ "$INCLUDE_METADATA_KEYS" != "1" ]]; then
+  TMDB_VALUE="$(
+    /usr/libexec/PlistBuddy -c 'Print :TMDBBearerToken' \
+      "$APP_PATH/Info.plist" 2>/dev/null || true
+  )"
+  if [[ -n "$TMDB_VALUE" ]]; then
+    echo "✗ Expected a keyless build, but TMDBBearerToken is populated." >&2
+    exit 1
+  fi
+fi
 
 echo "✓ Build $BUILD ready ($(du -sh "$APP_PATH" | awk '{print $1}'))."
 

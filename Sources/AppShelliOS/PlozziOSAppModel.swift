@@ -6,6 +6,8 @@ import CoreNetworking
 import CoreUI
 import CrashReporting
 import FeatureAuthCore
+import FeatureHomeCore
+import FeatureProfiles
 import Foundation
 import MALService
 import MediaDownloads
@@ -19,6 +21,11 @@ import TraktService
 @MainActor
 @Observable
 final class PlozziOSAppModel {
+    private struct HeroTrailerCacheEntry {
+        let source: HeroTrailerSource?
+        let expiresAt: Date
+    }
+
     struct PendingLibrarySelection: Identifiable {
         let id = UUID()
         let accountIDs: [String]
@@ -92,6 +99,7 @@ final class PlozziOSAppModel {
     @ObservationIgnored private var queuedLibrarySelectionBeginsFirstRun = false
     @ObservationIgnored private var postAddPresentationGeneration: UInt64 = 0
     @ObservationIgnored private var watchReconcilers: [String: WatchStateReconciler] = [:]
+    @ObservationIgnored private var heroTrailerCache: [String: HeroTrailerCacheEntry] = [:]
     @ObservationIgnored
     private(set) lazy var identityIndex = IdentityIndexModel(
         activeAccounts: { [weak self] in
@@ -343,6 +351,49 @@ final class PlozziOSAppModel {
             return accountsProviders.provider(forAccountID: accountID)
         }
         return accountsProviders.primaryProvider
+    }
+
+    func heroTrailerResolver() -> HeroTrailerResolving {
+        { [weak self] item in
+            await self?.resolveHeroTrailer(for: item)
+        }
+    }
+
+    private func resolveHeroTrailer(for item: MediaItem) async -> HeroTrailerSource? {
+        let cacheKey = "\(item.sourceAccountID ?? "_"):\(item.id)"
+        let now = Date()
+        if let cached = heroTrailerCache[cacheKey], cached.expiresAt > now {
+            return cached.source
+        }
+
+        let source = await FastHeroTrailerResolver.resolve(
+            item: item,
+            identitySources: identityIndex.identitySourcesProvider(item),
+            providerForAccountID: {
+                accountsProviders.provider(forAccountID: $0)
+            },
+            authenticatedHTTPResolver: authenticatedHTTPResolver
+        )
+        guard !Task.isCancelled else { return nil }
+
+        // Signed playback URLs can expire, so positive entries stay short-lived.
+        // Negative entries use an even shorter TTL so a newly-added trailer appears
+        // without requiring an app restart.
+        let ttl: TimeInterval = source == nil ? 120 : 600
+        heroTrailerCache[cacheKey] = HeroTrailerCacheEntry(
+            source: source,
+            expiresAt: now.addingTimeInterval(ttl)
+        )
+        if heroTrailerCache.count > 64 {
+            heroTrailerCache = heroTrailerCache.filter { $0.value.expiresAt > now }
+            if heroTrailerCache.count > 64,
+               let oldest = heroTrailerCache.min(by: {
+                   $0.value.expiresAt < $1.value.expiresAt
+               })?.key {
+                heroTrailerCache[oldest] = nil
+            }
+        }
+        return source
     }
 
     func rescanShare(accountID: String) {
@@ -664,31 +715,60 @@ final class PlozziOSAppModel {
         }
     }
 
-    func addProfile(name: String, emoji: String?) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Creates or updates a profile from a shared `ProfileEditorView` draft —
+    /// the single draft-based persistence path shared with tvOS. Cosmetic fields
+    /// (name, avatar symbol/emoji/photo, colours) are written through; every
+    /// non-cosmetic field (linked account, Plex Home bindings, Seerr identity,
+    /// active-account subset) is preserved. A new profile is seeded with the
+    /// current household accounts, selected, and handed to the first-run theme
+    /// step — mirroring the previous `addProfile` behaviour.
+    func saveProfile(_ draft: ProfileDraft) {
+        let trimmed = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let profile = profiles.add(
-            name: trimmed,
-            activeAccountIDs: accounts.map(\.id),
-            avatarEmoji: emoji?.isEmpty == false ? emoji : nil
-        )
-        selectProfile(profile.id)
-        scheduleFirstRunStep(.theme)
-    }
 
-    func updateProfile(_ profileID: String, name: String, emoji: String?) {
-        guard var profile = profiles.profiles.first(where: { $0.id == profileID }) else {
-            return
+        if let id = draft.id {
+            guard var profile = profiles.profiles.first(where: { $0.id == id }) else {
+                return
+            }
+            // Cosmetics from the editor…
+            profile.name = trimmed
+            profile.avatarSymbol = draft.avatarSymbol
+            profile.colorIndex = draft.colorIndex
+            profile.avatarImageURL = draft.avatarImageURL
+            profile.avatarEmoji = draft.avatarEmoji
+            profile.avatarEmojiColorIndex = draft.avatarEmojiColorIndex
+            // …plus the preserved non-cosmetic fields the draft carried through
+            // unchanged, so an edit never wipes Plex Home bindings / linked
+            // accounts. Membership (`activeAccountIDs`) is intentionally NOT
+            // touched here — the editor sends it empty to mean "leave alone."
+            profile.linkedAccountID = draft.linkedAccountID
+            profile.plexHomeUserID = draft.plexHomeUserID
+            profile.plexHomeUserName = draft.plexHomeUserName
+            profile.plexHomeUserAccountID = draft.plexHomeUserAccountID
+            profile.plexHomeUserRequiresPIN = draft.plexHomeUserRequiresPIN
+            profile.plexHomeUserAvatarURL = draft.plexHomeUserAvatarURL
+            profile.plexHomeUserBindings = draft.plexHomeUserBindings
+            profiles.update(profile)
+        } else {
+            let created = profiles.add(
+                name: trimmed,
+                avatarSymbol: draft.avatarSymbol,
+                colorIndex: draft.colorIndex,
+                linkedAccountID: draft.linkedAccountID,
+                activeAccountIDs: accounts.map(\.id),
+                plexHomeUserID: draft.plexHomeUserID,
+                plexHomeUserName: draft.plexHomeUserName,
+                plexHomeUserAccountID: draft.plexHomeUserAccountID,
+                plexHomeUserRequiresPIN: draft.plexHomeUserRequiresPIN,
+                plexHomeUserAvatarURL: draft.plexHomeUserAvatarURL,
+                plexHomeUserBindings: draft.plexHomeUserBindings,
+                avatarImageURL: draft.avatarImageURL,
+                avatarEmoji: draft.avatarEmoji,
+                avatarEmojiColorIndex: draft.avatarEmojiColorIndex
+            )
+            selectProfile(created.id)
+            scheduleFirstRunStep(.theme)
         }
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let trimmedEmoji = emoji?.trimmingCharacters(in: .whitespacesAndNewlines)
-        profile.name = trimmed
-        profile.avatarEmoji = trimmedEmoji?.isEmpty == false ? trimmedEmoji : nil
-        if profile.avatarEmoji != nil {
-            profile.avatarImageURL = nil
-        }
-        profiles.update(profile)
     }
 
     func removeProfile(_ id: String) {

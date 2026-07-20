@@ -35,11 +35,7 @@ struct PlozziOSDownloadsView: View {
         .navigationTitle("Downloads")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(
-                    "Settings",
-                    systemImage: "gear",
-                    action: onShowSettings
-                )
+                PlozziOSSettingsAvatarButton(action: onShowSettings)
             }
             if horizontalSizeClass != .regular {
                 ToolbarItem(placement: .topBarTrailing) {

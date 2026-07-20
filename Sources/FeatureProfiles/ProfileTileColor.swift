@@ -61,6 +61,21 @@ public enum ProfileTileColor {
     /// The palette as SwiftUI `Color`s.
     public static let palette: [Color] = paletteRGB.map(\.color)
 
+    private static let accessibilityNames: [LocalizedStringResource] = [
+        "Coral red", "Crimson", "Rose", "Salmon",
+        "Orange", "Tangerine", "Rust",
+        "Amber", "Gold", "Yellow",
+        "Lime", "Light lime", "Mint",
+        "Green", "Emerald", "Sea green",
+        "Teal", "Cyan", "Sky blue",
+        "Light blue", "Blue", "Royal blue",
+        "Indigo", "Violet",
+        "Purple", "Orchid",
+        "Magenta", "Pink", "Blush",
+        "White", "Light gray", "Silver", "Slate", "Steel gray", "Black",
+        "Sand", "Tan", "Taupe", "Brown", "Espresso"
+    ]
+
     private static func wrapped(_ index: Int) -> Int {
         guard !paletteRGB.isEmpty else { return 0 }
         return ((index % paletteRGB.count) + paletteRGB.count) % paletteRGB.count
@@ -73,6 +88,12 @@ public enum ProfileTileColor {
     public static func color(forIndex index: Int) -> Color {
         guard !paletteRGB.isEmpty else { return .accentColor }
         return paletteRGB[wrapped(index)].color
+    }
+
+    public static func accessibilityName(forIndex index: Int) -> LocalizedStringResource {
+        guard !accessibilityNames.isEmpty else { return "Avatar color" }
+        return accessibilityNames[((index % accessibilityNames.count) + accessibilityNames.count)
+            % accessibilityNames.count]
     }
 
     /// A legible foreground (black or white) for content drawn *on top of* the

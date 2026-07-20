@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import FeatureHomeCore
 
 /// Item detail screen: backdrop hero, metadata, Play/Resume, and children.
 public struct ItemDetailView: View {

@@ -49,7 +49,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
             .toggleStyle(SettingsSwitchToggleStyle(flushLeading: false))
             #else
             .toggleStyle(.switch)
-            .tint(palette.primaryText)
+            .tint(palette.accent)
             #endif
             .background(
                 palette.cardOpaqueSurface,

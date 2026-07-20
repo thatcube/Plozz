@@ -123,8 +123,6 @@ struct PlozziOSDownloadSettingsView: View {
                 }
             }
         }
-        .frame(maxWidth: 760)
-        .frame(maxWidth: .infinity)
         .settingsPageSurface()
         .navigationTitle("Downloads")
     }

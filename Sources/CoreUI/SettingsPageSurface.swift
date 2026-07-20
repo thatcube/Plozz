@@ -8,7 +8,9 @@ public struct SettingsPageSurface: ViewModifier {
         content
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .contentMargins(.horizontal, 24, for: .scrollContent)
             .contentMargins(.vertical, 24, for: .scrollContent)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background { SettingsPageBackground() }
             .toolbarBackground(.hidden, for: .navigationBar)
     }

@@ -41,11 +41,6 @@ struct PlozziOSSettingsView: View {
         .environment(\.themePalette, palette)
         .environment(\.colorScheme, palette.isLight ? .light : .dark)
         .tint(palette.primaryText)
-        .modifier(
-            PlozziOSSettingsListAppearance(
-                usesPureBlack: appModel.settings.theme.theme == .pureBlack
-            )
-        )
         .sheet(
             isPresented: $showingAddServer,
             onDismiss: appModel.finishManagedServerPresentation
@@ -130,19 +125,6 @@ struct PlozziOSSettingsView: View {
             for: appModel.settings.theme.theme,
             systemColorScheme: systemColorScheme
         )
-    }
-}
-
-private struct PlozziOSSettingsListAppearance: ViewModifier {
-    let usesPureBlack: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if usesPureBlack {
-            content.listStyle(.plain)
-        } else {
-            content
-        }
     }
 }
 
@@ -239,13 +221,10 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.about, title: "About", systemImage: "info.circle")
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 24)
             }
             .navigationTitle("Settings")
             .toolbar(removing: .sidebarToggle)
-            .scrollContentBackground(.hidden)
-            .background { SettingsPageBackground() }
+            .settingsPageSurface()
         } detail: {
             NavigationStack {
                 ZStack {
@@ -253,8 +232,6 @@ private struct PlozziOSSettingsSplitView: View {
                     Group {
                         settingsDetail
                     }
-                    .padding(.horizontal, 24)
-                    .plozziOSSettingsSurface()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -404,7 +381,7 @@ private struct PlozziOSAboutSettingsView: View {
                 }
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("About")
     }
 }
@@ -556,10 +533,8 @@ private struct PlozziOSSettingsCompactMenu: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 24)
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("Settings")
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Cancel", role: .cancel) {}
@@ -662,7 +637,7 @@ private struct PlozziOSProfilesView: View {
                 }
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("Profiles")
         .sheet(isPresented: $showingAddProfile) {
             NavigationStack {
@@ -703,7 +678,7 @@ private struct PlozziOSAddProfileView: View {
                 TextField("Emoji", text: $emoji)
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("New Profile")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -770,7 +745,7 @@ struct PlozziOSAccountDetailView: View {
                 }
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle(account.server.name)
         .navigationBarTitleDisplayMode(.inline)
         .alert("Remove \(account.server.name)?", isPresented: $confirmRemoval) {
@@ -861,7 +836,7 @@ struct PlozziOSPlexHomeUserSettingsView: View {
                 Text("PIN-protected users must unlock when their Plozz profile becomes active.")
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("Plex User")
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -974,20 +949,8 @@ private struct PlozziOSAppearanceSettingsView: View {
                 }
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("Appearance")
-    }
-}
-
-private struct PlozziOSSettingsSurface: ViewModifier {
-    func body(content: Content) -> some View {
-        content.settingsPageSurface()
-    }
-}
-
-private extension View {
-    func plozziOSSettingsSurface() -> some View {
-        modifier(PlozziOSSettingsSurface())
     }
 }
 
@@ -1130,7 +1093,7 @@ private struct PlozziOSHomeSettingsView: View {
                 }
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("Customize Home")
         .task(id: accounts.map(\.account.id)) {
             await loadLibraries()
@@ -1262,7 +1225,7 @@ private struct PlozziOSLibraryHomeSettingsView: View {
                 }
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle(library.title)
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -1377,7 +1340,7 @@ private struct PlozziOSPlaybackSettingsView: View {
                 )
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("Playback")
     }
 
@@ -1506,7 +1469,7 @@ private struct PlozziOSSubtitleSettingsView: View {
                 }
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("Subtitles")
     }
 
@@ -1560,7 +1523,7 @@ private struct PlozziOSSpoilerSettingsView: View {
                 Text("Episode titles, summaries, and artwork can be hidden until you watch them.")
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("Spoilers")
     }
 }
@@ -1623,7 +1586,7 @@ private struct PlozziOSNightShiftSettingsView: View {
                 }
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("Circadian Mode")
         .onChange(of: model.settings.isEnabled) { _, enabled in
             if !enabled {
@@ -1708,7 +1671,6 @@ private struct PlozziOSAttributionsView: View {
             Text(PlozzAttributions.introduction)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -1721,7 +1683,7 @@ private struct PlozziOSAttributionsView: View {
                 }
             }
         }
-        .plozziOSSettingsSurface()
+        .settingsPageSurface()
         .navigationTitle("Attributions")
     }
 }

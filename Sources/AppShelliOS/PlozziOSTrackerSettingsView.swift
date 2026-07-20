@@ -17,7 +17,6 @@ struct PlozziOSTrackerSettingsView: View {
             )
             .font(.footnote)
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 16)
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)

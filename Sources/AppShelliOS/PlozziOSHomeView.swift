@@ -530,6 +530,7 @@ private struct PlozziOSHomeMediaCard: View {
 
 private struct PlozziOSHomeLibraryCard: View {
     @Environment(\.plozzCardStyle) private var cardStyle
+    @Environment(\.plozzMetrics) private var metrics
     let library: AggregatedLibrary
     let width: CGFloat
 
@@ -547,7 +548,10 @@ private struct PlozziOSHomeLibraryCard: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(
+            alignment: .leading,
+            spacing: metrics.landscapeCaptionTopSpacing
+        ) {
             AsyncImage(url: library.library.imageURL) { image in
                 image
                     .resizable()
@@ -574,13 +578,20 @@ private struct PlozziOSHomeLibraryCard: View {
                 cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
             )
 
-            Text(library.library.title)
-                .font(.headline)
-                .lineLimit(1)
-            Text(library.serverName)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(library.library.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(library.serverName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, metrics.landscapeCaptionInset)
+            .padding(
+                .bottom,
+                cardStyle == .framed ? metrics.landscapeCaptionInset : 0
+            )
         }
         .frame(width: width, alignment: .leading)
     }

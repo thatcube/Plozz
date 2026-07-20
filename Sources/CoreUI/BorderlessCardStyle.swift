@@ -73,13 +73,20 @@ public struct BorderlessCardCaption: View {
     private let title: String
     private let subtitle: String?
     private let horizontalInset: CGFloat
+    private let reservesSubtitleSpace: Bool
 
     @Environment(\.plozzMetrics) private var metrics
 
-    public init(title: String, subtitle: String?, horizontalInset: CGFloat) {
+    public init(
+        title: String,
+        subtitle: String?,
+        horizontalInset: CGFloat,
+        reservesSubtitleSpace: Bool = true
+    ) {
         self.title = title
         self.subtitle = subtitle
         self.horizontalInset = horizontalInset
+        self.reservesSubtitleSpace = reservesSubtitleSpace
     }
 
     public var body: some View {
@@ -88,11 +95,16 @@ public struct BorderlessCardCaption: View {
                 .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)
-            Text(subtitle ?? " ")
-                .font(.system(size: metrics.cardSubtitleFontSize))
-                .foregroundStyle(Color.secondary)
-                .lineLimit(1)
-                .opacity(subtitle == nil ? 0 : 1)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.system(size: metrics.cardSubtitleFontSize))
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(1)
+            } else if reservesSubtitleSpace {
+                Text(" ")
+                    .font(.system(size: metrics.cardSubtitleFontSize))
+                    .hidden()
+            }
         }
         .padding(.horizontal, horizontalInset)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -122,6 +122,7 @@ private struct PlozziOSLibraryList: View {
 
 private struct PlozziOSLibraryCard: View {
     @Environment(\.plozzCardStyle) private var cardStyle
+    @Environment(\.plozzMetrics) private var metrics
     let library: MediaLibrary
 
     @ViewBuilder
@@ -138,7 +139,10 @@ private struct PlozziOSLibraryCard: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(
+            alignment: .leading,
+            spacing: metrics.landscapeCaptionTopSpacing
+        ) {
             AsyncImage(url: library.imageURL) { image in
                 image
                     .resizable()
@@ -167,6 +171,11 @@ private struct PlozziOSLibraryCard: View {
             Text(library.title)
                 .font(.headline)
                 .lineLimit(2)
+                .padding(.horizontal, metrics.landscapeCaptionInset)
+                .padding(
+                    .bottom,
+                    cardStyle == .framed ? metrics.landscapeCaptionInset : 0
+                )
         }
         .contentShape(Rectangle())
     }

@@ -19,6 +19,7 @@ public struct PosterCardView: View {
     private let style: Style
     private let spoilerSettings: SpoilerSettings
     private let enablesAsyncArtworkFallback: Bool
+    private let reservesSubtitleSpace: Bool
     /// Optional caller-owned context cue. It occupies the artwork's top-leading
     /// slot, leaving watch state (top-trailing) and progress (bottom) untouched.
     private let statusCueText: String?
@@ -35,6 +36,7 @@ public struct PosterCardView: View {
         style: Style = .poster,
         spoilerSettings: SpoilerSettings = .default,
         enablesAsyncArtworkFallback: Bool = true,
+        reservesSubtitleSpace: Bool = true,
         statusCue: String? = nil,
         action: @escaping () -> Void
     ) {
@@ -42,6 +44,7 @@ public struct PosterCardView: View {
         self.style = style
         self.spoilerSettings = spoilerSettings
         self.enablesAsyncArtworkFallback = enablesAsyncArtworkFallback
+        self.reservesSubtitleSpace = reservesSubtitleSpace
         self.statusCueText = statusCue
         self.action = action
     }
@@ -115,11 +118,7 @@ public struct PosterCardView: View {
                     .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
-                Text(subtitleText ?? " ")
-                    .font(.system(size: metrics.cardSubtitleFontSize))
-                    .foregroundStyle(subtitleColor)
-                    .lineLimit(1)
-                    .opacity(subtitleText == nil ? 0 : 1)
+                subtitleLine
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding([.horizontal, .bottom], metrics.posterCaptionInset)
@@ -166,11 +165,7 @@ public struct PosterCardView: View {
                     .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
-                Text(subtitleText ?? " ")
-                    .font(.system(size: metrics.cardSubtitleFontSize))
-                    .foregroundStyle(subtitleColor)
-                    .lineLimit(1)
-                    .opacity(subtitleText == nil ? 0 : 1)
+                subtitleLine
             }
             .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
             .frame(width: size.width, alignment: .leading)
@@ -204,7 +199,8 @@ public struct PosterCardView: View {
             BorderlessCardCaption(
                 title: primaryText,
                 subtitle: subtitleText,
-                horizontalInset: borderlessCaptionInset
+                horizontalInset: borderlessCaptionInset,
+                reservesSubtitleSpace: reservesSubtitleSpace
             )
             // Push the caption down on focus with a pure transform, never a layout
             // change: the gap slot is always reserved at its focused size (see
@@ -274,6 +270,20 @@ public struct PosterCardView: View {
         switch style {
         case .poster: return metrics.posterCaptionInset
         case .landscape: return metrics.landscapeCaptionInset
+        }
+    }
+
+    @ViewBuilder
+    private var subtitleLine: some View {
+        if let subtitleText {
+            Text(subtitleText)
+                .font(.system(size: metrics.cardSubtitleFontSize))
+                .foregroundStyle(subtitleColor)
+                .lineLimit(1)
+        } else if reservesSubtitleSpace {
+            Text(" ")
+                .font(.system(size: metrics.cardSubtitleFontSize))
+                .hidden()
         }
     }
 

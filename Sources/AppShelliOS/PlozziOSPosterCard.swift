@@ -11,6 +11,7 @@ struct PlozziOSPosterCard: View {
         PosterCardView(
             item: item ?? placeholderItem,
             style: style,
+            reservesSubtitleSpace: false,
             action: {}
         )
         .redacted(reason: item == nil ? .placeholder : [])

@@ -97,7 +97,7 @@ struct PlozziOSDownloadSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
+            SettingsSectionGroup {
                 Toggle("Allow Cellular Downloads", isOn: $model.allowsCellular)
                 Toggle(
                     "Pause in Low Data Mode",
@@ -108,9 +108,8 @@ struct PlozziOSDownloadSettingsView: View {
                     "Downloads use original quality. Network-share downloads continue while Plozz is open; Jellyfin, Emby, and Plex downloads can continue in the background."
                 )
             }
-            .settingsListRowSurface()
 
-            Section("Storage") {
+            SettingsSectionGroup("Storage") {
                 LabeledContent("Downloaded titles") {
                     Text(model.records.filter { $0.status == .completed }.count.formatted())
                 }
@@ -123,7 +122,6 @@ struct PlozziOSDownloadSettingsView: View {
                     )
                 }
             }
-            .settingsListRowSurface()
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)

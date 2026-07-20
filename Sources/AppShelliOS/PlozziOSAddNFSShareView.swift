@@ -1,4 +1,5 @@
 #if os(iOS)
+import CoreUI
 import Foundation
 import MediaTransportNFS
 import SwiftUI
@@ -21,7 +22,7 @@ struct PlozziOSAddNFSShareView: View {
 
     var body: some View {
         Form {
-            Section("NFS server") {
+            SettingsSectionGroup("NFS server") {
                 TextField("Host or IP address", text: $host)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -33,7 +34,7 @@ struct PlozziOSAddNFSShareView: View {
                 .disabled(!canProbe || isLoading)
             }
 
-            Section("Location") {
+            SettingsSectionGroup("Location") {
                 TextField("Export path", text: $exportPath, prompt: Text("/volume/media"))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -44,14 +45,14 @@ struct PlozziOSAddNFSShareView: View {
             }
 
             if isLoading {
-                Section {
+                SettingsSectionGroup {
                     HStack {
                         ProgressView()
                         Text("Connecting…")
                     }
                 }
             } else if !discoveredItems.isEmpty {
-                Section(discoveryTitle) {
+                SettingsSectionGroup(discoveryTitle) {
                     ForEach(discoveredItems, id: \.path) { item in
                         Button {
                             exportPath = item.path
@@ -69,16 +70,14 @@ struct PlozziOSAddNFSShareView: View {
                 }
             }
 
-            Section {
+            SettingsSectionGroup("Display") {
                 TextField("Name (optional)", text: $displayName)
-            } header: {
-                Text("Display")
             } footer: {
                 Text("Plozz scans the selected export for movies and TV episodes. NFS uses your server’s existing network permissions.")
             }
 
             if let errorMessage {
-                Section {
+                SettingsSectionGroup {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                 }

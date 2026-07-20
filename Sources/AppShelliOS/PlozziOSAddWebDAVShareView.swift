@@ -1,5 +1,6 @@
 #if os(iOS)
 import AppRuntime
+import CoreUI
 import FeatureAuthCore
 import Foundation
 import MediaTransportHTTP
@@ -34,7 +35,7 @@ struct PlozziOSAddWebDAVShareView: View {
 
     var body: some View {
         Form {
-            Section("WebDAV server") {
+            SettingsSectionGroup("WebDAV server") {
                 TextField(
                     "https://server.example/dav",
                     text: $address
@@ -44,7 +45,7 @@ struct PlozziOSAddWebDAVShareView: View {
                 .keyboardType(.URL)
             }
 
-            Section("Authentication") {
+            SettingsSectionGroup("Authentication") {
                 Picker("Method", selection: $authentication) {
                     Text("Username & Password").tag(Authentication.password)
                     Text("Bearer Token").tag(Authentication.bearer)
@@ -60,7 +61,7 @@ struct PlozziOSAddWebDAVShareView: View {
                 }
             }
 
-            Section {
+            SettingsSectionGroup {
                 Button(
                     isValidated ? "Connection Verified" : "Verify Connection",
                     systemImage: isValidated ? "checkmark.circle.fill" : "network"
@@ -77,12 +78,12 @@ struct PlozziOSAddWebDAVShareView: View {
                 }
             }
 
-            Section("Display") {
+            SettingsSectionGroup("Display") {
                 TextField("Name (optional)", text: $displayName)
             }
 
             if let errorMessage {
-                Section {
+                SettingsSectionGroup {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                 }

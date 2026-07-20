@@ -1,5 +1,6 @@
 #if os(iOS)
 import AppRuntime
+import CoreUI
 import Foundation
 import MediaTransportFTP
 import SwiftUI
@@ -40,7 +41,7 @@ struct PlozziOSAddFTPShareView: View {
 
     var body: some View {
         Form {
-            Section {
+            SettingsSectionGroup("Connection") {
                 Picker("Security", selection: $security) {
                     Text("FTP").tag(Security.ftp)
                     Text("FTPS (Implicit TLS)").tag(Security.ftps)
@@ -50,8 +51,6 @@ struct PlozziOSAddFTPShareView: View {
                     .autocorrectionDisabled()
                 TextField("Port", text: $port)
                     .keyboardType(.numberPad)
-            } header: {
-                Text("Connection")
             } footer: {
                 if security == .ftp {
                     Text("FTP sends credentials and media without encryption.")
@@ -60,7 +59,7 @@ struct PlozziOSAddFTPShareView: View {
                 }
             }
 
-            Section("Authentication") {
+            SettingsSectionGroup("Authentication") {
                 Picker("Method", selection: $authentication) {
                     Text("Anonymous").tag(Authentication.anonymous)
                     Text("Username & Password").tag(Authentication.password)
@@ -73,7 +72,7 @@ struct PlozziOSAddFTPShareView: View {
                 }
             }
 
-            Section("Folder") {
+            SettingsSectionGroup("Folder") {
                 TextField("Path", text: $path)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -98,7 +97,7 @@ struct PlozziOSAddFTPShareView: View {
                 }
             }
 
-            Section {
+            SettingsSectionGroup {
                 Button(
                     isVerified ? "Connection Verified" : "Verify & Browse",
                     systemImage: isVerified ? "checkmark.circle.fill" : "network"
@@ -111,12 +110,12 @@ struct PlozziOSAddFTPShareView: View {
                 }
             }
 
-            Section("Display") {
+            SettingsSectionGroup("Display") {
                 TextField("Name (optional)", text: $displayName)
             }
 
             if let errorMessage {
-                Section {
+                SettingsSectionGroup {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                 }

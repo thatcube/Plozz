@@ -11,35 +11,32 @@ struct PlozziOSTrackerSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                Text(
-                    "Connections are stored separately for each Plozz profile. "
-                        + "Playback progress is sent to every connected tracker."
-                )
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
-            .settingsListRowSurface()
+            Text(
+                "Connections are stored separately for each Plozz profile. "
+                    + "Playback progress is sent to every connected tracker."
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
 
-            Section("Trakt") {
+            SettingsSectionGroup("Trakt") {
                 TraktSettingsContent(service: appModel.traktService)
             }
-            .settingsListRowSurface()
 
-            Section("Simkl") {
+            SettingsSectionGroup("Simkl") {
                 SimklSettingsContent(service: appModel.simklService)
             }
-            .settingsListRowSurface()
 
-            Section("AniList") {
+            SettingsSectionGroup("AniList") {
                 AniListSettingsContent(service: appModel.anilistService)
             }
-            .settingsListRowSurface()
 
-            Section("MyAnimeList") {
+            SettingsSectionGroup("MyAnimeList") {
                 MALSettingsContent(service: appModel.malService)
             }
-            .settingsListRowSurface()
         }
         .navigationTitle("Trackers")
         .task {

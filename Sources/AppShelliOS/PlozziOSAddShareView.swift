@@ -1,4 +1,5 @@
 #if os(iOS)
+import CoreUI
 import SwiftUI
 
 struct PlozziOSAddShareView: View {
@@ -6,7 +7,7 @@ struct PlozziOSAddShareView: View {
 
     var body: some View {
         List {
-            Section("Network protocol") {
+            SettingsSectionGroup("Network protocol") {
                 NavigationLink {
                     PlozziOSAddSMBShareView(appModel: appModel)
                 } label: {

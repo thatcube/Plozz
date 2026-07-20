@@ -22,33 +22,30 @@ struct PlozziOSSeerrSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                Text(
-                    "Connect one Overseerr or Jellyseerr server for the household. "
-                        + "Each Plozz profile can make requests as a different user."
-                )
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
-            .settingsListRowSurface()
+            Text(
+                "Connect one Overseerr or Jellyseerr server for the household. "
+                    + "Each Plozz profile can make requests as a different user."
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
 
-            Section("Connection") {
+            SettingsSectionGroup("Connection") {
                 connectionContent
             }
-            .settingsListRowSurface()
 
             if appModel.seerService.isConfigured {
-                Section {
+                SettingsSectionGroup("Requests are made as") {
                     profileMappings
-                } header: {
-                    Text("Requests are made as")
                 } footer: {
                     Text(
                         "Unlinked profiles request as the administrator. "
                             + "Linked profiles use that user’s permissions, quotas, and defaults."
                     )
                 }
-                .settingsListRowSurface()
             }
         }
         .navigationTitle("Seerr")

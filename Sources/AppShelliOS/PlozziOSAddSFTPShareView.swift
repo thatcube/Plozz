@@ -1,6 +1,7 @@
 #if os(iOS)
 import AppRuntime
 import CoreModels
+import CoreUI
 import FeatureAuthCore
 import Foundation
 import MediaTransportSFTP
@@ -26,7 +27,7 @@ struct PlozziOSAddSFTPShareView: View {
 
     var body: some View {
         Form {
-            Section("SFTP server") {
+            SettingsSectionGroup("SFTP server") {
                 TextField("Host", text: $host)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -34,14 +35,14 @@ struct PlozziOSAddSFTPShareView: View {
                     .keyboardType(.numberPad)
             }
 
-            Section("Authentication") {
+            SettingsSectionGroup("Authentication") {
                 TextField("Username", text: $username)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 SecureField("Password", text: $password)
             }
 
-            Section("Folder") {
+            SettingsSectionGroup("Folder") {
                 TextField("Path", text: $path)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -66,7 +67,7 @@ struct PlozziOSAddSFTPShareView: View {
                 }
             }
 
-            Section {
+            SettingsSectionGroup {
                 Button(
                     approvedHostKey == nil ? "Verify & Capture Host Key" : "Connection Verified",
                     systemImage: approvedHostKey == nil ? "lock.shield" : "checkmark.circle.fill"
@@ -81,12 +82,12 @@ struct PlozziOSAddSFTPShareView: View {
                 Text("Plozz pins the server’s SSH host key after you approve its fingerprint.")
             }
 
-            Section("Display") {
+            SettingsSectionGroup("Display") {
                 TextField("Name (optional)", text: $displayName)
             }
 
             if let errorMessage {
-                Section {
+                SettingsSectionGroup {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                 }

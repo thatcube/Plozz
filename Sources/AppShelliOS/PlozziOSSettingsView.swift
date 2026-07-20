@@ -96,16 +96,18 @@ private struct PlozziOSSettingsSplitView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
-                Section("Profiles") {
-                    Label(
-                        appModel.profiles.activeProfile.name,
-                        systemImage: "person.2"
-                    )
-                    .tag(PlozziOSSettingsDestination.profiles)
-                    .settingsListRowSurface()
+                SettingsSectionGroup("Profiles") {
+                    Button {
+                        selection = .profiles
+                    } label: {
+                        Label(
+                            appModel.profiles.activeProfile.name,
+                            systemImage: "person.2"
+                        )
+                    }
                 }
 
-                Section("Services") {
+                SettingsSectionGroup("Services") {
                     settingsRow(
                         .requests,
                         title: "Seerr",
@@ -113,26 +115,27 @@ private struct PlozziOSSettingsSplitView: View {
                     )
                 }
 
-                Section("Media sources") {
+                SettingsSectionGroup("Media sources") {
                     ForEach(appModel.accounts) { account in
-                        Label {
-                            VStack(alignment: .leading) {
-                                Text(account.server.name)
-                                if !account.userName.isEmpty {
-                                    Text(account.userName)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                        Button {
+                            selection = .account(account.id)
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading) {
+                                    Text(account.server.name)
+                                    if !account.userName.isEmpty {
+                                        Text(account.userName)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
+                            } icon: {
+                                Image(systemName: "server.rack")
                             }
-                        } icon: {
-                            Image(systemName: "server.rack")
                         }
-                        .tag(PlozziOSSettingsDestination.account(account.id))
-                        .settingsListRowSurface()
                     }
 
                     Button("Add Server", systemImage: "plus", action: onAddServer)
-                        .settingsListRowSurface()
                     settingsRow(
                         .addNetworkShare,
                         title: "Add Network Share",
@@ -140,7 +143,7 @@ private struct PlozziOSSettingsSplitView: View {
                     )
                 }
 
-                Section("Preferences") {
+                SettingsSectionGroup("Preferences") {
                     settingsRow(
                         .trackers,
                         title: "Trackers",
@@ -183,7 +186,7 @@ private struct PlozziOSSettingsSplitView: View {
                     )
                 }
 
-                Section("Support") {
+                SettingsSectionGroup("Support") {
                     settingsRow(
                         .diagnostics,
                         title: "Help & Diagnostics",
@@ -243,9 +246,11 @@ private struct PlozziOSSettingsSplitView: View {
         title: LocalizedStringResource,
         systemImage: String
     ) -> some View {
-        Label(title, systemImage: systemImage)
-            .tag(destination)
-            .settingsListRowSurface()
+        Button {
+            selection = destination
+        } label: {
+            Label(title, systemImage: systemImage)
+        }
     }
 
     @ViewBuilder
@@ -335,7 +340,7 @@ private struct PlozziOSAboutSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Plozz") {
+            SettingsSectionGroup("Plozz") {
                 LabeledContent("Version") {
                     Text(
                         Bundle.main.infoDictionary?[
@@ -351,17 +356,15 @@ private struct PlozziOSAboutSettingsView: View {
                     )
                 }
             }
-            .settingsListRowSurface()
 
             if hasAccounts {
-                Section {
+                SettingsSectionGroup {
                     Button(
                         "Sign Out of All Accounts",
                         role: .destructive,
                         action: onSignOutAll
                     )
                 }
-                .settingsListRowSurface()
             }
         }
         .navigationTitle("About")
@@ -375,7 +378,7 @@ private struct PlozziOSSettingsCompactMenu: View {
 
     var body: some View {
         List {
-            Section("Profiles") {
+            SettingsSectionGroup("Profiles") {
                 NavigationLink {
                     PlozziOSProfilesView(appModel: appModel)
                 } label: {
@@ -385,18 +388,16 @@ private struct PlozziOSSettingsCompactMenu: View {
                     )
                 }
             }
-            .settingsListRowSurface()
 
-            Section("Services") {
+            SettingsSectionGroup("Services") {
                 NavigationLink {
                     PlozziOSSeerrSettingsView(appModel: appModel)
                 } label: {
                     Label("Seerr", systemImage: "sparkles.tv")
                 }
             }
-            .settingsListRowSurface()
 
-            Section("Media sources") {
+            SettingsSectionGroup("Media sources") {
                 ForEach(appModel.accounts) { account in
                     NavigationLink {
                         PlozziOSAccountDetailView(
@@ -416,7 +417,6 @@ private struct PlozziOSSettingsCompactMenu: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
-                            .settingsListRowSurface()
                         } icon: {
                             Image(systemName: "server.rack")
                         }
@@ -431,7 +431,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
             }
 
-            Section("Preferences") {
+            SettingsSectionGroup("Preferences") {
                 NavigationLink {
                     PlozziOSTrackerSettingsView(appModel: appModel)
                 } label: {
@@ -493,9 +493,8 @@ private struct PlozziOSSettingsCompactMenu: View {
                     Label("Circadian Mode", systemImage: "moon.stars.fill")
                 }
             }
-            .settingsListRowSurface()
 
-            Section("Support") {
+            SettingsSectionGroup("Support") {
                 NavigationLink {
                     PlozziOSDiagnosticsSettingsView(
                         appModel: appModel,
@@ -522,14 +521,12 @@ private struct PlozziOSSettingsCompactMenu: View {
                     }
                 }
             }
-            .settingsListRowSurface()
 
             if let accountError = appModel.accountError {
-                Section {
+                SettingsSectionGroup {
                     Label(accountError, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                 }
-                .settingsListRowSurface()
             }
         }
         .frame(maxWidth: 760)
@@ -555,7 +552,7 @@ private struct PlozziOSProfilesView: View {
 
     var body: some View {
         List {
-            Section {
+            SettingsSectionGroup {
                 Toggle(
                     "Enable Profiles",
                     isOn: Binding(
@@ -591,9 +588,8 @@ private struct PlozziOSProfilesView: View {
                     Text("Profiles keep Home, settings, watch history, and downloads personal.")
                 }
             }
-            .settingsListRowSurface()
 
-            Section("Who’s watching?") {
+            SettingsSectionGroup("Who’s watching?") {
                 ForEach(appModel.profiles.profiles) { profile in
                     NavigationLink {
                         PlozziOSProfileDetailView(
@@ -623,7 +619,6 @@ private struct PlozziOSProfilesView: View {
                     showingAddProfile = true
                 }
             }
-            .settingsListRowSurface()
         }
         .plozziOSSettingsSurface()
         .navigationTitle("Profiles")
@@ -646,7 +641,7 @@ private struct PlozziOSProfileDetailView: View {
 
     var body: some View {
         Form {
-            Section {
+            SettingsSectionGroup {
                 Button(
                     currentProfile.id == appModel.profiles.activeProfileID
                         ? "Current Profile"
@@ -660,9 +655,8 @@ private struct PlozziOSProfileDetailView: View {
                     editing = true
                 }
             }
-            .settingsListRowSurface()
 
-            Section("Media sources") {
+            SettingsSectionGroup("Media sources") {
                 ForEach(appModel.accounts) { account in
                     Toggle(
                         account.server.name,
@@ -682,7 +676,6 @@ private struct PlozziOSProfileDetailView: View {
                     )
                 }
             }
-            .settingsListRowSurface()
         }
         .navigationTitle(currentProfile.name)
         .sheet(isPresented: $editing) {
@@ -712,11 +705,10 @@ private struct PlozziOSAddProfileView: View {
 
     var body: some View {
         Form {
-            Section("Profile") {
+            SettingsSectionGroup("Profile") {
                 TextField("Name", text: $name)
                 TextField("Emoji", text: $emoji)
             }
-            .settingsListRowSurface()
         }
         .navigationTitle("New Profile")
         .navigationBarTitleDisplayMode(.inline)
@@ -745,7 +737,7 @@ private struct PlozziOSAccountDetailView: View {
 
     var body: some View {
         Form {
-            Section("Account") {
+            SettingsSectionGroup("Account") {
                 LabeledContent("Provider", value: account.server.provider.displayName)
                 if !account.userName.isEmpty {
                     LabeledContent("User", value: account.userName)
@@ -753,10 +745,9 @@ private struct PlozziOSAccountDetailView: View {
                 LabeledContent("Server", value: account.server.name)
                 LabeledContent("Address", value: account.server.baseURL.absoluteString)
             }
-            .settingsListRowSurface()
 
             if account.server.provider == .plex {
-                Section("Plex Home") {
+                SettingsSectionGroup("Plex Home") {
                     NavigationLink {
                         PlozziOSPlexHomeUserSettingsView(
                             appModel: appModel,
@@ -766,7 +757,6 @@ private struct PlozziOSAccountDetailView: View {
                         Label("Plex User", systemImage: "person.crop.circle")
                     }
                 }
-                .settingsListRowSurface()
             }
 
             if account.server.provider == .mediaShare {
@@ -780,12 +770,11 @@ private struct PlozziOSAccountDetailView: View {
                 )
             }
 
-            Section {
+            SettingsSectionGroup {
                 Button("Remove Account", role: .destructive) {
                     confirmRemoval = true
                 }
             }
-            .settingsListRowSurface()
         }
         .navigationTitle(account.server.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -806,7 +795,7 @@ private struct PlozziOSShareScanSection: View {
     let onScan: () -> Void
 
     var body: some View {
-        Section("Library") {
+        SettingsSectionGroup("Library") {
             if let state, state.isBusy {
                 LabeledContent(state.phase) {
                     if let detail = state.progressDetail {
@@ -834,7 +823,6 @@ private struct PlozziOSShareScanSection: View {
             Button("Scan Now", systemImage: "arrow.clockwise", action: onScan)
                 .disabled(state?.isBusy == true)
         }
-        .settingsListRowSurface()
     }
 }
 
@@ -846,19 +834,16 @@ private struct PlozziOSPlexHomeUserSettingsView: View {
 
     var body: some View {
         List {
-            Section {
+            SettingsSectionGroup("Account owner") {
                 userButton(
                     name: account.userName.isEmpty ? "Plex Account Owner" : account.userName,
                     avatarURL: nil,
                     requiresPIN: false,
                     user: nil
                 )
-            } header: {
-                Text("Account owner")
             }
-            .settingsListRowSurface()
 
-            Section {
+            SettingsSectionGroup("Home users") {
                 if isLoading {
                     HStack {
                         ProgressView()
@@ -877,12 +862,9 @@ private struct PlozziOSPlexHomeUserSettingsView: View {
                         )
                     }
                 }
-            } header: {
-                Text("Home users")
             } footer: {
                 Text("PIN-protected users must unlock when their Plozz profile becomes active.")
             }
-            .settingsListRowSurface()
         }
         .navigationTitle("Plex User")
         .navigationBarTitleDisplayMode(.inline)
@@ -955,14 +937,13 @@ private struct PlozziOSAppearanceSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Theme") {
+            SettingsSectionGroup("Theme") {
                 Picker("Appearance", selection: $theme.theme) {
                     ForEach(AppTheme.allCases) { theme in
                         Label(theme.displayName, systemImage: theme.symbolName)
                             .tag(theme)
                     }
                 }
-                .settingsListRowSurface()
                 Picker(
                     "Liquid Glass",
                     selection: $transparency.preference
@@ -976,32 +957,26 @@ private struct PlozziOSAppearanceSettingsView: View {
                         .tag(preference)
                     }
                 }
-                .settingsListRowSurface()
             }
-            .settingsSectionSurface()
 
-            Section("Library cards") {
+            SettingsSectionGroup("Library cards") {
                 Picker("Card style", selection: $cardStyle.style) {
                     ForEach(CardStyle.allCases) { style in
                         Text(style.displayName).tag(style)
                     }
                 }
-                .settingsListRowSurface()
                 Picker("Display size", selection: $density.density) {
                     ForEach(UIDensity.allCases) { density in
                         Label(density.displayName, systemImage: density.symbolName)
                             .tag(density)
                     }
                 }
-                .settingsListRowSurface()
                 Picker("Watch indicator", selection: $watchIndicator.indicator) {
                     ForEach(WatchStatusIndicator.allCases) { indicator in
                         Text(indicator.displayName).tag(indicator)
                     }
                 }
-                .settingsListRowSurface()
             }
-            .settingsSectionSurface()
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
@@ -1036,7 +1011,7 @@ private struct PlozziOSHomeSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Rows") {
+            SettingsSectionGroup("Rows") {
                 ForEach(HomeGlobalRow.allCases, id: \.rawValue) { row in
                     Toggle(
                         row.title,
@@ -1046,7 +1021,6 @@ private struct PlozziOSHomeSettingsView: View {
                         )
                     )
                 }
-                .settingsListRowSurface()
                 Toggle(
                     "Merge libraries",
                     isOn: Binding(
@@ -1067,7 +1041,7 @@ private struct PlozziOSHomeSettingsView: View {
                 )
             }
 
-            Section {
+            SettingsSectionGroup("Libraries") {
                 if isLoadingLibraries, libraries.isEmpty {
                     HStack {
                         ProgressView()
@@ -1093,24 +1067,20 @@ private struct PlozziOSHomeSettingsView: View {
                         }
                     }
                 }
-            } header: {
-                Text("Libraries")
             } footer: {
                 Text("Choose which libraries and library-specific rows appear on Home.")
             }
-            .settingsListRowSurface()
 
-            Section("Hero carousel") {
+            SettingsSectionGroup("Hero carousel") {
                 Toggle("Show hero", isOn: $hero.settings.isEnabled)
                 if hero.settings.isEnabled {
                     Toggle("Hide watched titles", isOn: $hero.settings.hideWatched)
                     Toggle("Auto-advance", isOn: $hero.settings.autoAdvance)
                 }
             }
-            .settingsListRowSurface()
 
             if hero.settings.isEnabled {
-                Section("Hero sources") {
+                SettingsSectionGroup("Hero sources") {
                     ForEach(orderedHeroSources, id: \.self) { source in
                         Toggle(
                             source.displayName,
@@ -1126,10 +1096,9 @@ private struct PlozziOSHomeSettingsView: View {
                         .disabled(source == .featured && !seerConfigured)
                     }
                 }
-                .settingsListRowSurface()
 
                 if hero.settings.isEnabled(.randomFromLibrary) {
-                    Section {
+                    SettingsSectionGroup("Random libraries") {
                         if randomEligibleLibraries.isEmpty {
                             Text("No movie or TV libraries are enabled on Home.")
                                 .foregroundStyle(.secondary)
@@ -1148,17 +1117,14 @@ private struct PlozziOSHomeSettingsView: View {
                                 )
                             }
                         }
-                    } header: {
-                        Text("Random libraries")
                     } footer: {
                         Text("Leave every library selected to include all enabled libraries.")
                     }
-                    .settingsListRowSurface()
                 }
             }
 
             if hero.settings.isEnabled {
-                Section("Rotation") {
+                SettingsSectionGroup("Rotation") {
                     Stepper(
                         "Items: \(hero.settings.maxItems)",
                         value: $hero.settings.maxItems,
@@ -1172,7 +1138,6 @@ private struct PlozziOSHomeSettingsView: View {
                         )
                     }
                 }
-                .settingsListRowSurface()
             }
         }
         .frame(maxWidth: 760)
@@ -1270,7 +1235,7 @@ private struct PlozziOSLibraryHomeSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
+            SettingsSectionGroup {
                 Toggle(
                     "Enabled",
                     isOn: Binding(
@@ -1281,10 +1246,9 @@ private struct PlozziOSLibraryHomeSettingsView: View {
             } footer: {
                 Text("Disabled libraries are hidden from Home and library browsing.")
             }
-            .settingsListRowSurface()
 
             if !visibility.mergeLibrariesOnHome {
-                Section("Home rows") {
+                SettingsSectionGroup("Home rows") {
                     ForEach(LibraryHomeRowKind.allCases, id: \.rawValue) { kind in
                         Toggle(
                             kind.displayName,
@@ -1307,7 +1271,6 @@ private struct PlozziOSLibraryHomeSettingsView: View {
                         .disabled(!visibility.isEnabled(library.key))
                     }
                 }
-                .settingsListRowSurface()
             }
         }
         .navigationTitle(library.title)
@@ -1329,7 +1292,7 @@ private struct PlozziOSPlaybackSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Skipping") {
+            SettingsSectionGroup("Skipping") {
                 Picker("Intros and credits", selection: $model.settings.skipIntros) {
                     ForEach(SkipIntrosMode.allCases, id: \.self) {
                         Text($0.title).tag($0)
@@ -1351,9 +1314,8 @@ private struct PlozziOSPlaybackSettingsView: View {
                     }
                 }
             }
-            .settingsListRowSurface()
 
-            Section("Playback") {
+            SettingsSectionGroup("Playback") {
                 Toggle("Seek without pausing", isOn: $model.settings.seekWithoutPausing)
                 Toggle("Show Up Next card", isOn: $model.settings.showUpNextCard)
                 if model.settings.showUpNextCard {
@@ -1368,9 +1330,8 @@ private struct PlozziOSPlaybackSettingsView: View {
                     isOn: $model.settings.syncWatchAcrossServers
                 )
             }
-            .settingsListRowSurface()
 
-            Section("Hero Background") {
+            SettingsSectionGroup("Hero Background") {
                 Picker(
                     "Background",
                     selection: $heroBackground.settings.mode
@@ -1396,9 +1357,8 @@ private struct PlozziOSPlaybackSettingsView: View {
                     }
                 }
             }
-            .settingsListRowSurface()
 
-            Section("Tracks") {
+            SettingsSectionGroup("Tracks") {
                 Picker("Preferred audio", selection: $model.settings.audioLanguagePreference) {
                     ForEach(Self.audioOptions, id: \.self) { preference in
                         Text(audioName(preference)).tag(preference)
@@ -1426,7 +1386,6 @@ private struct PlozziOSPlaybackSettingsView: View {
                     isOn: $model.settings.rememberSubtitleTrackPerSeries
                 )
             }
-            .settingsListRowSurface()
         }
         .frame(maxWidth: 760)
         .frame(maxWidth: .infinity)
@@ -1480,7 +1439,7 @@ private struct PlozziOSSubtitleSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Appearance") {
+            SettingsSectionGroup("Appearance") {
                 Toggle("Follow system style", isOn: $style.style.followsSystemStyle)
                 Picker("Font", selection: $style.style.fontFamily) {
                     ForEach(SubtitleFontFamily.allCases, id: \.self) {
@@ -1502,9 +1461,8 @@ private struct PlozziOSSubtitleSettingsView: View {
                 }
                 Toggle("Background", isOn: $style.style.background.isEnabled)
             }
-            .settingsListRowSurface()
 
-            Section("Behavior") {
+            SettingsSectionGroup("Behavior") {
                 Picker("Automatic subtitles", selection: $behavior.settings.subtitleMode) {
                     ForEach(SubtitleMode.allCases, id: \.self) {
                         Text($0.displayName).tag($0)
@@ -1539,9 +1497,8 @@ private struct PlozziOSSubtitleSettingsView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             }
-            .settingsListRowSurface()
 
-            Section("Subtitle search") {
+            SettingsSectionGroup("Subtitle search") {
                 Picker(
                     "Hearing impaired",
                     selection: $behavior.settings.hearingImpairedPreference
@@ -1550,7 +1507,6 @@ private struct PlozziOSSubtitleSettingsView: View {
                         Text($0.displayName).tag($0)
                     }
                 }
-                .settingsListRowSurface()
                 Picker(
                     "Forced subtitles",
                     selection: $behavior.settings.forcedSearchPreference
@@ -1600,7 +1556,7 @@ private struct PlozziOSSpoilerSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
+            SettingsSectionGroup {
                 Toggle("Protect unwatched episodes", isOn: $model.settings.isEnabled)
                 Picker("Thumbnail treatment", selection: $model.settings.mode) {
                     ForEach(SpoilerSettings.Mode.allCases, id: \.self) {
@@ -1615,7 +1571,6 @@ private struct PlozziOSSpoilerSettingsView: View {
             } footer: {
                 Text("Episode titles, summaries, and artwork can be hidden until you watch them.")
             }
-            .settingsListRowSurface()
         }
         .navigationTitle("Spoilers")
     }
@@ -1626,7 +1581,7 @@ private struct PlozziOSNightShiftSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
+            SettingsSectionGroup {
                 Toggle("Circadian Mode", isOn: $model.settings.isEnabled)
                 Picker("Schedule", selection: $model.settings.scheduleMode) {
                     ForEach(NightShiftScheduleMode.allCases) {
@@ -1641,10 +1596,9 @@ private struct PlozziOSNightShiftSettingsView: View {
             } footer: {
                 Text(model.scheduleSummary())
             }
-            .settingsListRowSurface()
 
             if model.settings.isEnabled {
-                Section("Picture") {
+                SettingsSectionGroup("Picture") {
                     Picker("Warmth", selection: $model.settings.warmth) {
                         ForEach(NightShiftWarmth.allCases) {
                             Text($0.displayName).tag($0)
@@ -1664,9 +1618,8 @@ private struct PlozziOSNightShiftSettingsView: View {
                         }
                     }
                 }
-                .settingsListRowSurface()
 
-                Section("Preview") {
+                SettingsSectionGroup("Preview") {
                     Toggle("Preview at Full Strength", isOn: $model.isPreviewing)
                     Button("Preview a Day", systemImage: "sun.and.horizon") {
                         model.runDayNightPreview()
@@ -1679,7 +1632,6 @@ private struct PlozziOSNightShiftSettingsView: View {
                         ProgressView(value: model.previewProgress ?? 0)
                     }
                 }
-                .settingsListRowSurface()
             }
         }
         .navigationTitle("Circadian Mode")
@@ -1763,18 +1715,20 @@ private struct PlozziOSNightShiftSettingsView: View {
 private struct PlozziOSAttributionsView: View {
     var body: some View {
         List {
-            Section {
-                Text(PlozzAttributions.introduction)
-            }
-            .settingsListRowSurface()
+            Text(PlozzAttributions.introduction)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             ForEach(PlozzAttributions.entries) { entry in
-                Section(entry.title) {
+                SettingsSectionGroup(entry.title) {
                     Text(entry.detail)
                     if !entry.licenses.isEmpty {
                         PlozziOSLicenseBadges(licenses: entry.licenses)
                     }
                 }
-                .settingsListRowSurface()
             }
         }
         .navigationTitle("Attributions")

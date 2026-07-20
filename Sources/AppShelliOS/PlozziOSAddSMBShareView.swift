@@ -1,4 +1,5 @@
 #if os(iOS)
+import CoreUI
 import Foundation
 import ProviderShare
 import SwiftUI
@@ -20,7 +21,7 @@ struct PlozziOSAddSMBShareView: View {
 
     var body: some View {
         Form {
-            Section("SMB server") {
+            SettingsSectionGroup("SMB server") {
                 TextField("Host or IP address", text: $host)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -28,7 +29,7 @@ struct PlozziOSAddSMBShareView: View {
                     .keyboardType(.numberPad)
             }
 
-            Section {
+            SettingsSectionGroup("Sign in") {
                 TextField("Username (optional)", text: $username)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -37,13 +38,11 @@ struct PlozziOSAddSMBShareView: View {
                     Task { await findShares() }
                 }
                 .disabled(!canProbe || isLoading)
-            } header: {
-                Text("Sign in")
             } footer: {
                 Text("Leave both fields empty for a guest share.")
             }
 
-            Section("Share") {
+            SettingsSectionGroup("Share") {
                 TextField("Share name", text: $share)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -70,12 +69,12 @@ struct PlozziOSAddSMBShareView: View {
                 }
             }
 
-            Section("Display") {
+            SettingsSectionGroup("Display") {
                 TextField("Name (optional)", text: $displayName)
             }
 
             if let errorMessage {
-                Section {
+                SettingsSectionGroup {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                 }

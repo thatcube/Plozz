@@ -29,7 +29,7 @@ struct PlozziOSDiagnosticsSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Get Help") {
+            SettingsSectionGroup("Get Help") {
                 if let issueURL = report.newIssueURL {
                     Link(destination: issueURL) {
                         Label("Report a Problem", systemImage: "ladybug")
@@ -48,9 +48,8 @@ struct PlozziOSDiagnosticsSettingsView: View {
                     Label("Recent Activity", systemImage: "clock.arrow.circlepath")
                 }
             }
-            .settingsListRowSurface()
 
-            Section {
+            SettingsSectionGroup {
                 Toggle(
                     "Share Crash Reports",
                     isOn: $crashReporting.settings.isEnabled
@@ -65,9 +64,8 @@ struct PlozziOSDiagnosticsSettingsView: View {
                     Text("Crash reporting is unavailable in this build.")
                 }
             }
-            .settingsListRowSurface()
 
-            Section("Send Diagnostics") {
+            SettingsSectionGroup("Send Diagnostics") {
                 TextField("Optional note", text: $diagnosticNote, axis: .vertical)
                     .lineLimit(2...4)
                 Button {
@@ -92,9 +90,8 @@ struct PlozziOSDiagnosticsSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .settingsListRowSurface()
 
-            Section {
+            SettingsSectionGroup {
                 Toggle("Playback diagnostics", isOn: $model.settings.isEnabled)
                 Toggle(
                     "Home performance overlay",
@@ -103,7 +100,6 @@ struct PlozziOSDiagnosticsSettingsView: View {
             } footer: {
                 Text("Troubleshooting overlays stay on this device and are off by default.")
             }
-            .settingsListRowSurface()
         }
         .navigationTitle("Help & Diagnostics")
         .onChange(of: crashReporting.settings.isEnabled) {

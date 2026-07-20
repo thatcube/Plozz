@@ -2,8 +2,6 @@
 import SwiftUI
 
 public struct SettingsPageSurface: ViewModifier {
-    @Environment(\.themePalette) private var palette
-
     public init() {}
 
     public func body(content: Content) -> some View {
@@ -11,7 +9,7 @@ public struct SettingsPageSurface: ViewModifier {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .contentMargins(.vertical, 24, for: .scrollContent)
-            .background { AppBackground(palette: palette) }
+            .background { SettingsPageBackground() }
             .toolbarBackground(.hidden, for: .navigationBar)
     }
 }

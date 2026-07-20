@@ -37,7 +37,7 @@ struct PlozziOSSettingsView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background { AppBackground(palette: palette) }
+        .background { SettingsPageBackground() }
         .environment(\.themePalette, palette)
         .environment(\.colorScheme, palette.isLight ? .light : .dark)
         .tint(palette.primaryText)
@@ -235,7 +235,7 @@ private struct PlozziOSSettingsSplitView: View {
 
                     SettingsSectionGroup("Support") {
                         settingsRow(.diagnostics, title: "Help & Diagnostics", systemImage: "ladybug")
-                        settingsRow(.attributions, title: "Attributions & Licensing", systemImage: "doc.text.magnifyingglass")
+                        settingsRow(.attributions, title: SettingsCopy.attributions, systemImage: "doc.text.magnifyingglass")
                         settingsRow(.about, title: "About", systemImage: "info.circle")
                     }
                 }
@@ -245,11 +245,11 @@ private struct PlozziOSSettingsSplitView: View {
             .navigationTitle("Settings")
             .toolbar(removing: .sidebarToggle)
             .scrollContentBackground(.hidden)
-            .background { AppBackground(palette: palette) }
+            .background { SettingsPageBackground() }
         } detail: {
             NavigationStack {
                 ZStack {
-                    AppBackground(palette: palette)
+                    SettingsPageBackground()
                     Group {
                         settingsDetail
                     }
@@ -536,7 +536,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 NavigationLink {
                     PlozziOSAttributionsView()
                 } label: {
-                    Label("Attributions & Licensing", systemImage: "doc.text.magnifyingglass")
+                    Label(SettingsCopy.attributions, systemImage: "doc.text.magnifyingglass")
                 }
                 LabeledContent("Version") {
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")

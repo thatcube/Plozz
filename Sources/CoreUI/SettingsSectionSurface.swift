@@ -52,18 +52,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
             #else
             .toggleStyle(SettingsTouchSwitchToggleStyle())
             #endif
-            .background(
-                palette.cardOpaqueSurface,
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(
-                        palette.cardOpaqueBorder,
-                        lineWidth: hairlineWidth
-                    )
-                    .allowsHitTesting(false)
-            }
+            .settingsGroupSurface(cornerRadius: 18)
 
             footer
                 .font(.footnote)

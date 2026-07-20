@@ -170,23 +170,23 @@ public extension ThemePalette {
         isLight: false
     )
 
-    /// Light theme. Uses the exact two-stop background gradient from my Twozz
-    /// `ThemePalette.light` (a soft off-white wash), with the top glow
-    /// recoloured to Plozz's brand blue (Twozz uses purple).
+    /// Light theme. Uses Apple's grouped Settings contrast: a neutral
+    /// system-grouped gray page, white grouped surfaces, and restrained
+    /// separators so controls read clearly without a decorative color cast.
     static let light = ThemePalette(
-        backgroundBase: Color(white: 1.0),
-        backgroundSecondary: Color(white: 0.97),
+        backgroundBase: Color(red: 0.949, green: 0.949, blue: 0.969),
+        backgroundSecondary: Color(red: 0.949, green: 0.949, blue: 0.969),
         cardSurface: .white,
-        cardBorder: Color.black.opacity(0.12),
+        cardBorder: Color.black.opacity(0.08),
         primaryText: Color.black.opacity(0.90),
         secondaryText: Color.black.opacity(0.60),
         accent: ThemePalette.brandAccent,
         errorText: Color(red: 0.78, green: 0.11, blue: 0.09),
-        topGlow: ThemePalette.brandBlue.opacity(0.14),
+        topGlow: nil,
         focusedCardGlassTint: Color.black.opacity(0.05),
         liftSurface: .white,
         cardOpaqueSurface: .white,
-        cardOpaqueBorder: Color.black.opacity(0.12),
+        cardOpaqueBorder: Color.black.opacity(0.08),
         isLight: true
     )
 

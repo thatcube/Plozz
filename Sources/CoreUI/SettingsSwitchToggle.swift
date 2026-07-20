@@ -64,8 +64,8 @@ private struct SettingsTouchSwitchIndicator: View {
 
     private var ink: Color { palette.isLight ? .black : .white }
     private var paper: Color { palette.isLight ? .white : .black }
-    private var trackColor: Color { isOn ? ink : ink.opacity(0.18) }
-    private var knobColor: Color { isOn ? paper : ink }
+    private var trackColor: Color { isOn ? ink : ink.opacity(0.22) }
+    private var knobColor: Color { isOn ? paper : .white }
     private var travel: CGFloat { (trackWidth - knobSize) / 2 - 2 }
 
     var body: some View {

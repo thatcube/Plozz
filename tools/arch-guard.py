@@ -259,6 +259,10 @@ def is_feature(name: str) -> bool:
     return name.startswith("Feature")
 
 
+def is_paired_feature_core(owner: str, dependency: str) -> bool:
+    return dependency == f"{owner}Core"
+
+
 def is_provider(name: str) -> bool:
     return name.startswith("Provider")
 
@@ -352,7 +356,10 @@ def check_manifest(pkg: Package) -> list[str]:
         for dep in deps:
             # Rule 1: Feature -> Feature (except the sanctioned edge).
             if is_feature(name) and is_feature(dep) and name != dep:
-                if (name, dep) not in ALLOWED_FEATURE_EDGES:
+                if (
+                    (name, dep) not in ALLOWED_FEATURE_EDGES
+                    and not is_paired_feature_core(name, dep)
+                ):
                     v.append(
                         f"[feature->feature] '{name}' depends on '{dep}'. "
                         f"Features must not depend on other Features (only "
@@ -455,7 +462,10 @@ def check_imports(pkg: Package, sources_root: str) -> list[str]:
                         )
                     # Rule 1: Feature -> Feature.
                     if mod in pkg.names and is_feature(target) and is_feature(mod) and mod != target:
-                        if (target, mod) not in ALLOWED_FEATURE_EDGES:
+                        if (
+                            (target, mod) not in ALLOWED_FEATURE_EDGES
+                            and not is_paired_feature_core(target, mod)
+                        ):
                             v.append(
                                 f"[feature->feature] {rel}:{lineno}: '{target}' "
                                 f"imports Feature '{mod}'."

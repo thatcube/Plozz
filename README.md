@@ -5,7 +5,8 @@
 <h1 align="center">Plozz</h1>
 
 <p align="center">
-  A free forever, open source, native Apple TV app for Jellyfin, Plex, Emby, and local shares (SMB, NFS, WebDAV, SFTP, FTP).
+A free, open source media player for Jellyfin, Plex, and Emby — native on Apple TV, iPhone, and iPad. 
+  <br> Also plays from network shares (SMB, NFS, WebDAV, SFTP, FTP). 
 </p>
 
 <p align="center">

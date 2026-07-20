@@ -25,6 +25,7 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
 
     private let lock = NSLock()
     private var connection: Connection?
+    private var lastCapturedHostKeyFingerprint: [UInt8]?
     private var isClosed = false
     private var nextRequestID: UInt32 = 0
 
@@ -42,6 +43,7 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return connection?.validator.capturedFingerprint
+            ?? lastCapturedHostKeyFingerprint
     }
 
 
@@ -152,6 +154,11 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
             lock.unlock()
         } catch {
             deadlineHandler.cancel()
+            if let fingerprint = serverAuthDelegate.capturedFingerprint {
+                lock.withLock {
+                    lastCapturedHostKeyFingerprint = fingerprint
+                }
+            }
             try? await group.shutdownGracefully()
             // A rejected/unaccepted credential surfaces here as an assorted
             // connection error; classify it as TERMINAL auth so the share browser
@@ -849,4 +856,3 @@ final class SSHConnectDeadlineHandler: ChannelInboundHandler, @unchecked Sendabl
         }
     }
 }
-

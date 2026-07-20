@@ -544,11 +544,15 @@ private extension View {
     /// geometric X-projection (no per-section last-focus memory).
     @ViewBuilder
     func focusSectionIf(_ enabled: Bool) -> some View {
+        #if os(tvOS)
         if enabled {
             focusSection()
         } else {
             self
         }
+        #else
+        self
+        #endif
     }
 }
 

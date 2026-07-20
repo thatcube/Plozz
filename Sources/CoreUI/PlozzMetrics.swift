@@ -144,6 +144,24 @@ public struct PlozzMetrics: Equatable, Sendable {
         landscapeWidth + cardInset * 2
     }
 
+    /// Exact rail footprint for a shared media card. Home uses this instead of a
+    /// separate iOS width table so the slot can never be wider than the rendered
+    /// surface and create invisible inter-card spacing.
+    public func cardSlotWidth(
+        for style: PosterCardView.Style,
+        cardStyle: CardStyle
+    ) -> CGFloat {
+        let artworkWidth = switch style {
+        case .poster: posterWidth
+        case .landscape: landscapeWidth
+        }
+        let sideInset = switch cardStyle {
+        case .framed: cardInset
+        case .borderless: borderlessCardSideMargin
+        }
+        return artworkWidth + sideInset * 2
+    }
+
     // MARK: Concentric card corner radii (derived)
 
     /// Outer (glass) corner radius for a poster ("Browse") card: its fixed inner
@@ -192,9 +210,21 @@ public struct PlozzMetrics: Equatable, Sendable {
     }
 
     public init(density: UIDensity) {
-        let s = CGFloat(density.scale)
+        self.init(density: density, geometryScale: 1)
+    }
+
+    /// Touch-sized geometry for the shared card system. Typography still follows
+    /// the platform's native Dynamic Type metrics; only physical card geometry,
+    /// insets, overlays, and spacing are reduced from the 10-foot tvOS scale.
+    public static func touch(density: UIDensity) -> PlozzMetrics {
+        PlozzMetrics(density: density, geometryScale: 0.5)
+    }
+
+    private init(density: UIDensity, geometryScale: CGFloat) {
+        let densityScale = CGFloat(density.scale)
+        let s = densityScale * geometryScale
         self.density = density
-        self.scale = s
+        self.scale = densityScale
 
         func step(_ base: CGFloat) -> CGFloat { (base * s).rounded() }
         /// Like `step`, but only applies `damping` of the density deviation from
@@ -202,7 +232,7 @@ public struct PlozzMetrics: Equatable, Sendable {
         /// fixed at the base, and values between let an element nod to density
         /// without scaling 1:1 with the cards.
         func damped(_ base: CGFloat, _ damping: CGFloat) -> CGFloat {
-            let effectiveScale = 1 + (s - 1) * damping
+            let effectiveScale = 1 + (densityScale - 1) * damping
             return (base * effectiveScale).rounded()
         }
 
@@ -258,18 +288,26 @@ public struct PlozzMetrics: Equatable, Sendable {
         #else
         let baseTitleFontSize = PlozzTheme.Metrics.cardTitleFontSizeFallback
         #endif
-        self.cardTitleFontSize = (baseTitleFontSize * s).rounded()
-        self.cardSubtitleFontSize = step(PlozzTheme.Metrics.cardSubtitleFontSize)
+        self.cardTitleFontSize = (baseTitleFontSize * densityScale).rounded()
+        self.cardSubtitleFontSize = (
+            PlozzTheme.Metrics.cardSubtitleFontSize * densityScale
+        ).rounded()
         self.cardStatusCueFontSize = max(
-            step(PlozzTheme.Metrics.cardStatusCueFontSize),
+            (PlozzTheme.Metrics.cardStatusCueFontSize * densityScale).rounded(),
             PlozzTheme.Metrics.cardStatusCueMinFontSize
         )
         self.cardStatusCueHorizontalPadding = max(
-            step(PlozzTheme.Metrics.cardStatusCueHorizontalPadding),
+            (
+                PlozzTheme.Metrics.cardStatusCueHorizontalPadding
+                    * densityScale
+            ).rounded(),
             PlozzTheme.Metrics.cardStatusCueMinHorizontalPadding
         )
         self.cardStatusCueVerticalPadding = max(
-            step(PlozzTheme.Metrics.cardStatusCueVerticalPadding),
+            (
+                PlozzTheme.Metrics.cardStatusCueVerticalPadding
+                    * densityScale
+            ).rounded(),
             PlozzTheme.Metrics.cardStatusCueMinVerticalPadding
         )
         // Section headers scale with density but dampened, so they anchor the page

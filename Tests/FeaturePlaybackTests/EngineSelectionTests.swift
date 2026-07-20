@@ -45,6 +45,20 @@ final class EngineSelectionTests: XCTestCase {
 
     // MARK: Network file
 
+    func testDownloadedLocalFileRoutesToPlozzigenWhenAvailable() {
+        let req = request(
+            streamURL: URL(fileURLWithPath: "/downloads/media.mkv")
+        )
+        XCTAssertEqual(route(req, plozzigenAvailable: true), .plozzigen)
+    }
+
+    func testDownloadedLocalFileFallsBackToNativeWithoutPlozzigen() {
+        let req = request(
+            streamURL: URL(fileURLWithPath: "/downloads/media.mp4")
+        )
+        XCTAssertEqual(route(req, plozzigenAvailable: false), .native)
+    }
+
     func testNetworkFileAlwaysRoutesToPlozzigen() throws {
         let identity = try RemoteFileIdentity(kind: .strongETag, value: "\"movie-v1\"")
         let representation = try RemoteFileRepresentation(

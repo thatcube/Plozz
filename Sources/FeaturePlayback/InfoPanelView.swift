@@ -116,7 +116,7 @@ struct InfoPanelView: View {
                         }
                     }
                 }
-                .focusSection()
+                .plozzFocusSection()
                 Spacer(minLength: 0)
                 // Subtle Playback Info (diagnostics) toggle, bottom-right —
                 // balances the tech badges bottom-left. Keeps the Info panel open
@@ -132,7 +132,7 @@ struct InfoPanelView: View {
                         model.diagnosticsEnabled.toggle()
                     }
                 }
-                .focusSection()
+                .plozzFocusSection()
             }
             .frame(height: thumbHeight, alignment: .topTrailing)
             .fixedSize(horizontal: true, vertical: false)

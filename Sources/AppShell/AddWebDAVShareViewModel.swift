@@ -3,6 +3,7 @@ import CoreModels
 import FeatureAuth
 import Foundation
 import MediaTransportHTTP
+import MediaTransportWebDAV
 import Observation
 
 /// Which credential the user is adding a WebDAV share with.

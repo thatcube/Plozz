@@ -4,6 +4,7 @@ import CoreModels
 import CoreUI
 import FeatureAuth
 import FeatureDiscovery
+import FeatureDiscoveryCore
 
 /// Entry point for adding an account, letting the user pick which backend to
 /// connect: **Jellyfin**, **Emby**, **Plex**, or a direct media share.

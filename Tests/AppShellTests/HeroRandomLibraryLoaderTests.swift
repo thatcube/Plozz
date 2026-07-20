@@ -1,5 +1,6 @@
 import XCTest
 import CoreModels
+import FeatureHomeCore
 @testable import AppShell
 
 final class HeroRandomLibraryLoaderTests: XCTestCase {

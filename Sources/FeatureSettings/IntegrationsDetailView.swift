@@ -499,94 +499,18 @@ struct AttributionsDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Plozz is free and open source under the GPL-3.0 license with an App Store exception. It is not affiliated with, endorsed, or certified by any of the projects or services listed below.")
+                Text(PlozzAttributions.introduction)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                attribution(
-                    "Media Servers",
-                    "Jellyfin is a free software media system; Plozz is an unofficial client and is not affiliated with the Jellyfin project. Plex is a trademark of Plex, Inc.; Plozz is an unofficial client and is not endorsed by Plex, Inc."
-                )
-                attribution(
-                    "Brand Marks",
-                    "The Plex and Jellyfin logos are used nominatively to identify which server type an account connects to. They are unmodified and are not used as Plozz branding."
-                )
-                attribution(
-                    "AetherEngine",
-                    "Plozzigen playback is powered by AetherEngine by Vincent Herbst. Source: github.com/superuser404notfound/AetherEngine",
-                    licenses: [.lgpl("LGPL-3.0")]
-                )
-                attribution(
-                    "FFmpeg",
-                    "Audio/video decoding uses FFmpeg libraries (libavcodec, libavformat, libavutil, libswresample, libswscale, libavfilter, libavdevice). ffmpeg.org",
-                    licenses: [.lgpl("LGPL-2.1+")]
-                )
-                attribution(
-                    "libdovi",
-                    "Dolby Vision metadata parsing uses libdovi.",
-                    licenses: [.mit()]
-                )
-                attribution(
-                    "libass & Text Rendering",
-                    "Subtitle rendering uses libass, FreeType, HarfBuzz, Fribidi, and Unibreak.",
-                    licenses: [.isc(), .lgpl("LGPL-2.1"), .mit()]
-                )
-                attribution(
-                    "dav1d",
-                    "AV1 video decoding uses dav1d by VideoLAN.",
-                    licenses: [.bsd("BSD-2")]
-                )
-                attribution(
-                    "libplacebo & MoltenVK",
-                    "GPU-accelerated video rendering uses libplacebo and MoltenVK for Vulkan-to-Metal translation.",
-                    licenses: [.lgpl("LGPL-2.1"), .apache()]
-                )
-                attribution(
-                    "GnuTLS & Networking",
-                    "TLS and network transport use GnuTLS, Nettle, GMP, AMSMB2, and OpenSSL.",
-                    licenses: [.lgpl("LGPL-2.1"), .lgpl("LGPL-3.0"), .apache()]
-                )
-                attribution(
-                    "libbluray",
-                    "Blu-ray disc structure parsing uses libbluray.",
-                    licenses: [.lgpl("LGPL-2.1")]
-                )
-                attribution(
-                    "TMDB",
-                    "This product uses the TMDB API but is not endorsed or certified by TMDB. Artwork and metadata are provided by TMDB (themoviedb.org).",
-                    licenses: [.api()]
-                )
-                attribution(
-                    "TheTVDB",
-                    "Metadata and artwork are provided by TheTVDB. Please consider adding missing information or subscribing at thetvdb.com. Plozz uses the TheTVDB API but is not endorsed or certified by TheTVDB.",
-                    licenses: [.api()]
-                )
-                attribution(
-                    "OMDb & AniList",
-                    "Additional ratings are sourced from the OMDb API (omdbapi.com) and AniList (anilist.co). Neither endorses or is affiliated with Plozz.",
-                    licenses: [.api()]
-                )
-                attribution(
-                    "Watch Tracking",
-                    "Watch-history sync integrations — Trakt (trakt.tv), Simkl (simkl.com), AniList (anilist.co), and MyAnimeList (myanimelist.net) — use their respective public APIs. None endorses or is affiliated with Plozz.",
-                    licenses: [.api()]
-                )
-                attribution(
-                    "Wikidata",
-                    "Fallback artwork lookup uses the Wikidata Query Service (wikidata.org).",
-                    licenses: [.cc0()]
-                )
-                attribution(
-                    "Fonts",
-                    "The default subtitle typeface is Atkinson Hyperlegible, © 2020 Braille Institute of America, Inc., chosen for its legibility from a distance. UI accent type uses Bungee by David Jonathan Ross. Both are used under the SIL Open Font License 1.1.",
-                    licenses: [.ofl()]
-                )
-                attribution(
-                    "YouTubeKit",
-                    "Trailer playback uses YouTubeKit by Alexander Eichhorn.",
-                    licenses: [.mit()]
-                )
+                ForEach(PlozzAttributions.entries) { entry in
+                    AttributionCard(
+                        title: entry.title,
+                        text: entry.detail,
+                        licenses: entry.licenses
+                    )
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
@@ -595,9 +519,6 @@ struct AttributionsDetailView: View {
         .scrollClipDisabled()
     }
 
-    private func attribution(_ title: String, _ text: String, licenses: [LicenseBadge] = []) -> some View {
-        AttributionCard(title: title, text: text, licenses: licenses)
-    }
 }
 
 /// A single focusable credit card with the shared inverted-card focus look
@@ -605,7 +526,7 @@ struct AttributionsDetailView: View {
 private struct AttributionCard: View {
     let title: String
     let text: String
-    var licenses: [LicenseBadge] = []
+    var licenses: [PlozzAttributionLicense] = []
 
     @FocusState private var isFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
@@ -619,7 +540,7 @@ private struct AttributionCard: View {
                 Text(title).font(.headline.weight(.semibold))
                 Spacer()
                 ForEach(licenses) { badge in
-                    badge.view(focused: isFocused)
+                    licenseBadge(badge)
                 }
             }
             Text(text)
@@ -645,52 +566,41 @@ private struct AttributionCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(title). \(licenses.map(\.label).joined(separator: ", ")). \(text)")
     }
-}
 
-/// A license badge model with a tint color category.
-private struct LicenseBadge: Identifiable {
-    let id: String
-    let label: String
-    let tint: Color
-
-    func view(focused: Bool) -> some View {
-        Text(label)
+    private func licenseBadge(_ license: PlozzAttributionLicense) -> some View {
+        Text(license.label)
             .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .foregroundStyle(focused ? Color.black : .white)
+            .foregroundStyle(isFocused ? Color.black : .white)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(
-                Capsule().fill(focused ? tint.opacity(0.85) : tint.opacity(0.7))
+                Capsule().fill(
+                    licenseTint(license.family).opacity(isFocused ? 0.85 : 0.7)
+                )
             )
     }
 
-    // Factory presets for common license families
-    static func gpl(_ version: String = "GPL-3.0") -> LicenseBadge {
-        LicenseBadge(id: version, label: version, tint: Color(red: 0.85, green: 0.25, blue: 0.25))
-    }
-    static func lgpl(_ version: String = "LGPL-3.0") -> LicenseBadge {
-        LicenseBadge(id: version, label: version, tint: Color(red: 0.9, green: 0.45, blue: 0.2))
-    }
-    static func mit() -> LicenseBadge {
-        LicenseBadge(id: "MIT", label: "MIT", tint: Color(red: 0.2, green: 0.65, blue: 0.35))
-    }
-    static func apache() -> LicenseBadge {
-        LicenseBadge(id: "Apache-2.0", label: "Apache-2.0", tint: Color(red: 0.2, green: 0.5, blue: 0.8))
-    }
-    static func bsd(_ variant: String = "BSD-2") -> LicenseBadge {
-        LicenseBadge(id: variant, label: variant, tint: Color(red: 0.4, green: 0.55, blue: 0.7))
-    }
-    static func cc0() -> LicenseBadge {
-        LicenseBadge(id: "CC0", label: "CC0", tint: Color(red: 0.5, green: 0.5, blue: 0.5))
-    }
-    static func isc() -> LicenseBadge {
-        LicenseBadge(id: "ISC", label: "ISC", tint: Color(red: 0.3, green: 0.6, blue: 0.5))
-    }
-    static func ofl() -> LicenseBadge {
-        LicenseBadge(id: "OFL-1.1", label: "OFL-1.1", tint: Color(red: 0.45, green: 0.45, blue: 0.8))
-    }
-    static func api() -> LicenseBadge {
-        LicenseBadge(id: "API", label: "API", tint: Color(red: 0.55, green: 0.4, blue: 0.7))
+    private func licenseTint(_ family: PlozzAttributionLicense.Family) -> Color {
+        switch family {
+        case .gpl:
+            Color(red: 0.85, green: 0.25, blue: 0.25)
+        case .lgpl:
+            Color(red: 0.9, green: 0.45, blue: 0.2)
+        case .mit:
+            Color(red: 0.2, green: 0.65, blue: 0.35)
+        case .apache:
+            Color(red: 0.2, green: 0.5, blue: 0.8)
+        case .bsd:
+            Color(red: 0.4, green: 0.55, blue: 0.7)
+        case .cc0:
+            Color(red: 0.5, green: 0.5, blue: 0.5)
+        case .isc:
+            Color(red: 0.3, green: 0.6, blue: 0.5)
+        case .ofl:
+            Color(red: 0.45, green: 0.45, blue: 0.8)
+        case .api:
+            Color(red: 0.55, green: 0.4, blue: 0.7)
+        }
     }
 }
 

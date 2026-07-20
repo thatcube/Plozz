@@ -14,7 +14,7 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
     case light
     /// A soft, dark gray theme.
     case dark
-    /// A pure-black theme. The persisted raw value stays unchanged so existing
+    /// A near-black theme. The persisted raw value stays unchanged so existing
     /// installs retain their selection after the user-facing rename.
     case pureBlack = "oled"
 
@@ -25,7 +25,7 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
         case .system: return "System"
         case .light: return "Light"
         case .dark: return "Dark"
-        case .pureBlack: return "Pure Black"
+        case .pureBlack: return "Black"
         }
     }
 
@@ -40,12 +40,12 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 
     /// Fresh installs default to Dark, regardless of the device appearance —
-    /// dark and Pure Black read best for a lean-back media app. Users can still pick any
+    /// dark and Black read best for a lean-back media app. Users can still pick any
     /// look during onboarding or later in Settings.
     public static let `default`: AppTheme = .dark
 
     /// The order the theme pickers (onboarding + Settings) present options in:
-    /// Dark first (the default), then Pure Black, Light, and System last.
+    /// Dark first (the default), then Black, Light, and System last.
     public static let pickerOrder: [AppTheme] = [.dark, .pureBlack, .light, .system]
 }
 

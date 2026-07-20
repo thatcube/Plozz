@@ -53,7 +53,7 @@ struct SkipSegmentButton: View {
 
     @ViewBuilder
     private func skipControl(for segment: MediaSegment) -> some View {
-        Button(action: onSkip) {
+        let button = Button(action: onSkip) {
             HStack(spacing: 18) {
                 Text(segment.kind.skipActionLabel)
                 RemainingRing(fraction: ringFraction(for: segment), focused: focused)
@@ -64,16 +64,21 @@ struct SkipSegmentButton: View {
         }
         .buttonStyle(SkipButtonStyle(focused: focused))
         .focused($focused)
-        .onExitCommand { onDismiss() }
+        #if os(tvOS)
+        button
+            .onExitCommand { onDismiss() }
         // Play/Pause works while the button holds focus: toggle playback in place
         // (the ring freezes because it tracks playback position) without leaving
         // the affordance. Matches Brandon's ask — pause without losing the button.
-        .onPlayPauseCommand { onPlayPause() }
-        .onMoveCommand { direction in
-            // An upward swipe dismisses the affordance, matching the player's
-            // other Up gestures (which surface the transport / leave the button).
-            if direction == .up { onDismiss() }
-        }
+            .onPlayPauseCommand { onPlayPause() }
+            .onMoveCommand { direction in
+                // An upward swipe dismisses the affordance, matching the player's
+                // other Up gestures (which surface the transport / leave the button).
+                if direction == .up { onDismiss() }
+            }
+        #else
+        button
+        #endif
     }
 
     /// The countdown ring's remaining fraction. In Auto (delay) it depletes over
@@ -100,7 +105,7 @@ struct SkipSegmentButton: View {
         .padding(.horizontal, 28)
         .padding(.vertical, 14)
 
-        if #available(tvOS 26.0, *) {
+        if #available(iOS 26.0, tvOS 26.0, *) {
             label.glassEffect(.regular, in: Capsule(style: .continuous))
         } else {
             label.background(

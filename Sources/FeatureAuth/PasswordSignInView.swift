@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import FeatureAuthCore
 
 /// TV-friendly username/password sign-in screen. The lower-priority sibling of
 /// `QuickConnectView`, reached from its secondary action.

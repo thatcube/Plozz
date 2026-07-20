@@ -173,6 +173,9 @@ public final class PlayerViewModel {
     /// asset. `nil` (the default) makes offline resolution a strict no-op.
     private let offlinePlaybackResolver: (any OfflinePlaybackResolving)?
     private let itemID: String
+    /// The item already selected by the UI. When it has a completed local copy,
+    /// playback can start without first contacting the provider.
+    private let offlineItem: MediaItem?
     /// The chosen `MediaVersion.id` (Jellyfin `MediaSourceId` / Plex `Media` id)
     /// to play when the title has multiple versions; `nil` plays the default.
     private let mediaSourceID: String?
@@ -394,6 +397,7 @@ public final class PlayerViewModel {
         provider: any MediaProvider,
         itemID: String,
         mediaSourceID: String? = nil,
+        offlineItem: MediaItem? = nil,
         offlinePlaybackResolver: (any OfflinePlaybackResolving)? = nil,
         behavior: SubtitleBehavior = .default,
         style: SubtitleStyle = .default,
@@ -422,6 +426,7 @@ public final class PlayerViewModel {
         self.provider = provider
         self.offlinePlaybackResolver = offlinePlaybackResolver
         self.itemID = itemID
+        self.offlineItem = offlineItem
         self.mediaSourceID = mediaSourceID
         self.behavior = behavior
         self.style = style
@@ -842,6 +847,30 @@ public final class PlayerViewModel {
         mediaSourceID: String?,
         forceTranscode: Bool
     ) async throws -> PrefetchedPlayback {
+        if let offlineItem,
+           Self.shouldUseOfflineFastPath(
+               offlineItem: offlineItem,
+               requestedItemID: itemID,
+               forceTranscode: forceTranscode
+           ),
+           let localURL = await offlinePlaybackResolver?
+               .localPlaybackURL(for: offlineItem) {
+            var request = PlaybackRequest(
+                item: offlineItem,
+                streamURL: localURL,
+                startPosition: offlineItem.resumePosition ?? 0,
+                sourceProvider: provider.kind,
+                sourceFileName: localURL.lastPathComponent
+            )
+            request.preferredAudioLanguages =
+                preferredAudioLanguages(for: offlineItem)
+            let kind = routeEngine(for: request, forceTranscode: false)
+            return PrefetchedPlayback(
+                itemID: itemID,
+                request: request,
+                engineKind: kind
+            )
+        }
         var request = try await provider.playbackInfo(
             for: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
         // Offline choke point: if a completed download exists for this item,
@@ -862,14 +891,23 @@ public final class PlayerViewModel {
         return PrefetchedPlayback(itemID: itemID, request: request, engineKind: kind)
     }
 
+    static func shouldUseOfflineFastPath(
+        offlineItem: MediaItem,
+        requestedItemID: String,
+        forceTranscode: Bool
+    ) -> Bool {
+        !forceTranscode && offlineItem.id == requestedItemID
+    }
+
     /// Rewrites a resolved request to play a local `file://` asset when a completed
     /// offline download exists (`localURL != nil`), otherwise returns the request
     /// UNCHANGED (byte-identical) so default behavior is preserved.
     ///
     /// The rewrite swaps only the *source*: it moves the local file into the legacy
     /// `streamURL` field — the direct-play field BOTH engines already consume —
-    /// clears every network/managed source (`playbackSource`, `externalAudioURL`,
-    /// `localRemuxSource`), and marks it a non-manifest direct play. All other
+    /// clears every network/managed source (`playbackSource`, `originalFileSource`,
+    /// `externalAudioURL`, `localRemuxSource`), and marks it a non-manifest direct
+    /// play. All other
     /// resolved facts (item, tracks, start position, source metadata used for
     /// engine routing) are preserved, so engine selection stays consistent with a
     /// direct-played copy of the same media.
@@ -881,6 +919,7 @@ public final class PlayerViewModel {
         var rewritten = request
         rewritten.streamURL = localURL
         rewritten.playbackSource = nil
+        rewritten.originalFileSource = nil
         rewritten.externalAudioURL = nil
         rewritten.localRemuxSource = nil
         rewritten.isManifestStream = false
@@ -1467,6 +1506,13 @@ public final class PlayerViewModel {
 
     /// Scrubbing-preview source for the playing item, if the server has previews.
     public var scrubPreview: ScrubPreviewSource? { request?.scrubPreview }
+
+    public func makeScrubPreviewCoordinator() -> ScrubPreviewCoordinator? {
+        ScrubPreviewCoordinator(
+            source: scrubPreview,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
+        )
+    }
 
     /// The active engine, exposed so the shared transport overlay can drive
     /// playback (play/pause/seek/state/tracks) and host the engine's bare video

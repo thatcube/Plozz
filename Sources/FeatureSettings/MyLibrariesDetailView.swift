@@ -3,7 +3,7 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// Settings → ‹Profile› → **Your Servers & Libraries**.
+/// Settings → ‹Profile› → **Libraries**.
 ///
 /// The per-profile half of the "mirror model". *This Apple TV › Servers*
 /// manages the household's sign-ins (the global inventory); this screen is
@@ -52,7 +52,7 @@ struct MyLibrariesDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     SettingsPageHeader(
-                        "Your Servers & Libraries",
+                        SettingsCopy.libraries,
                         subtitle: "Turn servers and libraries on or off, and pick who you watch as."
                     )
                     if allGroups.isEmpty {

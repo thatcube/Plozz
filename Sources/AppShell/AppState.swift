@@ -1,9 +1,11 @@
 import Foundation
 import Observation
+import AppRuntime
 import CoreModels
 import CoreNetworking
 import FeatureAuth
 import FeatureDiscovery
+import FeatureDiscoveryCore
 import FeatureMusic
 import FeatureProfiles
 import MediaTransportCore
@@ -75,94 +77,6 @@ public final class AppState {
     /// on profile switch so a new profile starts silent.
     public let audioController = AudioPlaybackController()
 
-
-    @MainActor
-    private final class AppAuthenticatedHTTPResourceResolver: AuthenticatedHTTPResourceResolving {
-        struct Context {
-            let provider: ProviderKind
-            let accountID: String
-            let credentialRevision: CredentialRevision
-            let baseURL: URL
-            let token: String
-        }
-
-        typealias ContextProvider = @MainActor @Sendable (
-            AuthenticatedHTTPPlaybackLocator
-        ) throws -> Context
-
-        private var contextProvider: ContextProvider?
-
-        func configure(contextProvider: @escaping ContextProvider) {
-            self.contextProvider = contextProvider
-        }
-
-        func resolve(_ locator: AuthenticatedHTTPPlaybackLocator) async throws -> URL {
-            guard let contextProvider else {
-                throw MediaTransportError.unsupportedCapability(
-                    "authenticated HTTP resolver"
-                )
-            }
-            let context = try contextProvider(locator)
-            guard context.provider == locator.provider,
-                  context.accountID == locator.accountID,
-                  context.credentialRevision == locator.credentialRevision,
-                  var components = URLComponents(
-                      url: context.baseURL,
-                      resolvingAgainstBaseURL: false
-                  ) else {
-                throw MediaTransportError.authentication(
-                    reason: "authenticated HTTP identity mismatch"
-                )
-            }
-
-            let encodedPath = locator.resource.path
-            switch locator.resource.pathBase {
-            case .configuredBaseURL:
-                let basePath = components.percentEncodedPath.hasSuffix("/")
-                    ? String(components.percentEncodedPath.dropLast())
-                    : components.percentEncodedPath
-                components.percentEncodedPath = basePath + "/" + encodedPath
-            case .serverRoot:
-                components.percentEncodedPath = encodedPath
-            }
-
-            var queryItems = locator.resource.queryItems.map {
-                URLQueryItem(name: $0.name, value: $0.value)
-            }
-            switch locator.provider {
-            case .jellyfin, .emby:
-                queryItems.append(URLQueryItem(name: "api_key", value: context.token))
-                if let playSessionID = locator.playSessionID {
-                    queryItems.append(
-                        URLQueryItem(name: "playSessionId", value: playSessionID)
-                    )
-                }
-            case .plex:
-                queryItems.append(URLQueryItem(name: "X-Plex-Token", value: context.token))
-                if let playSessionID = locator.playSessionID {
-                    queryItems.append(URLQueryItem(name: "session", value: playSessionID))
-                    queryItems.append(
-                        URLQueryItem(
-                            name: "X-Plex-Session-Identifier",
-                            value: playSessionID
-                        )
-                    )
-                }
-            case .mediaShare:
-                throw MediaTransportError.invalidInput(
-                    reason: "media shares cannot resolve authenticated HTTP resources"
-                )
-            }
-            components.queryItems = queryItems
-            guard let url = components.url else {
-                throw MediaTransportError.invalidInput(
-                    reason: "invalid authenticated HTTP resource"
-                )
-            }
-            return url
-        }
-    }
-
     /// Accounts just added in the current add flow whose libraries the
     /// "choose your libraries" step should offer. `RootView` renders that step
     /// from this; empty when none is pending.
@@ -216,7 +130,24 @@ public final class AppState {
     /// and performs watched-state (and future) actions against the server.
     @ObservationIgnored
     public private(set) lazy var mediaItemActionHandler: any MediaItemActionHandling =
-        MediaItemActionCoordinator(appState: self)
+        MediaItemActionCoordinator(
+            providerResolver: { [unowned self] accountID in
+                accountID.flatMap { self.accountsProviders.provider(forAccountID: $0) }
+                    ?? self.accountsProviders.primaryProvider
+            },
+            additionalSources: { [unowned self] item in
+                self.identityIndex.identitySnapshot.sourceRefs(for: item)
+            },
+            primaryAccountID: { [unowned self] in
+                self.accountsProviders.primaryActiveAccount?.id
+            },
+            crossServerWatchSyncEnabled: { [unowned self] in
+                self.profileSettings.playbackModel.settings.syncWatchAcrossServers
+            },
+            enqueueWatchMutation: { [unowned self] mutation in
+                self.enqueueWatchMutation(mutation)
+            }
+        )
 
     /// Durable cross-server watch-state outbox + reconciler. Persists each watch
     /// mutation's intent to disk before the network call and drains it on launch /
@@ -336,17 +267,33 @@ public final class AppState {
                     return self?.accountsProviders.provider(forAccountID: accountID)
                 }
             },
-            traktScrobbler: {
-                boundTraktScrobbler
+            applyTrakt: { intent in
+                try await boundTraktScrobbler.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
             },
-            simklScrobbler: {
-                boundSimklScrobbler
+            applySimkl: { intent in
+                try await boundSimklScrobbler.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
             },
-            anilistScrobbler: {
-                boundAniListScrobbler
+            applyAniList: { intent in
+                try await boundAniListScrobbler.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
             },
-            malScrobbler: {
-                boundMALScrobbler
+            applyMAL: { intent in
+                try await boundMALScrobbler.scrobbleResult(
+                    item: intent.makeScrobbleItem(),
+                    progress: intent.progress,
+                    event: .stop
+                )
             },
             allAccountIDs: { [weak self] in
                 // The set the identity index actually warms and that Home/Search
@@ -616,15 +563,15 @@ public final class AppState {
         }
         self.durableLocalStateStore = resolvedDurableLocalStateStore
         let resolvedRuntime: any MediaShareRuntime = mediaShareRuntime
-            ?? DefaultMediaShareRuntime.make(accountStore: resolvedAccountStore)
-        let defaultAuthenticatedHTTPResolver: AppAuthenticatedHTTPResourceResolver?
+            ?? AppShellMediaShareRuntimeFactory.make(accountStore: resolvedAccountStore)
+        let defaultAuthenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver?
         let resolvedAuthenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
         if let authenticatedHTTPResolver {
             self.authenticatedHTTPResolver = authenticatedHTTPResolver
             resolvedAuthenticatedHTTPResolver = authenticatedHTTPResolver
             defaultAuthenticatedHTTPResolver = nil
         } else {
-            let resolver = AppAuthenticatedHTTPResourceResolver()
+            let resolver = ManagedAuthenticatedHTTPResolver()
             self.authenticatedHTTPResolver = resolver
             resolvedAuthenticatedHTTPResolver = resolver
             defaultAuthenticatedHTTPResolver = resolver
@@ -733,7 +680,7 @@ public final class AppState {
             } else {
                 baseURL = account.server.baseURL
             }
-            return AppAuthenticatedHTTPResourceResolver.Context(
+            return ManagedAuthenticatedHTTPResolver.Context(
                 provider: account.server.provider,
                 accountID: account.id,
                 credentialRevision: self.plexHomeUsers.effectiveCredentialRevision(for: account),
@@ -758,25 +705,15 @@ public final class AppState {
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {
-        #if canImport(Security)
-        let secureStore = KeychainStore()
         do {
-            let localStateStore = try DurableLocalStateStoreFactory.userIndependent()
-            return AccountStore(
-                secureStore: secureStore,
-                mediaCredentialVault: MediaCredentialVault(secureStore: secureStore),
-                credentialJournal: try CredentialMutationJournal(store: localStateStore)
-            )
+            return try DefaultAccountStoreFactory.make()
         } catch {
             reportMediaSharePersistenceFailure(
                 error,
                 operation: "credential-infrastructure-init"
             )
-            return AccountStore(secureStore: secureStore)
+            return DefaultAccountStoreFactory.makeCredentialOnlyFallback()
         }
-        #else
-        return AccountStore(secureStore: InMemorySecureStore())
-        #endif
     }
 
     /// Builds the shared-household `SeerService`. The connection (URL + admin key)
@@ -1263,35 +1200,43 @@ public final class AppState {
         password: String,
         displayName: String
     ) {
-        var comps = URLComponents()
-        comps.scheme = "smb"
-        comps.host = ShareProvider.bracketedHostIfIPv6(host)
-        comps.port = port
-        comps.path = "/" + share
-        guard let baseURL = comps.url else {
+        let service = MediaShareAccountConfigurationService(
+            accountStore: accountsProviders.accountStore
+        )
+        let prepared: PreparedMediaShareAccount
+        do {
+            prepared = try service.prepareSMB(
+                host: host,
+                port: port,
+                share: share,
+                username: username,
+                password: password,
+                displayName: displayName
+            )
+        } catch {
             apply(.authenticationFailed(.unknown("Invalid share address")))
             return
         }
-        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
-        let name = trimmedName.isEmpty ? Self.defaultShareName(path: share, host: host, transport: .smb) : trimmedName
-        let server = MediaServer(
-            id: Self.mediaShareServerID(host: host, port: port, share: share, username: username),
-            name: name,
-            baseURL: baseURL,
-            provider: .mediaShare
+        let isFirstRun =
+            accountsProviders.accounts.isEmpty
+            && !profilesModel.firstRunProfileSetupComplete
+        apply(.serverSelected(prepared.session.server))
+        do {
+            try service.persist(prepared)
+        } catch {
+            Self.reportMediaSharePersistenceFailure(
+                error,
+                operation: "media-share-save"
+            )
+            apply(.authenticationFailed(.unknown("Couldn’t save this SMB share")))
+            return
+        }
+        finalizeAddedAccount(
+            session: prepared.session,
+            account: prepared.account,
+            previousAccount: prepared.previousAccount,
+            isFirstRun: isFirstRun
         )
-        // A guest/anonymous share has no user identity; use "guest" as a stable
-        // per-share user id so the account key is deterministic.
-        let user = username.isEmpty ? "guest" : username
-        let session = UserSession(
-            server: server,
-            userID: user,
-            userName: username,
-            deviceID: accountsProviders.accountStore.deviceID(),
-            accessToken: password
-        )
-        apply(.serverSelected(server))
-        didAuthenticate(session)
     }
 
     /// The stable identity for a media share, used as BOTH the `MediaServer.id`
@@ -1315,41 +1260,18 @@ public final class AppState {
         share: String,
         username: String
     ) -> String {
-        let portKey = port.map { ":\($0)" } ?? ""
-        let normalizedUser = username.trimmingCharacters(in: .whitespaces).lowercased()
-        let user = normalizedUser.isEmpty ? "guest" : normalizedUser
-        return "share:\(host.lowercased())\(portKey)/\(share.lowercased())#\(user)"
+        MediaShareAccountConfigurationService.smbID(
+            host: host,
+            port: port,
+            share: share,
+            username: username
+        )
     }
 
     /// The credential a WebDAV share is being added with. Mirrors the vault's
     /// `MediaShareAuthentication` cases WebDAV permits, kept as a small onboarding
     /// input type so the UI (Phase 3) doesn't depend on FeatureAuth internals.
-    public enum WebDAVShareAuth: Equatable, Sendable {
-        case anonymous
-        case password(username: String, password: String)
-        case bearer(token: String)
-
-        /// Stable principal component of the account identity. Different users on
-        /// one URL get separate accounts; anonymous and bearer each fold to a
-        /// single principal (re-adding replaces in place — the "my token/password
-        /// changed" flow), which is the common one-principal-per-server case.
-        fileprivate var principal: String {
-            switch self {
-            case .anonymous: return "anon"
-            case .password(let username, _):
-                let trimmed = username.trimmingCharacters(in: .whitespaces)
-                return trimmed.isEmpty ? "anon" : trimmed
-            case .bearer: return "bearer"
-            }
-        }
-
-        fileprivate var accountUserName: String {
-            switch self {
-            case .anonymous, .bearer: return ""
-            case .password(let username, _): return username.trimmingCharacters(in: .whitespaces)
-            }
-        }
-    }
+    public typealias WebDAVShareAuth = MediaShareWebDAVAuth
 
     /// Stable identity for a WebDAV share. Unlike SMB, WebDAV paths are
     /// case-sensitive and http vs https are genuinely different origins, so both
@@ -1363,19 +1285,13 @@ public final class AppState {
         path: String,
         principal: String
     ) -> String {
-        let normalizedScheme = scheme.lowercased()
-        // Canonicalize the port: an explicit default port (443/https, 80/http)
-        // is the same origin as an implicit one, so drop it to dedup
-        // `https://h/dav` and `https://h:443/dav` to one account.
-        let defaultPort = normalizedScheme == "https" ? 443 : 80
-        let portKey = (port == nil || port == defaultPort) ? "" : ":\(port!)"
-        // Canonicalize a trailing slash (`/dav` == `/dav/`) so the same
-        // collection isn't added twice; the transport endpoint drops it too.
-        var normalizedPath = path.isEmpty ? "/" : path
-        if normalizedPath.count > 1, normalizedPath.hasSuffix("/") {
-            normalizedPath.removeLast()
-        }
-        return "share:\(normalizedScheme)://\(host.lowercased())\(portKey)\(normalizedPath)#\(principal)"
+        MediaShareAccountConfigurationService.webDAVID(
+            scheme: scheme,
+            host: host,
+            port: port,
+            path: path,
+            principal: principal
+        )
     }
 
     /// Secret-safe persistence failure identity for device diagnostics. Never
@@ -1430,93 +1346,41 @@ public final class AppState {
         trustPin: SHA256Fingerprint? = nil,
         displayName: String
     ) {
-        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
-              let scheme = components.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              let host = components.host, !host.isEmpty,
-              // A base URL must never carry credentials-in-URL, a query, or a
-              // fragment — those aren't part of a share root and are a smuggling
-              // vector. Reject rather than silently strip.
-              components.user == nil, components.password == nil,
-              components.query == nil, components.fragment == nil else {
-            apply(.authenticationFailed(.unknown("Invalid WebDAV address")))
-            return
-        }
-        // A TLS leaf pin is only meaningful over HTTPS; refuse it on plaintext.
-        if trustPin != nil, scheme != "https" {
+        if trustPin != nil, baseURL.scheme?.lowercased() != "https" {
             apply(.authenticationFailed(.unknown("A certificate pin requires HTTPS")))
             return
         }
-        // Credentials over plain http are permitted for a LAN media share (the
-        // onboarding UI warns); only a TLS pin requires https. No cleartext
-        // rejection here.
-
-        let path = components.percentEncodedPath
-        let normalizedPath = path.isEmpty ? "/" : path
-        let envelope: MediaShareCredentialEnvelope
+        let service = MediaShareAccountConfigurationService(
+            accountStore: accountsProviders.accountStore
+        )
+        let prepared: PreparedMediaShareAccount
         do {
-            let authentication: MediaShareAuthentication
-            switch auth {
-            case .anonymous:
-                authentication = .anonymous
-            case let .password(username, password):
-                authentication = .password(
-                    username: username.trimmingCharacters(in: .whitespaces),
-                    password: password
-                )
-            case let .bearer(token):
-                authentication = .bearer(token: token)
-            }
-            let trust = MediaShareTrustMaterial(tlsLeafCertificateSHA256: trustPin)
-            envelope = try MediaShareCredentialEnvelope(
-                transport: .webDAV,
-                authentication: authentication,
-                trust: trust
+            prepared = try service.prepareWebDAV(
+                baseURL: baseURL,
+                auth: auth,
+                trustPin: trustPin,
+                displayName: displayName
             )
+        } catch is MediaShareAccountConfigurationError {
+            apply(.authenticationFailed(.unknown("Invalid WebDAV address")))
+            return
         } catch {
             apply(.authenticationFailed(.unknown("Invalid WebDAV credentials")))
             return
         }
-
-        let serverID = Self.webDAVShareID(
-            scheme: scheme,
-            host: host,
-            port: components.port,
-            path: normalizedPath,
-            principal: auth.principal
-        )
-        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
-        let name = trimmedName.isEmpty ? Self.defaultShareName(path: normalizedPath, host: host, transport: .webDAV) : trimmedName
-        let server = MediaServer(
-            id: serverID,
-            name: name,
-            baseURL: baseURL,
-            provider: .mediaShare
-        )
         let isFirstRun = accountsProviders.accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
-        let userName = auth.accountUserName
-        let session = UserSession(
-            server: server,
-            userID: auth.principal,
-            userName: userName,
-            deviceID: accountsProviders.accountStore.deviceID(),
-            // Credential bytes live in the vault envelope, not the token slot.
-            accessToken: ""
-        )
-        let account = Account(id: server.id, from: session)
-        let previousAccount = accountsProviders.accounts.first { $0.id == account.id }
-        apply(.serverSelected(server))
+        apply(.serverSelected(prepared.session.server))
         do {
-            try accountsProviders.accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+            try service.persist(prepared)
         } catch {
             Self.reportMediaSharePersistenceFailure(error, operation: "webdav-save")
             apply(.authenticationFailed(.unknown("Couldn’t save this WebDAV share")))
             return
         }
         finalizeAddedAccount(
-            session: session,
-            account: account,
-            previousAccount: previousAccount,
+            session: prepared.session,
+            account: prepared.account,
+            previousAccount: prepared.previousAccount,
             isFirstRun: isFirstRun
         )
     }
@@ -1534,12 +1398,11 @@ public final class AppState {
         host: String,
         transport: MediaShareTransportKind
     ) -> String {
-        let lastComponent = path
-            .split(separator: "/", omittingEmptySubsequences: true)
-            .last
-            .map(String.init)
-        let base = (lastComponent?.isEmpty == false) ? lastComponent! : host
-        return "\(base) (\(transport.badgeLabel))"
+        MediaShareAccountConfigurationService.defaultShareName(
+            path: path,
+            host: host,
+            transport: transport
+        )
     }
 
     /// Stable identity for a filesystem media share whose paths are case-sensitive
@@ -1556,13 +1419,13 @@ public final class AppState {
         path: String,
         principal: String
     ) -> String {
-        let normalizedScheme = scheme.lowercased()
-        let portKey = port.map { ":\($0)" } ?? ""
-        var normalizedPath = path.isEmpty ? "/" : path
-        if normalizedPath.count > 1, normalizedPath.hasSuffix("/") {
-            normalizedPath.removeLast()
-        }
-        return "share:\(normalizedScheme)://\(host.lowercased())\(portKey)\(normalizedPath)#\(principal)"
+        MediaShareAccountConfigurationService.filesystemID(
+            scheme: scheme,
+            host: host,
+            port: port,
+            path: path,
+            principal: principal
+        )
     }
 
     /// Adds (or updates in place) an NFS export as a media share. NFS is
@@ -1574,47 +1437,40 @@ public final class AppState {
         exportPath: String,
         displayName: String
     ) {
-        let trimmedHost = host.trimmingCharacters(in: .whitespaces)
-        guard !trimmedHost.isEmpty else {
-            apply(.authenticationFailed(.unknown("Invalid NFS address")))
-            return
-        }
-        var comps = URLComponents()
-        comps.scheme = "nfs"
-        comps.host = ShareProvider.bracketedHostIfIPv6(trimmedHost)
-        comps.port = port
-        let normalizedPath = Self.normalizedFilesystemPath(exportPath)
-        comps.path = normalizedPath
-        guard let baseURL = comps.url else {
-            apply(.authenticationFailed(.unknown("Invalid NFS address")))
-            return
-        }
-        let envelope: MediaShareCredentialEnvelope
+        let service = MediaShareAccountConfigurationService(
+            accountStore: accountsProviders.accountStore
+        )
+        let prepared: PreparedMediaShareAccount
         do {
-            envelope = try MediaShareCredentialEnvelope(
-                transport: .nfs,
-                authentication: .noCredentials
+            prepared = try service.prepareNFS(
+                host: host,
+                port: port,
+                exportPath: exportPath,
+                displayName: displayName
             )
         } catch {
-            apply(.authenticationFailed(.unknown("Invalid NFS share")))
+            apply(.authenticationFailed(.unknown("Invalid NFS address")))
             return
         }
-        let serverID = Self.mediaShareFilesystemID(
-            scheme: "nfs",
-            host: trimmedHost,
-            port: port,
-            path: normalizedPath,
-            principal: "anon"
-        )
-        persistMediaShare(
-            serverID: serverID,
-            baseURL: baseURL,
-            envelope: envelope,
-            userID: "anon",
-            userName: "",
-            defaultName: Self.defaultShareName(path: normalizedPath, host: trimmedHost, transport: .nfs),
-            displayName: displayName,
-            invalidMessage: "Couldn’t save this NFS share"
+        let isFirstRun =
+            accountsProviders.accounts.isEmpty
+            && !profilesModel.firstRunProfileSetupComplete
+        apply(.serverSelected(prepared.session.server))
+        do {
+            try service.persist(prepared)
+        } catch {
+            Self.reportMediaSharePersistenceFailure(
+                error,
+                operation: "media-share-save"
+            )
+            apply(.authenticationFailed(.unknown("Couldn’t save this NFS share")))
+            return
+        }
+        finalizeAddedAccount(
+            session: prepared.session,
+            account: prepared.account,
+            previousAccount: prepared.previousAccount,
+            isFirstRun: isFirstRun
         )
     }
 
@@ -1630,78 +1486,44 @@ public final class AppState {
         hostKeyPin: SHA256Fingerprint,
         displayName: String
     ) {
-        let trimmedHost = host.trimmingCharacters(in: .whitespaces)
-        let trimmedUser = username.trimmingCharacters(in: .whitespaces)
-        guard !trimmedHost.isEmpty, !trimmedUser.isEmpty else {
-            apply(.authenticationFailed(.unknown("SFTP needs a host and username")))
-            return
-        }
-        var comps = URLComponents()
-        comps.scheme = "sftp"
-        comps.host = ShareProvider.bracketedHostIfIPv6(trimmedHost)
-        comps.port = port
-        let normalizedPath = Self.normalizedFilesystemPath(path)
-        comps.path = normalizedPath
-        guard let baseURL = comps.url else {
-            apply(.authenticationFailed(.unknown("Invalid SFTP address")))
-            return
-        }
-        let envelope: MediaShareCredentialEnvelope
+        let service = MediaShareAccountConfigurationService(
+            accountStore: accountsProviders.accountStore
+        )
+        let prepared: PreparedMediaShareAccount
         do {
-            let trust = MediaShareTrustMaterial(sshHostKeySHA256: hostKeyPin)
-            envelope = try MediaShareCredentialEnvelope(
-                transport: .sftp,
-                authentication: .password(username: trimmedUser, password: password),
-                trust: trust
+            prepared = try service.prepareSFTP(
+                host: host,
+                port: port,
+                path: path,
+                username: username,
+                password: password,
+                hostKeyPin: hostKeyPin,
+                displayName: displayName
             )
         } catch {
-            apply(.authenticationFailed(.unknown("Invalid SFTP credentials")))
+            apply(.authenticationFailed(.unknown("Invalid SFTP address or credentials")))
             return
         }
-        let serverID = Self.mediaShareFilesystemID(
-            scheme: "sftp",
-            host: trimmedHost,
-            port: port,
-            path: normalizedPath,
-            principal: trimmedUser
-        )
-        persistMediaShare(
-            serverID: serverID,
-            baseURL: baseURL,
-            envelope: envelope,
-            userID: trimmedUser,
-            userName: trimmedUser,
-            defaultName: Self.defaultShareName(path: normalizedPath, host: trimmedHost, transport: .sftp),
-            displayName: displayName,
-            invalidMessage: "Couldn’t save this SFTP share"
-        )
-    }
-
-    /// How an FTP share authenticates, as the onboarding UI collects it. FTP is
-    /// plaintext by nature (or implicit TLS via the `ftps` scheme); a TLS leaf pin
-    /// is only meaningful over `ftps`.
-    public enum FTPShareAuth: Equatable, Sendable {
-        case anonymous
-        case password(username: String, password: String)
-
-        fileprivate var principal: String {
-            switch self {
-            case .anonymous: return "anon"
-            case .password(let username, _):
-                // POSIX usernames are case-sensitive, so distinct server users
-                // (`Admin` vs `admin`) must stay distinct accounts — preserve
-                // case, matching the WebDAV principal convention.
-                let trimmed = username.trimmingCharacters(in: .whitespaces)
-                return trimmed.isEmpty ? "anon" : trimmed
-            }
+        let isFirstRun =
+            accountsProviders.accounts.isEmpty
+            && !profilesModel.firstRunProfileSetupComplete
+        apply(.serverSelected(prepared.session.server))
+        do {
+            try service.persist(prepared)
+        } catch {
+            Self.reportMediaSharePersistenceFailure(
+                error,
+                operation: "media-share-save"
+            )
+            apply(.authenticationFailed(.unknown("Couldn’t save this SFTP share")))
+            return
         }
-
-        fileprivate var accountUserName: String {
-            switch self {
-            case .anonymous: return ""
-            case .password(let username, _): return username.trimmingCharacters(in: .whitespaces)
-            }
-        }
+        finalizeAddedAccount(
+            session: prepared.session,
+            account: prepared.account,
+            previousAccount: prepared.previousAccount,
+            isFirstRun: isFirstRun
+        )
     }
 
     /// Adds (or updates in place) an FTP/FTPS media share. `baseURL` carries the
@@ -1709,120 +1531,49 @@ public final class AppState {
     /// `ftps`.
     public func didConfigureFTPShare(
         baseURL: URL,
-        auth: FTPShareAuth,
+        auth: MediaShareFTPAuth,
         trustPin: SHA256Fingerprint? = nil,
         displayName: String
     ) {
-        guard let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
-              let scheme = components.scheme?.lowercased(),
-              scheme == "ftp" || scheme == "ftps",
-              let host = components.host, !host.isEmpty,
-              components.user == nil, components.password == nil,
-              components.query == nil, components.fragment == nil else {
-            apply(.authenticationFailed(.unknown("Invalid FTP address")))
-            return
-        }
-        if trustPin != nil, scheme != "ftps" {
-            apply(.authenticationFailed(.unknown("A certificate pin requires FTPS")))
-            return
-        }
-        let envelope: MediaShareCredentialEnvelope
+        let service = MediaShareAccountConfigurationService(
+            accountStore: accountsProviders.accountStore
+        )
+        let prepared: PreparedMediaShareAccount
         do {
-            let authentication: MediaShareAuthentication
-            switch auth {
-            case .anonymous:
-                authentication = .anonymous
-            case let .password(username, password):
-                authentication = .password(
-                    username: username.trimmingCharacters(in: .whitespaces),
-                    password: password
-                )
-            }
-            let trust = MediaShareTrustMaterial(tlsLeafCertificateSHA256: trustPin)
-            envelope = try MediaShareCredentialEnvelope(
-                transport: .ftp,
-                authentication: authentication,
-                trust: trust
+            prepared = try service.prepareFTP(
+                baseURL: baseURL,
+                auth: auth,
+                trustPin: trustPin,
+                displayName: displayName
             )
         } catch {
-            apply(.authenticationFailed(.unknown("Invalid FTP credentials")))
+            apply(.authenticationFailed(.unknown("Invalid FTP address or credentials")))
             return
         }
-        let normalizedPath = Self.normalizedFilesystemPath(components.path)
-        let serverID = Self.mediaShareFilesystemID(
-            scheme: scheme,
-            host: host,
-            port: components.port,
-            path: normalizedPath,
-            principal: auth.principal
-        )
-        persistMediaShare(
-            serverID: serverID,
-            baseURL: baseURL,
-            envelope: envelope,
-            userID: auth.accountUserName.isEmpty ? "anon" : auth.accountUserName,
-            userName: auth.accountUserName,
-            defaultName: Self.defaultShareName(path: normalizedPath, host: host, transport: .ftp),
-            displayName: displayName,
-            invalidMessage: "Couldn’t save this FTP share"
-        )
-    }
-
-    private static func normalizedFilesystemPath(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        if trimmed.isEmpty { return "/" }
-        return trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
-    }
-
-    /// Shared persistence tail for the credential-envelope transports (NFS/SFTP/
-    /// FTP): build the `MediaServer`/`Account`, store the envelope in the vault,
-    /// and run the common onboarding finalize — mirroring `didConfigureWebDAVShare`
-    /// without repeating it per transport.
-    private func persistMediaShare(
-        serverID: String,
-        baseURL: URL,
-        envelope: MediaShareCredentialEnvelope,
-        userID: String,
-        userName: String,
-        defaultName: String,
-        displayName: String,
-        invalidMessage: String
-    ) {
-        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
-        let name = trimmedName.isEmpty ? defaultName : trimmedName
-        let server = MediaServer(
-            id: serverID,
-            name: name,
-            baseURL: baseURL,
-            provider: .mediaShare
-        )
-        let isFirstRun = accountsProviders.accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
-        let session = UserSession(
-            server: server,
-            userID: userID,
-            userName: userName,
-            deviceID: accountsProviders.accountStore.deviceID(),
-            accessToken: ""
-        )
-        let account = Account(id: server.id, from: session)
-        let previousAccount = accountsProviders.accounts.first { $0.id == account.id }
-        apply(.serverSelected(server))
+        let isFirstRun =
+            accountsProviders.accounts.isEmpty
+            && !profilesModel.firstRunProfileSetupComplete
+        apply(.serverSelected(prepared.session.server))
         do {
-            try accountsProviders.accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+            try service.persist(prepared)
         } catch {
             Self.reportMediaSharePersistenceFailure(
                 error,
                 operation: "media-share-save"
             )
-            apply(.authenticationFailed(.unknown(invalidMessage)))
+            apply(.authenticationFailed(.unknown("Couldn’t save this FTP share")))
             return
         }
         finalizeAddedAccount(
-            session: session,
-            account: account,
-            previousAccount: previousAccount,
+            session: prepared.session,
+            account: prepared.account,
+            previousAccount: prepared.previousAccount,
             isFirstRun: isFirstRun
         )
+    }
+
+    private static func normalizedFilesystemPath(_ raw: String) -> String {
+        MediaShareAccountConfigurationService.normalizedFilesystemPath(raw)
     }
 
     /// Begins adding another account from inside the signed-in app.

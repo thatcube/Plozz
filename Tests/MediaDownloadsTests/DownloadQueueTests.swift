@@ -2,6 +2,25 @@ import CoreModels
 import XCTest
 @testable import MediaDownloads
 
+private actor FailOnceDownloadEngine: MediaDownloadEngine {
+    private var attempt = 0
+
+    func download(
+        record: DownloadedMediaRecord,
+        to destination: URL,
+        onProgress: @escaping @Sendable (Int64, Int64) async -> Void
+    ) async throws -> Int64 {
+        attempt += 1
+        if attempt == 1 {
+            throw Failure()
+        }
+        await onProgress(42, 42)
+        return 42
+    }
+
+    private struct Failure: Error {}
+}
+
 final class DownloadQueueTests: XCTestCase {
 
     private func makeQueue(
@@ -97,6 +116,59 @@ final class DownloadQueueTests: XCTestCase {
 
         let final = await registry.record(forKey: record.identityKey)
         XCTAssertEqual(final?.status, .failed)
+    }
+
+    func testResumeRetriesFailedDownload() async throws {
+        let registry = DownloadedMediaRegistry(store: InMemoryDownloadedMediaStore())
+        let (queue, dir) = makeQueue(
+            registry: registry,
+            engine: FailOnceDownloadEngine()
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let record = try await queue.enqueue(try DownloadTestFactory.request())
+        await queue.drainForTesting()
+        let failed = await registry.record(forKey: record.identityKey)
+        XCTAssertEqual(failed?.status, .failed)
+
+        await queue.resume(identityKey: record.identityKey)
+        await queue.drainForTesting()
+
+        let completed = await registry.record(forKey: record.identityKey)
+        XCTAssertEqual(completed?.status, .completed)
+        XCTAssertEqual(completed?.bytesDownloaded, 42)
+    }
+
+    func testManagedRequestPersistsSecretFreeReopenSource() async throws {
+        let registry = DownloadedMediaRegistry(store: InMemoryDownloadedMediaStore())
+        let (queue, dir) = makeQueue(
+            registry: registry,
+            engine: FakeDownloadEngine.completing(at: 100)
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = ManagedHTTPDownloadSource(
+            provider: .jellyfin,
+            accountID: "account-1",
+            itemID: "movie-1",
+            mediaSourceID: "source-1"
+        )
+        let request = DownloadRequest.managedHTTP(
+            identity: DownloadTestFactory.imdbIdentity(),
+            source: source,
+            snapshot: PinnedMediaSnapshot(
+                title: "Movie",
+                kind: .movie
+            ),
+            fileExtension: "mkv"
+        )
+
+        let record = try await queue.enqueue(request)
+        await queue.drainForTesting()
+
+        let stored = await registry.record(forKey: record.identityKey)
+        XCTAssertEqual(stored?.sourceKind, .managedHTTP)
+        XCTAssertEqual(stored?.managedHTTPSource, source)
+        XCTAssertNil(stored?.directShareSource)
     }
 
     func testEnqueueGroupSharesGroupID() async throws {

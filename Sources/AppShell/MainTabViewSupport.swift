@@ -1,8 +1,10 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureHome
+import FeatureHomeCore
 import FeatureMusic
 import FeaturePlayback
 import MediaTransportCore
@@ -327,110 +329,6 @@ func makeHeroMetadataEnricher(
     }
 }
 
-
-/// Builds the detail page's cross-server source resolver: given the title the
-/// user opened, it searches every *other* signed-in account, merges the hits with
-/// the primary by ``MediaItemIdentity`` (the same safe identity rules the Home /
-/// Search dedupe use), and returns the unified per-server ``MediaSourceRef`` list.
-/// The matching is **by provider IDs**, so a copy stored under a *different title*
-/// on another server still collapses into the picker — see
-/// ``CrossServerSourceResolver`` (which also widens the search with a normalized
-/// title so that differently-annotated copy is actually returned to be matched).
-///
-/// This is what makes the **server picker appear from Home** even when only one
-/// server surfaced the title in its row (Recently Added / Continue Watching are
-/// per-server, so a Home card often starts single-source) — Search already shows
-/// both servers because it queries them all, and now the detail page does the
-/// same discovery on open. Returns `nil` for a single-account setup (nothing to
-/// discover), which keeps the resolver entirely off the path for solo servers.
-/// Runs a provider search but gives up after `seconds`, returning whatever it
-/// has (empty on timeout). A cold/slow/unreachable server otherwise makes the
-/// whole cross-server discovery fan-out wait for its full request timeout — that
-/// straggler keeps the discovery task (and its cooperative-pool work) alive long
-/// after the user has moved on, contributing to next-page starvation.
-///
-/// The deadline is driven by a **libdispatch timer**, not `Task.sleep`. Under the
-/// very pool saturation this guard exists to relieve, a `Task.sleep`-based
-/// timeout cannot fire — its continuation needs a cooperative-pool thread that
-/// the backlog is holding — so the race silently waits the full server timeout
-/// (observed: a 33s Plex search that should have been cut at 4s). A
-/// `DispatchQueue.asyncAfter` fires on its own dispatch thread regardless of
-/// pool state and cancels the search task, which aborts the in-flight URLSession
-/// request and frees its connection on schedule.
-private func searchWithDeadline(
-    _ provider: any MediaProvider,
-    query: String,
-    limit: Int,
-    seconds: Double
-) async -> [MediaItem] {
-    let searchTask = Task { (try? await provider.search(query: query, limit: limit)) ?? [] }
-    let timeout = DispatchWorkItem { searchTask.cancel() }
-    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + seconds, execute: timeout)
-    let result = await searchTask.value
-    timeout.cancel()
-    return result
-}
-
-func crossServerSourceResolver(
-    in accounts: [ResolvedAccount],
-    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
-) -> (@Sendable (MediaItem) async -> [MediaSourceRef])? {
-    guard !accounts.isEmpty else { return nil }
-    let serverInfo = accounts.sourceServerInfo()
-    let orderedAccountIDs = accounts.map(\.account.id)
-    let providersByAccountID: [String: any MediaProvider] = Dictionary(
-        accounts.map { ($0.account.id, $0.provider) },
-        uniquingKeysWith: { first, _ in first }
-    )
-    return { primary in
-        // Start from the eager index's known sources for this title — the shared
-        // source of truth — so the picker is at least as complete as the watch
-        // fan-out even before (or without) an on-demand probe.
-        //
-        // KNOWN COST (r6-playtime-fanout, documented/deferred): even when the index
-        // already knows this title's sources, we still probe EVERY account below
-        // for live versions/watch-state and same-server duplicates. That's a
-        // fan-out of N searches per open. It's bounded (each search is deadline-
-        // capped at 4s via `searchWithDeadline`) and only runs on detail-open, not
-        // per-card, so it isn't hot. Using the index as the primary answer and
-        // probing only the *selected* source is folded into the upcoming
-        // preferred-server/bandwidth feature rather than changed here.
-        var sources: [MediaSourceRef] = identitySources(primary)
-        var seen = Set(sources.map(\.id))
-        // Probe EVERY signed-in account, including the primary's own. The
-        // primary's own item id is filtered inside the resolver so same-server
-        // duplicate movie items (two Jellyfin items, one film) group into one
-        // detail with a multi-entry version picker — without this only OTHER
-        // servers' twins were discovered and a same-server duplicate was invisible.
-        //
-        // Use the caller's stable `accounts` order (NOT `Dictionary.keys`, whose
-        // iteration order is unspecified and re-hashed per process): the resolver
-        // reassembles hits by this input order and `bestSelection`'s final
-        // primary-first tiebreak reads it, so a dictionary order would flip which
-        // server backs a tied merged card between launches — a source of the
-        // "server feels random" symptom.
-        let everyAccount = orderedAccountIDs
-        let resolved = await CrossServerSourceResolver.resolve(
-            primary: primary,
-            otherAccountIDs: everyAccount,
-            search: { accountID, query in
-                guard let provider = providersByAccountID[accountID] else { return [] }
-                return await searchWithDeadline(provider, query: query, limit: 25, seconds: 4)
-            },
-            serverInfo: { serverInfo[$0] }
-        )
-        // The on-demand probe carries live versions/watch-state, so let it win on
-        // id collisions: drop index placeholders the probe already covered, then
-        // union in any index-only server the probe missed.
-        let resolvedIDs = Set(resolved.map(\.id))
-        sources.removeAll { resolvedIDs.contains($0.id) }
-        seen = resolvedIDs
-        var merged = resolved
-        for ref in sources where seen.insert(ref.id).inserted { merged.append(ref) }
-        return merged
-    }
-}
-
 /// Builds the provider that backs a Library-browse grid for `library`. When the
 /// Home aggregator merged the same library across several servers
 /// (`allSourceAccountIDs.count > 1`) it returns an ``AggregatedLibraryProvider``
@@ -526,114 +424,10 @@ func bestSourcePlayItem(
     accounts: [ResolvedAccount],
     identitySources: (MediaItem) -> [MediaSourceRef]
 ) -> MediaItem {
-    let activeAccountIDs = Set(accounts.map(\.account.id))
-    let liveLocality: [String: SourceLocality] = Dictionary(
-        accounts.map { ($0.account.id, $0.provider.connectionLocality) },
-        uniquingKeysWith: { first, _ in first }
-    )
-    func withLiveLocality(_ source: MediaSourceRef) -> MediaSourceRef {
-        guard let locality = liveLocality[source.accountID] else { return source }
-        var copy = source
-        copy.locality = locality
-        return copy
-    }
-
-    // Union the card's own sources with any twin the live index knows. The card's
-    // refs come first and win on id collision (live versions/watch-state). The
-    // card's own sources are already cross-kind sanitized by `MediaItemMerger`
-    // (and stale caches are schema-bumped), so no further filtering is needed here.
-    var unioned = item.sources
-    var seen = Set(unioned.map(\.id))
-    for ref in identitySources(item) where seen.insert(ref.id).inserted {
-        unioned.append(ref)
-    }
-
-    // Drop any un-playable Plex **Discover** source: a watchlist/Discover stub is
-    // addressed by the GLOBAL catalog guid (its itemID == the `plex://…/<id>`
-    // tail), which no Plex Media Server can play. Such refs can linger on an item
-    // rebuilt before the merger fix, or hydrated from an older on-disk Home cache;
-    // if one wins best-source selection, playback dead-ends on "Can't play this"
-    // even though a real library copy exists. Filtering here is cache-proof — but
-    // only when a real, playable twin remains (never strip the last source, so a
-    // genuinely Discover-only title still resolves to its stub rather than nothing).
-    if let guidTail = item.providerIDs["PlexGuid"]?.split(separator: "/").last.map(String.init) {
-        let playable = unioned.filter { $0.itemID != guidTail }
-        if !playable.isEmpty { unioned = playable }
-    }
-
-    let liveSources = (activeAccountIDs.isEmpty
-        ? unioned
-        : unioned.filter { activeAccountIDs.contains($0.accountID) })
-        .map(withLiveLocality)
-
-    // Honor an already-applied EXPLICIT source pick. The detail page's play path
-    // retargets through `MediaItem.retargetedForPlayback` first, stamping
-    // `selectedSourceAccountID` from the server picker (or its origin-aware smart
-    // default) and repointing the item — but it preserves the full `sources`
-    // array for further switching. Re-running best-source selection here would
-    // then clobber that pick back to the locality-best copy, making the picker
-    // cosmetic (a user who deliberately chose the remote/Tailscale copy would
-    // still be sent to the LAN one). Only honor picks the user actually made
-    // (`explicitSourceSelection`): an AUTO default (origin-following detail
-    // default, or a Home/Search item that carries no explicit choice) is instead
-    // re-selected below against *live* locality, so a title opened from a
-    // remote/Tailscale library still plays from a same-LAN copy when one exists.
-    if item.explicitSourceSelection,
-       let picked = item.selectedSourceAccountID,
-       liveSources.contains(where: { $0.accountID == picked }) {
-        return item
-    }
-
-    // If the item's OWN (account, id) isn't itself a playable source — the
-    // Discover-stub case, where its id is the global guid we filtered out above —
-    // force a retarget onto the best remaining source, so we never launch the
-    // un-playable id even when the real copy sits on the same account as the stub
-    // (which the single-source heuristic below wouldn't otherwise catch). No-op
-    // for ordinary items, whose primary (account, id) is always among liveSources.
-    let primaryIsPlayable = liveSources.contains {
-        $0.accountID == item.sourceAccountID && $0.itemID == item.id
-    }
-    if !primaryIsPlayable, !liveSources.isEmpty {
-        let selection = CrossSourceSelector.bestSelection(
-            from: liveSources,
-            capabilities: .detected(),
-            preferring: item.sourceAccountID
-        )
-        let target = selection?.source ?? liveSources[0]
-        return MediaItem.retargetedForPlayback(
-            item: item,
-            sources: liveSources,
-            activeAccountID: target.accountID,
-            versionID: selection?.version?.id
-        )
-    }
-
-    guard liveSources.count > 1,
-          let selection = CrossSourceSelector.bestSelection(
-              from: liveSources,
-              capabilities: .detected(),
-              preferring: item.selectedSourceAccountID ?? item.sourceAccountID
-          )
-    else {
-        // One (or zero) live source. If pruning dropped servers, or the primary
-        // pointed at a now-removed account, retarget onto the surviving copy so we
-        // don't mis-resolve; otherwise the single-source item passes through.
-        if let only = liveSources.first,
-           liveSources.count < unioned.count || only.accountID != item.sourceAccountID {
-            return MediaItem.retargetedForPlayback(
-                item: item,
-                sources: liveSources,
-                activeAccountID: only.accountID,
-                versionID: nil
-            )
-        }
-        return item
-    }
-    return MediaItem.retargetedForPlayback(
-        item: item,
-        sources: liveSources,
-        activeAccountID: selection.source.accountID,
-        versionID: selection.version?.id
+    PlaybackSourceSelection.bestPlayItem(
+        item,
+        accounts: accounts,
+        identitySources: identitySources
     )
 }
 

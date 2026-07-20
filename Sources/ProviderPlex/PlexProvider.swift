@@ -491,11 +491,17 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             mediaIndex: mediaIndex,
             partIndex: partIndex
         ) ?? resolved.url
+        let originalFileSource = originalFileSource(
+            itemID: itemID,
+            mediaSourceID: selectedMediaSourceID,
+            client: client,
+            part: part,
+            container: media.container ?? part.container
+        )
         let localRemuxSource = localRemuxSourceDescriptor(
             itemID: itemID,
             mediaSourceID: media.id.map(String.init),
-            client: client,
-            part: part,
+            originalSource: originalFileSource,
             referencePlaybackURL: referenceURL,
             referencePlaySessionID: transcodeSessionID,
             durationSeconds: mappedItem.runtime,
@@ -522,6 +528,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
                 mediaAudioProfile: media.audioProfile,
                 mediaVideoDisplayTitle: media.videoStreamDisplayTitle
             ),
+            originalFileSource: originalFileSource,
             localRemuxSource: localRemuxSource,
             scrubPreview: scrubPreview(
                 for: part,
@@ -762,8 +769,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     func localRemuxSourceDescriptor(
         itemID: String,
         mediaSourceID: String?,
-        client: PlexClient,
-        part: PlexPart,
+        originalSource: PlaybackSource?,
         referencePlaybackURL: URL?,
         referencePlaySessionID: String,
         durationSeconds: TimeInterval?,
@@ -772,8 +778,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         mediaAudioProfile: String?,
         mediaVideoDisplayTitle: String?
     ) -> LocalRemuxSourceDescriptor? {
-        guard let key = part.key,
-              let originalURL = client.downloadURL(forPartKey: key),
+        guard let originalSource,
               let metadata = Self.sourceMetadata(
                 container: container,
                 streams: streams,
@@ -782,15 +787,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
               ) else {
             return nil
         }
-        guard let originalLocator = try? authenticatedPlaybackLocator(
-            itemID: itemID,
-            mediaSourceID: mediaSourceID,
-            url: originalURL,
-            deliveryMode: .directFile,
-            purpose: .originalFile,
-            playSessionID: nil,
-            formatHint: container
-        ), let referencePlaybackURL,
+        guard let referencePlaybackURL,
               let referenceLocator = try? authenticatedPlaybackLocator(
                   itemID: itemID,
                   mediaSourceID: mediaSourceID,
@@ -806,12 +803,35 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             itemID: itemID,
             mediaSourceID: mediaSourceID,
             provider: .plex,
-            originalSource: .authenticatedHTTP(originalLocator),
+            originalSource: originalSource,
             referencePlaybackSource: .authenticatedHTTP(referenceLocator),
             durationSeconds: durationSeconds,
             byteRangeSupported: true,
             sourceMetadata: metadata
         )
+    }
+
+    private func originalFileSource(
+        itemID: String,
+        mediaSourceID: String?,
+        client: PlexClient,
+        part: PlexPart,
+        container: String?
+    ) -> PlaybackSource? {
+        guard let key = part.key,
+              let originalURL = client.downloadURL(forPartKey: key),
+              let locator = try? authenticatedPlaybackLocator(
+                  itemID: itemID,
+                  mediaSourceID: mediaSourceID,
+                  url: originalURL,
+                  deliveryMode: .directFile,
+                  purpose: .originalFile,
+                  playSessionID: nil,
+                  formatHint: container
+              ) else {
+            return nil
+        }
+        return .authenticatedHTTP(locator)
     }
 
     func authenticatedPlaybackLocator(

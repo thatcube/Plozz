@@ -24,5 +24,46 @@ final class PosterCardPresentationTests: XCTestCase {
             XCTAssertTrue(PosterCardPresentation.showsPlaybackIndicators(for: kind))
         }
     }
+
+    func testProgressTakesPriorityOverWatchedBadge() {
+        let item = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            playedPercentage: 0.5,
+            isPlayed: true
+        )
+
+        XCTAssertTrue(MediaPlaybackIndicatorPresentation.showsProgress(for: item))
+        XCTAssertFalse(
+            MediaPlaybackIndicatorPresentation.showsWatchedBadge(
+                for: item,
+                hidesStatus: false
+            )
+        )
+    }
+
+    func testUnwatchedFlagOnlyShowsBeforePlaybackStarts() {
+        let untouched = MediaItem(id: "new", title: "New", kind: .episode)
+        let started = MediaItem(
+            id: "started",
+            title: "Started",
+            kind: .episode,
+            resumePosition: 12
+        )
+
+        XCTAssertTrue(
+            MediaPlaybackIndicatorPresentation.showsUnwatchedFlag(
+                for: untouched,
+                hidesStatus: false
+            )
+        )
+        XCTAssertFalse(
+            MediaPlaybackIndicatorPresentation.showsUnwatchedFlag(
+                for: started,
+                hidesStatus: false
+            )
+        )
+    }
 }
 #endif

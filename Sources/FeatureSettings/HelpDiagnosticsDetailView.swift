@@ -33,7 +33,8 @@ struct HelpDiagnosticsDetailView: View {
             appVersion: appVersion,
             appBuild: appBuild,
             providers: providerSummary,
-            repoURL: repoURL
+            repoURL: repoURL,
+            recentLogTail: PlozzLog.recentLogText(limit: 8)
         )
     }
 
@@ -209,111 +210,4 @@ struct HelpDiagnosticsDetailView: View {
     }
 }
 
-/// Builds the pre-filled GitHub "new issue" link (and its human-readable short
-/// form) plus the small, non-secret environment block embedded in the issue
-/// body. Kept as a value type — no view state — so the URL construction is easy
-/// to reason about and safe to unit test.
-struct DiagnosticsReport {
-    let appVersion: String
-    let appBuild: String
-    let providers: String
-    let repoURL: String
-
-    /// tvOS version as `major.minor(.patch)`.
-    var systemVersion: String {
-        let v = ProcessInfo.processInfo.operatingSystemVersion
-        return v.patchVersion == 0
-            ? "\(v.majorVersion).\(v.minorVersion)"
-            : "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
-    }
-
-    /// Hardware identifier, e.g. `AppleTV14,1`.
-    var deviceModel: String {
-        var info = utsname()
-        uname(&info)
-        let mirror = Mirror(reflecting: info.machine)
-        let bytes = mirror.children.compactMap { $0.value as? Int8 }.filter { $0 != 0 }.map { UInt8(bitPattern: $0) }
-        let model = String(decoding: bytes, as: UTF8.self)
-        return model.isEmpty ? "Apple TV" : model
-    }
-
-    /// The environment block appended to every report (non-secret only).
-    var environmentBlock: String {
-        """
-        - Plozz: \(appVersion) (build \(appBuild))
-        - tvOS: \(systemVersion)
-        - Device: \(deviceModel)
-        - Provider(s): \(providers)
-        """
-    }
-
-    /// A tiny tail of the most recent redacted log lines, folded into the issue
-    /// so a maintainer sees roughly what Plozz was doing right before the report
-    /// — without the tester sending anything separately. Deliberately capped hard
-    /// (a few hundred chars): the whole issue body is encoded into the scannable
-    /// QR code, so a long tail would make the QR too dense to scan across a room.
-    /// For the *full* log, testers use "Send to Developer" on Recent Activity.
-    var recentLogTail: String {
-        let raw = PlozzLog.recentLogText(limit: 8)
-        guard !raw.isEmpty else { return "" }
-        // Keep only the last ~400 chars so the QR stays comfortably scannable.
-        return raw.count > 400 ? "…" + String(raw.suffix(400)) : raw
-    }
-
-    private var issueTitle: String { "[Bug] " }
-
-    private var issueBody: String {
-        var body = """
-        **What happened?**
-
-
-        **Steps to reproduce**
-        1.\u{0020}
-
-        **What did you expect?**
-
-
-        ---
-        _Environment (auto-filled by Plozz — please keep):_
-        \(environmentBlock)
-        """
-
-        let tail = recentLogTail
-        if !tail.isEmpty {
-            body += """
-
-
-            <details><summary>Recent activity (auto-filled)</summary>
-
-            ```
-            \(tail)
-            ```
-            </details>
-            """
-        }
-        return body
-    }
-
-    /// Pre-filled `issues/new` URL. Uses `URLComponents`/`queryItems` so the
-    /// title and body are percent-encoded correctly.
-    var newIssueURLString: String {
-        let base = repoURL.hasSuffix("/") ? String(repoURL.dropLast()) : repoURL
-        guard var comps = URLComponents(string: base + "/issues/new") else {
-            return base + "/issues/new"
-        }
-        comps.queryItems = [
-            URLQueryItem(name: "labels", value: "bug"),
-            URLQueryItem(name: "title", value: issueTitle),
-            URLQueryItem(name: "body", value: issueBody)
-        ]
-        return comps.url?.absoluteString ?? (base + "/issues/new")
-    }
-
-    /// Human-readable short form to type manually (no query string).
-    var newIssueShortURL: String {
-        let base = repoURL.hasSuffix("/") ? String(repoURL.dropLast()) : repoURL
-        let host = base.replacingOccurrences(of: "https://", with: "")
-        return host + "/issues/new"
-    }
-}
 #endif

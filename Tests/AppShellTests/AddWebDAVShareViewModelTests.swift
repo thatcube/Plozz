@@ -3,6 +3,7 @@ import CoreModels
 import FeatureAuth
 import Foundation
 import MediaTransportHTTP
+import MediaTransportWebDAV
 @testable import AppShell
 import XCTest
 

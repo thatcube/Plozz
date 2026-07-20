@@ -1,5 +1,5 @@
 import CoreModels
-@testable import FeatureAuth
+@testable import FeatureAuthCore
 import Foundation
 import XCTest
 

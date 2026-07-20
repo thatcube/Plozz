@@ -103,7 +103,7 @@ struct ScrubBar: View {
     /// translucent-fill fallback on older systems.
     @ViewBuilder
     private func glassTrack(height: CGFloat) -> some View {
-        if #available(tvOS 26.0, *) {
+        if #available(iOS 26.0, tvOS 26.0, *) {
             Capsule()
                 .fill(.clear)
                 .frame(height: height)
@@ -144,7 +144,7 @@ struct ScrubBar: View {
             // preview hugs the bar.
             let thumbnailLift: CGFloat = 34
             Group {
-                if #available(tvOS 26.0, *) {
+                if #available(iOS 26.0, tvOS 26.0, *) {
                     content
                         .padding(border)
                         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: corner + border, style: .continuous))
@@ -219,13 +219,20 @@ extension AnyTransition {
     }
 }
 
+enum PlozzMoveCommandDirection {
+    case up
+    case down
+    case left
+    case right
+}
+
 extension View {
     /// Applies the system Liquid Glass button style (tvOS 26+), falling back to
     /// the bordered styles on older systems. `prominent` highlights the active
     /// category / enabled toggle.
     @ViewBuilder
     func playerGlassButton(prominent: Bool) -> some View {
-        if #available(tvOS 26.0, *) {
+        if #available(iOS 26.0, tvOS 26.0, *) {
             if prominent {
                 buttonStyle(.glassProminent)
             } else {
@@ -256,7 +263,7 @@ struct PanelGlassBackground: ViewModifier {
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: cornerRadius, style: .continuous) }
 
     func body(content: Content) -> some View {
-        if #available(tvOS 26.0, *) {
+        if #available(iOS 26.0, tvOS 26.0, *) {
             content
                 .glassEffect(.regular, in: shape)
                 .overlay(shape.stroke(.white.opacity(0.12), lineWidth: 1))
@@ -304,3 +311,57 @@ struct SpeedButtonLeadingKey: PreferenceKey {
     }
 }
 #endif
+
+extension View {
+    @ViewBuilder
+    func plozzFocusSection() -> some View {
+        #if os(tvOS)
+        focusSection()
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func plozzRemoteCommands(
+        onExit: @escaping () -> Void,
+        onPlayPause: @escaping () -> Void,
+        onMove: @escaping (PlozzMoveCommandDirection) -> Void
+    ) -> some View {
+        #if os(tvOS)
+        self
+            .onExitCommand(perform: onExit)
+            .onPlayPauseCommand(perform: onPlayPause)
+            .onMoveCommand { direction in
+                switch direction {
+                case .up: onMove(.up)
+                case .down: onMove(.down)
+                case .left: onMove(.left)
+                case .right: onMove(.right)
+                @unknown default: break
+                }
+            }
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func plozzMoveCommand(
+        perform action: @escaping (PlozzMoveCommandDirection) -> Void
+    ) -> some View {
+        #if os(tvOS)
+        onMoveCommand { direction in
+            switch direction {
+            case .up: action(.up)
+            case .down: action(.down)
+            case .left: action(.left)
+            case .right: action(.right)
+            @unknown default: break
+            }
+        }
+        #else
+        self
+        #endif
+    }
+}

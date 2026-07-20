@@ -1,6 +1,6 @@
 import XCTest
 import CoreModels
-@testable import FeatureAuth
+@testable import FeatureAuthCore
 
 final class SessionStateMachineTests: XCTestCase {
     private let server = MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://h")!, provider: .jellyfin)

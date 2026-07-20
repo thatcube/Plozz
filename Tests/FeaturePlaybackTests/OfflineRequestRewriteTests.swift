@@ -43,6 +43,7 @@ final class OfflineRequestRewriteTests: XCTestCase {
             streamURL: URL(string: "https://example.test/movie.m3u8")!,
             isTranscoding: true)
         request.playbackSource = .networkFile(try networkFileLocator())
+        request.originalFileSource = .networkFile(try networkFileLocator())
         request.externalAudioURL = URL(string: "https://example.test/audio.m4a")!
 
         let rewritten = PlayerViewModel.applyingOfflineRewrite(to: request, localURL: localURL())
@@ -52,6 +53,7 @@ final class OfflineRequestRewriteTests: XCTestCase {
         // cleared and it is a non-manifest direct play.
         XCTAssertEqual(rewritten.streamURL, localURL())
         XCTAssertNil(rewritten.playbackSource)
+        XCTAssertNil(rewritten.originalFileSource)
         XCTAssertNil(rewritten.externalAudioURL)
         XCTAssertNil(rewritten.localRemuxSource)
         XCTAssertFalse(rewritten.isManifestStream)
@@ -106,6 +108,33 @@ final class OfflineRequestRewriteTests: XCTestCase {
 
         let result = PlayerViewModel.applyingOfflineRewrite(to: request, localURL: nil)
         XCTAssertEqual(result, request)
+    }
+
+    @MainActor
+    func testOfflineFastPathOnlyAppliesToTheRequestedItem() {
+        let current = MediaItem(id: "episode-1", title: "Episode 1", kind: .episode)
+
+        XCTAssertTrue(
+            PlayerViewModel.shouldUseOfflineFastPath(
+                offlineItem: current,
+                requestedItemID: "episode-1",
+                forceTranscode: false
+            )
+        )
+        XCTAssertFalse(
+            PlayerViewModel.shouldUseOfflineFastPath(
+                offlineItem: current,
+                requestedItemID: "episode-2",
+                forceTranscode: false
+            )
+        )
+        XCTAssertFalse(
+            PlayerViewModel.shouldUseOfflineFastPath(
+                offlineItem: current,
+                requestedItemID: "episode-1",
+                forceTranscode: true
+            )
+        )
     }
 }
 #endif

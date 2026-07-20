@@ -66,17 +66,42 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
     let scrubPreview: ScrubPreviewSource?
     let authenticatedHTTPResolver:
         (any AuthenticatedHTTPResourceResolving)?
+    let showsSharedControls: Bool
     let themePalette: ThemePaletteBox
+
+    init(
+        engine: any VideoEngine,
+        model: PlayerControlsModel,
+        subtitleModel: LiveSubtitleModel,
+        actions: PlayerActions,
+        scrubPreview: ScrubPreviewSource?,
+        authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)?,
+        showsSharedControls: Bool = true,
+        themePalette: ThemePaletteBox
+    ) {
+        self.engine = engine
+        self.model = model
+        self.subtitleModel = subtitleModel
+        self.actions = actions
+        self.scrubPreview = scrubPreview
+        self.authenticatedHTTPResolver = authenticatedHTTPResolver
+        self.showsSharedControls = showsSharedControls
+        self.themePalette = themePalette
+    }
 
     func makeUIViewController(context: Context) -> PlayerInputViewController {
         let controller = PlayerInputViewController(engine: engine, model: model, actions: actions)
-        controller.configureScrubPreview(
-            scrubPreview,
-            authenticatedHTTPResolver: authenticatedHTTPResolver
-        )
+        if showsSharedControls {
+            controller.configureScrubPreview(
+                scrubPreview,
+                authenticatedHTTPResolver: authenticatedHTTPResolver
+            )
+        }
         controller.attachVideoSurface()
         controller.attachSubtitleOverlay(subtitleModel)
-        controller.attachControls(themePalette: themePalette)
+        if showsSharedControls {
+            controller.attachControls(themePalette: themePalette)
+        }
         return controller
     }
 
@@ -154,10 +179,9 @@ final class PlayerInputViewController: UIViewController {
     var actions: PlayerActions
     private let engine: any VideoEngine
     private let model: PlayerControlsModel
-    private var thumbnailLoader: (any ScrubThumbnailProviding)?
+    private var scrubPreviewCoordinator: ScrubPreviewCoordinator?
 
     private var autoHideTask: Task<Void, Never>?
-    private var thumbnailTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var skipHintTask: Task<Void, Never>?
     /// Interprets Siri-Remote pan samples into scrub decisions (axis lock,
@@ -299,33 +323,31 @@ final class PlayerInputViewController: UIViewController {
         authenticatedHTTPResolver:
             (any AuthenticatedHTTPResourceResolving)?
     ) {
-        thumbnailTask?.cancel()
-        thumbnailTask = nil
-        thumbnailLoader = nil
+        scrubPreviewCoordinator?.clear()
+        scrubPreviewCoordinator = nil
         model.previewImage = nil
 
         guard let source else {
             PlozzLog.playback.debug("Scrub preview unavailable: provider did not supply a source")
             return
         }
-        guard source.isUsable else {
+        guard let coordinator = ScrubPreviewCoordinator(
+            source: source,
+            authenticatedHTTPResolver: authenticatedHTTPResolver
+        ) else {
             PlozzLog.playback.debug("Scrub preview unavailable: source exists but is not usable")
             return
         }
+        coordinator.onImageChange = { [weak self] image in
+            self?.model.previewImage = image
+        }
+        scrubPreviewCoordinator = coordinator
         switch source {
         case .tiled(let manifest):
-            thumbnailLoader = TrickplayThumbnailLoader(
-                manifest: manifest,
-                authenticatedHTTPResolver: authenticatedHTTPResolver
-            )
             PlozzLog.playback.debug(
                 "Configured Jellyfin tiled scrub preview (\(manifest.tileResources.count) tiles, intervalMs=\(manifest.intervalMs))"
             )
-        case .plexBIF(let resource):
-            thumbnailLoader = PlexBIFThumbnailLoader(
-                resource: resource,
-                authenticatedHTTPResolver: authenticatedHTTPResolver
-            )
+        case .plexBIF:
             PlozzLog.playback.debug("Configured Plex BIF scrub preview")
         }
         prefetchThumbnailsSoon()
@@ -336,12 +358,12 @@ final class PlayerInputViewController: UIViewController {
     /// like it's fighting an empty timeline while the data loads. Delayed slightly
     /// so initial video buffering gets first claim on bandwidth.
     private func prefetchThumbnailsSoon() {
-        let loader = thumbnailLoader
-        guard loader != nil else { return }
+        let coordinator = scrubPreviewCoordinator
+        guard coordinator != nil else { return }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard let self, self.thumbnailLoader === loader else { return }
-            loader?.prefetch()
+            guard let self, self.scrubPreviewCoordinator === coordinator else { return }
+            coordinator?.prefetch()
         }
     }
 
@@ -926,7 +948,7 @@ final class PlayerInputViewController: UIViewController {
         // only the loading spinner.
         if resumeAfterScrub { actions.togglePlayPause() }
         model.isScrubbing = false
-        model.previewImage = nil
+        scrubPreviewCoordinator?.clear()
         model.seekIndicatorOnLeft = false
         if ScrubDiagnostics.forceScrubRefresh { engine.setScrubRefreshBoost(false) }
         scrubDiag.end("commit")
@@ -959,7 +981,7 @@ final class PlayerInputViewController: UIViewController {
         // rationale as commitScrub) so the pause glyph never flickers in.
         if resumeAfterScrub { actions.togglePlayPause() }
         model.isScrubbing = false
-        model.previewImage = nil
+        scrubPreviewCoordinator?.clear()
         if ScrubDiagnostics.forceScrubRefresh { engine.setScrubRefreshBoost(false) }
         scrubDiag.end("cancel")
         scheduleAutoHide()
@@ -967,38 +989,11 @@ final class PlayerInputViewController: UIViewController {
 
     @discardableResult
     private func updatePreviewThumbnail() -> Bool {
-        guard let loader = thumbnailLoader else {
+        guard let scrubPreviewCoordinator else {
             model.previewImage = nil
             return true
         }
-        let requestedSeconds = model.scrubSeconds
-        // Instant swap when the tile is already cached (the common case while
-        // dragging within one tile) keeps scrubbing fluid; otherwise fetch async.
-        if let cached = loader.cachedThumbnail(forSeconds: requestedSeconds) {
-            model.previewImage = cached
-            return true
-        }
-        thumbnailTask?.cancel()
-        thumbnailTask = Task { [weak self] in
-            let requestedImage = await loader.thumbnail(forSeconds: requestedSeconds)
-            guard let self, !Task.isCancelled, self.model.isScrubbing else { return }
-
-            let currentSeconds = self.model.scrubSeconds
-            // If the scrub head moved while this request was in flight, refresh for
-            // the current position so we don't drop previews on fast pans.
-            let image: CGImage?
-            if abs(currentSeconds - requestedSeconds) < 0.001 {
-                image = requestedImage
-            } else if let cachedCurrent = loader.cachedThumbnail(forSeconds: currentSeconds) {
-                image = cachedCurrent
-            } else {
-                image = await loader.thumbnail(forSeconds: currentSeconds)
-            }
-
-            guard !Task.isCancelled, self.model.isScrubbing else { return }
-            self.model.previewImage = image
-        }
-        return false
+        return scrubPreviewCoordinator.update(for: model.scrubSeconds)
     }
 
     // MARK: Button handlers
@@ -1276,7 +1271,6 @@ final class PlayerInputViewController: UIViewController {
 
     deinit {
         autoHideTask?.cancel()
-        thumbnailTask?.cancel()
         refreshTask?.cancel()
         skipHintTask?.cancel()
     }

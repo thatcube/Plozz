@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import FeatureHomeCore
 
 /// A sparse, lazily-loaded poster grid for browsing a single library. Each cell
 /// is the shared `CoreUI.PosterCardView` (`.poster` style) — identical to Home's
@@ -218,7 +219,14 @@ public struct LibraryBrowseView: View {
         Binding(
             get: { viewModel.sort.field },
             set: { field in
-                Task { await viewModel.setSort(CoreModels.SortDescriptor(field: field, direction: viewModel.sort.direction)) }
+                Task {
+                    await viewModel.setSort(
+                        CoreModels.SortDescriptor(
+                            field: field,
+                            direction: field.defaultDirection
+                        )
+                    )
+                }
             }
         )
     }

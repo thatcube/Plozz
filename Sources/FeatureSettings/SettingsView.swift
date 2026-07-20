@@ -397,7 +397,7 @@ public struct SettingsView: View {
             // Per-profile "Your Libraries": who you watch as + what shows on THIS
             // profile's Home. The personal mirror of This Apple TV › Servers.
             // Its second line glances the household's server sign-ins.
-            navRow("Your Servers & Libraries", icon: "rectangle.stack",
+            navRow(SettingsCopy.libraries, icon: "rectangle.stack",
                    value: nil,
                    route: .myLibraries) {
                 signedInStrip
@@ -503,7 +503,7 @@ public struct SettingsView: View {
 
     /// About info + Attributions entry + Sign Out, rendered INLINE at the
     /// bottom of the main Settings page. About no longer drills in — only
-    /// "Attributions & Licensing" pushes one level deeper. Spacing here mirrors
+    /// "Attributions" pushes one level deeper. Spacing here mirrors
     /// the roomy cadence of the About panel itself.
     @ViewBuilder
     private var aboutAndSignOut: some View {
@@ -513,7 +513,7 @@ public struct SettingsView: View {
             SettingsAboutSection(version: appVersion, build: appBuild, repoURL: repoURL)
 
             // The one acceptable deeper page: open-source credits & licensing.
-            navRow("Attributions & Licensing", icon: "doc.text.magnifyingglass",
+            navRow(SettingsCopy.attributions, icon: "doc.text.magnifyingglass",
                    value: nil,
                    route: .attributions)
 
@@ -728,7 +728,7 @@ public struct SettingsView: View {
     }
 
     /// Compact, read-only glance of the servers **this profile is watching**,
-    /// rendered as the SECOND line of the "Your Servers & Libraries" row. It
+    /// rendered as the SECOND line of the "Libraries" row. It
     /// mirrors the page's master toggles, so turning a server off inside drops it
     /// here too — the entry point is a truthful preview, not a household dump.
     /// Server-forward (provider logo + server name) to match the redesigned cards;

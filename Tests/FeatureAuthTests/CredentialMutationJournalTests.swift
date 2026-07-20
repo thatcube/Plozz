@@ -1,6 +1,6 @@
 import XCTest
 import CoreModels
-@testable import FeatureAuth
+@testable import FeatureAuthCore
 
 final class CredentialMutationJournalTests: XCTestCase {
     private let oldRevision = CredentialRevision(

@@ -3,12 +3,14 @@ import SwiftUI
 #if canImport(AVFoundation)
 import AVFoundation
 #endif
+import AppRuntime
 import CoreModels
 import CoreNetworking
 import CoreUI
 import CrashReporting
 import FeatureAuth
 import FeatureDiscovery
+import FeatureDiscoveryCore
 import FeatureHome
 import FeaturePlayback
 import MetadataKit

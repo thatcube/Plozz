@@ -354,6 +354,13 @@ public enum SortField: String, CaseIterable, Codable, Sendable {
         case .random: return "Random"
         }
     }
+
+    /// Natural first direction when a user selects this field. Alphabetical names
+    /// start A→Z; dates, ratings, runtime, and random order put the newest/highest
+    /// values first.
+    public var defaultDirection: SortDirection {
+        self == .name ? .ascending : .descending
+    }
 }
 
 /// The direction a `SortField` is ordered in.

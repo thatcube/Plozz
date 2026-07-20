@@ -42,6 +42,23 @@ final class PlozzMetricsTests: XCTestCase {
         XCTAssertEqual(m.landscapeCardSlotWidth, m.landscapeWidth + m.cardInset * 2)
     }
 
+    func testCardSlotsExactlyMatchRenderedSurfaceWidths() {
+        let metrics = PlozzMetrics.touch(density: .standard)
+
+        XCTAssertEqual(
+            metrics.cardSlotWidth(for: .poster, cardStyle: .framed),
+            metrics.posterWidth + metrics.cardInset * 2
+        )
+        XCTAssertEqual(
+            metrics.cardSlotWidth(for: .poster, cardStyle: .borderless),
+            metrics.posterWidth + metrics.borderlessCardSideMargin * 2
+        )
+        XCTAssertEqual(
+            metrics.cardSlotWidth(for: .landscape, cardStyle: .framed),
+            metrics.landscapeWidth + metrics.cardInset * 2
+        )
+    }
+
     func testCardStatusCueScalesWithoutBecomingTooSmall() {
         let micro = PlozzMetrics(density: .micro)
         let standard = PlozzMetrics(density: .standard)

@@ -18,6 +18,10 @@ public struct ThemePalette: Equatable, Sendable {
     /// Bottom stop of the vertical background gradient. The two stay close in
     /// value so the shift reads as a soft, low-contrast wash.
     public let backgroundSecondary: Color
+    /// Solid page color used by modal Settings surfaces. Kept separate from the
+    /// app gradient so iOS/iPadOS Settings does not stack a gradient over the
+    /// already-themed app beneath it.
+    public let settingsBackground: Color
     /// Fill used for card / surface chrome.
     public let cardSurface: Color
     /// Hairline border drawn around a card surface.
@@ -30,19 +34,19 @@ public struct ThemePalette: Equatable, Sendable {
     public let accent: Color
     /// Text colour for inline error / failure messaging (wrong credentials,
     /// unreachable server, etc). Theme-aware so it reads as a clear "danger" red
-    /// against each background — brighter on dark and Pure Black, deeper on light.
+    /// against each background — brighter on dark and Black, deeper on light.
     public let errorText: Color
     /// Optional accent glow bloomed from the top-centre of the background.
-    /// `nil` keeps a theme flat (e.g. Pure Black stays pure black).
+    /// `nil` keeps a theme flat (e.g. Black stays free of a colored glow).
     public let topGlow: Color?
 
     // MARK: Focused-card glass treatment (ported 1:1 from Twozz)
 
     /// Tint blended into a focused card's Liquid Glass so focus reads as a clear
-    /// lightness shift — not just the scale bump. Dark and Pure Black brighten toward
+    /// lightness shift — not just the scale bump. Dark and Black brighten toward
     /// white; Light darkens toward black, so the focused tile always separates
-    /// from the page behind it. Pure Black uses a lighter wash than Dark because its
-    /// pure-black backdrop makes the same white tint read stronger. Only affects
+    /// from the page behind it. Black uses a lighter wash than Dark because its
+    /// near-black backdrop makes the same white tint read stronger. Only affects
     /// the translucent-glass path; the Reduce Transparency path uses `liftSurface`.
     public let focusedCardGlassTint: Color
     /// Opaque fill behind a *focused* card when glass is disabled (Reduce
@@ -65,6 +69,7 @@ public struct ThemePalette: Equatable, Sendable {
     init(
         backgroundBase: Color,
         backgroundSecondary: Color,
+        settingsBackground: Color,
         cardSurface: Color,
         cardBorder: Color,
         primaryText: Color,
@@ -80,6 +85,7 @@ public struct ThemePalette: Equatable, Sendable {
     ) {
         self.backgroundBase = backgroundBase
         self.backgroundSecondary = backgroundSecondary
+        self.settingsBackground = settingsBackground
         self.cardSurface = cardSurface
         self.cardBorder = cardBorder
         self.primaryText = primaryText
@@ -137,6 +143,7 @@ public extension ThemePalette {
     static let dark = ThemePalette(
         backgroundBase: Color(red: 0.13, green: 0.13, blue: 0.14),
         backgroundSecondary: Color(red: 0.09, green: 0.09, blue: 0.10),
+        settingsBackground: Color(red: 0.09, green: 0.09, blue: 0.10),
         cardSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
         cardBorder: Color.white.opacity(0.16),
         primaryText: .white,
@@ -151,12 +158,13 @@ public extension ThemePalette {
         isLight: false
     )
 
-    /// Pure-black theme. Matches Twozz's `ThemePalette.pureBlack`: both stops
-    /// sit at pure black with no glow.
+    /// Near-black theme. It stays visibly darker than Dark while keeping pixels
+    /// slightly active to reduce OLED off-to-on smearing during motion.
     static let pureBlack = ThemePalette(
-        backgroundBase: .black,
-        backgroundSecondary: .black,
-        cardSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
+        backgroundBase: Color(red: 0.025, green: 0.025, blue: 0.03),
+        backgroundSecondary: Color(red: 0.012, green: 0.012, blue: 0.016),
+        settingsBackground: Color(red: 0.012, green: 0.012, blue: 0.016),
+        cardSurface: Color(red: 0.045, green: 0.045, blue: 0.055),
         cardBorder: Color.white.opacity(0.16),
         primaryText: .white,
         secondaryText: Color.white.opacity(0.62),
@@ -165,19 +173,19 @@ public extension ThemePalette {
         topGlow: nil,
         focusedCardGlassTint: Color.white.opacity(0.10),
         liftSurface: .white,
-        cardOpaqueSurface: .black,
-        cardOpaqueBorder: Color.white.opacity(0.16),
+        cardOpaqueSurface: Color(red: 0.045, green: 0.045, blue: 0.055),
+        cardOpaqueBorder: Color.white.opacity(0.12),
         isLight: false
     )
 
-    /// Light theme. Uses the exact two-stop background gradient from my Twozz
-    /// `ThemePalette.light` (a soft off-white wash), with the top glow
-    /// recoloured to Plozz's brand blue (Twozz uses purple).
+    /// Light app theme keeps the shared app gradient and glow. Settings uses the
+    /// separate neutral grouped-page token instead.
     static let light = ThemePalette(
         backgroundBase: Color(white: 1.0),
         backgroundSecondary: Color(white: 0.97),
+        settingsBackground: Color(red: 0.949, green: 0.949, blue: 0.969),
         cardSurface: .white,
-        cardBorder: Color.black.opacity(0.12),
+        cardBorder: Color.black.opacity(0.08),
         primaryText: Color.black.opacity(0.90),
         secondaryText: Color.black.opacity(0.60),
         accent: ThemePalette.brandAccent,
@@ -186,7 +194,7 @@ public extension ThemePalette {
         focusedCardGlassTint: Color.black.opacity(0.05),
         liftSurface: .white,
         cardOpaqueSurface: .white,
-        cardOpaqueBorder: Color.black.opacity(0.12),
+        cardOpaqueBorder: Color.black.opacity(0.08),
         isLight: true
     )
 
@@ -206,7 +214,7 @@ public extension ThemePalette {
 
 public extension AppTheme {
     /// The colour scheme to force on the SwiftUI view tree. `nil` (System)
-    /// follows the device; Pure Black rides the dark scheme.
+    /// follows the device; Black rides the dark scheme.
     var preferredColorScheme: ColorScheme? {
         switch self {
         case .system: return nil
@@ -222,8 +230,8 @@ public extension AppTheme {
 /// low-contrast tones, with an optional accent glow bloomed from the top-centre.
 /// Ported 1:1 from my Twozz `AppBackground` (same `LinearGradient` + top-glow
 /// `RadialGradient` with `endRadius: 820`), recoloured to Plozz's brand blue.
-/// Theme-aware — colours come entirely from the palette, so Pure Black renders pure
-/// black and Light renders a soft white wash.
+/// Theme-aware — colours come entirely from the palette, so Black renders a
+/// near-black wash and Light renders a soft white wash.
 public struct AppBackground: View {
     private let palette: ThemePalette
 

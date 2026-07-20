@@ -1199,6 +1199,26 @@ final class PlexProviderMappingTests: XCTestCase {
                 $0.name.localizedCaseInsensitiveContains("token")
             }
         )
+        guard case .some(.authenticatedHTTP(let downloadableOriginal)) =
+            request.originalFileSource else {
+            return XCTFail("expected a downloadable Plex original")
+        }
+        XCTAssertEqual(downloadableOriginal.deliveryMode, .directFile)
+        XCTAssertEqual(downloadableOriginal.purpose, .originalFile)
+        XCTAssertEqual(
+            downloadableOriginal.resource.path,
+            "/library/parts/2/16000/file.mkv"
+        )
+        XCTAssertEqual(
+            downloadableOriginal.resource.queryItems.first {
+                $0.name == "download"
+            }?.value,
+            "1"
+        )
+        XCTAssertEqual(
+            request.downloadableOriginalSource,
+            request.originalFileSource
+        )
         let localRemux = try XCTUnwrap(request.localRemuxSource)
         guard case .authenticatedHTTP(let original) = localRemux.originalSource,
               case .authenticatedHTTP(let reference) = localRemux.referencePlaybackSource else {
@@ -1304,6 +1324,15 @@ final class PlexProviderMappingTests: XCTestCase {
         }
         XCTAssertEqual(
             original.resource.path,
+            "/library/parts/2/selected.mkv"
+        )
+        guard case .some(.authenticatedHTTP(let downloadableOriginal)) =
+            request.originalFileSource else {
+            return XCTFail("expected selected version's downloadable original")
+        }
+        XCTAssertEqual(downloadableOriginal.mediaSourceID, "22")
+        XCTAssertEqual(
+            downloadableOriginal.resource.path,
             "/library/parts/2/selected.mkv"
         )
     }

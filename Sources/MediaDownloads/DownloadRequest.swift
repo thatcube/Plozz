@@ -10,6 +10,7 @@ public struct DownloadRequest: Sendable {
     public var sourceKind: DownloadSourceKind
     public var quality: DownloadQuality
     public var directShareSource: DirectShareDownloadSource?
+    public var managedHTTPSource: ManagedHTTPDownloadSource?
     public var contentType: String?
     /// Explicit media file extension (e.g. `mkv`); when nil, derived from the
     /// source path or content type.
@@ -22,6 +23,7 @@ public struct DownloadRequest: Sendable {
         sourceKind: DownloadSourceKind,
         quality: DownloadQuality = .original,
         directShareSource: DirectShareDownloadSource? = nil,
+        managedHTTPSource: ManagedHTTPDownloadSource? = nil,
         contentType: String? = nil,
         fileExtension: String? = nil,
         snapshot: PinnedMediaSnapshot
@@ -31,9 +33,31 @@ public struct DownloadRequest: Sendable {
         self.sourceKind = sourceKind
         self.quality = quality
         self.directShareSource = directShareSource
+        self.managedHTTPSource = managedHTTPSource
         self.contentType = contentType
         self.fileExtension = fileExtension
         self.snapshot = snapshot
+    }
+
+    public static func managedHTTP(
+        identity: MediaIdentity,
+        source: ManagedHTTPDownloadSource,
+        snapshot: PinnedMediaSnapshot,
+        groupID: String? = nil,
+        contentType: String? = nil,
+        fileExtension: String? = nil,
+        quality: DownloadQuality = .original
+    ) -> DownloadRequest {
+        DownloadRequest(
+            identity: identity,
+            groupID: groupID,
+            sourceKind: .managedHTTP,
+            quality: quality,
+            managedHTTPSource: source,
+            contentType: contentType,
+            fileExtension: fileExtension,
+            snapshot: snapshot
+        )
     }
 
     /// Convenience for a direct-share download built from a fully-formed locator.

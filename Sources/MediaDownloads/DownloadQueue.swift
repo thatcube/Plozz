@@ -46,12 +46,14 @@ public actor DownloadQueue {
         self.maxAttempts = max(1, maxAttempts)
         self.backoff = backoff
         self.limiter = ConcurrencyLimiter(limit: policy.maxConcurrentDownloads)
+        (engine as? any DownloadPolicyApplying)?.applyDownloadPolicy(policy)
     }
 
     /// Updates the active policy (e.g. the user toggled Wi‑Fi‑only). Applies to
     /// the next scheduling decision; the concurrency cap is fixed at init.
     public func updatePolicy(_ policy: DownloadNetworkPolicy) {
         self.policy = policy
+        (engine as? any DownloadPolicyApplying)?.applyDownloadPolicy(policy)
     }
 
     // MARK: - Enqueue
@@ -67,6 +69,7 @@ public actor DownloadQueue {
             quality: request.quality,
             status: .queued,
             directShareSource: request.directShareSource,
+            managedHTTPSource: request.managedHTTPSource,
             localFileName: request.makeLocalFileName(),
             contentType: request.contentType,
             snapshot: request.snapshot
@@ -98,7 +101,10 @@ public actor DownloadQueue {
 
     public func resume(identityKey: String) async {
         guard let record = await registry.record(forKey: identityKey),
-              record.status.isActive, record.status != .completed else { return }
+              record.status != .completed else { return }
+        if record.status == .failed {
+            try? await registry.setStatus(identityKey: identityKey, .queued)
+        }
         schedule(identityKey)
     }
 

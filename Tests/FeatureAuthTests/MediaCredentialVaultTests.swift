@@ -1,6 +1,6 @@
 import XCTest
 import CoreModels
-@testable import FeatureAuth
+@testable import FeatureAuthCore
 
 final class MediaCredentialVaultTests: XCTestCase {
     private let revision = CredentialRevision(

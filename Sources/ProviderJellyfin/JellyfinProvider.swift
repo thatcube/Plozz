@@ -723,6 +723,14 @@ public struct JellyfinProvider: MediaProvider {
             referencePlaybackLocator: playbackLocator,
             durationSeconds: mappedItem.runtime
         )
+        let originalFileLocator = try? authenticatedPlaybackLocator(
+            itemID: itemID,
+            source: originalSource,
+            playSessionID: info.PlaySessionId,
+            didRemux: false,
+            forceDirect: true,
+            purpose: .originalFile
+        )
 
         return PlaybackRequest(
             item: mappedItem,
@@ -734,6 +742,9 @@ public struct JellyfinProvider: MediaProvider {
             isTranscoding: source.TranscodingUrl != nil,
             deliveryMode: Self.deliveryMode(transcoding: source.TranscodingUrl != nil, didRemux: didRemux),
             sourceMetadata: mappedSourceMetadata,
+            originalFileSource: originalFileLocator.map {
+                .authenticatedHTTP($0)
+            },
             localRemuxSource: localRemuxSource,
             scrubPreview: scrubPreview(itemID: itemID, source: source, trickplay: detail.Trickplay),
             sourceProvider: kind,
@@ -1173,7 +1184,8 @@ public struct JellyfinProvider: MediaProvider {
         source: MediaSourceInfo,
         playSessionID: String?,
         didRemux: Bool,
-        forceDirect: Bool = false
+        forceDirect: Bool = false,
+        purpose: AuthenticatedHTTPResourcePurpose = .mediaStream
     ) throws -> AuthenticatedHTTPPlaybackLocator {
         let container = source.Container ?? "mp4"
         let sourceID = source.Id ?? itemID
@@ -1205,6 +1217,7 @@ public struct JellyfinProvider: MediaProvider {
             mediaSourceID: sourceID,
             deliveryMode: deliveryMode,
             formatHint: MediaFormatHint(container: container),
+            purpose: purpose,
             resource: resource,
             playSessionID: playSessionID
         )
@@ -1227,7 +1240,8 @@ public struct JellyfinProvider: MediaProvider {
             source: source,
             playSessionID: playSessionID,
             didRemux: false,
-            forceDirect: true
+            forceDirect: true,
+            purpose: .originalFile
         )
         return LocalRemuxSourceDescriptor(
             itemID: itemID,

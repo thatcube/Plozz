@@ -3,30 +3,6 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-func preferredDetailSource(
-    sourceOverride: String?,
-    libraryOrigin: String?,
-    itemSourceAccountID: String?,
-    sources: [MediaSourceRef],
-    serverChoices: [MediaSourceRef],
-    capabilities: MediaCapabilities
-) -> MediaSourceRef? {
-    guard serverChoices.count > 1 || sources.count > 1 else { return nil }
-    if let sourceOverride,
-       let match = serverChoices.first(where: { $0.accountID == sourceOverride }) {
-        return match
-    }
-    if let libraryOrigin,
-       let match = serverChoices.first(where: { $0.accountID == libraryOrigin }) {
-        return match
-    }
-    return CrossSourceSelector.bestSelection(
-        from: serverChoices,
-        capabilities: capabilities,
-        preferring: itemSourceAccountID
-    )?.source ?? serverChoices.first ?? sources.first
-}
-
 /// Item detail screen: backdrop hero, metadata, Play/Resume, and children.
 public struct ItemDetailView: View {
     @State private var viewModel: ItemDetailViewModel
@@ -681,15 +657,13 @@ public struct ItemDetailView: View {
     /// source has no selectable versions (server picks). Computed against the
     /// *effective source's* versions so switching servers re-defaults correctly.
     private func effectiveVersionID(for item: MediaItem, in versions: [MediaVersion]) -> String? {
-        guard versions.count > 1 else { return nil }
-        if let versionOverride, versions.contains(where: { $0.id == versionOverride }) {
-            return versionOverride
-        }
-        let remembered = versionPreferences.preferredVersionID(forTitle: versionPreferenceKey(for: item))
-        if let remembered, versions.contains(where: { $0.id == remembered }) {
-            return remembered
-        }
-        return versions.recommendedSelection(for: capabilities)?.id
+        DetailPlaybackSelection.preferredVersionID(
+            for: item,
+            versions: versions,
+            versionOverride: versionOverride,
+            preferences: versionPreferences,
+            capabilities: capabilities
+        )
     }
 
     /// The server `Play` should target right now: the user's in-session server
@@ -708,12 +682,11 @@ public struct ItemDetailView: View {
         sources: [MediaSourceRef],
         serverChoices: [MediaSourceRef]
     ) -> MediaSourceRef? {
-        preferredDetailSource(
+        DetailPlaybackSelection.preferredSource(
             sourceOverride: sourceOverride,
             libraryOrigin: viewModel.originSourceAccountID,
             itemSourceAccountID: item.sourceAccountID,
             sources: sources,
-            serverChoices: serverChoices,
             capabilities: capabilities
         )
     }
@@ -723,12 +696,7 @@ public struct ItemDetailView: View {
     /// identical "Server" rows. Same-account siblings are surfaced in the
     /// VERSION picker instead.
     private func serverChoices(from sources: [MediaSourceRef]) -> [MediaSourceRef] {
-        var seen = Set<String>()
-        var result: [MediaSourceRef] = []
-        for source in sources where seen.insert(source.accountID).inserted {
-            result.append(source)
-        }
-        return result
+        DetailPlaybackSelection.serverChoices(from: sources)
     }
 
     /// The versions to offer in the version picker: every source that belongs to
@@ -742,10 +710,11 @@ public struct ItemDetailView: View {
         sources: [MediaSourceRef],
         activeAccountID: String?
     ) -> [MediaVersion] {
-        guard let activeAccountID else { return item.versions.sortedForPicker() }
-        let active = sources.filter { $0.accountID == activeAccountID }
-        guard !active.isEmpty else { return item.versions.sortedForPicker() }
-        return active.flatMap(\.versions).sortedForPicker()
+        DetailPlaybackSelection.versions(
+            for: item,
+            sources: sources,
+            activeAccountID: activeAccountID
+        )
     }
 
     /// Builds the retargeted item `Play` should launch — see
@@ -763,8 +732,8 @@ public struct ItemDetailView: View {
         activeAccountID: String?,
         versionID: String?
     ) -> MediaItem {
-        MediaItem.retargetedForPlayback(
-            item: item,
+        DetailPlaybackSelection.playItem(
+            for: item,
             sources: sources,
             activeAccountID: activeAccountID,
             versionID: versionID,
@@ -794,7 +763,7 @@ public struct ItemDetailView: View {
     /// Stable key for the per-title version preference. Episodes share their
     /// series' key so a whole show remembers one preferred version.
     private func versionPreferenceKey(for item: MediaItem) -> String {
-        item.seriesID ?? item.id
+        DetailPlaybackSelection.versionPreferenceKey(for: item)
     }
 }
 

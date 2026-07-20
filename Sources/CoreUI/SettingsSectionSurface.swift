@@ -3,6 +3,7 @@ import SwiftUI
 
 public struct SettingsSectionGroup<Content: View, Footer: View>: View {
     @Environment(\.themePalette) private var palette
+    @Environment(\.displayScale) private var displayScale
     private let title: String?
     private let content: Content
     private let footer: Footer
@@ -35,8 +36,9 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
                         if subview.id != subviews.last?.id {
-                            Divider()
-                                .overlay(palette.cardOpaqueBorder)
+                            Rectangle()
+                                .fill(palette.cardOpaqueBorder)
+                                .frame(height: hairlineWidth)
                                 .padding(.horizontal, 16)
                         }
                     }
@@ -48,7 +50,10 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
+                    .strokeBorder(
+                        palette.cardOpaqueBorder,
+                        lineWidth: hairlineWidth
+                    )
                     .allowsHitTesting(false)
             }
 
@@ -60,6 +65,10 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+    }
+
+    private var hairlineWidth: CGFloat {
+        1 / max(displayScale, 1)
     }
 }
 

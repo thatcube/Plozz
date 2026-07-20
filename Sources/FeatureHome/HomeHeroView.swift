@@ -339,7 +339,7 @@ struct HomeHeroView: View {
     /// primary action (a not-owned featured title with Seerr disconnected).
     private func primaryButton(for item: MediaItem) -> HeroButton? {
         switch heroCTA(for: item) {
-        case .play: return .play
+        case .play: return item.hasPlayableLibraryTarget() ? .play : nil
         case .request: return .request
         case .downloading, .requested: return .downloadStatus
         case .unavailable: return nil
@@ -1285,7 +1285,12 @@ struct HomeHeroView: View {
                     // (no `.onMoveCommand` here) so the tap can't be intercepted.
                     .onTapGesture { activateSelected() }
                     // Play/Pause is a shortcut straight to playback.
-                    .onPlayPauseCommand { noteInteraction(); if let item = current { onPlay(item) } }
+                    .onPlayPauseCommand {
+                        noteInteraction()
+                        if let item = current, primaryButton(for: item) == .play {
+                            onPlay(item)
+                        }
+                    }
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel(accessibilityLabel(for: item))

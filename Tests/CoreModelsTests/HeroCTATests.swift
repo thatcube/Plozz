@@ -60,6 +60,45 @@ final class HeroCTATests: XCTestCase {
         XCTAssertTrue(item(.deleted).isNotInLibraryDiscovery)
     }
 
+    func testPlexDiscoverWatchlistStubHasNoPlayableLibraryTarget() {
+        let discover = MediaItem(
+            id: "5d7768342ec6b5001f6bbacd",
+            title: "13 Going on 30",
+            kind: .movie,
+            providerIDs: ["PlexGuid": "plex://movie/5d7768342ec6b5001f6bbacd"]
+        )
+
+        XCTAssertFalse(discover.hasPlayableLibraryTarget())
+    }
+
+    func testPlexDiscoverWatchlistStubBecomesPlayableWithLibrarySource() {
+        let discover = MediaItem(
+            id: "5d7768342ec6b5001f6bbacd",
+            title: "13 Going on 30",
+            kind: .movie,
+            providerIDs: ["PlexGuid": "plex://movie/5d7768342ec6b5001f6bbacd"]
+        )
+        let librarySource = MediaSourceRef(
+            accountID: "plex-account",
+            itemID: "48291",
+            providerKind: .plex
+        )
+
+        XCTAssertTrue(discover.hasPlayableLibraryTarget(additionalSources: [librarySource]))
+    }
+
+    func testOrdinaryAndOwnedPlexItemsHavePlayableLibraryTargets() {
+        XCTAssertTrue(item(nil).hasPlayableLibraryTarget())
+
+        let owned = MediaItem(
+            id: "48291",
+            title: "13 Going on 30",
+            kind: .movie,
+            providerIDs: ["PlexGuid": "plex://movie/5d7768342ec6b5001f6bbacd"]
+        )
+        XCTAssertTrue(owned.hasPlayableLibraryTarget())
+    }
+
     func testSeasonRequestAvailabilityKeepsOnlyMissingAndInFlightSeasons() {
         let availability = MediaRequestAvailability(
             status: .partiallyAvailable,

@@ -58,6 +58,19 @@ public extension MediaItem {
         }
     }
 
+    /// Whether this item resolves to a real playable library record. Plex Watchlist
+    /// can contain global Discover titles the user has never owned; those records use
+    /// the tail of their `plex://` GUID as `id`, which no Plex Media Server can play.
+    /// A matching library copy restores playability as soon as identity resolution
+    /// contributes a source whose local item id differs from that global GUID tail.
+    func hasPlayableLibraryTarget(additionalSources: [MediaSourceRef] = []) -> Bool {
+        guard let guidTail = providerIDs["PlexGuid"]?
+            .split(separator: "/").last.map(String.init)
+        else { return true }
+        if id != guidTail { return true }
+        return (sources + additionalSources).contains { $0.itemID != guidTail }
+    }
+
     /// Pure decision used by ``heroCTA(seerConnected:)`` and directly by the hero
     /// (which may apply a just-tapped optimistic `availability` override).
     ///

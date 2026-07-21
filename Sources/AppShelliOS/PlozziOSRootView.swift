@@ -253,6 +253,7 @@ private struct PlozziOSTabShell: View {
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
+                .toolbarBackground(.hidden, for: .tabBar)
                 .background { AppBackground(palette: palette) }
             }
 

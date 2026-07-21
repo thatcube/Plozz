@@ -190,14 +190,25 @@ struct PlozziOSMyLibrariesSettingsView: View {
 
     @ViewBuilder
     private func serverGroup(_ group: ServerAccountGroup) -> some View {
-        SettingsSectionGroup(group.serverName) {
+        SettingsSectionGroup {
+            // The whole row is the master switch: provider brand + server name on
+            // the left, the On/Off switch on the right — matching tvOS, where the
+            // server's icon and name *are* the toggle.
             Toggle(
-                "Use This Server",
                 isOn: Binding(
                     get: { isWatching(group) },
                     set: { setWatching($0, group: group) }
                 )
-            )
+            ) {
+                HStack(spacing: 12) {
+                    ProviderBrandMark(
+                        provider: group.providerKind,
+                        size: 32,
+                        mediaShareTransport: group.transportKind
+                    )
+                    Text(group.serverName)
+                }
+            }
 
             if isWatching(group) {
                 identityControl(for: group)

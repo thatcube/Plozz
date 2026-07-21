@@ -313,19 +313,117 @@ public final class SeerService {
         do {
             let result = try await activeClient.createRequest(body, actingUserID: actingUserID)
             switch result {
-            case let .created(response):
-                if let raw = response?.media?.status,
-                   let status = MediaAvailabilityStatus(rawValue: raw) {
-                    return .success(status)
-                }
-                // No decodable media status (e.g. a 202) — a fresh request is
-                // pending by definition.
-                return .success(.pending)
+            case let .created(response, status, rawBody):
+                return interpretCreate(response: response, status: status, rawBody: rawBody)
             case let .failed(status, message):
+                // A 409 means Overseerr already has a request for this title. If
+                // that existing request is FAILED or DECLINED it's a dead artifact
+                // that blocks re-requesting — clear it and recreate a fresh one so
+                // the user's tap actually results in a live request.
+                if status == 409 {
+                    return await recoverFromConflict(
+                        mediaType: mediaType,
+                        tmdbID: tmdbID,
+                        body: body,
+                        client: activeClient,
+                        actingUserID: actingUserID
+                    )
+                }
                 return .failure(.classify(status: status, message: message, actingUserSent: actingUserID != nil))
             }
         } catch {
             return .failure(.unreachable)
+        }
+    }
+
+    /// Turns a 2xx `POST /request` (or retry) response into an outcome. A real
+    /// request was created only when Seerr returns a request object with an id; a
+    /// 2xx that carries no request (e.g. a 202 "nothing to request") means nothing
+    /// was queued — surfaced as a failure rather than a fake "Requested".
+    private func interpretCreate(
+        response: SeerRequestResponse?,
+        status: Int,
+        rawBody: String?
+    ) -> SeerRequestOutcome {
+        guard response?.id != nil else {
+            let snippet = rawBody?.prefix(300).trimmingCharacters(in: .whitespacesAndNewlines)
+            return .failure(.unknown(
+                "Seerr accepted the call (HTTP \(status)) but created no request. Response: "
+                    + (snippet?.isEmpty == false ? snippet! : "empty")
+            ))
+        }
+        if let raw = response?.media?.status,
+           let mediaStatus = MediaAvailabilityStatus(rawValue: raw) {
+            return .success(mediaStatus)
+        }
+        return .success(.pending)
+    }
+
+    /// Recovers from a 409 "already requested" by inspecting the existing request.
+    /// FAILED/DECLINED requests are dead — delete and recreate. A genuinely
+    /// PENDING/APPROVED request is reported as ``SeerRequestFailure/alreadyRequested``
+    /// (the CTA should show "Requested"). An available title reports success.
+    private func recoverFromConflict(
+        mediaType: String,
+        tmdbID: Int,
+        body: SeerRequestBody,
+        client: SeerClient,
+        actingUserID: Int?
+    ) async -> SeerRequestOutcome {
+        // MediaRequestStatus: pending=1, approved=2, declined=3, failed=4,
+        // completed=5. Non-4k only — Plozz never requests 4k.
+        guard let details = try? await client.mediaDetails(mediaType: mediaType, tmdbID: tmdbID) else {
+            return .failure(.alreadyRequested)
+        }
+        // If the title is already available in the library, that's a "success".
+        if let raw = details.mediaInfo?.status,
+           let mediaStatus = MediaAvailabilityStatus(rawValue: raw),
+           mediaStatus == .available || mediaStatus == .partiallyAvailable {
+            return .success(mediaStatus)
+        }
+        let request = (details.mediaInfo?.requests ?? []).first { $0.is4k != true }
+        guard let request, let requestID = request.id else {
+            // A conflict with no inspectable request — treat as already requested.
+            return .failure(.alreadyRequested)
+        }
+        switch request.status {
+        case 4: // FAILED — try Overseerr's retry first (reuses the existing row).
+            if let retry = try? await client.retryRequest(id: requestID, actingUserID: actingUserID) {
+                switch retry {
+                case let .created(response, status, rawBody):
+                    let outcome = interpretCreate(response: response, status: status, rawBody: rawBody)
+                    if case .success = outcome { return outcome }
+                case .failed:
+                    break
+                }
+            }
+            // Retry unavailable/ineffective — delete the dead request and recreate.
+            return await deleteAndRecreate(requestID: requestID, body: body, client: client, actingUserID: actingUserID)
+        case 3: // DECLINED — recreate fresh (retry doesn't apply to declined).
+            return await deleteAndRecreate(requestID: requestID, body: body, client: client, actingUserID: actingUserID)
+        default: // pending / approved / completed — a live request already exists.
+            return .failure(.alreadyRequested)
+        }
+    }
+
+    /// Deletes a stale request then recreates a fresh one, returning the recreate
+    /// outcome. If the recreate still conflicts, reports already-requested.
+    private func deleteAndRecreate(
+        requestID: Int,
+        body: SeerRequestBody,
+        client: SeerClient,
+        actingUserID: Int?
+    ) async -> SeerRequestOutcome {
+        _ = try? await client.deleteRequest(id: requestID)
+        guard let result = try? await client.createRequest(body, actingUserID: actingUserID) else {
+            return .failure(.unreachable)
+        }
+        switch result {
+        case let .created(response, status, rawBody):
+            return interpretCreate(response: response, status: status, rawBody: rawBody)
+        case let .failed(status, message):
+            if status == 409 { return .failure(.alreadyRequested) }
+            return .failure(.classify(status: status, message: message, actingUserSent: actingUserID != nil))
         }
     }
 

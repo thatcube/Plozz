@@ -141,20 +141,23 @@ struct SeerMediaSeason: Decodable {
 /// A TV request attached to `mediaInfo`. Active requests must be reconciled
 /// separately from availability-scanner seasons or pending seasons look missing.
 struct SeerMediaRequest: Decodable {
+    var id: Int?
     var status: Int?
     var is4k: Bool?
     var seasons: [SeerRequestedSeason]
 
-    init(status: Int? = nil, is4k: Bool? = nil, seasons: [SeerRequestedSeason] = []) {
+    init(id: Int? = nil, status: Int? = nil, is4k: Bool? = nil, seasons: [SeerRequestedSeason] = []) {
+        self.id = id
         self.status = status
         self.is4k = is4k
         self.seasons = seasons
     }
 
-    enum CodingKeys: String, CodingKey { case status, is4k, seasons }
+    enum CodingKeys: String, CodingKey { case id, status, is4k, seasons }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(Int.self, forKey: .id)
         status = try c.decodeIfPresent(Int.self, forKey: .status)
         is4k = try c.decodeIfPresent(Bool.self, forKey: .is4k)
         seasons = try c.decodeIfPresent([SeerRequestedSeason].self, forKey: .seasons) ?? []

@@ -11,23 +11,26 @@ import SwiftUI
 /// environment app model so any toolbar can drop it in with just an action.
 struct PlozziOSSettingsAvatarButton: View {
     @Environment(PlozziOSAppModel.self) private var appModel
+    var size: CGFloat = 44
     let action: () -> Void
 
     var body: some View {
         let profile = appModel.profiles.activeProfile
-        let displayedProfile = appModel.profiles.hasRememberedSelection
+        let showsRealProfile = appModel.profiles.profilesEnabled
+            || appModel.profiles.hasRememberedSelection
+        let displayedProfile = showsRealProfile
             ? profile
             : Self.genericProfile
         Button(action: action) {
-            ProfileAvatarView(profile: displayedProfile, size: 44)
-                .frame(width: 44, height: 44)
+            ProfileAvatarView(profile: displayedProfile, size: size)
+                .frame(width: size, height: size)
                 .clipShape(Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .buttonBorderShape(.circle)
         .accessibilityLabel(
-            appModel.profiles.hasRememberedSelection
+            showsRealProfile
                 ? Text("Settings for \(profile.name)")
                 : Text("Settings")
         )

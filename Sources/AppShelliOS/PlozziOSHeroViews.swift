@@ -104,6 +104,76 @@ struct PlozziOSHomeHeroSlide: View {
     }
 }
 
+struct PlozziOSHeroRequest {
+    var cta: HeroCTA
+    var isRequesting: Bool
+    var actingName: String?
+    var onRequest: (MediaItem) -> Void
+}
+
+/// The shared Seerr request / download-status CTA for both the Home and detail
+/// heroes, driven by the canonical `HeroCTA` (CoreModels) so iOS matches tvOS
+/// exactly: a filled "Request" button, a plain "Requested" status while queued,
+/// and a live "NN%" + progress bar (reusing `ResumeProgressCapsule`) while
+/// actually downloading. Renders nothing for owned/unavailable titles.
+struct PlozziOSHeroRequestButton: View {
+    @Environment(\.themePalette) private var palette
+    let item: MediaItem
+    let request: PlozziOSHeroRequest
+
+    var body: some View {
+        switch request.cta {
+        case .request:
+            Button {
+                request.onRequest(item)
+            } label: {
+                if request.isRequesting {
+                    ProgressView()
+                } else {
+                    Label("Request", systemImage: "plus.circle")
+                }
+            }
+            .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .primary))
+            .disabled(request.isRequesting)
+            .accessibilityLabel(
+                request.actingName.map { "Request as \($0)" } ?? "Request"
+            )
+        case .requested:
+            statusPill {
+                Label("Requested", systemImage: "clock")
+            }
+        case let .downloading(progress):
+            statusPill {
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.down.circle")
+                    ResumeProgressCapsule(
+                        progress: progress,
+                        // The status pill uses the secondary (card) surface, so
+                        // the bar's ink tracks the *palette* lightness — dark ink
+                        // on a light theme, light ink on dark — not the raw
+                        // colour scheme (which left a dark bar on the dark pill).
+                        onLight: palette.isLight,
+                        width: 54,
+                        height: 5
+                    )
+                    Text("\(Int((progress * 100).rounded()))%")
+                        .lineLimit(1)
+                }
+            }
+        case .play, .unavailable:
+            EmptyView()
+        }
+    }
+
+    private func statusPill<Content: View>(
+        @ViewBuilder _ label: () -> Content
+    ) -> some View {
+        Button {} label: { label() }
+            .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .secondary))
+            .disabled(true)
+    }
+}
+
 struct PlozziOSDetailHeroSection: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(HeroTrailerController.self) private var trailerController
@@ -121,6 +191,7 @@ struct PlozziOSDetailHeroSection: View {
     let onSelectVersion: (String) -> Void
     let actionHandler: any MediaItemActionHandling
     let onPlay: (MediaItem, Bool) -> Void
+    var heroRequest: PlozziOSHeroRequest?
 
     var body: some View {
         let style: HeroArtworkStyle = horizontalSizeClass == .compact
@@ -161,7 +232,8 @@ struct PlozziOSDetailHeroSection: View {
                 fallbackPresentation: backdropPresentation,
                 style: style,
                 actionHandler: actionHandler,
-                onPlay: onPlay
+                onPlay: onPlay,
+                heroRequest: heroRequest
             )
         }
     }
@@ -660,6 +732,7 @@ struct PlozziOSHomeHeroForeground: View {
     let style: HeroArtworkStyle
     let provider: (any MediaProvider)?
     let onPlay: (MediaItem) -> Void
+    var heroRequest: PlozziOSHeroRequest?
 
     var body: some View {
         VStack(
@@ -706,6 +779,8 @@ struct PlozziOSHomeHeroForeground: View {
             .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .primary))
         }
 
+        heroRequestButton
+
         if let watchlistAction {
             Button {
                 actionHandler?.perform(
@@ -731,6 +806,7 @@ struct PlozziOSHomeHeroForeground: View {
         }
 
         if let provider {
+            let infoIsPrimary = !hasPlayAction && !showsRequestPrimary
             NavigationLink {
                 PlozziOSItemDetailView(
                     appModel: appModel,
@@ -739,20 +815,38 @@ struct PlozziOSHomeHeroForeground: View {
                     seerService: appModel.seerService
                 )
             } label: {
-                if hasPlayAction {
+                if infoIsPrimary {
+                    Label("More Info", systemImage: "info.circle")
+                } else {
                     Image(systemName: "info.circle")
                         .font(.headline.weight(.semibold))
-                } else {
-                    Label("More Info", systemImage: "info.circle")
                 }
             }
             .buttonStyle(
                 PlozziOSHeroActionButtonStyle(
-                    kind: hasPlayAction ? .secondary : .primary,
-                    circular: hasPlayAction
+                    kind: infoIsPrimary ? .primary : .secondary,
+                    circular: !infoIsPrimary
                 )
             )
             .accessibilityLabel("More Info")
+        }
+    }
+
+    /// One-tap Seerr request CTA for a discovery movie, matching the detail hero.
+    @ViewBuilder
+    private var heroRequestButton: some View {
+        if let heroRequest {
+            PlozziOSHeroRequestButton(item: item, request: heroRequest)
+        }
+    }
+
+    /// Whether the request pill provides the leading (primary-ish) action, so
+    /// "More Info" should step down to a secondary circular button.
+    private var showsRequestPrimary: Bool {
+        guard let heroRequest else { return false }
+        switch heroRequest.cta {
+        case .request, .requested, .downloading: return true
+        case .play, .unavailable: return false
         }
     }
 
@@ -801,6 +895,7 @@ private struct PlozziOSDetailHeroForeground: View {
     let style: HeroArtworkStyle
     let actionHandler: any MediaItemActionHandling
     let onPlay: (MediaItem, Bool) -> Void
+    var heroRequest: PlozziOSHeroRequest?
 
     private struct ActionEntry: Identifiable {
         let action: MediaItemAction
@@ -844,8 +939,8 @@ private struct PlozziOSDetailHeroForeground: View {
             )
 
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { actionButtons }
-                VStack(spacing: 12) { actionButtons }
+                fullActionRow
+                compactActionRow
             }
             .controlSize(.large)
         }
@@ -890,8 +985,51 @@ private struct PlozziOSDetailHeroForeground: View {
         }
     }
 
+    private var fullActionRow: some View {
+        HStack(spacing: 12) {
+            playActionButton
+            heroRequestButton
+            primaryActionButtons
+            downloadActionButton
+        }
+    }
+
+    private var compactActionRow: some View {
+        HStack(spacing: 12) {
+            playActionButton
+            heroRequestButton
+            if !primaryActions.isEmpty || downloadItem != nil {
+                Menu {
+                    overflowActions
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.headline.weight(.bold))
+                }
+                .buttonStyle(
+                    PlozziOSHeroActionButtonStyle(
+                        kind: .secondary,
+                        circular: true
+                    )
+                )
+                .accessibilityLabel("More actions")
+            }
+        }
+    }
+
+    /// The Seerr request CTA for a discovery (not-in-library) title — matching
+    /// tvOS, which surfaces Request in the hero itself rather than in a separate
+    /// block. Uses the shared `PlozziOSHeroRequestButton` so Home and detail read
+    /// identically (Request / Requested / live download progress).
     @ViewBuilder
-    private var actionButtons: some View {
+    private var heroRequestButton: some View {
+        if let heroRequest {
+            PlozziOSHeroRequestButton(item: item, request: heroRequest)
+        }
+    }
+
+
+    @ViewBuilder
+    private var playActionButton: some View {
         if let playableItem {
             Button {
                 onPlay(playableItem, false)
@@ -907,9 +1045,11 @@ private struct PlozziOSDetailHeroForeground: View {
                 )
             }
             .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .primary))
-
         }
+    }
 
+    @ViewBuilder
+    private var primaryActionButtons: some View {
         ForEach(primaryActions) { entry in
             Button {
                 actionHandler.perform(
@@ -929,6 +1069,10 @@ private struct PlozziOSDetailHeroForeground: View {
             )
             .accessibilityLabel(entry.action.title)
         }
+    }
+
+    @ViewBuilder
+    private var downloadActionButton: some View {
         if downloadItem != nil {
             downloadMenuAction
                 .buttonStyle(
@@ -937,6 +1081,27 @@ private struct PlozziOSDetailHeroForeground: View {
                         circular: true
                     )
                 )
+        }
+    }
+
+    @ViewBuilder
+    private var overflowActions: some View {
+        ForEach(primaryActions) { entry in
+            Button(
+                entry.action.title,
+                systemImage: primaryActionSymbol(for: entry)
+            ) {
+                actionHandler.perform(
+                    entry.action,
+                    on: entry.target,
+                    context: .none
+                )
+            }
+        }
+        if downloadItem != nil {
+            Button(downloadActionTitle, systemImage: downloadActionSymbol) {
+                Task { await performDownloadAction() }
+            }
         }
     }
 
@@ -1795,6 +1960,9 @@ struct PlozziOSHomeSidebarOverlapProbe: UIViewControllerRepresentable {
         weak var geometryModel: PlozziOSSidebarGeometryModel?
         private weak var owner: UITabBarController?
         private var previousLayout: UITabBarController.Sidebar.Layout?
+        private var previousStandardAppearance: UITabBarAppearance?
+        private var previousScrollEdgeAppearance: UITabBarAppearance?
+        private var didApplyTransparency = false
 
         override func didMove(toParent parent: UIViewController?) {
             super.didMove(toParent: parent)
@@ -1819,17 +1987,39 @@ struct PlozziOSHomeSidebarOverlapProbe: UIViewControllerRepresentable {
                 restore()
                 owner = tabs
                 previousLayout = tabs.sidebar.preferredLayout
+                previousStandardAppearance = tabs.tabBar.standardAppearance
+                previousScrollEdgeAppearance =
+                    tabs.tabBar.scrollEdgeAppearance
+                didApplyTransparency = false
             }
-            tabs.sidebar.preferredLayout = .overlap
+            if !didApplyTransparency {
+                didApplyTransparency = true
+                tabs.sidebar.preferredLayout = .overlap
+                let transparentAppearance = UITabBarAppearance()
+                transparentAppearance.configureWithTransparentBackground()
+                transparentAppearance.backgroundEffect = nil
+                transparentAppearance.backgroundColor = .clear
+                transparentAppearance.shadowColor = .clear
+                tabs.tabBar.standardAppearance = transparentAppearance
+                tabs.tabBar.scrollEdgeAppearance = transparentAppearance
+                tabs.tabBar.isTranslucent = true
+            }
             geometryModel?.setVisible(!tabs.sidebar.isHidden)
         }
 
         func restore() {
             geometryModel?.setVisible(false)
+            didApplyTransparency = false
             guard let owner else { return }
             owner.sidebar.preferredLayout = previousLayout ?? .automatic
+            if let previousStandardAppearance {
+                owner.tabBar.standardAppearance = previousStandardAppearance
+            }
+            owner.tabBar.scrollEdgeAppearance = previousScrollEdgeAppearance
             self.owner = nil
             previousLayout = nil
+            previousStandardAppearance = nil
+            previousScrollEdgeAppearance = nil
         }
     }
 }

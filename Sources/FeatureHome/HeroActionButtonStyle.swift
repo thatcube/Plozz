@@ -18,18 +18,15 @@ struct HeroActionButtonStyle: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
+        // On tvOS, focus — not fill — determines the primary button, so we never
+        // use the prominent (white/tinted) glass here; every hero button uses the
+        // same clear glass and the focus engine highlights the active one. iOS /
+        // iPadOS keep a real filled primary via `PlozziOSHeroActionButtonStyle`,
+        // because those platforms can't focus a button.
         if #available(tvOS 26.0, *) {
-            if prominent {
-                shaped(content.buttonStyle(.glassProminent))
-            } else {
-                shaped(content.buttonStyle(.glass))
-            }
+            shaped(content.buttonStyle(.glass))
         } else {
-            if prominent {
-                shaped(content.buttonStyle(.borderedProminent))
-            } else {
-                shaped(content.buttonStyle(.bordered))
-            }
+            shaped(content.buttonStyle(.bordered))
         }
     }
 

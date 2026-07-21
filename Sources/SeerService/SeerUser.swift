@@ -122,4 +122,26 @@ public enum SeerRequestFailure: Equatable, Sendable {
             return .unknown(message)
         }
     }
+
+    /// A user-facing explanation for the failure, shared by every request
+    /// surface (detail hero, Home hero, season menu) so the copy stays
+    /// consistent.
+    public var userMessage: String {
+        switch self {
+        case .noDefaults:
+            return "No default server or quality profile is configured for this user."
+        case .noPermission:
+            return "This user doesn’t have permission to make that request."
+        case .quotaExceeded:
+            return "This user has reached their request limit."
+        case .alreadyRequested:
+            return "This title has already been requested."
+        case .invalidActingUser:
+            return "The linked Seerr user no longer exists. Update the profile mapping in Settings."
+        case .unreachable:
+            return "Couldn’t reach the Seerr server."
+        case let .unknown(message):
+            return message ?? "The request failed."
+        }
+    }
 }

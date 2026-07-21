@@ -240,6 +240,12 @@ public struct AppBackground: View {
     }
 
     public var body: some View {
+        #if os(iOS)
+        // iOS/iPadOS: a clean, flat themed fill (no gradient or glow), which
+        // reads better in both light and dark mode. tvOS keeps the gradient.
+        palette.backgroundBase
+            .ignoresSafeArea()
+        #else
         LinearGradient(
             colors: [palette.backgroundBase, palette.backgroundSecondary],
             startPoint: .top,
@@ -256,6 +262,7 @@ public struct AppBackground: View {
             }
         }
         .ignoresSafeArea()
+        #endif
     }
 }
 

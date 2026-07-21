@@ -74,38 +74,15 @@ struct PlozziOSSyncSetupSettingsView: View {
     // MARK: Success
 
     private var successView: some View {
-        VStack(spacing: 18) {
-            Spacer()
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 84)).foregroundStyle(.green)
-            Text("Your device is set up").font(.title.bold())
-            Text("It’s signed in — no typing needed on the other device.")
-                .foregroundStyle(.secondary).multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            if let sent = sentSummary {
-                Text(sent).font(.callout).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Done") {
+        SyncSetupSentSuccessView(
+            accounts: appModel.accounts,
+            profiles: appModel.profiles.profiles,
+            onDone: {
                 handled = false
                 model.reset()
                 model.startDiscovery()
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .padding(.bottom, 40)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var sentSummary: String? {
-        let servers = Set(appModel.accounts.map(\.server.id)).count
-        let profiles = appModel.profiles.profiles.count
-        guard servers > 0 || profiles > 0 else { return nil }
-        var parts: [String] = []
-        if servers > 0 { parts.append(servers == 1 ? "1 server" : "\(servers) servers") }
-        if profiles > 0 { parts.append(profiles == 1 ? "1 profile" : "\(profiles) profiles") }
-        return "Sent " + parts.joined(separator: " and ")
+        )
     }
 
     private func centered<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

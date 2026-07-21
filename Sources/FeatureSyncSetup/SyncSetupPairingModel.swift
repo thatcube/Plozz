@@ -39,6 +39,8 @@ public final class SyncSetupPairingModel {
     private let makeGuestLink: @MainActor (String) -> any PairingLinkConnecting
     private let makeBrowser: @MainActor () -> any PairingBrowsing
     private var browser: (any PairingBrowsing)?
+    private var isReceiving = false
+    private var currentHost: (any PairingLinkHosting)?
 
     public init(
         service: SyncSetupService,
@@ -57,22 +59,53 @@ public final class SyncSetupPairingModel {
     }
 
     /// Target role: show a code + QR, advertise, receive + apply the config.
+    ///
+    /// Runs as a re-arm loop: the pairing code stays valid for as long as this
+    /// screen is open (a very generous TTL), and if a peer connects but doesn't
+    /// complete the handshake (aborted, dropped, or timed out), we tear that
+    /// attempt down and show a fresh code again instead of dead-ending on a
+    /// spinner. Call `stopReceiving()` when leaving the screen.
     public func startReceiving() async {
-        let pairing = service.makeHostPairing()
-        phase = .waitingForPeer(code: pairing.code, invite: pairing.invite)
-        let host = makeHostLink(pairing)
-        do {
-            let link = try await host.awaitConnection()
-            phase = .applying
-            let received = try await service.receiveSetup(
-                pairing: pairing, over: link,
-                existingAuthorizations: existingAuthorizations()
-            )
-            link.close()
-            phase = .applied(received)
-        } catch {
-            phase = .failed(Self.describe(error))
+        isReceiving = true
+        while isReceiving && !Task.isCancelled {
+            // Generous TTL so the code never silently expires while the screen is
+            // shown. The host's ephemeral key only lives as long as this ceremony,
+            // so a long window here doesn't weaken the security model.
+            let pairing = service.makeHostPairing(ttlSeconds: 24 * 60 * 60)
+            phase = .waitingForPeer(code: pairing.code, invite: pairing.invite)
+            let host = makeHostLink(pairing)
+            currentHost = host
+            do {
+                let link = try await host.awaitConnection()
+                guard isReceiving else { link.close(); host.stop(); return }
+                phase = .applying
+                let received = try await service.receiveSetup(
+                    pairing: pairing, over: link,
+                    existingAuthorizations: existingAuthorizations()
+                )
+                link.close()
+                host.stop()
+                currentHost = nil
+                isReceiving = false
+                phase = .applied(received)
+                return
+            } catch {
+                host.stop()
+                currentHost = nil
+                if !isReceiving || Task.isCancelled { return }
+                // A peer connected but didn't finish. Re-arm with a fresh code and
+                // keep waiting rather than showing a permanent spinner or error.
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
         }
+    }
+
+    /// Stop advertising / awaiting a setup (call when the receive screen closes) so
+    /// the device stops appearing in other devices' "set up another device" lists.
+    public func stopReceiving() {
+        isReceiving = false
+        currentHost?.stop()
+        currentHost = nil
     }
 
     // MARK: Source-side auto-discovery (tap-to-pair, no code)
@@ -147,6 +180,10 @@ public final class SyncSetupPairingModel {
 
 public protocol PairingLinkHosting: Sendable {
     func awaitConnection() async throws -> PairingLink
+    func stop()
+}
+public extension PairingLinkHosting {
+    func stop() {}
 }
 public protocol PairingLinkConnecting: Sendable {
     func connect() async throws -> PairingLink

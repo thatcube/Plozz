@@ -82,7 +82,11 @@ public final class BonjourPairingHost: @unchecked Sendable {
                 let txt = NWTXTRecord(["name": displayName])
                 l.service = NWListener.Service(name: serviceName, type: kPlozzPairingServiceType, txtRecord: txt)
                 l.stateUpdateHandler = { st in
-                    if case .failed = st { once.run { cont.resume(throwing: BonjourPairingError.listenerFailed) } }
+                    switch st {
+                    case .failed, .cancelled:
+                        once.run { cont.resume(throwing: BonjourPairingError.listenerFailed) }
+                    default: break
+                    }
                 }
                 l.newConnectionHandler = { [queue] conn in
                     conn.stateUpdateHandler = { st in

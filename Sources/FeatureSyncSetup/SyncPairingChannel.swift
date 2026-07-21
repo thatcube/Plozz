@@ -171,7 +171,13 @@ public enum SyncPairingSession {
     ) async throws -> SyncTransferBundle {
         let invite = SyncPairingInvite(serviceName: serviceName, publicKeyData: identity.publicKeyData, context: context)
         try await link.send(try JSONEncoder().encode(invite))
-        let sealedData = try await link.receive()
+        // Bound the wait for the sealed payload: once a peer has connected, it
+        // should complete within seconds. If it stalls or aborts (e.g. the source
+        // gave up), time out and close the link so the caller can recover and
+        // re-arm instead of hanging on "Setting up…" forever.
+        let sealedData = try await withPairingTimeout(
+            seconds: 60, onTimeout: { link.close() }
+        ) { try await link.receive() }
         let sealed = try JSONDecoder().decode(SealedSyncPayload.self, from: sealedData)
         return try SyncPairingCrypto.open(sealed, with: identity, now: now)
     }
@@ -194,5 +200,25 @@ public enum SyncPairingSession {
         guard !invite.context.isExpired(now: now) else { throw SyncPairingError.expiredContext }
         let sealed = try SyncPairingCrypto.seal(bundle, toPublicKey: invite.publicKeyData, context: invite.context)
         try await link.send(try JSONEncoder().encode(sealed))
+    }
+}
+
+/// Race an async operation against a timeout. If the timeout wins, `onTimeout` is
+/// invoked (e.g. to close a link and unblock a pending receive) and
+/// `BonjourPairingError.timedOut` is thrown.
+func withPairingTimeout<T: Sendable>(
+    seconds: Double,
+    onTimeout: @escaping @Sendable () -> Void,
+    _ operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await operation() }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            onTimeout()
+            throw BonjourPairingError.timedOut
+        }
+        defer { group.cancelAll() }
+        return try await group.next()!
     }
 }

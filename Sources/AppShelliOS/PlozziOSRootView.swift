@@ -3,6 +3,7 @@ import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureHomeCore
+import Foundation
 import SwiftUI
 
 public struct PlozziOSRootView: View {
@@ -123,6 +124,11 @@ public struct PlozziOSRootView: View {
         .installNightShiftOverlay(appModel.settings.nightShift)
         .onOpenURL { url in
             appModel.handleIncomingURL(url)
+        }
+        .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+            if let url = activity.webpageURL {
+                appModel.handleIncomingURL(url)
+            }
         }
         .sheet(item: pendingPairingBinding) { pairing in
             PlozziOSSyncSetupDeepLinkView(

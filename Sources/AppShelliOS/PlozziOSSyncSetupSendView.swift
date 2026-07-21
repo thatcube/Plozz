@@ -1,9 +1,105 @@
 #if os(iOS)
 import SwiftUI
 import AVFoundation
+import CoreModels
+import CoreUI
+import FeatureProfiles
 import FeatureSyncSetup
 
 // MARK: - Reusable pairing screens/components used by the Sync & Setup page.
+
+/// Shared "the other device is set up" success screen, shown to the sender after a
+/// successful pair. Uses the app's design language — provider logos + server names
+/// and profile avatars + names — rather than a generic checkmark.
+@MainActor
+struct SyncSetupSentSuccessView: View {
+    @Environment(\.themePalette) private var palette
+    let accounts: [Account]
+    let profiles: [Profile]
+    let onDone: () -> Void
+
+    private var servers: [Account] {
+        var seen = Set<String>()
+        return accounts.filter { seen.insert($0.server.id).inserted }
+    }
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer(minLength: 0)
+            VStack(spacing: 8) {
+                Text("Your other device is set up")
+                    .font(.title2.bold()).multilineTextAlignment(.center)
+                    .foregroundStyle(palette.primaryText)
+                Text("It’s signed in — no typing needed over there.")
+                    .font(.subheadline).foregroundStyle(palette.secondaryText)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 24)
+
+            VStack(spacing: 14) {
+                if !servers.isEmpty {
+                    sectionCard(title: servers.count == 1 ? "Server" : "Servers") {
+                        ForEach(servers) { account in
+                            HStack(spacing: 14) {
+                                ProviderBrandMark(provider: account.server.provider, size: 32)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(account.server.name)
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(palette.primaryText)
+                                    Text("Signed in")
+                                        .font(.caption).foregroundStyle(palette.secondaryText)
+                                }
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+                if !profiles.isEmpty {
+                    sectionCard(title: profiles.count == 1 ? "Profile" : "Profiles") {
+                        HStack(spacing: 18) {
+                            ForEach(profiles, id: \.id) { profile in
+                                VStack(spacing: 6) {
+                                    ProfileAvatarView(profile: profile, size: 56)
+                                    Text(profile.name)
+                                        .font(.caption).foregroundStyle(palette.primaryText)
+                                        .lineLimit(1)
+                                }
+                                .frame(maxWidth: 84)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+
+            Spacer(minLength: 0)
+            Button("Done", action: onDone)
+                .buttonStyle(.borderedProminent).controlSize(.large)
+                .padding(.bottom, 28)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func sectionCard<Content: View>(
+        title: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold)).tracking(1.2)
+                .foregroundStyle(palette.secondaryText)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(palette.cardSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(palette.cardBorder, lineWidth: 1)
+        )
+    }
+}
 
 /// Full-screen QR scanner screen (camera needs the full screen).
 @MainActor

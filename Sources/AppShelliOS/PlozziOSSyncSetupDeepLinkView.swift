@@ -47,19 +47,11 @@ struct PlozziOSSyncSetupDeepLinkView: View {
     private var content: some View {
         switch model.phase {
         case .sent:
-            VStack(spacing: 18) {
-                Spacer()
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 84)).foregroundStyle(.green)
-                Text("Device is set up").font(.title.bold())
-                Text("It’s signed in — no typing needed on the other device.")
-                    .foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                Spacer()
-                Button("Done", action: onClose)
-                    .buttonStyle(.borderedProminent).controlSize(.large)
-                    .padding(.bottom, 24)
-            }
+            SyncSetupSentSuccessView(
+                accounts: appModel.accounts,
+                profiles: appModel.profiles.profiles,
+                onDone: onClose
+            )
         case .failed(let message):
             VStack(spacing: 16) {
                 Spacer()

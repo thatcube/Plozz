@@ -1,6 +1,9 @@
 #if os(tvOS)
 import SwiftUI
 import CoreImage.CIFilterBuiltins
+import CoreModels
+import CoreUI
+import FeatureProfiles
 import FeatureSyncSetup
 
 /// tvOS "Set up from another device" screen: shows a QR + short code, advertises
@@ -8,6 +11,7 @@ import FeatureSyncSetup
 /// signed in with no typing.
 @MainActor
 struct SyncSetupReceiveView: View {
+    @Environment(\.themePalette) private var palette
     private let appState: AppState
     private let onClose: () -> Void
     @State private var model: SyncSetupPairingModel
@@ -26,6 +30,7 @@ struct SyncSetupReceiveView: View {
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .task { await model.startReceiving() }
+        .onDisappear { model.stopReceiving() }
     }
 
     @ViewBuilder
@@ -58,24 +63,13 @@ struct SyncSetupReceiveView: View {
             case .applying:
                 ProgressView("Setting up…").font(.title2)
             case .applied(let received):
-                VStack(spacing: 22) {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 84)).foregroundStyle(.green)
-                    Text("Setup complete").font(.largeTitle.bold())
-                    importedSummary(received)
-                    Button("Start Watching") {
-                        guard !didApply else { return }
-                        didApply = true
-                        appState.applyReceivedSetup(received)
-                        onClose()
-                    }
-                    .font(.title3.weight(.semibold))
-                    .padding(.top, 12)
-                }
+                appliedSummary(received)
             case .connecting, .sending, .sent:
                 ProgressView()
             case .failed(let message):
-                Image(systemName: "exclamationmark.triangle").font(.system(size: 60)).foregroundStyle(.orange)
-                Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Image(systemName: "exclamationmark.triangle").font(.system(size: 60))
+                    .foregroundStyle(palette.secondaryText)
+                Text(message).foregroundStyle(palette.secondaryText).multilineTextAlignment(.center)
                 Button("Try Again") { Task { await model.startReceiving() } }
             }
 
@@ -86,39 +80,84 @@ struct SyncSetupReceiveView: View {
         .padding(70)
     }
 
-    /// A precise, accurate breakdown of what actually transferred: which servers
-    /// are now signed in and which profiles were added. (Per-profile settings are
-    /// NOT transferred yet, so we don't claim them.)
-    @ViewBuilder
-    private func importedSummary(_ received: SyncSetupService.ReceivedSetup) -> some View {
-        let authIDs = Set(received.application.authorizedAuthorizations.map(\.id))
-        let serverNames = received.config.accounts.filter { authIDs.contains($0.id) }.map(\.serverName)
-        let profileNames = received.config.profiles.map(\.profile.name)
+    // MARK: Applied summary (app design language — provider logos + profiles)
 
-        VStack(alignment: .leading, spacing: 18) {
-            if !serverNames.isEmpty {
-                summaryRow(icon: "server.rack",
-                           title: serverNames.count == 1 ? "Signed in to 1 server" : "Signed in to \(serverNames.count) servers",
-                           detail: serverNames.joined(separator: ", "))
+    @ViewBuilder
+    private func appliedSummary(_ received: SyncSetupService.ReceivedSetup) -> some View {
+        let authIDs = Set(received.application.authorizedAuthorizations.map(\.id))
+        let servers = received.config.accounts.filter { authIDs.contains($0.id) }
+        let profiles = received.config.profiles.map(\.profile)
+
+        VStack(spacing: 44) {
+            VStack(spacing: 12) {
+                Text("You’re all set")
+                    .font(.largeTitle.bold()).foregroundStyle(palette.primaryText)
+                Text("This Apple TV is signed in — nothing to type here.")
+                    .font(.title3).foregroundStyle(palette.secondaryText)
             }
-            if !profileNames.isEmpty {
-                summaryRow(icon: "person.2.fill",
-                           title: profileNames.count == 1 ? "Added 1 profile" : "Added \(profileNames.count) profiles",
-                           detail: profileNames.joined(separator: ", "))
+
+            HStack(alignment: .top, spacing: 56) {
+                if !servers.isEmpty {
+                    summarySection(title: servers.count == 1 ? "Server" : "Servers") {
+                        VStack(alignment: .leading, spacing: 18) {
+                            ForEach(servers) { server in
+                                HStack(spacing: 18) {
+                                    ProviderBrandMark(provider: server.provider, size: 44)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(server.serverName)
+                                            .font(.title3.weight(.semibold))
+                                            .foregroundStyle(palette.primaryText)
+                                        Text("Signed in")
+                                            .font(.callout).foregroundStyle(palette.secondaryText)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !profiles.isEmpty {
+                    summarySection(title: profiles.count == 1 ? "Profile" : "Profiles") {
+                        HStack(alignment: .top, spacing: 28) {
+                            ForEach(profiles, id: \.id) { profile in
+                                VStack(spacing: 10) {
+                                    ProfileAvatarView(profile: profile, size: 96)
+                                    Text(profile.name)
+                                        .font(.callout).foregroundStyle(palette.primaryText)
+                                        .lineLimit(1)
+                                }
+                                .frame(maxWidth: 140)
+                            }
+                        }
+                    }
+                }
             }
+
+            Button("Start Watching") {
+                guard !didApply else { return }
+                didApply = true
+                appState.applyReceivedSetup(received)
+                onClose()
+            }
+            .font(.title3.weight(.semibold))
         }
-        .frame(maxWidth: 820, alignment: .leading)
     }
 
     @ViewBuilder
-    private func summaryRow(icon: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 18) {
-            Image(systemName: icon).font(.title2).foregroundStyle(.green).frame(width: 44)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.title3.weight(.semibold))
-                Text(detail).font(.headline).foregroundStyle(.secondary)
-            }
+    private func summarySection<Content: View>(
+        title: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(title.uppercased())
+                .font(.caption.weight(.semibold)).tracking(1.5)
+                .foregroundStyle(palette.secondaryText)
+            content()
         }
+        .padding(28)
+        .background(palette.cardSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(palette.cardBorder, lineWidth: 1)
+        )
     }
 
     static func qrImage(_ string: String) -> UIImage? {

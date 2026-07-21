@@ -132,12 +132,14 @@ public struct RootView: View {
                     deviceColorScheme: systemColorScheme
                 )
                 .overlay(alignment: .bottom) {
-                    Button {
-                        showSyncReceive = true
-                    } label: {
-                        Label("Set up from another device", systemImage: "qrcode")
+                    if step == .selectingServer {
+                        Button {
+                            showSyncReceive = true
+                        } label: {
+                            Label("Set up from another device", systemImage: "qrcode")
+                        }
+                        .padding(.bottom, 40)
                     }
-                    .padding(.bottom, 40)
                 }
                 .fullScreenCover(isPresented: $showSyncReceive) {
                     SyncSetupReceiveView(appState: appState) { showSyncReceive = false }

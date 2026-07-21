@@ -44,3 +44,24 @@ Documented step-by-step in `FINDINGS.md`:
   including a **tvOS write → iOS read**.
 - Provider capability checks (Jellyfin device token / Quick Connect; Plex second-device
   token / link).
+
+## OnDevice/ — throwaway Bonjour app for real devices
+`OnDevice/` is an XcodeGen app (iOS browser + tvOS advertiser) that runs the pairing
+discovery on real hardware. `OnDevice/run-ondevice.sh` builds + deploys both and
+observes discovery. Result so far: the tvOS advertiser on Brando TV was discovered by
+the Mac on the real LAN in **0.009 s**; the iPhone leg needs the device unlocked + a
+Local Network permission tap.
+
+## UXPrototype/ — clickable mock of the start-anywhere flows
+`UXPrototype/` is a pure-mock SwiftUI iOS app (no networking) to feel + critique the
+journeys: first-setup-on-iPhone, iPad-auto (same Apple ID), set-up-Apple-TV-by-discovery,
+verify-code, off-network manual code, the TV waiting screen, and the "you already set up
+on Apple TV — bring it here?" beacon flow. Build/run:
+
+```bash
+cd experiments/sync-feasibility-probes/UXPrototype
+xcodegen generate
+xcodebuild -project PlozzSyncUXPrototype.xcodeproj -scheme PlozzSyncUXPrototype \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath ./dd build
+# then install+launch the .app on the booted simulator
+```

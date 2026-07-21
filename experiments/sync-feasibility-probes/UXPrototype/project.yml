@@ -1,0 +1,31 @@
+name: PlozzSyncUXPrototype
+# ISOLATED clickable UX prototype for the "Sync & Setup" flows — NOT the Plozz app.
+# Pure mock: no networking, no iCloud, no credentials. Runs in the iOS Simulator so
+# the start-anywhere journeys can be felt and critiqued before any production build.
+options:
+  bundleIdPrefix: com.thatcube
+  deploymentTarget:
+    iOS: "18.0"
+settings:
+  base:
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.9"
+targets:
+  PlozzSyncUXPrototype:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: SyncUX
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.PlozzSyncUXPrototype
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO

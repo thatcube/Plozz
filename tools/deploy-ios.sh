@@ -20,9 +20,7 @@ cd "$(dirname "$0")/.."
 PROJECT="Plozz.xcodeproj"
 SCHEME="PlozziOS"
 CONFIG="Debug"
-IPHONE_UDID="${PLOZZ_IPHONE_UDID:-00008140-000955C40A0B001C}"
 IPHONE_CORE_ID="${PLOZZ_IPHONE_CORE_ID:-CACB5C41-FBA6-5DE8-9868-98BBDF897991}"
-IPAD_UDID="${PLOZZ_IPAD_UDID:-00008027-000331D81A62802E}"
 IPAD_CORE_ID="${PLOZZ_IPAD_CORE_ID:-D1EB8B46-3CEC-5F68-BCDA-B1C9E0E40600}"
 
 DEPLOY_IPHONE=1
@@ -129,8 +127,7 @@ fi
 
 install_device() {
   local name="$1"
-  local core_id="$3"   # arg 2 (usbmux udid) is no longer needed — devicectl uses
-                       # the CoreDevice id and picks USB automatically when present.
+  local core_id="$2"
   echo "▸ Installing build $BUILD on $name (verified)…"
   # --force: we just built fresh code; always (re)install rather than skip on a
   # matching build number (git-commit-count versioning can't tell it apart from
@@ -142,9 +139,9 @@ install_device() {
 
 STATUS=0
 if [[ "$DEPLOY_IPHONE" == "1" ]]; then
-  install_device "iPhone" "$IPHONE_UDID" "$IPHONE_CORE_ID" || STATUS=1
+  install_device "iPhone" "$IPHONE_CORE_ID" || STATUS=1
 fi
 if [[ "$DEPLOY_IPAD" == "1" ]]; then
-  install_device "iPad" "$IPAD_UDID" "$IPAD_CORE_ID" || STATUS=1
+  install_device "iPad" "$IPAD_CORE_ID" || STATUS=1
 fi
 exit "$STATUS"

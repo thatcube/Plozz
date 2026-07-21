@@ -86,6 +86,7 @@ struct PlozziOSOnboardingView: View {
 
     private var divider: some View {
         Rectangle().fill(palette.cardBorder).frame(height: 1)
+            .padding(.horizontal, 1)
     }
 
     private func providerRow(_ provider: ProviderKind) -> some View {

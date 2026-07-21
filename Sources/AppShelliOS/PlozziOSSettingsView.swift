@@ -138,6 +138,7 @@ private enum PlozziOSSettingsDestination: Hashable {
     case home
     case playback
     case downloads
+    case syncSetup
     case subtitles
     case spoilers
     case nightShift
@@ -195,32 +196,17 @@ private struct PlozziOSSettingsSplitView: View {
                             title: "Downloads",
                             systemImage: "arrow.down.circle"
                         )
+                        settingsRow(
+                            .syncSetup,
+                            title: "Sync & Setup",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
                     } footer: {
                         Text(
                             appModel.profiles.profilesEnabled
                                 ? "Shared across every profile on this \(deviceName)."
                                 : "Shared settings and accounts on this \(deviceName)."
                         )
-                    }
-
-                    SettingsSectionGroup("Sync & Setup") {
-                        Toggle(isOn: Binding(
-                            get: { appModel.syncSetup.isEnabled },
-                            set: { appModel.syncSetup.setEnabled($0) }
-                        )) {
-                            Label("Sync across your devices", systemImage: "arrow.triangle.2.circlepath")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        Button {
-                            showSyncSendSheet = true
-                        } label: {
-                            Label("Set up another device", systemImage: "qrcode.viewfinder")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    } footer: {
-                        Text("Securely syncs your profiles and settings through your private iCloud (end-to-end encrypted). “Set up another device” signs your Apple TV in by scanning the code it shows — no typing. Off by default.")
                     }
 
                     SettingsSectionGroup(
@@ -358,6 +344,8 @@ private struct PlozziOSSettingsSplitView: View {
             )
         case .downloads:
             PlozziOSDownloadSettingsView(model: appModel.downloads)
+        case .syncSetup:
+            PlozziOSSyncSetupSettingsView(appModel: appModel)
         case .subtitles:
             PlozziOSSubtitleSettingsView(
                 behavior: appModel.settings.subtitleBehavior,
@@ -427,7 +415,6 @@ private struct PlozziOSSettingsCompactMenu: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     @State private var confirmSignOutAll = false
-    @State private var showSyncSendSheet = false
 
     var body: some View {
         ScrollView {
@@ -458,6 +445,11 @@ private struct PlozziOSSettingsCompactMenu: View {
                 } label: {
                     Label("Downloads", systemImage: "arrow.down.circle")
                 }
+                NavigationLink {
+                    PlozziOSSyncSetupSettingsView(appModel: appModel)
+                } label: {
+                    Label("Sync & Setup", systemImage: "arrow.triangle.2.circlepath")
+                }
             } footer: {
                 Text(
                     appModel.profiles.profilesEnabled
@@ -465,25 +457,6 @@ private struct PlozziOSSettingsCompactMenu: View {
                         : "Shared settings and accounts on this \(deviceName)."
                 )
             }
-
-                SettingsSectionGroup("Sync & Setup") {
-                    Toggle(isOn: Binding(
-                        get: { appModel.syncSetup.isEnabled },
-                        set: { appModel.syncSetup.setEnabled($0) }
-                    )) {
-                        Label("Sync across your devices", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    Button {
-                        showSyncSendSheet = true
-                    } label: {
-                        Label("Set up another device", systemImage: "qrcode.viewfinder")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                } footer: {
-                    Text("Securely syncs your profiles and settings through your private iCloud (end-to-end encrypted). “Set up another device” signs your Apple TV in by scanning the code it shows — no typing. Off by default.")
-                }
 
                 SettingsSectionGroup(
                     appModel.profiles.profilesEnabled
@@ -607,9 +580,6 @@ private struct PlozziOSSettingsCompactMenu: View {
             }
         } message: {
             Text("This removes every server and network share from this device.")
-        }
-        .sheet(isPresented: $showSyncSendSheet) {
-            SyncSetupSendView(appModel: appModel) { showSyncSendSheet = false }
         }
     }
 }

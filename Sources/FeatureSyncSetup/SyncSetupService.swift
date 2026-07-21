@@ -94,16 +94,24 @@ public final class SyncSetupService {
 
     // MARK: Pairing — target (this device receives config, e.g. Apple TV)
 
-    /// Create a fresh identity + QR invite this device shows to be set up.
-    public func makeInvite(serviceName: String = "Plozz-\(Int.random(in: 1000...9999))",
-                           ttlSeconds: Int = 120) -> (invite: SyncPairingInvite, identity: SyncPairingIdentity) {
+    /// A prepared target-side pairing: the short code, the QR invite (carrying the
+    /// public key), and the identity used to open the received bundle.
+    public struct HostPairing: Sendable {
+        public let code: String
+        public let invite: SyncPairingInvite
+        public let identity: SyncPairingIdentity
+    }
+
+    /// Create a fresh code + QR invite + identity this device shows to be set up.
+    public func makeHostPairing(ttlSeconds: Int = 180) -> HostPairing {
+        let code = SyncPairingCode.generate()
         let identity = SyncPairingIdentity()
         let invite = SyncPairingInvite(
-            serviceName: serviceName,
+            serviceName: code,
             publicKeyData: identity.publicKeyData,
             context: SyncPairingContext(ttlSeconds: ttlSeconds)
         )
-        return (invite, identity)
+        return HostPairing(code: code, invite: invite, identity: identity)
     }
 
     /// Everything a target device needs to persist a received setup: the config
@@ -115,16 +123,18 @@ public final class SyncSetupService {
         public let application: SyncSetupCoordinator.Application
     }
 
-    /// Receive a setup bundle over a channel and compute what to persist. Accounts
-    /// whose credentials arrived are marked authorized (no sign-in needed); the
-    /// rest are pending for native sign-in. The caller persists profiles, creates
-    /// accounts from `config` + `secrets`, and stores credentials in the Keychain.
+    /// Host side: advertise our invite over the link, receive the sealed bundle,
+    /// and compute what to persist. Accounts whose credentials arrived are marked
+    /// authorized (no sign-in needed); the rest are pending for native sign-in.
     public func receiveSetup(
-        identity: SyncPairingIdentity,
-        over channel: PairingReceiving,
+        pairing: HostPairing,
+        over link: PairingLink,
         existingAuthorizations: [String: LocalAuthorization] = [:]
     ) async throws -> ReceivedSetup {
-        let bundle = try await SyncPairingSession.receiveSetup(with: identity, over: channel)
+        let bundle = try await SyncPairingSession.hostReceiveSetup(
+            identity: pairing.identity, context: pairing.invite.context,
+            serviceName: pairing.invite.serviceName, over: link
+        )
         var application = coordinator.apply(
             snapshot: bundle.config,
             existingAuthorizations: existingAuthorizations,
@@ -142,17 +152,18 @@ public final class SyncSetupService {
 
     // MARK: Pairing — source (this device sends its config + credentials)
 
-    /// Seal this device's config — and, unless `configOnly`, its credentials so the
-    /// target signs in with no taps — to a scanned invite and send it.
+    /// Guest side: over the link, receive the target's invite (verifying it against
+    /// `expectedPublicKey` from a scanned QR when present), then seal + send this
+    /// device's config and — unless `configOnly` — its credentials.
     public func sendSetup(
-        to invite: SyncPairingInvite,
-        over channel: PairingSending,
+        over link: PairingLink,
+        expectedPublicKey: Data?,
         configOnly: Bool = false
     ) async throws {
         let cfg = configProvider()
         let snapshot = coordinator.exportSnapshot(accounts: cfg.accounts, profiles: cfg.profiles)
         let secrets = configOnly ? nil : secretsProvider()
         let bundle = SyncTransferBundle(config: snapshot, secrets: (secrets?.isEmpty ?? true) ? nil : secrets)
-        try await SyncPairingSession.sendSetup(bundle, to: invite, over: channel)
+        try await SyncPairingSession.guestSendSetup(bundle, over: link, expectedPublicKey: expectedPublicKey)
     }
 }

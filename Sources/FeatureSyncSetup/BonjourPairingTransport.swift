@@ -2,17 +2,13 @@ import Foundation
 import Network
 import CoreModels
 
-// MARK: - Bonjour pairing transport (Network.framework)
+// MARK: - Bonjour pairing transport (Network.framework, bidirectional)
 //
-// Production byte transport for the non-secret config handoff. The target (e.g.
-// Apple TV) advertises `_plozz-pair._tcp` under a random service name that is also
-// embedded in its QR invite; the source (phone) connects to that exact service
-// name — which it learned by scanning — and sends the sealed payload. Bonjour
-// discovery here is only "a TV is waiting"; the key material comes from the QR
-// (see SyncPairingInvite), so a LAN bystander can't seal to the TV.
-//
-// This mirrors the validated on-device probe (real Apple TV discovered in 0.009s).
-// It carries ONLY a SealedSyncPayload of the non-secret snapshot in v1.
+// Production byte transport for the pairing handoff. The target advertises
+// `_plozz-pair._tcp` under a service name equal to the short pairing code; the
+// source connects to that service name (learned from the QR or the typed code).
+// Both then exchange framed messages over one NWConnection: target sends its
+// invite, source sends the sealed bundle.
 
 public let kPlozzPairingServiceType = "_plozz-pair._tcp"
 
@@ -23,65 +19,81 @@ public enum BonjourPairingError: Error, Equatable {
     case timedOut
 }
 
-private enum Framing {
-    /// UInt32 big-endian length prefix + JSON bytes.
-    static func encode(_ payload: SealedSyncPayload) throws -> Data {
-        let body = try JSONEncoder().encode(payload)
-        var len = UInt32(body.count).bigEndian
-        var out = Data(bytes: &len, count: 4)
-        out.append(body)
-        return out
+/// A PairingLink backed by a single NWConnection with UInt32-length-prefixed frames.
+public final class NWConnectionPairingLink: PairingLink, @unchecked Sendable {
+    private let connection: NWConnection
+
+    init(connection: NWConnection) {
+        self.connection = connection
     }
+
+    public func send(_ data: Data) async throws {
+        var len = UInt32(data.count).bigEndian
+        var frame = Data(bytes: &len, count: 4)
+        frame.append(data)
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            connection.send(content: frame, completion: .contentProcessed { err in
+                if err != nil { cont.resume(throwing: BonjourPairingError.connectionFailed) }
+                else { cont.resume(returning: ()) }
+            })
+        }
+    }
+
+    public func receive() async throws -> Data {
+        let header = try await receiveExactly(4)
+        let len = header.withUnsafeBytes { Int($0.load(as: UInt32.self).bigEndian) }
+        guard len > 0, len < 5_000_000 else { throw BonjourPairingError.framing }
+        return try await receiveExactly(len)
+    }
+
+    private func receiveExactly(_ count: Int) async throws -> Data {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
+            connection.receive(minimumIncompleteLength: count, maximumLength: count) { data, _, _, err in
+                if err != nil { cont.resume(throwing: BonjourPairingError.connectionFailed); return }
+                guard let data, data.count == count else { cont.resume(throwing: BonjourPairingError.framing); return }
+                cont.resume(returning: data)
+            }
+        }
+    }
+
+    public func close() { connection.cancel() }
 }
 
-/// Target/receiver side: advertise a service and receive one sealed payload.
-public final class BonjourPairingResponder: PairingReceiving, @unchecked Sendable {
+/// Target/host: advertise a service and accept one incoming connection.
+public final class BonjourPairingHost: @unchecked Sendable {
     public let serviceName: String
-    private let queue = DispatchQueue(label: "plozz.pair.responder")
+    private let queue = DispatchQueue(label: "plozz.pair.host")
     private var listener: NWListener?
 
-    public init(serviceName: String = "Plozz-\(Int.random(in: 1000...9999))") {
-        self.serviceName = serviceName
-    }
+    public init(serviceName: String) { self.serviceName = serviceName }
 
-    public func receive() async throws -> SealedSyncPayload {
-        try await withCheckedThrowingContinuation { cont in
-            let once = OnceBox(cont)
+    /// Advertise and wait for the first connection, returning a link over it.
+    public func awaitConnection() async throws -> PairingLink {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<PairingLink, Error>) in
+            let once = Once()
             do {
                 let params = NWParameters.tcp
                 params.includePeerToPeer = true
                 let l = try NWListener(using: params)
                 l.service = NWListener.Service(name: serviceName, type: kPlozzPairingServiceType)
                 l.stateUpdateHandler = { st in
-                    if case .failed = st { once.fail(BonjourPairingError.listenerFailed) }
+                    if case .failed = st { once.run { cont.resume(throwing: BonjourPairingError.listenerFailed) } }
                 }
                 l.newConnectionHandler = { [queue] conn in
                     conn.stateUpdateHandler = { st in
-                        if case .failed = st { once.fail(BonjourPairingError.connectionFailed) }
+                        if case .ready = st {
+                            once.run { cont.resume(returning: NWConnectionPairingLink(connection: conn)) }
+                        }
+                        if case .failed = st {
+                            once.run { cont.resume(throwing: BonjourPairingError.connectionFailed) }
+                        }
                     }
                     conn.start(queue: queue)
-                    Self.readFrame(on: conn, into: once)
                 }
                 l.start(queue: queue)
                 self.listener = l
             } catch {
-                once.fail(BonjourPairingError.listenerFailed)
-            }
-        }
-    }
-
-    private static func readFrame(on conn: NWConnection, into once: OnceBox) {
-        conn.receive(minimumIncompleteLength: 4, maximumLength: 4) { header, _, _, err in
-            guard err == nil, let header, header.count == 4 else { once.fail(BonjourPairingError.framing); return }
-            let len = header.withUnsafeBytes { Int($0.load(as: UInt32.self).bigEndian) }
-            guard len > 0, len < 1_000_000 else { once.fail(BonjourPairingError.framing); return }
-            conn.receive(minimumIncompleteLength: len, maximumLength: len) { body, _, _, err in
-                guard err == nil, let body, body.count == len,
-                      let payload = try? JSONDecoder().decode(SealedSyncPayload.self, from: body) else {
-                    once.fail(BonjourPairingError.framing); return
-                }
-                once.succeed(payload)
-                conn.cancel()
+                once.run { cont.resume(throwing: BonjourPairingError.listenerFailed) }
             }
         }
     }
@@ -89,17 +101,16 @@ public final class BonjourPairingResponder: PairingReceiving, @unchecked Sendabl
     public func stop() { listener?.cancel(); listener = nil }
 }
 
-/// Source/sender side: connect to a known service name and send one sealed payload.
-public final class BonjourPairingInitiator: PairingSending, @unchecked Sendable {
+/// Source/guest: connect to a known service name, returning a link over it.
+public final class BonjourPairingGuest: @unchecked Sendable {
     public let serviceName: String
-    private let queue = DispatchQueue(label: "plozz.pair.initiator")
+    private let queue = DispatchQueue(label: "plozz.pair.guest")
 
     public init(serviceName: String) { self.serviceName = serviceName }
 
-    public func send(_ payload: SealedSyncPayload) async throws {
-        let frame = try Framing.encode(payload)
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            let once = OnceVoidBox(cont)
+    public func connect() async throws -> PairingLink {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<PairingLink, Error>) in
+            let once = Once()
             let endpoint = NWEndpoint.service(name: serviceName, type: kPlozzPairingServiceType, domain: "local.", interface: nil)
             let params = NWParameters.tcp
             params.includePeerToPeer = true
@@ -107,13 +118,9 @@ public final class BonjourPairingInitiator: PairingSending, @unchecked Sendable 
             conn.stateUpdateHandler = { st in
                 switch st {
                 case .ready:
-                    conn.send(content: frame, completion: .contentProcessed { err in
-                        if err != nil { once.fail(BonjourPairingError.connectionFailed) }
-                        else { once.succeed() }
-                        conn.cancel()
-                    })
+                    once.run { cont.resume(returning: NWConnectionPairingLink(connection: conn)) }
                 case .failed, .cancelled:
-                    once.fail(BonjourPairingError.connectionFailed)
+                    once.run { cont.resume(throwing: BonjourPairingError.connectionFailed) }
                 default: break
                 }
             }
@@ -122,28 +129,11 @@ public final class BonjourPairingInitiator: PairingSending, @unchecked Sendable 
     }
 }
 
-// One-shot continuation guards (Network callbacks may fire more than once).
-private final class OnceBox: @unchecked Sendable {
+/// One-shot continuation guard (Network callbacks may fire more than once).
+private final class Once: @unchecked Sendable {
     private let lock = NSLock()
     private var done = false
-    private let cont: CheckedContinuation<SealedSyncPayload, Error>
-    init(_ cont: CheckedContinuation<SealedSyncPayload, Error>) { self.cont = cont }
-    func succeed(_ v: SealedSyncPayload) { fire { cont.resume(returning: v) } }
-    func fail(_ e: Error) { fire { cont.resume(throwing: e) } }
-    private func fire(_ block: () -> Void) {
-        lock.lock(); defer { lock.unlock() }
-        guard !done else { return }; done = true; block()
-    }
-}
-
-private final class OnceVoidBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var done = false
-    private let cont: CheckedContinuation<Void, Error>
-    init(_ cont: CheckedContinuation<Void, Error>) { self.cont = cont }
-    func succeed() { fire { cont.resume(returning: ()) } }
-    func fail(_ e: Error) { fire { cont.resume(throwing: e) } }
-    private func fire(_ block: () -> Void) {
+    func run(_ block: () -> Void) {
         lock.lock(); defer { lock.unlock() }
         guard !done else { return }; done = true; block()
     }

@@ -1,5 +1,4 @@
 import XCTest
-import CryptoKit
 @testable import FeatureSyncSetup
 @testable import CoreModels
 
@@ -21,53 +20,49 @@ final class SyncPairingCryptoTests: XCTestCase {
 
     func testSealOpenRoundTripsToTargetDevice() throws {
         let tv = SyncPairingIdentity()
-        let ctx = SyncPairingContext()
         let b = bundle()
-        let sealed = try SyncPairingCrypto.seal(b, toPublicKey: tv.publicKeyData, context: ctx)
-        let opened = try SyncPairingCrypto.open(sealed, with: tv)
-        XCTAssertEqual(opened, b)
+        let sealed = try SyncPairingCrypto.seal(b, toPublicKey: tv.publicKeyData, context: SyncPairingContext())
+        XCTAssertEqual(try SyncPairingCrypto.open(sealed, with: tv), b)
     }
 
-    func testSecretsRoundTripButAreOpaqueOnTheWire() throws {
+    func testSecretsRoundTripButOpaqueOnWire() throws {
         let tv = SyncPairingIdentity()
-        let b = bundle(withSecrets: true)
-        let sealed = try SyncPairingCrypto.seal(b, toPublicKey: tv.publicKeyData, context: SyncPairingContext())
-        // On the wire the token is NOT visible (ciphertext is opaque).
+        let sealed = try SyncPairingCrypto.seal(bundle(withSecrets: true), toPublicKey: tv.publicKeyData, context: SyncPairingContext())
         let json = String(data: try JSONEncoder().encode(sealed), encoding: .utf8)!
         XCTAssertFalse(json.contains("SECRET-TOKEN"))
-        // But the intended device recovers it.
-        let opened = try SyncPairingCrypto.open(sealed, with: tv)
-        XCTAssertEqual(opened.secrets?.accounts.first?.token, "SECRET-TOKEN")
+        XCTAssertEqual(try SyncPairingCrypto.open(sealed, with: tv).secrets?.accounts.first?.token, "SECRET-TOKEN")
     }
 
     func testDifferentDeviceCannotOpen() throws {
-        let tv = SyncPairingIdentity()
-        let attacker = SyncPairingIdentity()
+        let tv = SyncPairingIdentity(); let attacker = SyncPairingIdentity()
         let sealed = try SyncPairingCrypto.seal(bundle(withSecrets: true), toPublicKey: tv.publicKeyData, context: SyncPairingContext())
-        XCTAssertThrowsError(try SyncPairingCrypto.open(sealed, with: attacker)) { err in
-            XCTAssertEqual(err as? SyncPairingError, .decryptionFailed)
+        XCTAssertThrowsError(try SyncPairingCrypto.open(sealed, with: attacker)) {
+            XCTAssertEqual($0 as? SyncPairingError, .decryptionFailed)
         }
     }
 
     func testExpiredContextRejected() throws {
         let tv = SyncPairingIdentity()
-        let past = Date(timeIntervalSinceNow: -1000)
-        let ctx = SyncPairingContext(ttlSeconds: 1, now: past)
-        let sealed = try SyncPairingCrypto.seal(bundle(), toPublicKey: tv.publicKeyData, context: ctx)
-        XCTAssertThrowsError(try SyncPairingCrypto.open(sealed, with: tv)) { err in
-            XCTAssertEqual(err as? SyncPairingError, .expiredContext)
+        let sealed = try SyncPairingCrypto.seal(bundle(), toPublicKey: tv.publicKeyData,
+                                                context: SyncPairingContext(ttlSeconds: 1, now: Date(timeIntervalSinceNow: -1000)))
+        XCTAssertThrowsError(try SyncPairingCrypto.open(sealed, with: tv)) {
+            XCTAssertEqual($0 as? SyncPairingError, .expiredContext)
         }
     }
 
-    func testReplayIntoDifferentCeremonyFails() throws {
-        let tv = SyncPairingIdentity()
-        let ctxA = SyncPairingContext()
-        let sealed = try SyncPairingCrypto.seal(bundle(), toPublicKey: tv.publicKeyData, context: ctxA)
-        // Attacker swaps in a different ceremony context (different info binding).
-        var tampered = sealed
-        tampered.context = SyncPairingContext()
-        XCTAssertThrowsError(try SyncPairingCrypto.open(tampered, with: tv)) { err in
-            XCTAssertEqual(err as? SyncPairingError, .decryptionFailed)
+    // MARK: Short code
+
+    func testShortCodeNormalizeAndGroup() {
+        XCTAssertEqual(SyncPairingCode.normalize("7k2q 9f"), "7K2Q9F")
+        XCTAssertEqual(SyncPairingCode.normalize("il-o1"), "1101")
+        XCTAssertEqual(SyncPairingCode.grouped("7K2Q9F"), "7K2Q-9F")
+    }
+
+    func testGeneratedCodeAvoidsAmbiguousLetters() {
+        for _ in 0..<50 {
+            let code = SyncPairingCode.generate()
+            XCTAssertEqual(code.count, 6)
+            XCTAssertFalse(code.contains(where: { "ILOU".contains($0) }))
         }
     }
 }

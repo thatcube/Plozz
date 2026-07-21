@@ -134,7 +134,7 @@ public struct RootView: View {
                     Button {
                         showSyncReceive = true
                     } label: {
-                        Label("Set up from iPhone", systemImage: "iphone")
+                        Label("Set up from another device", systemImage: "qrcode")
                     }
                     .padding(.bottom, 40)
                 }

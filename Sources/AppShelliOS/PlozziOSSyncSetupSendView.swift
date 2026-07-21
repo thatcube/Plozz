@@ -3,15 +3,19 @@ import SwiftUI
 import AVFoundation
 import FeatureSyncSetup
 
-/// iOS "Set up another device" screen: scans the QR shown on the Apple TV and
-/// sends this phone's config + credentials over the E2E pairing channel so the TV
-/// is signed in with no typing.
+/// iOS "Set up another device" screen: scan the QR shown on the other device, or
+/// type its short code, then send this device's config + credentials over the E2E
+/// pairing channel so the other device is set up with no typing.
 @MainActor
 struct SyncSetupSendView: View {
     private let appModel: PlozziOSAppModel
     private let onClose: () -> Void
     @State private var model: SyncSetupPairingModel
     @State private var handled = false
+    @State private var mode: Mode = .scan
+    @State private var typedCode = ""
+
+    enum Mode { case scan, code }
 
     init(appModel: PlozziOSAppModel, onClose: @escaping () -> Void) {
         self.appModel = appModel
@@ -24,31 +28,16 @@ struct SyncSetupSendView: View {
             Group {
                 switch model.phase {
                 case .idle:
-                    ZStack {
-                        QRScannerView { code in
-                            guard !handled else { return }
-                            handled = true
-                            Task { await model.send(inviteString: code) }
-                        }
-                        .ignoresSafeArea()
-                        VStack {
-                            Spacer()
-                            Text("Point your camera at the code on your Apple TV — pinch to zoom")
-                                .font(.headline).padding()
-                                .background(.ultraThinMaterial, in: Capsule())
-                                .padding(.bottom, 60)
-                        }
-                    }
+                    if mode == .scan { scanner } else { codeEntry }
+                case .connecting:
+                    ProgressView("Connecting…")
                 case .sending:
                     ProgressView("Sending your setup…")
                 case .sent:
                     result(icon: "checkmark.circle.fill", color: .green,
-                           title: "Your Apple TV is set up",
+                           title: "Your other device is set up",
                            subtitle: "It’s signed in — no typing needed.")
-                        .task {
-                            try? await Task.sleep(nanoseconds: 2_000_000_000)
-                            onClose()
-                        }
+                        .task { try? await Task.sleep(nanoseconds: 2_000_000_000); onClose() }
                 case .failed(let message):
                     result(icon: "exclamationmark.triangle.fill", color: .orange,
                            title: "Setup didn’t finish", subtitle: message, retry: true)
@@ -58,8 +47,59 @@ struct SyncSetupSendView: View {
             }
             .navigationTitle("Set Up Device")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { onClose() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { onClose() } }
+                if model.phase == .idle {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button(mode == .scan ? "Enter Code" : "Scan") {
+                            mode = (mode == .scan) ? .code : .scan
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    private var scanner: some View {
+        ZStack {
+            QRScannerView { code in
+                guard !handled else { return }
+                handled = true
+                Task { await model.send(inviteString: code) }
+            }
+            .ignoresSafeArea()
+            VStack {
+                Spacer()
+                Text("Point your camera at the code on your other device — pinch to zoom")
+                    .font(.headline).padding()
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.bottom, 60)
+            }
+        }
+    }
+
+    private var codeEntry: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "keyboard").font(.system(size: 48)).foregroundStyle(.tint)
+            Text("Enter the code shown on your other device").font(.headline)
+                .multilineTextAlignment(.center)
+            TextField("Code", text: $typedCode)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .multilineTextAlignment(.center)
+                .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal, 40)
+            Button("Continue") {
+                guard !handled else { return }
+                handled = true
+                Task { await model.send(code: typedCode) }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(SyncPairingCode.normalize(typedCode).count < 4)
+            Spacer()
+        }
+        .padding(.top, 60)
     }
 
     @ViewBuilder
@@ -69,7 +109,7 @@ struct SyncSetupSendView: View {
             Text(title).font(.title2.bold())
             Text(subtitle).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
             if retry {
-                Button("Try Again") { handled = false; model.reset() }.buttonStyle(.borderedProminent)
+                Button("Try Again") { handled = false; typedCode = ""; model.reset() }.buttonStyle(.borderedProminent)
             } else {
                 Button("Done") { onClose() }.buttonStyle(.borderedProminent)
             }
@@ -77,7 +117,7 @@ struct SyncSetupSendView: View {
     }
 }
 
-/// Minimal AVFoundation QR scanner.
+/// Minimal AVFoundation QR scanner with pinch-to-zoom.
 struct QRScannerView: UIViewControllerRepresentable {
     let onCode: (String) -> Void
 
@@ -113,41 +153,28 @@ struct QRScannerView: UIViewControllerRepresentable {
             preview.frame = view.layer.bounds
             view.layer.addSublayer(preview)
             self.preview = preview
-
-            // Pinch to zoom the camera while scanning.
-            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
-            view.addGestureRecognizer(pinch)
+            view.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:))))
         }
 
         @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             guard let device else { return }
-            if gesture.state == .began {
-                zoomAtPinchStart = device.videoZoomFactor
-            }
+            if gesture.state == .began { zoomAtPinchStart = device.videoZoomFactor }
             let maxZoom = min(device.activeFormat.videoMaxZoomFactor, 8.0)
             let target = max(1.0, min(zoomAtPinchStart * gesture.scale, maxZoom))
-            do {
-                try device.lockForConfiguration()
-                device.videoZoomFactor = target
-                device.unlockForConfiguration()
-            } catch {}
+            do { try device.lockForConfiguration(); device.videoZoomFactor = target; device.unlockForConfiguration() } catch {}
         }
 
         override func viewWillAppear(_ animated: Bool) {
             super.viewWillAppear(animated)
             if !session.isRunning { DispatchQueue.global(qos: .userInitiated).async { self.session.startRunning() } }
         }
-        override func viewDidLayoutSubviews() {
-            super.viewDidLayoutSubviews()
-            preview?.frame = view.layer.bounds
-        }
+        override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); preview?.frame = view.layer.bounds }
         override func viewWillDisappear(_ animated: Bool) {
             super.viewWillDisappear(animated)
             if session.isRunning { session.stopRunning() }
         }
 
-        func metadataOutput(_ output: AVCaptureMetadataOutput,
-                            didOutput metadataObjects: [AVMetadataObject],
+        func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject],
                             from connection: AVCaptureConnection) {
             guard let obj = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
                   let value = obj.stringValue else { return }

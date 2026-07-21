@@ -1,22 +1,24 @@
 import Foundation
 import CoreModels
 
-// MARK: - Pairing invite + channel abstraction
+// MARK: - Pairing invite, short code + bidirectional link
 //
-// Security model for the phone→TV (or any device→device) non-secret handoff:
-//   • The TV shows a QR / short code that encodes a `SyncPairingInvite` — its
-//     ephemeral PUBLIC KEY + ceremony id + expiry. The public key travels via the
-//     QR, NOT via the Bonjour advertisement, so a LAN bystander who cannot see the
-//     TV's screen cannot seal a payload to it.
-//   • Bonjour discovery only says "a TV is waiting" (convenience); the actual key
-//     material is obtained by scanning. A payload is HPKE-sealed to the invite's
-//     key and bound to the ceremony, so only the intended TV can open it.
+// Security model for the device→device non-secret/credential handoff:
+//   • The target (e.g. Apple TV) shows a QR AND a short human code. Both identify
+//     the same one-time Bonjour service; the QR additionally carries the target's
+//     ephemeral PUBLIC KEY out-of-band.
+//   • Pairing runs over a single bidirectional connection: the target first sends
+//     its invite (public key + ceremony), then the source seals the payload to that
+//     key and sends it back.
+//   • If the source scanned the QR, it VERIFIES the streamed public key equals the
+//     QR's — so a man-in-the-middle on the LAN can't substitute its own key (QR
+//     path stays end-to-end secure). A code-only source (no camera) trusts the
+//     keyed LAN connection gated by the short code.
 //
-// `PairingChannel` abstracts the byte transport (Bonjour/Network.framework in
-// production, in-memory in tests) so the full export→seal→transfer→open→apply flow
-// is unit-testable without real networking.
+// `PairingLink` abstracts the byte transport (Bonjour/Network.framework in
+// production, in-memory in tests) so the whole flow is unit-testable.
 
-/// What the TV's QR / short code encodes. NON-SECRET: a public key is safe to show.
+/// What the target's QR encodes. NON-SECRET: a public key is safe to show.
 public struct SyncPairingInvite: Codable, Hashable, Sendable {
     public var serviceName: String
     public var publicKeyData: Data
@@ -49,60 +51,112 @@ public struct SyncPairingInvite: Codable, Hashable, Sendable {
     }
 }
 
-/// Source side of a pairing byte channel.
-public protocol PairingSending: Sendable {
-    func send(_ payload: SealedSyncPayload) async throws
+/// Short, human-typeable pairing code. Crockford-style base32 (no I/L/O/U to avoid
+/// ambiguity), shown grouped like "7K2Q-9F". The raw (ungrouped, uppercased) form
+/// doubles as the Bonjour service name so a typed code can find the same service.
+public enum SyncPairingCode {
+    private static let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+
+    /// Generate a fresh N-character code (default 6).
+    public static func generate(length: Int = 6) -> String {
+        String((0..<length).map { _ in alphabet.randomElement()! })
+    }
+
+    /// Normalize user input: uppercase, strip spaces/dashes, map look-alikes.
+    public static func normalize(_ input: String) -> String {
+        input.uppercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "I", with: "1")
+            .replacingOccurrences(of: "L", with: "1")
+            .replacingOccurrences(of: "O", with: "0")
+    }
+
+    /// Group for display, e.g. "7K2Q9F" -> "7K2Q-9F".
+    public static func grouped(_ code: String, size: Int = 4) -> String {
+        let chars = Array(code)
+        guard chars.count > size else { return code }
+        return stride(from: 0, to: chars.count, by: size)
+            .map { String(chars[$0..<min($0 + size, chars.count)]) }
+            .joined(separator: "-")
+    }
 }
 
-/// Target side of a pairing byte channel.
-public protocol PairingReceiving: Sendable {
-    func receive() async throws -> SealedSyncPayload
+// MARK: - Bidirectional link
+
+/// A bidirectional, framed byte link between two paired devices.
+public protocol PairingLink: Sendable {
+    func send(_ data: Data) async throws
+    func receive() async throws -> Data
+    func close()
 }
 
-/// Convenience for transports that do both (e.g. the in-memory test channel).
-public typealias PairingChannel = PairingSending & PairingReceiving
+/// In-memory bidirectional link pair for tests. `makePair()` returns two ends whose
+/// sends are delivered to the other's receives.
+public actor InMemoryPairingLink: PairingLink {
+    private var inbox: [Data] = []
+    private var waiters: [CheckedContinuation<Data, Never>] = []
+    private var peer: InMemoryPairingLink?
 
-/// In-memory loopback channel for tests (source and target share one instance).
-public actor InMemoryPairingChannel: PairingSending, PairingReceiving {
-    private var buffer: [SealedSyncPayload] = []
-    private var waiters: [CheckedContinuation<SealedSyncPayload, Never>] = []
     public init() {}
 
-    public func send(_ payload: SealedSyncPayload) async throws {
-        if let w = waiters.first { waiters.removeFirst(); w.resume(returning: payload) }
-        else { buffer.append(payload) }
+    public static func makePair() async -> (host: InMemoryPairingLink, guest: InMemoryPairingLink) {
+        let a = InMemoryPairingLink(); let b = InMemoryPairingLink()
+        await a.setPeer(b); await b.setPeer(a)
+        return (a, b)
     }
 
-    public func receive() async throws -> SealedSyncPayload {
-        if !buffer.isEmpty { return buffer.removeFirst() }
+    func setPeer(_ p: InMemoryPairingLink) { peer = p }
+    fileprivate func deliver(_ data: Data) {
+        if let w = waiters.first { waiters.removeFirst(); w.resume(returning: data) }
+        else { inbox.append(data) }
+    }
+
+    public func send(_ data: Data) async throws { await peer?.deliver(data) }
+    public func receive() async throws -> Data {
+        if !inbox.isEmpty { return inbox.removeFirst() }
         return await withCheckedContinuation { waiters.append($0) }
     }
+    public nonisolated func close() {}
 }
 
 // MARK: - High-level pairing session (transport-agnostic)
 
 public enum SyncPairingSession {
 
-    /// Source device: seal the transfer bundle (config + optional credentials) to
-    /// the invite and send.
-    public static func sendSetup(
-        _ bundle: SyncTransferBundle,
-        to invite: SyncPairingInvite,
-        over channel: PairingSending,
-        now: Date = Date()
-    ) async throws {
-        guard !invite.context.isExpired(now: now) else { throw SyncPairingError.expiredContext }
-        let sealed = try SyncPairingCrypto.seal(bundle, toPublicKey: invite.publicKeyData, context: invite.context)
-        try await channel.send(sealed)
-    }
-
-    /// Target device: receive + open a transfer bundle using its identity.
-    public static func receiveSetup(
-        with identity: SyncPairingIdentity,
-        over channel: PairingReceiving,
+    /// Target/host side (e.g. Apple TV): send our invite, then receive + open the
+    /// sealed transfer bundle.
+    public static func hostReceiveSetup(
+        identity: SyncPairingIdentity,
+        context: SyncPairingContext,
+        serviceName: String,
+        over link: PairingLink,
         now: Date = Date()
     ) async throws -> SyncTransferBundle {
-        let sealed = try await channel.receive()
+        let invite = SyncPairingInvite(serviceName: serviceName, publicKeyData: identity.publicKeyData, context: context)
+        try await link.send(try JSONEncoder().encode(invite))
+        let sealedData = try await link.receive()
+        let sealed = try JSONDecoder().decode(SealedSyncPayload.self, from: sealedData)
         return try SyncPairingCrypto.open(sealed, with: identity, now: now)
+    }
+
+    /// Source/guest side (e.g. phone): receive the target's invite, optionally
+    /// verify it against a scanned QR (MITM protection), seal our bundle to it, send.
+    /// - Parameter expectedPublicKey: the QR-scanned key to verify against, or nil
+    ///   for a code-only pairing (no out-of-band key to check).
+    public static func guestSendSetup(
+        _ bundle: SyncTransferBundle,
+        over link: PairingLink,
+        expectedPublicKey: Data?,
+        now: Date = Date()
+    ) async throws {
+        let inviteData = try await link.receive()
+        let invite = try JSONDecoder().decode(SyncPairingInvite.self, from: inviteData)
+        if let expectedPublicKey, expectedPublicKey != invite.publicKeyData {
+            throw SyncPairingError.decryptionFailed
+        }
+        guard !invite.context.isExpired(now: now) else { throw SyncPairingError.expiredContext }
+        let sealed = try SyncPairingCrypto.seal(bundle, toPublicKey: invite.publicKeyData, context: invite.context)
+        try await link.send(try JSONEncoder().encode(sealed))
     }
 }

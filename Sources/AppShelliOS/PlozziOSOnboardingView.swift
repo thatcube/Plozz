@@ -69,13 +69,13 @@ struct PlozziOSOnboardingView: View {
 
     private var providerList: some View {
         VStack(spacing: 0) {
-            providerRow(.jellyfin, subtitle: "Sign in to your Jellyfin server")
+            providerRow(.jellyfin)
             divider
-            providerRow(.plex, subtitle: "Link your Plex account")
+            providerRow(.plex)
             divider
-            providerRow(.emby, subtitle: "Sign in to your Emby server")
+            providerRow(.emby)
             divider
-            providerRow(.mediaShare, subtitle: "Connect an SMB / network share")
+            providerRow(.mediaShare)
         }
         .background(palette.cardSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
@@ -85,10 +85,10 @@ struct PlozziOSOnboardingView: View {
     }
 
     private var divider: some View {
-        Rectangle().fill(palette.cardBorder).frame(height: 1).padding(.leading, 68)
+        Rectangle().fill(palette.cardBorder).frame(height: 1)
     }
 
-    private func providerRow(_ provider: ProviderKind, subtitle: String) -> some View {
+    private func providerRow(_ provider: ProviderKind) -> some View {
         Button {
             if provider == .mediaShare {
                 showAddShare = true
@@ -98,21 +98,16 @@ struct PlozziOSOnboardingView: View {
         } label: {
             HStack(spacing: 16) {
                 ProviderBrandMark(provider: provider, size: 40)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(provider.displayName)
-                        .font(.headline)
-                        .foregroundStyle(palette.primaryText)
-                    Text(subtitle)
-                        .font(.footnote)
-                        .foregroundStyle(palette.secondaryText)
-                }
+                Text(provider.displayName)
+                    .font(.headline)
+                    .foregroundStyle(palette.primaryText)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(palette.secondaryText)
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.vertical, 16)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

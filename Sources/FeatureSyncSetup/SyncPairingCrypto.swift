@@ -63,6 +63,10 @@ public enum SyncPairingError: Error, Equatable {
     case expiredContext
     case kindMismatch
     case decryptionFailed
+    /// The user did not confirm the SAS matched (or cancelled the ceremony).
+    case notConfirmed
+    /// The revealed guest nonce did not match its earlier commitment.
+    case commitmentMismatch
 }
 
 /// Ephemeral key material a device advertises during pairing.

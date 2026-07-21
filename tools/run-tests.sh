@@ -70,6 +70,32 @@ if [[ "${PLOZZ_LEAN:-1}" != "0" ]]; then
   )
 fi
 
+# --- Hang watchdog + isolated DerivedData ------------------------------------
+# xcodebuild can WEDGE indefinitely (0% CPU, no output) when it inherits a
+# poisoned/contended build database — most often the shared
+# ~/Library/Developer/Xcode/DerivedData when several worktrees or a previously
+# force-killed build left it in a bad state. Because `xcodebuild test` has no
+# built-in timeout, that manifests as a "build" that silently hangs forever.
+#
+# Two defenses, both here:
+#   1. A per-worktree DerivedData dir (PLOZZ_DERIVED_DATA) so this checkout never
+#      contends with another worktree's build DB, and so a wedge can be cleared
+#      by nuking just this dir — never the shared cache.
+#   2. A no-progress watchdog: if the build log stops growing for
+#      PLOZZ_HANG_SECS, the xcodebuild process tree is killed, this worktree's
+#      DerivedData is cleared, and the invocation is retried ONCE from clean.
+PLOZZ_DERIVED_DATA="${PLOZZ_DERIVED_DATA:-$PWD/.build/test-derived-data}"
+PLOZZ_HANG_SECS="${PLOZZ_HANG_SECS:-180}"
+
+# Recursively kill a process and all its descendants (xcodebuild's swift-frontend
+# children don't die with the parent otherwise).
+kill_tree() {
+  local pid="$1" child
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do kill_tree "$child"; done
+  kill "$pid" 2>/dev/null || true
+}
+
+
 # --- Architecture layering guard (fast, data-driven) -------------------------
 # Enforce the module-layering invariants before any (slow) compile/simulator
 # orchestration. This is the chokepoint both CI and tools/test-fast.sh funnel
@@ -243,21 +269,73 @@ failed_bundles_from_log() {
     | sed -E "s/Test Suite '([A-Za-z0-9_]+)\.xctest' failed/\1/" | sort -u
 }
 
-# xcodebuild_test <log> <xcb-arg>...  -> returns xcodebuild's exit status
-xcodebuild_test() {
+# _xcb_once <log> <xcb-arg>...  -> runs one xcodebuild test invocation with a
+# no-progress watchdog. Returns xcodebuild's exit status, or 124 if the watchdog
+# killed it for making no progress for PLOZZ_HANG_SECS.
+_xcb_once() {
   local log="$1"; shift
-  set +e
+  : > "$log"
   xcodebuild test \
     "$@" \
     -destination "platform=tvOS Simulator,id=$PLOZZ_SIM_ID" \
     -parallel-testing-enabled "$PARALLEL" \
+    -derivedDataPath "$PLOZZ_DERIVED_DATA" \
     "${LEAN_SETTINGS[@]}" \
-    CODE_SIGNING_ALLOWED=NO 2>&1 \
-    | tee "$log" \
-    | grep --line-buffered -E "$SUMMARY_RE" | tail -60
-  local status=${PIPESTATUS[0]}
-  set -e
+    CODE_SIGNING_ALLOWED=NO > "$log" 2>&1 &
+  local xcb_pid=$!
+
+  # Live-stream the summary lines so the run always shows progress (never a
+  # silent multi-minute hang with no feedback).
+  ( tail -n +1 -F "$log" 2>/dev/null | grep --line-buffered -E "$SUMMARY_RE" || true ) &
+  local tail_pid=$!
+
+  # Watchdog: poll the log size; if it doesn't grow for PLOZZ_HANG_SECS, the
+  # build is wedged — kill the tree and report a hang (124).
+  local last_size=-1 stalled=0 hung=0 size
+  while kill -0 "$xcb_pid" 2>/dev/null; do
+    sleep 10
+    size=$(stat -f%z "$log" 2>/dev/null || echo 0)
+    if [[ "$size" == "$last_size" ]]; then
+      stalled=$(( stalled + 10 ))
+      if [[ $stalled -ge $PLOZZ_HANG_SECS ]]; then
+        echo "" ; echo "run-tests.sh: WATCHDOG — no build output for ${PLOZZ_HANG_SECS}s; xcodebuild is wedged. Killing it." >&2
+        kill_tree "$xcb_pid"
+        hung=1
+        break
+      fi
+    else
+      stalled=0
+      last_size="$size"
+    fi
+  done
+
+  local status
+  wait "$xcb_pid" 2>/dev/null; status=$?
+  kill "$tail_pid" 2>/dev/null || true
+  wait "$tail_pid" 2>/dev/null || true
+  [[ $hung -eq 1 ]] && return 124
   return $status
+}
+
+# xcodebuild_test <log> <xcb-arg>...  -> returns xcodebuild's exit status. Self-
+# heals a wedged build once: on a watchdog kill, clears this worktree's
+# DerivedData and retries from clean.
+xcodebuild_test() {
+  local log="$1"; shift
+  local attempt status
+  for attempt in 1 2; do
+    set +e
+    _xcb_once "$log" "$@"
+    status=$?
+    set -e
+    if [[ $status -eq 124 && $attempt -eq 1 ]]; then
+      echo "run-tests.sh: clearing DerivedData ($PLOZZ_DERIVED_DATA) and retrying the build once from clean." >&2
+      rm -rf "$PLOZZ_DERIVED_DATA"
+      continue
+    fi
+    [[ $status -eq 124 ]] && echo "run-tests.sh: FAILURE — xcodebuild wedged twice; the simulator/toolchain likely needs attention." >&2
+    return $status
+  done
 }
 
 # --- Decide the build strategy ------------------------------------------------

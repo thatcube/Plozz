@@ -30,6 +30,8 @@ struct PlozziOSSyncSetupSettingsView: View {
                 }
             case .sent:
                 successView
+            case .confirmingSAS(let code):
+                sasConfirm(code)
             case .failed(let message):
                 centered {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -76,6 +78,11 @@ struct PlozziOSSyncSetupSettingsView: View {
     }
 
     // MARK: Success
+
+    @ViewBuilder
+    private func sasConfirm(_ code: String) -> some View {
+        SyncSetupSASConfirmView(code: code) { model.confirmSASMatch($0) }
+    }
 
     private var successView: some View {
         SyncSetupSentSuccessView(

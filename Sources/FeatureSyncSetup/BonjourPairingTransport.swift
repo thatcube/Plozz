@@ -41,7 +41,7 @@ public final class NWConnectionPairingLink: PairingLink, @unchecked Sendable {
 
     public func receive() async throws -> Data {
         let header = try await receiveExactly(4)
-        let len = header.withUnsafeBytes { Int($0.load(as: UInt32.self).bigEndian) }
+        let len = header.withUnsafeBytes { Int($0.loadUnaligned(as: UInt32.self).bigEndian) }
         guard len > 0, len < 5_000_000 else { throw BonjourPairingError.framing }
         return try await receiveExactly(len)
     }

@@ -39,7 +39,7 @@ struct PlozziOSSyncSetupDeepLinkView: View {
         .task {
             guard !started else { return }
             started = true
-            await model.send(inviteString: invite)
+            await model.send(deepLink: invite)
         }
     }
 
@@ -52,6 +52,8 @@ struct PlozziOSSyncSetupDeepLinkView: View {
                 profiles: appModel.profiles.profiles,
                 onDone: onClose
             )
+        case .confirmingSAS(let code):
+            SyncSetupSASConfirmView(code: code) { model.confirmSASMatch($0) }
         case .failed(let message):
             VStack(spacing: 16) {
                 Spacer()
@@ -64,7 +66,7 @@ struct PlozziOSSyncSetupDeepLinkView: View {
                 Button("Try Again") {
                     Task {
                         model.reset()
-                        await model.send(inviteString: invite)
+                        await model.send(deepLink: invite)
                     }
                 }
                 .buttonStyle(.borderedProminent)

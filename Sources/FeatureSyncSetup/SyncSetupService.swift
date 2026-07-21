@@ -137,11 +137,13 @@ public final class SyncSetupService {
     public func receiveSetup(
         pairing: HostPairing,
         over link: PairingLink,
-        existingAuthorizations: [String: LocalAuthorization] = [:]
+        existingAuthorizations: [String: LocalAuthorization] = [:],
+        presentSAS: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> ReceivedSetup {
         let bundle = try await SyncPairingSession.hostReceiveSetup(
             identity: pairing.identity, context: pairing.invite.context,
-            serviceName: pairing.invite.serviceName, over: link
+            serviceName: pairing.invite.serviceName, over: link,
+            presentSAS: presentSAS
         )
         var application = coordinator.apply(
             snapshot: bundle.config,
@@ -160,13 +162,15 @@ public final class SyncSetupService {
 
     // MARK: Pairing — source (this device sends its config + credentials)
 
-    /// Guest side: over the link, receive the target's invite (verifying it against
-    /// `expectedPublicKey` from a scanned QR when present), then seal + send this
-    /// device's config and — unless `configOnly` — its credentials.
+    /// Guest side: over the link, run the authenticated handshake (QR key pinning
+    /// when `expectedPublicKey` is set, otherwise a SAS numeric-comparison the user
+    /// confirms via `confirmSAS`), then seal + send this device's config and —
+    /// unless `configOnly` — its credentials.
     public func sendSetup(
         over link: PairingLink,
         expectedPublicKey: Data?,
-        configOnly: Bool = false
+        configOnly: Bool = false,
+        confirmSAS: @escaping @Sendable (String) async -> Bool = { _ in true }
     ) async throws {
         let cfg = configProvider()
         let snapshot = coordinator.exportSnapshot(
@@ -174,6 +178,8 @@ public final class SyncSetupService {
         )
         let secrets = configOnly ? nil : secretsProvider()
         let bundle = SyncTransferBundle(config: snapshot, secrets: (secrets?.isEmpty ?? true) ? nil : secrets)
-        try await SyncPairingSession.guestSendSetup(bundle, over: link, expectedPublicKey: expectedPublicKey)
+        try await SyncPairingSession.guestSendSetup(
+            bundle, over: link, expectedPublicKey: expectedPublicKey, confirmSAS: confirmSAS
+        )
     }
 }

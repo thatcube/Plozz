@@ -63,7 +63,13 @@ struct SyncSetupReceiveView: View {
                     .font(.headline).foregroundStyle(palette.secondaryText)
                     .multilineTextAlignment(.center).frame(maxWidth: 900)
             case .applying:
-                ProgressView("Setting up…").font(.title2).foregroundStyle(palette.primaryText)
+                if let sas = model.hostSASCode {
+                    sasComparison(sas)
+                } else {
+                    ProgressView("Setting up…").font(.title2).foregroundStyle(palette.primaryText)
+                }
+            case .confirmingSAS(let sas):
+                sasComparison(sas)
             case .applied(let received):
                 appliedSummary(received)
             case .connecting, .sending, .sent:
@@ -80,6 +86,23 @@ struct SyncSetupReceiveView: View {
             }
         }
         .padding(70)
+    }
+
+    // MARK: Verification code (SAS) — shown so the user can confirm both devices
+    // display the SAME number before any credentials are trusted.
+
+    @ViewBuilder
+    private func sasComparison(_ code: String) -> some View {
+        VStack(spacing: 24) {
+            Text("Check this code").font(.largeTitle.bold())
+                .foregroundStyle(palette.primaryText)
+            Text(SyncPairingSAS.grouped(code))
+                .font(.system(size: 84, weight: .bold, design: .rounded)).monospaced()
+                .foregroundStyle(palette.primaryText)
+            Text("Make sure the same number shows on your other device, then confirm there.")
+                .font(.headline).foregroundStyle(palette.secondaryText)
+                .multilineTextAlignment(.center).frame(maxWidth: 900)
+        }
     }
 
     // MARK: Applied summary (app design language — provider logos + profiles)

@@ -128,11 +128,16 @@ public protocol PairingLink: Sendable {
 }
 
 /// In-memory bidirectional link pair for tests. `makePair()` returns two ends whose
-/// sends are delivered to the other's receives.
+/// sends are delivered to the other's receives. Closing an end unblocks BOTH ends'
+/// pending receives with an error — mirroring a real socket close (the Bonjour
+/// transport cancels its connection), so an aborted pairing frees the peer at once
+/// instead of hanging until the phase timeout.
 public actor InMemoryPairingLink: PairingLink {
+    struct Closed: Error {}
     private var inbox: [Data] = []
-    private var waiters: [CheckedContinuation<Data, Never>] = []
+    private var waiters: [CheckedContinuation<Data, Error>] = []
     private var peer: InMemoryPairingLink?
+    private var isClosed = false
 
     public init() {}
 
@@ -148,56 +153,156 @@ public actor InMemoryPairingLink: PairingLink {
         else { inbox.append(data) }
     }
 
-    public func send(_ data: Data) async throws { await peer?.deliver(data) }
+    /// Fail all pending receives — called on this end's close and on the peer's.
+    fileprivate func failWaiters() {
+        isClosed = true
+        let pending = waiters; waiters.removeAll()
+        for w in pending { w.resume(throwing: Closed()) }
+    }
+
+    public func send(_ data: Data) async throws {
+        if isClosed { throw Closed() }
+        await peer?.deliver(data)
+    }
     public func receive() async throws -> Data {
         if !inbox.isEmpty { return inbox.removeFirst() }
-        return await withCheckedContinuation { waiters.append($0) }
+        if isClosed { throw Closed() }
+        return try await withCheckedThrowingContinuation { waiters.append($0) }
     }
-    public nonisolated func close() {}
+    public nonisolated func close() {
+        Task { await self.closeNow() }
+    }
+    private func closeNow() async {
+        failWaiters()
+        await peer?.failWaiters()
+    }
 }
 
 // MARK: - High-level pairing session (transport-agnostic)
 
+/// Wire messages for the authenticated pairing handshake.
+enum PairingHandshakeMode: String, Codable, Sendable { case qr, sas }
+
+/// Guest's opening message. In SAS mode it carries the guest's nonce commitment,
+/// sent BEFORE the host reveals its key — the binding that defeats a MITM.
+struct PairingHello: Codable, Sendable {
+    var mode: PairingHandshakeMode
+    var commitment: Data?
+}
+
+/// Host's reply: its ephemeral public key, the ceremony context, and a fresh
+/// per-connection nonce mixed into the SAS.
+struct PairingHandshakeInvite: Codable, Sendable {
+    var publicKeyData: Data
+    var context: SyncPairingContext
+    var hostNonce: Data
+}
+
+/// Guest reveals its nonce (SAS mode only).
+struct PairingReveal: Codable, Sendable {
+    var guestNonce: Data
+}
+
 public enum SyncPairingSession {
 
-    /// Target/host side (e.g. Apple TV): send our invite, then receive + open the
-    /// sealed transfer bundle.
+    /// Per-phase timeout so a stalled or malicious peer can never hang either side.
+    static let phaseTimeout: Double = 60
+
+    /// Target/host side (e.g. Apple TV): run the handshake, then receive + open the
+    /// sealed transfer bundle. In SAS mode, `presentSAS` is invoked with the 6-digit
+    /// code the moment it is known so the host UI can display it for comparison.
     public static func hostReceiveSetup(
         identity: SyncPairingIdentity,
         context: SyncPairingContext,
         serviceName: String,
         over link: PairingLink,
+        presentSAS: @escaping @Sendable (String) -> Void = { _ in },
         now: Date = Date()
     ) async throws -> SyncTransferBundle {
-        let invite = SyncPairingInvite(serviceName: serviceName, publicKeyData: identity.publicKeyData, context: context)
+        // 1. Await the guest's hello (with its commitment in SAS mode).
+        let helloData = try await withPairingTimeout(seconds: phaseTimeout, onTimeout: { link.close() }) {
+            try await link.receive()
+        }
+        let hello = try JSONDecoder().decode(PairingHello.self, from: helloData)
+
+        // 2. Reveal our key + a fresh host nonce.
+        let hostNonce = SyncPairingSAS.makeNonce()
+        let invite = PairingHandshakeInvite(
+            publicKeyData: identity.publicKeyData, context: context, hostNonce: hostNonce
+        )
         try await link.send(try JSONEncoder().encode(invite))
-        // Bound the wait for the sealed payload: once a peer has connected, it
-        // should complete within seconds. If it stalls or aborts (e.g. the source
-        // gave up), time out and close the link so the caller can recover and
-        // re-arm instead of hanging on "Setting up…" forever.
-        let sealedData = try await withPairingTimeout(
-            seconds: 60, onTimeout: { link.close() }
-        ) { try await link.receive() }
+
+        // 3. SAS mode: receive the guest's revealed nonce, verify the commitment,
+        //    compute + surface the code for the human to compare.
+        if hello.mode == .sas {
+            guard let commitment = hello.commitment else { throw SyncPairingError.commitmentMismatch }
+            let revealData = try await withPairingTimeout(seconds: phaseTimeout, onTimeout: { link.close() }) {
+                try await link.receive()
+            }
+            let reveal = try JSONDecoder().decode(PairingReveal.self, from: revealData)
+            guard SyncPairingSAS.verify(commitment: commitment, matchesGuestNonce: reveal.guestNonce) else {
+                throw SyncPairingError.commitmentMismatch
+            }
+            let sas = SyncPairingSAS.code(
+                hostPublicKey: identity.publicKeyData, hostNonce: hostNonce,
+                guestNonce: reveal.guestNonce, ceremonyID: context.ceremonyID
+            )
+            presentSAS(sas)
+        }
+
+        // 4. Receive the sealed bundle (arrives only after the guest confirmed).
+        let sealedData = try await withPairingTimeout(seconds: phaseTimeout, onTimeout: { link.close() }) {
+            try await link.receive()
+        }
         let sealed = try JSONDecoder().decode(SealedSyncPayload.self, from: sealedData)
         return try SyncPairingCrypto.open(sealed, with: identity, now: now)
     }
 
-    /// Source/guest side (e.g. phone): receive the target's invite, optionally
-    /// verify it against a scanned QR (MITM protection), seal our bundle to it, send.
-    /// - Parameter expectedPublicKey: the QR-scanned key to verify against, or nil
-    ///   for a code-only pairing (no out-of-band key to check).
+    /// Source/guest side (e.g. phone): run the handshake, then seal + send this
+    /// device's bundle.
+    /// - Parameters:
+    ///   - expectedPublicKey: the QR-scanned key. When present the recipient is
+    ///     already authenticated out-of-band, so no SAS is needed.
+    ///   - confirmSAS: for the non-QR path, invoked with the 6-digit code; the
+    ///     bundle is sent ONLY if it returns true (the user confirmed a match).
     public static func guestSendSetup(
         _ bundle: SyncTransferBundle,
         over link: PairingLink,
         expectedPublicKey: Data?,
+        confirmSAS: @escaping @Sendable (String) async -> Bool = { _ in true },
         now: Date = Date()
     ) async throws {
-        let inviteData = try await link.receive()
-        let invite = try JSONDecoder().decode(SyncPairingInvite.self, from: inviteData)
-        if let expectedPublicKey, expectedPublicKey != invite.publicKeyData {
-            throw SyncPairingError.decryptionFailed
+        let mode: PairingHandshakeMode = expectedPublicKey == nil ? .sas : .qr
+
+        // 1. Say hello. In SAS mode commit to our nonce BEFORE seeing the host key.
+        let guestNonce = SyncPairingSAS.makeNonce()
+        let hello = PairingHello(
+            mode: mode,
+            commitment: mode == .sas ? SyncPairingSAS.commitment(forGuestNonce: guestNonce) : nil
+        )
+        try await link.send(try JSONEncoder().encode(hello))
+
+        // 2. Receive the host's key + nonce.
+        let inviteData = try await withPairingTimeout(seconds: phaseTimeout, onTimeout: { link.close() }) {
+            try await link.receive()
         }
+        let invite = try JSONDecoder().decode(PairingHandshakeInvite.self, from: inviteData)
         guard !invite.context.isExpired(now: now) else { throw SyncPairingError.expiredContext }
+
+        if let expectedPublicKey {
+            // QR path: the key is authenticated out-of-band; no human comparison.
+            guard expectedPublicKey == invite.publicKeyData else { throw SyncPairingError.decryptionFailed }
+        } else {
+            // SAS path: reveal our nonce, derive the code, require user confirmation.
+            try await link.send(try JSONEncoder().encode(PairingReveal(guestNonce: guestNonce)))
+            let sas = SyncPairingSAS.code(
+                hostPublicKey: invite.publicKeyData, hostNonce: invite.hostNonce,
+                guestNonce: guestNonce, ceremonyID: invite.context.ceremonyID
+            )
+            guard await confirmSAS(sas) else { throw SyncPairingError.notConfirmed }
+        }
+
+        // 3. Seal our bundle to the (now-authenticated) key and send it.
         let sealed = try SyncPairingCrypto.seal(bundle, toPublicKey: invite.publicKeyData, context: invite.context)
         try await link.send(try JSONEncoder().encode(sealed))
     }

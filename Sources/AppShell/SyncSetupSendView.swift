@@ -46,6 +46,8 @@ struct SyncSetupSendView: View {
             }
         case .sent:
             sentSummary
+        case .confirmingSAS(let sas):
+            sasConfirm(sas)
         case .failed(let message):
             VStack(spacing: 18) {
                 Image(systemName: "exclamationmark.triangle").font(.system(size: 60))
@@ -128,6 +130,31 @@ struct SyncSetupSendView: View {
                 Task { await model.send(code: code) }
             }
             .disabled(SyncPairingCode.normalize(code).count < 4)
+        }
+    }
+
+    // MARK: Verification code (SAS) confirmation — the sender gates the transfer
+    // on the user confirming both devices show the SAME number, defeating a
+    // man-in-the-middle on the (cameraless) tap-to-pair / code paths.
+
+    @ViewBuilder
+    private func sasConfirm(_ code: String) -> some View {
+        VStack(spacing: 28) {
+            Text("Does this code match?").font(.largeTitle.bold())
+                .foregroundStyle(palette.primaryText)
+            Text(SyncPairingSAS.grouped(code))
+                .font(.system(size: 84, weight: .bold, design: .rounded)).monospaced()
+                .foregroundStyle(palette.primaryText)
+            Text("Check the other device shows the same number before continuing.")
+                .font(.headline).foregroundStyle(palette.secondaryText)
+                .multilineTextAlignment(.center).frame(maxWidth: 900)
+            HStack(spacing: 24) {
+                Button("Yes, they match") { model.confirmSASMatch(true) }
+                    .font(.title3.weight(.semibold))
+                Button("No", role: .cancel) { model.confirmSASMatch(false) }
+                    .font(.title3)
+            }
+            .padding(.top, 8)
         }
     }
 

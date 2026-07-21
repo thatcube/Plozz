@@ -50,9 +50,13 @@ struct PlozziOSSyncSetupReceiveView: View {
         case .waitingForPeer(let code, let invite):
             waiting(code: code, invite: invite)
         case .applying:
-            centered {
-                ProgressView().controlSize(.large)
-                Text("Setting up…").font(.headline).foregroundStyle(palette.secondaryText)
+            if let sas = model.hostSASCode {
+                sasCompare(sas)
+            } else {
+                centered {
+                    ProgressView().controlSize(.large)
+                    Text("Setting up…").font(.headline).foregroundStyle(palette.secondaryText)
+                }
             }
         case .applied(let received):
             appliedSummary(received)
@@ -94,6 +98,27 @@ struct PlozziOSSyncSetupReceiveView: View {
                 .multilineTextAlignment(.center).padding(.horizontal, 12)
             Spacer(minLength: 0)
         }
+    }
+
+    // MARK: Verification code (SAS) — the receiver shows the number so the user can
+    // confirm it matches the sending device before trusting the transfer.
+
+    private func sasCompare(_ code: String) -> some View {
+        VStack(spacing: 18) {
+            Spacer(minLength: 0)
+            Image(systemName: "checkmark.shield")
+                .font(.system(size: 44)).foregroundStyle(palette.accent)
+            Text("Check this code").font(.title2.bold())
+                .foregroundStyle(palette.primaryText)
+            Text(SyncPairingSAS.grouped(code))
+                .font(.system(size: 56, weight: .bold, design: .rounded)).monospaced()
+                .foregroundStyle(palette.primaryText)
+            Text("Make sure the same number shows on your other device, then confirm there.")
+                .font(.callout).foregroundStyle(palette.secondaryText)
+                .multilineTextAlignment(.center).padding(.horizontal, 24)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: Applied summary (received servers + profiles, on-brand)

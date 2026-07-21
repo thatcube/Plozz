@@ -3,8 +3,9 @@ import XCTest
 @testable import CoreModels
 
 // Test factories that hand each role its pre-wired in-memory link end.
-struct StaticHost: PairingLinkHosting {
+final class StaticHost: PairingLinkHosting {
     let link: PairingLink
+    init(link: PairingLink) { self.link = link }
     func awaitConnection() async throws -> PairingLink { link }
 }
 struct StaticGuest: PairingLinkConnecting {
@@ -66,7 +67,7 @@ final class SyncSetupPairingE2ETests: XCTestCase {
         XCTAssertEqual(received.secrets?.accounts.first?.token, "TOK")
     }
 
-    func testShortCodePathWorksWithoutQR() async throws {
+    func testShortCodePathRunsSASAndTransfers() async throws {
         let (hostLink, guestLink) = await InMemoryPairingLink.makePair()
         let phone = service(accounts: [account("a1")], configured: true, id: "phone")
         let tv = service(configured: false, id: "tv")
@@ -81,8 +82,22 @@ final class SyncSetupPairingE2ETests: XCTestCase {
             await Task.yield()
         }
         let typed = try XCTUnwrap(code)
-        // Simulate the user typing the code with spaces/lowercase.
-        await phoneModel.send(code: SyncPairingCode.grouped(typed).lowercased())
+
+        // Sender begins; the non-QR path must surface a SAS to confirm.
+        async let sending: Void = phoneModel.send(code: SyncPairingCode.grouped(typed).lowercased())
+        var sas: String?
+        for _ in 0..<4000 {
+            if case .confirmingSAS(let c) = phoneModel.phase { sas = c; break }
+            await Task.yield()
+        }
+        let phoneSAS = try XCTUnwrap(sas)
+        // Both devices must derive the SAME code when there is no MITM.
+        for _ in 0..<2000 where tvModel.hostSASCode == nil { await Task.yield() }
+        XCTAssertEqual(tvModel.hostSASCode, phoneSAS)
+
+        // User confirms the match → credentials flow.
+        phoneModel.confirmSASMatch(true)
+        await sending
         await hosting
 
         XCTAssertEqual(phoneModel.phase, .sent)
@@ -90,24 +105,57 @@ final class SyncSetupPairingE2ETests: XCTestCase {
         XCTAssertEqual(received.application.pendingAuthorizations.map(\.id), ["a1"])
     }
 
+    func testSASRejectionAbortsSend() async throws {
+        let (hostLink, guestLink) = await InMemoryPairingLink.makePair()
+        let phone = service(accounts: [account("a1")], configured: true, id: "phone")
+        let tv = service(configured: false, id: "tv")
+
+        let tvModel = SyncSetupPairingModel(service: tv, makeHostLink: { _ in StaticHost(link: hostLink) })
+        let phoneModel = SyncSetupPairingModel(service: phone, makeGuestLink: { _ in StaticGuest(link: guestLink) })
+
+        async let hosting: Void = tvModel.startReceiving()
+        var code: String?
+        for _ in 0..<2000 {
+            if case .waitingForPeer(let c, _) = tvModel.phase { code = c; break }
+            await Task.yield()
+        }
+        let typed = try XCTUnwrap(code)
+
+        async let sending: Void = phoneModel.send(code: typed)
+        for _ in 0..<4000 {
+            if case .confirmingSAS = phoneModel.phase { break }
+            await Task.yield()
+        }
+        // User says the codes DON'T match → send must abort, no credentials sent.
+        phoneModel.confirmSASMatch(false)
+        await sending
+        tvModel.stopReceiving()
+        await hosting
+
+        guard case .failed = phoneModel.phase else { return XCTFail("expected failure, got \(phoneModel.phase)") }
+    }
+
     func testMITMKeySubstitutionOnQRPathFails() async throws {
-        // The QR carries the phone's EXPECTED key, but the host (attacker) presents
-        // a different key over the link -> guest must refuse.
+        // The QR pins the phone's EXPECTED key, but the host (attacker) presents a
+        // different key over the link -> guest must refuse before sending anything.
         let (hostLink, guestLink) = await InMemoryPairingLink.makePair()
         let phone = service(accounts: [account("a1")], configured: true, id: "phone")
 
-        // Host sends an invite with an unrelated key.
+        // Attacker plays host: consume the guest's hello, then send a handshake
+        // invite carrying the attacker's (wrong) key.
         let attackerIdentity = SyncPairingIdentity()
         Task {
-            let invite = SyncPairingInvite(serviceName: "X", publicKeyData: attackerIdentity.publicKeyData,
-                                           context: SyncPairingContext())
+            _ = try? await hostLink.receive() // guest hello
+            let invite = PairingHandshakeInvite(
+                publicKeyData: attackerIdentity.publicKeyData,
+                context: SyncPairingContext(),
+                hostNonce: SyncPairingSAS.makeNonce()
+            )
             try? await hostLink.send(try JSONEncoder().encode(invite))
         }
 
-        // Guest expects a DIFFERENT key (from the real QR).
         let realKey = SyncPairingIdentity().publicKeyData
         let phoneModel = SyncSetupPairingModel(service: phone, makeGuestLink: { _ in StaticGuest(link: guestLink) })
-        // Build a fake QR string carrying realKey + the attacker's service name.
         let fakeInvite = SyncPairingInvite(serviceName: "X", publicKeyData: realKey, context: SyncPairingContext())
         await phoneModel.send(inviteString: fakeInvite.encoded())
 

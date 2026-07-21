@@ -283,6 +283,8 @@ final class PlozziOSAppModel {
                 return SyncSecretsBundle(accounts: accts)
             }
         )
+        // Keep the non-secret presence beacon fresh for same-Apple-ID devices.
+        self.syncSetup.publishPresence()
         self.plexHomeUsers = PlexHomeUsersModel(
             accountsProviders: accountsProviders,
             profilesModel: profiles,

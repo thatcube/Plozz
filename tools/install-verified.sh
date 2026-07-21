@@ -129,11 +129,11 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
   fi
 fi
 
-# Launch (best-effort; a failed launch does not undo a verified install).
+# Launch — purely best-effort and SILENT on failure. Install is the only thing
+# that matters; a launch can fail for benign reasons (e.g. the device is locked),
+# and that's not worth reporting. Only note a confirmed launch.
 if [[ "$LAUNCH" == "1" ]]; then
   if xcrun devicectl device process launch --device "$DEVICE" --timeout 60 "$BUNDLE" >/dev/null 2>&1; then
     echo "✓ Launched $BUNDLE."
-  else
-    echo "• Installed, but launch didn't confirm — open it manually if needed."
   fi
 fi

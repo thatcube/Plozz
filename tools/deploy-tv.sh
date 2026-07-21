@@ -163,10 +163,11 @@ echo "▸ Installing $BUNDLE_ID → Apple TV (verified)…"
 # reset env on launch below.
 "$(dirname "$0")/install-verified.sh" "$DEVICE_ID" "$APP_PATH" --force --no-launch
 
-echo "▸ Launching…"
+# Launch is best-effort and silent on failure — install is what matters; a launch
+# can fail for benign reasons (device asleep/locked) and isn't worth reporting.
 if [[ "${PLOZZ_SHOW_FIRST_RUN_RESET:-0}" == "1" ]]; then
   export DEVICECTL_CHILD_PLOZZ_SHOW_FIRST_RUN_RESET=1
 fi
-xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID"
+xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID" >/dev/null 2>&1 || true
 
-echo "✓ Deployed & launched: $BUNDLE_ID"
+echo "✓ Deployed: $BUNDLE_ID"

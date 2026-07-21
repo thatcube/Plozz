@@ -33,7 +33,7 @@ struct SyncSetupSendView: View {
                         .ignoresSafeArea()
                         VStack {
                             Spacer()
-                            Text("Point your camera at the code on your Apple TV")
+                            Text("Point your camera at the code on your Apple TV — pinch to zoom")
                                 .font(.headline).padding()
                                 .background(.ultraThinMaterial, in: Capsule())
                                 .padding(.bottom, 60)
@@ -92,6 +92,8 @@ struct QRScannerView: UIViewControllerRepresentable {
         var onCode: ((String) -> Void)?
         private let session = AVCaptureSession()
         private var preview: AVCaptureVideoPreviewLayer?
+        private var device: AVCaptureDevice?
+        private var zoomAtPinchStart: CGFloat = 1.0
 
         override func viewDidLoad() {
             super.viewDidLoad()
@@ -99,6 +101,7 @@ struct QRScannerView: UIViewControllerRepresentable {
             guard let device = AVCaptureDevice.default(for: .video),
                   let input = try? AVCaptureDeviceInput(device: device),
                   session.canAddInput(input) else { return }
+            self.device = device
             session.addInput(input)
             let output = AVCaptureMetadataOutput()
             guard session.canAddOutput(output) else { return }
@@ -110,6 +113,24 @@ struct QRScannerView: UIViewControllerRepresentable {
             preview.frame = view.layer.bounds
             view.layer.addSublayer(preview)
             self.preview = preview
+
+            // Pinch to zoom the camera while scanning.
+            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+            view.addGestureRecognizer(pinch)
+        }
+
+        @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            guard let device else { return }
+            if gesture.state == .began {
+                zoomAtPinchStart = device.videoZoomFactor
+            }
+            let maxZoom = min(device.activeFormat.videoMaxZoomFactor, 8.0)
+            let target = max(1.0, min(zoomAtPinchStart * gesture.scale, maxZoom))
+            do {
+                try device.lockForConfiguration()
+                device.videoZoomFactor = target
+                device.unlockForConfiguration()
+            } catch {}
         }
 
         override func viewWillAppear(_ animated: Bool) {

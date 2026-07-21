@@ -50,6 +50,7 @@
 	<array>
 		<string>_jellyfin._tcp</string>
 		<string>_smb._tcp</string>
+		<string>_plozz-pair._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Plozz uses your local network to discover media servers and network shares.</string>

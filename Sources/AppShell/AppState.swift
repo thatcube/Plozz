@@ -8,6 +8,7 @@ import FeatureDiscovery
 import FeatureDiscoveryCore
 import FeatureMusic
 import FeatureProfiles
+import FeatureSyncSetup
 import MediaTransportCore
 import MediaDownloads
 import MediaTransportFTP
@@ -28,6 +29,7 @@ import LastFmService
 import AniListService
 import MALService
 import TopShelfKit
+import UIKit
 
 /// The app's composition root and single source of truth for session state.
 ///
@@ -473,6 +475,9 @@ public final class AppState {
     /// seams and media-share preferred-keys hook are wired in `init`.
     public let accountsProviders: AccountsProvidersModel
 
+    /// Cross-device Sync & Setup (feature-flagged; OFF by default).
+    public let syncSetup: SyncSetupService
+
     /// The Plex Home users ("Who's watching?") facet — owns per-account Plex
     /// token overrides, the PIN-prompt state, `plexIdentityGeneration`, and the
     /// profile↔Home-user switching. It resolves the accounts hub's token/credential
@@ -600,6 +605,20 @@ public final class AppState {
         )
         self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
+
+        // Cross-device Sync & Setup facade. Captures locals (not self) so it can be
+        // initialized here in phase 1, before any self-capturing closures.
+        let syncAccounts = self.accountsProviders
+        let syncProfiles = resolvedProfilesModel
+        let syncStore = resolvedAccountStore
+        self.syncSetup = SyncSetupService(
+            deviceID: { syncStore.deviceID() },
+            deviceName: { UIDevice.current.name },
+            isConfigured: { !syncAccounts.accounts.isEmpty },
+            configProvider: {
+                .init(accounts: syncAccounts.accounts, profiles: syncProfiles.profiles)
+            }
+        )
 
         // If the caller supplied any settings model, treat them all as injected
         // (test path) and don't rebuild them on profile switch. Otherwise build

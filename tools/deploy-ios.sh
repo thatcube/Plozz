@@ -23,7 +23,7 @@ CONFIG="Debug"
 IPHONE_UDID="${PLOZZ_IPHONE_UDID:-00008140-000955C40A0B001C}"
 IPHONE_CORE_ID="${PLOZZ_IPHONE_CORE_ID:-CACB5C41-FBA6-5DE8-9868-98BBDF897991}"
 IPAD_UDID="${PLOZZ_IPAD_UDID:-00008027-000331D81A62802E}"
-IPAD_CORE_ID="${PLOZZ_IPAD_CORE_ID:-57563618-0186-5D3B-81AD-CB884A854DD2}"
+IPAD_CORE_ID="${PLOZZ_IPAD_CORE_ID:-D1EB8B46-3CEC-5F68-BCDA-B1C9E0E40600}"
 
 DEPLOY_IPHONE=1
 DEPLOY_IPAD=1
@@ -127,69 +127,17 @@ if [[ "$BUILD_ONLY" == "1" ]]; then
   exit 0
 fi
 
-USB_DEVICES=""
-NETWORK_DEVICES=""
-if command -v idevice_id >/dev/null 2>&1; then
-  USB_DEVICES="$(idevice_id -l 2>/dev/null || true)"
-  NETWORK_DEVICES="$(idevice_id -n -l 2>/dev/null || true)"
-fi
-
 install_device() {
   local name="$1"
-  local udid="$2"
-  local core_id="$3"
-  local transport_args=()
-
-  if grep -qx "$udid" <<<"$USB_DEVICES"; then
-    transport_args+=(--no-wifi)
-    echo "▸ Installing build $BUILD on $name over direct USB…"
-  elif grep -qx "$udid" <<<"$NETWORK_DEVICES"; then
-    echo "▸ Installing build $BUILD on $name over MobileDevice Wi-Fi…"
-  else
-    echo "▸ $name is not visible through usbmuxd; trying CoreDevice once…"
-    if ! xcrun devicectl device install app \
-      --device "$core_id" --timeout 45 "$APP_PATH"; then
-      echo "✗ $name installation failed. Connect it by USB and retry." >&2
-      return 1
-    fi
-    launch_device "$name" "$core_id"
-    return
-  fi
-
-  local running_pid
-  running_pid="$(
-    xcrun devicectl device info processes \
-      --device "$core_id" --timeout 20 2>/dev/null \
-      | awk '/\/Plozz\.app\/Plozz$/ { print $1; exit }'
-  )"
-  if [[ -n "$running_pid" ]]; then
-    echo "▸ Stopping the existing Plozz process before replacement…"
-    xcrun devicectl device process terminate \
-      --device "$core_id" --pid "$running_pid" --timeout 20 >/dev/null || true
-  fi
-
-  if ! command -v ios-deploy >/dev/null 2>&1; then
-    echo "✗ MobileDevice installer unavailable. Run: brew install ios-deploy" >&2
-    return 1
-  fi
-
-  ios-deploy \
-    --id "$udid" \
-    --bundle "$APP_PATH" \
-    --timeout 30 \
-    "${transport_args[@]}"
-  launch_device "$name" "$core_id"
-}
-
-launch_device() {
-  local name="$1"
-  local core_id="$2"
-  if xcrun devicectl device process launch \
-      --device "$core_id" --timeout 30 "$BUNDLE_ID" >/dev/null; then
-    echo "✓ $name installed and launched build $BUILD."
-  else
-    echo "✓ $name installed build $BUILD; unlock it and launch Plozz manually."
-  fi
+  local core_id="$3"   # arg 2 (usbmux udid) is no longer needed — devicectl uses
+                       # the CoreDevice id and picks USB automatically when present.
+  echo "▸ Installing build $BUILD on $name (verified)…"
+  # --force: we just built fresh code; always (re)install rather than skip on a
+  # matching build number (git-commit-count versioning can't tell it apart from
+  # changed-but-uncommitted code). The verified installer warms the tunnel, uses
+  # a generous timeout, and confirms success by querying the device instead of
+  # trusting the install command's exit code (which lies on wireless links).
+  "$(dirname "$0")/install-verified.sh" "$core_id" "$APP_PATH" --force
 }
 
 STATUS=0

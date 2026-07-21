@@ -86,8 +86,14 @@ if [[ "$SIM_BUILD" == "1" ]]; then
   fi
   echo "▸ Building for tvOS Simulator (compile sanity only — no HDR)…"
 else
-  DESTINATION="platform=tvOS,id=$DEVICE_ID"
-  echo "▸ Building for Apple TV ($DEVICE_ID)…"
+  # Build with a GENERIC destination, NOT the device id. A device-specific
+  # destination makes xcodebuild open a tunnel to the Apple TV just to PLAN the
+  # build, which times out whenever that wireless tunnel is cold ("Timed out
+  # waiting for all destinations… Connecting to Brando TV"). The generic slice
+  # produces the same installable arm64 tvOS build without the device being up;
+  # only the INSTALL needs the device, and that's handled reliably below.
+  DESTINATION="generic/platform=tvOS"
+  echo "▸ Building for Apple TV (generic tvOS slice; device only needed to install)…"
 fi
 
 # --- Build -------------------------------------------------------------------
@@ -150,8 +156,12 @@ if [[ -d "$CT" ]]; then
   fi
 fi
 
-echo "▸ Installing $BUNDLE_ID → Apple TV…"
-xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH"
+echo "▸ Installing $BUNDLE_ID → Apple TV (verified)…"
+# --force: we just built fresh code, so always (re)install rather than skip on a
+# matching build number (which the git-commit-count versioning can't distinguish
+# from changed-but-uncommitted code). --no-launch so we can apply the first-run
+# reset env on launch below.
+"$(dirname "$0")/install-verified.sh" "$DEVICE_ID" "$APP_PATH" --force --no-launch
 
 echo "▸ Launching…"
 if [[ "${PLOZZ_SHOW_FIRST_RUN_RESET:-0}" == "1" ]]; then

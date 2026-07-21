@@ -86,6 +86,10 @@ final class PlozziOSAppModel {
     private(set) var downloads: PlozziOSDownloadsModel
     private(set) var pendingLibrarySelection: PendingLibrarySelection?
     private(set) var pendingFirstRunStep: FirstRunStep?
+    /// A pairing invite captured from a Sync & Setup universal link
+    /// (`https://plozz.app/pair#…`). When set, the root presents the pairing send
+    /// flow and auto-sends this device's setup to the device that showed the QR.
+    var pendingPairingInvite: String?
     @ObservationIgnored
     private(set) var plexHomeUsers: PlexHomeUsersModel!
     @ObservationIgnored
@@ -456,6 +460,16 @@ final class PlozziOSAppModel {
 
     var deviceID: String {
         accountStore.deviceID()
+    }
+
+    /// Handle an incoming URL (custom scheme or universal link). Returns true if it
+    /// was a recognized Sync & Setup pairing link and has been captured for
+    /// presentation via `pendingPairingInvite`.
+    @discardableResult
+    func handleIncomingURL(_ url: URL) -> Bool {
+        guard SyncPairingInvite.decode(url.absoluteString) != nil else { return false }
+        pendingPairingInvite = url.absoluteString
+        return true
     }
 
     func selectProfile(_ id: String) {

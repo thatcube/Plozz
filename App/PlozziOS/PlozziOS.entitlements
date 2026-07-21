@@ -7,5 +7,12 @@
          setup over. No secrets are ever stored here. -->
     <key>com.apple.developer.ubiquity-kvstore-identifier</key>
     <string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+    <!-- Universal Links for Sync & Setup pairing: scanning the QR opens Plozz
+         straight into the "set up another device" flow. Backed by the AASA file
+         served from https://plozz.app/.well-known/apple-app-site-association. -->
+    <key>com.apple.developer.associated-domains</key>
+    <array>
+        <string>applinks:plozz.app</string>
+    </array>
 </dict>
 </plist>

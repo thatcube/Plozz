@@ -30,24 +30,60 @@ public struct SyncPairingInvite: Codable, Hashable, Sendable {
         self.context = context
     }
 
-    /// Compact, URL-safe string for embedding in a QR (`plozz-pair://<base64url>`).
+    /// Compact, URL-safe string embedded in the QR. Uses an https **Universal
+    /// Link** so scanning it with the system Camera opens Plozz straight into
+    /// pairing when installed, or shows a download/finish-setup page when not.
+    /// The payload rides in the URL **fragment** (`#…`) so it is never sent to
+    /// the server. Legacy `plozz-pair://` strings are still accepted by `decode`.
     public func encoded() -> String {
+        SyncPairingInvite.universalLinkPrefix + encodedPayload()
+    }
+
+    /// The base64url payload alone (no scheme/URL), used by `encoded()` and tests.
+    public func encodedPayload() -> String {
         let data = (try? JSONEncoder().encode(self)) ?? Data()
-        let b64 = data.base64EncodedString()
+        return data.base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
-        return "plozz-pair://" + b64
     }
 
+    /// The Universal Link prefix the QR uses. The payload is appended as a
+    /// fragment so it stays entirely client-side.
+    public static let universalLinkPrefix = "https://plozz.app/pair#"
+    /// Legacy custom-scheme prefix, still decoded for backward compatibility.
+    public static let legacyScheme = "plozz-pair://"
+
     public static func decode(_ string: String) -> SyncPairingInvite? {
-        guard string.hasPrefix("plozz-pair://") else { return nil }
-        var b64 = String(string.dropFirst("plozz-pair://".count))
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let payload = extractPayload(trimmed) else { return nil }
+        var b64 = payload
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
         while b64.count % 4 != 0 { b64 += "=" }
         guard let data = Data(base64Encoded: b64) else { return nil }
         return try? JSONDecoder().decode(SyncPairingInvite.self, from: data)
+    }
+
+    /// Pull the base64url payload out of any accepted form: the https universal
+    /// link (payload in the fragment, or a `d=` query as a fallback), the legacy
+    /// `plozz-pair://` scheme, or a bare payload string.
+    private static func extractPayload(_ string: String) -> String? {
+        if string.hasPrefix(legacyScheme) {
+            return String(string.dropFirst(legacyScheme.count))
+        }
+        if let scheme = URL(string: string)?.scheme?.lowercased(),
+           scheme == "https" || scheme == "http" {
+            if let comps = URLComponents(string: string) {
+                if let frag = comps.fragment, !frag.isEmpty { return frag }
+                if let d = comps.queryItems?.first(where: { $0.name == "d" })?.value,
+                   !d.isEmpty { return d }
+            }
+            return nil
+        }
+        // Bare payload (no scheme) — accept as-is.
+        if !string.contains("://") && !string.contains("/") { return string }
+        return nil
     }
 }
 

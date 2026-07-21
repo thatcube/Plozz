@@ -121,6 +121,17 @@ public struct PlozziOSRootView: View {
             )
         }
         .installNightShiftOverlay(appModel.settings.nightShift)
+        .onOpenURL { url in
+            appModel.handleIncomingURL(url)
+        }
+        .sheet(item: pendingPairingBinding) { pairing in
+            PlozziOSSyncSetupDeepLinkView(
+                appModel: appModel,
+                invite: pairing.invite,
+                onClose: { appModel.pendingPairingInvite = nil }
+            )
+            .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
+        }
     }
 
     private var resolvedPalette: ThemePalette {
@@ -195,11 +206,25 @@ public struct PlozziOSRootView: View {
         )
     }
 
+    private var pendingPairingBinding: Binding<PendingPairing?> {
+        Binding(
+            get: { appModel.pendingPairingInvite.map(PendingPairing.init(invite:)) },
+            set: { newValue in
+                if newValue == nil { appModel.pendingPairingInvite = nil }
+            }
+        )
+    }
+
     private func showAddServer() {
         addServerPresentationColorScheme = resolvedPalette.isLight ? .light : .dark
         appModel.beginManagedServerPresentation()
         showingAddServer = true
     }
+}
+
+private struct PendingPairing: Identifiable {
+    let invite: String
+    var id: String { invite }
 }
 
 private enum PlozziOSDestination: String, CaseIterable, Identifiable, Hashable {

@@ -47,6 +47,22 @@ done
 
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS-'safe.bareRepository=all'}"
 
+# App Store Connect API key for provisioning. When present, xcodebuild can enable
+# NEW App ID capabilities (e.g. Associated Domains) and regenerate profiles via
+# -allowProvisioningUpdates. Without it, only already-enabled capabilities work.
+# Override via ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH (or .env.fastlane).
+ASC_KEY_ID="${ASC_KEY_ID:-37FS6MVHMJ}"
+ASC_ISSUER_ID="${ASC_ISSUER_ID:-22389112-b204-4681-b921-ee9edc4afe6f}"
+ASC_KEY_PATH="${ASC_KEY_PATH:-/Users/brandon/Development/.appstoreconnect/keys/AuthKey_${ASC_KEY_ID}.p8}"
+AUTH_FLAGS=()
+if [[ -f "$ASC_KEY_PATH" ]]; then
+  AUTH_FLAGS=(
+    -authenticationKeyPath "$ASC_KEY_PATH"
+    -authenticationKeyID "$ASC_KEY_ID"
+    -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+  )
+fi
+
 BUILD_SETTING_OVERRIDES=()
 if [[ "$INCLUDE_METADATA_KEYS" != "1" ]]; then
   # Device builds are keyless by default. Account-level integrations such as
@@ -68,6 +84,7 @@ if [[ "$NO_BUILD" != "1" ]]; then
     -configuration "$CONFIG" \
     -destination "generic/platform=iOS" \
     -allowProvisioningUpdates \
+    ${AUTH_FLAGS[@]+"${AUTH_FLAGS[@]}"} \
     ${BUILD_SETTING_OVERRIDES[@]+"${BUILD_SETTING_OVERRIDES[@]}"} \
     build \
     | { command -v xcbeautify >/dev/null 2>&1 && xcbeautify || cat; }

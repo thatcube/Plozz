@@ -174,6 +174,10 @@ targets:
           # SMB file servers (NAS, macOS/Windows file sharing) advertise
           # themselves as _smb._tcp; used to auto-discover local media shares.
           - _smb._tcp
+          # Sync & Setup device pairing ("set up from another device"): the TV
+          # advertises this service so a configured phone/tablet can find it and
+          # transfer setup over the local network.
+          - _plozz-pair._tcp
         # Jellyfin servers are user-controlled and frequently plain HTTP — on the
         # LAN, behind a reverse proxy, or over Tailscale (the 100.64.0.0/10 CGNAT
         # range, which is NOT covered by NSAllowsLocalNetworking). Since the user
@@ -301,6 +305,11 @@ targets:
         NSBonjourServices:
           - _jellyfin._tcp
           - _smb._tcp
+          # Sync & Setup device pairing ("set up another device") over the LAN.
+          - _plozz-pair._tcp
+        NSCameraUsageDescription: "Plozz uses the camera to scan the setup code shown on your other device."
+        OMDBAPIKey: "$(OMDB_API_KEY)"
+        TMDBBearerToken: "$(TMDB_BEARER_TOKEN)"
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true

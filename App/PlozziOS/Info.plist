@@ -53,7 +53,7 @@
 		<string>_plozz-pair._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Plozz uses the camera to scan the setup code shown on your Apple TV.</string>
+	<string>Plozz uses the camera to scan the setup code shown on your other device.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Plozz uses your local network to discover media servers and network shares.</string>
 	<key>OMDBAPIKey</key>
@@ -64,12 +64,12 @@
 	<string>$(SIMKL_CLIENT_ID)</string>
 	<key>SimklClientSecret</key>
 	<string>$(SIMKL_CLIENT_SECRET)</string>
+	<key>TMDBBearerToken</key>
+	<string>$(TMDB_BEARER_TOKEN)</string>
 	<key>TraktClientID</key>
 	<string>$(TRAKT_CLIENT_ID)</string>
 	<key>TraktClientSecret</key>
 	<string>$(TRAKT_CLIENT_SECRET)</string>
-	<key>TMDBBearerToken</key>
-	<string>$(TMDB_BEARER_TOKEN)</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Bungee-Regular.ttf</string>

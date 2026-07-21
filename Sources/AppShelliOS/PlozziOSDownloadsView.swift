@@ -6,7 +6,6 @@ import SwiftUI
 import UIKit
 
 struct PlozziOSDownloadsView: View {
-    @Environment(\.themePalette) private var palette
     @Bindable var model: PlozziOSDownloadsModel
     let appModel: PlozziOSAppModel
     let onShowSettings: () -> Void
@@ -78,63 +77,133 @@ struct PlozziOSDownloadsView: View {
     }
 
     private func libraryList(_ library: PlozziOSDownloadLibrary) -> some View {
-        List {
-            Section {
-                PlozziOSDownloadsStorageBar(downloadsBytes: library.totalBytes)
-                Button(
-                    "Delete All Downloads",
-                    systemImage: "trash",
-                    role: .destructive
+        GeometryReader { proxy in
+            ScrollView {
+                LazyVGrid(
+                    columns: Self.columns(for: proxy.size.width),
+                    spacing: 20
                 ) {
-                    pendingBulkDeletion = .all(library)
-                }
-            }
-            .listRowBackground(palette.cardOpaqueSurface)
-            .listRowSeparatorTint(palette.cardOpaqueBorder)
-
-            Section {
-                ForEach(library.entries) { entry in
-                    switch entry {
-                    case let .movie(movie):
-                        movieRow(movie)
-                    case let .show(show):
-                        showRow(show)
+                    ForEach(library.entries) { entry in
+                        switch entry {
+                        case let .movie(movie):
+                            movieTile(movie)
+                        case let .show(show):
+                            showTile(show)
+                        }
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .listRowBackground(palette.cardOpaqueSurface)
-            .listRowSeparatorTint(palette.cardOpaqueBorder)
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
+    }
+
+    /// Landscape download tiles: one column on a compact phone, two on an iPad in
+    /// portrait, three on a wide iPad — using the real estate the old full-width
+    /// rows left empty.
+    private static func columns(for width: CGFloat) -> [GridItem] {
+        let count: Int
+        switch width {
+        case ..<560: count = 1
+        case ..<1100: count = 2
+        default: count = 3
+        }
+        return Array(repeating: GridItem(.flexible(), spacing: 20), count: count)
     }
 
     @ViewBuilder
-    private func movieRow(_ movie: PlozziOSDownloadedMovie) -> some View {
+    private func movieTile(_ movie: PlozziOSDownloadedMovie) -> some View {
         let record = movie.record
-        DownloadRowLink(record: record, model: model, appModel: appModel) {
-            DownloadRowContent(
-                title: record.snapshot.title,
-                subtitle: DownloadFormatting.status(for: record),
-                subtitleColor: DownloadFormatting.statusColor(for: record),
-                fraction: DownloadFormatting.activeFraction(for: record),
-                failure: DownloadFormatting.failure(for: record),
-                artworkURL: model.artworkURL(for: record),
-                kind: record.snapshot.kind
-            )
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button("Remove", systemImage: "trash", role: .destructive) {
-                Task { await model.remove(record) }
+        tileCard(
+            menu: {
+                transferMenuActions(for: record)
+                Button("Remove", systemImage: "trash", role: .destructive) {
+                    Task { await model.remove(record) }
+                }
+            },
+            accessibilityTitle: record.snapshot.title
+        ) {
+            DownloadRowLink(record: record, model: model, appModel: appModel) {
+                DownloadTileContent(
+                    title: record.snapshot.title,
+                    subtitle: DownloadFormatting.status(for: record),
+                    subtitleColor: DownloadFormatting.statusColor(for: record),
+                    fraction: DownloadFormatting.activeFraction(for: record),
+                    failure: DownloadFormatting.failure(for: record),
+                    artworkURL: model.artworkURL(for: record),
+                    kind: record.snapshot.kind
+                )
             }
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            transferSwipeActions(for: record)
+            .buttonStyle(.plain)
         }
     }
 
     @ViewBuilder
-    private func transferSwipeActions(
+    private func showTile(_ show: PlozziOSDownloadedShow) -> some View {
+        tileCard(
+            menu: {
+                Button("Remove", systemImage: "trash", role: .destructive) {
+                    pendingBulkDeletion = .show(show)
+                }
+            },
+            accessibilityTitle: show.title
+        ) {
+            NavigationLink {
+                PlozziOSDownloadedShowView(
+                    showID: show.id,
+                    model: model,
+                    appModel: appModel
+                )
+            } label: {
+                DownloadTileContent(
+                    title: show.title,
+                    subtitle: DownloadFormatting.showSubtitle(
+                        episodeCount: show.episodeCount,
+                        seasonCount: show.seasons.count,
+                        bytes: show.totalBytes
+                    ),
+                    subtitleColor: .secondary,
+                    fraction: nil,
+                    failure: nil,
+                    artworkURL: show.artworkRecord.flatMap(model.artworkURL(for:)),
+                    kind: .series
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// Wraps a tile's navigation link with a "⋯" actions menu placed in the same
+    /// top-leading slot the detail-page episode cards use, plus a matching
+    /// long-press context menu. The menu is a sibling *above* the link so its taps
+    /// never trigger navigation.
+    @ViewBuilder
+    private func tileCard<Menu: View, Card: View>(
+        @ViewBuilder menu: () -> Menu,
+        accessibilityTitle: String,
+        @ViewBuilder card: () -> Card
+    ) -> some View {
+        let menuContent = menu()
+        ZStack(alignment: .topLeading) {
+            card()
+                .contextMenu { menuContent }
+            SwiftUI.Menu {
+                menuContent
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+            }
+            .padding(4)
+            .accessibilityLabel("More actions for \(accessibilityTitle)")
+        }
+    }
+
+    @ViewBuilder
+    private func transferMenuActions(
         for record: DownloadedMediaRecord
     ) -> some View {
         switch record.status {
@@ -142,44 +211,12 @@ struct PlozziOSDownloadsView: View {
             Button("Pause", systemImage: "pause") {
                 Task { await model.pause(record) }
             }
-            .tint(.orange)
         case .paused, .failed:
             Button("Resume", systemImage: "play") {
                 Task { await model.resume(record) }
             }
-            .tint(.blue)
         case .completed:
             EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private func showRow(_ show: PlozziOSDownloadedShow) -> some View {
-        NavigationLink {
-            PlozziOSDownloadedShowView(
-                showID: show.id,
-                model: model,
-                appModel: appModel
-            )
-        } label: {
-            DownloadRowContent(
-                title: show.title,
-                subtitle: DownloadFormatting.showSubtitle(
-                    episodeCount: show.episodeCount,
-                    seasonCount: show.seasons.count,
-                    bytes: show.totalBytes
-                ),
-                subtitleColor: .secondary,
-                fraction: nil,
-                failure: nil,
-                artworkURL: show.artworkRecord.flatMap(model.artworkURL(for:)),
-                kind: .series
-            )
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button("Remove", systemImage: "trash", role: .destructive) {
-                pendingBulkDeletion = .show(show)
-            }
         }
     }
 }
@@ -378,6 +415,133 @@ struct DownloadRowContent: View {
     }
 }
 
+/// A landscape download tile that shares the app's media-card chrome: the same
+/// concentric framed surface (`plozzFramedMediaCard`), media edge, corner radius,
+/// and caption insets the Home landscape library cards and detail episode cards
+/// use — so downloads read as first-class cards, not a bespoke list.
+struct DownloadTileContent: View {
+    @Environment(\.plozzCardStyle) private var cardStyle
+    @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.themePalette) private var palette
+    let title: String
+    let subtitle: String
+    let subtitleColor: Color
+    let fraction: Double?
+    let failure: String?
+    let artworkURL: URL?
+    let kind: MediaItemKind
+
+    @ViewBuilder
+    var body: some View {
+        if cardStyle == .framed {
+            content
+                .plozzFramedMediaCard(
+                    innerCornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
+                )
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
+            artwork
+                .frame(maxWidth: .infinity)
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .overlay { cornerScrim }
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
+                        style: .continuous
+                    )
+                )
+                .plozzMediaEdge(
+                    cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
+                )
+                .overlay(alignment: .bottom) { progressOverlay }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .foregroundStyle(palette.primaryText)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(subtitleColor)
+                    .lineLimit(1)
+                if let failure {
+                    Text(failure)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, metrics.landscapeCaptionInset)
+            .padding(
+                .bottom,
+                cardStyle == .framed ? metrics.landscapeCaptionInset : 0
+            )
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var artwork: some View {
+        DownloadLocalArtwork(url: artworkURL) {
+            ZStack {
+                Color.secondary.opacity(0.12)
+                Image(systemName: fallbackSymbol)
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// A corner-anchored legibility scrim: dark at the top-leading corner (behind
+    /// the "⋯" menu) fading to clear by roughly the middle of the artwork —
+    /// similar to the detail episode card's gradient, but only where the menu sits
+    /// so most of the image stays untouched.
+    private var cornerScrim: some View {
+        GeometryReader { proxy in
+            RadialGradient(
+                colors: [.black.opacity(0.5), .clear],
+                center: .topLeading,
+                startRadius: 0,
+                endRadius: max(proxy.size.width, proxy.size.height) * 0.55
+            )
+            .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var progressOverlay: some View {
+        if let fraction {
+            ProgressView(value: fraction)
+                .tint(palette.accent)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+                .background(
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.55)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+        }
+    }
+
+    private var fallbackSymbol: String {
+        switch kind {
+        case .episode, .series, .season:
+            return "tv"
+        case .movie, .video:
+            return "film"
+        case .collection, .folder, .unknown:
+            return "photo"
+        }
+    }
+}
+
 struct PlozziOSDownloadSettingsView: View {
     @Bindable var model: PlozziOSDownloadsModel
     @State private var pendingBulkDeletion: PlozziOSDownloadsBulkDeletion?
@@ -415,16 +579,18 @@ struct PlozziOSDownloadSettingsView: View {
             }
 
             SettingsSectionGroup("Storage") {
+                PlozziOSDownloadsStorageBar(downloadsBytes: model.library.totalBytes)
                 LabeledContent("Downloaded titles") {
                     Text(model.records.filter { $0.status == .completed }.count.formatted())
                 }
-                LabeledContent("Stored media") {
-                    Text(
-                        model.records
-                            .filter { $0.status == .completed }
-                            .reduce(Int64(0)) { $0 + $1.bytesDownloaded },
-                        format: .byteCount(style: .file)
-                    )
+                if !model.library.isEmpty {
+                    Button(
+                        "Delete All Downloads",
+                        systemImage: "trash",
+                        role: .destructive
+                    ) {
+                        pendingBulkDeletion = .all(model.library)
+                    }
                 }
             }
         }
@@ -466,18 +632,12 @@ struct DownloadArtwork: View {
     let kind: MediaItemKind
 
     var body: some View {
-        Group {
-            if let url, let image = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ZStack {
-                    Color.secondary.opacity(0.12)
-                    Image(systemName: fallbackSymbol)
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
+        DownloadLocalArtwork(url: url) {
+            ZStack {
+                Color.secondary.opacity(0.12)
+                Image(systemName: fallbackSymbol)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(width: 104, height: 60)
@@ -495,6 +655,60 @@ struct DownloadArtwork: View {
             return "photo"
         }
     }
+}
+
+/// Loads a pinned local artwork file off the main thread and caches the decoded,
+/// display-ready image. A grid of download tiles re-renders on every download
+/// progress publish; decoding synchronously in `body` each time caused main-thread
+/// work per tile, so decoding is moved to a detached task and cached by file path.
+struct DownloadLocalArtwork<Placeholder: View>: View {
+    let url: URL?
+    @ViewBuilder var placeholder: () -> Placeholder
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                placeholder()
+            }
+        }
+        .task(id: url) { await load() }
+    }
+
+    private func load() async {
+        guard let url else {
+            image = nil
+            return
+        }
+        let key = url.path as NSString
+        if let cached = DownloadArtworkCache.shared.object(forKey: key) {
+            image = cached
+            return
+        }
+        let decoded = await Task.detached(priority: .userInitiated) {
+            UIImage(contentsOfFile: url.path)?.preparingForDisplay()
+        }.value
+        guard !Task.isCancelled else { return }
+        if let decoded {
+            DownloadArtworkCache.shared.setObject(decoded, forKey: key)
+        }
+        image = decoded
+    }
+}
+
+/// Process-wide cache of decoded download artwork, keyed by file path, so the
+/// same pinned image isn't re-read/re-decoded on every re-render.
+enum DownloadArtworkCache {
+    static let shared: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 240
+        return cache
+    }()
 }
 
 /// Describes a confirmed bulk removal (a whole show, a whole season, all active

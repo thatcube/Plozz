@@ -10,6 +10,7 @@ struct PlozziOSSyncSetupSettingsView: View {
     @State private var model: SyncSetupPairingModel
     @State private var showScanner = false
     @State private var showCodeEntry = false
+    @State private var showReceive = false
     @State private var handled = false
 
     init(appModel: PlozziOSAppModel) {
@@ -47,6 +48,9 @@ struct PlozziOSSyncSetupSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { if case .idle = model.phase { model.startDiscovery() } }
         .onDisappear { model.stopDiscovery() }
+        .fullScreenCover(isPresented: $showReceive) {
+            PlozziOSSyncSetupReceiveView(appModel: appModel) { showReceive = false }
+        }
         .fullScreenCover(isPresented: $showScanner) {
             SyncSetupScannerScreen(
                 onCode: { code in
@@ -149,6 +153,16 @@ struct PlozziOSSyncSetupSettingsView: View {
                 }
             } footer: {
                 Text("Not seeing it nearby? Scan the QR or type the short code shown on the other device.")
+            }
+
+            Section {
+                Button { showReceive = true } label: {
+                    Label("Set up this device from another", systemImage: "qrcode")
+                }
+            } header: {
+                Text("Set up this device")
+            } footer: {
+                Text("Coming from a device that’s already signed in? Show a code here and scan it from your other phone, tablet, or Apple TV to sign this one in.")
             }
         }
     }

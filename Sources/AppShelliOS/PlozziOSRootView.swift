@@ -411,6 +411,7 @@ private struct PlozziOSHomeLandingView: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     let onShowSettings: () -> Void
+    @State private var showingReceive = false
 
     var body: some View {
         if appModel.accounts.isEmpty {
@@ -421,6 +422,7 @@ private struct PlozziOSHomeLandingView: View {
             } actions: {
                 Button("Add Server", action: onAddServer)
                     .buttonStyle(.borderedProminent)
+                Button("Set Up from Another Device") { showingReceive = true }
                 NavigationLink("Add Network Share") {
                     PlozziOSAddShareView(appModel: appModel)
                 }
@@ -430,6 +432,9 @@ private struct PlozziOSHomeLandingView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     PlozziOSSettingsAvatarButton(action: onShowSettings)
                 }
+            }
+            .fullScreenCover(isPresented: $showingReceive) {
+                PlozziOSSyncSetupReceiveView(appModel: appModel) { showingReceive = false }
             }
         } else {
             PlozziOSHomeView(

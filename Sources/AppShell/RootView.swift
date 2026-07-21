@@ -38,6 +38,7 @@ enum HomeRuntimeScope {
 public struct RootView: View {
     @State private var appState: AppState
     @State private var showSyncReceive = false
+    @State private var showSyncSend = false
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
     /// The OS-level Reduce Transparency setting, resolved against the active
@@ -242,7 +243,8 @@ public struct RootView: View {
                         onSelectPlexHomeUser: { appState.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
                         onSetSeerrUser: { appState.setSeerrUserForProfile(profileID: $0, user: $1) },
                         identitySources: appState.identityIndex.identitySourcesProvider,
-                        onWarmIdentityIndex: { appState.identityIndex.warmIdentityIndex() }
+                        onWarmIdentityIndex: { appState.identityIndex.warmIdentityIndex() },
+                        onSetUpAnotherDevice: { showSyncSend = true }
                     )
                     .id(HomeRuntimeScope.identityKey(
                         profileID: appState.profilesModel.activeProfileID,
@@ -299,6 +301,9 @@ public struct RootView: View {
                 onContinue: { appState.finishNewProfileThemeSelection() },
                 deviceColorScheme: systemColorScheme
             )
+        }
+        .fullScreenCover(isPresented: $showSyncSend) {
+            SyncSetupSendView(appState: appState) { showSyncSend = false }
         }
         .onAppear {
             if case .launching = appState.state { appState.bootstrap() }

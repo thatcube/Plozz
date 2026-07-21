@@ -175,6 +175,9 @@ struct MainTabView: View {
     /// Kicks off (or incrementally refreshes) the identity index for the signed-in
     /// accounts. Invoked when the signed-in UI appears.
     let onWarmIdentityIndex: () -> Void
+    /// Presents the tvOS "set up another device" (sender) flow. Optional so the
+    /// feature can be omitted; hosted by RootView where AppState is available.
+    var onSetUpAnotherDevice: (() -> Void)?
 
     @State private var discovery = LibraryDiscoveryModel()
     /// Owns the Settings library-discovery result as an `@Observable` reference so
@@ -382,7 +385,8 @@ struct MainTabView: View {
                 onResetToFirstRun: onResetToFirstRun,
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
                 onSelectPlexHomeUser: onSelectPlexHomeUser,
-                onSetSeerrUser: onSetSeerrUser
+                onSetSeerrUser: onSetSeerrUser,
+                onSetUpAnotherDevice: onSetUpAnotherDevice
             )
             }
         }

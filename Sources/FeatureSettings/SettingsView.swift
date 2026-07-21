@@ -109,6 +109,7 @@ public struct SettingsView: View {
     private let onRescanShare: (String) -> Void
     private let onSignOutAll: () -> Void
     private let onResetToFirstRun: () -> Void
+    private let onSetUpAnotherDevice: (() -> Void)?
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
     private let onSetSeerrUser: (String, SeerUser?) -> Void
@@ -160,7 +161,8 @@ public struct SettingsView: View {
         onResetToFirstRun: @escaping () -> Void,
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void,
-        onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in }
+        onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in },
+        onSetUpAnotherDevice: (() -> Void)? = nil
     ) {
         self.subtitleBehavior = subtitleBehavior
         self.spoilers = spoilers
@@ -209,6 +211,7 @@ public struct SettingsView: View {
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
         self.onSetSeerrUser = onSetSeerrUser
+        self.onSetUpAnotherDevice = onSetUpAnotherDevice
     }
 
     /// Whether the active profile includes at least one server that can download
@@ -486,6 +489,12 @@ public struct SettingsView: View {
                 navRow("Seerr", icon: "sparkles.tv", assetIcon: "SeerrIcon",
                        value: seerrRowValue,
                        route: .seerr)
+
+                // Set up another device (sender): push this Apple TV's servers +
+                // profiles to a phone/tablet that's waiting to be set up.
+                if let onSetUpAnotherDevice {
+                    setUpAnotherDeviceRow(onSetUpAnotherDevice)
+                }
             }
             .padding(.horizontal, 28)
             .padding(.top, 16)
@@ -804,6 +813,30 @@ public struct SettingsView: View {
     }
 
     // MARK: - Enable profiles row (single-profile household)
+
+    private func setUpAnotherDeviceRow(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 16) {
+                rowIcon("qrcode")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Set Up Another Device")
+                        .font(.callout.weight(.medium))
+                    Text("Sign in a phone or tablet from this Apple TV — no retyping.")
+                        .font(.footnote)
+                        .settingsRowSecondary()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .settingsRowSecondary()
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsFocusButtonStyle())
+    }
 
     private var enableProfilesRow: some View {
         Button(action: onEnableProfiles) {

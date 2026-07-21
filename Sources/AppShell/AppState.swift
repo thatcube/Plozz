@@ -478,12 +478,21 @@ public final class AppState {
     /// Cross-device Sync & Setup (feature-flagged; OFF by default).
     public let syncSetup: SyncSetupService
 
-    /// Persist a setup received over pairing: create accounts from the descriptors,
-    /// store their transferred tokens in the Keychain, and refresh providers so the
-    /// device is immediately signed in (no native sign-in needed).
+    /// Persist a setup received over pairing: import profiles, create accounts from
+    /// the descriptors, store their transferred tokens in the Keychain, refresh
+    /// providers, and enter the app — so the device is fully set up and signed in
+    /// with no typing.
     @MainActor
     public func applyReceivedSetup(_ received: SyncSetupService.ReceivedSetup) {
         let store = accountsProviders.accountStore
+
+        // 1. Import profiles (merge by id; existing ids preserved).
+        let incomingProfiles = received.config.profiles.map(\.profile)
+        if !incomingProfiles.isEmpty {
+            profilesModel.importProfiles(incomingProfiles)
+        }
+
+        // 2. Create accounts from descriptors + transferred tokens.
         let descByID = Dictionary(received.config.accounts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let secretByID = Dictionary((received.secrets?.accounts ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
         for auth in received.application.authorizedAuthorizations {
@@ -496,7 +505,11 @@ public final class AppState {
                                   avatarURL: desc.avatarURL, deviceID: secret.deviceID)
             try? store.add(account, token: secret.token)
         }
+
+        // 3. Refresh providers, complete first-run, and enter the app.
         accountsProviders.reloadAccounts()
+        profilesModel.markFirstRunProfileSetupComplete()
+        apply(.accountsChanged(accountsProviders.accounts))
     }
 
     /// The Plex Home users ("Who's watching?") facet — owns per-account Plex

@@ -45,6 +45,10 @@ struct SyncSetupSendView: View {
                     result(icon: "checkmark.circle.fill", color: .green,
                            title: "Your Apple TV is set up",
                            subtitle: "It’s signed in — no typing needed.")
+                        .task {
+                            try? await Task.sleep(nanoseconds: 2_000_000_000)
+                            onClose()
+                        }
                 case .failed(let message):
                     result(icon: "exclamationmark.triangle.fill", color: .orange,
                            title: "Setup didn’t finish", subtitle: message, retry: true)

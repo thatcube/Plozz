@@ -55,14 +55,18 @@ struct SyncSetupReceiveView: View {
                 VStack(spacing: 16) {
                     Image(systemName: "checkmark.circle.fill").font(.system(size: 90)).foregroundStyle(.green)
                     Text("You’re all set").font(.title.bold())
-                    Text("Signed in to \(received.application.authorizedAuthorizations.count) server(s).")
-                        .foregroundStyle(.secondary)
-                    Button("Done") { onClose() }.buttonStyle(.borderedProminent)
+                    Text(summary(received)).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).frame(maxWidth: 760)
                 }
                 .onAppear {
                     guard !didApply else { return }
                     didApply = true
                     appState.applyReceivedSetup(received)
+                    // Brief success flash, then drop into the app automatically.
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_800_000_000)
+                        onClose()
+                    }
                 }
             case .sending, .sent:
                 ProgressView()
@@ -77,6 +81,15 @@ struct SyncSetupReceiveView: View {
             }
         }
         .padding(70)
+    }
+
+    private func summary(_ received: SyncSetupService.ReceivedSetup) -> String {
+        let servers = received.application.authorizedAuthorizations.count
+        let profiles = received.config.profiles.count
+        var parts: [String] = []
+        parts.append(servers == 1 ? "Signed in to 1 server" : "Signed in to \(servers) servers")
+        if profiles > 0 { parts.append(profiles == 1 ? "1 profile" : "\(profiles) profiles") }
+        return parts.joined(separator: " · ")
     }
 
     static func qrImage(_ string: String) -> UIImage? {

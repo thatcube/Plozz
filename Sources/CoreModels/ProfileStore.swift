@@ -463,6 +463,19 @@ public final class ProfilesModel {
         return profile
     }
 
+    /// Merge in profiles received from another device (by pairing/sync), preserving
+    /// each profile's id so per-profile account scoping stays consistent. Existing
+    /// ids are kept as-is; only genuinely new profiles are added.
+    public func importProfiles(_ incoming: [Profile]) {
+        let knownIDs = Set(profiles.map(\.id))
+        let additions = incoming.filter { !knownIDs.contains($0.id) }
+        guard !additions.isEmpty else { return }
+        profiles.append(contentsOf: additions)
+        profiles.sort { $0.createdAt < $1.createdAt }
+        store.saveProfiles(profiles)
+        recomputeHouseholdDefaults()
+    }
+
     /// Updates an existing profile's editable fields in place.
     public func update(_ profile: Profile) {
         guard let idx = profiles.firstIndex(where: { $0.id == profile.id }) else { return }

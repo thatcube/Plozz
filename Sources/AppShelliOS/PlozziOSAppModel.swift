@@ -50,6 +50,10 @@ final class PlozziOSAppModel {
     /// store their transferred tokens in the Keychain, and refresh providers so the
     /// device is immediately signed in (no native sign-in needed).
     func applyReceivedSetup(_ received: SyncSetupService.ReceivedSetup) {
+        let incomingProfiles = received.config.profiles.map(\.profile)
+        if !incomingProfiles.isEmpty {
+            profiles.importProfiles(incomingProfiles)
+        }
         let descByID = Dictionary(received.config.accounts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let secretByID = Dictionary((received.secrets?.accounts ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
         for auth in received.application.authorizedAuthorizations {

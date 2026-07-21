@@ -71,6 +71,22 @@ public final class SyncSetupService {
 
     // MARK: Opt-in
 
+    /// What the `isEnabled` flag gates — and what it deliberately does NOT.
+    ///
+    /// The flag is the consent decision for PASSIVE behaviour: publishing the
+    /// presence beacon (`publishPresence`) and surfacing the auto "continue here"
+    /// offer (`continueOffer`). Both are gated on `isEnabled`, so a device that
+    /// hasn't opted in never advertises itself or nudges other devices.
+    ///
+    /// It intentionally does NOT gate the EXPLICIT, user-initiated pairing
+    /// (`makeHostPairing` / `receiveSetup` / `sendSetup`). Those are only reached by
+    /// a person tapping "Set up another device" / "Set up this device from another"
+    /// in Settings — consent is the tap itself — and a brand-new device must be able
+    /// to RECEIVE a setup while its own flag is still off-by-default. Gating the
+    /// interactive flow behind a pre-toggle would break exactly the first-run case
+    /// the feature exists for. Security on those paths comes from the SAS/QR
+    /// authentication in SyncPairingSession, not from this flag.
+    ///
     /// Turn cross-device sync on/off (the consent decision). When enabled and this
     /// device is configured, it publishes a presence beacon so other devices can
     /// offer to continue here.

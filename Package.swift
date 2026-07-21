@@ -45,6 +45,7 @@ let package = Package(
         .library(name: "FeatureSearch", targets: ["FeatureSearch"]),
         .library(name: "FeatureSettings", targets: ["FeatureSettings"]),
         .library(name: "FeatureProfiles", targets: ["FeatureProfiles"]),
+        .library(name: "FeatureSyncSetup", targets: ["FeatureSyncSetup"]),
         .library(name: "FeatureMusic", targets: ["FeatureMusic"]),
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "CrashReporting", targets: ["CrashReporting"]),
@@ -307,6 +308,16 @@ let package = Package(
         .target(
             name: "FeatureProfiles",
             dependencies: ["CoreModels", "CoreUI"]
+        ),
+
+        // MARK: Sync & Setup (cross-device onboarding — feature-flagged, v1)
+        //
+        // Non-secret config sync + device pairing crypto. Depends only on
+        // CoreModels; uses CryptoKit for the pairing seal (kept out of the
+        // Foundation-only CoreModels). v1 carries NON-SECRET config only.
+        .target(
+            name: "FeatureSyncSetup",
+            dependencies: ["CoreModels"]
         ),
 
         // MARK: Music (browse + audio playback engine)
@@ -606,6 +617,10 @@ let package = Package(
         .testTarget(
             name: "CoreModelsTests",
             dependencies: ["CoreModels", "CoreUI"]
+        ),
+        .testTarget(
+            name: "FeatureSyncSetupTests",
+            dependencies: ["FeatureSyncSetup", "CoreModels"]
         ),
         .testTarget(
             name: "AppRuntimeTests",

@@ -51,14 +51,14 @@ public struct SyncPairingInvite: Codable, Hashable, Sendable {
     }
 }
 
-/// Short, human-typeable pairing code. Crockford-style base32 (no I/L/O/U to avoid
-/// ambiguity), shown grouped like "7K2Q-9F". The raw (ungrouped, uppercased) form
-/// doubles as the Bonjour service name so a typed code can find the same service.
+/// Short, human-typeable pairing code — kept short + easy (Plex-style). Uppercase
+/// letters + digits minus ambiguous ones (no I/L/O/U/0/1). The raw uppercased form
+/// doubles as the Bonjour service name so a typed code finds the same service.
 public enum SyncPairingCode {
-    private static let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+    private static let alphabet = Array("ABCDEFGHJKMNPQRSTVWXYZ23456789")
 
-    /// Generate a fresh N-character code (default 6).
-    public static func generate(length: Int = 6) -> String {
+    /// Generate a fresh N-character code (default 4, like Plex/TV link codes).
+    public static func generate(length: Int = 4) -> String {
         String((0..<length).map { _ in alphabet.randomElement()! })
     }
 
@@ -72,7 +72,7 @@ public enum SyncPairingCode {
             .replacingOccurrences(of: "O", with: "0")
     }
 
-    /// Group for display, e.g. "7K2Q9F" -> "7K2Q-9F".
+    /// Group for display. A 4-char code shows as-is (no dash); longer codes group.
     public static func grouped(_ code: String, size: Int = 4) -> String {
         let chars = Array(code)
         guard chars.count > size else { return code }

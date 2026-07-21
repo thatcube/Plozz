@@ -12,10 +12,10 @@ struct SyncSetupSendView: View {
     private let onClose: () -> Void
     @State private var model: SyncSetupPairingModel
     @State private var handled = false
-    @State private var mode: Mode = .scan
+    @State private var mode: Mode = .nearby
     @State private var typedCode = ""
 
-    enum Mode { case scan, code }
+    enum Mode { case nearby, scan, code }
 
     init(appModel: PlozziOSAppModel, onClose: @escaping () -> Void) {
         self.appModel = appModel
@@ -28,7 +28,11 @@ struct SyncSetupSendView: View {
             Group {
                 switch model.phase {
                 case .idle:
-                    if mode == .scan { scanner } else { codeEntry }
+                    switch mode {
+                    case .nearby: nearby
+                    case .scan: scanner
+                    case .code: codeEntry
+                    }
                 case .connecting:
                     ProgressView("Connecting…")
                 case .sending:
@@ -48,11 +52,54 @@ struct SyncSetupSendView: View {
             .navigationTitle("Set Up Device")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { onClose() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { model.stopDiscovery(); onClose() } }
                 if model.phase == .idle {
                     ToolbarItem(placement: .primaryAction) {
-                        Button(mode == .scan ? "Enter Code" : "Scan") {
-                            mode = (mode == .scan) ? .code : .scan
+                        Menu {
+                            Button { switchMode(.nearby) } label: { Label("Nearby", systemImage: "wifi") }
+                            Button { switchMode(.scan) } label: { Label("Scan QR", systemImage: "qrcode.viewfinder") }
+                            Button { switchMode(.code) } label: { Label("Enter Code", systemImage: "keyboard") }
+                        } label: { Image(systemName: "ellipsis.circle") }
+                    }
+                }
+            }
+            .onAppear { if mode == .nearby { model.startDiscovery() } }
+            .onDisappear { model.stopDiscovery() }
+        }
+    }
+
+    private func switchMode(_ new: Mode) {
+        if new == .nearby { model.startDiscovery() } else { model.stopDiscovery() }
+        mode = new
+    }
+
+    private var nearby: some View {
+        VStack(spacing: 0) {
+            if model.nearbyDevices.isEmpty {
+                VStack(spacing: 16) {
+                    ProgressView()
+                    Text("Looking for a device waiting to be set up…").font(.headline)
+                        .multilineTextAlignment(.center)
+                    Text("On the other device, open Plozz and choose “Set up from another device.” Make sure both are on the same Wi-Fi.")
+                        .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
+                .padding(40)
+            } else {
+                List(model.nearbyDevices) { device in
+                    Button {
+                        guard !handled else { return }
+                        handled = true
+                        Task { await model.pair(with: device) }
+                    } label: {
+                        HStack {
+                            Image(systemName: "tv").font(.title3)
+                            VStack(alignment: .leading) {
+                                Text(device.displayName).fontWeight(.semibold)
+                                Text("Code \(SyncPairingCode.grouped(device.serviceName))")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
                         }
                     }
                 }

@@ -95,11 +95,13 @@ public final class SyncSetupService {
     // MARK: Pairing — target (this device receives config, e.g. Apple TV)
 
     /// A prepared target-side pairing: the short code, the QR invite (carrying the
-    /// public key), and the identity used to open the received bundle.
+    /// public key), the friendly device name (advertised for discovery), and the
+    /// identity used to open the received bundle.
     public struct HostPairing: Sendable {
         public let code: String
         public let invite: SyncPairingInvite
         public let identity: SyncPairingIdentity
+        public let displayName: String
     }
 
     /// Create a fresh code + QR invite + identity this device shows to be set up.
@@ -111,7 +113,7 @@ public final class SyncSetupService {
             publicKeyData: identity.publicKeyData,
             context: SyncPairingContext(ttlSeconds: ttlSeconds)
         )
-        return HostPairing(code: code, invite: invite, identity: identity)
+        return HostPairing(code: code, invite: invite, identity: identity, displayName: deviceName())
     }
 
     /// Everything a target device needs to persist a received setup: the config

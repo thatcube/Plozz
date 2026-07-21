@@ -62,10 +62,14 @@ public final class NWConnectionPairingLink: PairingLink, @unchecked Sendable {
 /// Target/host: advertise a service and accept one incoming connection.
 public final class BonjourPairingHost: @unchecked Sendable {
     public let serviceName: String
+    public let displayName: String
     private let queue = DispatchQueue(label: "plozz.pair.host")
     private var listener: NWListener?
 
-    public init(serviceName: String) { self.serviceName = serviceName }
+    public init(serviceName: String, displayName: String = "") {
+        self.serviceName = serviceName
+        self.displayName = displayName
+    }
 
     /// Advertise and wait for the first connection, returning a link over it.
     public func awaitConnection() async throws -> PairingLink {
@@ -75,7 +79,8 @@ public final class BonjourPairingHost: @unchecked Sendable {
                 let params = NWParameters.tcp
                 params.includePeerToPeer = true
                 let l = try NWListener(using: params)
-                l.service = NWListener.Service(name: serviceName, type: kPlozzPairingServiceType)
+                let txt = NWTXTRecord(["name": displayName])
+                l.service = NWListener.Service(name: serviceName, type: kPlozzPairingServiceType, txtRecord: txt)
                 l.stateUpdateHandler = { st in
                     if case .failed = st { once.run { cont.resume(throwing: BonjourPairingError.listenerFailed) } }
                 }
@@ -99,6 +104,46 @@ public final class BonjourPairingHost: @unchecked Sendable {
     }
 
     public func stop() { listener?.cancel(); listener = nil }
+}
+
+/// A device currently advertising itself for pairing (waiting to be set up).
+public struct DiscoveredPairingDevice: Identifiable, Hashable, Sendable {
+    public var id: String { serviceName }
+    public let serviceName: String   // == the short code
+    public let displayName: String   // friendly name from the TXT record
+
+    public init(serviceName: String, displayName: String) {
+        self.serviceName = serviceName
+        self.displayName = displayName
+    }
+}
+
+/// Browses the LAN for devices waiting to be set up, so a source device can offer
+/// a tap-to-pair list instead of requiring a scanned/typed code.
+public final class BonjourPairingBrowser: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "plozz.pair.browser")
+    private var browser: NWBrowser?
+
+    public init() {}
+
+    public func start(onChange: @escaping @Sendable ([DiscoveredPairingDevice]) -> Void) {
+        let params = NWParameters()
+        params.includePeerToPeer = true
+        let browser = NWBrowser(for: .bonjourWithTXTRecord(type: kPlozzPairingServiceType, domain: nil), using: params)
+        browser.browseResultsChangedHandler = { results, _ in
+            let devices: [DiscoveredPairingDevice] = results.compactMap { result in
+                guard case let .service(name, _, _, _) = result.endpoint else { return nil }
+                var display = name
+                if case let .bonjour(txt) = result.metadata, let n = txt["name"], !n.isEmpty { display = n }
+                return DiscoveredPairingDevice(serviceName: name, displayName: display)
+            }
+            onChange(devices)
+        }
+        browser.start(queue: queue)
+        self.browser = browser
+    }
+
+    public func stop() { browser?.cancel(); browser = nil }
 }
 
 /// Source/guest: connect to a known service name, returning a link over it.

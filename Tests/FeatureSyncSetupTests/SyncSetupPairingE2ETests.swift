@@ -11,7 +11,6 @@ struct StaticGuest: PairingLinkConnecting {
     let link: PairingLink
     func connect() async throws -> PairingLink { link }
 }
-
 @MainActor
 final class SyncSetupPairingE2ETests: XCTestCase {
 

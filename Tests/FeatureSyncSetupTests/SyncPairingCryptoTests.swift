@@ -61,8 +61,8 @@ final class SyncPairingCryptoTests: XCTestCase {
     func testGeneratedCodeAvoidsAmbiguousLetters() {
         for _ in 0..<50 {
             let code = SyncPairingCode.generate()
-            XCTAssertEqual(code.count, 6)
-            XCTAssertFalse(code.contains(where: { "ILOU".contains($0) }))
+            XCTAssertEqual(code.count, 4)
+            XCTAssertFalse(code.contains(where: { "ILOU01".contains($0) }))
         }
     }
 }

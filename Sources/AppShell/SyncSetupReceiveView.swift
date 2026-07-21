@@ -62,12 +62,14 @@ struct SyncSetupReceiveView: View {
                     Image(systemName: "checkmark.circle.fill").font(.system(size: 84)).foregroundStyle(.green)
                     Text("Setup complete").font(.largeTitle.bold())
                     importedSummary(received)
-                }
-                .onAppear {
-                    guard !didApply else { return }
-                    didApply = true
-                    appState.applyReceivedSetup(received)
-                    Task { try? await Task.sleep(nanoseconds: 3_200_000_000); onClose() }
+                    Button("Start Watching") {
+                        guard !didApply else { return }
+                        didApply = true
+                        appState.applyReceivedSetup(received)
+                        onClose()
+                    }
+                    .font(.title3.weight(.semibold))
+                    .padding(.top, 12)
                 }
             case .connecting, .sending, .sent:
                 ProgressView()

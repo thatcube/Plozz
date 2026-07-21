@@ -465,4 +465,38 @@ final class SettingsNamespaceTests: XCTestCase {
         XCTAssertEqual(SettingsKey.scoped("base", namespace: ""), "base")
         XCTAssertEqual(SettingsKey.scoped("base", namespace: "abc"), "base.abc")
     }
+
+    // MARK: importProfiles (Sync & Setup transfer)
+
+    @MainActor
+    func testImportProfilesOverwritesSharedIdDefaultCosmetics() {
+        let model = ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
+        // The pristine local default profile.
+        let localDefault = model.profiles.first { $0.id == ProfileStore.defaultProfileID }
+        XCTAssertNotNil(localDefault)
+
+        // An incoming default profile (same shared id) with different cosmetics —
+        // e.g. transferred from another device where the user picked a sushi emoji.
+        var incoming = Profile(id: ProfileStore.defaultProfileID, name: "Brandon")
+        incoming.avatarEmoji = "🍣"
+        incoming.colorIndex = 7
+        model.importProfiles([incoming])
+
+        let merged = model.profiles.first { $0.id == ProfileStore.defaultProfileID }
+        XCTAssertEqual(merged?.avatarEmoji, "🍣", "incoming avatar must overwrite the pristine default")
+        XCTAssertEqual(merged?.colorIndex, 7)
+        XCTAssertEqual(merged?.name, "Brandon")
+        XCTAssertEqual(model.profiles.filter { $0.id == ProfileStore.defaultProfileID }.count, 1,
+                       "must not duplicate the default profile")
+    }
+
+    @MainActor
+    func testImportProfilesAddsNewAndKeepsLocalOnly() {
+        let model = ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
+        let newProfile = Profile(id: "kid-1", name: "Kid", createdAt: Date(timeIntervalSince1970: 50))
+        model.importProfiles([newProfile])
+        XCTAssertTrue(model.profiles.contains { $0.id == "kid-1" })
+        // Local default is preserved.
+        XCTAssertTrue(model.profiles.contains { $0.id == ProfileStore.defaultProfileID })
+    }
 }

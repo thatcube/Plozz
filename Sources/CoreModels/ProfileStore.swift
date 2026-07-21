@@ -467,10 +467,22 @@ public final class ProfilesModel {
     /// each profile's id so per-profile account scoping stays consistent. Existing
     /// ids are kept as-is; only genuinely new profiles are added.
     public func importProfiles(_ incoming: [Profile]) {
-        let knownIDs = Set(profiles.map(\.id))
-        let additions = incoming.filter { !knownIDs.contains($0.id) }
-        guard !additions.isEmpty else { return }
-        profiles.append(contentsOf: additions)
+        guard !incoming.isEmpty else { return }
+        // Incoming profiles win by id: this both ADDS new profiles and UPDATES
+        // existing ones (notably the shared-id default profile) so a transferred
+        // profile's avatar/emoji/color actually replaces the receiver's pristine
+        // default instead of being silently dropped as a duplicate id.
+        var byID: [String: Profile] = [:]
+        var order: [String] = []
+        for p in profiles {
+            if byID[p.id] == nil { order.append(p.id) }
+            byID[p.id] = p
+        }
+        for p in incoming {
+            if byID[p.id] == nil { order.append(p.id) }
+            byID[p.id] = p
+        }
+        profiles = order.compactMap { byID[$0] }
         profiles.sort { $0.createdAt < $1.createdAt }
         store.saveProfiles(profiles)
         recomputeHouseholdDefaults()

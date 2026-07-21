@@ -9,7 +9,7 @@ import SwiftUI
 
 struct AddServerView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var provider: ProviderKind = .jellyfin
+    @State private var provider: ProviderKind
     @State private var address = ""
     @State private var server: MediaServer?
     @State private var jellyfinDiscovery = ServerPickerViewModel(provider: .jellyfin)
@@ -18,6 +18,13 @@ struct AddServerView: View {
     @State private var validationMessage: String?
 
     let appModel: PlozziOSAppModel
+
+    init(appModel: PlozziOSAppModel, initialProvider: ProviderKind = .jellyfin) {
+        self.appModel = appModel
+        // Media Share isn't a media *server*; callers route it elsewhere. Guard
+        // against it here so the provider picker never lands on an invalid state.
+        _provider = State(initialValue: initialProvider == .mediaShare ? .jellyfin : initialProvider)
+    }
 
     var body: some View {
         NavigationStack {

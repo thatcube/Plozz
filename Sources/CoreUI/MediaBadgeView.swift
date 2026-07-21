@@ -41,6 +41,9 @@ public struct MediaBadgeChip: View {
     /// against a light-mode background — so in light mode we swap in darker, still
     /// fully-saturated versions of the same hues.
     @Environment(\.colorScheme) private var colorScheme
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
 
     /// Shared type scale so every treatment lines up to the same cap height.
     private static let textFont = Font.system(size: 21, weight: .semibold)
@@ -99,10 +102,19 @@ public struct MediaBadgeChip: View {
         Group {
             switch badge.style {
             case .rating:
-                label(badge.label, textColor: palette.primaryText, font: Font.custom("Bungee-Regular", size: 18))
+                label(
+                    badge.label,
+                    textColor: palette.primaryText,
+                    font: ratingFont,
+                    height: ratingPillHeight,
+                    hPadding: ratingHPadding
+                )
                     .overlay(
                         RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                            .strokeBorder(palette.primaryText.opacity(0.65), lineWidth: 3)
+                            .strokeBorder(
+                                palette.primaryText.opacity(0.65),
+                                lineWidth: ratingBorderWidth
+                            )
                     )
                     .accessibilityLabel(badge.label)
             case .prominent:
@@ -194,6 +206,41 @@ public struct MediaBadgeChip: View {
             .foregroundStyle(palette.primaryText)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
+    }
+
+    private var ratingFont: Font {
+        #if os(iOS)
+        return .custom(
+            "Bungee-Regular",
+            size: horizontalSizeClass == .compact ? 13 : 15
+        )
+        #else
+        return .custom("Bungee-Regular", size: 18)
+        #endif
+    }
+
+    private var ratingPillHeight: CGFloat {
+        #if os(iOS)
+        return horizontalSizeClass == .compact ? 28 : 32
+        #else
+        return Self.pillHeight
+        #endif
+    }
+
+    private var ratingHPadding: CGFloat {
+        #if os(iOS)
+        return horizontalSizeClass == .compact ? 8 : 9
+        #else
+        return Self.hPadding
+        #endif
+    }
+
+    private var ratingBorderWidth: CGFloat {
+        #if os(iOS)
+        return 2
+        #else
+        return 3
+        #endif
     }
 
     private func label(

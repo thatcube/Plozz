@@ -1,7 +1,7 @@
 #if canImport(UIKit)
 import XCTest
 import UIKit
-@testable import FeatureHome
+@testable import HeroUI
 
 @MainActor
 final class HomeHeroBackdropTests: XCTestCase {

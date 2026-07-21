@@ -159,7 +159,7 @@ private struct PlozziOSSettingsSplitView: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     let onClose: () -> Void
-    @State private var selection: PlozziOSSettingsDestination? = .profiles
+    @State private var selection: PlozziOSSettingsDestination?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var confirmSignOutAll = false
 
@@ -171,12 +171,12 @@ private struct PlozziOSSettingsSplitView: View {
                         Button {
                             selection = .profiles
                         } label: {
-                            Label(
-                                "Profiles",
-                                systemImage: "person.2"
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
+                            Label("Profiles", systemImage: "person.2")
+                                .frame(
+                                    maxWidth: .infinity,
+                                    alignment: .leading
+                                )
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         settingsRow(
@@ -195,10 +195,18 @@ private struct PlozziOSSettingsSplitView: View {
                             systemImage: "arrow.down.circle"
                         )
                     } footer: {
-                        Text("Shared across every profile on this \(deviceName).")
+                        Text(
+                            appModel.profiles.profilesEnabled
+                                ? "Shared across every profile on this \(deviceName)."
+                                : "Shared settings and accounts on this \(deviceName)."
+                        )
                     }
 
-                    SettingsSectionGroup("This Profile") {
+                    SettingsSectionGroup(
+                        appModel.profiles.profilesEnabled
+                            ? "This Profile"
+                            : "Your Settings"
+                    ) {
                         settingsRow(
                             .myLibraries,
                             title: SettingsCopy.libraries,
@@ -212,7 +220,11 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.spoilers, title: "Spoilers", systemImage: "eye.slash")
                         settingsRow(.nightShift, title: "Circadian Mode", systemImage: "moon.stars.fill")
                     } footer: {
-                        Text("Saved for \(appModel.profiles.activeProfile.name).")
+                        Text(
+                            appModel.profiles.profilesEnabled
+                                ? "Saved for \(appModel.profiles.activeProfile.name)."
+                                : "Saved on this \(deviceName)."
+                        )
                     }
 
                     SettingsSectionGroup("Support") {
@@ -280,7 +292,8 @@ private struct PlozziOSSettingsSplitView: View {
 
     @ViewBuilder
     private var settingsDetail: some View {
-        switch selection ?? .profiles {
+        switch selection
+            ?? (appModel.profiles.profilesEnabled ? .profiles : .servers) {
         case .profiles:
             PlozziOSProfilesView(appModel: appModel)
         case .requests:
@@ -398,10 +411,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 NavigationLink {
                     PlozziOSProfilesView(appModel: appModel)
                 } label: {
-                    Label(
-                        "Profiles",
-                        systemImage: "person.2"
-                    )
+                    Label("Profiles", systemImage: "person.2")
                 }
 
                 NavigationLink {
@@ -424,10 +434,18 @@ private struct PlozziOSSettingsCompactMenu: View {
                     Label("Downloads", systemImage: "arrow.down.circle")
                 }
             } footer: {
-                Text("Shared across every profile on this \(deviceName).")
+                Text(
+                    appModel.profiles.profilesEnabled
+                        ? "Shared across every profile on this \(deviceName)."
+                        : "Shared settings and accounts on this \(deviceName)."
+                )
             }
 
-                SettingsSectionGroup("This Profile") {
+                SettingsSectionGroup(
+                    appModel.profiles.profilesEnabled
+                        ? "This Profile"
+                        : "Your Settings"
+                ) {
                 NavigationLink {
                     PlozziOSMyLibrariesSettingsView(
                         appModel: appModel,
@@ -607,33 +625,39 @@ private struct PlozziOSProfilesView: View {
                 }
             }
 
-            SettingsSectionGroup("Who’s watching?") {
-                ForEach(appModel.profiles.profiles) { profile in
-                    Button {
-                        editingProfile = profile
-                    } label: {
-                        HStack {
-                            PlozziOSProfileAvatar(profile: profile, size: 34)
-                            Text(profile.name)
-                            Spacer()
-                            if profile.id == appModel.profiles.activeProfileID {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.tint)
+            if appModel.profiles.profilesEnabled {
+                SettingsSectionGroup("Who’s watching?") {
+                    ForEach(appModel.profiles.profiles) { profile in
+                        Button {
+                            editingProfile = profile
+                        } label: {
+                            HStack {
+                                PlozziOSProfileAvatar(
+                                    profile: profile,
+                                    size: 34
+                                )
+                                Text(profile.name)
+                                Spacer()
+                                if profile.id
+                                    == appModel.profiles.activeProfileID {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.tint)
+                                }
+                                Image(systemName: "pencil")
+                                    .foregroundStyle(.secondary)
                             }
-                            Image(systemName: "pencil")
-                                .foregroundStyle(.secondary)
+                        }
+                        .swipeActions {
+                            if !appModel.profiles.isDefault(profile) {
+                                Button("Delete", role: .destructive) {
+                                    appModel.removeProfile(profile.id)
+                                }
+                            }
                         }
                     }
-                    .swipeActions {
-                        if !appModel.profiles.isDefault(profile) {
-                            Button("Delete", role: .destructive) {
-                                appModel.removeProfile(profile.id)
-                            }
-                        }
+                    Button("Add Profile", systemImage: "person.badge.plus") {
+                        showingAddProfile = true
                     }
-                }
-                Button("Add Profile", systemImage: "person.badge.plus") {
-                    showingAddProfile = true
                 }
             }
         }

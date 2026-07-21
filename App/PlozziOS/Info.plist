@@ -53,6 +53,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Plozz uses your local network to discover media servers and network shares.</string>
+	<key>OMDBAPIKey</key>
+	<string>$(OMDB_API_KEY)</string>
 	<key>PlozzSentryDSN</key>
 	<string>$(PLOZZ_SENTRY_DSN)</string>
 	<key>SimklClientID</key>
@@ -63,8 +65,11 @@
 	<string>$(TRAKT_CLIENT_ID)</string>
 	<key>TraktClientSecret</key>
 	<string>$(TRAKT_CLIENT_SECRET)</string>
+	<key>TMDBBearerToken</key>
+	<string>$(TMDB_BEARER_TOKEN)</string>
 	<key>UIAppFonts</key>
 	<array>
+		<string>Bungee-Regular.ttf</string>
 		<string>AtkinsonHyperlegible-Regular.ttf</string>
 		<string>AtkinsonHyperlegible-Italic.ttf</string>
 		<string>AtkinsonHyperlegible-Bold.ttf</string>

@@ -37,6 +37,8 @@ struct HeroForegroundModel: Equatable {
     /// item's short marketing tagline when it has one, otherwise its long
     /// overview as a fallback. `nil` only when neither exists / text is hidden.
     let overview: String?
+    /// Every external rating available for the title, spoiler-gated by caller.
+    let ratings: [ExternalRating]
     /// The visible action pills, left-to-right, exactly matching the SwiftUI
     /// hero's `buttons(for:)` order. Non-interactive here — the SwiftUI overlay
     /// owns focus/selection/dispatch — but their *visuals* (including the selected
@@ -65,6 +67,8 @@ struct HeroForegroundModel: Equatable {
         /// inline progress bar (Play resume / active download) *between* the glyph and
         /// the trailing text — matching `PlayResumeButtonLabel` / `downloadStatusLabel`.
         let progress: Double?
+        /// Whether this pill is the fallback primary CTA even while unfocused.
+        var prominent: Bool = false
     }
 
     /// Paging-indicator state for the renderer (count + fronted index) plus the
@@ -116,11 +120,21 @@ enum HeroForegroundModelBuilder {
         /// For `.downloadStatus`: active download fraction, or `nil` when the
         /// request is queued/searching (shows a plain "Requested" status).
         var downloadProgress: Double? = nil
+        /// Makes a fallback action read as the primary CTA even while unfocused.
+        var prominent: Bool = false
     }
 
     /// The `  ·  `-joined metadata line for a slide, or `nil` when empty.
     static func metadataText(for item: MediaItem) -> String? {
-        let parts = item.metadataComponents()
+        var parts: [String] = []
+        if let productionYear = item.productionYear {
+            parts.append(String(productionYear))
+        }
+        parts.append(
+            contentsOf: GenreDisplayFormatter.displayNames(
+                for: Array(item.genres.prefix(3))
+            )
+        )
         return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
     }
 
@@ -199,7 +213,11 @@ enum HeroForegroundModelBuilder {
             )
         case .moreInfo:
             return HeroForegroundModel.Pill(
-                kind: .moreInfo, text: nil, systemImage: "info.circle", progress: nil
+                kind: .moreInfo,
+                text: input.prominent ? "More Info" : nil,
+                systemImage: "info.circle",
+                progress: nil,
+                prominent: input.prominent
             )
         case .watchlist:
             return HeroForegroundModel.Pill(
@@ -221,6 +239,7 @@ enum HeroForegroundModelBuilder {
     static func model(
         item: MediaItem,
         overviewVisible: Bool,
+        ratingsVisible: Bool = true,
         maskedTitle: String?,
         pillInputs: [PillInput],
         selectedIndex: Int,
@@ -251,7 +270,16 @@ enum HeroForegroundModelBuilder {
             logoURL: item.logoURL,
             metadataText: metadataText(for: item),
             ratingBadgeText: ratingBadgeText(for: item),
-            overview: overviewVisible ? (item.tagline ?? item.overview) : nil,
+            overview: overviewVisible
+                ? HeroContentPolicy.homeDescription(
+                    for: HeroPresentation(
+                        item: item,
+                        artworkStyle: .landscape,
+                        surface: .home
+                    )
+                )
+                : nil,
+            ratings: ratingsVisible ? item.ratings : [],
             pills: pills,
             selectedIndex: clamped,
             heroFocused: heroFocused,

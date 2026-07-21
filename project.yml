@@ -150,6 +150,8 @@ targets:
         # from MAL_CLIENT_ID build setting (gitignored Config/Secrets.local.xcconfig).
         # Empty by default, which disables MAL sync.
         MALClientID: "$(MAL_CLIENT_ID)"
+        OMDBAPIKey: "$(OMDB_API_KEY)"
+        TMDBBearerToken: "$(TMDB_BEARER_TOKEN)"
         # Simkl client credentials for watch tracking. Register at simkl.com/apps.
         SimklClientID: "$(SIMKL_CLIENT_ID)"
         SimklClientSecret: "$(SIMKL_CLIENT_SECRET)"
@@ -272,6 +274,7 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         UIAppFonts:
+          - "Bungee-Regular.ttf"
           - "AtkinsonHyperlegible-Regular.ttf"
           - "AtkinsonHyperlegible-Italic.ttf"
           - "AtkinsonHyperlegible-Bold.ttf"

@@ -161,7 +161,8 @@ let package = Package(
         // MARK: Shared UI (design system + reusable tvOS components)
         .target(
             name: "CoreUI",
-            dependencies: ["CoreModels", "MetadataKit"]
+            dependencies: ["CoreModels", "MetadataKit"],
+            resources: [.process("Resources")]
         ),
 
         // MARK: Scalable external metadata/artwork (content-type-routed providers)
@@ -271,8 +272,12 @@ let package = Package(
             ]
         ),
         .target(
+            name: "HeroUI",
+            dependencies: ["CoreModels", "CoreUI", "FeatureHomeCore"]
+        ),
+        .target(
             name: "FeatureHome",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "FeatureHomeCore", "MetadataKit", "TopShelfKit", "RatingsService", "ProviderTrailers"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "FeatureHomeCore", "HeroUI", "MetadataKit", "TopShelfKit", "RatingsService", "ProviderTrailers"]
         ),
         .target(
             name: "FeaturePlayback",
@@ -576,6 +581,7 @@ let package = Package(
                 "FeatureAuthCore",
                 "FeatureDiscoveryCore",
                 "FeatureHomeCore",
+                "HeroUI",
                 "FeaturePlayback",
                 "FeatureProfiles",
                 "FeatureSearchCore",
@@ -659,7 +665,12 @@ let package = Package(
         ),
         .testTarget(
             name: "FeatureHomeTests",
-            dependencies: ["FeatureHome", "FeatureHomeCore", "CoreModels"]
+            dependencies: [
+                "FeatureHome",
+                "FeatureHomeCore",
+                "HeroUI",
+                "CoreModels"
+            ]
         ),
         .testTarget(
             name: "FeatureHomeCoreTests",

@@ -1,5 +1,45 @@
 import Foundation
 
+public enum GenreDisplayFormatter {
+    public static func displayName(for genre: String) -> String {
+        let trimmed = genre.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed.lowercased().unicodeScalars
+            .filter(CharacterSet.alphanumerics.contains)
+            .map(String.init)
+            .joined()
+        switch key {
+        case "sciencefiction", "scifi", "scifiction":
+            return "Sci-Fi"
+        case "sciencefictionfantasy", "sciencefictionandfantasy",
+             "scififantasy", "scifiandfantasy",
+             "scifictionfantasy", "scifictionandfantasy":
+            return "Sci-Fi & Fantasy"
+        default:
+            return trimmed
+        }
+    }
+
+    public static func displayNames(for genres: [String]) -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = genres.compactMap { genre -> String? in
+            let displayName = displayName(for: genre)
+            guard !displayName.isEmpty,
+                  seen.insert(displayName.lowercased()).inserted else {
+                return nil
+            }
+            return displayName
+        }
+        let compoundKey = "sci-fi & fantasy"
+        if result.contains(where: { $0.lowercased() == compoundKey }) {
+            result.removeAll {
+                let key = $0.lowercased()
+                return key == "sci-fi" || key == "fantasy"
+            }
+        }
+        return result
+    }
+}
+
 /// A small, provider-agnostic capability badge shown on a detail hero, e.g.
 /// `4K`, `Dolby Vision`, `Dolby Atmos`, `5.1`, or a content rating like `TV-14`.
 ///
@@ -447,7 +487,11 @@ public extension MediaItem {
         var parts: [String] = []
         if let productionYear { parts.append(String(productionYear)) }
         if let runtimeText = runtime?.runtimeBadgeText { parts.append(runtimeText) }
-        parts.append(contentsOf: genres.prefix(maxGenres))
+        parts.append(
+            contentsOf: GenreDisplayFormatter.displayNames(
+                for: Array(genres.prefix(maxGenres))
+            )
+        )
         return parts
     }
 

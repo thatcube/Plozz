@@ -7,15 +7,27 @@ import SwiftUI
 ///
 /// Shared by the item-detail hero Play button (`DetailHeroView`) and the Home
 /// hero Play pill (`HomeHeroView`) so the resume affordance is identical in both.
-struct ResumeProgressCapsule: View {
+public struct ResumeProgressCapsule: View {
     /// Watched fraction (`0...1`) driving the fill width.
-    let progress: Double
+    public let progress: Double
     /// Whether the bar sits on a light background (dark ink) vs dark (light ink).
-    let onLight: Bool
-    var width: CGFloat = 150
-    var height: CGFloat = 6
+    public let onLight: Bool
+    public var width: CGFloat
+    public var height: CGFloat
 
-    var body: some View {
+    public init(
+        progress: Double,
+        onLight: Bool,
+        width: CGFloat = 150,
+        height: CGFloat = 6
+    ) {
+        self.progress = progress
+        self.onLight = onLight
+        self.width = width
+        self.height = height
+    }
+
+    public var body: some View {
         let track = onLight ? Color.black.opacity(0.22) : Color.white.opacity(0.32)
         let fill = onLight ? Color.black.opacity(0.85) : Color.white
         Capsule()
@@ -38,22 +50,40 @@ struct ResumeProgressCapsule: View {
 /// item-detail hero and the Home hero render it identically. The glyph and text
 /// inherit the ambient `.font`, so each caller keeps its own type scale; the
 /// progress bar is a fixed size.
-struct PlayResumeButtonLabel: View {
+public struct PlayResumeButtonLabel: View {
     /// Plain-form label shown when the item has no resumable progress (e.g. "Play").
-    let title: String
+    public let title: String
     /// In-progress fraction; a value in `0..<1` (together with `remainingText`)
     /// switches the label to the resume form. `nil`/`0`/`1` shows the plain title.
-    let progress: Double?
+    public let progress: Double?
     /// Remaining-time text (e.g. "20m") shown after the bar in the resume form.
-    let remainingText: String?
+    public let remainingText: String?
     /// The episode the button will play, as `S{n}, E{m}` — appended to the plain
     /// title ("Play S21, E8") and prefixed to the resume trailing ("S5, E12 • 43m").
     /// `nil` for movies/series, which keep their plain label.
-    var seasonEpisodeText: String? = nil
+    public var seasonEpisodeText: String?
     /// Whether the label sits on a light background, forwarded to the progress bar.
-    let onLight: Bool
-    var spacing: CGFloat = 16
-    var capsuleWidth: CGFloat = 75
+    public let onLight: Bool
+    public var spacing: CGFloat
+    public var capsuleWidth: CGFloat
+
+    public init(
+        title: String,
+        progress: Double?,
+        remainingText: String?,
+        seasonEpisodeText: String? = nil,
+        onLight: Bool,
+        spacing: CGFloat = 16,
+        capsuleWidth: CGFloat = 75
+    ) {
+        self.title = title
+        self.progress = progress
+        self.remainingText = remainingText
+        self.seasonEpisodeText = seasonEpisodeText
+        self.onLight = onLight
+        self.spacing = spacing
+        self.capsuleWidth = capsuleWidth
+    }
 
     /// The resume form is used only for a genuinely in-progress item: a fraction
     /// strictly between 0 and 1 with a remaining-time string to show.
@@ -70,7 +100,7 @@ struct PlayResumeButtonLabel: View {
         seasonEpisodeText.map { "\(title) \($0)" } ?? title
     }
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: spacing) {
             Image(systemName: "play.fill")
             if let resumeForm {

@@ -246,7 +246,13 @@ struct PlozziOSMyLibrariesSettingsView: View {
                     account: account
                 )
             } label: {
-                Label("Plex User", systemImage: "person.crop.circle")
+                HStack(spacing: 12) {
+                    PlozziOSPlexIdentityAvatar(
+                        url: plexIdentityAvatarURL(for: account),
+                        name: plexIdentityName(for: account)
+                    )
+                    Text(plexIdentityName(for: account))
+                }
             }
         } else if group.providerKind != .mediaShare, group.accounts.count > 1 {
             Picker(
@@ -264,9 +270,73 @@ struct PlozziOSMyLibrariesSettingsView: View {
         }
     }
 
+    private func plexIdentityName(for account: Account) -> String {
+        let homeName = appModel.profiles.activeProfile
+            .homeUserBinding(forPlexAccount: account.id)?
+            .name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let homeName, !homeName.isEmpty {
+            return homeName
+        }
+        let accountName = account.userName.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        return accountName.isEmpty ? "Plex Administrator" : accountName
+    }
+
+    private func plexIdentityAvatarURL(for account: Account) -> URL? {
+        let bindingURL = appModel.profiles.activeProfile
+            .homeUserBinding(forPlexAccount: account.id)?
+            .avatarURL
+            .flatMap(URL.init(string:))
+        return bindingURL ?? account.avatarURL
+    }
+
     private func isWatching(_ group: ServerAccountGroup) -> Bool {
         let active = appModel.activeAccountIDs(for: profileID)
         return group.accounts.contains { active.contains($0.id) }
+    }
+
+    private struct PlozziOSPlexIdentityAvatar: View {
+        let url: URL?
+        let name: String
+
+        var body: some View {
+            Group {
+                if let url {
+                    FallbackAsyncImage(
+                        urls: [url],
+                        variant: .musicThumbnail
+                    ) {
+                        fallback
+                    }
+                } else {
+                    fallback
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(Circle())
+            .accessibilityHidden(true)
+        }
+
+        private var fallback: some View {
+            Circle()
+                .fill(Color.accentColor.opacity(0.18))
+                .overlay {
+                    Text(initials)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.tint)
+                }
+        }
+
+        private var initials: String {
+            let letters = name.split(separator: " ")
+                .prefix(2)
+                .compactMap(\.first)
+                .map(String.init)
+                .joined()
+            return letters.isEmpty ? "P" : letters.uppercased()
+        }
     }
 
     private func activeAccount(in group: ServerAccountGroup) -> Account? {

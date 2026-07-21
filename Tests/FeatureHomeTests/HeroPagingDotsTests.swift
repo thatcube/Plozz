@@ -1,5 +1,6 @@
 import XCTest
 @testable import FeatureHome
+@testable import FeatureHomeCore
 
 /// Locks down the hero paging-dots windowing (`HeroPagingDots.layout`): the cap,
 /// the shrinking edge dots on sides with hidden content, the "hold the active dot

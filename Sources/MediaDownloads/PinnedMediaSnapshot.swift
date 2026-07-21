@@ -16,6 +16,8 @@ public struct PinnedMediaSnapshot: Codable, Sendable, Hashable {
     public var title: String
     public var kind: MediaItemKind
     public var year: Int?
+    public var sourceAccountID: String?
+    public var sourceItemID: String?
     /// Relative leaf filename of the poster/artwork inside this download's pinned
     /// folder, or `nil` when no artwork was captured. NEVER an absolute path or a
     /// server URL (see the type doc).
@@ -25,11 +27,15 @@ public struct PinnedMediaSnapshot: Codable, Sendable, Hashable {
         title: String,
         kind: MediaItemKind,
         year: Int? = nil,
+        sourceAccountID: String? = nil,
+        sourceItemID: String? = nil,
         artworkFileName: String? = nil
     ) {
         self.title = title
         self.kind = kind
         self.year = year
+        self.sourceAccountID = sourceAccountID
+        self.sourceItemID = sourceItemID
         self.artworkFileName = artworkFileName
     }
 }
@@ -43,6 +49,8 @@ public extension PinnedMediaSnapshot {
             title: item.title,
             kind: item.kind,
             year: item.productionYear,
+            sourceAccountID: item.sourceAccountID,
+            sourceItemID: item.id,
             artworkFileName: nil
         )
     }

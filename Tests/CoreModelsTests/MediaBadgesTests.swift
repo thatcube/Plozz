@@ -282,10 +282,28 @@ final class MediaBadgesTests: XCTestCase {
             title: "M",
             kind: .movie,
             productionYear: 2010,
-            genres: ["Action", "Adventure", "Sci-Fi", "Thriller"],
+            genres: ["Action", "Adventure", "Science Fiction", "Thriller"],
             runtime: 8880 // 2h 28m
         )
         XCTAssertEqual(item.metadataComponents(), ["2010", "2h 28m", "Action", "Adventure", "Sci-Fi"])
+    }
+
+    func testGenreDisplayFormatterCanonicalizesSciFiAliasesAndDeduplicates() {
+        XCTAssertEqual(
+            GenreDisplayFormatter.displayNames(
+                for: [
+                    "Science Fiction",
+                    "Sci-Fi",
+                    "Sci Fi",
+                    "SciFi",
+                    "Sci-Fiction",
+                    "Science Fiction and Fantasy",
+                    "Fantasy",
+                    "Drama"
+                ]
+            ),
+            ["Sci-Fi & Fantasy", "Drama"]
+        )
     }
 
     // MARK: Card runtime text

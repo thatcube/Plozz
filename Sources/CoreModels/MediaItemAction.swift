@@ -92,4 +92,17 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     /// current watched-state action loses data irreversibly; this exists so a
     /// future `delete` action can opt in without reworking the menu.
     public var isDestructive: Bool { false }
+
+    /// Actions intentionally promoted into a detail hero's visible More menu.
+    /// Navigation and server-maintenance actions remain in the context menu.
+    public var isPrimaryDetailAction: Bool {
+        switch self {
+        case .markWatched, .markUnwatched,
+             .addToWatchlist, .removeFromWatchlist:
+            return true
+        case .markWatchedUpToHere, .goToSeason, .goToMovie,
+             .refreshMetadata:
+            return false
+        }
+    }
 }

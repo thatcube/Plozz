@@ -68,7 +68,7 @@ if [[ "$NO_BUILD" != "1" ]]; then
     -configuration "$CONFIG" \
     -destination "generic/platform=iOS" \
     -allowProvisioningUpdates \
-    "${BUILD_SETTING_OVERRIDES[@]}" \
+    ${BUILD_SETTING_OVERRIDES[@]+"${BUILD_SETTING_OVERRIDES[@]}"} \
     build \
     | { command -v xcbeautify >/dev/null 2>&1 && xcbeautify || cat; }
 fi
@@ -79,7 +79,7 @@ APP_PATH="$(
     -scheme "$SCHEME" \
     -configuration "$CONFIG" \
     -destination "generic/platform=iOS" \
-    "${BUILD_SETTING_OVERRIDES[@]}" \
+    ${BUILD_SETTING_OVERRIDES[@]+"${BUILD_SETTING_OVERRIDES[@]}"} \
     -showBuildSettings 2>/dev/null \
     | awk -F' = ' '/ CODESIGNING_FOLDER_PATH / { print $2; exit }'
 )"

@@ -9,10 +9,10 @@ final class WatchStatusIndicatorSettingsStoreTests: XCTestCase {
         return defaults
     }
 
-    func testDefaultIsWatchedWhenEmpty() {
+    func testDefaultIsUnwatchedWhenEmpty() {
         let store = WatchStatusIndicatorSettingsStore(defaults: makeDefaults())
-        XCTAssertEqual(store.load(), .watched)
-        XCTAssertEqual(WatchStatusIndicator.default, .watched)
+        XCTAssertEqual(store.load(), .unwatched)
+        XCTAssertEqual(WatchStatusIndicator.default, .unwatched)
     }
 
     func testRoundTripForEveryIndicator() {

@@ -342,6 +342,7 @@ final class PlozziOSAppModel {
     }
 
     private func reloadAccountsAndCrashContext() {
+        heroTrailerCache.removeAll()
         accountsProviders.reloadAccounts()
         applyCrashReportingPreference()
     }
@@ -829,7 +830,10 @@ final class PlozziOSAppModel {
     }
 
     func activeAccountIDs(for profileID: String) -> Set<String> {
-        Set(
+        if profiles.activeProfileID == profileID {
+            return accountsProviders.activeAccountIDs
+        }
+        return Set(
             profiles.activeAccountIDs(
                 for: profileID,
                 fallback: accountStore.activeAccountIDs()

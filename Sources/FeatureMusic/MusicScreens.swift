@@ -339,7 +339,7 @@ private struct GenreCard: View {
 
             // The genre name is the hero: shrinks to fit (never ellipsises — the
             // "Interna…" wrap-then-truncate bug) and can use two lines.
-            Text(genre.name)
+            Text(GenreDisplayFormatter.displayName(for: genre.name))
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(2)
@@ -456,7 +456,12 @@ struct ArtistDetailView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(viewModel.artist.name).font(.system(size: 56, weight: .bold))
                         if !viewModel.artist.genres.isEmpty {
-                            Text(viewModel.artist.genres.joined(separator: " · "))
+                            Text(
+                                GenreDisplayFormatter.displayNames(
+                                    for: viewModel.artist.genres
+                                )
+                                .joined(separator: " · ")
+                            )
                                 .font(.title3)
                                 .foregroundStyle(.secondary)
                         }

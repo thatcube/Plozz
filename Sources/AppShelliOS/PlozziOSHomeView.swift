@@ -1,14 +1,20 @@
 #if os(iOS)
+import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureHomeCore
 import SwiftUI
+import UIKit
 
 struct PlozziOSHomeView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(HeroTrailerController.self) private var trailerController
     @State private var viewModel: HomeViewModel
     @State private var featuredItems: [MediaItem] = []
     @State private var heroItems: [MediaItem] = []
     @State private var playbackRequest: PlozziOSPlaybackRequest?
+    @State private var heroControlsVisible = true
     private let appModel: PlozziOSAppModel
     private let onAddServer: () -> Void
     private let onShowSettings: () -> Void
@@ -73,9 +79,46 @@ struct PlozziOSHomeView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                PlozziOSSettingsAvatarButton(action: onShowSettings)
+            if heroControlsVisible {
+                if #available(iOS 26.0, *) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        PlozziOSHomeHeroControls(
+                            showsMute: trailerController.isPlaying,
+                            isMuted: appModel.settings.heroBackground.settings
+                                .trailerMuted,
+                            onToggleMute: {
+                                appModel.settings.heroBackground.settings
+                                    .trailerMuted.toggle()
+                                trailerController.setMuted(
+                                    appModel.settings.heroBackground.settings
+                                        .trailerMuted
+                                )
+                            },
+                            onShowSettings: onShowSettings
+                        )
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        PlozziOSHomeHeroControls(
+                            showsMute: trailerController.isPlaying,
+                            isMuted: appModel.settings.heroBackground.settings
+                                .trailerMuted,
+                            onToggleMute: {
+                                appModel.settings.heroBackground.settings
+                                    .trailerMuted.toggle()
+                                trailerController.setMuted(
+                                    appModel.settings.heroBackground.settings
+                                        .trailerMuted
+                                )
+                            },
+                            onShowSettings: onShowSettings
+                        )
+                    }
+                }
             }
         }
         .task(id: appModel.settings.homeVisibility.visibility) {
@@ -118,6 +161,14 @@ struct PlozziOSHomeView: View {
             isLibraryVisible: visibility.isVisibleOnHome,
             isGlobalRowEnabled: visibility.isGlobalRowEnabled
         )
+        let heroStyle: HeroArtworkStyle = horizontalSizeClass == .compact
+            ? .compactPortrait
+            : .landscape
+        let trailerPauseThreshold = PlozziOSHeroMetrics.height(
+            style: heroStyle,
+            surfaceRole: .home,
+            dynamicTypeSize: dynamicTypeSize
+        ) / 2
         let scroll = ScrollView {
             LazyVStack(alignment: .leading, spacing: 30) {
                 if !heroItems.isEmpty {
@@ -183,6 +234,18 @@ struct PlozziOSHomeView: View {
             }
         }
         .scrollClipDisabled()
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentOffset.y > 72
+        } action: { _, scrolledPastHeroControls in
+            withAnimation(.easeOut(duration: 0.18)) {
+                heroControlsVisible = !scrolledPastHeroControls
+            }
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentOffset.y > trailerPauseThreshold
+        } action: { _, isPastHalfHero in
+            trailerController.setPaused(isPastHalfHero)
+        }
         .refreshable {
             await viewModel.load()
             await loadFeatured()
@@ -213,6 +276,7 @@ struct PlozziOSHomeView: View {
     }
 
     private func play(_ item: MediaItem) {
+        trailerController.stop()
         playbackRequest = PlozziOSPlaybackRequest(
             item: item,
             startPosition: item.resumePosition ?? 0
@@ -317,6 +381,12 @@ private struct PlozziOSHomeHeroCarousel: View {
     @Environment(HeroTrailerController.self) private var trailerController
     @State private var selectedItemID: String?
     @State private var dwellStart = Date()
+    @State private var dragOffset: CGFloat = 0
+    @State private var rootItems: [String: MediaItem] = [:]
+    @State private var playTargets: [String: MediaItem] = [:]
+    @State private var transitionTargetID: String?
+    @State private var transitionInProgress = false
+    @State private var foregroundVisible = true
 
     let items: [MediaItem]
     let autoAdvance: Bool
@@ -324,29 +394,107 @@ private struct PlozziOSHomeHeroCarousel: View {
     let onPlay: (MediaItem) -> Void
 
     var body: some View {
-        TabView(selection: $selectedItemID) {
-            ForEach(items) { item in
-                PlozziOSHomeHeroSlide(
-                    item: item,
-                    provider: provider(for: item),
-                    isSelected: item.id == selectedItemID,
-                    onPlay: onPlay
-                )
-                .tag(Optional(item.id))
-            }
-        }
-        .tabViewStyle(
-            .page(indexDisplayMode: .never)
+        let style: HeroArtworkStyle = horizontalSizeClass == .compact
+            ? .compactPortrait
+            : .landscape
+        let heroHeight = PlozziOSHeroMetrics.height(
+            style: style,
+            surfaceRole: .home,
+            dynamicTypeSize: dynamicTypeSize
         )
-        .scrollClipDisabled()
-        .frame(
-            height: PlozziOSHeroMetrics.height(
-                style: horizontalSizeClass == .compact
-                    ? .compactPortrait
-                    : .landscape,
-                dynamicTypeSize: dynamicTypeSize
+        GeometryReader { proxy in
+            let progress = min(
+                abs(dragOffset) / max(proxy.size.width * 0.45, 1),
+                1
             )
-        )
+            ZStack {
+                if let currentItem {
+                    PlozziOSHomeStaticBackdrop(
+                        item: currentItem,
+                        style: style,
+                        height: heroHeight
+                    )
+                    .id(currentItem.id)
+                    .opacity(1 - progress)
+
+                    if let dragTargetItem {
+                        PlozziOSHomeStaticBackdrop(
+                            item: dragTargetItem,
+                            style: style,
+                            height: heroHeight
+                        )
+                        .opacity(progress)
+                    }
+
+                    PlozziOSStationaryHeroScrim(
+                        style: style,
+                        height: heroHeight
+                    )
+
+                    PlozziOSHomeHeroSlide(
+                        item: currentItem,
+                        isSelected: true
+                    )
+
+                    let rootItem = rootItem(for: currentItem)
+                    let playItem = playTarget(for: currentItem) ?? currentItem
+                    PlozziOSHomeHeroForeground(
+                        item: playItem,
+                        detailItem: currentItem,
+                        watchlistItem: rootItem,
+                        presentation: HeroPresentation(
+                            item: rootItem,
+                            artworkStyle: style,
+                            surface: .home
+                        ),
+                        style: style,
+                        provider: provider(for: currentItem),
+                        onPlay: onPlay
+                    )
+                    .id(currentItem.id)
+                    .transition(.opacity)
+                    .opacity(
+                        (1 - progress)
+                            * (foregroundVisible ? 1 : 0)
+                    )
+                    .frame(
+                        maxWidth: PlozziOSPageLayout.heroTextMaxWidth(
+                            for: style
+                        )
+                    )
+                    .frame(
+                        maxWidth: .infinity,
+                        maxHeight: .infinity,
+                        alignment: style == .compactPortrait
+                            ? .bottom
+                            : .bottomLeading
+                    )
+                    .padding(
+                        .horizontal,
+                        PlozziOSPageLayout.horizontalInset(for: style)
+                    )
+                    .padding(.bottom, style == .compactPortrait ? 30 : 42)
+                    .animation(
+                        .easeInOut(duration: 0.24),
+                        value: currentItem.id
+                    )
+
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                PlozziOSHorizontalHeroDragGesture(
+                    isEnabled: !transitionInProgress,
+                    onChanged: { translation in
+                        dragOffset = translation.width
+                    },
+                    onEnded: { translation in
+                        finishDrag(translation: translation)
+                    }
+                )
+            )
+        }
+        .frame(height: heroHeight)
         .overlay(alignment: .bottom) {
             if items.count > 1 {
                 PlozziOSHeroPagingIndicator(
@@ -358,7 +506,7 @@ private struct PlozziOSHomeHeroCarousel: View {
                     trailerController: trailerController
                 )
                 .padding(.horizontal, 20)
-                .padding(.bottom, 10)
+                .offset(y: 10)
             }
         }
         .onChange(of: items.map(\.id), initial: true) { _, itemIDs in
@@ -393,7 +541,7 @@ private struct PlozziOSHomeHeroCarousel: View {
                 }
                 elapsed += 1
                 if elapsed >= autoAdvanceSeconds {
-                    advance()
+                    page(forward: true)
                     countdownItemID = selectedItemID
                     elapsed = 0
                 }
@@ -403,6 +551,13 @@ private struct PlozziOSHomeHeroCarousel: View {
             dwellStart = .now
             installTrailerEndHandler()
         }
+        .task(id: selectedItemID) {
+            guard let currentItem else { return }
+            async let root: Void = resolveRootItem(for: currentItem)
+            async let play: Void = resolvePlayTarget(for: currentItem)
+            async let art: Void = warmAdjacentArtwork()
+            _ = await (root, play, art)
+        }
         .onAppear(perform: installTrailerEndHandler)
         .onDisappear {
             trailerController.clearEndHandler(ownerID: endHandlerOwnerID)
@@ -411,11 +566,108 @@ private struct PlozziOSHomeHeroCarousel: View {
 
     @Environment(PlozziOSAppModel.self) private var appModel
 
+    private var currentItem: MediaItem? {
+        guard let selectedItemID else { return items.first }
+        return items.first { $0.id == selectedItemID } ?? items.first
+    }
+
+    private var dragTargetItem: MediaItem? {
+        if let transitionTargetID {
+            return items.first { $0.id == transitionTargetID }
+        }
+        guard dragOffset != 0, items.count > 1 else { return nil }
+        return adjacentItem(forward: dragOffset < 0)
+    }
+
     private func provider(for item: MediaItem) -> (any MediaProvider)? {
         if let accountID = item.sourceAccountID {
             return appModel.accountsProviders.provider(forAccountID: accountID)
         }
         return appModel.accountsProviders.primaryProvider
+    }
+
+    private func rootItem(for item: MediaItem) -> MediaItem {
+        rootItems[item.id] ?? item
+    }
+
+    private func playTarget(for item: MediaItem) -> MediaItem? {
+        if let resolved = playTargets[item.id] {
+            return resolved
+        }
+        switch item.kind {
+        case .movie, .episode, .video:
+            let target = bestLibraryItem(for: item)
+            return target.hasPlayableLibraryTarget() ? target : nil
+        default:
+            return nil
+        }
+    }
+
+    private func resolveRootItem(for item: MediaItem) async {
+        guard rootItems[item.id] == nil else { return }
+        let target = bestLibraryItem(for: item)
+        guard let provider = provider(for: target) else {
+            rootItems[item.id] = item
+            return
+        }
+        var hydrated = (try? await provider.item(id: target.id)) ?? target
+        if hydrated.sourceAccountID == nil,
+           let sourceAccountID = target.sourceAccountID {
+            hydrated = hydrated.taggingSource(sourceAccountID)
+        }
+        let metadataID: String
+        if (hydrated.kind == .episode || hydrated.kind == .season),
+           let seriesID = hydrated.seriesID {
+            metadataID = seriesID
+        } else {
+            metadataID = hydrated.id
+        }
+
+        do {
+            var root = try await provider.item(id: metadataID)
+            guard !Task.isCancelled else { return }
+            if root.sourceAccountID == nil,
+               let sourceAccountID = target.sourceAccountID {
+                root = root.taggingSource(sourceAccountID)
+            }
+            rootItems[item.id] = root
+        } catch {
+            guard !Task.isCancelled else { return }
+            rootItems[item.id] = item
+        }
+    }
+
+    private func resolvePlayTarget(for item: MediaItem) async {
+        guard playTargets[item.id] == nil else {
+            return
+        }
+        let selected = bestLibraryItem(for: item)
+        guard let provider = provider(for: selected) else { return }
+        var hydrated = (try? await provider.item(id: selected.id)) ?? selected
+        if hydrated.sourceAccountID == nil,
+           let sourceAccountID = selected.sourceAccountID {
+            hydrated = hydrated.taggingSource(sourceAccountID)
+        }
+        guard var target = await HeroPlayTargetResolver.resolve(
+            item: hydrated,
+            provider: provider
+        ) else {
+            return
+        }
+        guard !Task.isCancelled else { return }
+        if target.sourceAccountID == nil,
+           let sourceAccountID = selected.sourceAccountID {
+            target = target.taggingSource(sourceAccountID)
+        }
+        playTargets[item.id] = target
+    }
+
+    private func bestLibraryItem(for item: MediaItem) -> MediaItem {
+        PlaybackSourceSelection.bestPlayItem(
+            item,
+            accounts: appModel.accountsProviders.resolvedActiveAccounts,
+            identitySources: appModel.identityIndex.identitySourcesProvider
+        )
     }
 
     private var endHandlerOwnerID: String { "ios-home-carousel" }
@@ -426,17 +678,281 @@ private struct PlozziOSHomeHeroCarousel: View {
             return
         }
         trailerController.setEndHandler(ownerID: endHandlerOwnerID) {
-            advance()
+            page(forward: true)
         }
     }
 
-    private func advance() {
-        withAnimation(.easeInOut(duration: 0.35)) {
-            let currentIndex = items.firstIndex {
-                $0.id == selectedItemID
-            } ?? -1
-            selectedItemID = items[(currentIndex + 1) % items.count].id
+    private func page(forward: Bool) {
+        beginTransition(forward: forward)
+    }
+
+    private func adjacentItem(forward: Bool) -> MediaItem? {
+        guard items.count > 1 else { return nil }
+        let currentIndex = items.firstIndex {
+            $0.id == selectedItemID
+        } ?? 0
+        let targetIndex = forward
+            ? (currentIndex + 1) % items.count
+            : (currentIndex - 1 + items.count) % items.count
+        return items[targetIndex]
+    }
+
+    private func finishDrag(translation: CGSize) {
+        guard abs(translation.width) > abs(translation.height) * 1.2,
+              abs(translation.width) >= 50 else {
+            withAnimation(.easeOut(duration: 0.2)) {
+                dragOffset = 0
+            }
+            return
         }
+        beginTransition(forward: translation.width < 0)
+    }
+
+    private func beginTransition(forward: Bool) {
+        guard !transitionInProgress,
+              let target = adjacentItem(forward: forward) else {
+            return
+        }
+        transitionInProgress = true
+        transitionTargetID = target.id
+        withAnimation(.easeInOut(duration: 0.28)) {
+            dragOffset = forward ? -1_000 : 1_000
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(280))
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                selectedItemID = target.id
+                transitionTargetID = nil
+                dragOffset = 0
+                foregroundVisible = false
+            }
+            withAnimation(.easeInOut(duration: 0.24)) {
+                foregroundVisible = true
+            }
+            transitionInProgress = false
+        }
+    }
+
+    private func warmAdjacentArtwork() async {
+        let targets = [currentItem, adjacentItem(forward: true),
+                       adjacentItem(forward: false)]
+            .compactMap { $0 }
+        for target in targets {
+            let style: HeroArtworkStyle = horizontalSizeClass == .compact
+                ? .compactPortrait
+                : .landscape
+            let references = HeroPresentation(
+                item: target,
+                artworkStyle: style,
+                surface: .home
+            ).artworkReferences
+            for reference in references {
+                guard !Task.isCancelled else { return }
+                if await ArtworkImageCache.shared.image(
+                    for: reference,
+                    variant: .heroBackdrop,
+                    background: true
+                ) != nil {
+                    break
+                }
+            }
+        }
+    }
+}
+
+private struct PlozziOSHomeHeroControls: View {
+    let showsMute: Bool
+    let isMuted: Bool
+    let onToggleMute: () -> Void
+    let onShowSettings: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if showsMute {
+                PlozziOSHomeHeroMuteButton(
+                    isMuted: isMuted,
+                    action: onToggleMute
+                )
+                .modifier(PlozziOSCircularHeroControlModifier())
+            }
+            PlozziOSSettingsAvatarButton(action: onShowSettings)
+                .modifier(PlozziOSCircularHeroControlModifier())
+        }
+        .fixedSize()
+        .offset(y: -1)
+    }
+}
+
+private struct PlozziOSCircularHeroControlModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+                .glassEffect(.regular.interactive(), in: Circle())
+        } else {
+            content
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.14), lineWidth: 1)
+                }
+        }
+    }
+}
+
+private struct PlozziOSHomeHeroMuteButton: View {
+    let isMuted: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(
+                systemName: isMuted
+                    ? "speaker.slash.fill"
+                    : "speaker.wave.2.fill"
+            )
+            .font(.subheadline.weight(.semibold))
+            .frame(width: 44, height: 44)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(isMuted ? "Unmute trailer" : "Mute trailer")
+    }
+}
+
+private struct PlozziOSHorizontalHeroDragGesture:
+    UIGestureRecognizerRepresentable {
+    let isEnabled: Bool
+    let onChanged: (CGSize) -> Void
+    let onEnded: (CGSize) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIGestureRecognizer(
+        context: Context
+    ) -> PlozziOSHorizontalHeroPanGestureRecognizer {
+        let recognizer = PlozziOSHorizontalHeroPanGestureRecognizer()
+        recognizer.delegate = context.coordinator
+        recognizer.cancelsTouchesInView = false
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(
+        _ recognizer: PlozziOSHorizontalHeroPanGestureRecognizer,
+        context: Context
+    ) {
+        recognizer.isEnabled = isEnabled
+    }
+
+    func handleUIGestureRecognizerAction(
+        _ recognizer: PlozziOSHorizontalHeroPanGestureRecognizer,
+        context: Context
+    ) {
+        switch recognizer.state {
+        case .began, .changed:
+            onChanged(recognizer.translation)
+        case .ended:
+            onEnded(recognizer.translation)
+        case .cancelled, .failed:
+            onEnded(.zero)
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer:
+                UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+    }
+}
+
+private final class PlozziOSHorizontalHeroPanGestureRecognizer:
+    UIGestureRecognizer {
+    private static let minimumDistance: CGFloat = 12
+    private static let horizontalDominance: CGFloat = 1.35
+
+    private var initialLocation: CGPoint?
+    private(set) var translation: CGSize = .zero
+
+    override func touchesBegan(
+        _ touches: Set<UITouch>,
+        with event: UIEvent
+    ) {
+        guard touches.count == 1, let touch = touches.first else {
+            state = .failed
+            return
+        }
+        initialLocation = touch.location(in: view)
+        translation = .zero
+    }
+
+    override func touchesMoved(
+        _ touches: Set<UITouch>,
+        with event: UIEvent
+    ) {
+        guard let initialLocation, let touch = touches.first else {
+            state = .failed
+            return
+        }
+        let location = touch.location(in: view)
+        translation = CGSize(
+            width: location.x - initialLocation.x,
+            height: location.y - initialLocation.y
+        )
+
+        if state == .possible {
+            let horizontalDistance = abs(translation.width)
+            let verticalDistance = abs(translation.height)
+            guard hypot(horizontalDistance, verticalDistance)
+                >= Self.minimumDistance else {
+                return
+            }
+            guard horizontalDistance
+                > verticalDistance * Self.horizontalDominance else {
+                state = .failed
+                return
+            }
+            state = .began
+        } else if state == .began || state == .changed {
+            state = .changed
+        }
+    }
+
+    override func touchesEnded(
+        _ touches: Set<UITouch>,
+        with event: UIEvent
+    ) {
+        if state == .began || state == .changed {
+            state = .ended
+        } else {
+            state = .failed
+        }
+    }
+
+    override func touchesCancelled(
+        _ touches: Set<UITouch>,
+        with event: UIEvent
+    ) {
+        state = .cancelled
+    }
+
+    override func reset() {
+        initialLocation = nil
+        translation = .zero
+        super.reset()
     }
 }
 
@@ -449,6 +965,7 @@ private struct PlozziOSHeroTimerID: Equatable {
 private struct PlozziOSFeaturedRow: View {
     @Environment(\.plozzCardStyle) private var cardStyle
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let items: [MediaItem]
     let appModel: PlozziOSAppModel
 
@@ -456,7 +973,10 @@ private struct PlozziOSFeaturedRow: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Trending")
                 .font(.title2.bold())
-                .padding(.horizontal)
+                .padding(
+                    .horizontal,
+                    PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass)
+                )
 
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 14) {
@@ -474,8 +994,12 @@ private struct PlozziOSFeaturedRow: View {
                         )
                     }
                 }
-                .padding(.horizontal)
             }
+            .contentMargins(
+                .horizontal,
+                PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass),
+                for: .scrollContent
+            )
             .scrollIndicators(.hidden)
         }
     }
@@ -492,7 +1016,12 @@ private struct PlozziOSHomeRowView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(row.title)
                         .font(.title2.bold())
-                        .padding(.horizontal)
+                        .padding(
+                            .horizontal,
+                            PlozziOSPageLayout.horizontalInset(
+                                for: horizontalSizeClass
+                            )
+                        )
                     libraryRow
                 }
             } else {
@@ -538,8 +1067,12 @@ private struct PlozziOSHomeRowView: View {
                     }
                 }
             }
-            .padding(.horizontal)
         }
+        .contentMargins(
+            .horizontal,
+            PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass),
+            for: .scrollContent
+        )
         .scrollIndicators(.hidden)
     }
 
@@ -548,6 +1081,7 @@ private struct PlozziOSHomeRowView: View {
 private struct PlozziOSHomeMediaRail: View {
     @Environment(\.plozzCardStyle) private var cardStyle
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let title: String
     let items: [MediaItem]
@@ -558,7 +1092,10 @@ private struct PlozziOSHomeMediaRail: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.title2.bold())
-                .padding(.horizontal)
+                .padding(
+                    .horizontal,
+                    PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass)
+                )
 
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 14) {
@@ -576,8 +1113,12 @@ private struct PlozziOSHomeMediaRail: View {
                         )
                     }
                 }
-                .padding(.horizontal)
             }
+            .contentMargins(
+                .horizontal,
+                PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass),
+                for: .scrollContent
+            )
             .scrollIndicators(.hidden)
         }
     }
@@ -597,13 +1138,19 @@ private struct PlozziOSHomeMediaCard: View {
     let provider: (any MediaProvider)?
 
     var body: some View {
+        let detailItem = PlaybackSourceSelection.bestPlayItem(
+            item,
+            accounts: appModel.accountsProviders.resolvedActiveAccounts,
+            identitySources: appModel.identityIndex.identitySourcesProvider
+        )
+        let detailProvider = appModel.provider(for: detailItem) ?? provider
         Group {
-            if let provider {
+            if let detailProvider {
                 NavigationLink {
                     PlozziOSItemDetailView(
                         appModel: appModel,
-                        provider: provider,
-                        item: item,
+                        provider: detailProvider,
+                        item: detailItem,
                         seerService: appModel.seerService
                     )
                 } label: {

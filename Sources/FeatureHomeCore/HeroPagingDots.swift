@@ -12,20 +12,20 @@ import Foundation
 /// further, so those edge dots grow back to full size and the active dot moves
 /// into them — i.e. the last `edgeShrink` dots only become full-size (and the
 /// active dot only reaches them) once you're on the last `edgeShrink` slides.
-enum HeroPagingDots {
+public enum HeroPagingDots {
     /// How large to draw a windowed dot. `.small` is the outermost edge dot,
     /// `.medium` the next one in, `.full` every interior dot (and the active dot).
-    enum Size: Equatable {
+    public enum Size: Equatable, Sendable {
         case full
         case medium
         case small
     }
 
     /// One rendered dot: which slide it represents and how large to draw it.
-    struct Dot: Equatable, Identifiable {
-        let index: Int
-        let size: Size
-        var id: Int { index }
+    public struct Dot: Equatable, Identifiable, Sendable {
+        public let index: Int
+        public let size: Size
+        public var id: Int { index }
     }
 
     /// The dots to render for `count` slides with `index` fronted.
@@ -35,7 +35,7 @@ enum HeroPagingDots {
     ///   so the active dot is held at the last full slot before the trailing shrink
     ///   band while scrolling, and clamped at the ends so the trailing/leading dots
     ///   grow back to full when there's nothing more that way.
-    static func layout(
+    public static func layout(
         count: Int,
         index: Int,
         maxVisible: Int = 8,
@@ -44,6 +44,7 @@ enum HeroPagingDots {
         guard count > maxVisible else {
             return (0..<max(count, 0)).map { Dot(index: $0, size: .full) }
         }
+
         let clampedIndex = min(max(index, 0), count - 1)
         // Held slot for the active dot while the window scrolls: the last full slot
         // before the trailing shrink band.
@@ -83,5 +84,33 @@ enum HeroPagingDots {
             }
         }
         return rank(a) <= rank(b) ? a : b
+    }
+}
+
+/// Shared geometry for every hero paging renderer. tvOS retains its native
+/// glass implementation while iOS/iPadOS use the same dot/pill dimensions,
+/// window size, edge shrinking, and coordinated morph duration.
+public enum HeroPagingIndicatorMetrics {
+    public static let dotSize: CGFloat = 10
+    public static let dotSpacing: CGFloat = 12
+    public static let activeWidth: CGFloat = 30
+    public static let morphDuration: TimeInterval = 0.3
+    public static let maxVisible = 8
+    public static let edgeShrink = 2
+
+    public static func scale(for size: HeroPagingDots.Size) -> CGFloat {
+        switch size {
+        case .full: 1
+        case .medium: 0.78
+        case .small: 0.55
+        }
+    }
+
+    public static func rowWidth(count: Int) -> CGFloat? {
+        guard count > maxVisible else { return nil }
+        let otherDots = CGFloat(maxVisible - 1)
+        return otherDots * dotSize
+            + activeWidth
+            + otherDots * dotSpacing
     }
 }

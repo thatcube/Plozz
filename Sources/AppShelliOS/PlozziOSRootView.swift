@@ -11,6 +11,7 @@ public struct PlozziOSRootView: View {
     private var systemReduceTransparency
     @State private var appModel = PlozziOSAppModel()
     @State private var heroTrailerController = HeroTrailerController()
+    @State private var sidebarGeometry = PlozziOSSidebarGeometryModel()
     @State private var showingAddServer = false
     @State private var addServerPresentationColorScheme: ColorScheme = .dark
     @State private var showingSettings = false
@@ -67,6 +68,7 @@ public struct PlozziOSRootView: View {
         )
         .environment(appModel)
         .environment(heroTrailerController)
+        .environment(sidebarGeometry)
         .id(shellIdentity)
         .onChange(of: shellIdentity) {
             heroTrailerController.stop()
@@ -200,7 +202,7 @@ public struct PlozziOSRootView: View {
     }
 }
 
-private enum PlozziOSDestination: String, CaseIterable, Identifiable {
+private enum PlozziOSDestination: String, CaseIterable, Identifiable, Hashable {
     case home
     case search
     case downloads
@@ -226,15 +228,22 @@ private enum PlozziOSDestination: String, CaseIterable, Identifiable {
 
 private struct PlozziOSTabShell: View {
     @Environment(\.themePalette) private var palette
+    @Environment(PlozziOSSidebarGeometryModel.self)
+    private var sidebarGeometry
     @State private var settingsPresentationColorScheme: ColorScheme = .dark
+    @State private var selectedDestination: PlozziOSDestination = .home
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     @Binding var showingSettings: Bool
     let systemColorScheme: ColorScheme
 
     var body: some View {
-        TabView {
-            Tab("Home", systemImage: "house") {
+        TabView(selection: $selectedDestination) {
+            Tab(
+                "Home",
+                systemImage: "house",
+                value: PlozziOSDestination.home
+            ) {
                 NavigationStack {
                     PlozziOSDestinationView(
                         destination: .home,
@@ -247,7 +256,11 @@ private struct PlozziOSTabShell: View {
                 .background { AppBackground(palette: palette) }
             }
 
-            Tab("Search", systemImage: "magnifyingglass") {
+            Tab(
+                "Search",
+                systemImage: "magnifyingglass",
+                value: PlozziOSDestination.search
+            ) {
                 NavigationStack {
                     PlozziOSDestinationView(
                         destination: .search,
@@ -260,7 +273,11 @@ private struct PlozziOSTabShell: View {
                 .background { AppBackground(palette: palette) }
             }
 
-            Tab("Downloads", systemImage: "arrow.down.circle") {
+            Tab(
+                "Downloads",
+                systemImage: "arrow.down.circle",
+                value: PlozziOSDestination.downloads
+            ) {
                 NavigationStack {
                     PlozziOSDestinationView(
                         destination: .downloads,
@@ -275,6 +292,13 @@ private struct PlozziOSTabShell: View {
         }
         .tabViewStyle(.sidebarAdaptable)
         .background { AppBackground(palette: palette) }
+        .background(alignment: .topLeading) {
+            PlozziOSHomeSidebarOverlapProbe(
+                enabled: selectedDestination == .home,
+                geometryModel: sidebarGeometry
+            )
+            .frame(width: 0, height: 0)
+        }
         .sheet(isPresented: $showingSettings) {
             PlozziOSSettingsView(
                 appModel: appModel,
@@ -324,19 +348,31 @@ private struct PlozziOSDestinationView: View {
                 onAddServer: onAddServer,
                 onShowSettings: onShowSettings
             )
+            .id(activeAccountsIdentity)
         case .search:
             PlozziOSSearchView(
                 appModel: appModel,
                 onShowSettings: onShowSettings
             )
-                .id(appModel.accounts.map(\.credentialRevision))
+                .id(activeAccountsIdentity)
         case .downloads:
             PlozziOSDownloadsView(
                 model: appModel.downloads,
+                appModel: appModel,
                 onShowSettings: onShowSettings
             )
                 .id(appModel.profiles.activeProfileID)
         }
+    }
+
+    private var activeAccountsIdentity: String {
+        let credentials = appModel.accounts
+            .map { "\($0.id):\($0.credentialRevision)" }
+            .joined(separator: "|")
+        let active = appModel.accountsProviders.activeAccountIDs
+            .sorted()
+            .joined(separator: ",")
+        return "\(credentials)#\(active)"
     }
 }
 
@@ -370,7 +406,6 @@ private struct PlozziOSHomeLandingView: View {
                 onAddServer: onAddServer,
                 onShowSettings: onShowSettings
             )
-            .id(appModel.accounts.map(\.credentialRevision))
         }
     }
 }

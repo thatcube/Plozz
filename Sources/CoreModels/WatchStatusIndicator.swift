@@ -40,5 +40,5 @@ public enum WatchStatusIndicator: String, CaseIterable, Identifiable, Codable, S
         }
     }
 
-    public static let `default`: WatchStatusIndicator = .watched
+    public static let `default`: WatchStatusIndicator = .unwatched
 }

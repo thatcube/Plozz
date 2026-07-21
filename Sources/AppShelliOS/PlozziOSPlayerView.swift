@@ -1,5 +1,6 @@
 #if os(iOS)
 import CoreModels
+import FeatureHomeCore
 import FeaturePlayback
 import SwiftUI
 
@@ -10,6 +11,7 @@ struct PlozziOSPlaybackRequest: Identifiable {
 }
 
 struct PlozziOSPlayerView: View {
+    @Environment(HeroTrailerController.self) private var trailerController
     @Environment(PlozziOSAppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: PlayerViewModel?
@@ -47,7 +49,10 @@ struct PlozziOSPlayerView: View {
             }
         }
         .statusBarHidden()
-        .onAppear { isPresented = true }
+        .onAppear {
+            trailerController.stop()
+            isPresented = true
+        }
         .onDisappear {
             isPresented = false
             handoffTask?.cancel()

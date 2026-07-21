@@ -249,6 +249,54 @@ func makeHeroWatchStateRefresher(
 /// at most four details at once, preserve curated identity/order/watch state, and
 /// copy only missing presentation fields so this cannot reseat the carousel or alter
 /// playback routing.
+private struct HeroMetadataEnrichment: Sendable {
+    let root: MediaItem
+    let playTarget: MediaItem?
+}
+
+private func resolveHeroMetadata(
+    target: MediaItem,
+    provider: any MediaProvider,
+    accountID: String
+) async -> HeroMetadataEnrichment? {
+    guard var hydratedTarget = try? await provider.item(id: target.id) else {
+        return nil
+    }
+    if hydratedTarget.sourceAccountID == nil {
+        hydratedTarget = hydratedTarget.taggingSource(accountID)
+    }
+
+    if hydratedTarget.kind == .episode {
+        guard let seriesID = hydratedTarget.seriesID,
+              var root = try? await provider.item(id: seriesID) else {
+            return nil
+        }
+        if root.sourceAccountID == nil {
+            root = root.taggingSource(accountID)
+        }
+        return HeroMetadataEnrichment(
+            root: root,
+            playTarget: hydratedTarget
+        )
+    }
+
+    if hydratedTarget.kind == .series {
+        var playTarget = await HeroPlayTargetResolver.resolve(
+            item: hydratedTarget,
+            provider: provider
+        )
+        if playTarget?.sourceAccountID == nil {
+            playTarget = playTarget?.taggingSource(accountID)
+        }
+        return HeroMetadataEnrichment(
+            root: hydratedTarget,
+            playTarget: playTarget
+        )
+    }
+
+    return HeroMetadataEnrichment(root: hydratedTarget, playTarget: nil)
+}
+
 func makeHeroMetadataEnricher(
     accounts: [ResolvedAccount],
     identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
@@ -260,7 +308,9 @@ func makeHeroMetadataEnricher(
     return { items in
         let targets = Dictionary(uniqueKeysWithValues: items.indices.compactMap { index -> (Int, MediaItem)? in
             let item = items[index]
-            guard item.officialRating?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+            guard item.kind == .series
+                    || item.kind == .episode
+                    || item.officialRating?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
                     || item.productionYear == nil
                     || item.overview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
                     || item.taglines.isEmpty else { return nil }
@@ -278,8 +328,8 @@ func makeHeroMetadataEnricher(
 
         let concurrency = min(4, candidates.count)
         let details = await withTaskGroup(
-            of: (Int, MediaItem?).self,
-            returning: [Int: MediaItem].self
+            of: (Int, HeroMetadataEnrichment?).self,
+            returning: [Int: HeroMetadataEnrichment].self
         ) { group in
             var next = 0
             for _ in 0..<concurrency {
@@ -288,10 +338,19 @@ func makeHeroMetadataEnricher(
                 guard let target = targets[index],
                       let accountID = target.sourceAccountID,
                       let provider = providersByAccount[accountID] else { continue }
-                group.addTask { (index, try? await provider.item(id: target.id)) }
+                group.addTask {
+                    return (
+                        index,
+                        await resolveHeroMetadata(
+                            target: target,
+                            provider: provider,
+                            accountID: accountID
+                        )
+                    )
+                }
             }
 
-            var result: [Int: MediaItem] = [:]
+            var result: [Int: HeroMetadataEnrichment] = [:]
             while let (index, detail) = await group.next() {
                 if let detail { result[index] = detail }
                 if next < candidates.count, !Task.isCancelled {
@@ -300,7 +359,16 @@ func makeHeroMetadataEnricher(
                     guard let target = targets[queuedIndex],
                           let accountID = target.sourceAccountID,
                           let provider = providersByAccount[accountID] else { continue }
-                    group.addTask { (queuedIndex, try? await provider.item(id: target.id)) }
+                    group.addTask {
+                        return (
+                            queuedIndex,
+                            await resolveHeroMetadata(
+                                target: target,
+                                provider: provider,
+                                accountID: accountID
+                            )
+                        )
+                    }
                 }
             }
             return result
@@ -309,20 +377,54 @@ func makeHeroMetadataEnricher(
 
         var enriched = items
         for (index, detail) in details {
+            if var playTarget = detail.playTarget {
+                if playTarget.sourceAccountID == nil,
+                   let sourceAccountID = detail.root.sourceAccountID {
+                    playTarget = playTarget.taggingSource(sourceAccountID)
+                }
+                enriched[index] = playTarget
+            }
+            let root = detail.root
+            if enriched[index].kind == .episode {
+                enriched[index].parentTitle = root.title
+                enriched[index].seriesID = root.id
+                enriched[index].officialRating = root.officialRating
+                enriched[index].genres = root.genres
+                enriched[index].overview = root.overview
+                enriched[index].taglines = root.taglines
+                enriched[index].ratings = root.ratings
+                enriched[index].people = root.people
+                enriched[index].studios = root.studios
+                enriched[index].logoURL = root.logoURL
+                enriched[index].heroBackdropURL = root.heroBackdropURL
+                enriched[index].backdropURL = root.backdropURL
+                enriched[index].fallbackArtworkURL = root.fallbackArtworkURL
+                enriched[index].artworkSelections = root.artworkSelections
+                continue
+            }
             if enriched[index].officialRating?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-                enriched[index].officialRating = detail.officialRating
+                enriched[index].officialRating = root.officialRating
             }
             if enriched[index].productionYear == nil {
-                enriched[index].productionYear = detail.productionYear
+                enriched[index].productionYear = root.productionYear
             }
             if enriched[index].genres.isEmpty {
-                enriched[index].genres = detail.genres
+                enriched[index].genres = root.genres
             }
             if enriched[index].overview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-                enriched[index].overview = detail.overview
+                enriched[index].overview = root.overview
             }
             if enriched[index].taglines.isEmpty {
-                enriched[index].taglines = detail.taglines
+                enriched[index].taglines = root.taglines
+            }
+            if enriched[index].ratings.isEmpty {
+                enriched[index].ratings = root.ratings
+            }
+            if enriched[index].people.isEmpty {
+                enriched[index].people = root.people
+            }
+            if enriched[index].studios.isEmpty {
+                enriched[index].studios = root.studios
             }
         }
         return enriched

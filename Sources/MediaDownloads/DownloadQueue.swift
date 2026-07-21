@@ -62,18 +62,7 @@ public actor DownloadQueue {
     /// completed identity is a no-op beyond refreshing reopen info.
     @discardableResult
     public func enqueue(_ request: DownloadRequest) async throws -> DownloadedMediaRecord {
-        let record = DownloadedMediaRecord(
-            identity: request.identity,
-            groupID: request.groupID,
-            sourceKind: request.sourceKind,
-            quality: request.quality,
-            status: .queued,
-            directShareSource: request.directShareSource,
-            managedHTTPSource: request.managedHTTPSource,
-            localFileName: request.makeLocalFileName(),
-            contentType: request.contentType,
-            snapshot: request.snapshot
-        )
+        let record = makeRecord(for: request)
         // Idempotency: the `.downloading`/`.queued` marker is persisted BEFORE any
         // byte is fetched, so a kill leaves a recoverable record.
         let stored = try await registry.beginDownload(record)
@@ -86,11 +75,30 @@ public actor DownloadQueue {
     /// Enqueues a whole group (e.g. a season) under one `groupID`.
     @discardableResult
     public func enqueueGroup(_ requests: [DownloadRequest]) async throws -> [DownloadedMediaRecord] {
-        var results: [DownloadedMediaRecord] = []
-        for request in requests {
-            results.append(try await enqueue(request))
+        let stored = try await registry.beginDownloads(
+            requests.map(makeRecord(for:))
+        )
+        for record in stored where record.status != .completed {
+            schedule(record.identityKey)
         }
-        return results
+        return stored
+    }
+
+    private func makeRecord(
+        for request: DownloadRequest
+    ) -> DownloadedMediaRecord {
+        DownloadedMediaRecord(
+            identity: request.identity,
+            groupID: request.groupID,
+            sourceKind: request.sourceKind,
+            quality: request.quality,
+            status: .queued,
+            directShareSource: request.directShareSource,
+            managedHTTPSource: request.managedHTTPSource,
+            localFileName: request.makeLocalFileName(),
+            contentType: request.contentType,
+            snapshot: request.snapshot
+        )
     }
 
     // MARK: - Controls

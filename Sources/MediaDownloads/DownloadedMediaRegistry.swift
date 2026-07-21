@@ -93,21 +93,60 @@ public actor DownloadedMediaRegistry {
     /// existing byte progress and pinned file, only refreshing reopen info/status.
     @discardableResult
     public func beginDownload(_ record: DownloadedMediaRecord) throws -> DownloadedMediaRecord {
-        var toStore = record
-        if let existing = state.records[record.identityKey] {
-            // Preserve real progress already on disk; never rewind a resumable
-            // partial back to zero.
-            toStore.bytesDownloaded = max(existing.bytesDownloaded, record.bytesDownloaded)
-            toStore.totalBytes = record.totalBytes ?? existing.totalBytes
-            toStore.createdAt = existing.createdAt
-            if existing.status == .completed {
-                // Already done — keep it completed and don't touch the file.
-                return existing
-            }
+        var toStore = mergedRecord(
+            record,
+            existing: state.records[record.identityKey]
+        )
+        if toStore.status == .completed,
+           state.records[record.identityKey]?.status == .completed {
+            return toStore
         }
         toStore.updatedAt = Date()
         try persist(toStore)
         return toStore
+    }
+
+    /// Atomically accepts a preflighted group before any transfer starts.
+    public func beginDownloads(
+        _ records: [DownloadedMediaRecord]
+    ) throws -> [DownloadedMediaRecord] {
+        guard !records.isEmpty else { return [] }
+        var nextState = state
+        var stored: [DownloadedMediaRecord] = []
+        let now = Date()
+
+        for record in records {
+            var merged = mergedRecord(
+                record,
+                existing: nextState.records[record.identityKey]
+            )
+            merged.updatedAt = now
+            nextState.records[merged.identityKey] = merged
+            stored.append(merged)
+        }
+
+        try store.save(nextState)
+        state = nextState
+        for record in stored {
+            emit(.item(record))
+            emitAggregates(forGroup: record.groupID)
+        }
+        return stored
+    }
+
+    @discardableResult
+    public func setArtworkFileName(
+        identityKey: String,
+        fileName: String
+    ) throws -> Bool {
+        guard fileName == URL(fileURLWithPath: fileName).lastPathComponent,
+              var record = state.records[identityKey] else {
+            return false
+        }
+        record.snapshot.artworkFileName = fileName
+        record.updatedAt = Date()
+        try persist(record)
+        return true
     }
 
     /// Records byte progress for an in-flight download.
@@ -165,6 +204,27 @@ public actor DownloadedMediaRegistry {
         try store.save(state)
         emit(.item(record))
         emitAggregates(forGroup: record.groupID)
+    }
+
+    private func mergedRecord(
+        _ record: DownloadedMediaRecord,
+        existing: DownloadedMediaRecord?
+    ) -> DownloadedMediaRecord {
+        guard let existing else { return record }
+        if existing.status == .completed {
+            return existing
+        }
+        var merged = record
+        merged.bytesDownloaded = max(
+            existing.bytesDownloaded,
+            record.bytesDownloaded
+        )
+        merged.totalBytes = record.totalBytes ?? existing.totalBytes
+        merged.createdAt = existing.createdAt
+        if merged.snapshot.artworkFileName == nil {
+            merged.snapshot.artworkFileName = existing.snapshot.artworkFileName
+        }
+        return merged
     }
 
     private func emitAggregates(forGroup groupID: String?) {

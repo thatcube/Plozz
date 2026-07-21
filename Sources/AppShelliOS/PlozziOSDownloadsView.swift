@@ -1,11 +1,14 @@
 #if os(iOS)
+import CoreModels
 import CoreUI
 import MediaDownloads
 import SwiftUI
+import UIKit
 
 struct PlozziOSDownloadsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Bindable var model: PlozziOSDownloadsModel
+    let appModel: PlozziOSAppModel
     let onShowSettings: () -> Void
 
     var body: some View {
@@ -28,7 +31,11 @@ struct PlozziOSDownloadsView: View {
                 regularWidthContent
             } else {
                 List(model.records) { record in
-                    DownloadRow(record: record, model: model)
+                    DownloadRow(
+                        record: record,
+                        model: model,
+                        appModel: appModel
+                    )
                 }
             }
         }
@@ -72,7 +79,11 @@ struct PlozziOSDownloadsView: View {
 
                 LazyVStack(spacing: 12) {
                     ForEach(model.records) { record in
-                        DownloadRow(record: record, model: model)
+                        DownloadRow(
+                            record: record,
+                            model: model,
+                            appModel: appModel
+                        )
                             .padding(14)
                             .background(
                                 .thinMaterial,
@@ -127,30 +138,56 @@ struct PlozziOSDownloadSettingsView: View {
 private struct DownloadRow: View {
     let record: DownloadedMediaRecord
     let model: PlozziOSDownloadsModel
+    let appModel: PlozziOSAppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(record.snapshot.title)
-                        .font(.headline)
-                    Text(statusText)
-                        .font(.caption)
-                        .foregroundStyle(statusColor)
+        HStack(alignment: .center, spacing: 14) {
+            if let item = model.detailItem(for: record),
+               let provider = appModel.provider(for: item) {
+                NavigationLink {
+                    PlozziOSItemDetailView(
+                        appModel: appModel,
+                        provider: provider,
+                        item: item,
+                        seerService: appModel.seerService
+                    )
+                } label: {
+                    rowContent
                 }
-                Spacer()
-                actionMenu
+                .buttonStyle(.plain)
+            } else {
+                rowContent
             }
-            if record.status == .downloading || record.status == .queued {
-                ProgressView(value: record.fractionCompleted ?? 0)
-            }
-            if let failure = record.failureReason, record.status == .failed {
-                Text(failure)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+            actionMenu
         }
         .padding(.vertical, 4)
+    }
+
+    private var rowContent: some View {
+        HStack(alignment: .center, spacing: 14) {
+            DownloadArtwork(
+                url: model.artworkURL(for: record),
+                kind: record.snapshot.kind
+            )
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(record.snapshot.title)
+                    .font(.headline)
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(statusColor)
+                if record.status == .downloading || record.status == .queued {
+                    ProgressView(value: record.fractionCompleted ?? 0)
+                }
+                if let failure = record.failureReason, record.status == .failed {
+                    Text(failure)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
     }
 
     private var actionMenu: some View {
@@ -191,6 +228,42 @@ private struct DownloadRow: View {
         case .completed: .green
         case .failed: .red
         default: .secondary
+        }
+    }
+}
+
+private struct DownloadArtwork: View {
+    let url: URL?
+    let kind: MediaItemKind
+
+    var body: some View {
+        Group {
+            if let url, let image = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    Color.secondary.opacity(0.12)
+                    Image(systemName: fallbackSymbol)
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(width: 104, height: 60)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityHidden(true)
+    }
+
+    private var fallbackSymbol: String {
+        switch kind {
+        case .episode, .series, .season:
+            return "tv"
+        case .movie, .video:
+            return "film"
+        case .collection, .folder, .unknown:
+            return "photo"
         }
     }
 }

@@ -4,6 +4,7 @@ import CoreModels
 import CoreNetworking
 import CoreUI
 import FeatureHomeCore
+import HeroUI
 import MetadataKit
 
 /// Profile-scoped Hero state owned above the transient Home tab subtree. tvOS may
@@ -202,7 +203,9 @@ public struct HomeView: View {
         // default argument because the public init can't reference the internal
         // `HeroBackdropArtworkPolicy` from a default-argument value.
         self.heroArtworkValidator = heroArtworkValidator ?? { urls in
-            await HeroBackdropArtworkPolicy.warmFirstUsablePreview(for: urls)
+            await HeroBackdropArtworkPolicy.warmFirstUsablePreview(
+                for: urls.map(ArtworkReference.remote)
+            )
         }
         self.heroWatchStateRefresher = heroWatchStateRefresher
         self.heroMetadataEnricher = heroMetadataEnricher

@@ -7,6 +7,9 @@ import CoreModels
 /// Renders nothing when there are no ratings.
 public struct RatingsBadgeRow: View {
     private let ratings: [ExternalRating]
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
 
     public init(ratings: [ExternalRating]) {
         self.ratings = ratings
@@ -14,12 +17,32 @@ public struct RatingsBadgeRow: View {
 
     public var body: some View {
         if !ratings.isEmpty {
-            HStack(alignment: .center, spacing: 18) {
+            WrappingHStackLayout(
+                alignment: alignment,
+                spacing: spacing,
+                lineSpacing: 8
+            ) {
                 ForEach(ratings) { rating in
                     RatingBadge(rating: rating)
                 }
             }
         }
+    }
+
+    private var alignment: WrappingHStackLayout.RowAlignment {
+        #if os(iOS)
+        return horizontalSizeClass == .compact ? .center : .leading
+        #else
+        return .leading
+        #endif
+    }
+
+    private var spacing: CGFloat {
+        #if os(iOS)
+        return horizontalSizeClass == .compact ? 12 : 14
+        #else
+        return 18
+        #endif
     }
 }
 
@@ -30,11 +53,27 @@ public struct RatingsBadgeRow: View {
 /// reads as a single line of facts; only the icons carry brand colour.
 public struct RatingBadge: View {
     private let rating: ExternalRating
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
 
     /// One shared type scale + weight for every score, matching the adjacent
     /// year/runtime metadata line so the whole bottom row reads consistently.
-    private static let valueFont = Font.system(size: 23, weight: .medium)
-    private static let iconSize: CGFloat = 24
+    private var valueFont: Font {
+        #if os(iOS)
+        return .subheadline.weight(.medium)
+        #else
+        return .system(size: 23, weight: .medium)
+        #endif
+    }
+
+    private var iconSize: CGFloat {
+        #if os(iOS)
+        return horizontalSizeClass == .compact ? 18 : 20
+        #else
+        return 24
+        #endif
+    }
 
     public init(rating: ExternalRating) {
         self.rating = rating
@@ -44,7 +83,7 @@ public struct RatingBadge: View {
         HStack(spacing: 7) {
             icon
             Text(rating.displayValue)
-                .font(Self.valueFont)
+                .font(valueFont)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
         }
@@ -61,7 +100,7 @@ public struct RatingBadge: View {
         switch rating.source.icon {
         case .star:
             Image(systemName: "star.fill")
-                .font(.system(size: Self.iconSize * 0.8, weight: .semibold))
+                .font(.system(size: iconSize * 0.8, weight: .semibold))
                 .foregroundStyle(starColor)
         case .imdb:
             imdbBadge
@@ -86,34 +125,34 @@ public struct RatingBadge: View {
     /// `foregroundStyle`, so they're only scaled, not tinted.
     private func emoji(_ value: String) -> some View {
         Text(value)
-            .font(.system(size: Self.iconSize * 0.82))
+            .font(.system(size: iconSize * 0.82))
     }
 
     /// Metacritic's signature coloured square: green for favourable scores,
     /// yellow for mixed, red for unfavourable.
     private var metacriticChip: some View {
         Text(String(Int(rating.value.rounded())))
-            .font(.system(size: 18, weight: .bold))
+            .font(.system(size: iconSize * 0.75, weight: .bold))
             .monospacedDigit()
             .foregroundStyle(.white)
-            .frame(width: 34, height: 34)
+            .frame(width: iconSize * 1.42, height: iconSize * 1.42)
             .background(metacriticColor, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
     private var tmdbBadge: some View {
-        Image("TMDBPrimaryShortBlue")
+        Image("TMDBPrimaryShortBlue", bundle: .module)
             .resizable()
             .scaledToFit()
-            .frame(width: 42, height: 18)
+            .frame(width: iconSize * 1.75, height: iconSize * 0.75)
     }
 
     /// IMDb's signature yellow "IMDb" pill (a self-contained logo, so it's not
     /// tinted). Sized to the ~2:1 logo aspect ratio at the shared cap height.
     private var imdbBadge: some View {
-        Image("IMDbLogo")
+        Image("IMDbLogo", bundle: .module)
             .resizable()
             .scaledToFit()
-            .frame(width: 44, height: 22)
+            .frame(width: iconSize * 1.83, height: iconSize * 0.92)
     }
 
     /// Metacritic's coloured square tint: green for favourable scores, yellow

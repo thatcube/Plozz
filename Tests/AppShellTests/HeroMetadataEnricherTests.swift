@@ -63,7 +63,65 @@ final class HeroMetadataEnricherTests: XCTestCase {
         XCTAssertEqual(result[0].genres, ["Comedy"])
     }
 
+    func testEpisodeHydrationPreservesSelectedSourceAccountAndHierarchy() async throws {
+        let accountID = "jellyfin-account"
+        let original = MediaItem(
+            id: "plex-discover-episode",
+            title: "The Getaway",
+            kind: .episode,
+            seriesID: "plex-series",
+            sourceAccountID: "plex-account",
+            sources: [
+                MediaSourceRef(
+                    accountID: accountID,
+                    itemID: "jellyfin-episode",
+                    kind: .episode
+                )
+            ]
+        )
+        let hydratedEpisode = MediaItem(
+            id: "jellyfin-episode",
+            title: "The Getaway",
+            kind: .episode,
+            seasonNumber: 1,
+            episodeNumber: 4,
+            seriesID: "jellyfin-series",
+            seasonID: "jellyfin-season"
+        )
+        let series = MediaItem(
+            id: "jellyfin-series",
+            title: "Silo",
+            kind: .series,
+            genres: ["Science Fiction"]
+        )
+        let account = resolved(
+            accountID,
+            details: [
+                hydratedEpisode.id: hydratedEpisode,
+                series.id: series
+            ]
+        )
+
+        let enrich = makeHeroMetadataEnricher(
+            accounts: [account],
+            identitySources: { _ in [] }
+        )
+        let result = await enrich([original])
+
+        XCTAssertEqual(result[0].id, hydratedEpisode.id)
+        XCTAssertEqual(result[0].sourceAccountID, accountID)
+        XCTAssertEqual(result[0].seriesID, series.id)
+        XCTAssertEqual(result[0].seasonID, hydratedEpisode.seasonID)
+    }
+
     private func resolved(_ accountID: String, detail: MediaItem) -> ResolvedAccount {
+        resolved(accountID, details: [detail.id: detail])
+    }
+
+    private func resolved(
+        _ accountID: String,
+        details: [String: MediaItem]
+    ) -> ResolvedAccount {
         let session = UserSession(
             server: MediaServer(
                 id: "server-\(accountID)",
@@ -85,7 +143,7 @@ final class HeroMetadataEnricherTests: XCTestCase {
         )
         return ResolvedAccount(
             account: account,
-            provider: HeroMetadataProvider(session: session, detail: detail)
+            provider: HeroMetadataProvider(session: session, details: details)
         )
     }
 }
@@ -93,11 +151,11 @@ final class HeroMetadataEnricherTests: XCTestCase {
 private final class HeroMetadataProvider: MediaProvider, @unchecked Sendable {
     let kind: ProviderKind = .jellyfin
     let session: UserSession
-    private let detail: MediaItem
+    private let details: [String: MediaItem]
 
-    init(session: UserSession, detail: MediaItem) {
+    init(session: UserSession, details: [String: MediaItem]) {
         self.session = session
-        self.detail = detail
+        self.details = details
     }
 
     func libraries() async throws -> [MediaLibrary] { [] }
@@ -105,7 +163,7 @@ private final class HeroMetadataProvider: MediaProvider, @unchecked Sendable {
         MediaPage(items: [], startIndex: page.startIndex, totalCount: 0)
     }
     func item(id: String) async throws -> MediaItem {
-        guard id == detail.id else { throw AppError.notFound }
+        guard let detail = details[id] else { throw AppError.notFound }
         return detail
     }
     func continueWatching(limit: Int) async throws -> [MediaItem] { [] }

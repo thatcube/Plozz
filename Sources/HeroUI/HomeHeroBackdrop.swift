@@ -7,7 +7,7 @@ import FeatureHomeCore
 import UIKit
 #endif
 
-/// The Home **hero** backdrop, redesigned around the Apple TV app's "parallax
+/// Shared Home **hero** backdrop, designed around the Apple TV app's "parallax
 /// wipe" page transition.
 ///
 /// ### Why this shape
@@ -36,7 +36,7 @@ import UIKit
 /// SwiftUI owns only the STATIC treatment (legibility scrim, bottom dissolve mask,
 /// overscan breakout, vertical scroll parallax) — none of which changes between
 /// slides, so none of it animates.
-struct HomeHeroBackdrop: View {
+public struct HomeHeroBackdrop: View {
     /// Ordered candidate backdrop references for the **currently fronted** slide.
     let references: [ArtworkReference]
     /// Last-resort async art lookup (e.g. TMDb) when none of `urls` load.
@@ -66,12 +66,16 @@ struct HomeHeroBackdrop: View {
     /// underneath, so opacity can crossfade without a blank frame.
     var trailerController: HeroTrailerController? = nil
     var showsTrailer: Bool = false
+    /// tvOS owns the full screen and breaks out horizontally. iPad embeds this
+    /// renderer in an already-measured usable region and disables that breakout
+    /// so the explicit width stays anchored through the physical trailing edge.
+    var ignoresHorizontalSafeArea: Bool = true
     /// Home relinquishes its scrim during a navigation push while preserving the
     /// shared video underneath. The incoming detail hero supplies the one visible
     /// scrim, preventing the two dark overlays from stacking during handoff.
     var scrimOpacity: Double = 1
 
-    init(
+    public init(
         references: [ArtworkReference],
         asyncFallbackURL: (@Sendable () async -> URL?)?,
         slideID: String,
@@ -83,6 +87,7 @@ struct HomeHeroBackdrop: View {
         receded: Bool = false,
         trailerController: HeroTrailerController? = nil,
         showsTrailer: Bool = false,
+        ignoresHorizontalSafeArea: Bool = true,
         scrimOpacity: Double = 1
     ) {
         self.references = references
@@ -96,10 +101,11 @@ struct HomeHeroBackdrop: View {
         self.receded = receded
         self.trailerController = trailerController
         self.showsTrailer = showsTrailer
+        self.ignoresHorizontalSafeArea = ignoresHorizontalSafeArea
         self.scrimOpacity = scrimOpacity
     }
 
-    init(
+    public init(
         urls: [URL],
         asyncFallbackURL: (@Sendable () async -> URL?)?,
         slideID: String,
@@ -111,6 +117,7 @@ struct HomeHeroBackdrop: View {
         receded: Bool = false,
         trailerController: HeroTrailerController? = nil,
         showsTrailer: Bool = false,
+        ignoresHorizontalSafeArea: Bool = true,
         scrimOpacity: Double = 1
     ) {
         self.init(
@@ -125,6 +132,7 @@ struct HomeHeroBackdrop: View {
             receded: receded,
             trailerController: trailerController,
             showsTrailer: showsTrailer,
+            ignoresHorizontalSafeArea: ignoresHorizontalSafeArea,
             scrimOpacity: scrimOpacity
         )
     }
@@ -140,7 +148,7 @@ struct HomeHeroBackdrop: View {
     /// width (see `dissolveMask`).
     private var meltStart: CGFloat { isLight ? 0.38 : 0.62 }
 
-    var body: some View {
+    public var body: some View {
         backdropImage
             .frame(width: width, height: height)
             .clipped()
@@ -181,7 +189,11 @@ struct HomeHeroBackdrop: View {
             // dissolve strengthening rides the same curve so it blends in step.
             .animation(.smooth(duration: 0.96), value: recedeLift)
             .animation(.smooth(duration: 0.96), value: receded)
-            .ignoresSafeArea(edges: [.top, .horizontal])
+            .ignoresSafeArea(
+                edges: ignoresHorizontalSafeArea
+                    ? [.top, .horizontal]
+                    : .top
+            )
     }
 
     @ViewBuilder
@@ -260,7 +272,7 @@ struct HomeHeroBackdrop: View {
 /// Shared hero-art acceptance policy. Some providers expose ultra-wide logo/banner
 /// assets through backdrop fields; treating those as full-bleed art both looks wrong
 /// and can suppress warming of a valid fallback.
-enum HeroBackdropArtworkPolicy {
+public enum HeroBackdropArtworkPolicy {
     static let maxAspectRatio: CGFloat = 3.0
 
     static func isUsable(_ image: UIImage) -> Bool {
@@ -269,7 +281,9 @@ enum HeroBackdropArtworkPolicy {
         return size.width / size.height <= maxAspectRatio
     }
 
-    static func hasUsableCachedArtwork(for references: [ArtworkReference]) -> Bool {
+    public static func hasUsableCachedArtwork(
+        for references: [ArtworkReference]
+    ) -> Bool {
         let cache = ArtworkImageCache.shared
         return references.contains { reference in
             [.heroBackdrop, .landscapeCard, .heroPreview].contains { variant in
@@ -280,7 +294,9 @@ enum HeroBackdropArtworkPolicy {
 
     /// Warms candidates in display order until one yields a usable instant frame.
     /// A malformed primary must not prevent a valid fallback from becoming cache-hot.
-    static func warmFirstUsablePreview(for references: [ArtworkReference]) async -> Bool {
+    public static func warmFirstUsablePreview(
+        for references: [ArtworkReference]
+    ) async -> Bool {
         if hasUsableCachedArtwork(for: references) { return true }
         for reference in references {
             guard !Task.isCancelled else { return false }

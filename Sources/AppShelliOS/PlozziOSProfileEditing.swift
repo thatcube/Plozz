@@ -15,17 +15,31 @@ struct PlozziOSSettingsAvatarButton: View {
 
     var body: some View {
         let profile = appModel.profiles.activeProfile
+        let displayedProfile = appModel.profiles.hasRememberedSelection
+            ? profile
+            : Self.genericProfile
         Button(action: action) {
-            ProfileAvatarView(profile: profile, size: 30)
-                .frame(width: 30, height: 30)
-                // Keep the whole 44pt hit target tappable even though the
-                // avatar itself is smaller.
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+            ProfileAvatarView(profile: displayedProfile, size: 44)
+                .frame(width: 44, height: 44)
+                .clipShape(Circle())
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text("Settings for \(profile.name)"))
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(
+            appModel.profiles.hasRememberedSelection
+                ? Text("Settings for \(profile.name)")
+                : Text("Settings")
+        )
     }
+
+    private static let genericProfile = Profile(
+        id: "generic-profile",
+        name: "Profile",
+        avatarSymbol: "person.fill",
+        colorIndex: 33,
+        createdAt: .distantPast
+    )
 }
 
 /// Thin host wrapping the shared `ProfileEditorView` for iOS create / edit /

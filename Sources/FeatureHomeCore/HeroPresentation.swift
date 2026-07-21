@@ -15,6 +15,7 @@ public enum HeroPresentationSurface: Sendable, Equatable {
 /// retain their own geometry and controls while sharing the same media policy.
 public struct HeroPresentation: Sendable, Equatable {
     public let itemID: String
+    public let kind: MediaItemKind
     public let title: String
     public let artworkReferences: [ArtworkReference]
     public let logoReferences: [ArtworkReference]
@@ -24,6 +25,14 @@ public struct HeroPresentation: Sendable, Equatable {
     public let tagline: String?
     public let certification: String?
     public let genres: [String]
+    public let ratingBadge: MediaBadge?
+    public let technicalBadges: [MediaBadge]
+    public let ratings: [ExternalRating]
+    public let starringNames: [String]
+    public let directorNames: [String]
+    public let studios: [String]
+    public let isAnime: Bool
+    public let sourceMaterial: String?
     public let isResumable: Bool
 
     public init(
@@ -32,6 +41,7 @@ public struct HeroPresentation: Sendable, Equatable {
         surface: HeroPresentationSurface
     ) {
         itemID = item.id
+        kind = item.kind
         title = Self.normalizedTitle(for: item)
         artworkReferences = Self.artworkReferences(
             for: item,
@@ -47,6 +57,34 @@ public struct HeroPresentation: Sendable, Equatable {
         tagline = item.tagline
         certification = Self.nonempty(item.officialRating)
         genres = Array(item.genres.prefix(4))
+        ratingBadge = item.ratingBadge
+        technicalBadges = item.technicalBadges
+        ratings = item.ratings
+        starringNames = item.cast.prefix(3).map(\.name)
+        directorNames = item.people
+            .filter { $0.kind?.lowercased() == "director" }
+            .prefix(2)
+            .map(\.name)
+        studios = Array(item.studios.prefix(3))
+        // Credit classification is intentionally stricter than artwork routing.
+        // A fuzzy tag/provider-key match is useful for trying anime artwork APIs,
+        // but must never turn a live-action movie's "Starring" into "Studio".
+        let animeIDCount = [
+            item.providerID(.aniList),
+            item.providerID(.myAnimeList),
+            item.providerID(.aniDB)
+        ].compactMap { $0 }.count
+        let hasAnimeGenre = item.genres.contains {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .localizedCaseInsensitiveCompare("Anime") == .orderedSame
+            }
+        switch item.kind {
+        case .movie, .video:
+            isAnime = hasAnimeGenre || animeIDCount >= 2
+        default:
+            isAnime = hasAnimeGenre || animeIDCount >= 1
+        }
+        sourceMaterial = Self.sourceMaterial(from: item.tags)
         isResumable = (item.resumePosition ?? 0) > 1
     }
 
@@ -80,5 +118,21 @@ public struct HeroPresentation: Sendable, Equatable {
             return nil
         }
         return value
+    }
+
+    private static func sourceMaterial(from tags: [String]) -> String? {
+        for tag in tags {
+            let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowered = trimmed.lowercased()
+            for prefix in ["based on:", "source material:"] {
+                guard lowered.hasPrefix(prefix) else { continue }
+                let value = trimmed.dropFirst(prefix.count)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty {
+                    return value
+                }
+            }
+        }
+        return nil
     }
 }

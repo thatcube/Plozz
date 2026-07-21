@@ -1,4 +1,5 @@
 #if canImport(SwiftUI) && canImport(UIKit)
+import SwiftUI
 import UIKit
 import CoreUI
 
@@ -19,22 +20,12 @@ final class HeroForegroundUIView: UIView {
     private let ratingLabel = PaddedLabel()
     private let metadataLabel = UILabel()
     private let overviewLabel = UILabel()
+    private let ratingsHost = UIHostingController(
+        rootView: AnyView(EmptyView())
+    )
     private let pillsContainer = UIView()
-    /// Liquid Glass capsule that hosts the paging dots (real `UIGlassEffect` on
-    /// tvOS 26+, ultra-thin blur below), mirroring the SwiftUI `pagingDotsGlass`.
-    /// When glass is A/B-disabled it becomes an effect-less container with a flat
-    /// translucent `backgroundColor` (cheap; no live re-composite on transitions).
-    private let dotsContainer: UIVisualEffectView = {
-        let v = HeroForegroundGlass.makeView()
-        if v.effect == nil {
-            // Flat styles: a theme-aware translucent capsule with a hairline border,
-            // matching the pills. No live backdrop sampling.
-            v.backgroundColor = HeroForegroundGlass.flatFill()
-            v.layer.borderColor = HeroForegroundGlass.flatBorder().resolvedColor(with: v.traitCollection).cgColor
-            v.layer.borderWidth = HeroForegroundGlass.borderWidth
-        }
-        return v
-    }()
+    /// Effect-less host: dots/pill render directly over the hero with no capsule.
+    private let dotsContainer = UIVisualEffectView(effect: nil)
     private let useGauge = HeroForegroundConfig.useGauge
 
     /// Reused pill views (pooled), so a page updates labels/frames in place rather
@@ -116,8 +107,8 @@ final class HeroForegroundUIView: UIView {
     /// Cap the logo to the same width as the description text column, so a wide
     /// wordmark spans the full text width rather than a narrower box.
     private let logoMaxWidth: CGFloat = 496
-    private let dotsGlassHPad: CGFloat = 14
-    private let dotsGlassVPad: CGFloat = 9
+    private let dotsGlassHPad: CGFloat = 0
+    private let dotsGlassVPad: CGFloat = 0
     private let bottomMargin: CGFloat = 24
 
     /// Total height of the paging-dot glass capsule (dot + vertical padding), used to
@@ -152,6 +143,8 @@ final class HeroForegroundUIView: UIView {
 
         overviewLabel.font = .systemFont(ofSize: 22)
         overviewLabel.numberOfLines = 3
+        ratingsHost.view!.backgroundColor = .clear
+        ratingsHost.view!.isUserInteractionEnabled = false
 
         // A low-opacity, wide-radius glyph shadow keeps copy readable over bright
         // artwork without looking outlined. It is static layer chrome (no backdrop
@@ -163,7 +156,8 @@ final class HeroForegroundUIView: UIView {
         }
         applyThemeColors()
 
-        for v in [logoImageView, titleLabel, ratingLabel, metadataLabel, overviewLabel, pillsContainer, dotsContainer] {
+        for v in [logoImageView, titleLabel, ratingLabel, metadataLabel,
+                  overviewLabel, ratingsHost.view!, pillsContainer, dotsContainer] {
             addSubview(v)
         }
         dotsContainer.clipsToBounds = true
@@ -246,6 +240,11 @@ final class HeroForegroundUIView: UIView {
 
         overviewLabel.text = model.overview
         overviewLabel.isHidden = (model.overview ?? "").isEmpty
+        ratingsHost.rootView = AnyView(
+            RatingsBadgeRow(ratings: model.ratings)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        )
+        ratingsHost.view!.isHidden = model.ratings.isEmpty
 
         applyPills(model)
         applyDots(model)
@@ -508,7 +507,8 @@ final class HeroForegroundUIView: UIView {
     /// The set of views that fade with the show description on a page (the SwiftUI
     /// hero fades logo/metadata/overview + pills together; dots stay visible).
     private var fadeViews: [UIView] {
-        [logoImageView, titleLabel, ratingLabel, metadataLabel, overviewLabel, pillsContainer]
+        [logoImageView, titleLabel, ratingLabel, metadataLabel,
+         overviewLabel, ratingsHost.view!, pillsContainer]
     }
 
     private func applyFade(metadataVisible: Bool, slideChanged: Bool) {
@@ -558,6 +558,20 @@ final class HeroForegroundUIView: UIView {
         // Pills row above the dots.
         let pillsHeight = layoutPills(bottom: y, leading: leading)
         y -= pillsHeight + columnSpacing + pillsTopPadding
+
+        if !ratingsHost.view!.isHidden {
+            let size = ratingsHost.sizeThatFits(
+                in: CGSize(width: maxWidth, height: 52)
+            )
+            let h = min(max(size.height, 36), 52)
+            ratingsHost.view!.frame = CGRect(
+                x: leading,
+                y: y - h,
+                width: maxWidth,
+                height: h
+            )
+            y -= h + columnSpacing
+        }
 
         // Overview above the pills (bottom-anchored: its bottom sits at y).
         if !overviewLabel.isHidden {
@@ -662,7 +676,7 @@ final class HeroForegroundUIView: UIView {
         // Centre the capsule across the hero width, matching the SwiftUI hero.
         let glassX = (bounds.width - glassWidth) / 2
         dotsContainer.frame = CGRect(x: glassX, y: bottom - glassHeight, width: glassWidth, height: glassHeight)
-        dotsContainer.layer.cornerRadius = glassHeight / 2
+        dotsContainer.layer.cornerRadius = 0
 
         let morph = animateDotsMorph
         animateDotsMorph = false

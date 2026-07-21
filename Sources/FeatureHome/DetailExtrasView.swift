@@ -91,7 +91,7 @@ private struct InfoChipsRow: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(title)
                 .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
-            FlowLayout(spacing: 12, lineSpacing: 12) {
+            WrappingHStackLayout(spacing: 12, lineSpacing: 12) {
                 ForEach(values, id: \.self) { value in
                     Text(value)
                         .font(.system(size: 22, weight: .medium))
@@ -137,7 +137,7 @@ private struct StudiosRow: View {
             Text("Studios")
                 .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
             if !logoStudios.isEmpty {
-                FlowLayout(spacing: 16, lineSpacing: 16) {
+                WrappingHStackLayout(spacing: 16, lineSpacing: 16) {
                     ForEach(logoStudios) { studio in
                         if let url = studio.logoURL {
                             StudioLogoChip(url: url, name: studio.name)
@@ -147,7 +147,7 @@ private struct StudiosRow: View {
             }
             // Studios without a logo always wrap onto their own line(s) below.
             if !textStudios.isEmpty {
-                FlowLayout(spacing: 12, lineSpacing: 12) {
+                WrappingHStackLayout(spacing: 12, lineSpacing: 12) {
                     ForEach(textStudios) { studio in
                         StudioTextChip(name: studio.name)
                     }
@@ -390,64 +390,6 @@ private struct StudioTextChip: View {
             .padding(.vertical, 8)
             .padding(.horizontal, 18)
             .background(Capsule().fill(Color.primary.opacity(0.10)))
-    }
-}
-
-/// A minimal flow (wrapping) layout so chips wrap onto new lines instead of
-/// overflowing the screen width.
-private struct FlowLayout: Layout {
-    var spacing: CGFloat = 12
-    var lineSpacing: CGFloat = 12
-
-    /// Finite width to wrap at when the layout is proposed an unbounded width
-    /// (which can otherwise make `sizeThatFits` return the summed width of *every*
-    /// chip on a single row — hundreds of tags then blow the page far past the
-    /// viewport and shove the whole detail page sideways).
-    private static var fallbackWidth: CGFloat {
-        #if canImport(UIKit)
-        return UIScreen.main.bounds.width
-        #else
-        return 1920
-        #endif
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
-        let proposed = proposal.width
-        let maxWidth: CGFloat = (proposed != nil && proposed!.isFinite && proposed! > 0) ? proposed! : Self.fallbackWidth
-        var rows: [[CGSize]] = [[]]
-        var x: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x + size.width > maxWidth, !rows[rows.count - 1].isEmpty {
-                rows.append([])
-                x = 0
-            }
-            rows[rows.count - 1].append(size)
-            x += size.width + spacing
-        }
-        let height = rows.reduce(CGFloat(0)) { acc, row in
-            let rowHeight = row.map(\.height).max() ?? 0
-            return acc + rowHeight + lineSpacing
-        } - (rows.isEmpty ? 0 : lineSpacing)
-        return CGSize(width: maxWidth, height: max(0, height))
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
-        let maxWidth = bounds.width
-        var x: CGFloat = bounds.minX
-        var y: CGFloat = bounds.minY
-        var lineHeight: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x + size.width > bounds.minX + maxWidth, x > bounds.minX {
-                x = bounds.minX
-                y += lineHeight + lineSpacing
-                lineHeight = 0
-            }
-            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
     }
 }
 

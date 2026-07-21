@@ -230,6 +230,22 @@ struct DetailHeroView: View {
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
 
+    private var focusedPresentation: HeroPresentation {
+        HeroPresentation(
+            item: item,
+            artworkStyle: .landscape,
+            surface: .detail
+        )
+    }
+
+    private var rootPresentation: HeroPresentation {
+        HeroPresentation(
+            item: backdrop,
+            artworkStyle: .landscape,
+            surface: .detail
+        )
+    }
+
     /// Tone of the hero legibility scrim: a dark wash in dark mode (so light
     /// content reads against the artwork) and a light wash in light mode (so dark
     /// content does). The scrim geometry is identical across modes — only this
@@ -264,10 +280,28 @@ struct DetailHeroView: View {
     /// `MetadataRefreshing`).
     private var heroOffersRefresh: Bool { heroActions.contains(.refreshMetadata) }
 
+    private var heroMenuActions: [MediaItemAction] {
+        var seen = Set<MediaItemAction>()
+        return (heroActions
+            + (actionHandler?.actions(
+                for: backdrop,
+                context: actionContext
+            ) ?? []))
+            .filter { !$0.isNavigation && seen.insert($0).inserted }
+    }
+
+    private var heroPrimaryMenuActions: [MediaItemAction] {
+        heroMenuActions.filter(\.isPrimaryDetailAction)
+    }
+
+    private var heroContextMenuActions: [MediaItemAction] {
+        heroMenuActions.filter { !$0.isPrimaryDetailAction }
+    }
+
     /// Whether any visible item-action button should render — used to decide
     /// whether the action row appears even when there's no Play/Trailer/Version.
     private var hasHeroActionButtons: Bool {
-        heroWatchlistAction != nil || heroWatchedAction != nil || heroOffersRefresh
+        heroWatchlistAction != nil || heroWatchedAction != nil
     }
 
     /// Whether the discovery request/status pill should render: a discovery title
@@ -281,7 +315,6 @@ struct DetailHeroView: View {
         case .play, .unavailable: return false
         }
     }
-
     /// Routes a hero button through the shared action handler with this hero's
     /// item + context — the exact same path the context menu uses.
     private func performHeroAction(_ action: MediaItemAction) {
@@ -330,14 +363,20 @@ struct DetailHeroView: View {
     /// backdrop item (the series), so a show's TV rating still shows while
     /// scrubbing episodes — matching Apple TV.
     private var heroRatingBadge: MediaBadge? {
-        item.ratingBadge ?? backdrop.ratingBadge
+        HeroContentPolicy.ratingBadge(
+            focused: focusedPresentation,
+            root: rootPresentation
+        )
     }
 
     /// External ratings to show. Falls back to the backdrop item (the series)
     /// when the focused item (an episode) carries none of its own, so a show's
     /// rating stays visible while scrubbing episodes.
     private var heroRatings: [ExternalRating] {
-        item.ratings.isEmpty ? backdrop.ratings : item.ratings
+        HeroContentPolicy.ratings(
+            focused: focusedPresentation,
+            root: rootPresentation
+        )
     }
 
     /// True when `subtitle` is just the production year — the richer metadata
@@ -352,10 +391,21 @@ struct DetailHeroView: View {
     /// first). Falls back to the backdrop item (the series) when the focused item
     /// (an episode) carries no cast of its own, so a show's stars stay shown while
     /// scrubbing episodes. `nil` when no cast is available.
-    private var starringCastNames: String? {
-        let cast = item.cast.isEmpty ? backdrop.cast : item.cast
-        let names = cast.prefix(3).map(\.name)
-        return names.isEmpty ? nil : names.joined(separator: ", ")
+    private var starringCastValues: [String] {
+        guard !rootPresentation.isAnime,
+              rootPresentation.kind == .movie
+                || rootPresentation.kind == .series else {
+            return []
+        }
+        return rootPresentation.starringNames
+    }
+
+    private var animeStudioValues: [String] {
+        guard rootPresentation.isAnime,
+              !rootPresentation.studios.isEmpty else {
+            return []
+        }
+        return rootPresentation.studios
     }
 
     /// The film's director(s) for the right-aligned "Director …" line shown just
@@ -363,14 +413,12 @@ struct DetailHeroView: View {
     /// `Director`) in provider order, capped so a rare multi-director credit stays
     /// on one line. Movies only — episodes/series direction varies per episode, so
     /// it isn't shown there. `nil` when no director is reported.
-    private var directorNames: String? {
-        guard item.kind == .movie else { return nil }
-        let people = item.people.isEmpty ? backdrop.people : item.people
-        let names = people
-            .filter { $0.kind?.lowercased() == "director" }
-            .prefix(2)
-            .map(\.name)
-        return names.isEmpty ? nil : names.joined(separator: ", ")
+    private var directorValues: [String] {
+        guard !rootPresentation.isAnime,
+              rootPresentation.kind == .movie else {
+            return []
+        }
+        return rootPresentation.directorNames
     }
 
     var body: some View {
@@ -436,12 +484,16 @@ struct DetailHeroView: View {
                         .contentTransition(.opacity)
                 }
             }
-            let comps = item.metadataComponents()
-            let genreSet = Set(item.genres)
+            let comps = HeroContentPolicy.detailFacts(
+                focused: focusedPresentation
+            )
+            let genreParts = HeroContentPolicy.genres(
+                focused: focusedPresentation,
+                root: rootPresentation
+            )
             // Split the facts line: genres ride the certificate line up top; the
             // year/runtime facts drop to the bottom row beside the ratings.
-            let genreParts = comps.filter { genreSet.contains($0) }
-            let factParts = comps.filter { !genreSet.contains($0) }
+            let factParts = comps
             let showRatings = !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item)
 
             // Line 1: content-rating certificate + genres.
@@ -463,7 +515,10 @@ struct DetailHeroView: View {
             }
             // Description directly beneath the genres line.
             SpoilerSafeOverviewText(
-                overview: item.overview,
+                overview: HeroContentPolicy.detailDescription(
+                    focused: focusedPresentation,
+                    root: rootPresentation
+                ),
                 hidesSpoilers: hideText,
                 mode: spoilerSettings.mode,
                 lineCount: 3,
@@ -492,7 +547,7 @@ struct DetailHeroView: View {
                     }
                 }
             }
-            if isDiscoveryItem ? showsRequestPill : ((playTitle != nil && onPlay != nil) || onPlayTrailer != nil || showsMoreMenu || hasHeroActionButtons) {
+            if isDiscoveryItem ? showsRequestPill : ((playTitle != nil && onPlay != nil) || onPlayTrailer != nil || hasHeroActionButtons) {
                 HStack(spacing: 24) {
                     if isDiscoveryItem {
                         // A not-in-library discovery title offers only a request /
@@ -509,21 +564,11 @@ struct DetailHeroView: View {
                         .modifier(HeroActionButtonStyle(prominent: false))
                         .focused($heroActionRowFocus, equals: .trailer)
                     }
-                    if let heroWatchlistAction {
-                        watchlistButton(action: heroWatchlistAction)
-                    }
                     if let heroWatchedAction {
                         watchedButton(action: heroWatchedAction)
                     }
-                    if heroOffersRefresh {
-                        refreshButton()
-                    }
-                    // The server + version choices live together in one subtle
-                    // trailing "…" menu (not separate prominent buttons), so a
-                    // multi-server / multi-version title stays uncluttered: one
-                    // tap reveals which servers host it and which files each has.
-                    if showsMoreMenu {
-                        moreMenu(onSelectSource: onSelectSource, onSelectVersion: onSelectVersion)
+                    if let heroWatchlistAction {
+                        watchlistButton(action: heroWatchlistAction)
                     }
                     }
                 }
@@ -607,17 +652,33 @@ struct DetailHeroView: View {
         // `bottomInset` so the two sit on the same baseline, and is hidden while
         // the hero is receded for the episode browser.
         .overlay(alignment: .bottomTrailing) {
-            if seriesRecedeModel?.isReceded != true, starringCastNames != nil || directorNames != nil {
+            if seriesRecedeModel?.isReceded != true,
+               !starringCastValues.isEmpty
+                || !directorValues.isEmpty
+                || !animeStudioValues.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    if let starringCastNames {
-                        (Text("Starring ").foregroundStyle(.tertiary)
-                            + Text(starringCastNames).foregroundStyle(.primary))
-                            .lineLimit(2)
+                    if !animeStudioValues.isEmpty {
+                        DetailHeroCreditLine(
+                            label: "Studio",
+                            values: animeStudioValues
+                        )
+                    } else if !starringCastValues.isEmpty {
+                        DetailHeroCreditLine(
+                            label: "Starring",
+                            values: starringCastValues
+                        )
                     }
-                    if let directorNames {
-                        (Text("Director ").foregroundStyle(.tertiary)
-                            + Text(directorNames).foregroundStyle(.primary))
-                            .lineLimit(1)
+                    if !directorValues.isEmpty {
+                        DetailHeroCreditLine(
+                            label: "Director",
+                            values: directorValues
+                        )
+                    }
+                    if let sourceMaterial = rootPresentation.sourceMaterial {
+                        DetailHeroCreditLine(
+                            label: "Based on",
+                            values: [sourceMaterial]
+                        )
                     }
                 }
                 .font(.system(size: 24, weight: .semibold))
@@ -629,6 +690,9 @@ struct DetailHeroView: View {
                 .contentTransition(.opacity)
                 .allowsHitTesting(false)
             }
+        }
+        .contextMenu {
+            heroContextMenu
         }
         // Normal detail opens fade the whole hero in. A live Home-trailer handoff
         // must be fully opaque on its very first frame; fading the inherited video
@@ -656,7 +720,6 @@ struct DetailHeroView: View {
         .onChange(of: selectedSourceAccountID) { _, _ in
             guard userInitiatedSourceSwitch else { return }
             userInitiatedSourceSwitch = false
-            if showsMoreMenu { moreMenuFocused = true }
         }
 
     }
@@ -708,7 +771,10 @@ struct DetailHeroView: View {
         // tight default width.
         let liveResumeText = resumeText
         let sizingText = reservedResumeText ?? liveResumeText
-        let button = Button(action: action) {
+        let button = Button {
+            heroTrailerController.stop()
+            action()
+        } label: {
             ZStack {
                 if let sizingText {
                     playResumeSizer(remaining: sizingText).hidden()
@@ -875,7 +941,7 @@ struct DetailHeroView: View {
     /// Whether the trailing "…" menu has anything to offer: more than one server
     /// hosting the title, or more than one playable version on the active server.
     private var showsMoreMenu: Bool {
-        (serverChoices.count > 1 && onSelectSource != nil) || (versions.count > 1 && onSelectVersion != nil)
+        !heroPrimaryMenuActions.isEmpty
     }
 
     /// A single subtle trailing "…" menu that folds BOTH the cross-server picker
@@ -897,23 +963,84 @@ struct DetailHeroView: View {
     /// hero re-render rebuilds the Menu's content closure, which can produce a
     /// visible single-frame flash right after the user opens it.
     @ViewBuilder
-    private func moreMenu(onSelectSource: ((String) -> Void)?, onSelectVersion: ((String) -> Void)?) -> some View {
+    private func moreMenu() -> some View {
         HeroMoreMenu(
-            serverChoices: serverChoices,
-            versions: versions,
-            selectedSourceAccountID: selectedSourceAccountID,
-            selectedVersionID: selectedVersionID,
+            actions: heroPrimaryMenuActions,
             glyphSize: heroGlyphSize,
             iconSize: heroIconSize,
-            onSelectSource: onSelectSource,
-            onSelectVersion: onSelectVersion,
-            onUserInitiatedSourceSwitch: { userInitiatedSourceSwitch = true }
+            onPerformAction: performHeroMenuAction
         )
         .equatable()
         .modifier(HeroActionButtonStyle(prominent: false, circular: true))
         .focused($moreMenuFocused)
         .focused($heroActionRowFocus, equals: .more)
-        .accessibilityLabel("Server and version options")
+        .accessibilityLabel("More actions")
+    }
+
+    @ViewBuilder
+    private var heroContextMenu: some View {
+        ForEach(heroContextMenuActions) { action in
+            Button(action.title, systemImage: action.systemImage) {
+                performHeroMenuAction(action)
+            }
+        }
+        if serverChoices.count > 1, let onSelectSource {
+            let currentServer = serverChoices.first {
+                $0.accountID == selectedSourceAccountID
+            } ?? serverChoices.first
+            Menu {
+                ForEach(serverChoices) { source in
+                    Button {
+                        userInitiatedSourceSwitch = true
+                        onSelectSource(source.accountID)
+                    } label: {
+                        if source.accountID == currentServer?.accountID {
+                            Label(source.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(source.displayName)
+                        }
+                    }
+                }
+            } label: {
+                Label(
+                    currentServer?.displayName ?? "Server",
+                    systemImage: "server.rack"
+                )
+            }
+        }
+        if versions.count > 1, let onSelectVersion {
+            let currentVersion = versions.first {
+                $0.id == selectedVersionID
+            } ?? versions.first
+            Menu {
+                ForEach(versions) { version in
+                    Button {
+                        onSelectVersion(version.id)
+                    } label: {
+                        if version.id == currentVersion?.id {
+                            Label(version.displayLabel, systemImage: "checkmark")
+                        } else {
+                            Text(version.displayLabel)
+                        }
+                    }
+                }
+            } label: {
+                Label(
+                    currentVersion?.displayLabel ?? "Play Version",
+                    systemImage: "film.stack"
+                )
+            }
+        }
+    }
+
+    private func performHeroMenuAction(_ action: MediaItemAction) {
+        let target: MediaItem
+        if action == .addToWatchlist || action == .removeFromWatchlist {
+            target = backdrop
+        } else {
+            target = item
+        }
+        actionHandler?.perform(action, on: target, context: actionContext)
     }
 
     /// Visible Watchlist toggle, shown when the resolving provider conforms to
@@ -1216,61 +1343,45 @@ private struct CheckmarkShape: Shape {
 /// recreated on every parent render but invoke stable view-model methods, so
 /// comparing the data inputs is sufficient to decide whether the menu needs
 /// to redraw.
+private struct DetailHeroCreditLine: View {
+    let label: String
+    let values: [String]
+
+    var body: some View {
+        let capped = Array(values.prefix(3))
+        return text(capped)
+    }
+
+    private func text(_ values: [String]) -> some View {
+        (
+            Text("\(label) ").foregroundStyle(.tertiary)
+            + Text(values.joined(separator: ", "))
+                .foregroundStyle(.primary)
+        )
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 private struct HeroMoreMenu: View, Equatable {
-    let serverChoices: [MediaSourceRef]
-    let versions: [MediaVersion]
-    let selectedSourceAccountID: String?
-    let selectedVersionID: String?
+    let actions: [MediaItemAction]
     let glyphSize: CGFloat
     let iconSize: CGFloat
-    let onSelectSource: ((String) -> Void)?
-    let onSelectVersion: ((String) -> Void)?
-    let onUserInitiatedSourceSwitch: () -> Void
+    let onPerformAction: (MediaItemAction) -> Void
 
     static func == (lhs: HeroMoreMenu, rhs: HeroMoreMenu) -> Bool {
-        lhs.serverChoices == rhs.serverChoices
-            && lhs.versions == rhs.versions
-            && lhs.selectedSourceAccountID == rhs.selectedSourceAccountID
-            && lhs.selectedVersionID == rhs.selectedVersionID
+        lhs.actions == rhs.actions
             && lhs.glyphSize == rhs.glyphSize
             && lhs.iconSize == rhs.iconSize
-            && (lhs.onSelectSource == nil) == (rhs.onSelectSource == nil)
-            && (lhs.onSelectVersion == nil) == (rhs.onSelectVersion == nil)
     }
 
     var body: some View {
         Menu {
-            if serverChoices.count > 1, let onSelectSource {
-                let currentServer = serverChoices.first { $0.accountID == selectedSourceAccountID } ?? serverChoices.first
-                Section("Server") {
-                    ForEach(serverChoices) { source in
-                        Button {
-                            onUserInitiatedSourceSwitch()
-                            onSelectSource(source.accountID)
-                        } label: {
-                            if source.accountID == currentServer?.accountID {
-                                Label(source.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(source.displayName)
-                            }
-                        }
-                    }
-                }
-            }
-            if versions.count > 1, let onSelectVersion {
-                let currentVersion = versions.first { $0.id == selectedVersionID } ?? versions.first
-                Section("Version") {
-                    ForEach(versions) { version in
-                        Button {
-                            onSelectVersion(version.id)
-                        } label: {
-                            if version.id == currentVersion?.id {
-                                Label(version.displayLabel, systemImage: "checkmark")
-                            } else {
-                                Text(version.displayLabel)
-                            }
-                        }
-                    }
+            ForEach(actions) { action in
+                Button(
+                    action.title,
+                    systemImage: action.systemImage
+                ) {
+                    onPerformAction(action)
                 }
             }
         } label: {

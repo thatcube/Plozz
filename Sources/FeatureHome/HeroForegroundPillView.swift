@@ -114,6 +114,7 @@ final class HeroForegroundPillView: UIView {
 
     private var pill: HeroForegroundModel.Pill?
     private var selected = false
+    private var prominent = false
     private var progressFraction: CGFloat = 0
 
     override init(frame: CGRect) {
@@ -159,8 +160,10 @@ final class HeroForegroundPillView: UIView {
         let selectionChanged = self.selected != selected
         self.pill = pill
         self.selected = selected
+        prominent = pill.prominent
+        let bright = selected || prominent
 
-        let tint: UIColor = selected ? .black : HeroForegroundGlass.primaryInk()
+        let tint: UIColor = bright ? .black : HeroForegroundGlass.primaryInk()
         if let symbol = pill.systemImage {
             glyphView.image = UIImage(systemName: symbol)
             glyphView.tintColor = tint
@@ -180,7 +183,7 @@ final class HeroForegroundPillView: UIView {
 
         if let progress = pill.progress {
             progressTrack.isHidden = false
-            let progressTint: UIColor = selected ? .black : HeroForegroundGlass.primaryInk()
+            let progressTint: UIColor = bright ? .black : HeroForegroundGlass.primaryInk()
             progressFill.backgroundColor = progressTint
             progressTrack.backgroundColor = progressTint.withAlphaComponent(0.3)
             progressFraction = max(0, min(1, progress))
@@ -216,7 +219,7 @@ final class HeroForegroundPillView: UIView {
     ///   view's own layer (plus a hairline border, and a sheen for `.glassish`), which
     ///   never samples the moving backdrop so it stays on the ~17ms frame budget.
     private func applyBackgroundAppearance() {
-        if selected {
+        if selected || prominent {
             glassView.isHidden = true
             sheenLayer.isHidden = true
             layer.borderWidth = 0

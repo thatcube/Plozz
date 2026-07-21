@@ -38,7 +38,7 @@ public struct CastRowView: View {
                 }
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: metrics.cardSpacing) {
+                    LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
                         ForEach(people) { person in
                             CastMemberCard(person: person, onFocusEntered: onFocusEntered)
                         }
@@ -89,12 +89,12 @@ private struct CastMemberCard: View {
                     Text(person.name)
                         .font(.system(size: 22 * Self.scale, weight: .semibold))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                     if let role = person.role {
                         Text(role)
                             .font(.system(size: 19 * Self.scale))
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .frame(width: slot)

@@ -21,6 +21,7 @@ final class PlozziOSDownloadsModel {
 
     private let registry: DownloadedMediaRegistry?
     private let queue: DownloadQueue?
+    private let storage: (any DownloadStorageLocating)?
     private let defaults: UserDefaults?
     private let policyKey: String
     private let providerKind: @MainActor (String) -> ProviderKind?
@@ -64,6 +65,7 @@ final class PlozziOSDownloadsModel {
 
         self.registry = registry
         self.queue = queue
+        self.storage = storage
         self.offlineResolver = RegistryOfflinePlaybackResolver(
             registry: registry,
             storage: storage
@@ -89,6 +91,7 @@ final class PlozziOSDownloadsModel {
         self.initializationError = initializationError
         self.registry = nil
         self.queue = nil
+        self.storage = nil
         self.offlineResolver = nil
         self.defaults = nil
         self.policyKey = ""
@@ -110,11 +113,96 @@ final class PlozziOSDownloadsModel {
         item: MediaItem,
         provider: any MediaProvider
     ) async throws -> DownloadedMediaRecord {
+        let request = try await makeRequest(
+            item: item,
+            provider: provider,
+            groupID: nil
+        )
         guard let queue else {
             throw PlozziOSDownloadError.unavailable(
                 initializationError ?? "Downloads are unavailable."
             )
         }
+        let record = try await queue.enqueue(request)
+        await reload()
+        pinArtworkIfAvailable(for: item, record: record)
+        return record
+    }
+
+    @discardableResult
+    func enqueueSeason(
+        season: MediaItem,
+        episodes: [MediaItem],
+        provider: any MediaProvider
+    ) async throws -> [DownloadedMediaRecord] {
+        guard let queue else {
+            throw PlozziOSDownloadError.unavailable(
+                initializationError ?? "Downloads are unavailable."
+            )
+        }
+        guard !episodes.isEmpty else {
+            throw PlozziOSDownloadError.unavailable(
+                "This season has no downloadable episodes."
+            )
+        }
+        let accountID = season.sourceAccountID
+            ?? episodes.first?.sourceAccountID
+            ?? "unknown"
+        let groupID = "season:\(accountID):\(season.id)"
+        var requests: [DownloadRequest] = []
+        requests.reserveCapacity(episodes.count)
+        for episode in episodes {
+            requests.append(
+                try await makeRequest(
+                    item: episode,
+                    provider: provider,
+                    groupID: groupID
+                )
+            )
+        }
+        let records = try await queue.enqueueGroup(requests)
+        await reload()
+        for (episode, record) in zip(episodes, records) {
+            pinArtworkIfAvailable(for: episode, record: record)
+        }
+        return records
+    }
+
+    func artworkURL(for record: DownloadedMediaRecord) -> URL? {
+        guard let storage,
+              let fileName = record.snapshot.artworkFileName,
+              fileName == URL(fileURLWithPath: fileName).lastPathComponent,
+              let folder = try? storage.pinnedFolderURL(
+                forKey: record.identityKey
+              ) else {
+            return nil
+        }
+        let url = folder.appendingPathComponent(fileName)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func detailItem(for record: DownloadedMediaRecord) -> MediaItem? {
+        let accountID = record.snapshot.sourceAccountID
+            ?? record.managedHTTPSource?.accountID
+            ?? record.directShareSource?.accountID
+        let itemID = record.snapshot.sourceItemID
+            ?? record.managedHTTPSource?.itemID
+            ?? accountScopedItemID(from: record.identity)
+        guard let accountID, let itemID else { return nil }
+        return MediaItem(
+            id: itemID,
+            title: record.snapshot.title,
+            kind: record.snapshot.kind,
+            productionYear: record.snapshot.year,
+            sourceAccountID: accountID
+        )
+    }
+
+    private func makeRequest(
+        item: MediaItem,
+        provider: any MediaProvider,
+        groupID: String?
+    ) async throws -> DownloadRequest {
         guard let identity = DownloadMediaIdentity.primary(for: item) else {
             throw PlozziOSDownloadError.unavailable(
                 "This item does not have a stable offline identity."
@@ -131,7 +219,8 @@ final class PlozziOSDownloadsModel {
             request = DownloadRequest.directShare(
                 identity: identity,
                 locator: locator,
-                snapshot: PinnedMediaSnapshot(item: item)
+                snapshot: PinnedMediaSnapshot(item: item),
+                groupID: groupID
             )
         case .authenticatedHTTP(let locator):
             guard locator.deliveryMode == .directFile,
@@ -155,6 +244,7 @@ final class PlozziOSDownloadsModel {
                 identity: identity,
                 source: source,
                 snapshot: PinnedMediaSnapshot(item: item),
+                groupID: groupID,
                 fileExtension: fileExtension
             )
         case .publicURL, .dlnaResource, nil:
@@ -162,9 +252,81 @@ final class PlozziOSDownloadsModel {
                 "This playback source cannot be downloaded for offline use."
             )
         }
-        let record = try await queue.enqueue(request)
-        await reload()
-        return record
+        return request
+    }
+
+    private func pinArtworkIfAvailable(
+        for item: MediaItem,
+        record: DownloadedMediaRecord
+    ) {
+        guard record.snapshot.artworkFileName == nil,
+              let sourceURL = artworkSourceURL(for: item) else {
+            return
+        }
+        Task { [weak self] in
+            await self?.pinArtwork(
+                sourceURL: sourceURL,
+                identityKey: record.identityKey
+            )
+        }
+    }
+
+    private func pinArtwork(
+        sourceURL: URL,
+        identityKey: String
+    ) async {
+        guard let storage, let registry else { return }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: sourceURL)
+            guard let response = response as? HTTPURLResponse,
+                  (200..<300).contains(response.statusCode),
+                  !data.isEmpty,
+                  data.count <= 15_000_000 else {
+                return
+            }
+            guard await registry.record(forKey: identityKey) != nil else {
+                return
+            }
+            let folder = try storage.pinnedFolderURL(forKey: identityKey)
+            try FileManager.default.createDirectory(
+                at: folder,
+                withIntermediateDirectories: true
+            )
+            let fileName = "artwork.img"
+            let artworkURL = folder.appendingPathComponent(fileName)
+            try data.write(
+                to: artworkURL,
+                options: .atomic
+            )
+            let attached = try await registry.setArtworkFileName(
+                identityKey: identityKey,
+                fileName: fileName
+            )
+            if !attached {
+                try? FileManager.default.removeItem(at: folder)
+                return
+            }
+            await reload()
+        } catch {
+            // Artwork is optional; media download success remains authoritative.
+        }
+    }
+
+    private func artworkSourceURL(for item: MediaItem) -> URL? {
+        item.backdropURL
+            ?? item.fallbackArtworkURL
+            ?? item.posterURL
+            ?? item.seriesPosterURL
+    }
+
+    private func accountScopedItemID(
+        from identity: MediaIdentity
+    ) -> String? {
+        guard case let .external(source, value) = identity,
+              source.hasPrefix(DownloadMediaIdentity.accountSourcePrefix) else {
+            return nil
+        }
+        return value
     }
 
     func pause(_ record: DownloadedMediaRecord) async {

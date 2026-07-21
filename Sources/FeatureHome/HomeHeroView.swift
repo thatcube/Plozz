@@ -4,23 +4,8 @@ import UIKit
 import CoreModels
 import CoreUI
 import FeatureHomeCore
+import HeroUI
 import MetadataKit
-
-/// Pure timeline policy for the hero's single linear progress gauge.
-enum HeroTrailerTimeline {
-    static let leadIn: TimeInterval = 3
-
-    static func duration(
-        autoAdvanceSeconds: Int,
-        mode: HeroBackgroundMode,
-        trailerDuration: TimeInterval
-    ) -> TimeInterval {
-        if mode == .trailer, trailerDuration > 0 {
-            return leadIn + trailerDuration
-        }
-        return Double(autoAdvanceSeconds)
-    }
-}
 
 /// The Home **hero** carousel: a cinematic, rotating spotlight at the top of
 /// Home, functionally near-identical to the Apple TV app. Each slide shows a
@@ -301,9 +286,22 @@ struct HomeHeroView: View {
     /// `.watchlist` whenever a watchlist toggle applies to the slide's target.
     private func buttons(for item: MediaItem) -> [HeroButton] {
         var result: [HeroButton] = []
-        if let primary = primaryButton(for: item) { result.append(primary) }
-        result.append(.moreInfo)
-        if watchlistAction(for: item) != nil { result.append(.watchlist) }
+        let primary = primaryButton(for: item)
+        if primary == .play {
+            result.append(.play)
+            if watchlistAction(for: item) != nil {
+                result.append(.watchlist)
+            }
+            result.append(.moreInfo)
+        } else {
+            // No playable target: More Info becomes the labelled, white primary
+            // action. Request/status remains available immediately after it.
+            result.append(.moreInfo)
+            if watchlistAction(for: item) != nil {
+                result.append(.watchlist)
+            }
+            if let primary { result.append(primary) }
+        }
         // A right-hand chevron on a multi-slide carousel — an affordance that
         // there's more to page through (matching the Apple TV app) and the
         // stable right-most button, so Right only pages the carousel here.
@@ -891,6 +889,13 @@ struct HomeHeroView: View {
                         .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
                         .contentTransition(.opacity)
                 }
+
+                if !spoilerSettings.shouldHideRatings(for: item),
+                   !item.ratings.isEmpty {
+                    RatingsBadgeRow(ratings: item.ratings)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentTransition(.opacity)
+                }
             }
             .opacity(metadataVisible ? 1 : 0)
             // Snap the metadata *hide* instantly (so the outgoing text vanishes as
@@ -1034,6 +1039,7 @@ struct HomeHeroView: View {
         return HeroForegroundModelBuilder.model(
             item: item,
             overviewVisible: !hideText,
+            ratingsVisible: !spoilerSettings.shouldHideRatings(for: item),
             maskedTitle: masked,
             pillInputs: foregroundPillInputs(for: item),
             selectedIndex: selectedIndex,
@@ -1070,7 +1076,10 @@ struct HomeHeroView: View {
                 }
                 return .init(kind: .downloadStatus)
             case .moreInfo:
-                return .init(kind: .moreInfo)
+                return .init(
+                    kind: .moreInfo,
+                    prominent: primaryButton(for: item) != .play
+                )
             case .watchlist:
                 return .init(kind: .watchlist, isFavorite: watchlistTarget(for: item).isFavorite)
             case .next:
@@ -1157,7 +1166,7 @@ struct HomeHeroView: View {
 
     @ViewBuilder
     private func metadataLine(for item: MediaItem) -> some View {
-        let metadata = item.metadataComponents()
+        let metadata = GenreDisplayFormatter.displayNames(for: item.genres)
         let badge = HeroForegroundModelBuilder.ratingBadgeText(for: item).map {
             MediaBadge($0, style: .rating)
         }
@@ -1547,7 +1556,9 @@ struct HomeHeroView: View {
         let idx = min(selectedButton, max(0, itemButtons.count - 1))
         guard itemButtons.indices.contains(idx) else { return }
         switch itemButtons[idx] {
-        case .play: onPlay(item)
+        case .play:
+            trailerController.stop()
+            onPlay(item)
         case .request: performRequest(for: item)
         case .downloadStatus: break // informational status pill — no action
         case .moreInfo: onSelect(item)
@@ -1670,10 +1681,16 @@ struct HomeHeroView: View {
                 downloadStatusLabel(for: item, selected: selected)
             }
         case .moreInfo:
-            heroPill(selected: selected) {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 28, weight: .semibold))
-                    .frame(width: 34, height: 34)
+            let prominent = primaryButton(for: item) != .play
+            heroPill(selected: selected, prominent: prominent) {
+                if prominent {
+                    Label("More Info", systemImage: "info.circle")
+                        .font(.system(size: 28, weight: .semibold))
+                } else {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 28, weight: .semibold))
+                        .frame(width: 34, height: 34)
+                }
             }
         case .watchlist:
             let target = watchlistTarget(for: item)
@@ -1701,9 +1718,11 @@ struct HomeHeroView: View {
     @ViewBuilder
     private func heroPill<Content: View>(
         selected: Bool,
+        prominent: Bool = false,
         @ViewBuilder _ label: () -> Content
     ) -> some View {
         let shape = Capsule(style: .continuous)
+        let bright = selected || prominent
         // Glyph/label tint. When focused the pill is a bright WHITE platter, so the
         // glyph is black. When idle it sits on Liquid Glass — which renders LIGHT
         // (frosted) in light mode and dark in dark mode — so the glyph must follow
@@ -1714,15 +1733,15 @@ struct HomeHeroView: View {
         // the resume progress bar and its glyph/text now flip together.
         let idleTint: Color = colorScheme == .light ? .black : .white
         label()
-            .foregroundStyle(selected ? Color.black : idleTint)
+            .foregroundStyle(bright ? Color.black : idleTint)
             .transaction { $0.animation = nil }
             .padding(.horizontal, 30)
             .padding(.vertical, 18)
             .background {
                 ZStack {
                     heroPillIdleBackground(shape: shape)
-                        .opacity(selected ? 0 : 1)
-                    shape.fill(.white).opacity(selected ? 1 : 0)
+                        .opacity(bright ? 0 : 1)
+                    shape.fill(.white).opacity(bright ? 1 : 0)
                 }
                 .transaction { $0.animation = nil }
             }
@@ -1968,11 +1987,6 @@ struct HomeHeroView: View {
             // — the fixed width holds the pill steady while the extra dot fades at the
             // edge.
             .frame(width: windowedRowWidth, height: Self.dotSize)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            // Liquid Glass rounded container so the indicators stay legible over any
-            // backdrop (matches the hero action pills' glass treatment).
-            .background { pagingDotsGlass(shape: Capsule()) }
             .padding(.top, 10)
             // ONE coordinated morph for the whole row, keyed on the fronted slide.
             // Both the outgoing and incoming dot (and their fills) animate in a
@@ -1986,18 +2000,18 @@ struct HomeHeroView: View {
         }
     }
 
-    private static let dotSize: CGFloat = 10
-    private static let dotSpacing: CGFloat = 12
-    private static let activeDotWidth: CGFloat = 30
+    private static let dotSize = HeroPagingIndicatorMetrics.dotSize
+    private static let dotSpacing = HeroPagingIndicatorMetrics.dotSpacing
+    private static let activeDotWidth = HeroPagingIndicatorMetrics.activeWidth
     /// Duration of the simultaneous dot→pill / pill→dot open/close on a page.
-    private static let dotMorph: Double = 0.3
+    private static let dotMorph = HeroPagingIndicatorMetrics.morphDuration
 
     /// Maximum page indicators shown at once. Beyond this the row becomes a scrolling
     /// window with shrinking edge dots — a fixed UX cap independent of how many
     /// titles the user lets the hero rotate through (`HeroSettings.maxItems`).
-    private static let maxVisibleDots = 8
+    private static let maxVisibleDots = HeroPagingIndicatorMetrics.maxVisible
     /// How many dots shrink on each edge that has hidden content (outermost first).
-    private static let edgeShrinkCount = 2
+    private static let edgeShrinkCount = HeroPagingIndicatorMetrics.edgeShrink
 
     /// Fixed width of the windowed dot row (nil when not windowed, so the classic
     /// row sizes naturally to its dots). Exactly `maxVisibleDots` slots: one active
@@ -2005,9 +2019,7 @@ struct HomeHeroView: View {
     /// keeps the glass pill from resizing when a scroll transiently renders an extra
     /// entering/leaving dot.
     private var windowedRowWidth: CGFloat? {
-        guard items.count > Self.maxVisibleDots else { return nil }
-        let others = CGFloat(Self.maxVisibleDots - 1)
-        return others * Self.dotSize + Self.activeDotWidth + others * Self.dotSpacing
+        HeroPagingIndicatorMetrics.rowWidth(count: items.count)
     }
 
     /// Theme-aware ink for the paging indicators — dark in light mode, white in dark
@@ -2022,11 +2034,7 @@ struct HomeHeroView: View {
     /// falloff is deliberately gentle — the outermost dot stays clearly visible (a
     /// tiny speck read as "too small" on device) rather than shrinking to a dot.
     private static func dotScale(for size: HeroPagingDots.Size) -> CGFloat {
-        switch size {
-        case .full: return 1.0
-        case .medium: return 0.78   // second-from-edge
-        case .small: return 0.55    // outermost edge
-        }
+        HeroPagingIndicatorMetrics.scale(for: size)
     }
 
     /// A single page indicator. It is always the same `Capsule` so its width can
@@ -2083,27 +2091,6 @@ struct HomeHeroView: View {
         let reference = pausedAt ?? now
         let progress = min(1, max(0, reference.timeIntervalSince(dwellStart) / duration))
         return height + (trackWidth - height) * progress
-    }
-
-    /// Paging-dot container background. The measurement-only SwiftUI-flat gate uses
-    /// the exact same non-sampling fill/border tokens as UIKit; otherwise this stays
-    /// real glass on tvOS 26+ and `.ultraThinMaterial` below.
-    @ViewBuilder
-    private func pagingDotsGlass(shape: Capsule) -> some View {
-        if HeroForegroundConfig.useSwiftUIFlatChrome {
-            shape
-                .fill(Color(uiColor: HeroForegroundGlass.flatFill()))
-                .overlay {
-                    shape.stroke(
-                        Color(uiColor: HeroForegroundGlass.flatBorder()),
-                        lineWidth: HeroForegroundGlass.borderWidth
-                    )
-                }
-        } else if #available(tvOS 26.0, *) {
-            shape.fill(.clear).glassEffect(.regular, in: shape)
-        } else {
-            shape.fill(.ultraThinMaterial)
-        }
     }
 
     /// The hero's action buttons, in visual order.

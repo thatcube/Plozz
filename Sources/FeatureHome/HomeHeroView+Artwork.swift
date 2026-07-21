@@ -4,6 +4,7 @@ import UIKit
 import CoreModels
 import CoreUI
 import FeatureHomeCore
+import HeroUI
 import MetadataKit
 
 // Artwork resolution / preload for the hero, relocated verbatim from

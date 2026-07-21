@@ -140,8 +140,6 @@ struct SyncSetupSendView: View {
             VStack(spacing: 12) {
                 Text("The other device is set up").font(.largeTitle.bold())
                     .foregroundStyle(palette.primaryText)
-                Text("It’s signed in — nothing to type over there.")
-                    .font(.title3).foregroundStyle(palette.secondaryText)
             }
             HStack(alignment: .top, spacing: 56) {
                 if !servers.isEmpty {

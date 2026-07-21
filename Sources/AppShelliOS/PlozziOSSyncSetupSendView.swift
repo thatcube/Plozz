@@ -30,9 +30,6 @@ struct SyncSetupSentSuccessView: View {
                 Text("Your other device is set up")
                     .font(.title2.bold()).multilineTextAlignment(.center)
                     .foregroundStyle(palette.primaryText)
-                Text("It’s signed in — no typing needed over there.")
-                    .font(.subheadline).foregroundStyle(palette.secondaryText)
-                    .multilineTextAlignment(.center)
             }
             .padding(.horizontal, 24)
 

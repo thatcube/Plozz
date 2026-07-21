@@ -94,8 +94,6 @@ struct SyncSetupReceiveView: View {
             VStack(spacing: 12) {
                 Text("You’re all set")
                     .font(.largeTitle.bold()).foregroundStyle(palette.primaryText)
-                Text("This Apple TV is signed in — nothing to type here.")
-                    .font(.title3).foregroundStyle(palette.secondaryText)
             }
 
             HStack(alignment: .top, spacing: 56) {

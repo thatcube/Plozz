@@ -108,9 +108,6 @@ struct PlozziOSSyncSetupReceiveView: View {
             Spacer(minLength: 0)
             VStack(spacing: 8) {
                 Text("You’re all set").font(.title.bold()).foregroundStyle(palette.primaryText)
-                Text("This device is signed in — nothing to type here.")
-                    .font(.subheadline).foregroundStyle(palette.secondaryText)
-                    .multilineTextAlignment(.center)
             }
             VStack(spacing: 14) {
                 if !servers.isEmpty {

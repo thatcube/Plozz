@@ -821,7 +821,7 @@ public struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Set Up Another Device")
                         .font(.callout.weight(.medium))
-                    Text("Sign in a phone or tablet from this Apple TV — no retyping.")
+                    Text("Sign in a phone or tablet from this Apple TV.")
                         .font(.footnote)
                         .settingsRowSecondary()
                         .fixedSize(horizontal: false, vertical: true)

@@ -492,18 +492,32 @@ public final class AppState {
             profilesModel.importProfiles(incomingProfiles)
         }
 
-        // 2. Create accounts from descriptors + transferred tokens.
+        // 2. Create accounts from descriptors + transferred credentials. Managed
+        // accounts (Jellyfin/Plex/Emby) restore from a bearer token; media shares
+        // (WebDAV/SMB/NFS/SFTP/FTP) restore from their credential envelope.
         let descByID = Dictionary(received.config.accounts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let secretByID = Dictionary((received.secrets?.accounts ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
+        let shareByID = Dictionary((received.secrets?.shares ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
         for auth in received.application.authorizedAuthorizations {
-            guard let desc = descByID[auth.id], let secret = secretByID[auth.id] else { continue }
-            let baseURL = desc.candidateBaseURLs.first ?? URL(string: secret.trustedOrigin) ?? URL(string: "https://localhost")!
-            let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
-                                     provider: desc.provider,
-                                     connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
-            let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
-                                  avatarURL: desc.avatarURL, deviceID: secret.deviceID)
-            try? store.add(account, token: secret.token)
+            guard let desc = descByID[auth.id] else { continue }
+            if let secret = secretByID[auth.id] {
+                let baseURL = desc.candidateBaseURLs.first ?? URL(string: secret.trustedOrigin) ?? URL(string: "https://localhost")!
+                let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
+                                         provider: desc.provider,
+                                         connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
+                let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
+                                      avatarURL: desc.avatarURL, deviceID: secret.deviceID)
+                try? store.add(account, token: secret.token)
+            } else if let share = shareByID[auth.id], let baseURL = desc.candidateBaseURLs.first {
+                let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
+                                         provider: .mediaShare,
+                                         connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
+                let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
+                                      avatarURL: desc.avatarURL, deviceID: store.deviceID())
+                if let envelope = try? MediaShareCredentialCodec.decodeVersioned(share.credentialEnvelope) {
+                    try? store.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+                }
+            }
         }
 
         // 3. Refresh providers, complete first-run, and enter the app.
@@ -671,7 +685,15 @@ public final class AppState {
             },
             secretsProvider: {
                 var accts: [AccountSecret] = []
+                var shares: [ShareSecret] = []
                 for account in syncAccounts.accounts {
+                    if account.server.provider == .mediaShare {
+                        if let envelope = try? syncStore.mediaShareCredential(for: account.id),
+                           let encoded = try? MediaShareCredentialCodec.encode(envelope) {
+                            shares.append(ShareSecret(accountID: account.id, credentialEnvelope: encoded))
+                        }
+                        continue
+                    }
                     guard let token = syncStore.token(for: account.id) else { continue }
                     accts.append(AccountSecret(
                         accountID: account.id,
@@ -681,7 +703,7 @@ public final class AppState {
                         trustedOrigin: LocalAuthorization.origin(of: account.server.baseURL)
                     ))
                 }
-                return SyncSecretsBundle(accounts: accts)
+                return SyncSecretsBundle(accounts: accts, shares: shares)
             }
         )
 

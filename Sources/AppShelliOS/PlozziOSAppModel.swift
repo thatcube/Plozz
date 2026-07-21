@@ -56,17 +56,48 @@ final class PlozziOSAppModel {
         }
         let descByID = Dictionary(received.config.accounts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let secretByID = Dictionary((received.secrets?.accounts ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
+        let shareByID = Dictionary((received.secrets?.shares ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
+        var added = 0
         for auth in received.application.authorizedAuthorizations {
-            guard let desc = descByID[auth.id], let secret = secretByID[auth.id] else { continue }
-            let baseURL = desc.candidateBaseURLs.first ?? URL(string: secret.trustedOrigin) ?? URL(string: "https://localhost")!
-            let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
-                                     provider: desc.provider,
-                                     connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
-            let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
-                                  avatarURL: desc.avatarURL, deviceID: secret.deviceID)
-            try? accountStore.add(account, token: secret.token)
+            guard let desc = descByID[auth.id] else { continue }
+            if let secret = secretByID[auth.id] {
+                let baseURL = desc.candidateBaseURLs.first ?? URL(string: secret.trustedOrigin) ?? URL(string: "https://localhost")!
+                let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
+                                         provider: desc.provider,
+                                         connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
+                let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
+                                      avatarURL: desc.avatarURL, deviceID: secret.deviceID)
+                do {
+                    try accountStore.add(account, token: secret.token)
+                    added += 1
+                } catch {
+                    PlozzLog.auth.error("Sync setup: failed to add transferred account \(desc.id): \(error.localizedDescription)")
+                }
+            } else if let share = shareByID[auth.id] {
+                // Media share: rebuild the account + reinstall its credential envelope.
+                guard let baseURL = desc.candidateBaseURLs.first else { continue }
+                let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
+                                         provider: .mediaShare,
+                                         connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
+                let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
+                                      avatarURL: desc.avatarURL, deviceID: accountStore.deviceID())
+                do {
+                    let envelope = try MediaShareCredentialCodec.decodeVersioned(share.credentialEnvelope)
+                    try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+                    added += 1
+                } catch {
+                    PlozzLog.auth.error("Sync setup: failed to add transferred share \(desc.id): \(error.localizedDescription)")
+                }
+            }
         }
+        // Mirror the tvOS receiver: complete first-run so the app never bounces
+        // back to onboarding, refresh providers + identity index, and republish
+        // presence.
+        profiles.markFirstRunProfileSetupComplete()
         accountsProviders.reloadAccounts()
+        reloadAccountsAndCrashContext()
+        identityIndex.warmIdentityIndex()
+        PlozzLog.auth.info("Sync setup applied: added \(added) account(s), \(incomingProfiles.count) profile(s)")
     }
     let authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
     let mediaShareRuntime: DefaultMediaShareRuntime
@@ -272,9 +303,19 @@ final class PlozziOSAppModel {
             },
             secretsProvider: {
                 // Gather this device's credentials for a no-tap transfer over the
-                // E2E pairing channel (provider tokens; shares handled separately).
+                // E2E pairing channel. Managed accounts (Jellyfin/Plex/Emby) carry a
+                // bearer token; media shares (WebDAV/SMB/NFS/SFTP/FTP) carry their
+                // opaque credential envelope from the vault.
                 var accts: [AccountSecret] = []
+                var shares: [ShareSecret] = []
                 for account in accountsProviders.accounts {
+                    if account.server.provider == .mediaShare {
+                        if let envelope = try? accountStore.mediaShareCredential(for: account.id),
+                           let encoded = try? MediaShareCredentialCodec.encode(envelope) {
+                            shares.append(ShareSecret(accountID: account.id, credentialEnvelope: encoded))
+                        }
+                        continue
+                    }
                     guard let token = accountStore.token(for: account.id) else { continue }
                     accts.append(AccountSecret(
                         accountID: account.id,
@@ -284,7 +325,7 @@ final class PlozziOSAppModel {
                         trustedOrigin: LocalAuthorization.origin(of: account.server.baseURL)
                     ))
                 }
-                return SyncSecretsBundle(accounts: accts)
+                return SyncSecretsBundle(accounts: accts, shares: shares)
             }
         )
         // Keep the non-secret presence beacon fresh for same-Apple-ID devices.

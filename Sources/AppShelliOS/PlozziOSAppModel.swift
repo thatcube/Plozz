@@ -472,6 +472,19 @@ final class PlozziOSAppModel {
         return true
     }
 
+    /// Debug-only: clear all accounts + profiles so the app returns to the
+    /// first-run / onboarding empty state (used to test Sync & Setup receive).
+    func resetToFirstRunForDebugging() {
+        try? accountStore.clearAll()
+        accountsProviders.reloadAccounts()
+        plexHomeUsers.resetAllForDebug()
+        profiles.resetToPristineDefaultForDebugging()
+        pendingLibrarySelection = nil
+        pendingFirstRunStep = nil
+        pendingPairingInvite = nil
+        selectProfile(profiles.activeProfileID)
+    }
+
     func selectProfile(_ id: String) {
         profiles.select(id)
         settings = PlozziOSSettingsModel(namespace: profiles.activeNamespace)

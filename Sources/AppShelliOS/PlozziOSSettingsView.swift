@@ -238,6 +238,14 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.attributions, title: SettingsCopy.attributions, systemImage: "doc.text.magnifyingglass")
                         settingsRow(.about, title: "About", systemImage: "info.circle")
                     }
+                    #if DEBUG
+                    SettingsSectionGroup("Debug") {
+                        Button("Reset to First Run") {
+                            appModel.resetToFirstRunForDebugging()
+                            onClose()
+                        }
+                    }
+                    #endif
                 }
             }
             .navigationTitle("Settings")
@@ -410,6 +418,7 @@ private struct PlozziOSAboutSettingsView: View {
 private struct PlozziOSSettingsCompactMenu: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
+    @Environment(\.dismiss) private var dismiss
     @State private var confirmSignOutAll = false
 
     var body: some View {
@@ -556,6 +565,15 @@ private struct PlozziOSSettingsCompactMenu: View {
                     }
                 }
             }
+
+                #if DEBUG
+                SettingsSectionGroup("Debug") {
+                    Button("Reset to First Run") {
+                        appModel.resetToFirstRunForDebugging()
+                        dismiss()
+                    }
+                }
+                #endif
 
                 if let accountError = appModel.accountError {
                     SettingsSectionGroup {

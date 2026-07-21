@@ -135,7 +135,7 @@ struct SeerClient: Sendable {
     /// the decoded response when present) or a server-rejected status + message.
     /// Transport failures throw instead (the caller maps those to `.unreachable`).
     enum CreateRequestResult {
-        case created(SeerRequestResponse?)
+        case created(SeerRequestResponse?, status: Int, rawBody: String?)
         case failed(status: Int, message: String?)
     }
 
@@ -148,11 +148,41 @@ struct SeerClient: Sendable {
             .jsonBody(body)
         let (data, response) = try await http.sendRaw(endpoint, baseURL: baseURL)
         if (200...299).contains(response.statusCode) {
-            // A 201 carries the request; a 202 "nothing to request" body may not
-            // decode — swallow that to nil (the send itself succeeded).
-            return .created(try? JSONDecoder.plozz.decode(SeerRequestResponse.self, from: data))
+            let decoded = try? JSONDecoder.plozz.decode(
+                SeerRequestResponse.self, from: data
+            )
+            let rawBody = String(data: data, encoding: .utf8)
+            return .created(decoded, status: response.statusCode, rawBody: rawBody)
         }
         let message = (try? JSONDecoder.plozz.decode(SeerErrorBody.self, from: data))?.message
         return .failed(status: response.statusCode, message: message)
+    }
+
+    /// `POST /api/v1/request/{id}/retry` — re-dispatch a **failed** request to
+    /// Radarr/Sonarr without creating a duplicate. Returns the same
+    /// ``CreateRequestResult`` shape as ``createRequest(_:actingUserID:)``.
+    func retryRequest(id: Int, actingUserID: Int?) async throws -> CreateRequestResult {
+        let endpoint = Endpoint(
+            method: .post,
+            path: "/api/v1/request/\(id)/retry",
+            headers: headers(actingUserID: actingUserID)
+        )
+        let (data, response) = try await http.sendRaw(endpoint, baseURL: baseURL)
+        if (200...299).contains(response.statusCode) {
+            let decoded = try? JSONDecoder.plozz.decode(SeerRequestResponse.self, from: data)
+            return .created(decoded, status: response.statusCode, rawBody: String(data: data, encoding: .utf8))
+        }
+        let message = (try? JSONDecoder.plozz.decode(SeerErrorBody.self, from: data))?.message
+        return .failed(status: response.statusCode, message: message)
+    }
+
+    /// `DELETE /api/v1/request/{id}` — remove a request (used to clear a stale
+    /// failed/declined request before recreating a fresh one). Returns whether the
+    /// server accepted the delete (2xx); transport failures throw.
+    @discardableResult
+    func deleteRequest(id: Int) async throws -> Bool {
+        let endpoint = Endpoint(method: .delete, path: "/api/v1/request/\(id)", headers: headers())
+        let (_, response) = try await http.sendRaw(endpoint, baseURL: baseURL)
+        return (200...299).contains(response.statusCode)
     }
 }

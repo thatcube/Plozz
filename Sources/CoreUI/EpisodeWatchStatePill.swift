@@ -1,0 +1,112 @@
+#if canImport(SwiftUI)
+import SwiftUI
+import CoreModels
+
+/// The shared watch-state chip shown over an episode thumbnail on both iOS and
+/// tvOS detail pages. It renders the same three states everywhere so the
+/// resume affordance is consistent across platforms:
+///  - **in progress** → `▶ [progress bar] 12m` (reusing ``ResumeProgressCapsule``,
+///    the exact bar used inside the hero Play/Resume button),
+///  - **watched** → a checkmark,
+///  - **not started** → the plain runtime (e.g. `52m`).
+///
+/// The `showsRuntimeWhenIdle` / `showsWatched` flags let a platform opt out of
+/// the idle/watched forms: tvOS keeps its own corner watched badge and shows the
+/// chip only while an episode is in progress, whereas iOS uses the chip for all
+/// three states. When there's nothing to show the view renders empty (no chip).
+public struct EpisodeWatchStatePill: View {
+    private let item: MediaItem
+    private let showsRuntimeWhenIdle: Bool
+    private let showsWatched: Bool
+    private let showsBackground: Bool
+    private let barWidth: CGFloat
+
+    public init(
+        item: MediaItem,
+        showsRuntimeWhenIdle: Bool = true,
+        showsWatched: Bool = true,
+        showsBackground: Bool = true,
+        barWidth: CGFloat = 54
+    ) {
+        self.item = item
+        self.showsRuntimeWhenIdle = showsRuntimeWhenIdle
+        self.showsWatched = showsWatched
+        self.showsBackground = showsBackground
+        self.barWidth = barWidth
+    }
+
+    private enum State {
+        case watched
+        case inProgress(fraction: Double, remaining: String)
+        case runtime(String)
+    }
+
+    private var state: State? {
+        if showsWatched, item.isPlayed {
+            return .watched
+        }
+        if let fraction = item.resumeProgressFraction,
+           let remaining = item.resumeRemainingText {
+            return .inProgress(fraction: fraction, remaining: remaining)
+        }
+        if showsRuntimeWhenIdle, let runtime = item.runtime?.runtimeBadgeText {
+            return .runtime(runtime)
+        }
+        return nil
+    }
+
+    public var body: some View {
+        if let state {
+            content(for: state)
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
+                .modifier(
+                    PillBackground(enabled: showsBackground)
+                )
+        }
+    }
+
+    @ViewBuilder
+    private func content(for state: State) -> some View {
+        switch state {
+        case .watched:
+            Image(systemName: "checkmark")
+                .fontWeight(.bold)
+                .accessibilityLabel("Watched")
+        case let .inProgress(fraction, remaining):
+            HStack(spacing: 8) {
+                Image(systemName: "play.fill")
+                ResumeProgressCapsule(
+                    progress: fraction,
+                    onLight: false,
+                    width: barWidth,
+                    height: 5
+                )
+                Text(remaining)
+            }
+            .accessibilityLabel("\(remaining) left")
+        case let .runtime(text):
+            Text(text)
+        }
+    }
+}
+
+/// Wraps pill content in the optional dark capsule. When disabled the pill has
+/// no background at all — legibility comes from the host image's dark scrim plus
+/// the text shadow — matching the "no solid background behind text" rule.
+private struct PillBackground: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.black.opacity(0.5), in: Capsule())
+        } else {
+            content
+        }
+    }
+}
+#endif

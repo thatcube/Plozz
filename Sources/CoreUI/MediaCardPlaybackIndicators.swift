@@ -5,6 +5,7 @@ import SwiftUI
 public struct MediaCardPlaybackIndicators: View {
     private let item: MediaItem
     private let hidesStatus: Bool
+    private let progressBarEnabled: Bool
     private let badgeInset: CGFloat
     private let progressHeight: CGFloat
     private let progressHorizontalInset: CGFloat
@@ -17,13 +18,15 @@ public struct MediaCardPlaybackIndicators: View {
     public init(
         item: MediaItem,
         hidesStatus: Bool = false,
+        showsProgressBar: Bool = true,
         badgeInset: CGFloat,
-        progressHeight: CGFloat,
-        progressHorizontalInset: CGFloat,
-        progressBottomInset: CGFloat
+        progressHeight: CGFloat = 0,
+        progressHorizontalInset: CGFloat = 0,
+        progressBottomInset: CGFloat = 0
     ) {
         self.item = item
         self.hidesStatus = hidesStatus
+        self.progressBarEnabled = showsProgressBar
         self.badgeInset = badgeInset
         self.progressHeight = progressHeight
         self.progressHorizontalInset = progressHorizontalInset
@@ -36,7 +39,9 @@ public struct MediaCardPlaybackIndicators: View {
                 statusIndicator
             }
             .overlay(alignment: .bottom) {
-                progressBar
+                if progressBarEnabled {
+                    progressBar
+                }
             }
             .allowsHitTesting(false)
     }

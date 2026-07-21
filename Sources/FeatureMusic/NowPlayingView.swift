@@ -1253,11 +1253,23 @@ struct LyricsSourceBadge: View {
     private var logo: some View {
         switch source {
         case .jellyfin:
-            Image("JellyfinLogo").renderingMode(.template).resizable().scaledToFit().frame(width: 16, height: 16)
+            ProviderBrandMark(
+                provider: .jellyfin,
+                size: 16,
+                showsBackground: false
+            )
         case .emby:
-            Image("EmbyLogo").renderingMode(.template).resizable().scaledToFit().frame(width: 16, height: 16)
+            ProviderBrandMark(
+                provider: .emby,
+                size: 16,
+                showsBackground: false
+            )
         case .plex:
-            Image("PlexLogo").renderingMode(.template).resizable().scaledToFit().frame(width: 16, height: 16)
+            ProviderBrandMark(
+                provider: .plex,
+                size: 16,
+                showsBackground: false
+            )
         case .lrclib:
             // LRCLIB ships no brand asset we can bundle, so use a lyrics-flavoured
             // SF Symbol sized to match the 16×16 server logos above so all three

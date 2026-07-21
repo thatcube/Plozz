@@ -198,6 +198,75 @@ final class PlozziOSDownloadsModel {
         )
     }
 
+    /// A playback-ready item reconstructed from a downloaded record, enriched
+    /// with the series/season/episode context captured at download time so the
+    /// offline player can order episodes and show "S1 · E5"-style metadata. The
+    /// reconstructed identity (`id` + account) matches what the offline resolver
+    /// keys the pinned file by, so it plays straight from disk.
+    func playbackItem(for record: DownloadedMediaRecord) -> MediaItem? {
+        guard var item = detailItem(for: record) else { return nil }
+        item.parentTitle = record.snapshot.seriesTitle
+        item.seriesID = record.snapshot.seriesID
+        item.seasonNumber = record.snapshot.seasonNumber
+        item.episodeNumber = record.snapshot.episodeNumber
+        item.providerIDs = record.snapshot.providerIDs
+        return item
+    }
+
+    /// Finds the downloaded record that a live/reconstructed item refers to,
+    /// matching on the portable source id + account captured in the snapshot.
+    func downloadedRecord(matching item: MediaItem) -> DownloadedMediaRecord? {
+        records.first { record in
+            guard let sourceItemID = record.snapshot.sourceItemID,
+                  sourceItemID == item.id else {
+                return false
+            }
+            guard let account = item.sourceAccountID else { return true }
+            return record.snapshot.sourceAccountID == nil
+                || record.snapshot.sourceAccountID == account
+        }
+    }
+
+    /// Previous/next **completed** downloaded episodes of the same show as
+    /// `item`, in season/episode order — the basis for fully offline
+    /// "watch the whole show" autoplay. Returns `nil` when `item` isn't a
+    /// downloaded episode, so online playback keeps its provider-based neighbors.
+    func offlineNeighborItems(
+        for item: MediaItem
+    ) -> (previous: MediaItem?, next: MediaItem?)? {
+        guard let record = downloadedRecord(matching: item),
+              record.snapshot.kind == .episode else {
+            return nil
+        }
+        let ordered = orderedSeriesEpisodes(containing: record)
+        guard ordered.count > 1,
+              let index = ordered.firstIndex(where: {
+                  $0.identityKey == record.identityKey
+              }) else {
+            return (nil, nil)
+        }
+        let previous = index > 0
+            ? playbackItem(for: ordered[index - 1])
+            : nil
+        let next = index < ordered.count - 1
+            ? playbackItem(for: ordered[index + 1])
+            : nil
+        return (previous, next)
+    }
+
+    /// The completed, playable episodes of the show that `record` belongs to,
+    /// ordered by season then episode (reusing the grouped library ordering).
+    private func orderedSeriesEpisodes(
+        containing record: DownloadedMediaRecord
+    ) -> [DownloadedMediaRecord] {
+        guard let show = library.shows.first(where: { show in
+            show.records.contains { $0.identityKey == record.identityKey }
+        }) else {
+            return []
+        }
+        return show.records.filter { $0.status == .completed }
+    }
+
     private func makeRequest(
         item: MediaItem,
         provider: any MediaProvider,
@@ -341,6 +410,69 @@ final class PlozziOSDownloadsModel {
 
     func remove(_ record: DownloadedMediaRecord) async {
         try? await queue?.cancelAndRemove(identityKey: record.identityKey)
+        await reload()
+    }
+
+    /// A grouped, browsable projection of the current downloads: standalone
+    /// movies plus shows collapsed into seasons/episodes.
+    var library: PlozziOSDownloadLibrary {
+        PlozziOSDownloadLibrary.make(from: records)
+    }
+
+    /// Total bytes stored across completed and in-flight downloads.
+    var totalBytesDownloaded: Int64 {
+        records.reduce(0) { $0 + $1.bytesDownloaded }
+    }
+
+    /// Records with a transfer still in progress, queued, or paused.
+    var activeTransfers: [DownloadedMediaRecord] {
+        records.filter {
+            $0.status == .downloading
+                || $0.status == .queued
+                || $0.status == .paused
+        }
+    }
+
+    var hasActiveTransfers: Bool { !activeTransfers.isEmpty }
+
+    /// Removes many records as a single unit (a whole season, a whole show, or
+    /// everything), cancelling any in-flight transfer, then reloads once.
+    func remove(_ toRemove: [DownloadedMediaRecord]) async {
+        guard let queue, !toRemove.isEmpty else { return }
+        for record in toRemove {
+            try? await queue.cancelAndRemove(identityKey: record.identityKey)
+        }
+        await reload()
+    }
+
+    /// Cancels and deletes every download for this profile.
+    func removeAll() async {
+        await remove(records)
+    }
+
+    /// Cancels every in-flight/queued/paused transfer, leaving completed
+    /// downloads in place.
+    func cancelActiveTransfers() async {
+        await remove(activeTransfers)
+    }
+
+    /// Pauses every actively transferring or queued download.
+    func pauseAllActive() async {
+        guard let queue else { return }
+        for record in records
+        where record.status == .downloading || record.status == .queued {
+            await queue.pause(identityKey: record.identityKey)
+        }
+        await reload()
+    }
+
+    /// Resumes every paused or failed download.
+    func resumeAllPaused() async {
+        guard let queue else { return }
+        for record in records
+        where record.status == .paused || record.status == .failed {
+            await queue.resume(identityKey: record.identityKey)
+        }
         await reload()
     }
 

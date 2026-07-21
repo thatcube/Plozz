@@ -661,7 +661,15 @@ public final class ItemDetailViewModel {
         var updated = current
         updated.availability = availability
         updated.downloadProgress = downloadProgress
-        state = .loaded(Detail(item: updated, children: [], childrenLoaded: true))
+        state = .loaded(Detail(item: updated, children: current.kind == .series ? (state.value?.children ?? []) : [], childrenLoaded: state.value?.childrenLoaded ?? true))
+    }
+
+    /// Public entry so the detail view can poll a discovery title's live Seerr
+    /// status (request/download state) while it's on screen — keeping the hero
+    /// CTA in sync as a request progresses, mirroring the Home hero's poll.
+    public func refreshDiscoveryStatusNow() async {
+        guard isDiscoveryItem else { return }
+        await refreshDiscoveryStatus()
     }
 
     /// A season must never render a page of its own. When the fetched item is a

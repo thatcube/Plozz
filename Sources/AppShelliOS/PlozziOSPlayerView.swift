@@ -182,6 +182,14 @@ struct PlozziOSPlayerView: View {
     private func makeNeighborResolver(
         for item: MediaItem
     ) -> (@Sendable () async -> (previous: MediaItem?, next: MediaItem?))? {
+        // Downloaded episode: neighbors come from the pinned set (no network),
+        // so a full show plays through offline. Computed now on the main actor
+        // and captured as Sendable values for the resolver closure.
+        if let offline = appModel.downloads.offlineNeighborItems(for: item) {
+            let previous = offline.previous
+            let next = offline.next
+            return { (previous: previous, next: next) }
+        }
         guard item.kind == .episode, let seasonID = item.seasonID else { return nil }
         let provider = self.provider
         let accountID = item.sourceAccountID

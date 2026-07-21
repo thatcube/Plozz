@@ -85,7 +85,7 @@ public struct ProviderBrandMark: View {
                     // in its container. Visual only — layout footprint unchanged.
                     .offset(y: badgeLabel != nil ? -size * 0.11 : 0)
             } else {
-                Image(assetName)
+                Image(assetName, bundle: .module)
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()

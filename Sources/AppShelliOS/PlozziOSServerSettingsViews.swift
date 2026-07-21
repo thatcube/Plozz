@@ -27,8 +27,11 @@ struct PlozziOSServersSettingsView: View {
                             )
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: symbol(for: group))
-                                    .frame(width: 24)
+                                ProviderBrandMark(
+                                    provider: group.providerKind,
+                                    size: 32,
+                                    mediaShareTransport: group.transportKind
+                                )
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(group.serverName)
                                     if let summary = summary(for: group) {
@@ -50,10 +53,13 @@ struct PlozziOSServersSettingsView: View {
                 NavigationLink {
                     PlozziOSAddShareView(appModel: appModel)
                 } label: {
-                    Label(
-                        "Add Network Share",
-                        systemImage: "externaldrive.connected.to.line.below"
-                    )
+                    HStack(spacing: 12) {
+                        ProviderBrandMark(
+                            provider: .mediaShare,
+                            size: 24
+                        )
+                        Text("Add Network Share")
+                    }
                 }
             }
         }
@@ -73,13 +79,6 @@ struct PlozziOSServersSettingsView: View {
         return "Signed in as \(user)"
     }
 
-    private func symbol(for group: ServerAccountGroup) -> String {
-        switch group.providerKind {
-        case .plex: "play.rectangle.on.rectangle"
-        case .jellyfin, .emby: "server.rack"
-        case .mediaShare: "externaldrive.connected.to.line.below"
-        }
-    }
 }
 
 private struct PlozziOSServerSettingsDetailView: View {
@@ -191,14 +190,25 @@ struct PlozziOSMyLibrariesSettingsView: View {
 
     @ViewBuilder
     private func serverGroup(_ group: ServerAccountGroup) -> some View {
-        SettingsSectionGroup(group.serverName) {
+        SettingsSectionGroup {
+            // The whole row is the master switch: provider brand + server name on
+            // the left, the On/Off switch on the right — matching tvOS, where the
+            // server's icon and name *are* the toggle.
             Toggle(
-                "Use This Server",
                 isOn: Binding(
                     get: { isWatching(group) },
                     set: { setWatching($0, group: group) }
                 )
-            )
+            ) {
+                HStack(spacing: 12) {
+                    ProviderBrandMark(
+                        provider: group.providerKind,
+                        size: 32,
+                        mediaShareTransport: group.transportKind
+                    )
+                    Text(group.serverName)
+                }
+            }
 
             if isWatching(group) {
                 identityControl(for: group)

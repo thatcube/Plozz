@@ -14,7 +14,16 @@ struct PlozziOSHomeView: View {
     @State private var featuredItems: [MediaItem] = []
     @State private var heroItems: [MediaItem] = []
     @State private var playbackRequest: PlozziOSPlaybackRequest?
-    @State private var heroControlsVisible = true
+    @State private var isRequestingHero = false
+    @State private var heroRequestStatuses: [String: MediaAvailabilityStatus] = [:]
+    /// When each optimistic override was set. An override may shield the CTA from
+    /// an untracked (`.unknown`) poll only briefly — long enough to bridge the gap
+    /// until Seerr commits a freshly-created request — after which the authoritative
+    /// per-title lookup wins, so a request that actually failed can never stay
+    /// stuck on "Requested" forever.
+    @State private var heroRequestStatusSetAt: [String: Date] = [:]
+    @State private var heroRequestConfirmItem: MediaItem?
+    @State private var heroRequestError: String?
     private let appModel: PlozziOSAppModel
     private let onAddServer: () -> Void
     private let onShowSettings: () -> Void
@@ -65,7 +74,10 @@ struct PlozziOSHomeView: View {
                 }
             case let .failed(error):
                 ContentUnavailableView {
-                    Label("Unable to load Home", systemImage: "exclamationmark.triangle")
+                    Label(
+                        "Unable to load Home",
+                        systemImage: "exclamationmark.triangle"
+                    )
                 } description: {
                     Text(error.userMessage)
                 } actions: {
@@ -79,46 +91,27 @@ struct PlozziOSHomeView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {
-            if heroControlsVisible {
-                if #available(iOS 26.0, *) {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        PlozziOSHomeHeroControls(
-                            showsMute: trailerController.isPlaying,
-                            isMuted: appModel.settings.heroBackground.settings
-                                .trailerMuted,
-                            onToggleMute: {
-                                appModel.settings.heroBackground.settings
-                                    .trailerMuted.toggle()
-                                trailerController.setMuted(
-                                    appModel.settings.heroBackground.settings
-                                        .trailerMuted
-                                )
-                            },
-                            onShowSettings: onShowSettings
+            if trailerController.isPlaying {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: toggleTrailerMute) {
+                        Image(
+                            systemName: appModel.settings.heroBackground
+                                .settings.trailerMuted
+                                ? "speaker.slash.fill"
+                                : "speaker.wave.2.fill"
                         )
                     }
-                    .sharedBackgroundVisibility(.hidden)
-                } else {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        PlozziOSHomeHeroControls(
-                            showsMute: trailerController.isPlaying,
-                            isMuted: appModel.settings.heroBackground.settings
-                                .trailerMuted,
-                            onToggleMute: {
-                                appModel.settings.heroBackground.settings
-                                    .trailerMuted.toggle()
-                                trailerController.setMuted(
-                                    appModel.settings.heroBackground.settings
-                                        .trailerMuted
-                                )
-                            },
-                            onShowSettings: onShowSettings
-                        )
-                    }
+                    .accessibilityLabel(
+                        appModel.settings.heroBackground.settings.trailerMuted
+                            ? "Unmute trailer"
+                            : "Mute trailer"
+                    )
                 }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                PlozziOSSettingsAvatarButton(size: 30, action: onShowSettings)
             }
         }
         .task(id: appModel.settings.homeVisibility.visibility) {
@@ -134,11 +127,20 @@ struct PlozziOSHomeView: View {
         ) {
             await loadFeatured()
         }
+        .task(
+            id: FeaturedLoadID(
+                isConfigured: appModel.seerService.isConfigured,
+                settings: appModel.settings.hero.settings
+            )
+        ) {
+            await refreshFeaturedStatusLoop()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
             if let mutation = MediaItemMutation.from(note) {
                 viewModel.applyWatchedState(mutation)
             }
         }
+
         .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
             viewModel.scheduleReenrich()
         }
@@ -152,6 +154,44 @@ struct PlozziOSHomeView: View {
                 )
             }
         }
+        .confirmationDialog(
+            "Request as Administrator?",
+            isPresented: Binding(
+                get: { heroRequestConfirmItem != nil },
+                set: { if !$0 { heroRequestConfirmItem = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Request as Administrator") {
+                guard let item = heroRequestConfirmItem else { return }
+                heroRequestConfirmItem = nil
+                Task { await requestFromHero(item) }
+            }
+            Button("Cancel", role: .cancel) { heroRequestConfirmItem = nil }
+        } message: {
+            Text(
+                "This profile isn’t linked to a Seerr user. "
+                    + "The request will use the unrestricted administrator account."
+            )
+        }
+        .alert(
+            "Request Failed",
+            isPresented: Binding(
+                get: { heroRequestError != nil },
+                set: { if !$0 { heroRequestError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(heroRequestError ?? "")
+        }
+    }
+
+    private func toggleTrailerMute() {
+        appModel.settings.heroBackground.settings.trailerMuted.toggle()
+        trailerController.setMuted(
+            appModel.settings.heroBackground.settings.trailerMuted
+        )
     }
 
     private func loadedContent(_ content: HomeViewModel.Content) -> some View {
@@ -177,7 +217,10 @@ struct PlozziOSHomeView: View {
                         autoAdvance: appModel.settings.hero.settings.autoAdvance,
                         autoAdvanceSeconds:
                             appModel.settings.hero.settings.autoAdvanceSeconds,
-                        onPlay: play
+                        onPlay: play,
+                        isRequesting: isRequestingHero,
+                        requestStatus: { heroRequestStatuses[$0.id] },
+                        onRequest: beginHeroRequest
                     )
                 }
 
@@ -235,13 +278,6 @@ struct PlozziOSHomeView: View {
         }
         .scrollClipDisabled()
         .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.contentOffset.y > 72
-        } action: { _, scrolledPastHeroControls in
-            withAnimation(.easeOut(duration: 0.18)) {
-                heroControlsVisible = !scrolledPastHeroControls
-            }
-        }
-        .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentOffset.y > trailerPauseThreshold
         } action: { _, isPastHalfHero in
             trailerController.setPaused(isPastHalfHero)
@@ -275,12 +311,176 @@ struct PlozziOSHomeView: View {
         featuredItems = trending.filter(\.isNotInLibraryDiscovery)
     }
 
+    /// Fast cadence while a title is requested but not yet downloading — the
+    /// window where the user is waiting to see it *start* — so "Downloading"
+    /// appears within a few seconds of the grab actually beginning.
+    private static let featuredRefreshFast: Duration = .seconds(4)
+    /// Relaxed cadence once every in-flight title is already downloading (its %
+    /// only needs coarse updates) or nothing is transitional, to avoid hammering
+    /// Seerr with per-title TMDB lookups indefinitely.
+    private static let featuredRefreshSlow: Duration = .seconds(20)
+
+    /// Periodically re-fetches featured (Seerr) status and folds each fresh
+    /// title's `availability` + `downloadProgress` back onto the matching hero
+    /// item **in place**, so the request CTA tracks the server live
+    /// (Request → "NN%" → Play) as a download progresses — mirroring tvOS. Only
+    /// the two status fields change; item ids and carousel order are untouched,
+    /// so the current slide, backdrop, and paging never reset. Polls fast while a
+    /// request is still spinning up, then backs off.
+    private func refreshFeaturedStatusLoop() async {
+        while !Task.isCancelled {
+            await refreshFeaturedStatusOnce()
+            if Task.isCancelled { return }
+            try? await Task.sleep(for: nextFeaturedRefreshDelay())
+        }
+    }
+
+    /// Fast delay while any hero title is requested/approved but not yet
+    /// downloading; relaxed once everything in-flight is downloading or idle.
+    private func nextFeaturedRefreshDelay() -> Duration {
+        // An outstanding optimistic override means we just requested and are
+        // waiting for Seerr to confirm — poll fast until it does.
+        if !heroRequestStatuses.isEmpty { return Self.featuredRefreshFast }
+        let transitional = heroItems.contains { item in
+            guard let availability = item.availability else { return false }
+            switch availability {
+            case .pending:
+                return true
+            case .processing:
+                return item.downloadProgress == nil
+            case .available, .partiallyAvailable, .unknown, .deleted:
+                return false
+            }
+        }
+        return transitional ? Self.featuredRefreshFast : Self.featuredRefreshSlow
+    }
+
+    /// One status-refresh pass. Re-fetches each in-flight hero title's live
+    /// availability + download progress by TMDB lookup (`availability(for:)`),
+    /// which — unlike `trending` — keeps reporting a title after it's been
+    /// requested and left the trending list, so the CTA doesn't get stuck on
+    /// "Requested" while it's actually downloading.
+    private func refreshFeaturedStatusOnce() async {
+        let hero = appModel.settings.hero.settings
+        guard hero.isActive,
+              hero.sources.contains(.featured),
+              appModel.seerService.isConfigured else {
+            return
+        }
+        let inFlight = heroItems.filter { $0.availability != nil }
+        guard !inFlight.isEmpty else { return }
+
+        var statusByID: [String: (MediaAvailabilityStatus?, Double?)] = [:]
+        for item in inFlight {
+            if let status = await appModel.seerService.availability(for: item) {
+                statusByID[item.id] = (status.0, status.1)
+            }
+        }
+        if Task.isCancelled || statusByID.isEmpty { return }
+        foldFeaturedStatus(statusByID, into: &heroItems)
+        foldFeaturedStatus(statusByID, into: &featuredItems)
+    }
+
+    private func foldFeaturedStatus(
+        _ statusByID: [String: (MediaAvailabilityStatus?, Double?)],
+        into items: inout [MediaItem]
+    ) {
+        for index in items.indices {
+            let id = items[index].id
+            guard let status = statusByID[id] else { continue }
+            // Don't let a stale/untracked lookup downgrade an optimistic
+            // post-request state *immediately* after a request: for a beat, Seerr
+            // can still report `.unknown` before it commits the new request row,
+            // which would flap the CTA back to "Request". But this shield is
+            // time-boxed — once the grace window lapses, the authoritative lookup
+            // wins, so a request that genuinely failed can't stay stuck on
+            // "Requested" forever.
+            if heroRequestStatuses[id] != nil, !Self.isTracked(status.0) {
+                let setAt = heroRequestStatusSetAt[id] ?? .distantPast
+                if Date().timeIntervalSince(setAt) < Self.heroRequestOverrideGrace {
+                    continue
+                }
+            }
+            guard items[index].availability != status.0
+                || items[index].downloadProgress != status.1 else {
+                // Even when nothing changed, an authoritative tracked/untracked
+                // lookup means the override has served its purpose — drop it so it
+                // can't linger and shield a later real change.
+                heroRequestStatuses[id] = nil
+                heroRequestStatusSetAt[id] = nil
+                continue
+            }
+            items[index].availability = status.0
+            items[index].downloadProgress = status.1
+            heroRequestStatuses[id] = nil
+            heroRequestStatusSetAt[id] = nil
+        }
+    }
+
+    /// How long an optimistic hero-request override may shield the CTA from an
+    /// untracked (`.unknown`) poll before the authoritative lookup takes over.
+    private static let heroRequestOverrideGrace: TimeInterval = 25
+
+    /// Whether a Seerr availability represents a real, tracked request state
+    /// (as opposed to "not tracked"), so it may supersede an optimistic override.
+    private static func isTracked(_ status: MediaAvailabilityStatus?) -> Bool {
+        switch status {
+        case .pending, .processing, .available, .partiallyAvailable:
+            return true
+        case .unknown, .deleted, nil:
+            return false
+        }
+    }
+
     private func play(_ item: MediaItem) {
         trailerController.stop()
         playbackRequest = PlozziOSPlaybackRequest(
             item: item,
             startPosition: item.resumePosition ?? 0
         )
+    }
+
+    /// One-tap Seerr request from the Home hero, mirroring the detail hero. When
+    /// the active profile isn't linked to a Seerr user (and there are multiple
+    /// profiles), confirm the admin-account fallback first.
+    private func beginHeroRequest(_ item: MediaItem) {
+        if appModel.activeSeerrUserID == nil,
+           appModel.profiles.profiles.count > 1 {
+            heroRequestConfirmItem = item
+        } else {
+            Task { await requestFromHero(item) }
+        }
+    }
+
+    private func requestFromHero(_ item: MediaItem) async {
+        guard appModel.seerService.isConfigured else {
+            heroRequestError = "Connect Overseerr or Jellyseerr in Settings first."
+            return
+        }
+        isRequestingHero = true
+        heroRequestError = nil
+        defer { isRequestingHero = false }
+        let outcome = await appModel.seerService.request(
+            item,
+            seasons: nil,
+            actingUserID: appModel.activeSeerrUserID
+        )
+        switch outcome {
+        case let .success(status):
+            heroRequestStatuses[item.id] = status
+            heroRequestStatusSetAt[item.id] = Date()
+            await refreshFeaturedStatusOnce()
+        case .failure(.alreadyRequested):
+            // Seerr already tracks this title with a live (pending/approved)
+            // request — reflect that as "Requested" immediately, shielded only
+            // briefly (see `heroRequestOverrideGrace`) before the authoritative
+            // lookup takes over.
+            heroRequestStatuses[item.id] = .pending
+            heroRequestStatusSetAt[item.id] = Date()
+            await refreshFeaturedStatusOnce()
+        case let .failure(reason):
+            heroRequestError = reason.userMessage
+        }
     }
 
     private func loadHero(from content: HomeViewModel.Content) async {
@@ -392,6 +592,9 @@ private struct PlozziOSHomeHeroCarousel: View {
     let autoAdvance: Bool
     let autoAdvanceSeconds: Int
     let onPlay: (MediaItem) -> Void
+    var isRequesting: Bool = false
+    var requestStatus: (MediaItem) -> MediaAvailabilityStatus? = { _ in nil }
+    var onRequest: ((MediaItem) -> Void)?
 
     var body: some View {
         let style: HeroArtworkStyle = horizontalSizeClass == .compact
@@ -449,7 +652,8 @@ private struct PlozziOSHomeHeroCarousel: View {
                         ),
                         style: style,
                         provider: provider(for: currentItem),
-                        onPlay: onPlay
+                        onPlay: onPlay,
+                        heroRequest: heroRequest(for: currentItem)
                     )
                     .id(currentItem.id)
                     .transition(.opacity)
@@ -588,6 +792,28 @@ private struct PlozziOSHomeHeroCarousel: View {
 
     private func rootItem(for item: MediaItem) -> MediaItem {
         rootItems[item.id] ?? item
+    }
+
+    /// Request CTA descriptor for a discovery **movie** hero (one-tap request,
+    /// like the detail hero). `nil` for in-library items or non-movie discovery,
+    /// so those keep the normal Play / More Info actions.
+    private func heroRequest(for item: MediaItem) -> PlozziOSHeroRequest? {
+        guard let onRequest,
+              item.isNotInLibraryDiscovery,
+              item.kind == .movie else {
+            return nil
+        }
+        let availability = requestStatus(item) ?? item.availability
+        return PlozziOSHeroRequest(
+            cta: MediaItem.heroCTA(
+                availability: availability,
+                downloadProgress: item.downloadProgress,
+                seerConnected: appModel.seerService.isConfigured
+            ),
+            isRequesting: isRequesting,
+            actingName: appModel.activeSeerrUserName,
+            onRequest: onRequest
+        )
     }
 
     private func playTarget(for item: MediaItem) -> MediaItem? {
@@ -762,70 +988,6 @@ private struct PlozziOSHomeHeroCarousel: View {
     }
 }
 
-private struct PlozziOSHomeHeroControls: View {
-    let showsMute: Bool
-    let isMuted: Bool
-    let onToggleMute: () -> Void
-    let onShowSettings: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            if showsMute {
-                PlozziOSHomeHeroMuteButton(
-                    isMuted: isMuted,
-                    action: onToggleMute
-                )
-                .modifier(PlozziOSCircularHeroControlModifier())
-            }
-            PlozziOSSettingsAvatarButton(action: onShowSettings)
-                .modifier(PlozziOSCircularHeroControlModifier())
-        }
-        .fixedSize()
-        .offset(y: -1)
-    }
-}
-
-private struct PlozziOSCircularHeroControlModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
-                .glassEffect(.regular.interactive(), in: Circle())
-        } else {
-            content
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay {
-                    Circle()
-                        .stroke(.white.opacity(0.14), lineWidth: 1)
-                }
-        }
-    }
-}
-
-private struct PlozziOSHomeHeroMuteButton: View {
-    let isMuted: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(
-                systemName: isMuted
-                    ? "speaker.slash.fill"
-                    : "speaker.wave.2.fill"
-            )
-            .font(.subheadline.weight(.semibold))
-            .frame(width: 44, height: 44)
-            .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .buttonBorderShape(.circle)
-        .accessibilityLabel(isMuted ? "Unmute trailer" : "Mute trailer")
-    }
-}
-
 private struct PlozziOSHorizontalHeroDragGesture:
     UIGestureRecognizerRepresentable {
     let isEnabled: Bool
@@ -838,29 +1000,32 @@ private struct PlozziOSHorizontalHeroDragGesture:
 
     func makeUIGestureRecognizer(
         context: Context
-    ) -> PlozziOSHorizontalHeroPanGestureRecognizer {
-        let recognizer = PlozziOSHorizontalHeroPanGestureRecognizer()
+    ) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
         recognizer.delegate = context.coordinator
         recognizer.cancelsTouchesInView = false
+        recognizer.allowedScrollTypesMask = .continuous
         return recognizer
     }
 
     func updateUIGestureRecognizer(
-        _ recognizer: PlozziOSHorizontalHeroPanGestureRecognizer,
+        _ recognizer: UIPanGestureRecognizer,
         context: Context
     ) {
         recognizer.isEnabled = isEnabled
     }
 
     func handleUIGestureRecognizerAction(
-        _ recognizer: PlozziOSHorizontalHeroPanGestureRecognizer,
+        _ recognizer: UIPanGestureRecognizer,
         context: Context
     ) {
+        let point = recognizer.translation(in: recognizer.view)
+        let translation = CGSize(width: point.x, height: point.y)
         switch recognizer.state {
         case .began, .changed:
-            onChanged(recognizer.translation)
+            onChanged(translation)
         case .ended:
-            onEnded(recognizer.translation)
+            onEnded(translation)
         case .cancelled, .failed:
             onEnded(.zero)
         default:
@@ -869,6 +1034,19 @@ private struct PlozziOSHorizontalHeroDragGesture:
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private static let horizontalDominance: CGFloat = 1.35
+
+        func gestureRecognizerShouldBegin(
+            _ gestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else {
+                return true
+            }
+            let velocity = pan.velocity(in: pan.view)
+            return abs(velocity.x)
+                > abs(velocity.y) * Self.horizontalDominance
+        }
+
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer:
@@ -876,83 +1054,6 @@ private struct PlozziOSHorizontalHeroDragGesture:
         ) -> Bool {
             true
         }
-    }
-}
-
-private final class PlozziOSHorizontalHeroPanGestureRecognizer:
-    UIGestureRecognizer {
-    private static let minimumDistance: CGFloat = 12
-    private static let horizontalDominance: CGFloat = 1.35
-
-    private var initialLocation: CGPoint?
-    private(set) var translation: CGSize = .zero
-
-    override func touchesBegan(
-        _ touches: Set<UITouch>,
-        with event: UIEvent
-    ) {
-        guard touches.count == 1, let touch = touches.first else {
-            state = .failed
-            return
-        }
-        initialLocation = touch.location(in: view)
-        translation = .zero
-    }
-
-    override func touchesMoved(
-        _ touches: Set<UITouch>,
-        with event: UIEvent
-    ) {
-        guard let initialLocation, let touch = touches.first else {
-            state = .failed
-            return
-        }
-        let location = touch.location(in: view)
-        translation = CGSize(
-            width: location.x - initialLocation.x,
-            height: location.y - initialLocation.y
-        )
-
-        if state == .possible {
-            let horizontalDistance = abs(translation.width)
-            let verticalDistance = abs(translation.height)
-            guard hypot(horizontalDistance, verticalDistance)
-                >= Self.minimumDistance else {
-                return
-            }
-            guard horizontalDistance
-                > verticalDistance * Self.horizontalDominance else {
-                state = .failed
-                return
-            }
-            state = .began
-        } else if state == .began || state == .changed {
-            state = .changed
-        }
-    }
-
-    override func touchesEnded(
-        _ touches: Set<UITouch>,
-        with event: UIEvent
-    ) {
-        if state == .began || state == .changed {
-            state = .ended
-        } else {
-            state = .failed
-        }
-    }
-
-    override func touchesCancelled(
-        _ touches: Set<UITouch>,
-        with event: UIEvent
-    ) {
-        state = .cancelled
-    }
-
-    override func reset() {
-        initialLocation = nil
-        translation = .zero
-        super.reset()
     }
 }
 

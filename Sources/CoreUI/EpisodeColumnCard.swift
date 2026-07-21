@@ -42,7 +42,7 @@ public struct EpisodeColumnCard: View {
             artwork
                 .frame(width: Self.artworkSize.width, height: Self.artworkSize.height)
                 .overlay(alignment: .topTrailing) { statusIndicator }
-                .overlay(alignment: .bottom) { progressBar }
+                .overlay(alignment: .bottomLeading) { progressBar }
                 .clipShape(RoundedRectangle(
                     cornerRadius: metrics.landscapeCardCornerRadius,
                     style: .continuous
@@ -226,21 +226,15 @@ public struct EpisodeColumnCard: View {
 
     @ViewBuilder
     private var progressBar: some View {
-        if let progress = presentation.progress {
-            let height = metrics.progressBarHeight
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule(style: .continuous)
-                        .fill(.white.opacity(0.22))
-                    Capsule(style: .continuous)
-                        .fill(ThemePalette.brandBlue)
-                        .frame(width: max(height, geometry.size.width * progress))
-                        .shadow(color: .black.opacity(0.35), radius: height * 0.25)
-                }
-            }
-            .frame(height: height)
-            .padding(.horizontal, 18)
-            .padding(.bottom, 18)
+        if presentation.artworkTreatment != .blurred {
+            EpisodeWatchStatePill(
+                item: item,
+                showsRuntimeWhenIdle: false,
+                showsWatched: false,
+                barWidth: 110
+            )
+            .font(.system(size: 24, weight: .semibold))
+            .padding(18)
         }
     }
 }

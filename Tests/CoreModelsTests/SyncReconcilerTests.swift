@@ -80,6 +80,29 @@ final class SyncReconcilerTests: XCTestCase {
         XCTAssertEqual(profByID["p2"], "Kids")
     }
 
+    func testMergePreservesLocalOnlyProfileSettings() {
+        // A whole-list replace would drop settings for a profile the remote snapshot
+        // doesn't carry. Union by profileID keeps local-only and overlays remote.
+        let local = SyncConfigSnapshot(
+            profileSettings: [
+                ProfileSettingsSnapshot(profileID: "p1", entries: ["k": Data([1])]),
+                ProfileSettingsSnapshot(profileID: "p2", entries: ["k": Data([2])])
+            ]
+        )
+        let remote = SyncConfigSnapshot(
+            profileSettings: [
+                ProfileSettingsSnapshot(profileID: "p1", entries: ["k": Data([9])]),  // updates p1
+                ProfileSettingsSnapshot(profileID: "p3", entries: ["k": Data([3])])   // adds p3
+            ]
+        )
+        let merged = local.merged(with: remote)
+        let byID = Dictionary(uniqueKeysWithValues: merged.profileSettings.map { ($0.profileID, $0.entries["k"]) })
+        XCTAssertEqual(byID["p1"], Data([9]))   // remote-wins per profile
+        XCTAssertEqual(byID["p2"], Data([2]))   // local-only preserved (not dropped)
+        XCTAssertEqual(byID["p3"], Data([3]))   // remote-only added
+        XCTAssertEqual(merged.profileSettings.count, 3)
+    }
+
     func testSnapshotIsCodableAndTokenFree() {
         let snap = SyncConfigSnapshot(
             accounts: [desc("a", 1)],

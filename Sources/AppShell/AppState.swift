@@ -517,14 +517,24 @@ public final class AppState {
                 let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
                                       avatarURL: desc.avatarURL, deviceID: secret.deviceID)
                 try? store.add(account, token: secret.token)
-            } else if let share = shareByID[auth.id], let baseURL = desc.candidateBaseURLs.first {
+            } else if let share = shareByID[auth.id] {
+                guard let baseURL = desc.candidateBaseURLs.first else {
+                    PlozzLog.auth.error("Sync setup: share \(desc.id) has no reachable URL — skipping (re-add it on this device)")
+                    continue
+                }
                 let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
                                          provider: .mediaShare,
                                          connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
                 let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
                                       avatarURL: desc.avatarURL, deviceID: store.deviceID())
                 if let envelope = try? MediaShareCredentialCodec.decodeVersioned(share.credentialEnvelope) {
-                    try? store.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+                    if case .generatedKey = envelope.authentication {
+                        // The SSH key never travelled — don't restore a share that
+                        // can't authenticate; the user re-adds it here.
+                        PlozzLog.auth.error("Sync setup: share \(desc.id) uses a device-local SSH key — skipping (re-add it on this device)")
+                    } else {
+                        try? store.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
+                    }
                 }
             }
         }
@@ -709,9 +719,15 @@ public final class AppState {
                 var shares: [ShareSecret] = []
                 for account in syncAccounts.accounts {
                     if account.server.provider == .mediaShare {
-                        if let envelope = try? syncStore.mediaShareCredential(for: account.id),
-                           let encoded = try? MediaShareCredentialCodec.encode(envelope) {
-                            shares.append(ShareSecret(accountID: account.id, credentialEnvelope: encoded))
+                        if let envelope = try? syncStore.mediaShareCredential(for: account.id) {
+                            if case .generatedKey = envelope.authentication {
+                                // SSH key is device-local (Keychain) and never
+                                // travels; don't advertise a share that couldn't
+                                // authenticate on the other device.
+                                PlozzLog.auth.info("Sync setup: skipping generated-key SFTP share \(account.id) — key is device-local")
+                            } else if let encoded = try? MediaShareCredentialCodec.encode(envelope) {
+                                shares.append(ShareSecret(accountID: account.id, credentialEnvelope: encoded))
+                            }
                         }
                         continue
                     }

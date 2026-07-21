@@ -84,7 +84,10 @@ final class PlozziOSAppModel {
                 }
             } else if let share = shareByID[auth.id] {
                 // Media share: rebuild the account + reinstall its credential envelope.
-                guard let baseURL = desc.candidateBaseURLs.first else { continue }
+                guard let baseURL = desc.candidateBaseURLs.first else {
+                    PlozzLog.auth.error("Sync setup: share \(desc.id) has no reachable URL — skipping (re-add it on this device)")
+                    continue
+                }
                 let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
                                          provider: .mediaShare,
                                          connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
@@ -92,6 +95,13 @@ final class PlozziOSAppModel {
                                       avatarURL: desc.avatarURL, deviceID: accountStore.deviceID())
                 do {
                     let envelope = try MediaShareCredentialCodec.decodeVersioned(share.credentialEnvelope)
+                    if case .generatedKey = envelope.authentication {
+                        // Defense in depth: an older sender may still ship a
+                        // generated-key envelope whose SSH key never travelled.
+                        // Don't claim success — leave it for manual re-add.
+                        PlozzLog.auth.error("Sync setup: share \(desc.id) uses a device-local SSH key — skipping (re-add it on this device)")
+                        continue
+                    }
                     try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
                     added += 1
                 } catch {
@@ -333,9 +343,16 @@ final class PlozziOSAppModel {
                 var shares: [ShareSecret] = []
                 for account in accountsProviders.accounts {
                     if account.server.provider == .mediaShare {
-                        if let envelope = try? accountStore.mediaShareCredential(for: account.id),
-                           let encoded = try? MediaShareCredentialCodec.encode(envelope) {
-                            shares.append(ShareSecret(accountID: account.id, credentialEnvelope: encoded))
+                        if let envelope = try? accountStore.mediaShareCredential(for: account.id) {
+                            if case .generatedKey = envelope.authentication {
+                                // The SSH key lives in THIS device's Keychain and
+                                // never travels, so a transferred copy couldn't
+                                // authenticate. Don't advertise it — the paired
+                                // device re-adds this share (minting its own key).
+                                PlozzLog.auth.info("Sync setup: skipping generated-key SFTP share \(account.id) — key is device-local")
+                            } else if let encoded = try? MediaShareCredentialCodec.encode(envelope) {
+                                shares.append(ShareSecret(accountID: account.id, credentialEnvelope: encoded))
+                            }
                         }
                         continue
                     }

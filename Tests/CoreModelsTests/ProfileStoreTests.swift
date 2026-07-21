@@ -491,12 +491,24 @@ final class SettingsNamespaceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportProfilesAddsNewAndKeepsLocalOnly() {
+    func testImportProfilesDoesNotClobberConfiguredReceiversDefault() {
         let model = ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
-        let newProfile = Profile(id: "kid-1", name: "Kid", createdAt: Date(timeIntervalSince1970: 50))
-        model.importProfiles([newProfile])
-        XCTAssertTrue(model.profiles.contains { $0.id == "kid-1" })
-        // Local default is preserved.
-        XCTAssertTrue(model.profiles.contains { $0.id == ProfileStore.defaultProfileID })
+        // Receiver already finished setup and customized its own default profile.
+        model.markFirstRunProfileSetupComplete()
+        var localDefault = model.profiles.first { $0.id == ProfileStore.defaultProfileID }!
+        localDefault.name = "My Real Profile"
+        localDefault.avatarEmoji = "🎬"
+        model.update(localDefault)
+
+        // A pairing transfer brings a different default (same shared id).
+        var incoming = Profile(id: ProfileStore.defaultProfileID, name: "Someone Else")
+        incoming.avatarEmoji = "🍣"
+        model.importProfiles([incoming])
+
+        // The receiver's own default is preserved, not overwritten.
+        let after = model.profiles.first { $0.id == ProfileStore.defaultProfileID }
+        XCTAssertEqual(after?.name, "My Real Profile")
+        XCTAssertEqual(after?.avatarEmoji, "🎬")
+        XCTAssertEqual(model.profiles.filter { $0.id == ProfileStore.defaultProfileID }.count, 1)
     }
 }

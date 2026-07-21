@@ -469,9 +469,20 @@ public final class ProfilesModel {
     public func importProfiles(_ incoming: [Profile]) {
         guard !incoming.isEmpty else { return }
         // Incoming profiles win by id: this both ADDS new profiles and UPDATES
-        // existing ones (notably the shared-id default profile) so a transferred
-        // profile's avatar/emoji/color actually replaces the receiver's pristine
-        // default instead of being silently dropped as a duplicate id.
+        // existing ones so a transferred profile's avatar/emoji/color actually
+        // replaces the receiver's pristine default instead of being dropped as a
+        // duplicate id.
+        //
+        // Clobber guard: the ONE id that legitimately collides across devices is
+        // the shared default profile (`defaultProfileID`); every other id is a
+        // UUID that only matches when it's genuinely the same profile. On a FRESH
+        // receiver (first-run not yet complete) overwriting the default is exactly
+        // what we want — it inherits the source's cosmetics. But once the receiver
+        // has completed setup, its default is a real, user-owned profile (its own
+        // name/photo, Plex Home mapping, downloads namespace); silently replacing
+        // it with a synced default would lose that. So on an already-configured
+        // receiver we keep the local default and skip the incoming one.
+        let receiverConfigured = firstRunProfileSetupComplete
         var byID: [String: Profile] = [:]
         var order: [String] = []
         for p in profiles {
@@ -479,6 +490,9 @@ public final class ProfilesModel {
             byID[p.id] = p
         }
         for p in incoming {
+            if p.id == ProfileStore.defaultProfileID, receiverConfigured, byID[p.id] != nil {
+                continue // don't clobber a configured receiver's own default
+            }
             if byID[p.id] == nil { order.append(p.id) }
             byID[p.id] = p
         }

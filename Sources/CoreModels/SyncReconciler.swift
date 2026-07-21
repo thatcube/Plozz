@@ -125,8 +125,28 @@ public struct SyncConfigSnapshot: Codable, Hashable, Sendable {
         return SyncConfigSnapshot(
             accounts: acc.records, accountTombstones: acc.tombstones,
             profiles: prof.records, profileTombstones: prof.tombstones,
-            profileSettings: remote.profileSettings.isEmpty ? profileSettings : remote.profileSettings,
+            profileSettings: SyncReconciler.unionByProfileID(local: profileSettings, remote: remote.profileSettings),
             schemaVersion: max(schemaVersion, remote.schemaVersion)
         )
+    }
+}
+
+extension SyncReconciler {
+    /// Merge two per-profile settings lists by `profileID`. A whole-list replace
+    /// would drop settings for any profile the remote snapshot doesn't happen to
+    /// carry; instead we keep every local profile's settings and overlay the
+    /// remote's values for the profiles it does include (remote-wins per profile,
+    /// matching the reconciler's incoming-can-update rule). No version field exists
+    /// on the snapshot, so per-profile last-writer is the best available tie-break.
+    static func unionByProfileID(
+        local: [ProfileSettingsSnapshot], remote: [ProfileSettingsSnapshot]
+    ) -> [ProfileSettingsSnapshot] {
+        var byID: [String: ProfileSettingsSnapshot] = [:]
+        var order: [String] = []
+        for snap in local + remote {
+            if byID[snap.profileID] == nil { order.append(snap.profileID) }
+            byID[snap.profileID] = snap
+        }
+        return order.compactMap { byID[$0] }
     }
 }

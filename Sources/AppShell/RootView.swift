@@ -129,18 +129,9 @@ public struct RootView: View {
                     appState: appState,
                     step: step,
                     canReturnToApp: canReturnToApp,
-                    deviceColorScheme: systemColorScheme
+                    deviceColorScheme: systemColorScheme,
+                    onSetUpFromAnotherDevice: canReturnToApp ? nil : { showSyncReceive = true }
                 )
-                .overlay(alignment: .bottom) {
-                    if step == .selectingServer {
-                        Button {
-                            showSyncReceive = true
-                        } label: {
-                            Label("Set up from another device", systemImage: "qrcode")
-                        }
-                        .padding(.bottom, 40)
-                    }
-                }
                 .fullScreenCover(isPresented: $showSyncReceive) {
                     SyncSetupReceiveView(appState: appState) { showSyncReceive = false }
                 }
@@ -415,6 +406,7 @@ private struct OnboardingFlowView: View {
     let step: OnboardingStep
     let canReturnToApp: Bool
     let deviceColorScheme: ColorScheme
+    var onSetUpFromAnotherDevice: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var displayedPage: OnboardingPage
@@ -426,12 +418,14 @@ private struct OnboardingFlowView: View {
         appState: AppState,
         step: OnboardingStep,
         canReturnToApp: Bool,
-        deviceColorScheme: ColorScheme
+        deviceColorScheme: ColorScheme,
+        onSetUpFromAnotherDevice: (() -> Void)? = nil
     ) {
         self.appState = appState
         self.step = step
         self.canReturnToApp = canReturnToApp
         self.deviceColorScheme = deviceColorScheme
+        self.onSetUpFromAnotherDevice = onSetUpFromAnotherDevice
         _displayedPage = State(initialValue: OnboardingPage(
             step: step,
             canReturnToApp: canReturnToApp,
@@ -444,7 +438,8 @@ private struct OnboardingFlowView: View {
             OnboardingPageContent(
                 page: displayedPage,
                 appState: appState,
-                deviceColorScheme: deviceColorScheme
+                deviceColorScheme: deviceColorScheme,
+                onSetUpFromAnotherDevice: onSetUpFromAnotherDevice
             )
             .id(displayedPage.transitionID)
             .geometryGroup()
@@ -516,6 +511,7 @@ private struct OnboardingPageContent: View {
     let page: OnboardingPage
     let appState: AppState
     let deviceColorScheme: ColorScheme
+    var onSetUpFromAnotherDevice: (() -> Void)?
 
     @ViewBuilder
     var body: some View {
@@ -575,7 +571,8 @@ private struct OnboardingPageContent: View {
                         )
                     }
                 },
-                onCancel: { appState.cancelAuthentication() }
+                onCancel: { appState.cancelAuthentication() },
+                onSetUpFromAnotherDevice: onSetUpFromAnotherDevice
             )
 
         case let .authenticating(server):

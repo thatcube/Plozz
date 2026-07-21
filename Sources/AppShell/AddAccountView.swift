@@ -22,6 +22,7 @@ struct AddAccountView: View {
     let onWebDAVShareConfigured: (WebDAVShareConfiguration) -> Void
     let onMediaShareConfigured: (MediaShareOnboardingResult) -> Void
     let onCancel: () -> Void
+    var onSetUpFromAnotherDevice: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var choice: ProviderKind?
@@ -42,7 +43,8 @@ struct AddAccountView: View {
         onShareConfigured: @escaping (ShareDraft) -> Void = { _ in },
         onWebDAVShareConfigured: @escaping (WebDAVShareConfiguration) -> Void = { _ in },
         onMediaShareConfigured: @escaping (MediaShareOnboardingResult) -> Void = { _ in },
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        onSetUpFromAnotherDevice: (() -> Void)? = nil
     ) {
         self.deviceID = deviceID
         self.canReturnToApp = canReturnToApp
@@ -54,6 +56,7 @@ struct AddAccountView: View {
         self.onWebDAVShareConfigured = onWebDAVShareConfigured
         self.onMediaShareConfigured = onMediaShareConfigured
         self.onCancel = onCancel
+        self.onSetUpFromAnotherDevice = onSetUpFromAnotherDevice
         // Seed the flow's starting screen. Cancelling Quick Connect returns here
         // with the provider preserved so we land on its server list, not the
         // chooser. Plex has no intermediate list, so it falls back to the chooser.
@@ -125,7 +128,8 @@ struct AddAccountView: View {
             showsBackButton: canReturnToApp,
             isPreparingPlex: isPreparingPlex,
             onBack: cancelPreparationOrReturn,
-            onSelect: navigate(to:)
+            onSelect: navigate(to:),
+            onSetUpFromAnotherDevice: onSetUpFromAnotherDevice
         )
     }
 
@@ -204,6 +208,7 @@ private enum ProviderChooserFocus: Hashable {
     case emby
     case plex
     case mediaShare
+    case setUpFromAnotherDevice
 
     init(provider: ProviderKind) {
         switch provider {
@@ -221,6 +226,7 @@ private struct ProviderChooserView: View {
     let isPreparingPlex: Bool
     let onBack: () -> Void
     let onSelect: (ProviderKind) -> Void
+    var onSetUpFromAnotherDevice: (() -> Void)?
     @FocusState private var focusedControl: ProviderChooserFocus?
 
     var body: some View {
@@ -245,6 +251,15 @@ private struct ProviderChooserView: View {
                 }
                 .buttonStyle(.bordered)
                 .focused($focusedControl, equals: .back)
+            }
+
+            if let onSetUpFromAnotherDevice {
+                Button(action: onSetUpFromAnotherDevice) {
+                    Label("Set up from another device", systemImage: "qrcode")
+                }
+                .buttonStyle(.bordered)
+                .focused($focusedControl, equals: .setUpFromAnotherDevice)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
         }
         .padding(.horizontal, 80)

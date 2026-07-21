@@ -49,16 +49,21 @@ public struct SyncPairingInvite: Codable, Hashable, Sendable {
     }
 }
 
-/// Abstract byte channel between two paired devices.
-public protocol PairingChannel: Sendable {
-    /// Source device: deliver a sealed payload to the target.
+/// Source side of a pairing byte channel.
+public protocol PairingSending: Sendable {
     func send(_ payload: SealedSyncPayload) async throws
-    /// Target device: await the next sealed payload.
+}
+
+/// Target side of a pairing byte channel.
+public protocol PairingReceiving: Sendable {
     func receive() async throws -> SealedSyncPayload
 }
 
+/// Convenience for transports that do both (e.g. the in-memory test channel).
+public typealias PairingChannel = PairingSending & PairingReceiving
+
 /// In-memory loopback channel for tests (source and target share one instance).
-public actor InMemoryPairingChannel: PairingChannel {
+public actor InMemoryPairingChannel: PairingSending, PairingReceiving {
     private var buffer: [SealedSyncPayload] = []
     private var waiters: [CheckedContinuation<SealedSyncPayload, Never>] = []
     public init() {}
@@ -82,7 +87,7 @@ public enum SyncPairingSession {
     public static func sendConfig(
         _ snapshot: SyncConfigSnapshot,
         to invite: SyncPairingInvite,
-        over channel: PairingChannel,
+        over channel: PairingSending,
         now: Date = Date()
     ) async throws {
         guard !invite.context.isExpired(now: now) else { throw SyncPairingError.expiredContext }
@@ -93,7 +98,7 @@ public enum SyncPairingSession {
     /// Target device (fresh): receive + open a config snapshot using its identity.
     public static func receiveConfig(
         with identity: SyncPairingIdentity,
-        over channel: PairingChannel,
+        over channel: PairingReceiving,
         now: Date = Date()
     ) async throws -> SyncConfigSnapshot {
         let sealed = try await channel.receive()

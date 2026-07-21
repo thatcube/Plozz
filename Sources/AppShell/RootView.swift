@@ -37,6 +37,7 @@ enum HomeRuntimeScope {
 /// Top-level view that renders one screen per `SessionState`.
 public struct RootView: View {
     @State private var appState: AppState
+    @State private var showSyncReceive = false
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
     /// The OS-level Reduce Transparency setting, resolved against the active
@@ -129,6 +130,17 @@ public struct RootView: View {
                     canReturnToApp: canReturnToApp,
                     deviceColorScheme: systemColorScheme
                 )
+                .overlay(alignment: .bottom) {
+                    Button {
+                        showSyncReceive = true
+                    } label: {
+                        Label("Set up from iPhone", systemImage: "iphone")
+                    }
+                    .padding(.bottom, 40)
+                }
+                .fullScreenCover(isPresented: $showSyncReceive) {
+                    SyncSetupReceiveView(appState: appState) { showSyncReceive = false }
+                }
 
             case .ready:
                 ZStack {

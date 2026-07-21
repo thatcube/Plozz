@@ -45,6 +45,25 @@ final class PlozziOSAppModel {
     let profiles: ProfilesModel
     /// Cross-device Sync & Setup (feature-flagged; OFF by default).
     let syncSetup: SyncSetupService
+
+    /// Persist a setup received over pairing: create accounts from the descriptors,
+    /// store their transferred tokens in the Keychain, and refresh providers so the
+    /// device is immediately signed in (no native sign-in needed).
+    func applyReceivedSetup(_ received: SyncSetupService.ReceivedSetup) {
+        let descByID = Dictionary(received.config.accounts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let secretByID = Dictionary((received.secrets?.accounts ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
+        for auth in received.application.authorizedAuthorizations {
+            guard let desc = descByID[auth.id], let secret = secretByID[auth.id] else { continue }
+            let baseURL = desc.candidateBaseURLs.first ?? URL(string: secret.trustedOrigin) ?? URL(string: "https://localhost")!
+            let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
+                                     provider: desc.provider,
+                                     connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
+            let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
+                                  avatarURL: desc.avatarURL, deviceID: secret.deviceID)
+            try? accountStore.add(account, token: secret.token)
+        }
+        accountsProviders.reloadAccounts()
+    }
     let authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
     let mediaShareRuntime: DefaultMediaShareRuntime
     let shareScanStatus: ShareScanStatusModel

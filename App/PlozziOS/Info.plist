@@ -52,6 +52,8 @@
 		<string>_smb._tcp</string>
 		<string>_plozz-pair._tcp</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Plozz uses the camera to scan the setup code shown on your Apple TV.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Plozz uses your local network to discover media servers and network shares.</string>
 	<key>OMDBAPIKey</key>

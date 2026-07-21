@@ -478,6 +478,27 @@ public final class AppState {
     /// Cross-device Sync & Setup (feature-flagged; OFF by default).
     public let syncSetup: SyncSetupService
 
+    /// Persist a setup received over pairing: create accounts from the descriptors,
+    /// store their transferred tokens in the Keychain, and refresh providers so the
+    /// device is immediately signed in (no native sign-in needed).
+    @MainActor
+    public func applyReceivedSetup(_ received: SyncSetupService.ReceivedSetup) {
+        let store = accountsProviders.accountStore
+        let descByID = Dictionary(received.config.accounts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let secretByID = Dictionary((received.secrets?.accounts ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
+        for auth in received.application.authorizedAuthorizations {
+            guard let desc = descByID[auth.id], let secret = secretByID[auth.id] else { continue }
+            let baseURL = desc.candidateBaseURLs.first ?? URL(string: secret.trustedOrigin) ?? URL(string: "https://localhost")!
+            let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
+                                     provider: desc.provider,
+                                     connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
+            let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
+                                  avatarURL: desc.avatarURL, deviceID: secret.deviceID)
+            try? store.add(account, token: secret.token)
+        }
+        accountsProviders.reloadAccounts()
+    }
+
     /// The Plex Home users ("Who's watching?") facet — owns per-account Plex
     /// token overrides, the PIN-prompt state, `plexIdentityGeneration`, and the
     /// profile↔Home-user switching. It resolves the accounts hub's token/credential

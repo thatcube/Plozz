@@ -162,6 +162,7 @@ private struct PlozziOSSettingsSplitView: View {
     @State private var selection: PlozziOSSettingsDestination?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var confirmSignOutAll = false
+    @State private var showSyncSendSheet = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -210,8 +211,16 @@ private struct PlozziOSSettingsSplitView: View {
                             Label("Sync across your devices", systemImage: "arrow.triangle.2.circlepath")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        Button {
+                            showSyncSendSheet = true
+                        } label: {
+                            Label("Set up another device", systemImage: "qrcode.viewfinder")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     } footer: {
-                        Text("Securely syncs your profiles and settings through your private iCloud (end-to-end encrypted). You still sign in to each server once per device. Off by default.")
+                        Text("Securely syncs your profiles and settings through your private iCloud (end-to-end encrypted). “Set up another device” signs your Apple TV in by scanning the code it shows — no typing. Off by default.")
                     }
 
                     SettingsSectionGroup(
@@ -279,6 +288,9 @@ private struct PlozziOSSettingsSplitView: View {
             }
         } message: {
             Text("This removes every server and network share from this device.")
+        }
+        .sheet(isPresented: $showSyncSendSheet) {
+            SyncSetupSendView(appModel: appModel) { showSyncSendSheet = false }
         }
         .onChange(of: columnVisibility) { _, visibility in
             if visibility != .all {

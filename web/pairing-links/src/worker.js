@@ -16,10 +16,9 @@
 
 const APP_ID = "N8Z5T4AK3X.com.thatcube.Plozz";
 
-// Public App Store URL for Plozz. Leave empty until the app is published; the
-// /pair page adapts its copy when this is empty. TestFlight public link also
-// works here once available.
-const APP_STORE_URL = "";
+// Public install URL for Plozz. TestFlight public link (works before an App
+// Store release). The /pair page adapts its copy if this is ever emptied.
+const APP_STORE_URL = "https://testflight.apple.com/join/EKfReNMu";
 
 const AASA = {
   applinks: {
@@ -65,7 +64,8 @@ export default {
 function pairPage() {
   const hasStore = APP_STORE_URL.length > 0;
   const cta = hasStore
-    ? `<a class="btn" href="${APP_STORE_URL}">Get Plozz</a>`
+    ? `<a class="btn" href="${APP_STORE_URL}">Get Plozz on TestFlight</a>
+       <p class="hint">Plozz is in public beta — TestFlight is a free Apple app.</p>`
     : `<p class="soon">Plozz isn’t on the App Store just yet.</p>`;
 
   return `<!doctype html>
@@ -97,6 +97,7 @@ function pairPage() {
   h1 { font-size: 24px; margin: 0 0 10px; letter-spacing: -0.02em; }
   p { margin: 0 0 14px; color: #c6c9da; }
   .soon { color: #ffd479; font-weight: 600; }
+  .hint { margin-top: 10px; font-size: 13px; color: #9a9fb5; }
   .btn {
     display: inline-block; margin-top: 12px; padding: 14px 26px; border-radius: 14px;
     background: #fff; color: #0b0d18; font-weight: 700; text-decoration: none;

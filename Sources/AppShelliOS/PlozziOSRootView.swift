@@ -22,7 +22,9 @@ public struct PlozziOSRootView: View {
 
     public var body: some View {
         Group {
-            if appModel.requiresLaunchProfileSelection
+            if appModel.accounts.isEmpty {
+                PlozziOSOnboardingView(appModel: appModel)
+            } else if appModel.requiresLaunchProfileSelection
                 && !completedLaunchProfileSelection {
                 PlozziOSProfilePickerView(
                     profiles: appModel.profiles.profiles,

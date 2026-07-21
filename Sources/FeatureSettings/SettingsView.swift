@@ -535,11 +535,9 @@ public struct SettingsView: View {
             debugHeroForegroundRow
 
             // DEBUG-only: wipe accounts, profiles, recents, and the first-run
-            // flag so the next server add reproduces a genuine first run.
-            // Hidden unless PLOZZ_SHOW_FIRST_RUN_RESET=1 is set at launch.
-            if Self.showDebugResetFirstRunRow {
-                debugResetFirstRunRow
-            }
+            // flag so the next server add reproduces a genuine first run. Always
+            // shown in Debug builds so it's reachable without a relaunch flag.
+            debugResetFirstRunRow
             #endif
         }
     }

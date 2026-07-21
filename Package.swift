@@ -576,6 +576,7 @@ let package = Package(
                 "FeatureSettings",
                 "FeatureProfiles",
                 "FeatureMusic",
+                "FeatureSyncSetup",
                 "TopShelfKit",
                 "CrashReporting",
             ]
@@ -610,6 +611,7 @@ let package = Package(
                 "SimklService",
                 "AniListService",
                 "MALService",
+                "FeatureSyncSetup",
             ]
         ),
 

@@ -1,0 +1,4 @@
+# Generated / build artifacts for the throwaway on-device probe app.
+dd/
+Generated/
+*.xcodeproj/

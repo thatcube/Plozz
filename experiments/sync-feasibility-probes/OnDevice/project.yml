@@ -1,0 +1,49 @@
+name: PlozzPairProbe
+# ISOLATED on-device feasibility probe app — NOT the Plozz app. Throwaway.
+# Validates real Bonjour discovery + Local Network permission between an iPhone
+# and an Apple TV. No iCloud, no credentials, no real stores.
+options:
+  bundleIdPrefix: com.thatcube
+  deploymentTarget:
+    iOS: "18.0"
+    tvOS: "18.0"
+settings:
+  base:
+    DEVELOPMENT_TEAM: N8Z5T4AK3X
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.9"
+targets:
+  PlozzPairProbeiOS:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Generated/Info-iOS.plist
+      properties:
+        CFBundleDisplayName: PairProbe
+        UILaunchScreen: {}
+        NSLocalNetworkUsageDescription: "PairProbe uses the local network to discover a nearby Apple TV for setup (feasibility probe)."
+        NSBonjourServices:
+          - _plozz-pair._tcp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.PlozzPairProbe
+        TARGETED_DEVICE_FAMILY: "1,2"
+  PlozzPairProbeTV:
+    type: application
+    platform: tvOS
+    sources:
+      - Sources
+    info:
+      path: Generated/Info-tvOS.plist
+      properties:
+        CFBundleDisplayName: PairProbe
+        NSLocalNetworkUsageDescription: "PairProbe uses the local network to let a nearby iPhone discover this Apple TV for setup (feasibility probe)."
+        NSBonjourServices:
+          - _plozz-pair._tcp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.PlozzPairProbeTV

@@ -11,9 +11,19 @@ code exists. Full product/UX reasoning lives in the session plan.
 | `BonjourProbe` (loopback) | `NWListener` advertise + `NWBrowser` discover + `NWConnection` exchange of a non-secret beacon | ✅ discovered in ~0.9 s; discover+exchange ~3 s (incl. loopback TCP setup) |
 | `PairingCryptoProbe` | HPKE seal→open to the target device key; wrong device can't open; pairing-context binding blocks replay | ✅ all checks pass; seal+open ~0.24 ms; ciphertext 70 B, encap 32 B |
 
-These validate the two mechanisms the pairing UX depends on (LAN discovery and a
-device-targeted, context-bound sealed transfer) at the API level. Cross-device and
-iCloud behaviors below still need real hardware.
+## 1a. Measured results (ON REAL HARDWARE — Brando TV, this LAN)
+
+| Test | What it proves | Result |
+| --- | --- | --- |
+| tvOS advertiser deployed to Brando TV (`OnDevice/PlozzPairProbeTV`) + Mac browses the real Wi-Fi | An Apple TV genuinely advertising `_plozz-pair._tcp` is discoverable by another device over the physical LAN | ✅ **Mac discovered `BrandoTV-PairProbe` in 0.009 s** |
+| iPhone browser (`OnDevice/PlozzPairProbeiOS`) discovers the TV + exchanges + Local Network prompt | The full user-facing phone→TV pairing discovery | ⏸️ **not completed autonomously** — iPhone was locked (install needs unlock; the Local Network permission prompt needs a physical tap). App builds + signs; run `OnDevice/run-ondevice.sh` with the phone unlocked to finish. |
+
+Notes: the Mac→TV *connect* after discovery did not complete in the autonomous run
+(tvOS suspends the backgrounded probe app; the full exchange is designed for
+iPhone↔TV with both apps foreground). Discovery — the core mechanism — is validated
+on real hardware and is effectively instant on this LAN. On-device iOS builds sign
+with the "Apple Development" identity via automatic provisioning + the ASC API key.
+
 
 ## 2. Platform evidence (from Apple docs + forums; see session plan for citations)
 

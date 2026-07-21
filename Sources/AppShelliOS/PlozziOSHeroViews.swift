@@ -970,18 +970,16 @@ private struct PlozziOSDetailHeroForeground: View {
             }
         }
         if sources.count > 1 {
-            Menu(selectedSourceLabel, systemImage: "server.rack") {
+            Menu {
                 ForEach(sources) { source in
                     Button {
                         onSelectSource(source.accountID)
                     } label: {
-                        if source.accountID == selectedSourceAccountID {
-                            Label(source.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(source.displayName)
-                        }
+                        sourceContextLabel(source)
                     }
                 }
+            } label: {
+                sourceContextLabel(selectedSource)
             }
         }
         if versions.count > 1 {
@@ -1006,6 +1004,29 @@ private struct PlozziOSDetailHeroForeground: View {
             .displayName
             ?? sources.first?.displayName
             ?? "Server"
+    }
+
+    private var selectedSource: MediaSourceRef? {
+        sources.first { $0.accountID == selectedSourceAccountID }
+            ?? sources.first
+    }
+
+    private func sourceContextLabel(
+        _ source: MediaSourceRef?
+    ) -> some View {
+        HStack(spacing: 8) {
+            if let provider = source?.providerKind {
+                ProviderBrandMark(
+                    provider: provider,
+                    size: 18,
+                    showsBackground: false
+                )
+            }
+            Text(source?.displayName ?? selectedSourceLabel)
+            if source?.accountID == selectedSourceAccountID {
+                Image(systemName: "checkmark")
+            }
+        }
     }
 
     private var selectedVersionLabel: String {

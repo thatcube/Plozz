@@ -1,7 +1,8 @@
 {
+
   "images" : [
     {
-      "filename" : "emby-logo.svg",
+      "filename" : "jellyfin-logo.svg",
       "idiom" : "universal"
     }
   ],

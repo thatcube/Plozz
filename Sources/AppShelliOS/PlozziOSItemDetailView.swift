@@ -709,17 +709,14 @@ private struct PlozziOSSourceVersionControls: View {
                         Button {
                             onSelectSource(source.accountID)
                         } label: {
-                            selectionLabel(
-                                source.displayName,
+                            sourceSelectionLabel(
+                                source,
                                 selected: source.accountID == selectedSourceID
                             )
                         }
                     }
                 } label: {
-                    Label(
-                        selectedSource?.displayName ?? "Server",
-                        systemImage: "server.rack"
-                    )
+                    sourceMenuLabel(selectedSource)
                 }
                 .buttonStyle(.bordered)
             }
@@ -753,6 +750,40 @@ private struct PlozziOSSourceVersionControls: View {
 
     private var selectedVersion: MediaVersion? {
         versions.first { $0.id == selectedVersionID }
+    }
+
+    private func sourceMenuLabel(
+        _ source: MediaSourceRef?
+    ) -> some View {
+        HStack(spacing: 8) {
+            if let provider = source?.providerKind {
+                ProviderBrandMark(
+                    provider: provider,
+                    size: 20,
+                    showsBackground: false
+                )
+            }
+            Text(source?.displayName ?? "Server")
+        }
+    }
+
+    private func sourceSelectionLabel(
+        _ source: MediaSourceRef,
+        selected: Bool
+    ) -> some View {
+        HStack(spacing: 8) {
+            if let provider = source.providerKind {
+                ProviderBrandMark(
+                    provider: provider,
+                    size: 18,
+                    showsBackground: false
+                )
+            }
+            Text(source.displayName)
+            if selected {
+                Image(systemName: "checkmark")
+            }
+        }
     }
 
     @ViewBuilder

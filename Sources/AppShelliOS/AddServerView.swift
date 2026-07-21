@@ -24,9 +24,9 @@ struct AddServerView: View {
             Form {
                 Section {
                     Picker("Provider", selection: $provider) {
-                        Text("Jellyfin").tag(ProviderKind.jellyfin)
-                        Text("Emby").tag(ProviderKind.emby)
-                        Text("Plex").tag(ProviderKind.plex)
+                        providerChoice(.jellyfin)
+                        providerChoice(.emby)
+                        providerChoice(.plex)
                     }
 
                     if provider != .plex {
@@ -121,6 +121,18 @@ struct AddServerView: View {
         address = selectedServer.baseURL.absoluteString
         validationMessage = nil
     }
+
+    private func providerChoice(_ provider: ProviderKind) -> some View {
+        HStack(spacing: 8) {
+            ProviderBrandMark(
+                provider: provider,
+                size: 22,
+                showsBackground: false
+            )
+            Text(provider.displayName)
+        }
+        .tag(provider)
+    }
 }
 
 private struct ManagedServerDiscoverySection: View {
@@ -153,10 +165,10 @@ private struct ManagedServerDiscoverySection: View {
                         onSelect(server)
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: server.provider == .emby
-                                ? "play.rectangle.on.rectangle"
-                                : "play.tv")
-                                .foregroundStyle(.tint)
+                            ProviderBrandMark(
+                                provider: server.provider,
+                                size: 30
+                            )
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(server.name)

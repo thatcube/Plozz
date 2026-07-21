@@ -25,8 +25,7 @@ struct SyncSetupReceiveView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(white: 0.10), Color(white: 0.03)],
-                           startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            AppBackground(palette: palette)
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .task { await model.startReceiving() }
@@ -41,27 +40,30 @@ struct SyncSetupReceiveView: View {
                 ProgressView()
             case .waitingForPeer(let code, let invite):
                 Text("Set up from another device").font(.largeTitle.bold())
+                    .foregroundStyle(palette.primaryText)
                 HStack(alignment: .center, spacing: 60) {
                     if let img = Self.qrImage(invite.encoded()) {
                         VStack(spacing: 12) {
                             Image(uiImage: img).interpolation(.none).resizable()
                                 .frame(width: 340, height: 340)
                                 .padding(18).background(.white).cornerRadius(16)
-                            Text("Scan with your phone or tablet").font(.callout).foregroundStyle(.secondary)
+                            Text("Scan with your phone or tablet").font(.callout)
+                                .foregroundStyle(palette.secondaryText)
                         }
                     }
                     VStack(spacing: 10) {
-                        Text("or enter code").font(.callout).foregroundStyle(.secondary)
+                        Text("or enter code").font(.callout).foregroundStyle(palette.secondaryText)
                         Text(SyncPairingCode.grouped(code))
                             .font(.system(size: 56, weight: .bold, design: .rounded)).monospaced()
-                        Text("on another device").font(.callout).foregroundStyle(.secondary)
+                            .foregroundStyle(palette.primaryText)
+                        Text("on another device").font(.callout).foregroundStyle(palette.secondaryText)
                     }
                 }
                 Text("On your other device, open Plozz ▸ Settings ▸ Sync & Setup ▸ “Set up another device.”")
-                    .font(.headline).foregroundStyle(.secondary)
+                    .font(.headline).foregroundStyle(palette.secondaryText)
                     .multilineTextAlignment(.center).frame(maxWidth: 900)
             case .applying:
-                ProgressView("Setting up…").font(.title2)
+                ProgressView("Setting up…").font(.title2).foregroundStyle(palette.primaryText)
             case .applied(let received):
                 appliedSummary(received)
             case .connecting, .sending, .sent:

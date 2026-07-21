@@ -26,8 +26,7 @@ struct SyncSetupSendView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(white: 0.10), Color(white: 0.03)],
-                           startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            AppBackground(palette: palette)
             content.frame(maxWidth: .infinity, maxHeight: .infinity).padding(70)
         }
         .onAppear { model.startDiscovery() }

@@ -20,6 +20,21 @@ struct SyncSetupReceiveView: View {
     }
 
     var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(white: 0.10), Color(white: 0.03)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .task { await model.startReceiving() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         VStack(spacing: 28) {
             switch model.phase {
             case .idle:
@@ -62,7 +77,6 @@ struct SyncSetupReceiveView: View {
             }
         }
         .padding(70)
-        .task { await model.startReceiving() }
     }
 
     static func qrImage(_ string: String) -> UIImage? {

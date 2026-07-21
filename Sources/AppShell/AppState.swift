@@ -647,7 +647,17 @@ public final class AppState {
         let syncStore = resolvedAccountStore
         self.syncSetup = SyncSetupService(
             deviceID: { syncStore.deviceID() },
-            deviceName: { UIDevice.current.name },
+            deviceName: {
+                // tvOS 16+ returns a generic UIDevice.name without a special
+                // entitlement, so prefer the Bonjour host name (derived from the
+                // user-assigned device name, e.g. "Brando-TV.local" -> "Brando-TV").
+                let host = ProcessInfo.processInfo.hostName
+                if !host.isEmpty, host.lowercased() != "localhost" {
+                    return host.replacingOccurrences(of: ".local", with: "")
+                }
+                let name = UIDevice.current.name
+                return name.isEmpty ? "Apple TV" : name
+            },
             isConfigured: { !syncAccounts.accounts.isEmpty },
             configProvider: {
                 .init(accounts: syncAccounts.accounts, profiles: syncProfiles.profiles)

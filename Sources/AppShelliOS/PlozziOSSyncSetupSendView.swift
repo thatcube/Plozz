@@ -72,7 +72,7 @@ struct SyncSetupSentSuccessView: View {
 
             Spacer(minLength: 0)
             Button("Done", action: onDone)
-                .buttonStyle(.borderedProminent).controlSize(.large)
+                .syncPrimaryButtonStyle().controlSize(.large)
                 .padding(.bottom, 28)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -135,7 +135,7 @@ struct SyncSetupCodeEntryScreen: View {
                     .font(.system(.largeTitle, design: .rounded).weight(.bold))
                     .textFieldStyle(.roundedBorder).padding(.horizontal, 40)
                 Button("Continue") { onSubmit(typedCode) }
-                    .buttonStyle(.borderedProminent)
+                    .syncPrimaryButtonStyle()
                     .disabled(SyncPairingCode.normalize(typedCode).count < 4)
                 Spacer()
             }

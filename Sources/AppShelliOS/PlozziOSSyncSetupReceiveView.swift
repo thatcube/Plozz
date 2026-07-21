@@ -74,7 +74,7 @@ struct PlozziOSSyncSetupReceiveView: View {
                 Text(message).foregroundStyle(palette.secondaryText)
                     .multilineTextAlignment(.center)
                 Button("Try Again") { Task { await model.startReceiving() } }
-                    .buttonStyle(.borderedProminent)
+                    .syncPrimaryButtonStyle()
             }
         default:
             centered { ProgressView() }
@@ -185,7 +185,7 @@ struct PlozziOSSyncSetupReceiveView: View {
                     onClose()
                 }
             }
-            .buttonStyle(.borderedProminent).controlSize(.large)
+            .syncPrimaryButtonStyle().controlSize(.large)
         }
     }
 

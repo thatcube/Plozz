@@ -69,7 +69,7 @@ struct PlozziOSSyncSetupDeepLinkView: View {
                         await model.send(deepLink: invite)
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .syncPrimaryButtonStyle()
                 .padding(.bottom, 24)
             }
         default:

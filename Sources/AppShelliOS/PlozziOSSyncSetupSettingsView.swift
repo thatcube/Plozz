@@ -40,7 +40,7 @@ struct PlozziOSSyncSetupSettingsView: View {
                     Text(message).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).padding(.horizontal)
                     Button("Try Again") { handled = false; model.reset(); model.startDiscovery() }
-                        .buttonStyle(.borderedProminent)
+                        .syncPrimaryButtonStyle()
                 }
             default:
                 centered { ProgressView() }

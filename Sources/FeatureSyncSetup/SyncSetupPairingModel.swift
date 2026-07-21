@@ -22,7 +22,7 @@ public final class SyncSetupPairingModel {
         case idle
         case waitingForPhone(invite: SyncPairingInvite)   // target advertising
         case applying                                     // received, applying
-        case applied(SyncSetupCoordinator.Application)    // target done
+        case applied(SyncSetupService.ReceivedSetup)      // target done
         case sending                                      // source in flight
         case sent                                         // source done
         case failed(String)
@@ -53,13 +53,13 @@ public final class SyncSetupPairingModel {
         phase = .waitingForPhone(invite: invite)
         let receiver = makeReceiver(invite.serviceName)
         do {
-            let application = try await service.receiveConfig(
+            let received = try await service.receiveSetup(
                 identity: identity,
                 over: receiver,
                 existingAuthorizations: existingAuthorizations()
             )
             phase = .applying
-            phase = .applied(application)
+            phase = .applied(received)
         } catch {
             phase = .failed(Self.describe(error))
         }
@@ -78,7 +78,7 @@ public final class SyncSetupPairingModel {
         phase = .sending
         let sender = makeSender(invite.serviceName)
         do {
-            try await service.sendConfig(to: invite, over: sender)
+            try await service.sendSetup(to: invite, over: sender)
             phase = .sent
         } catch {
             phase = .failed(Self.describe(error))

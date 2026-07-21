@@ -617,6 +617,20 @@ public final class AppState {
             isConfigured: { !syncAccounts.accounts.isEmpty },
             configProvider: {
                 .init(accounts: syncAccounts.accounts, profiles: syncProfiles.profiles)
+            },
+            secretsProvider: {
+                var accts: [AccountSecret] = []
+                for account in syncAccounts.accounts {
+                    guard let token = syncStore.token(for: account.id) else { continue }
+                    accts.append(AccountSecret(
+                        accountID: account.id,
+                        provider: account.server.provider,
+                        token: token,
+                        deviceID: account.deviceID,
+                        trustedOrigin: LocalAuthorization.origin(of: account.server.baseURL)
+                    ))
+                }
+                return SyncSecretsBundle(accounts: accts)
             }
         )
 

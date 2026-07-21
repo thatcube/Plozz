@@ -83,24 +83,25 @@ public actor InMemoryPairingChannel: PairingSending, PairingReceiving {
 
 public enum SyncPairingSession {
 
-    /// Source device (has the config): seal the snapshot to the invite and send.
-    public static func sendConfig(
-        _ snapshot: SyncConfigSnapshot,
+    /// Source device: seal the transfer bundle (config + optional credentials) to
+    /// the invite and send.
+    public static func sendSetup(
+        _ bundle: SyncTransferBundle,
         to invite: SyncPairingInvite,
         over channel: PairingSending,
         now: Date = Date()
     ) async throws {
         guard !invite.context.isExpired(now: now) else { throw SyncPairingError.expiredContext }
-        let sealed = try SyncPairingCrypto.seal(snapshot, toPublicKey: invite.publicKeyData, context: invite.context)
+        let sealed = try SyncPairingCrypto.seal(bundle, toPublicKey: invite.publicKeyData, context: invite.context)
         try await channel.send(sealed)
     }
 
-    /// Target device (fresh): receive + open a config snapshot using its identity.
-    public static func receiveConfig(
+    /// Target device: receive + open a transfer bundle using its identity.
+    public static func receiveSetup(
         with identity: SyncPairingIdentity,
         over channel: PairingReceiving,
         now: Date = Date()
-    ) async throws -> SyncConfigSnapshot {
+    ) async throws -> SyncTransferBundle {
         let sealed = try await channel.receive()
         return try SyncPairingCrypto.open(sealed, with: identity, now: now)
     }

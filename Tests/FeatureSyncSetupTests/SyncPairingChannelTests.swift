@@ -35,11 +35,11 @@ final class SyncPairingChannelTests: XCTestCase {
         let snapshot = coord.exportSnapshot(accounts: [account], profiles: [Profile(id: "p1", name: "Brandon")])
 
         let channel = InMemoryPairingChannel()
-        try await SyncPairingSession.sendConfig(snapshot, to: invite, over: channel)
+        try await SyncPairingSession.sendSetup(SyncTransferBundle(config: snapshot), to: invite, over: channel)
 
         // TV receives + opens + applies.
-        let received = try await SyncPairingSession.receiveConfig(with: tvIdentity, over: channel)
-        let app = coord.apply(snapshot: received, existingAuthorizations: [:], thisDeviceID: "tv")
+        let received = try await SyncPairingSession.receiveSetup(with: tvIdentity, over: channel)
+        let app = coord.apply(snapshot: received.config, existingAuthorizations: [:], thisDeviceID: "tv")
 
         XCTAssertEqual(app.profiles.map(\.id), ["p1"])
         XCTAssertEqual(app.pendingAuthorizations.map(\.id), ["a1"])
@@ -54,7 +54,7 @@ final class SyncPairingChannelTests: XCTestCase {
                                        context: SyncPairingContext(ttlSeconds: 1, now: past))
         let channel = InMemoryPairingChannel()
         do {
-            try await SyncPairingSession.sendConfig(SyncConfigSnapshot(), to: invite, over: channel)
+            try await SyncPairingSession.sendSetup(SyncTransferBundle(config: SyncConfigSnapshot()), to: invite, over: channel)
             XCTFail("expected expiredContext")
         } catch {
             XCTAssertEqual(error as? SyncPairingError, .expiredContext)

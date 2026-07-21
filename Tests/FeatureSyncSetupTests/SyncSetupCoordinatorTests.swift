@@ -70,9 +70,9 @@ final class SyncSetupCoordinatorTests: XCTestCase {
         let snap = coord.exportSnapshot(accounts: [account("a1")], profiles: [Profile(id: "p1", name: "Brandon")])
         let tv = SyncPairingIdentity()
         let ctx = SyncPairingContext()
-        let sealed = try SyncPairingCrypto.seal(snap, toPublicKey: tv.publicKeyData, context: ctx)
+        let sealed = try SyncPairingCrypto.seal(SyncTransferBundle(config: snap), toPublicKey: tv.publicKeyData, context: ctx)
         let received = try SyncPairingCrypto.open(sealed, with: tv)
-        let app = coord.apply(snapshot: received, existingAuthorizations: [:], thisDeviceID: "tv-device")
+        let app = coord.apply(snapshot: received.config, existingAuthorizations: [:], thisDeviceID: "tv-device")
         XCTAssertEqual(app.pendingAuthorizations.map(\.id), ["a1"])
         XCTAssertEqual(app.profiles.map(\.id), ["p1"])
     }

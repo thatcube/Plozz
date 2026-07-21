@@ -51,11 +51,11 @@ final class SyncSetupPairingModelTests: XCTestCase {
         await receiving
 
         XCTAssertEqual(phone.phase, .sent)
-        guard case .applied(let application) = tv.phase else {
+        guard case .applied(let received) = tv.phase else {
             return XCTFail("expected applied, got \(tv.phase)")
         }
-        XCTAssertEqual(application.profiles.map(\.id), ["p1"])
-        XCTAssertEqual(application.pendingAuthorizations.map(\.id), ["a1"])
+        XCTAssertEqual(received.application.profiles.map(\.id), ["p1"])
+        XCTAssertEqual(received.application.pendingAuthorizations.map(\.id), ["a1"])
     }
 
     func testSendRejectsGarbageInvite() async {

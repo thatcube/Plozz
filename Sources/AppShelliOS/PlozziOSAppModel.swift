@@ -242,6 +242,22 @@ final class PlozziOSAppModel {
             isConfigured: { !accountsProviders.accounts.isEmpty },
             configProvider: {
                 .init(accounts: accountsProviders.accounts, profiles: profiles.profiles)
+            },
+            secretsProvider: {
+                // Gather this device's credentials for a no-tap transfer over the
+                // E2E pairing channel (provider tokens; shares handled separately).
+                var accts: [AccountSecret] = []
+                for account in accountsProviders.accounts {
+                    guard let token = accountStore.token(for: account.id) else { continue }
+                    accts.append(AccountSecret(
+                        accountID: account.id,
+                        provider: account.server.provider,
+                        token: token,
+                        deviceID: account.deviceID,
+                        trustedOrigin: LocalAuthorization.origin(of: account.server.baseURL)
+                    ))
+                }
+                return SyncSecretsBundle(accounts: accts)
             }
         )
         self.plexHomeUsers = PlexHomeUsersModel(

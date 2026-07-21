@@ -71,12 +71,53 @@ final class SyncSetupServiceTests: XCTestCase {
         let (invite, identity) = tv.makeInvite()
         let channel = InMemoryPairingChannel()
 
-        async let received = tv.receiveConfig(identity: identity, over: channel)
-        try await phone.sendConfig(to: invite, over: channel)
-        let application = try await received
+        async let received = tv.receiveSetup(identity: identity, over: channel)
+        try await phone.sendSetup(to: invite, over: channel)
+        let application = try await received.application
 
         XCTAssertEqual(application.profiles.map(\.id), ["p1"])
         XCTAssertEqual(application.pendingAuthorizations.map(\.id), ["a1"])
         XCTAssertTrue(application.pendingAuthorizations.allSatisfy { $0.state == .pending })
+    }
+
+    func testCredentialTransferSignsInWithNoPending() async throws {
+        // Phone has config AND provides credentials to transfer.
+        let d = UserDefaults(suiteName: "svc.\(UUID().uuidString)")!
+        var flag = SyncSetupFeatureFlag(defaults: d); flag.isEnabled = true
+        let phone = SyncSetupService(
+            flag: SyncSetupFeatureFlag(defaults: d),
+            beaconStore: InMemoryPresenceBeaconStore(),
+            deviceID: { "phone" },
+            deviceName: { "iPhone" },
+            isConfigured: { true },
+            configProvider: { .init(accounts: [self.account("a1")], profiles: [Profile(id: "p1", name: "Brandon")]) },
+            secretsProvider: {
+                SyncSecretsBundle(accounts: [AccountSecret(accountID: "a1", provider: .jellyfin,
+                                                           token: "TOK", deviceID: "phone",
+                                                           trustedOrigin: "https://h.example.com")])
+            }
+        )
+        let tv = SyncSetupService(
+            beaconStore: InMemoryPresenceBeaconStore(),
+            deviceID: { "tv" },
+            deviceName: { "Apple TV" },
+            isConfigured: { false },
+            configProvider: { .init(accounts: [], profiles: []) }
+        )
+
+        let (invite, identity) = tv.makeInvite()
+        let channel = InMemoryPairingChannel()
+        async let received = tv.receiveSetup(identity: identity, over: channel)
+        try await phone.sendSetup(to: invite, over: channel)
+        let result = try await received
+        let application = result.application
+
+        // No sign-in needed on the TV: the account is authorized, nothing pending.
+        XCTAssertTrue(application.pendingAuthorizations.isEmpty)
+        XCTAssertEqual(application.authorizedAuthorizations.map(\.id), ["a1"])
+        XCTAssertEqual(application.authorizedAuthorizations.first?.state, .authorized)
+        XCTAssertTrue(application.authorizedAuthorizations.first?.trustedOrigins.contains("https://h.example.com") ?? false)
+        // The received bundle carries the transferred credential for the app to persist.
+        XCTAssertEqual(result.secrets?.accounts.first?.token, "TOK")
     }
 }

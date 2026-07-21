@@ -44,6 +44,46 @@ public struct SyncSetupCoordinator: Sendable {
         /// move onto an untrusted origin — must NOT be applied silently; the app
         /// should re-verify. (Guards the endpoint-retarget attack.)
         public var needsReverification: [String]
+        /// Accounts that were signed in via a transferred credential (no tap needed).
+        public var authorizedAuthorizations: [LocalAuthorization]
+
+        public init(
+            profiles: [Profile],
+            pendingAuthorizations: [LocalAuthorization],
+            needsReverification: [String],
+            authorizedAuthorizations: [LocalAuthorization] = []
+        ) {
+            self.profiles = profiles
+            self.pendingAuthorizations = pendingAuthorizations
+            self.needsReverification = needsReverification
+            self.authorizedAuthorizations = authorizedAuthorizations
+        }
+
+        /// Move the given account ids from `pending` to `authorized` because their
+        /// credentials arrived over the pairing channel. Each authorized entry
+        /// records the trusted origin(s) from `origins[id]`.
+        public func markingAuthorized(_ ids: Set<String>, deviceID: String,
+                                      origins: [String: Set<String>] = [:]) -> Application {
+            guard !ids.isEmpty else { return self }
+            var stillPending: [LocalAuthorization] = []
+            var nowAuthorized = authorizedAuthorizations
+            for auth in pendingAuthorizations {
+                if ids.contains(auth.id) {
+                    nowAuthorized.append(LocalAuthorization(
+                        id: auth.id, state: .authorized, deviceID: deviceID,
+                        trustedOrigins: origins[auth.id] ?? []
+                    ))
+                } else {
+                    stillPending.append(auth)
+                }
+            }
+            return Application(
+                profiles: profiles,
+                pendingAuthorizations: stillPending,
+                needsReverification: needsReverification,
+                authorizedAuthorizations: nowAuthorized
+            )
+        }
     }
 
     /// Apply an incoming snapshot against this device's current authorizations.

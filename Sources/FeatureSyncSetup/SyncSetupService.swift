@@ -31,6 +31,7 @@ public final class SyncSetupService {
     private let coordinator = SyncSetupCoordinator()
 
     private let configProvider: @MainActor () -> LocalConfig
+    private let secretsProvider: @MainActor () -> SyncSecretsBundle
     private let deviceID: @MainActor () -> String
     private let deviceName: @MainActor () -> String
     private let isConfigured: @MainActor () -> Bool
@@ -43,7 +44,8 @@ public final class SyncSetupService {
         deviceID: @escaping @MainActor () -> String,
         deviceName: @escaping @MainActor () -> String,
         isConfigured: @escaping @MainActor () -> Bool,
-        configProvider: @escaping @MainActor () -> LocalConfig
+        configProvider: @escaping @MainActor () -> LocalConfig,
+        secretsProvider: @escaping @MainActor () -> SyncSecretsBundle = { SyncSecretsBundle() }
     ) {
         self.flag = flag
         self.beaconStore = beaconStore
@@ -51,6 +53,7 @@ public final class SyncSetupService {
         self.deviceName = deviceName
         self.isConfigured = isConfigured
         self.configProvider = configProvider
+        self.secretsProvider = secretsProvider
         self.isEnabled = flag.isEnabled
     }
 
@@ -103,27 +106,53 @@ public final class SyncSetupService {
         return (invite, identity)
     }
 
-    /// Receive a config snapshot over a channel and compute what to apply. The
-    /// caller persists profiles and offers native sign-in for pending accounts.
-    public func receiveConfig(
+    /// Everything a target device needs to persist a received setup: the config
+    /// (descriptors + profiles), any transferred credentials, and the computed
+    /// application (which accounts are authorized vs still pending sign-in).
+    public struct ReceivedSetup: Sendable, Equatable {
+        public let config: SyncConfigSnapshot
+        public let secrets: SyncSecretsBundle?
+        public let application: SyncSetupCoordinator.Application
+    }
+
+    /// Receive a setup bundle over a channel and compute what to persist. Accounts
+    /// whose credentials arrived are marked authorized (no sign-in needed); the
+    /// rest are pending for native sign-in. The caller persists profiles, creates
+    /// accounts from `config` + `secrets`, and stores credentials in the Keychain.
+    public func receiveSetup(
         identity: SyncPairingIdentity,
         over channel: PairingReceiving,
         existingAuthorizations: [String: LocalAuthorization] = [:]
-    ) async throws -> SyncSetupCoordinator.Application {
-        let snapshot = try await SyncPairingSession.receiveConfig(with: identity, over: channel)
-        return coordinator.apply(
-            snapshot: snapshot,
+    ) async throws -> ReceivedSetup {
+        let bundle = try await SyncPairingSession.receiveSetup(with: identity, over: channel)
+        var application = coordinator.apply(
+            snapshot: bundle.config,
             existingAuthorizations: existingAuthorizations,
             thisDeviceID: deviceID()
         )
+        if let secrets = bundle.secrets, !secrets.isEmpty {
+            var origins: [String: Set<String>] = [:]
+            for a in secrets.accounts { origins[a.accountID, default: []].insert(a.trustedOrigin) }
+            application = application.markingAuthorized(
+                secrets.authorizedAccountIDs, deviceID: deviceID(), origins: origins
+            )
+        }
+        return ReceivedSetup(config: bundle.config, secrets: bundle.secrets, application: application)
     }
 
-    // MARK: Pairing — source (this device sends its config, e.g. phone)
+    // MARK: Pairing — source (this device sends its config + credentials)
 
-    /// Seal this device's NON-SECRET config to a scanned invite and send it.
-    public func sendConfig(to invite: SyncPairingInvite, over channel: PairingSending) async throws {
+    /// Seal this device's config — and, unless `configOnly`, its credentials so the
+    /// target signs in with no taps — to a scanned invite and send it.
+    public func sendSetup(
+        to invite: SyncPairingInvite,
+        over channel: PairingSending,
+        configOnly: Bool = false
+    ) async throws {
         let cfg = configProvider()
         let snapshot = coordinator.exportSnapshot(accounts: cfg.accounts, profiles: cfg.profiles)
-        try await SyncPairingSession.sendConfig(snapshot, to: invite, over: channel)
+        let secrets = configOnly ? nil : secretsProvider()
+        let bundle = SyncTransferBundle(config: snapshot, secrets: (secrets?.isEmpty ?? true) ? nil : secrets)
+        try await SyncPairingSession.sendSetup(bundle, to: invite, over: channel)
     }
 }

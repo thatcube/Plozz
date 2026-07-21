@@ -2,19 +2,15 @@ import Foundation
 import CryptoKit
 import CoreModels
 
-// MARK: - Sync pairing crypto (v1: NON-SECRET config only)
+// MARK: - Sync pairing crypto (config + optional credentials, E2E)
 //
-// Productizes the validated pairing primitive (CryptoKit HPKE, RFC 9180) into a
-// reusable API. In v1 the ONLY thing that can travel through it is a
-// `SyncConfigSnapshot` — which is non-secret by construction (token-free account
-// descriptors + profiles). This is a deliberate type-level guardrail: no token or
-// password type is accepted here, so v1 cannot accidentally ship a secret over the
-// pairing channel. (Extending this to carry credentials is the separately-reviewed
-// deferred item, and must not reuse this API without that review.)
-//
-// The payload is sealed to the target device's ephemeral public key and bound to a
-// pairing context (ceremony id + expiry), so a captured blob can't be opened by a
-// different device or replayed into another pairing.
+// Productizes the validated pairing primitive (CryptoKit HPKE, RFC 9180). It seals
+// a `SyncTransferBundle` — non-secret config, plus OPTIONALLY the credentials that
+// let the paired device sign in with no taps. Secrets ride ONLY this channel:
+// sealed to the target device's ephemeral public key and bound to a pairing
+// context (ceremony id + expiry), so a captured blob can't be opened by a
+// different device or replayed. This is the E2E, physically-confirmed, device→
+// device transfer — nothing here is ever placed where a server can read it.
 
 /// The pairing ceremony context, conveyed out-of-band (QR / short code) and mixed
 /// into the HPKE `info` so the seal is bound to this specific, time-limited pairing.
@@ -22,18 +18,18 @@ public struct SyncPairingContext: Codable, Hashable, Sendable {
     public var ceremonyID: String
     public var expiresAtEpoch: Int
     public var protocolVersion: Int
-    /// Kind guard — v1 only ever seals non-secret config.
+    /// Kind guard for the sealed payload shape.
     public var kind: String
 
     public static let currentProtocolVersion = 1
-    public static let configKind = "sync-config-v1"
+    public static let setupKind = "sync-setup-v1"
 
     public init(
         ceremonyID: String = UUID().uuidString,
         ttlSeconds: Int = 120,
         now: Date = Date(),
         protocolVersion: Int = SyncPairingContext.currentProtocolVersion,
-        kind: String = SyncPairingContext.configKind
+        kind: String = SyncPairingContext.setupKind
     ) {
         self.ceremonyID = ceremonyID
         self.expiresAtEpoch = Int(now.timeIntervalSince1970) + ttlSeconds
@@ -81,17 +77,18 @@ public enum SyncPairingCrypto {
     private static let suite = HPKE.Ciphersuite.Curve25519_SHA256_ChachaPoly
     private static let aad = Data("plozz-sync-pairing-v1".utf8)
 
-    /// Seal a NON-SECRET config snapshot to the target device's public key.
+    /// Seal a transfer bundle (non-secret config + optional credentials) to the
+    /// target device's public key.
     public static func seal(
-        _ snapshot: SyncConfigSnapshot,
+        _ bundle: SyncTransferBundle,
         toPublicKey publicKeyData: Data,
         context: SyncPairingContext
     ) throws -> SealedSyncPayload {
-        guard context.kind == SyncPairingContext.configKind else { throw SyncPairingError.kindMismatch }
+        guard context.kind == SyncPairingContext.setupKind else { throw SyncPairingError.kindMismatch }
         let recipient = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: publicKeyData)
         let info = try context.infoData()
         var sender = try HPKE.Sender(recipientKey: recipient, ciphersuite: suite, info: info)
-        let plaintext = try JSONEncoder().encode(snapshot)
+        let plaintext = try JSONEncoder().encode(bundle)
         let ct = try sender.seal(plaintext, authenticating: aad)
         return SealedSyncPayload(encapsulatedKey: sender.encapsulatedKey, ciphertext: ct, context: context)
     }
@@ -102,8 +99,8 @@ public enum SyncPairingCrypto {
         _ payload: SealedSyncPayload,
         with identity: SyncPairingIdentity,
         now: Date = Date()
-    ) throws -> SyncConfigSnapshot {
-        guard payload.context.kind == SyncPairingContext.configKind else { throw SyncPairingError.kindMismatch }
+    ) throws -> SyncTransferBundle {
+        guard payload.context.kind == SyncPairingContext.setupKind else { throw SyncPairingError.kindMismatch }
         guard !payload.context.isExpired(now: now) else { throw SyncPairingError.expiredContext }
         let info = try payload.context.infoData()
         do {
@@ -112,7 +109,7 @@ public enum SyncPairingCrypto {
                 info: info, encapsulatedKey: payload.encapsulatedKey
             )
             let pt = try recipient.open(payload.ciphertext, authenticating: aad)
-            return try JSONDecoder().decode(SyncConfigSnapshot.self, from: pt)
+            return try JSONDecoder().decode(SyncTransferBundle.self, from: pt)
         } catch let e as SyncPairingError {
             throw e
         } catch {

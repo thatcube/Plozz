@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import CoreModels
 import FeatureAuth
+import FeatureShareOnboarding
 import Foundation
 import MediaTransportHTTP
 import MediaTransportWebDAV
@@ -11,14 +12,6 @@ enum WebDAVAuthMode: String, CaseIterable, Sendable {
     case anonymous
     case usernamePassword
     case bearer
-}
-
-/// The finished configuration handed back to `AppState.didConfigureWebDAVShare`.
-struct WebDAVShareConfiguration: Equatable {
-    let baseURL: URL
-    let auth: AppState.WebDAVShareAuth
-    let trustPin: SHA256Fingerprint?
-    let displayName: String
 }
 
 /// Drives the "Add a WebDAV share" flow: enter address + credentials, preflight

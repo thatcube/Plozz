@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import CoreUI
+import FeatureShareOnboarding
 import FeatureAuth
 import Foundation
 import SwiftUI

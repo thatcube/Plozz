@@ -537,10 +537,28 @@ let package = Package(
             ]
         ),
 
+        // MARK: Shared media-share onboarding (used by both tvOS + iOS shells)
+        .target(
+            name: "FeatureShareOnboarding",
+            dependencies: [
+                "AppRuntime",
+                "CoreModels",
+                "CoreNetworking",
+                "FeatureAuthCore",
+                "ProviderShare",
+                "MediaTransportHTTP",
+                "MediaTransportWebDAV",
+                "MediaTransportSFTP",
+                "MediaTransportFTP",
+                "MediaTransportNFS",
+            ]
+        ),
+
         // MARK: App composition root
         .target(
             name: "AppShell",
             dependencies: [
+                "FeatureShareOnboarding",
                 "AppRuntime",
                 "CoreModels",
                 "CoreNetworking",
@@ -584,6 +602,7 @@ let package = Package(
         .target(
             name: "AppShelliOS",
             dependencies: [
+                "FeatureShareOnboarding",
                 "AppRuntime",
                 "CoreModels",
                 "CoreNetworking",

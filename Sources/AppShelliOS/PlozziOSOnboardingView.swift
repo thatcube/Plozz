@@ -41,14 +41,7 @@ struct PlozziOSOnboardingView: View {
             PlozziOSSyncSetupReceiveView(appModel: appModel) { showReceive = false }
         }
         .fullScreenCover(isPresented: $showAddShare) {
-            NavigationStack {
-                PlozziOSAddShareView(appModel: appModel)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") { showAddShare = false }
-                        }
-                    }
-            }
+            PlozziOSUnifiedAddShareView(appModel: appModel)
         }
     }
 

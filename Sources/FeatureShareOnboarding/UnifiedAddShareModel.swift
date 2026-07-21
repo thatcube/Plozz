@@ -1,8 +1,8 @@
-#if canImport(SwiftUI)
 import Foundation
 import Observation
+import AppRuntime
 import CoreModels
-import FeatureAuth
+import FeatureAuthCore
 import ProviderShare
 import MediaTransportHTTP
 import MediaTransportWebDAV
@@ -13,40 +13,40 @@ import MediaTransportNFS
 /// The finished configuration for an NFS export, handed back to
 /// `AppState.didConfigureNFSShare`. NFS is credential-free; the export path is the
 /// share root.
-struct NFSShareConfiguration: Equatable {
-    let host: String
-    let port: Int?
-    let exportPath: String
-    let displayName: String
+public struct NFSShareConfiguration: Equatable {
+    public let host: String
+    public let port: Int?
+    public let exportPath: String
+    public let displayName: String
 }
 
 /// The finished configuration for an SFTP share, handed back to
 /// `AppState.didConfigureSFTPShare`. Carries the host key captured (and pinned)
 /// during onboarding — the vault mandates it.
-struct SFTPShareConfiguration: Equatable {
-    let host: String
-    let port: Int?
-    let path: String
-    let username: String
-    let password: String
-    let hostKeyPin: SHA256Fingerprint
-    let displayName: String
+public struct SFTPShareConfiguration: Equatable {
+    public let host: String
+    public let port: Int?
+    public let path: String
+    public let username: String
+    public let password: String
+    public let hostKeyPin: SHA256Fingerprint
+    public let displayName: String
 }
 
 /// The finished configuration for an FTP/FTPS share, handed back to
 /// `AppState.didConfigureFTPShare`. `baseURL` carries the real scheme (`ftp` /
 /// `ftps`).
-struct FTPShareConfiguration: Equatable {
-    let baseURL: URL
-    let auth: MediaShareFTPAuth
-    let trustPin: SHA256Fingerprint?
-    let displayName: String
+public struct FTPShareConfiguration: Equatable {
+    public let baseURL: URL
+    public let auth: MediaShareFTPAuth
+    public let trustPin: SHA256Fingerprint?
+    public let displayName: String
 }
 
 /// A completed add-a-share result for the credential-envelope transports the
 /// unified flow drives through one callback (NFS/SFTP/FTP), keeping SMB and
 /// WebDAV on their existing dedicated callbacks.
-enum MediaShareOnboardingResult: Equatable {
+public enum MediaShareOnboardingResult: Equatable {
     case nfs(NFSShareConfiguration)
     case sftp(SFTPShareConfiguration)
     case ftp(FTPShareConfiguration)
@@ -75,9 +75,9 @@ enum MediaShareOnboardingResult: Equatable {
 /// transport branches merge.
 @MainActor
 @Observable
-final class UnifiedAddShareModel {
+public final class UnifiedAddShareModel {
 
-    enum Step: Equatable {
+    public enum Step: Equatable {
         case chooseDevice
         case connect
         case verifyTrust(sha256: Data)
@@ -86,53 +86,53 @@ final class UnifiedAddShareModel {
     }
 
     /// A credential control mode on the Connect form.
-    enum AuthMode: Equatable { case usernamePassword, token }
+    public enum AuthMode: Equatable { case usernamePassword, token }
 
     /// One selectable location at the pick-location step (an SMB share or a
     /// WebDAV folder). `path` drills for WebDAV; SMB shares are leaves.
-    struct LocationItem: Identifiable, Equatable {
-        let name: String
-        let path: String        // SMB: share name; WebDAV: server-rooted folder path
-        let isBrowsable: Bool    // WebDAV folders can be drilled into
-        var id: String { path }
+    public struct LocationItem: Identifiable, Equatable {
+        public let name: String
+        public let path: String
+        public let isBrowsable: Bool
+        public var id: String { path }
     }
 
-    enum LocationLoad: Equatable {
+    public enum LocationLoad: Equatable {
         case idle, loading, loaded
         case needsAuth, badCredentials, unreachable
         case failed(String)
     }
 
     // MARK: Discovery
-    private(set) var boxes: [DiscoveredMediaShareBox] = []
-    private(set) var scanning = false
+    public private(set) var boxes: [DiscoveredMediaShareBox] = []
+    public private(set) var scanning = false
 
     // MARK: Step
-    private(set) var step: Step = .chooseDevice
+    public private(set) var step: Step = .chooseDevice
 
     // MARK: Connect form
     /// The chosen transport on the Connect form. Always a concrete protocol —
     /// there is no "auto-detect". Defaults to a sensible protocol and is set to
     /// the best detected door when a device is opened.
-    var selectedTransport: MediaShareTransportKind = .smb
-    var address = ""
-    var portText = ""
-    var username = ""
-    var password = ""
-    var token = ""
-    var authMode: AuthMode = .usernamePassword
-    private(set) var detecting = false
-    private(set) var connectError: String?
+    public var selectedTransport: MediaShareTransportKind = .smb
+    public var address = ""
+    public var portText = ""
+    public var username = ""
+    public var password = ""
+    public var token = ""
+    public var authMode: AuthMode = .usernamePassword
+    public private(set) var detecting = false
+    public private(set) var connectError: String?
     /// Doors detected for the box currently being connected (for the Protocol
     /// dropdown's "Detected" group and per-door port prefill).
-    private(set) var detectedDoors: [DiscoveredMediaShareBox.Door] = []
+    public private(set) var detectedDoors: [DiscoveredMediaShareBox.Door] = []
 
     // MARK: Location
-    private(set) var locations: [LocationItem] = []
-    private(set) var locationLoad: LocationLoad = .idle
-    private(set) var currentPath = "/"
-    var manualShare = ""
-    var displayName = ""
+    public private(set) var locations: [LocationItem] = []
+    public private(set) var locationLoad: LocationLoad = .idle
+    public private(set) var currentPath = "/"
+    public var manualShare = ""
+    public var displayName = ""
 
     // Resolved connection for the active attempt.
     private var resolvedHost = ""
@@ -145,11 +145,11 @@ final class UnifiedAddShareModel {
     private var approvedPin: Data?
 
     // Outputs
-    var onSMBConfigured: (ShareDraft) -> Void = { _ in }
-    var onWebDAVConfigured: (WebDAVShareConfiguration) -> Void = { _ in }
+    public var onSMBConfigured: (ShareDraft) -> Void = { _ in }
+    public var onWebDAVConfigured: (WebDAVShareConfiguration) -> Void = { _ in }
     /// The credential-envelope transports (NFS/SFTP/FTP) report through one
     /// callback; SMB/WebDAV keep their dedicated ones above.
-    var onMediaShareConfigured: (MediaShareOnboardingResult) -> Void = { _ in }
+    public var onMediaShareConfigured: (MediaShareOnboardingResult) -> Void = { _ in }
 
     private let discovery: BonjourServiceDiscovery
     private let sweeper = MediaSharePortSweeper()
@@ -174,7 +174,7 @@ final class UnifiedAddShareModel {
     /// The SFTP host key the user approved, pinned into the saved account.
     private var approvedHostKeyPin: Data?
 
-    init(
+    public init(
         webDAVProbe: any WebDAVOnboardingProbing = WebDAVOnboardingProbe(),
         serviceProbe: any MediaShareServiceProbing = ProtocolServiceProbe(),
         sftpProbe: any SFTPOnboardingProbing = SFTPOnboardingProbe(),
@@ -217,13 +217,13 @@ final class UnifiedAddShareModel {
         )
     }
 
-    func descriptor(_ kind: MediaShareTransportKind) -> TransportOnboardingDescriptor? {
+    public func descriptor(_ kind: MediaShareTransportKind) -> TransportOnboardingDescriptor? {
         MediaShareTransportCatalog.descriptor(for: kind)
     }
 
     // MARK: - Discovery
 
-    func startScan() {
+    public func startScan() {
         scanTask?.cancel()
         boxes = []
         scanning = true
@@ -285,7 +285,7 @@ final class UnifiedAddShareModel {
         }
     }
 
-    func stopScan() {
+    public func stopScan() {
         scanTask?.cancel()
         scanTask = nil
         scanning = false
@@ -296,7 +296,7 @@ final class UnifiedAddShareModel {
     /// Open the Connect form pre-filled from a discovered device. Its doors were
     /// already gathered during discovery (Bonjour + the curated sweep), so the
     /// best one is pre-selected and its port prefilled.
-    func openConnect(for box: DiscoveredMediaShareBox) {
+    public func openConnect(for box: DiscoveredMediaShareBox) {
         stopScan()
         resetForm()
         address = box.host
@@ -309,7 +309,7 @@ final class UnifiedAddShareModel {
 
     /// Open the Connect form blank for a typed address. No auto-detect — the user
     /// picks a protocol explicitly; it defaults to the most common (SMB).
-    func openManualConnect() {
+    public func openManualConnect() {
         stopScan()
         resetForm()
         detectedDoors = []
@@ -335,7 +335,7 @@ final class UnifiedAddShareModel {
     /// Whether the selected transport drills into nested folders at the
     /// pick-location step (WebDAV, SFTP, FTP), as opposed to a flat list (SMB
     /// shares, NFS exports).
-    var isDrillableTransport: Bool {
+    public var isDrillableTransport: Bool {
         switch selectedTransport {
         case .webDAV, .sftp, .ftp: return true
         case .smb, .nfs: return false
@@ -346,7 +346,7 @@ final class UnifiedAddShareModel {
     /// protocol. When a device answered on a specific (non-default) port — e.g.
     /// WebDAV on :8384 — we use that exact port, because it's the one the user
     /// configured. We never discard a detected port in favour of the default.
-    func applyTransport(_ kind: MediaShareTransportKind, doors: [DiscoveredMediaShareBox.Door]? = nil) {
+    public func applyTransport(_ kind: MediaShareTransportKind, doors: [DiscoveredMediaShareBox.Door]? = nil) {
         selectedTransport = kind
         guard let descriptor = descriptor(kind) else { portText = ""; return }
         if let door = bestDetectedDoor(for: kind, descriptor: descriptor) {
@@ -384,7 +384,7 @@ final class UnifiedAddShareModel {
     }
 
     /// All distinct ports detected for a transport (drives the port chips).
-    func detectedPorts(for kind: MediaShareTransportKind) -> [Int] {
+    public func detectedPorts(for kind: MediaShareTransportKind) -> [Int] {
         let descriptor = descriptor(kind)
         let ports = detectedDoors
             .filter { $0.transport == kind }
@@ -392,7 +392,7 @@ final class UnifiedAddShareModel {
         return Array(Set(ports)).sorted()
     }
 
-    var canConnect: Bool {
+    public var canConnect: Bool {
         guard !address.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         guard let descriptor = descriptor(selectedTransport) else { return true }
         if descriptor.authModes.isEmpty { return true } // NFS: no creds
@@ -403,7 +403,7 @@ final class UnifiedAddShareModel {
     }
 
     /// The plaintext-credential warning to show for the current form, if any.
-    var plaintextWarning: String? {
+    public var plaintextWarning: String? {
         guard let descriptor = descriptor(selectedTransport) else { return nil }
         switch descriptor.plaintextCredentialRisk {
         case .never:
@@ -432,7 +432,7 @@ final class UnifiedAddShareModel {
 
     // MARK: - Connect
 
-    func connect() {
+    public func connect() {
         workTask?.cancel()
         connectError = nil
         let host = normalizedHost(address)
@@ -552,7 +552,7 @@ final class UnifiedAddShareModel {
     /// Lists the child directories of the current SFTP path so the user can drill
     /// into a subfolder before saving. Reuses the captured + approved host key and
     /// the form credentials; reconnects per call (onboarding is low-frequency).
-    func loadSFTPFolders(path: String) async {
+    public func loadSFTPFolders(path: String) async {
         guard let pin = approvedHostKeyPin else { return }
         locationLoad = .loading
         let host = resolvedHost
@@ -594,7 +594,7 @@ final class UnifiedAddShareModel {
         workTask = Task { await self.loadNFSExports() }
     }
 
-    func loadNFSExports() async {
+    public func loadNFSExports() async {
         locationLoad = .loading
         locations = []
         let host = resolvedHost
@@ -619,13 +619,13 @@ final class UnifiedAddShareModel {
     }
 
     /// Save a chosen NFS export (from the advertised list) as the share root.
-    func chooseNFSExport(_ path: String) {
+    public func chooseNFSExport(_ path: String) {
         confirmedPath = path.hasPrefix("/") ? path : "/" + path
         chooseFilesystemRoot()
     }
 
     /// Save a manually-typed NFS export path (fallback when EXPORT is blocked).
-    func chooseNFSManualExport() {
+    public func chooseNFSManualExport() {
         let trimmed = manualShare.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
         confirmedPath = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
@@ -679,7 +679,7 @@ final class UnifiedAddShareModel {
     /// Lists the child directories of the current FTP path. Reconnects per call
     /// (onboarding is low-frequency), mirroring the WebDAV/SFTP browsers. Used for
     /// drilling AFTER the first connect already validated credentials.
-    func loadFTPFolders(path: String) async {
+    public func loadFTPFolders(path: String) async {
         locationLoad = .loading
         let host = resolvedHost
         let scheme = ftpScheme(from: address, port: resolvedPort)
@@ -732,7 +732,7 @@ final class UnifiedAddShareModel {
 
     /// Confirms the reviewed root and hands the completed configuration back for
     /// persistence. NFS/FTP build here; SFTP reuses the captured + approved pin.
-    func chooseFilesystemRoot() {
+    public func chooseFilesystemRoot() {
         let name = displayName.trimmingCharacters(in: .whitespaces)
         let path = confirmedPath
         switch selectedTransport {
@@ -778,7 +778,7 @@ final class UnifiedAddShareModel {
         }
     }
 
-    func loadSMBShares() {
+    public func loadSMBShares() {
         workTask?.cancel()
         locationLoad = .loading
         locations = []
@@ -951,7 +951,7 @@ final class UnifiedAddShareModel {
 
     private var pendingWebDAVURL: URL?
 
-    func approveTrust() {
+    public func approveTrust() {
         guard case .verifyTrust(let sha256) = step else { return }
         // SFTP: the fingerprint is an SSH host key already captured by the connect
         // probe. Approving pins it and opens a folder browser rooted at the typed
@@ -976,7 +976,7 @@ final class UnifiedAddShareModel {
         }
     }
 
-    func rejectTrust() {
+    public func rejectTrust() {
         trust = .system; approvedPin = nil
         pendingWebDAVURL = nil
         pendingSFTPHostKey = nil
@@ -1001,7 +1001,7 @@ final class UnifiedAddShareModel {
 
     private var webDAVOriginURL: URL?
 
-    func loadWebDAVFolders(path: String) async {
+    public func loadWebDAVFolders(path: String) async {
         guard let origin = webDAVOriginURL else { return }
         locationLoad = .loading
         switch await webDAVProbe.listFolders(url: origin, path: path, credential: webDAVCredential(), trust: trust) {
@@ -1024,7 +1024,7 @@ final class UnifiedAddShareModel {
         }
     }
 
-    private var webDAVShareAuth: AppState.WebDAVShareAuth {
+    private var webDAVShareAuth: MediaShareWebDAVAuth {
         switch authMode {
         case .token:
             return token.isEmpty ? .anonymous : .bearer(token: token.trimmingCharacters(in: .whitespaces))
@@ -1043,7 +1043,7 @@ final class UnifiedAddShareModel {
     // MARK: - Saving
 
     /// Confirm an SMB share by name (from the list or typed).
-    func chooseSMBShare(_ share: String) {
+    public func chooseSMBShare(_ share: String) {
         let trimmed = share.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
         let name = displayName.trimmingCharacters(in: .whitespaces)
@@ -1058,7 +1058,7 @@ final class UnifiedAddShareModel {
     }
 
     /// Confirm the current WebDAV folder as the share root.
-    func chooseWebDAVFolder(_ path: String) {
+    public func chooseWebDAVFolder(_ path: String) {
         guard let origin = webDAVOriginURL,
               var comps = URLComponents(url: origin, resolvingAgainstBaseURL: false) else { return }
         comps.percentEncodedPath = path == "/" ? "" : path
@@ -1075,7 +1075,7 @@ final class UnifiedAddShareModel {
 
     // MARK: - Back navigation
 
-    func backToDevices() {
+    public func backToDevices() {
         workTask?.cancel()
         step = .chooseDevice
         resetForm()
@@ -1084,7 +1084,7 @@ final class UnifiedAddShareModel {
         startScan()
     }
 
-    func backToConnect() {
+    public func backToConnect() {
         workTask?.cancel()
         step = .connect
         locations = []; locationLoad = .idle
@@ -1106,4 +1106,3 @@ final class UnifiedAddShareModel {
         }
     }
 }
-#endif

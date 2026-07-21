@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import FeatureShareOnboarding
 import CoreModels
 import CoreUI
 import ProviderShare

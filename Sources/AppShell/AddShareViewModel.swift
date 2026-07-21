@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import Foundation
+import FeatureShareOnboarding
 import Observation
 import ProviderShare
 

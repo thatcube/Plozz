@@ -2,18 +2,8 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import FeatureShareOnboarding
 import ProviderShare
-
-/// The values collected when adding a local media share. Passed back to
-/// `AppState.didConfigureShare` which mints the account.
-struct ShareDraft: Equatable {
-    var host: String
-    var port: Int?
-    var share: String
-    var username: String
-    var password: String
-    var displayName: String
-}
 
 /// Discovery-first "Add a Media Share" screen, modeled on the Jellyfin server
 /// picker but simpler. Step one lists SMB servers found on the network (with a

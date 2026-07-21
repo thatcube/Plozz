@@ -163,7 +163,6 @@ private struct PlozziOSSettingsSplitView: View {
     @State private var selection: PlozziOSSettingsDestination?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var confirmSignOutAll = false
-    @State private var showSyncSendSheet = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -274,9 +273,6 @@ private struct PlozziOSSettingsSplitView: View {
             }
         } message: {
             Text("This removes every server and network share from this device.")
-        }
-        .sheet(isPresented: $showSyncSendSheet) {
-            SyncSetupSendView(appModel: appModel) { showSyncSendSheet = false }
         }
         .onChange(of: columnVisibility) { _, visibility in
             if visibility != .all {

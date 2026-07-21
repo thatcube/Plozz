@@ -58,17 +58,16 @@ struct SyncSetupReceiveView: View {
             case .applying:
                 ProgressView("Setting up…").font(.title2)
             case .applied(let received):
-                VStack(spacing: 16) {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 90)).foregroundStyle(.green)
-                    Text("You’re all set").font(.title.bold())
-                    Text(summary(received)).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center).frame(maxWidth: 760)
+                VStack(spacing: 22) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 84)).foregroundStyle(.green)
+                    Text("Setup complete").font(.largeTitle.bold())
+                    importedSummary(received)
                 }
                 .onAppear {
                     guard !didApply else { return }
                     didApply = true
                     appState.applyReceivedSetup(received)
-                    Task { try? await Task.sleep(nanoseconds: 1_800_000_000); onClose() }
+                    Task { try? await Task.sleep(nanoseconds: 3_200_000_000); onClose() }
                 }
             case .connecting, .sending, .sent:
                 ProgressView()
@@ -85,12 +84,39 @@ struct SyncSetupReceiveView: View {
         .padding(70)
     }
 
-    private func summary(_ received: SyncSetupService.ReceivedSetup) -> String {
-        let servers = received.application.authorizedAuthorizations.count
-        let profiles = received.config.profiles.count
-        var parts: [String] = [servers == 1 ? "Signed in to 1 server" : "Signed in to \(servers) servers"]
-        if profiles > 0 { parts.append(profiles == 1 ? "1 profile" : "\(profiles) profiles") }
-        return parts.joined(separator: " · ")
+    /// A precise, accurate breakdown of what actually transferred: which servers
+    /// are now signed in and which profiles were added. (Per-profile settings are
+    /// NOT transferred yet, so we don't claim them.)
+    @ViewBuilder
+    private func importedSummary(_ received: SyncSetupService.ReceivedSetup) -> some View {
+        let authIDs = Set(received.application.authorizedAuthorizations.map(\.id))
+        let serverNames = received.config.accounts.filter { authIDs.contains($0.id) }.map(\.serverName)
+        let profileNames = received.config.profiles.map(\.profile.name)
+
+        VStack(alignment: .leading, spacing: 18) {
+            if !serverNames.isEmpty {
+                summaryRow(icon: "server.rack",
+                           title: serverNames.count == 1 ? "Signed in to 1 server" : "Signed in to \(serverNames.count) servers",
+                           detail: serverNames.joined(separator: ", "))
+            }
+            if !profileNames.isEmpty {
+                summaryRow(icon: "person.2.fill",
+                           title: profileNames.count == 1 ? "Added 1 profile" : "Added \(profileNames.count) profiles",
+                           detail: profileNames.joined(separator: ", "))
+            }
+        }
+        .frame(maxWidth: 820, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func summaryRow(icon: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 18) {
+            Image(systemName: icon).font(.title2).foregroundStyle(.green).frame(width: 44)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.title3.weight(.semibold))
+                Text(detail).font(.headline).foregroundStyle(.secondary)
+            }
+        }
     }
 
     static func qrImage(_ string: String) -> UIImage? {

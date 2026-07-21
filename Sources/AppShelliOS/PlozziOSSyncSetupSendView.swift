@@ -3,119 +3,18 @@ import SwiftUI
 import AVFoundation
 import FeatureSyncSetup
 
-/// iOS "Set up another device" screen: scan the QR shown on the other device, or
-/// type its short code, then send this device's config + credentials over the E2E
-/// pairing channel so the other device is set up with no typing.
+// MARK: - Reusable pairing screens/components used by the Sync & Setup page.
+
+/// Full-screen QR scanner screen (camera needs the full screen).
 @MainActor
-struct SyncSetupSendView: View {
-    private let appModel: PlozziOSAppModel
-    private let onClose: () -> Void
-    @State private var model: SyncSetupPairingModel
-    @State private var handled = false
-    @State private var mode: Mode = .nearby
-    @State private var typedCode = ""
-
-    enum Mode { case nearby, scan, code }
-
-    init(appModel: PlozziOSAppModel, onClose: @escaping () -> Void) {
-        self.appModel = appModel
-        self.onClose = onClose
-        _model = State(initialValue: SyncSetupPairingModel(service: appModel.syncSetup))
-    }
-
+struct SyncSetupScannerScreen: View {
+    let onCode: (String) -> Void
+    let onCancel: () -> Void
     var body: some View {
-        NavigationStack {
-            Group {
-                switch model.phase {
-                case .idle:
-                    switch mode {
-                    case .nearby: nearby
-                    case .scan: scanner
-                    case .code: codeEntry
-                    }
-                case .connecting:
-                    ProgressView("Connecting…")
-                case .sending:
-                    ProgressView("Sending your setup…")
-                case .sent:
-                    result(icon: "checkmark.circle.fill", color: .green,
-                           title: "Your other device is set up",
-                           subtitle: "It’s signed in — no typing needed.")
-                        .task { try? await Task.sleep(nanoseconds: 2_000_000_000); onClose() }
-                case .failed(let message):
-                    result(icon: "exclamationmark.triangle.fill", color: .orange,
-                           title: "Setup didn’t finish", subtitle: message, retry: true)
-                default:
-                    ProgressView()
-                }
-            }
-            .navigationTitle("Set Up Device")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { model.stopDiscovery(); onClose() } }
-                if model.phase == .idle {
-                    ToolbarItem(placement: .primaryAction) {
-                        Menu {
-                            Button { switchMode(.nearby) } label: { Label("Nearby", systemImage: "wifi") }
-                            Button { switchMode(.scan) } label: { Label("Scan QR", systemImage: "qrcode.viewfinder") }
-                            Button { switchMode(.code) } label: { Label("Enter Code", systemImage: "keyboard") }
-                        } label: { Image(systemName: "ellipsis.circle") }
-                    }
-                }
-            }
-            .onAppear { if mode == .nearby { model.startDiscovery() } }
-            .onDisappear { model.stopDiscovery() }
-        }
-    }
-
-    private func switchMode(_ new: Mode) {
-        if new == .nearby { model.startDiscovery() } else { model.stopDiscovery() }
-        mode = new
-    }
-
-    private var nearby: some View {
-        VStack(spacing: 0) {
-            if model.nearbyDevices.isEmpty {
-                VStack(spacing: 16) {
-                    ProgressView()
-                    Text("Looking for a device waiting to be set up…").font(.headline)
-                        .multilineTextAlignment(.center)
-                    Text("On the other device, open Plozz and choose “Set up from another device.” Make sure both are on the same Wi-Fi.")
-                        .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                }
-                .padding(40)
-            } else {
-                List(model.nearbyDevices) { device in
-                    Button {
-                        guard !handled else { return }
-                        handled = true
-                        Task { await model.pair(with: device) }
-                    } label: {
-                        HStack {
-                            Image(systemName: "tv").font(.title3)
-                            VStack(alignment: .leading) {
-                                Text(device.displayName).fontWeight(.semibold)
-                                Text("Code \(SyncPairingCode.grouped(device.serviceName))")
-                                    .font(.footnote).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var scanner: some View {
         ZStack {
-            QRScannerView { code in
-                guard !handled else { return }
-                handled = true
-                Task { await model.send(inviteString: code) }
-            }
-            .ignoresSafeArea()
+            QRScannerView(onCode: onCode).ignoresSafeArea()
             VStack {
+                HStack { Spacer(); Button("Cancel") { onCancel() }.padding().foregroundStyle(.white) }
                 Spacer()
                 Text("Point your camera at the code on your other device — pinch to zoom")
                     .font(.headline).padding()
@@ -124,43 +23,33 @@ struct SyncSetupSendView: View {
             }
         }
     }
+}
 
-    private var codeEntry: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "keyboard").font(.system(size: 48)).foregroundStyle(.tint)
-            Text("Enter the code shown on your other device").font(.headline)
-                .multilineTextAlignment(.center)
-            TextField("Code", text: $typedCode)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-                .multilineTextAlignment(.center)
-                .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                .textFieldStyle(.roundedBorder)
-                .padding(.horizontal, 40)
-            Button("Continue") {
-                guard !handled else { return }
-                handled = true
-                Task { await model.send(code: typedCode) }
+/// Manual code-entry sheet.
+@MainActor
+struct SyncSetupCodeEntryScreen: View {
+    @State private var typedCode = ""
+    let onSubmit: (String) -> Void
+    let onCancel: () -> Void
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Image(systemName: "keyboard").font(.system(size: 48)).foregroundStyle(.tint)
+                Text("Enter the code shown on your other device").font(.headline).multilineTextAlignment(.center)
+                TextField("Code", text: $typedCode)
+                    .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                    .multilineTextAlignment(.center)
+                    .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                    .textFieldStyle(.roundedBorder).padding(.horizontal, 40)
+                Button("Continue") { onSubmit(typedCode) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(SyncPairingCode.normalize(typedCode).count < 4)
+                Spacer()
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(SyncPairingCode.normalize(typedCode).count < 4)
-            Spacer()
+            .padding(.top, 60)
+            .navigationTitle("Enter Code").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onCancel() } } }
         }
-        .padding(.top, 60)
-    }
-
-    @ViewBuilder
-    private func result(icon: String, color: Color, title: String, subtitle: String, retry: Bool = false) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: icon).font(.system(size: 64)).foregroundStyle(color)
-            Text(title).font(.title2.bold())
-            Text(subtitle).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
-            if retry {
-                Button("Try Again") { handled = false; typedCode = ""; model.reset() }.buttonStyle(.borderedProminent)
-            } else {
-                Button("Done") { onClose() }.buttonStyle(.borderedProminent)
-            }
-        }.padding()
     }
 }
 
@@ -169,9 +58,7 @@ struct QRScannerView: UIViewControllerRepresentable {
     let onCode: (String) -> Void
 
     func makeUIViewController(context: Context) -> ScannerVC {
-        let vc = ScannerVC()
-        vc.onCode = onCode
-        return vc
+        let vc = ScannerVC(); vc.onCode = onCode; return vc
     }
     func updateUIViewController(_ uiViewController: ScannerVC, context: Context) {}
 
@@ -220,7 +107,6 @@ struct QRScannerView: UIViewControllerRepresentable {
             super.viewWillDisappear(animated)
             if session.isRunning { session.stopRunning() }
         }
-
         func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject],
                             from connection: AVCaptureConnection) {
             guard let obj = metadataObjects.first as? AVMetadataMachineReadableCodeObject,

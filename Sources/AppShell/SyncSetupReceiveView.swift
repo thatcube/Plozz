@@ -16,6 +16,7 @@ struct SyncSetupReceiveView: View {
     private let onClose: () -> Void
     @State private var model: SyncSetupPairingModel
     @State private var didApply = false
+    @State private var applyError: String?
 
     init(appState: AppState, onClose: @escaping () -> Void) {
         self.appState = appState
@@ -30,6 +31,11 @@ struct SyncSetupReceiveView: View {
         }
         .task { await model.startReceiving() }
         .onDisappear { model.stopReceiving() }
+        .alert("Setup didn’t finish", isPresented: Binding(
+            get: { applyError != nil }, set: { if !$0 { applyError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(applyError ?? "") }
     }
 
     @ViewBuilder
@@ -158,8 +164,13 @@ struct SyncSetupReceiveView: View {
             Button("Start Watching") {
                 guard !didApply else { return }
                 didApply = true
-                appState.applyReceivedSetup(received)
-                onClose()
+                let outcome = appState.applyReceivedSetup(received)
+                if outcome.isTotalCredentialFailure {
+                    didApply = false   // allow a retry
+                    applyError = "Couldn’t finish signing in on this Apple TV. Check both devices are on the same Wi-Fi and try again."
+                } else {
+                    onClose()
+                }
             }
             .font(.title3.weight(.semibold))
         }

@@ -49,7 +49,12 @@ final class PlozziOSAppModel {
     /// Persist a setup received over pairing: create accounts from the descriptors,
     /// store their transferred tokens in the Keychain, and refresh providers so the
     /// device is immediately signed in (no native sign-in needed).
-    func applyReceivedSetup(_ received: SyncSetupService.ReceivedSetup) {
+    @discardableResult
+    func applyReceivedSetup(_ received: SyncSetupService.ReceivedSetup) -> SyncSetupService.ApplyOutcome {
+        // Captured BEFORE markFirstRunProfileSetupComplete below: whether this
+        // receiver had already completed setup (used to guard its own default
+        // profile from being clobbered by the incoming default).
+        let receiverWasConfigured = profiles.firstRunProfileSetupComplete
         let incomingProfiles = received.config.profiles.map(\.profile)
         if !incomingProfiles.isEmpty {
             profiles.importProfiles(incomingProfiles)
@@ -66,10 +71,16 @@ final class PlozziOSAppModel {
         let descByID = Dictionary(received.config.accounts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let secretByID = Dictionary((received.secrets?.accounts ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
         let shareByID = Dictionary((received.secrets?.shares ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
-        var added = 0
+        // Track credentialed accounts we ATTEMPT (expected to sign in without a tap)
+        // vs those that actually persisted, so the caller can gate success and
+        // surface any that failed. Intentional skips (device-local SSH key, no URL)
+        // are NOT counted as expected — they were never going to work here.
+        var expected = 0, added = 0
+        var failedAccountIDs: [String] = []
         for auth in received.application.authorizedAuthorizations {
             guard let desc = descByID[auth.id] else { continue }
             if let secret = secretByID[auth.id] {
+                expected += 1
                 let baseURL = desc.candidateBaseURLs.first ?? URL(string: secret.trustedOrigin) ?? URL(string: "https://localhost")!
                 let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
                                          provider: desc.provider,
@@ -80,6 +91,7 @@ final class PlozziOSAppModel {
                     try accountStore.add(account, token: secret.token)
                     added += 1
                 } catch {
+                    failedAccountIDs.append(desc.id)
                     PlozzLog.auth.error("Sync setup: failed to add transferred account \(desc.id): \(error.localizedDescription)")
                 }
             } else if let share = shareByID[auth.id] {
@@ -88,38 +100,68 @@ final class PlozziOSAppModel {
                     PlozzLog.auth.error("Sync setup: share \(desc.id) has no reachable URL — skipping (re-add it on this device)")
                     continue
                 }
+                guard let envelope = try? MediaShareCredentialCodec.decodeVersioned(share.credentialEnvelope) else {
+                    PlozzLog.auth.error("Sync setup: share \(desc.id) credential envelope failed to decode — skipping")
+                    continue
+                }
+                if case .generatedKey = envelope.authentication {
+                    // Defense in depth: an older sender may still ship a generated-key
+                    // envelope whose SSH key never travelled. Don't claim success —
+                    // leave it for manual re-add (not counted as an expected success).
+                    PlozzLog.auth.error("Sync setup: share \(desc.id) uses a device-local SSH key — skipping (re-add it on this device)")
+                    continue
+                }
+                expected += 1
                 let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
                                          provider: .mediaShare,
                                          connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
                 let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
                                       avatarURL: desc.avatarURL, deviceID: accountStore.deviceID())
                 do {
-                    let envelope = try MediaShareCredentialCodec.decodeVersioned(share.credentialEnvelope)
-                    if case .generatedKey = envelope.authentication {
-                        // Defense in depth: an older sender may still ship a
-                        // generated-key envelope whose SSH key never travelled.
-                        // Don't claim success — leave it for manual re-add.
-                        PlozzLog.auth.error("Sync setup: share \(desc.id) uses a device-local SSH key — skipping (re-add it on this device)")
-                        continue
-                    }
                     try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
                     added += 1
                 } catch {
+                    failedAccountIDs.append(desc.id)
                     PlozzLog.auth.error("Sync setup: failed to add transferred share \(desc.id): \(error.localizedDescription)")
                 }
             }
+        }
+        let outcome = SyncSetupService.ApplyOutcome(
+            expectedCredentialed: expected, addedCredentialed: added,
+            failedAccountIDs: failedAccountIDs, importedProfiles: incomingProfiles.count
+        )
+        accountsProviders.reloadAccounts()
+        // Transactional gate: if we were meant to sign accounts in but NONE stuck,
+        // don't declare setup complete — leave the device in onboarding so the
+        // caller can show an error and the user can retry. Profiles already imported
+        // are harmless and idempotent on retry.
+        if outcome.isTotalCredentialFailure {
+            reloadAccountsAndCrashContext()
+            PlozzLog.auth.error("Sync setup: all \(expected) credentialed account(s) failed to persist — not completing setup")
+            return outcome
+        }
+        // Apply each transferred profile's explicit server membership (which
+        // accounts it watches). Filter to accounts present in this transfer, and
+        // don't clobber a configured receiver's own default-profile choice — the
+        // same guard importProfiles uses so a "bring my setup here" transfer never
+        // rewrites an existing device's default.
+        let receivedAccountIDs = Set(received.config.accounts.map(\.id))
+        for (pid, ids) in received.config.profileMemberships {
+            guard profiles.profiles.contains(where: { $0.id == pid }) else { continue }
+            if pid == ProfileStore.defaultProfileID, receiverWasConfigured { continue }
+            profiles.setActiveAccountIDs(ids.filter { receivedAccountIDs.contains($0) }, for: pid)
         }
         // Mirror the tvOS receiver: complete first-run so the app never bounces
         // back to onboarding, refresh providers + identity index, and republish
         // presence.
         profiles.markFirstRunProfileSetupComplete()
-        accountsProviders.reloadAccounts()
         reloadAccountsAndCrashContext()
         identityIndex.warmIdentityIndex()
         // Rebuild the active profile's settings model so freshly-applied
         // preferences take effect immediately.
         selectProfile(profiles.activeProfileID)
-        PlozzLog.auth.info("Sync setup applied: added \(added) account(s), \(incomingProfiles.count) profile(s)")
+        PlozzLog.auth.info("Sync setup applied: added \(added)/\(expected) account(s), \(incomingProfiles.count) profile(s), \(failedAccountIDs.count) failed")
+        return outcome
     }
     let authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
     let mediaShareRuntime: DefaultMediaShareRuntime
@@ -331,7 +373,15 @@ final class PlozziOSAppModel {
                                 namespace: p.settingsNamespace(isDefault: profiles.isDefault(p))
                             )
                         )
-                    }
+                    },
+                    // Carry each profile's EXPLICIT server-membership choice (only
+                    // profiles that chose one; a profile that never chose is absent,
+                    // preserving the unset/empty/subset tri-state on the receiver).
+                    profileMemberships: Dictionary(
+                        uniqueKeysWithValues: profiles.profiles.compactMap { p in
+                            profiles.storedActiveAccountIDs(for: p.id).map { (p.id, $0) }
+                        }
+                    )
                 )
             },
             secretsProvider: {

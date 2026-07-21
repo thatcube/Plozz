@@ -18,6 +18,7 @@ struct PlozziOSSyncSetupReceiveView: View {
     let onClose: () -> Void
     @State private var model: SyncSetupPairingModel
     @State private var didApply = false
+    @State private var applyError: String?
 
     init(appModel: PlozziOSAppModel, onClose: @escaping () -> Void) {
         self.appModel = appModel
@@ -39,6 +40,11 @@ struct PlozziOSSyncSetupReceiveView: View {
                         }
                     }
                 }
+                .alert("Setup didn’t finish", isPresented: Binding(
+                    get: { applyError != nil }, set: { if !$0 { applyError = nil } }
+                )) {
+                    Button("OK", role: .cancel) {}
+                } message: { Text(applyError ?? "") }
         }
         .task { await model.startReceiving() }
         .onDisappear { model.stopReceiving() }
@@ -171,8 +177,13 @@ struct PlozziOSSyncSetupReceiveView: View {
             Button("Start Watching") {
                 guard !didApply else { return }
                 didApply = true
-                appModel.applyReceivedSetup(received)
-                onClose()
+                let outcome = appModel.applyReceivedSetup(received)
+                if outcome.isTotalCredentialFailure {
+                    didApply = false   // allow a retry
+                    applyError = "Couldn’t finish signing in on this device. Check both devices are on the same Wi-Fi and try again."
+                } else {
+                    onClose()
+                }
             }
             .buttonStyle(.borderedProminent).controlSize(.large)
         }

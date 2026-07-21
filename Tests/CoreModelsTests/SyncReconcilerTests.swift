@@ -103,6 +103,15 @@ final class SyncReconcilerTests: XCTestCase {
         XCTAssertEqual(merged.profileSettings.count, 3)
     }
 
+    func testMergeUnionsProfileMembershipsRemoteWins() {
+        let local = SyncConfigSnapshot(profileMemberships: ["p1": ["a1"], "p2": ["a2"]])
+        let remote = SyncConfigSnapshot(profileMemberships: ["p1": ["a1", "a9"], "p3": []])
+        let merged = local.merged(with: remote)
+        XCTAssertEqual(merged.profileMemberships["p1"], ["a1", "a9"])  // remote-wins
+        XCTAssertEqual(merged.profileMemberships["p2"], ["a2"])         // local-only kept
+        XCTAssertEqual(merged.profileMemberships["p3"], [])             // remote-only added
+    }
+
     func testSnapshotIsCodableAndTokenFree() {
         let snap = SyncConfigSnapshot(
             accounts: [desc("a", 1)],

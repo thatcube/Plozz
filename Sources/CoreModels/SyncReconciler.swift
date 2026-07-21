@@ -80,6 +80,13 @@ public struct SyncConfigSnapshot: Codable, Hashable, Sendable {
     /// Per-profile transferable settings (theme, playback, subtitles, …), keyed by
     /// profile id. Empty for a config-only or legacy snapshot.
     public var profileSettings: [ProfileSettingsSnapshot]
+    /// Per-profile server *membership* (which accounts a profile watches), keyed by
+    /// profile id. A key PRESENT means the profile made an explicit choice — the
+    /// value is the chosen account-id subset, possibly `[]` ("watch nothing"). A
+    /// key ABSENT means the profile never chose (⇒ defaults to all servers). This
+    /// present/absent distinction preserves the unset/empty/subset tri-state that
+    /// the per-server master toggle depends on. Empty for a legacy snapshot.
+    public var profileMemberships: [String: [String]]
     public var schemaVersion: Int
 
     public static let currentSchemaVersion = 1
@@ -90,6 +97,7 @@ public struct SyncConfigSnapshot: Codable, Hashable, Sendable {
         profiles: [VersionedProfile] = [],
         profileTombstones: [String: Int] = [:],
         profileSettings: [ProfileSettingsSnapshot] = [],
+        profileMemberships: [String: [String]] = [:],
         schemaVersion: Int = SyncConfigSnapshot.currentSchemaVersion
     ) {
         self.accounts = accounts
@@ -97,6 +105,7 @@ public struct SyncConfigSnapshot: Codable, Hashable, Sendable {
         self.profiles = profiles
         self.profileTombstones = profileTombstones
         self.profileSettings = profileSettings
+        self.profileMemberships = profileMemberships
         self.schemaVersion = schemaVersion
     }
 
@@ -107,6 +116,7 @@ public struct SyncConfigSnapshot: Codable, Hashable, Sendable {
         profiles = try c.decodeIfPresent([VersionedProfile].self, forKey: .profiles) ?? []
         profileTombstones = try c.decodeIfPresent([String: Int].self, forKey: .profileTombstones) ?? [:]
         profileSettings = try c.decodeIfPresent([ProfileSettingsSnapshot].self, forKey: .profileSettings) ?? []
+        profileMemberships = try c.decodeIfPresent([String: [String]].self, forKey: .profileMemberships) ?? [:]
         schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? SyncConfigSnapshot.currentSchemaVersion
     }
 
@@ -126,6 +136,7 @@ public struct SyncConfigSnapshot: Codable, Hashable, Sendable {
             accounts: acc.records, accountTombstones: acc.tombstones,
             profiles: prof.records, profileTombstones: prof.tombstones,
             profileSettings: SyncReconciler.unionByProfileID(local: profileSettings, remote: remote.profileSettings),
+            profileMemberships: profileMemberships.merging(remote.profileMemberships) { _, incoming in incoming },
             schemaVersion: max(schemaVersion, remote.schemaVersion)
         )
     }

@@ -483,8 +483,12 @@ public final class AppState {
     /// providers, and enter the app — so the device is fully set up and signed in
     /// with no typing.
     @MainActor
-    public func applyReceivedSetup(_ received: SyncSetupService.ReceivedSetup) {
+    @discardableResult
+    public func applyReceivedSetup(_ received: SyncSetupService.ReceivedSetup) -> SyncSetupService.ApplyOutcome {
         let store = accountsProviders.accountStore
+        // Captured BEFORE markFirstRunProfileSetupComplete: guards the receiver's
+        // own default-profile membership from being clobbered by the incoming one.
+        let receiverWasConfigured = profilesModel.firstRunProfileSetupComplete
 
         // 1. Import profiles (merge by id; existing ids preserved).
         let incomingProfiles = received.config.profiles.map(\.profile)
@@ -503,47 +507,84 @@ public final class AppState {
 
         // 2. Create accounts from descriptors + transferred credentials. Managed
         // accounts (Jellyfin/Plex/Emby) restore from a bearer token; media shares
-        // (WebDAV/SMB/NFS/SFTP/FTP) restore from their credential envelope.
+        // (WebDAV/SMB/NFS/SFTP/FTP) restore from their credential envelope. Track
+        // attempted-vs-persisted so we can gate completion and report failures.
         let descByID = Dictionary(received.config.accounts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let secretByID = Dictionary((received.secrets?.accounts ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
         let shareByID = Dictionary((received.secrets?.shares ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
+        var expected = 0, added = 0
+        var failedAccountIDs: [String] = []
         for auth in received.application.authorizedAuthorizations {
             guard let desc = descByID[auth.id] else { continue }
             if let secret = secretByID[auth.id] {
+                expected += 1
                 let baseURL = desc.candidateBaseURLs.first ?? URL(string: secret.trustedOrigin) ?? URL(string: "https://localhost")!
                 let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
                                          provider: desc.provider,
                                          connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
                 let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
                                       avatarURL: desc.avatarURL, deviceID: secret.deviceID)
-                try? store.add(account, token: secret.token)
+                do { try store.add(account, token: secret.token); added += 1 }
+                catch {
+                    failedAccountIDs.append(desc.id)
+                    PlozzLog.auth.error("Sync setup: failed to add transferred account \(desc.id): \(error.localizedDescription)")
+                }
             } else if let share = shareByID[auth.id] {
                 guard let baseURL = desc.candidateBaseURLs.first else {
                     PlozzLog.auth.error("Sync setup: share \(desc.id) has no reachable URL — skipping (re-add it on this device)")
                     continue
                 }
+                guard let envelope = try? MediaShareCredentialCodec.decodeVersioned(share.credentialEnvelope) else {
+                    PlozzLog.auth.error("Sync setup: share \(desc.id) credential envelope failed to decode — skipping")
+                    continue
+                }
+                if case .generatedKey = envelope.authentication {
+                    // The SSH key never travelled — don't restore a share that can't
+                    // authenticate; the user re-adds it here (not counted as expected).
+                    PlozzLog.auth.error("Sync setup: share \(desc.id) uses a device-local SSH key — skipping (re-add it on this device)")
+                    continue
+                }
+                expected += 1
                 let server = MediaServer(id: desc.serverID, name: desc.serverName, baseURL: baseURL,
                                          provider: .mediaShare,
                                          connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
                 let account = Account(id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
                                       avatarURL: desc.avatarURL, deviceID: store.deviceID())
-                if let envelope = try? MediaShareCredentialCodec.decodeVersioned(share.credentialEnvelope) {
-                    if case .generatedKey = envelope.authentication {
-                        // The SSH key never travelled — don't restore a share that
-                        // can't authenticate; the user re-adds it here.
-                        PlozzLog.auth.error("Sync setup: share \(desc.id) uses a device-local SSH key — skipping (re-add it on this device)")
-                    } else {
-                        try? store.addMediaShare(account, credential: envelope, generatedPrivateKey: nil)
-                    }
+                do { try store.addMediaShare(account, credential: envelope, generatedPrivateKey: nil); added += 1 }
+                catch {
+                    failedAccountIDs.append(desc.id)
+                    PlozzLog.auth.error("Sync setup: failed to add transferred share \(desc.id): \(error.localizedDescription)")
                 }
             }
         }
-
-        // 3. Refresh providers, complete first-run, and enter the app.
+        let outcome = SyncSetupService.ApplyOutcome(
+            expectedCredentialed: expected, addedCredentialed: added,
+            failedAccountIDs: failedAccountIDs, importedProfiles: incomingProfiles.count
+        )
         accountsProviders.reloadAccounts()
+        // Transactional gate: if credentialed accounts were expected but NONE stuck,
+        // don't complete setup — surface the failure and let the user retry.
+        if outcome.isTotalCredentialFailure {
+            apply(.accountsChanged(accountsProviders.accounts))
+            PlozzLog.auth.error("Sync setup: all \(expected) credentialed account(s) failed to persist — not completing setup")
+            return outcome
+        }
+
+        // 3. Apply each transferred profile's explicit server membership (filter to
+        // accounts present in the transfer; don't clobber a configured receiver's
+        // own default-profile choice).
+        let receivedAccountIDs = Set(received.config.accounts.map(\.id))
+        for (pid, ids) in received.config.profileMemberships {
+            guard profilesModel.profiles.contains(where: { $0.id == pid }) else { continue }
+            if pid == ProfileStore.defaultProfileID, receiverWasConfigured { continue }
+            profilesModel.setActiveAccountIDs(ids.filter { receivedAccountIDs.contains($0) }, for: pid)
+        }
+
+        // 4. Complete first-run and enter the app.
         profilesModel.markFirstRunProfileSetupComplete()
         rebuildSettingsModels()
         apply(.accountsChanged(accountsProviders.accounts))
+        return outcome
     }
 
     /// The Plex Home users ("Who's watching?") facet — owns per-account Plex
@@ -711,7 +752,14 @@ public final class AppState {
                                 namespace: p.settingsNamespace(isDefault: syncProfiles.isDefault(p))
                             )
                         )
-                    }
+                    },
+                    // Carry each profile's EXPLICIT server-membership choice (absent
+                    // when a profile never chose — preserves the tri-state).
+                    profileMemberships: Dictionary(
+                        uniqueKeysWithValues: syncProfiles.profiles.compactMap { p in
+                            syncProfiles.storedActiveAccountIDs(for: p.id).map { (p.id, $0) }
+                        }
+                    )
                 )
             },
             secretsProvider: {

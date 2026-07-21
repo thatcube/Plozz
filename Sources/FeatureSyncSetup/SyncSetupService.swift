@@ -21,14 +21,20 @@ public final class SyncSetupService {
         public var accounts: [Account]
         public var profiles: [Profile]
         public var profileSettings: [ProfileSettingsSnapshot]
+        /// Per-profile explicit server membership (profile id → chosen account-id
+        /// subset). Only profiles that made an explicit choice appear; a profile
+        /// absent here never chose one (⇒ all servers). See SyncConfigSnapshot.
+        public var profileMemberships: [String: [String]]
         public init(
             accounts: [Account],
             profiles: [Profile],
-            profileSettings: [ProfileSettingsSnapshot] = []
+            profileSettings: [ProfileSettingsSnapshot] = [],
+            profileMemberships: [String: [String]] = [:]
         ) {
             self.accounts = accounts
             self.profiles = profiles
             self.profileSettings = profileSettings
+            self.profileMemberships = profileMemberships
         }
     }
 
@@ -131,6 +137,40 @@ public final class SyncSetupService {
         public let application: SyncSetupCoordinator.Application
     }
 
+    /// Result of persisting a received setup on this device, so the UI can confirm
+    /// success or surface a partial/total failure instead of silently claiming
+    /// everything worked. `applyReceivedSetup` returns this from each shell.
+    public struct ApplyOutcome: Sendable, Equatable {
+        /// Credentialed accounts that arrived with a token/envelope and were meant
+        /// to be signed in without a tap.
+        public var expectedCredentialed: Int
+        /// How many of those actually persisted to the account store.
+        public var addedCredentialed: Int
+        /// Ids of the credentialed accounts that FAILED to persist (for a re-add hint).
+        public var failedAccountIDs: [String]
+        public var importedProfiles: Int
+
+        public init(expectedCredentialed: Int, addedCredentialed: Int,
+                    failedAccountIDs: [String], importedProfiles: Int) {
+            self.expectedCredentialed = expectedCredentialed
+            self.addedCredentialed = addedCredentialed
+            self.failedAccountIDs = failedAccountIDs
+            self.importedProfiles = importedProfiles
+        }
+
+        /// At least one credentialed account was expected but NONE persisted — the
+        /// device is NOT signed in; the caller must surface an error and must not
+        /// mark setup complete.
+        public var isTotalCredentialFailure: Bool {
+            expectedCredentialed > 0 && addedCredentialed == 0
+        }
+        /// Some (but not all) credentialed accounts failed — setup is usable but the
+        /// UI should tell the user which servers to re-add.
+        public var isPartialFailure: Bool {
+            !failedAccountIDs.isEmpty && addedCredentialed > 0
+        }
+    }
+
     /// Host side: advertise our invite over the link, receive the sealed bundle,
     /// and compute what to persist. Accounts whose credentials arrived are marked
     /// authorized (no sign-in needed); the rest are pending for native sign-in.
@@ -174,7 +214,8 @@ public final class SyncSetupService {
     ) async throws {
         let cfg = configProvider()
         let snapshot = coordinator.exportSnapshot(
-            accounts: cfg.accounts, profiles: cfg.profiles, profileSettings: cfg.profileSettings
+            accounts: cfg.accounts, profiles: cfg.profiles,
+            profileSettings: cfg.profileSettings, profileMemberships: cfg.profileMemberships
         )
         let secrets = configOnly ? nil : secretsProvider()
         let bundle = SyncTransferBundle(config: snapshot, secrets: (secrets?.isEmpty ?? true) ? nil : secrets)

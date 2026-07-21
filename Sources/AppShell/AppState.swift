@@ -491,6 +491,15 @@ public final class AppState {
         if !incomingProfiles.isEmpty {
             profilesModel.importProfiles(incomingProfiles)
         }
+        // Reinstall each transferred profile's per-profile settings under the
+        // matching namespace on this device (default profile → nil namespace).
+        for snap in received.config.profileSettings {
+            guard let profile = profilesModel.profiles.first(where: { $0.id == snap.profileID }) else { continue }
+            ProfileSettingsTransfer.apply(
+                snap.entries,
+                namespace: profile.settingsNamespace(isDefault: profilesModel.isDefault(profile))
+            )
+        }
 
         // 2. Create accounts from descriptors + transferred credentials. Managed
         // accounts (Jellyfin/Plex/Emby) restore from a bearer token; media shares
@@ -523,6 +532,7 @@ public final class AppState {
         // 3. Refresh providers, complete first-run, and enter the app.
         accountsProviders.reloadAccounts()
         profilesModel.markFirstRunProfileSetupComplete()
+        rebuildSettingsModels()
         apply(.accountsChanged(accountsProviders.accounts))
     }
 
@@ -681,7 +691,18 @@ public final class AppState {
             },
             isConfigured: { !syncAccounts.accounts.isEmpty },
             configProvider: {
-                .init(accounts: syncAccounts.accounts, profiles: syncProfiles.profiles)
+                .init(
+                    accounts: syncAccounts.accounts,
+                    profiles: syncProfiles.profiles,
+                    profileSettings: syncProfiles.profiles.map { p in
+                        ProfileSettingsSnapshot(
+                            profileID: p.id,
+                            entries: ProfileSettingsTransfer.capture(
+                                namespace: p.settingsNamespace(isDefault: syncProfiles.isDefault(p))
+                            )
+                        )
+                    }
+                )
             },
             secretsProvider: {
                 var accts: [AccountSecret] = []

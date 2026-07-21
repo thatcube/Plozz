@@ -54,6 +54,15 @@ final class PlozziOSAppModel {
         if !incomingProfiles.isEmpty {
             profiles.importProfiles(incomingProfiles)
         }
+        // Reinstall each transferred profile's per-profile settings under the
+        // matching namespace on this device (default profile → nil namespace).
+        for snap in received.config.profileSettings {
+            guard let profile = profiles.profiles.first(where: { $0.id == snap.profileID }) else { continue }
+            ProfileSettingsTransfer.apply(
+                snap.entries,
+                namespace: profile.settingsNamespace(isDefault: profiles.isDefault(profile))
+            )
+        }
         let descByID = Dictionary(received.config.accounts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let secretByID = Dictionary((received.secrets?.accounts ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
         let shareByID = Dictionary((received.secrets?.shares ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
@@ -97,6 +106,9 @@ final class PlozziOSAppModel {
         accountsProviders.reloadAccounts()
         reloadAccountsAndCrashContext()
         identityIndex.warmIdentityIndex()
+        // Rebuild the active profile's settings model so freshly-applied
+        // preferences take effect immediately.
+        selectProfile(profiles.activeProfileID)
         PlozzLog.auth.info("Sync setup applied: added \(added) account(s), \(incomingProfiles.count) profile(s)")
     }
     let authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
@@ -299,7 +311,18 @@ final class PlozziOSAppModel {
             deviceName: { UIDevice.current.name },
             isConfigured: { !accountsProviders.accounts.isEmpty },
             configProvider: {
-                .init(accounts: accountsProviders.accounts, profiles: profiles.profiles)
+                .init(
+                    accounts: accountsProviders.accounts,
+                    profiles: profiles.profiles,
+                    profileSettings: profiles.profiles.map { p in
+                        ProfileSettingsSnapshot(
+                            profileID: p.id,
+                            entries: ProfileSettingsTransfer.capture(
+                                namespace: p.settingsNamespace(isDefault: profiles.isDefault(p))
+                            )
+                        )
+                    }
+                )
             },
             secretsProvider: {
                 // Gather this device's credentials for a no-tap transfer over the

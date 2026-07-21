@@ -77,6 +77,9 @@ public struct SyncConfigSnapshot: Codable, Hashable, Sendable {
     public var accountTombstones: [String: Int]
     public var profiles: [VersionedProfile]
     public var profileTombstones: [String: Int]
+    /// Per-profile transferable settings (theme, playback, subtitles, …), keyed by
+    /// profile id. Empty for a config-only or legacy snapshot.
+    public var profileSettings: [ProfileSettingsSnapshot]
     public var schemaVersion: Int
 
     public static let currentSchemaVersion = 1
@@ -86,13 +89,25 @@ public struct SyncConfigSnapshot: Codable, Hashable, Sendable {
         accountTombstones: [String: Int] = [:],
         profiles: [VersionedProfile] = [],
         profileTombstones: [String: Int] = [:],
+        profileSettings: [ProfileSettingsSnapshot] = [],
         schemaVersion: Int = SyncConfigSnapshot.currentSchemaVersion
     ) {
         self.accounts = accounts
         self.accountTombstones = accountTombstones
         self.profiles = profiles
         self.profileTombstones = profileTombstones
+        self.profileSettings = profileSettings
         self.schemaVersion = schemaVersion
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        accounts = try c.decodeIfPresent([SyncedAccountDescriptor].self, forKey: .accounts) ?? []
+        accountTombstones = try c.decodeIfPresent([String: Int].self, forKey: .accountTombstones) ?? [:]
+        profiles = try c.decodeIfPresent([VersionedProfile].self, forKey: .profiles) ?? []
+        profileTombstones = try c.decodeIfPresent([String: Int].self, forKey: .profileTombstones) ?? [:]
+        profileSettings = try c.decodeIfPresent([ProfileSettingsSnapshot].self, forKey: .profileSettings) ?? []
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? SyncConfigSnapshot.currentSchemaVersion
     }
 
     /// Reconcile this (local) snapshot against a `remote` one, granularly.
@@ -110,6 +125,7 @@ public struct SyncConfigSnapshot: Codable, Hashable, Sendable {
         return SyncConfigSnapshot(
             accounts: acc.records, accountTombstones: acc.tombstones,
             profiles: prof.records, profileTombstones: prof.tombstones,
+            profileSettings: remote.profileSettings.isEmpty ? profileSettings : remote.profileSettings,
             schemaVersion: max(schemaVersion, remote.schemaVersion)
         )
     }

@@ -24,12 +24,14 @@ public struct SyncSetupCoordinator: Sendable {
     public func exportSnapshot(
         accounts: [Account],
         profiles: [Profile],
+        profileSettings: [ProfileSettingsSnapshot] = [],
         accountVersion: (String) -> Int = { _ in 1 },
         profileVersion: (String) -> Int = { _ in 1 }
     ) -> SyncConfigSnapshot {
         SyncConfigSnapshot(
             accounts: accounts.map { SyncedAccountDescriptor(account: $0, recordVersion: accountVersion($0.id)) },
-            profiles: profiles.map { VersionedProfile(profile: $0, recordVersion: profileVersion($0.id)) }
+            profiles: profiles.map { VersionedProfile(profile: $0, recordVersion: profileVersion($0.id)) },
+            profileSettings: profileSettings
         )
     }
 

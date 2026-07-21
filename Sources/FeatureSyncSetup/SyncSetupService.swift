@@ -20,9 +20,15 @@ public final class SyncSetupService {
     public struct LocalConfig: Sendable {
         public var accounts: [Account]
         public var profiles: [Profile]
-        public init(accounts: [Account], profiles: [Profile]) {
+        public var profileSettings: [ProfileSettingsSnapshot]
+        public init(
+            accounts: [Account],
+            profiles: [Profile],
+            profileSettings: [ProfileSettingsSnapshot] = []
+        ) {
             self.accounts = accounts
             self.profiles = profiles
+            self.profileSettings = profileSettings
         }
     }
 
@@ -163,7 +169,9 @@ public final class SyncSetupService {
         configOnly: Bool = false
     ) async throws {
         let cfg = configProvider()
-        let snapshot = coordinator.exportSnapshot(accounts: cfg.accounts, profiles: cfg.profiles)
+        let snapshot = coordinator.exportSnapshot(
+            accounts: cfg.accounts, profiles: cfg.profiles, profileSettings: cfg.profileSettings
+        )
         let secrets = configOnly ? nil : secretsProvider()
         let bundle = SyncTransferBundle(config: snapshot, secrets: (secrets?.isEmpty ?? true) ? nil : secrets)
         try await SyncPairingSession.guestSendSetup(bundle, over: link, expectedPublicKey: expectedPublicKey)

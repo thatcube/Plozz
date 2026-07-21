@@ -71,6 +71,12 @@ import sys
 # The single sanctioned cross-Feature edge (declared in Package.swift too).
 ALLOWED_FEATURE_EDGES = {
     ("FeatureSettings", "FeatureProfiles"),
+    # FeatureShareOnboarding is a shared media-share onboarding lib used by BOTH
+    # the tvOS and iOS shells; it needs FeatureAuthCore's credential/fingerprint
+    # types (SHA256Fingerprint, the media-share credential envelope). This code
+    # previously lived in AppShell (allowed), and was extracted so iOS could
+    # reuse it — a deliberate, reviewed relaxation.
+    ("FeatureShareOnboarding", "FeatureAuthCore"),
 }
 
 # Heavy third-party SDKs and the ONLY internal modules allowed to link/import

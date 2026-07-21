@@ -202,6 +202,18 @@ private struct PlozziOSSettingsSplitView: View {
                         )
                     }
 
+                    SettingsSectionGroup("Sync & Setup") {
+                        Toggle(isOn: Binding(
+                            get: { appModel.syncSetup.isEnabled },
+                            set: { appModel.syncSetup.setEnabled($0) }
+                        )) {
+                            Label("Sync across your devices", systemImage: "arrow.triangle.2.circlepath")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    } footer: {
+                        Text("Securely syncs your profiles and settings through your private iCloud (end-to-end encrypted). You still sign in to each server once per device. Off by default.")
+                    }
+
                     SettingsSectionGroup(
                         appModel.profiles.profilesEnabled
                             ? "This Profile"

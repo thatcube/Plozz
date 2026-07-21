@@ -14,7 +14,8 @@ import CoreModels
 // provider linking (Quick Connect / Plex link). Manual media-share passwords.
 
 @MainActor
-public final class SyncSetupService: ObservableObject {
+@Observable
+public final class SyncSetupService {
 
     public struct LocalConfig: Sendable {
         public var accounts: [Account]
@@ -34,7 +35,7 @@ public final class SyncSetupService: ObservableObject {
     private let deviceName: @MainActor () -> String
     private let isConfigured: @MainActor () -> Bool
 
-    @Published public private(set) var isEnabled: Bool
+    public private(set) var isEnabled: Bool
 
     public init(
         flag: SyncSetupFeatureFlag = SyncSetupFeatureFlag(),

@@ -8,6 +8,7 @@ import CrashReporting
 import FeatureAuthCore
 import FeatureHomeCore
 import FeatureProfiles
+import FeatureSyncSetup
 import Foundation
 import MALService
 import MediaDownloads
@@ -17,6 +18,7 @@ import ProviderShare
 import SeerService
 import SimklService
 import TraktService
+import UIKit
 
 @MainActor
 @Observable
@@ -41,6 +43,8 @@ final class PlozziOSAppModel {
 
     let accountsProviders: AccountsProvidersModel
     let profiles: ProfilesModel
+    /// Cross-device Sync & Setup (feature-flagged; OFF by default).
+    let syncSetup: SyncSetupService
     let authenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver
     let mediaShareRuntime: DefaultMediaShareRuntime
     let shareScanStatus: ShareScanStatusModel
@@ -231,6 +235,14 @@ final class PlozziOSAppModel {
         )
         self.mediaShareRescanService = MediaShareRescanService(
             accountsProviders: accountsProviders
+        )
+        self.syncSetup = SyncSetupService(
+            deviceID: { accountStore.deviceID() },
+            deviceName: { UIDevice.current.name },
+            isConfigured: { !accountsProviders.accounts.isEmpty },
+            configProvider: {
+                .init(accounts: accountsProviders.accounts, profiles: profiles.profiles)
+            }
         )
         self.plexHomeUsers = PlexHomeUsersModel(
             accountsProviders: accountsProviders,

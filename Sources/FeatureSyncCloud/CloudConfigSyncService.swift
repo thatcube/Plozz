@@ -144,9 +144,34 @@ public actor CloudConfigSyncService {
             try await engine.sendChanges()
             setStatus(.idle, syncedNow: true)
         } catch {
-            PlozzLog.sync.error("CloudSync: manual sync failed: \(error.localizedDescription)")
+            setDiagnostic("sendChanges: \(Self.describe(error))")
             setStatus(.error, error: (error as NSError).localizedDescription)
         }
+    }
+
+    /// Unwrap a CloudKit / sync error into a readable chain: domain, code, message,
+    /// any underlying error, and any per-item partial errors — the detail the
+    /// generic "Failed to send changes" wrapper hides.
+    static func describe(_ error: Error) -> String {
+        let ns = error as NSError
+        var parts = ["\(ns.domain) code=\(ns.code): \(ns.localizedDescription)"]
+        if let ck = error as? CKError {
+            if let partials = ck.partialErrorsByItemID, !partials.isEmpty {
+                let items = partials.prefix(4).map { key, value in
+                    let e = value as NSError
+                    return "\(key): \(e.domain) \(e.code)"
+                }.joined(separator: ", ")
+                parts.append("partials[\(partials.count)]: \(items)")
+            }
+            if let retry = ck.retryAfterSeconds { parts.append("retryAfter=\(retry)s") }
+        }
+        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+            parts.append("underlying: \(underlying.domain) code=\(underlying.code) \(underlying.localizedDescription)")
+            if let deepest = underlying.userInfo[NSUnderlyingErrorKey] as? NSError {
+                parts.append("deepest: \(deepest.domain) code=\(deepest.code) \(deepest.localizedDescription)")
+            }
+        }
+        return parts.joined(separator: " | ")
     }
 
     /// The app calls this whenever the non-secret config changes (same signal that

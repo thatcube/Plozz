@@ -23,6 +23,11 @@ public struct PosterCardView: View {
     /// Optional caller-owned context cue. It occupies the artwork's top-leading
     /// slot, leaving watch state (top-trailing) and progress (bottom) untouched.
     private let statusCueText: String?
+    /// When `true`, selecting the card starts playback immediately (Continue
+    /// Watching, landscape library rows) rather than opening a detail page. Such
+    /// cards show the resume chip — play glyph + progress bar + time-remaining —
+    /// over a soft bottom-leading scrim, matching the episode card.
+    private let playsOnSelect: Bool
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -38,6 +43,7 @@ public struct PosterCardView: View {
         enablesAsyncArtworkFallback: Bool = true,
         reservesSubtitleSpace: Bool = true,
         statusCue: String? = nil,
+        playsOnSelect: Bool = false,
         action: @escaping () -> Void
     ) {
         self.item = item
@@ -46,6 +52,7 @@ public struct PosterCardView: View {
         self.enablesAsyncArtworkFallback = enablesAsyncArtworkFallback
         self.reservesSubtitleSpace = reservesSubtitleSpace
         self.statusCueText = statusCue
+        self.playsOnSelect = playsOnSelect
         self.action = action
     }
 
@@ -104,12 +111,14 @@ public struct PosterCardView: View {
                     MediaCardPlaybackIndicators(
                         item: item,
                         hidesStatus: hideThumbnail,
+                        showsProgressBar: !showsResumeChip,
                         badgeInset: 8,
                         progressHeight: 12,
                         progressHorizontalInset: 16,
                         progressBottomInset: 16
                     )
                 }
+                .overlay { resumeChip }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius)
 
@@ -151,12 +160,14 @@ public struct PosterCardView: View {
                     MediaCardPlaybackIndicators(
                         item: item,
                         hidesStatus: hideThumbnail,
+                        showsProgressBar: !showsResumeChip,
                         badgeInset: 8,
                         progressHeight: 12,
                         progressHorizontalInset: 16,
                         progressBottomInset: 16
                     )
                 }
+                .overlay { resumeChip }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
@@ -356,9 +367,49 @@ public struct PosterCardView: View {
         return parts.joined(separator: " · ")
     }
 
-    // MARK: Artwork
+    // MARK: Resume chip (immediate-play cards)
 
-    /// Ordered list of real-image candidates to try before showing a placeholder.
+    /// Whether to show the resume chip (play glyph + progress bar + time
+    /// remaining) over a soft bottom-leading scrim. Only immediate-play cards
+    /// (`playsOnSelect`) that are actually mid-watch qualify, so a series/movie
+    /// card that opens a detail page never grows a play button.
+    private var showsResumeChip: Bool {
+        playsOnSelect
+            && !hideThumbnail
+            && item.resumeProgressFraction != nil
+    }
+
+    /// The resume affordance drawn on immediate-play cards: a subtle radial scrim
+    /// anchored at the bottom-leading corner so the white play/progress/time chip
+    /// reads cleanly without a solid capsule (mirrors the episode card).
+    @ViewBuilder
+    private var resumeChip: some View {
+        if showsResumeChip {
+            GeometryReader { proxy in
+                RadialGradient(
+                    colors: [.black.opacity(0.55), .clear],
+                    center: .bottomLeading,
+                    startRadius: 0,
+                    endRadius: max(proxy.size.width, proxy.size.height) * 0.8
+                )
+            }
+            .allowsHitTesting(false)
+            .overlay(alignment: .bottomLeading) {
+                EpisodeWatchStatePill(
+                    item: item,
+                    showsRuntimeWhenIdle: false,
+                    showsWatched: false,
+                    showsBackground: false,
+                    barWidth: 80,
+                    barHeight: 16
+                )
+                .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
+                .padding(16)
+            }
+        }
+    }
+
+    // MARK: Artwork
     private var artworkReferences: [ArtworkReference] {
         switch style {
         case .poster:

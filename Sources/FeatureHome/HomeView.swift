@@ -786,7 +786,7 @@ public struct HomeView: View {
     private func rowView(_ row: HomeRow) -> some View {
         switch row.kind {
         case .continueWatching:
-            MediaRowView(title: row.title, items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, onSelect: onPlayItem)
+            MediaRowView(title: row.title, items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, playsOnSelect: true, onSelect: onPlayItem)
         case .watchlist, .recentlyAdded:
             MediaRowView(title: row.title, items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, onSelect: onSelectItem)
         case .libraries:
@@ -823,6 +823,7 @@ public struct HomeView: View {
                 items: section.items,
                 style: cardStyle(section.style),
                 spoilerSettings: spoilerSettings,
+                playsOnSelect: section.style == .landscape,
                 onSelect: section.style == .landscape ? onPlayItem : onSelectItem
             )
         }

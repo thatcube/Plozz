@@ -42,6 +42,10 @@ public struct MediaRowView: View {
     /// padding so the row aligns with the hero text above it.
     private let leadingInset: CGFloat
     private let onSelect: (MediaItem) -> Void
+    /// When `true`, selecting a card starts playback immediately, so its cards
+    /// show the resume chip (play glyph + progress bar + time). Threaded to
+    /// `PosterCardView.playsOnSelect`.
+    private let playsOnSelect: Bool
     /// Called whenever focus moves onto a card (with that item). Used by series
     /// detail to mirror the focused episode into the page hero. When set, every
     /// card becomes individually focus-tracked.
@@ -95,6 +99,7 @@ public struct MediaRowView: View {
         leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
         onFocusEntered: (() -> Void)? = nil,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
+        playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.init(
@@ -109,6 +114,7 @@ public struct MediaRowView: View {
             leadingInset: leadingInset,
             onFocusEntered: onFocusEntered,
             onFocusChange: onFocusChange,
+            playsOnSelect: playsOnSelect,
             onSelect: onSelect
         )
     }
@@ -125,6 +131,7 @@ public struct MediaRowView: View {
         leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
         onFocusEntered: (() -> Void)? = nil,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
+        playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.title = title
@@ -138,6 +145,7 @@ public struct MediaRowView: View {
         self.leadingInset = leadingInset
         self.onFocusEntered = onFocusEntered
         self.onFocusChange = onFocusChange
+        self.playsOnSelect = playsOnSelect
         self.onSelect = onSelect
         self.itemIDSet = Set(items.map(\.id))
         var indexByID: [String: Int] = [:]
@@ -294,7 +302,8 @@ public struct MediaRowView: View {
                 PosterCardView(
                     item: item,
                     style: .poster,
-                    spoilerSettings: spoilerSettings
+                    spoilerSettings: spoilerSettings,
+                    playsOnSelect: playsOnSelect
                 ) { onSelect(item) },
                 for: item
             )
@@ -303,7 +312,8 @@ public struct MediaRowView: View {
                 PosterCardView(
                     item: item,
                     style: .landscape,
-                    spoilerSettings: spoilerSettings
+                    spoilerSettings: spoilerSettings,
+                    playsOnSelect: playsOnSelect
                 ) { onSelect(item) },
                 for: item
             )

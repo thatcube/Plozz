@@ -81,6 +81,15 @@ public actor CloudConfigSyncService {
     /// fetched the new account's real state, so this device never uploads the previous
     /// household's config into a different Apple ID before learning what's there.
     private var suspendPublishUntilFetch = false
+    /// True once this process has CONFIRMED the current account's server state (a
+    /// successful fetch or real fetched data). Until then a device with no local
+    /// baseline must not publish — stamping fresh edits over unknown server data would
+    /// clobber peers. Gates EVERY normal publish path (S1), not just activate.
+    private var didConfirmServerState = false
+    /// True for the duration of a full resync. Publishing while `beginFullResync` has
+    /// cleared the baselines would re-mark every record dirty and resurrect peer
+    /// deletions, so all publishing is deferred until the resync ends/aborts (S3).
+    private var isFullResyncing = false
 
     // Persisted across launches.
     private var ledger: SyncLedger
@@ -120,6 +129,14 @@ public actor CloudConfigSyncService {
 
     private static func ckCodeName(_ error: CKError) -> String { "\(error.code) (\(error.code.rawValue))" }
 
+    /// A fetch of the CURRENT account succeeded (or real data arrived): the server
+    /// state is now known, so it's safe to lift a post-switch suspension and to let a
+    /// baseline-less device publish. Single choke point for both publish gates.
+    private func markServerStateConfirmed() {
+        suspendPublishUntilFetch = false
+        didConfirmServerState = true
+    }
+
     // MARK: Lifecycle
 
     /// Bring the engine up (if enabled + an account is available), ensure the zone,
@@ -135,22 +152,11 @@ public actor CloudConfigSyncService {
         guard let engine else { return }
         engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
         // Fetch before publish — the anti-clobber ordering.
-        var fetchOK = true
-        do { try await engine.fetchChanges() }
-        catch { fetchOK = false; setDiagnostic("activate fetch: \(Self.describe(error))") }
-        if fetchOK { suspendPublishUntilFetch = false }
-        // C4/C6: only publish once we've either confirmed the server's state this
-        // cycle, or we already hold a real baseline from a prior sync. A fresh device
-        // (or one whose state file was lost) that FAILED its initial fetch must NOT
-        // publish — stamping fresh edits over an unknown server would clobber peers.
-        // A pending account-switch also blocks publishing until a clean fetch.
-        if suspendPublishUntilFetch {
-            PlozzLog.sync.info("CloudSync: publish suspended pending post-account-switch fetch")
-        } else if fetchOK || ledger.hasServerBaseline {
-            await publishLocalChanges()
-        } else {
-            setDiagnostic("activate: initial fetch failed with no local baseline — deferring publish to avoid clobber")
-        }
+        do { try await engine.fetchChanges(); markServerStateConfirmed() }
+        catch { setDiagnostic("activate fetch: \(Self.describe(error))") }
+        // publishLocalChanges enforces the suspend / baseline / resync gates itself, so
+        // a fresh device whose fetch failed simply no-ops instead of clobbering.
+        await publishLocalChanges()
         reportRecordCount()
     }
 
@@ -172,7 +178,7 @@ public actor CloudConfigSyncService {
         guard config.isEnabled(), await accountIsAvailable() else { return }
         ensureEngine()
         guard let engine else { return }
-        if (try? await engine.fetchChanges()) != nil { suspendPublishUntilFetch = false }
+        if (try? await engine.fetchChanges()) != nil { markServerStateConfirmed() }
         await publishLocalChanges()
         try? await engine.sendChanges()
         reportRecordCount()
@@ -186,7 +192,7 @@ public actor CloudConfigSyncService {
         guard let engine else { return }
         setStatus(.syncing)
         var syncError: Error?
-        do { try await engine.fetchChanges(); suspendPublishUntilFetch = false }
+        do { try await engine.fetchChanges(); markServerStateConfirmed() }
         catch { syncError = error }
         await publishLocalChanges()
         do { try await engine.sendChanges() } catch { if syncError == nil { syncError = error } }
@@ -219,10 +225,28 @@ public actor CloudConfigSyncService {
 
     /// Capture local state, reconcile into the ledger, and enqueue the minimal
     /// save/delete plan. No-op when disabled or unchanged.
-    public func publishLocalChanges() async {
+    ///
+    /// `bypassBaselineGate` is set ONLY by reset/reseed, which has just made the
+    /// server state known (it deleted all records), so publishing local as fresh
+    /// creates is deliberate and safe.
+    public func publishLocalChanges(bypassBaselineGate: Bool = false) async {
         guard config.isEnabled(), let engine else { return }
         guard !suspendPublishUntilFetch else {
             PlozzLog.sync.info("CloudSync: publish skipped — suspended pending account-switch fetch")
+            return
+        }
+        // S3: never publish while a full resync has the baselines cleared — it would
+        // re-mark everything dirty and resurrect peer deletions.
+        guard !isFullResyncing else {
+            PlozzLog.sync.info("CloudSync: publish skipped — full resync in progress")
+            return
+        }
+        // S1: a device that hasn't confirmed the current account's server state AND
+        // has no local baseline must not publish — fresh-stamped creates would clobber
+        // unknown remote data. (activate/fetchNow/syncNow set didConfirmServerState on a
+        // successful fetch; real fetched data sets it too.)
+        guard bypassBaselineGate || didConfirmServerState || ledger.hasServerBaseline else {
+            PlozzLog.sync.info("CloudSync: publish deferred — server state not yet confirmed on a baseline-less device")
             return
         }
         // C2 (reentrancy anti-clobber): `captureRecords` awaits a hop to the app's
@@ -233,12 +257,18 @@ public actor CloudConfigSyncService {
         // until no remote-driven mutation interleaved with the capture; reconcile is
         // synchronous and therefore atomic once we have a clean snapshot.
         var desired: [SyncRecordID: Data] = [:]
-        var attempts = 0
-        while true {
+        var stabilized = false
+        for _ in 0..<4 {
             let rev = ledger.remoteRevision
             desired = await config.captureRecords(ledger.syncedValues())
-            attempts += 1
-            if ledger.remoteRevision == rev || attempts >= 4 { break }
+            if ledger.remoteRevision == rev { stabilized = true; break }
+        }
+        // S4: if a remote apply kept interleaving every capture, the snapshot may
+        // predate the latest baseline. Do NOT reconcile an unverified capture (it could
+        // clobber the just-arrived change) — skip this publish; a later one retries.
+        guard stabilized else {
+            PlozzLog.sync.info("CloudSync: publish deferred — capture kept racing remote applies; will retry")
+            return
         }
         let plan = ledger.reconcileLocal(
             desired: desired, now: nowMillis(), synthesizeDeletions: config.isHydrated())
@@ -285,7 +315,8 @@ public actor CloudConfigSyncService {
         setStatus(.syncing)
         await deleteAllServerData()   // deletes records + clears the ledger
         rebuildEngine()
-        await publishLocalChanges()   // fresh creates from this device's local config
+        // Server state is known (just emptied), so bypass the baseline gate to re-seed.
+        await publishLocalChanges(bypassBaselineGate: true)
         do {
             try await engine?.sendChanges()
             setStatus(.idle, syncedNow: true)
@@ -305,15 +336,21 @@ public actor CloudConfigSyncService {
         guard config.isEnabled(), await accountIsAvailable() else { setStatus(.signedOut); return }
         setStatus(.syncing)
         PlozzLog.sync.info("CloudSync: redownload — full resync (keep local, reset token)")
+        // S3: block all publishing while the baselines are cleared, so a concurrent
+        // observation/manual publish can't re-mark everything dirty and resurrect
+        // peer deletions. Lifted in every exit path below.
+        isFullResyncing = true
         ledger.beginFullResync()
         rebuildEngine(resetState: true)   // nil token ⇒ COMPLETE re-fetch; fences old events
-        guard let engine else { setStatus(.error, error: "engine unavailable"); return }
+        guard let engine else { isFullResyncing = false; setStatus(.error, error: "engine unavailable"); return }
         do {
             engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
             try await engine.fetchChanges()
+            markServerStateConfirmed()
             // Only NOW — after a confirmed complete fetch — is it safe to finalize
             // unseen previously-synced records as deletions.
             let finalized = ledger.endFullResync()
+            isFullResyncing = false
             persist(); reportRecordCount()
             if !finalized.isEmpty { await config.applyRecords(finalized) }
             // Requeue anything still dirty / pending-delete without re-stamping.
@@ -321,6 +358,9 @@ public actor CloudConfigSyncService {
             pending += ledger.pendingUploads().map { .saveRecord(CloudSyncSchema.recordID(forRecordName: $0.recordName)) }
             pending += ledger.pendingDeletes().map { .deleteRecord(CloudSyncSchema.recordID(forRecordName: $0)) }
             if !pending.isEmpty { engine.state.add(pendingRecordZoneChanges: pending); try await engine.sendChanges() }
+            // Replay one publish for any genuine local edits made during the resync
+            // (they were deferred by the isFullResyncing gate).
+            await publishLocalChanges()
             setStatus(.idle, syncedNow: true)
             PlozzLog.sync.info("CloudSync: redownload complete — \(ledger.count) record(s)")
         } catch {
@@ -329,6 +369,7 @@ public actor CloudConfigSyncService {
             // resync WITHOUT producing any deletions; a later successful fetch
             // re-establishes the true baseline.
             ledger.abortFullResync()
+            isFullResyncing = false
             persist()
             setDiagnostic("redownload: \(Self.describe(error))")
             setStatus(.error, error: (error as NSError).localizedDescription)
@@ -419,9 +460,6 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
         case .willFetchChanges, .willSendChanges:
             setStatus(.syncing)
         case .didFetchChanges, .didSendChanges:
-            // A successful fetch means we've seen the current account's real state, so
-            // it's safe to lift a post-account-switch publish suspension.
-            if case .didFetchChanges = event { suspendPublishUntilFetch = false }
             setStatus(.idle, syncedNow: true)
         case .willFetchRecordZoneChanges, .didFetchRecordZoneChanges:
             break

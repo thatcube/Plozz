@@ -65,6 +65,38 @@ public struct SyncRecordKey: Hashable, Sendable {
     }
 }
 
+// MARK: - Capture fallback (out-of-order / deletion disambiguation)
+
+/// Shared, pure helper for the app-layer `captureSyncRecords`. After the app builds
+/// the live record map from its stores, it back-fills setting/membership records for
+/// profiles it can't currently express — but ONLY when the profile is genuinely
+/// not-yet-hydrated (also absent from the last-synced `fallback`), never when the
+/// profile is being deleted (still present in `fallback`, so its children must delete
+/// too). Extracted here so both app models share ONE implementation and it's unit
+/// tested directly.
+public enum SyncCaptureFallback {
+    public static func merge(
+        live: [SyncRecordID: Data],
+        fallback: [SyncRecordID: Data],
+        localProfileIDs: Set<String>
+    ) -> [SyncRecordID: Data] {
+        var out = live
+        for (name, data) in fallback where out[name] == nil {
+            guard let key = SyncRecordKey.parse(name) else { continue }
+            switch key.kind {
+            case .setting, .membership:
+                let parent = SyncRecordKey(kind: .profile, id: key.id).recordName
+                if !localProfileIDs.contains(key.id) && fallback[parent] == nil {
+                    out[name] = data
+                }
+            case .profile, .descriptor:
+                break   // authoritative on this device: absence is a genuine deletion
+            }
+        }
+        return out
+    }
+}
+
 // MARK: - Canonical JSON
 
 /// Deterministic JSON so the SAME logical value always yields the SAME bytes
@@ -119,16 +151,18 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         p.avatarSymbol = avatarSymbol
         p.colorIndex = colorIndex
         p.createdAt = createdAt
+        // Defense in depth: a peer (or an older app version) could send a tokenized
+        // avatar URL — sanitize the incoming value before it is stored/rendered.
+        let cleanIncoming = SyncURLSanitizer.sanitize(string: avatarImageURL)
         // Preserve this device's LOCAL (tokenized) avatar URL when it refers to the
-        // same resource as the synced (stripped) one — so the local image keeps
-        // rendering without re-fetching a token, while a genuinely different remote
-        // avatar still replaces it. Keeps capture==apply: capture re-strips the
-        // local URL and gets exactly `avatarImageURL` back.
+        // same resource — so the local image keeps rendering without re-fetching a
+        // token, while a genuinely different remote avatar still replaces it. Keeps
+        // capture==apply: capture re-strips the local URL back to `cleanIncoming`.
         if let local = existing.avatarImageURL,
-           SyncURLSanitizer.sanitize(string: local) == avatarImageURL {
+           SyncURLSanitizer.sanitize(string: local) == cleanIncoming {
             p.avatarImageURL = local
         } else {
-            p.avatarImageURL = avatarImageURL
+            p.avatarImageURL = cleanIncoming
         }
         p.avatarEmoji = avatarEmoji
         p.avatarEmojiColorIndex = avatarEmojiColorIndex
@@ -139,7 +173,8 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
     public func makeProfile() -> Profile {
         Profile(
             id: id, name: name, avatarSymbol: avatarSymbol, colorIndex: colorIndex,
-            createdAt: createdAt, avatarImageURL: avatarImageURL,
+            createdAt: createdAt,
+            avatarImageURL: SyncURLSanitizer.sanitize(string: avatarImageURL),
             avatarEmoji: avatarEmoji, avatarEmojiColorIndex: avatarEmojiColorIndex)
     }
 }

@@ -75,27 +75,21 @@ extension PlozziOSAppModel {
                 out[SyncRecordKey(kind: .setting, id: p.id, subkey: baseKey).recordName] = blob
             }
         }
-        // C5: keep last-synced bytes for setting/membership of profiles not present
-        // locally, so an out-of-order capture never triggers a spurious deletion.
-        for (name, data) in fallback where out[name] == nil {
-            guard let key = SyncRecordKey.parse(name) else { continue }
-            switch key.kind {
-            case .setting, .membership:
-                if !localProfileIDs.contains(key.id) { out[name] = data }
-            case .profile, .descriptor:
-                break
-            }
-        }
-        return out
+        // C5: shared back-fill logic (out-of-order safe, no deleted-profile orphans).
+        return SyncCaptureFallback.merge(live: out, fallback: fallback, localProfileIDs: localProfileIDs)
     }
 
     /// H2 stability: reuse the last-synced descriptor bytes when the meaningful fields
     /// are unchanged (preserving per-device advisory URLs), else emit fresh bytes.
     static func stableDescriptorBytes(_ d: SyncedAccountDescriptor, fallback: Data?) -> Data? {
         if let fallback,
-           let prev = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: fallback),
-           prev.semanticallyEqualForSync(to: d) {
-            return fallback
+           let prev = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: fallback) {
+            // S7: sanitize the fallback before reuse so a legacy tokenized
+            // candidateBaseURLs heals instead of being re-published.
+            let cleanPrev = prev.sanitizingURLs()
+            if cleanPrev.semanticallyEqualForSync(to: d) {
+                return CanonicalJSON.encode(cleanPrev)
+            }
         }
         return CanonicalJSON.encode(d)
     }
@@ -161,9 +155,7 @@ extension PlozziOSAppModel {
         // Membership: store the EXACT synced id set (no filter) so capture==apply;
         // consumers intersect with signed-in accounts at the point of use.
         if !membershipSet.isEmpty || !membershipClear.isEmpty {
-            for (pid, ids) in membershipSet where profiles.profiles.contains(where: { $0.id == pid }) {
-                profiles.setActiveAccountIDs(ids, for: pid)
-            }
+            for (pid, ids) in membershipSet { profiles.setActiveAccountIDs(ids, for: pid) }
             for pid in membershipClear { profiles.clearActiveAccountIDs(for: pid) }
         }
         if descriptorsTouched { _ = pendingStore }  // descriptors persisted; iOS has no pending-server UI
@@ -174,8 +166,12 @@ extension PlozziOSAppModel {
     }
 
     private func namespace(forProfileID pid: String) -> String?? {
-        guard let p = profiles.profiles.first(where: { $0.id == pid }) else { return nil }
-        return .some(p.settingsNamespace(isDefault: profiles.isDefault(p)))
+        if let p = profiles.profiles.first(where: { $0.id == pid }) {
+            return .some(p.settingsNamespace(isDefault: profiles.isDefault(p)))
+        }
+        // Apply even for a not-yet-local profile (cross-batch ordering, S5); the default
+        // profile is always seeded locally, so an absent profile is non-default.
+        return .some(pid)
     }
 
     // MARK: Lifecycle + change observation

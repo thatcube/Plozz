@@ -151,22 +151,10 @@ extension AppState {
                 out[SyncRecordKey(kind: .setting, id: p.id, subkey: baseKey).recordName] = blob
             }
         }
-        // C5: for setting/membership records whose profile is NOT present locally
-        // (e.g. it arrived in a later fetch batch, or hasn't hydrated yet), fall back
-        // to the last-synced bytes so we never omit them and trigger a spurious
-        // deletion that would wipe the setting/membership for the whole household.
-        // Profiles/descriptors are authoritative on this device, so their absence IS a
-        // genuine deletion and is NOT back-filled.
-        for (name, data) in fallback where out[name] == nil {
-            guard let key = SyncRecordKey.parse(name) else { continue }
-            switch key.kind {
-            case .setting, .membership:
-                if !localProfileIDs.contains(key.id) { out[name] = data }
-            case .profile, .descriptor:
-                break
-            }
-        }
-        return out
+        // C5: back-fill setting/membership from last-synced bytes for not-yet-hydrated
+        // profiles, without resurrecting a locally-deleted profile's children. Shared,
+        // unit-tested logic in SyncCaptureFallback.
+        return SyncCaptureFallback.merge(live: out, fallback: fallback, localProfileIDs: localProfileIDs)
     }
 
     /// H2 stability: if the last-synced descriptor bytes decode to a descriptor whose
@@ -175,9 +163,15 @@ extension AppState {
     /// published. Otherwise emit the new canonical bytes.
     static func stableDescriptorBytes(_ d: SyncedAccountDescriptor, fallback: Data?) -> Data? {
         if let fallback,
-           let prev = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: fallback),
-           prev.semanticallyEqualForSync(to: d) {
-            return fallback
+           let prev = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: fallback) {
+            // S7: never reuse RAW fallback bytes — a legacy record could carry a token
+            // in candidateBaseURLs (which semantic equality ignores). Sanitize first,
+            // so a tokenized fallback heals to a stripped upload instead of re-publishing
+            // the credential.
+            let cleanPrev = prev.sanitizingURLs()
+            if cleanPrev.semanticallyEqualForSync(to: d) {
+                return CanonicalJSON.encode(cleanPrev)
+            }
         }
         return CanonicalJSON.encode(d)
     }
@@ -260,15 +254,12 @@ extension AppState {
             guard let ns = namespace(forProfileID: r.pid) else { continue }
             ProfileSettingsTransfer.removeOne(baseKey: r.key, namespace: ns)
         }
-        // 3. Membership: store the EXACT synced id set (do NOT filter to the ids this
-        // device currently knows — that would make capture != apply and upload a
-        // shrunken set, dropping accounts for the whole household when a membership
-        // arrives before its descriptors). Consumers intersect with available accounts
-        // at the point of USE.
+        // 3. Membership: store the EXACT synced id set (no filter) so capture==apply;
+        // consumers intersect with signed-in accounts at the point of USE. Apply even
+        // for a not-yet-local profile (cross-batch ordering) — it's keyed by id and
+        // re-read on capture once the profile lands (S5).
         if !membershipSet.isEmpty || !membershipClear.isEmpty {
-            for (pid, ids) in membershipSet where profilesModel.profiles.contains(where: { $0.id == pid }) {
-                profilesModel.setActiveAccountIDs(ids, for: pid)
-            }
+            for (pid, ids) in membershipSet { profilesModel.setActiveAccountIDs(ids, for: pid) }
             for pid in membershipClear { profilesModel.clearActiveAccountIDs(for: pid) }
         }
         // 4. Descriptors → pending "needs sign-in" servers.
@@ -280,8 +271,15 @@ extension AppState {
 
     /// The settings UserDefaults namespace for a profile id, or nil if unknown here.
     private func namespace(forProfileID pid: String) -> String?? {
-        guard let p = profilesModel.profiles.first(where: { $0.id == pid }) else { return nil }
-        return .some(p.settingsNamespace(isDefault: profilesModel.isDefault(p)))
+        if let p = profilesModel.profiles.first(where: { $0.id == pid }) {
+            return .some(p.settingsNamespace(isDefault: profilesModel.isDefault(p)))
+        }
+        // Profile not local yet (arrived in an earlier fetch batch than its own
+        // record): apply the setting anyway under its derived namespace so it's present
+        // when the profile lands — otherwise a later capture would omit it and delete
+        // it for the household (S5). The default profile is always seeded locally, so an
+        // absent profile is definitely non-default ⇒ namespace = its id.
+        return .some(pid)
     }
 
     // MARK: Pending synced servers

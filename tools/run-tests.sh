@@ -311,7 +311,12 @@ _xcb_once() {
 
   local status
   wait "$xcb_pid" 2>/dev/null; status=$?
-  kill "$tail_pid" 2>/dev/null || true
+  # Kill the WHOLE streamer subtree, not just the subshell: the `tail -F` inside
+  # `( tail -F | grep )` is a child of the subshell, so `kill $tail_pid` leaves it
+  # orphaned — and because it inherited this pipeline's stdout, that orphan holds
+  # the pipe open forever, so `run-tests.sh | tail` never gets EOF and LOOKS hung
+  # long after the build actually finished. kill_tree reaps tail -F + grep too.
+  kill_tree "$tail_pid"
   wait "$tail_pid" 2>/dev/null || true
   [[ $hung -eq 1 ]] && return 124
   return $status

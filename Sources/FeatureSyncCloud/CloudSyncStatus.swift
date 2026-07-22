@@ -27,7 +27,33 @@ public final class CloudSyncStatus {
     /// success clears it. Survives the phase flicker so it's actually readable.
     public internal(set) var lastDiagnostic: String?
 
+    /// Debounces error display: a transient conflict that self-heals on the engine's
+    /// own retry shouldn't flash a scary "Couldn't sync". The error is only shown if
+    /// it's still pending after a short grace period without a success/syncing update.
+    @ObservationIgnored private var pendingErrorTask: Task<Void, Never>?
+
     public init() {}
+
+    /// Non-error phase update (idle/syncing/signedOut/disabled). Cancels any pending
+    /// debounced error, since we've made forward progress.
+    func setPhase(_ newPhase: Phase, syncedNow: Bool = false) {
+        pendingErrorTask?.cancel(); pendingErrorTask = nil
+        phase = newPhase
+        if syncedNow { lastSyncedAt = Date(); lastDiagnostic = nil; lastErrorMessage = nil }
+    }
+
+    /// Record an error, but only surface it after a grace period — so a blip that
+    /// the engine immediately resolves (a following idle) never shows red.
+    func setError(_ message: String, diagnostic: String?) {
+        pendingErrorTask?.cancel()
+        pendingErrorTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.phase = .error
+            self.lastErrorMessage = message
+            if let diagnostic { self.lastDiagnostic = diagnostic }
+        }
+    }
 
     /// A short, user-facing summary line, e.g. "Up to date · synced 2m ago".
     public var summary: String {

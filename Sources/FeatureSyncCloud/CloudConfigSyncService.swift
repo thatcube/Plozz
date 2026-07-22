@@ -85,13 +85,16 @@ public actor CloudConfigSyncService {
     private func setStatus(_ phase: CloudSyncStatus.Phase, syncedNow: Bool = false, error: String? = nil) {
         guard let status = config.status else { return }
         Task { @MainActor in
-            status.phase = phase
-            if syncedNow { status.lastSyncedAt = Date(); status.lastDiagnostic = nil }
-            status.lastErrorMessage = error
+            if phase == .error {
+                status.setError(error ?? "Couldn't sync", diagnostic: nil)
+            } else {
+                status.setPhase(phase, syncedNow: syncedNow)
+            }
         }
     }
 
-    /// Record a PERSISTENT diagnostic detail (survives the phase flicker).
+    /// Record a PERSISTENT diagnostic detail (survives the phase flicker). Does NOT
+    /// itself flip to the error phase — a self-healing conflict logs quietly.
     private func setDiagnostic(_ detail: String) {
         PlozzLog.sync.error("CloudSync: \(detail)")
         guard let status = config.status else { return }
@@ -131,21 +134,30 @@ public actor CloudConfigSyncService {
         await publishLocalChanges()
     }
 
-    /// Force an immediate two-way sync (fetch then send), for a manual "Sync Now".
+    /// Force an immediate two-way sync, for a manual "Sync Now". Publishes local
+    /// changes, pushes, then ALWAYS pulls (so pressing Sync Now on a receiver
+    /// reliably fetches the latest even if the push had nothing to send / failed).
     public func syncNow() async {
         guard config.isEnabled() else { setStatus(.disabled); return }
         guard await accountIsAvailable() else { setStatus(.signedOut); return }
         ensureEngine()
         guard let engine else { return }
         setStatus(.syncing)
-        do {
-            await publishLocalChanges()
-            try await engine.fetchChanges()
-            try await engine.sendChanges()
+        await publishLocalChanges()
+
+        var sendError: Error?
+        do { try await engine.sendChanges() } catch { sendError = error }
+        // Fetch regardless of send outcome — this is how a receiver pulls updates.
+        do { try await engine.fetchChanges() } catch { if sendError == nil { sendError = error } }
+
+        if let sendError {
+            // The engine auto-retries transient conflicts, and its own did*Changes
+            // events will flip us back to idle if that succeeds — so this error is
+            // debounced and only surfaces if it's still unresolved shortly after.
+            setDiagnostic("sync: \(Self.describe(sendError))")
+            setStatus(.error, error: (sendError as NSError).localizedDescription)
+        } else {
             setStatus(.idle, syncedNow: true)
-        } catch {
-            setDiagnostic("sendChanges: \(Self.describe(error))")
-            setStatus(.error, error: (error as NSError).localizedDescription)
         }
     }
 

@@ -109,7 +109,7 @@ struct PlozziOSSyncSetupSettingsView: View {
             Section {
                 Toggle(isOn: Binding(
                     get: { appModel.syncSetup.isEnabled },
-                    set: { appModel.syncSetup.setEnabled($0) }
+                    set: { appModel.setSyncSetupEnabled($0) }
                 )) {
                     Label("Sync across your devices", systemImage: "arrow.triangle.2.circlepath")
                 }

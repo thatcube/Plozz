@@ -9,6 +9,7 @@ import FeatureAuthCore
 import FeatureHomeCore
 import FeatureProfiles
 import FeatureSyncSetup
+import FeatureSyncCloud
 import Foundation
 import MALService
 import MediaDownloads
@@ -45,6 +46,17 @@ final class PlozziOSAppModel {
     let profiles: ProfilesModel
     /// Cross-device Sync & Setup (feature-flagged; OFF by default).
     let syncSetup: SyncSetupService
+
+    /// CloudKit "Stage 1" auto-sync of the NON-SECRET household config across this
+    /// Apple ID's devices. Lazily built so its config<->apply closures can capture
+    /// `self`. Gated on `SyncSetupFeatureFlag`; a no-op until enabled. See
+    /// `PlozziOSAppModel+CloudSync`.
+    @ObservationIgnored
+    private(set) lazy var cloudSync: CloudConfigSyncService? = Self.makeCloudSync(for: self)
+
+    /// Debounces bursts of local config edits into a single cloud publish.
+    @ObservationIgnored
+    var cloudPublishTask: Task<Void, Never>?
 
     /// Persist a setup received over pairing: create accounts from the descriptors,
     /// store their transferred tokens in the Keychain, and refresh providers so the
@@ -503,6 +515,10 @@ final class PlozziOSAppModel {
             await seerService.migrateLegacyConnectionIfNeeded(namespaces: namespaces)
             await seerService.refreshStatus()
         }
+
+        // Bring up CloudKit config auto-sync (no-op unless the Sync & Setup flag is
+        // on) and start observing local config changes to publish them.
+        startCloudSyncIfEnabled()
     }
 
     var accounts: [Account] {

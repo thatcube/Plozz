@@ -12,6 +12,7 @@ struct PlozziOSSyncSetupSettingsView: View {
     @State private var showCodeEntry = false
     @State private var showReceive = false
     @State private var handled = false
+    @State private var showResetConfirm = false
 
     init(appModel: PlozziOSAppModel) {
         self.appModel = appModel
@@ -144,10 +145,22 @@ struct PlozziOSSyncSetupSettingsView: View {
                             .font(.footnote)
                     }
                     Button(role: .destructive) {
-                        appModel.resetCloudSync()
+                        showResetConfirm = true
                     } label: {
                         Label("Reset Synced Data", systemImage: "arrow.counterclockwise.icloud")
                             .font(.footnote)
+                    }
+                    .confirmationDialog(
+                        "Reset synced data?",
+                        isPresented: $showResetConfirm,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Reset & Re-upload From This Device", role: .destructive) {
+                            appModel.resetCloudSync()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Deletes the shared iCloud copy and re-uploads it from THIS device. Your other devices keep their own logins. Use only if devices won't converge.")
                     }
                 }
             } footer: {

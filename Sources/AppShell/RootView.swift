@@ -243,7 +243,10 @@ public struct RootView: View {
                         onSetSyncEnabled: { appState.setSyncSetupEnabled($0) },
                         syncStatusSummary: appState.cloudSyncStatus.summaryLine,
                         onSyncNow: { appState.syncCloudNow() },
-                        onResetSync: { appState.resetCloudSync() },
+                        syncRepair: .init(
+                            redownload: { appState.redownloadCloudSync() },
+                            reset: { appState.resetCloudSync() }
+                        ),
                         pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,
                         onIgnorePendingServer: { appState.ignorePendingSyncedServer($0) },
                         onSetUpFromAnotherDevice: { showSyncReceiveFromSettings = true }

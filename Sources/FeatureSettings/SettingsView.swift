@@ -10,6 +10,17 @@ import AniListService
 import MALService
 import LastFmService
 
+/// Sync-repair actions for the iCloud Sync page, bundled so the (already
+/// arg-limit-bound) `SettingsView` initializer carries them in a single parameter.
+public struct SyncRepairActions {
+    public var redownload: () -> Void
+    public var reset: () -> Void
+    public init(redownload: @escaping () -> Void, reset: @escaping () -> Void) {
+        self.redownload = redownload
+        self.reset = reset
+    }
+}
+
 /// Settings root — a hierarchical list of top-level rows that each push a
 /// dedicated detail page.
 ///
@@ -30,6 +41,7 @@ public struct SettingsView: View {
     /// instead of popping back.
     @State private var path: [SettingsRoute] = []
     @State private var confirmSignOutAll = false
+    @State private var showResetSyncConfirm = false
     /// Presents the profile editor sheet for the active profile (Edit button in
     /// the profile header). Mirrors the editor flow in ``ProfileDetailView``.
     @State private var editingProfile: Profile?
@@ -117,7 +129,7 @@ public struct SettingsView: View {
     /// Live status summary line for the iCloud Sync page, and a manual sync action.
     private let syncStatusSummary: String?
     private let onSyncNow: (() -> Void)?
-    private let onResetSync: (() -> Void)?
+    private let syncRepair: SyncRepairActions?
     /// Synced servers this device isn't signed into yet, plus ignore + set-up actions.
     private let pendingSyncedServers: [SyncedAccountDescriptor]
     private let onIgnorePendingServer: (String) -> Void
@@ -179,7 +191,7 @@ public struct SettingsView: View {
         onSetSyncEnabled: ((Bool) -> Void)? = nil,
         syncStatusSummary: String? = nil,
         onSyncNow: (() -> Void)? = nil,
-        onResetSync: (() -> Void)? = nil,
+        syncRepair: SyncRepairActions? = nil,
         pendingSyncedServers: [SyncedAccountDescriptor] = [],
         onIgnorePendingServer: @escaping (String) -> Void = { _ in },
         onSetUpFromAnotherDevice: (() -> Void)? = nil
@@ -236,7 +248,7 @@ public struct SettingsView: View {
         self.onSetSyncEnabled = onSetSyncEnabled
         self.syncStatusSummary = syncStatusSummary
         self.onSyncNow = onSyncNow
-        self.onResetSync = onResetSync
+        self.syncRepair = syncRepair
         self.pendingSyncedServers = pendingSyncedServers
         self.onIgnorePendingServer = onIgnorePendingServer
         self.onSetUpFromAnotherDevice = onSetUpFromAnotherDevice
@@ -878,19 +890,36 @@ public struct SettingsView: View {
                             .focusSection()
                         }
 
-                        if syncEnabled, let onResetSync {
+                        if syncEnabled, let syncRepair {
                             LabeledSettingRow("Troubleshoot", labelWidth: 160) {
-                                HStack(spacing: 16) {
-                                    Text("Wipe iCloud copy and re-upload from this Apple TV. Fixes devices that won't converge.")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    Spacer(minLength: 0)
-                                    Button("Reset Sync", action: onResetSync)
-                                        .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
+                                VStack(alignment: .leading, spacing: 14) {
+                                    HStack(spacing: 16) {
+                                        Text("Not seeing changes from your other devices? Pull a fresh copy from iCloud.")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        Spacer(minLength: 0)
+                                        Button("Re-download From iCloud", action: syncRepair.redownload)
+                                            .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
+                                    }
+                                    HStack(spacing: 16) {
+                                        Text("Still wrong? Wipe the iCloud copy and re-upload from this Apple TV.")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        Spacer(minLength: 0)
+                                        Button("Reset Sync") { showResetSyncConfirm = true }
+                                            .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
+                                    }
                                 }
                             }
                             .focusSection()
+                            .alert("Reset synced data?", isPresented: $showResetSyncConfirm) {
+                                Button("Reset", role: .destructive) { syncRepair.reset() }
+                                Button("Cancel", role: .cancel) {}
+                            } message: {
+                                Text("Deletes the shared iCloud copy and re-uploads it from THIS Apple TV. Other devices keep their own logins. Use only if devices won't converge.")
+                            }
                         }
                     }
                 }

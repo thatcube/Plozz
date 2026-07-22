@@ -19,6 +19,12 @@ enum CloudSyncSchema {
     static let zoneName = "PlozzSyncV3Zone"
     static var zoneID: CKRecordZone.ID { CKRecordZone.ID(zoneName: zoneName) }
 
+    /// Dead zones from the V1/V2 sync engines. Their records are ignored by V3 but,
+    /// left in the private DB, they get dragged into every fetch as noise (and inflate
+    /// the user-visible item count). Deleted once by the V3 service.
+    static let legacyZoneNames = ["PlozzConfig", "PlozzConfigV2"]
+    static var legacyZoneIDs: [CKRecordZone.ID] { legacyZoneNames.map { CKRecordZone.ID(zoneName: $0) } }
+
     static let fieldKind = "kind"        // SyncRecordKind raw value (diagnostics/filtering)
     static let fieldValue = "value"      // canonical value bytes
     static let fieldEditedAt = "editedAt" // Int64 mutation clock

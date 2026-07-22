@@ -151,6 +151,7 @@ public actor CloudConfigSyncService {
         await logAccountIdentity()
         guard let engine else { return }
         engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
+        await cleanupLegacyZonesIfNeeded()
         // Fetch before publish — the anti-clobber ordering.
         do { try await engine.fetchChanges(); markServerStateConfirmed() }
         catch { setDiagnostic("activate fetch: \(Self.describe(error))") }
@@ -160,8 +161,31 @@ public actor CloudConfigSyncService {
         reportRecordCount()
     }
 
-    private func logAccountIdentity() async {
+    /// One-time: delete the dead V1/V2 CloudKit zones so their stale records stop being
+    /// dragged into every V3 fetch (noise + an inflated item count). Idempotent and
+    /// guarded by a persisted flag so it runs at most once per install; a failure just
+    /// retries next launch. Never touches the live V3 zone.
+    private func cleanupLegacyZonesIfNeeded() async {
+        let key = "com.plozz.cloudSync.didCleanupLegacyZones.\(config.containerIdentifier)"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
         do {
+            _ = try await container.privateCloudDatabase.modifyRecordZones(
+                saving: [], deleting: CloudSyncSchema.legacyZoneIDs)
+            UserDefaults.standard.set(true, forKey: key)
+            PlozzLog.sync.info("CloudSync: deleted legacy V1/V2 zones \(CloudSyncSchema.legacyZoneNames.joined(separator: ", "))")
+        } catch {
+            // A zone that doesn't exist yields a partial error — treat "nothing to
+            // delete" as success so we don't retry forever.
+            if let ck = error as? CKError, ck.code == .partialFailure || ck.code == .zoneNotFound {
+                UserDefaults.standard.set(true, forKey: key)
+                PlozzLog.sync.info("CloudSync: legacy zones already absent — cleanup marked done")
+            } else {
+                PlozzLog.sync.error("CloudSync: legacy zone cleanup failed (will retry): \(Self.describe(error))")
+            }
+        }
+    }
+
+    private func logAccountIdentity() async {        do {
             let status = try await container.accountStatus()
             let userID = try await container.userRecordID()
             let short = String(userID.recordName.prefix(10))

@@ -185,7 +185,7 @@ struct MainTabView: View {
     /// Live sync status summary + manual sync action for the iCloud Sync page.
     var syncStatusSummary: String?
     var onSyncNow: (() -> Void)?
-    var onResetSync: (() -> Void)?
+    var syncRepair: SyncRepairActions?
     /// Pending (needs-sign-in) synced servers + their actions.
     var pendingSyncedServers: [SyncedAccountDescriptor] = []
     var onIgnorePendingServer: (String) -> Void = { _ in }
@@ -403,7 +403,7 @@ struct MainTabView: View {
                 onSetSyncEnabled: onSetSyncEnabled,
                 syncStatusSummary: syncStatusSummary,
                 onSyncNow: onSyncNow,
-                onResetSync: onResetSync,
+                syncRepair: syncRepair,
                 pendingSyncedServers: pendingSyncedServers,
                 onIgnorePendingServer: onIgnorePendingServer,
                 onSetUpFromAnotherDevice: onSetUpFromAnotherDevice

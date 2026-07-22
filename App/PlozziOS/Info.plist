@@ -96,6 +96,10 @@
 		<string>OpenDyslexic-Bold.otf</string>
 		<string>OpenDyslexic-BoldItalic.otf</string>
 	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiresFullScreen</key>

@@ -9,6 +9,7 @@ import FeatureDiscoveryCore
 import FeatureMusic
 import FeatureProfiles
 import FeatureSyncSetup
+import FeatureSyncCloud
 import MediaTransportCore
 import MediaDownloads
 import MediaTransportFTP
@@ -477,6 +478,18 @@ public final class AppState {
 
     /// Cross-device Sync & Setup (feature-flagged; OFF by default).
     public let syncSetup: SyncSetupService
+
+    /// CloudKit "Stage 1" auto-sync of the NON-SECRET household config (server
+    /// descriptors, profiles, per-profile settings + membership) across one Apple
+    /// ID's devices. Lazily built so its config<->apply closures can capture `self`.
+    /// Gated at runtime on `SyncSetupFeatureFlag`; a no-op until enabled. `nil` only
+    /// if no writable state location can be resolved. See `AppState+CloudSync`.
+    @ObservationIgnored
+    public private(set) lazy var cloudSync: CloudConfigSyncService? = Self.makeCloudSync(for: self)
+
+    /// Debounces bursts of local config edits into a single cloud publish.
+    @ObservationIgnored
+    var cloudPublishTask: Task<Void, Never>?
 
     /// Persist a setup received over pairing: import profiles, create accounts from
     /// the descriptors, store their transferred tokens in the Keychain, refresh
@@ -1039,6 +1052,10 @@ public final class AppState {
             await seerService.migrateLegacyConnectionIfNeeded(namespaces: seerNamespaces)
             await seerService.refreshStatus()
         }
+
+        // Bring up CloudKit config auto-sync (no-op unless the Sync & Setup flag is
+        // on) and start observing local config changes to publish them.
+        startCloudSyncIfEnabled()
     }
 
     /// Whether the environment permits remembering the selected profile for the
@@ -1906,7 +1923,7 @@ public final class AppState {
     /// Rebuilds the settings models scoped to the active profile's
     /// namespace. Delegates to `profileSettings`; a no-op there when settings
     /// models were injected (tests).
-    private func rebuildSettingsModels() {
+    func rebuildSettingsModels() {
         profileSettings.rebuild(namespace: profilesModel.activeNamespace)
     }
 

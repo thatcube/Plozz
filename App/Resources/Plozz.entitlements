@@ -6,6 +6,23 @@
     <array>
         <string>group.com.thatcube.Plozz</string>
     </array>
+    <!-- iCloud key-value storage: powers the non-secret Sync & Setup "presence
+         beacon" (a configured device advertises that a setup exists so a fresh
+         same-Apple-ID device can offer to bring it over). No secrets stored. -->
+    <key>com.apple.developer.ubiquity-kvstore-identifier</key>
+    <string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+    <!-- CloudKit: powers the non-secret Sync & Setup auto-sync layer (CKSyncEngine
+         on the private DB) that keeps the household setup — server descriptors,
+         profiles, per-profile settings + membership — in sync across one Apple
+         ID's devices. NEVER stores tokens/passwords. -->
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array>
+        <string>iCloud.com.thatcube.Plozz</string>
+    </array>
+    <key>com.apple.developer.icloud-services</key>
+    <array>
+        <string>CloudKit</string>
+    </array>
     <!-- tvOS system multi-user support. "runs-as-current-user" opts the app into
          per-Apple-TV-user data partitioning (separate UserDefaults + Keychain per
          system user) on tvOS 16+, while "…with-user-independent-keychain" lets the

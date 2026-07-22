@@ -66,8 +66,11 @@ targets:
         # Background audio keeps music playing while the user browses other
         # screens or the tvOS screensaver starts. Required for the music MVP's
         # background/Now-Playing behaviour (AVAudioSession .playback).
+        # remote-notification lets CloudKit (CKSyncEngine) wake the app to pull
+        # config changes pushed from another device on the same Apple ID.
         UIBackgroundModes:
           - audio
+          - remote-notification
         UIAppFonts:
           - "Bungee-Regular.ttf"
           # Atkinson Hyperlegible (SIL OFL) — the default subtitle font. Designed
@@ -267,6 +270,10 @@ targets:
         PlozzSentryDSN: "$(PLOZZ_SENTRY_DSN)"
         UILaunchScreen: {}
         UIRequiresFullScreen: false
+        # remote-notification lets CloudKit (CKSyncEngine) wake the app to pull
+        # config changes pushed from another device on the same Apple ID.
+        UIBackgroundModes:
+          - remote-notification
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown

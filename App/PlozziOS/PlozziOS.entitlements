@@ -7,6 +7,18 @@
          setup over. No secrets are ever stored here. -->
     <key>com.apple.developer.ubiquity-kvstore-identifier</key>
     <string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+    <!-- CloudKit: powers the non-secret Sync & Setup auto-sync layer (CKSyncEngine
+         on the private DB) that keeps the household setup — server descriptors,
+         profiles, per-profile settings + membership — in sync across one Apple
+         ID's devices. NEVER stores tokens/passwords. -->
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array>
+        <string>iCloud.com.thatcube.Plozz</string>
+    </array>
+    <key>com.apple.developer.icloud-services</key>
+    <array>
+        <string>CloudKit</string>
+    </array>
     <!-- Universal Links for Sync & Setup pairing: scanning the QR opens Plozz
          straight into the "set up another device" flow. Backed by the AASA file
          served from https://plozz.app/.well-known/apple-app-site-association. -->

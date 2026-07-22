@@ -52,8 +52,7 @@ final class PendingSyncedServersStoreTests: XCTestCase {
         XCTAssertEqual(store.pending.map(\.id), ["A"], "but it stays listed as pending")
     }
 
-    func testForgetRemovesEntirely() {
-        var store = PendingSyncedServersStore(defaults: makeDefaults())
+    func testForgetRemovesEntirely() {        var store = PendingSyncedServersStore(defaults: makeDefaults())
         _ = store.reconcile(syncedDescriptors: [desc("A")], localAccountIDs: [])
         store.ignore("A")
         store.forget("A")

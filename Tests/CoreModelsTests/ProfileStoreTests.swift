@@ -511,4 +511,29 @@ final class SettingsNamespaceTests: XCTestCase {
         XCTAssertEqual(after?.avatarEmoji, "🎬")
         XCTAssertEqual(model.profiles.filter { $0.id == ProfileStore.defaultProfileID }.count, 1)
     }
+
+    @MainActor
+    func testMergeSyncedProfilesUpdatesDefaultProfile() {
+        let model = ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
+        model.markFirstRunProfileSetupComplete()   // configured receiver
+
+        // An edit to the SHARED default profile (name + avatar) arriving via sync
+        // must apply — unlike importProfiles, which guards the default.
+        var edited = model.profiles.first { $0.id == ProfileStore.defaultProfileID }!
+        edited.name = "Renamed On Phone"
+        edited.avatarEmoji = "🍿"
+        model.mergeSyncedProfiles([edited])
+
+        let after = model.profiles.first { $0.id == ProfileStore.defaultProfileID }
+        XCTAssertEqual(after?.name, "Renamed On Phone")
+        XCTAssertEqual(after?.avatarEmoji, "🍿")
+    }
+
+    @MainActor
+    func testMergeSyncedProfilesAddsNewAndKeepsCount() {
+        let model = ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
+        let newProfile = Profile(id: "kid-1", name: "Kid")
+        model.mergeSyncedProfiles([newProfile])
+        XCTAssertTrue(model.profiles.contains { $0.id == "kid-1" && $0.name == "Kid" })
+    }
 }

@@ -494,14 +494,9 @@ public final class AppState {
     /// Observable CloudKit sync status for the iCloud Sync settings page.
     public let cloudSyncStatus = CloudSyncStatus()
 
-    /// Synced servers this device isn't signed into yet ("Needs sign-in"), surfaced
-    /// on the iCloud Sync page. Device-local; never injected into the account pipeline.
-    /// Settable only via the AppState+CloudSync helpers (kept module-internal).
-    public internal(set) var pendingSyncedServers: [SyncedAccountDescriptor] = []
-
-    /// A newly-detected synced server to prompt the user about (Set Up / Ignore),
-    /// or nil. RootView observes this to present a one-time prompt.
-    public var pendingServerPrompt: SyncedAccountDescriptor?
+    /// Observable facet for the CloudKit "needs sign-in" server UI, kept off
+    /// `AppState` itself so its @Observable mutable-property budget stays flat.
+    public let cloudSyncUI = CloudSyncUIModel()
 
     /// Persist a setup received over pairing: import profiles, create accounts from
     /// the descriptors, store their transferred tokens in the Keychain, refresh

@@ -5,6 +5,21 @@ import CoreNetworking
 import FeatureSyncSetup
 import FeatureSyncCloud
 
+// MARK: - CloudSyncUIModel
+//
+// Small @Observable facet holding the CloudKit "needs sign-in" server UI state,
+// kept off AppState so AppState's tracked-mutable-property budget stays flat
+// (per the architecture layering guard).
+@MainActor
+@Observable
+public final class CloudSyncUIModel {
+    /// Synced servers this device isn't signed into yet ("Needs sign-in").
+    public internal(set) var pendingSyncedServers: [SyncedAccountDescriptor] = []
+    /// A newly-detected synced server to prompt about (Set Up / Ignore), or nil.
+    public var pendingServerPrompt: SyncedAccountDescriptor?
+    public init() {}
+}
+
 // MARK: - AppState + CloudKit config auto-sync
 //
 // Wires the pure/engine layers (CoreModels.CloudSyncMirror + FeatureSyncCloud) into
@@ -107,10 +122,11 @@ extension AppState {
     /// Keychain. Safe to call for background CloudKit merges (unlike
     /// `applyReceivedSetup`, it does not mark first-run complete or enter the app).
     public func applyRemoteConfigSnapshot(_ snapshot: SyncConfigSnapshot) {
-        // 1. Roster: import/update by id (importProfiles guards a configured
-        //    receiver's own default profile from being clobbered).
+        // 1. Roster: update/add by id — INCLUDING the shared default profile — so an
+        //    edit to the default's name/avatar converges (importProfiles' pairing
+        //    guard would skip the default and strand its edits).
         let incomingProfiles = snapshot.profiles.map(\.profile)
-        if !incomingProfiles.isEmpty { profilesModel.importProfiles(incomingProfiles) }
+        if !incomingProfiles.isEmpty { profilesModel.mergeSyncedProfiles(incomingProfiles) }
 
         // 2. Per-profile settings: reinstall under each matching profile's namespace.
         for snap in snapshot.profileSettings {
@@ -147,12 +163,12 @@ extension AppState {
         let localIDs = Set(accountsProviders.accounts.map(\.id))
         let newlyPending = store.reconcile(
             syncedDescriptors: snapshot.accounts, localAccountIDs: localIDs)
-        pendingSyncedServers = store.pending
+        cloudSyncUI.pendingSyncedServers = store.pending
         // Offer to set up the first newly-detected server (one at a time), then mark
         // it prompted so it never nags again. Only when sync is enabled.
-        if SyncSetupFeatureFlag().isEnabled, pendingServerPrompt == nil,
+        if SyncSetupFeatureFlag().isEnabled, cloudSyncUI.pendingServerPrompt == nil,
            let first = newlyPending.first {
-            pendingServerPrompt = first
+            cloudSyncUI.pendingServerPrompt = first
             store.markPrompted(newlyPending.map(\.id))
         }
     }
@@ -162,12 +178,12 @@ extension AppState {
     public func ignorePendingSyncedServer(_ id: String) {
         var store = PendingSyncedServersStore()
         store.ignore(id)
-        if pendingServerPrompt?.id == id { pendingServerPrompt = nil }
-        pendingSyncedServers = store.pending
+        if cloudSyncUI.pendingServerPrompt?.id == id { cloudSyncUI.pendingServerPrompt = nil }
+        cloudSyncUI.pendingSyncedServers = store.pending
     }
 
     /// The user dismissed / handled the current prompt.
-    public func clearPendingServerPrompt() { pendingServerPrompt = nil }
+    public func clearPendingServerPrompt() { cloudSyncUI.pendingServerPrompt = nil }
 
     /// Refresh the pending list from the current local snapshot (e.g. after a
     /// pairing/sign-in signs the device into one of them).

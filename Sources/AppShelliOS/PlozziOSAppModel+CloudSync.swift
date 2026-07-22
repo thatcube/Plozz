@@ -73,7 +73,7 @@ extension PlozziOSAppModel {
 
     func applyRemoteConfigSnapshot(_ snapshot: SyncConfigSnapshot) {
         let incomingProfiles = snapshot.profiles.map(\.profile)
-        if !incomingProfiles.isEmpty { profiles.importProfiles(incomingProfiles) }
+        if !incomingProfiles.isEmpty { profiles.mergeSyncedProfiles(incomingProfiles) }
 
         for snap in snapshot.profileSettings {
             guard let profile = profiles.profiles.first(where: { $0.id == snap.profileID }) else { continue }

@@ -502,6 +502,34 @@ public final class ProfilesModel {
         recomputeHouseholdDefaults()
     }
 
+    /// Apply profiles arriving from ongoing CloudKit sync. Unlike `importProfiles`
+    /// (pairing), this UPDATES every existing profile by id — INCLUDING the shared
+    /// default profile — so an edit to the default's name/avatar/color on one device
+    /// converges on the others. New ids are added. Nothing is removed here (profile
+    /// deletions propagate separately). The record-level last-writer-wins in the
+    /// sync mirror already decided the winner, so applying the incoming value is
+    /// safe: a stale remote never reaches this method (its snapshot is unchanged).
+    public func mergeSyncedProfiles(_ incoming: [Profile]) {
+        guard !incoming.isEmpty else { return }
+        var byID: [String: Profile] = [:]
+        var order: [String] = []
+        for p in profiles {
+            if byID[p.id] == nil { order.append(p.id) }
+            byID[p.id] = p
+        }
+        var changed = false
+        for p in incoming {
+            if byID[p.id] != p { changed = true }   // add or update (default included)
+            if byID[p.id] == nil { order.append(p.id) }
+            byID[p.id] = p
+        }
+        guard changed else { return }
+        profiles = order.compactMap { byID[$0] }
+        profiles.sort { $0.createdAt < $1.createdAt }
+        store.saveProfiles(profiles)
+        recomputeHouseholdDefaults()
+    }
+
     /// Updates an existing profile's editable fields in place.
     public func update(_ profile: Profile) {
         guard let idx = profiles.firstIndex(where: { $0.id == profile.id }) else { return }

@@ -243,7 +243,7 @@ public struct RootView: View {
                         onSetSyncEnabled: { appState.setSyncSetupEnabled($0) },
                         syncStatusSummary: appState.cloudSyncStatus.summary,
                         onSyncNow: { appState.syncCloudNow() },
-                        pendingSyncedServers: appState.pendingSyncedServers,
+                        pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,
                         onIgnorePendingServer: { appState.ignorePendingSyncedServer($0) },
                         onSetUpFromAnotherDevice: { showSyncReceiveFromSettings = true }
                     )
@@ -315,10 +315,10 @@ public struct RootView: View {
         .alert(
             "New server from your other device",
             isPresented: Binding(
-                get: { appState.pendingServerPrompt != nil },
+                get: { appState.cloudSyncUI.pendingServerPrompt != nil },
                 set: { if !$0 { appState.clearPendingServerPrompt() } }
             ),
-            presenting: appState.pendingServerPrompt
+            presenting: appState.cloudSyncUI.pendingServerPrompt
         ) { descriptor in
             Button("Set Up") {
                 appState.clearPendingServerPrompt()

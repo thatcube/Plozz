@@ -175,6 +175,7 @@ public actor CloudConfigSyncService {
         await publishLocalChanges()
         try? await engine.fetchChanges()
         try? await engine.sendChanges()   // flush toPush from the fetch
+        reportRecordCount()
     }
 
     /// Force an immediate two-way sync, for a manual "Sync Now". Order is
@@ -193,6 +194,7 @@ public actor CloudConfigSyncService {
         // toPush). Each runs regardless of the other's outcome.
         do { try await engine.fetchChanges() } catch { syncError = error }
         do { try await engine.sendChanges() } catch { if syncError == nil { syncError = error } }
+        reportRecordCount()
 
         if let syncError {
             // The engine auto-retries transient conflicts, and its own did*Changes

@@ -498,15 +498,12 @@ public struct SettingsView: View {
                        value: seerrRowValue,
                        route: .seerr)
 
-                // Cross-device sync opt-in (CloudKit; non-secret config only).
-                if let onSetSyncEnabled {
-                    syncEnabledRow(syncEnabled, onSetSyncEnabled)
-                }
-
-                // Set up another device (sender): push this Apple TV's servers +
-                // profiles to a phone/tablet that's waiting to be set up.
-                if let onSetUpAnotherDevice {
-                    setUpAnotherDeviceRow(onSetUpAnotherDevice)
+                // Cross-device sync + device pairing, combined under one entry that
+                // drills into a detail page (matches the Settings hierarchy).
+                if onSetSyncEnabled != nil || onSetUpAnotherDevice != nil {
+                    navRow("iCloud Sync", icon: "arrow.triangle.2.circlepath",
+                           value: onSetSyncEnabled != nil ? (syncEnabled ? "On" : "Off") : nil,
+                           route: .syncSetup)
                 }
             }
             .padding(.horizontal, 28)
@@ -685,6 +682,8 @@ public struct SettingsView: View {
             IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount)
         case .seerr:
             SeerDetailView(seer: seer, knownServerHosts: knownServerHosts, profiles: profiles, onSetSeerrUser: onSetSeerrUser)
+        case .syncSetup:
+            syncSetupDetail
         case let .seerUserPicker(profileID):
             if let profile = profiles.first(where: { $0.id == profileID }) {
                 SeerUserPickerView(seer: seer, profile: profile, onSelect: { onSetSeerrUser(profileID, $0) })
@@ -827,28 +826,38 @@ public struct SettingsView: View {
 
     // MARK: - Enable profiles row (single-profile household)
 
-    private func syncEnabledRow(_ isOn: Bool, _ setOn: @escaping (Bool) -> Void) -> some View {
-        Button { setOn(!isOn) } label: {
-            HStack(alignment: .top, spacing: 16) {
-                rowIcon("arrow.triangle.2.circlepath")
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Sync Across Your Devices")
-                        .font(.callout.weight(.medium))
-                    Text("Keep your profiles, settings, and server list in sync across devices signed in to your iCloud account. Off by default.")
-                        .font(.footnote)
-                        .settingsRowSecondary()
-                        .fixedSize(horizontal: false, vertical: true)
+    /// Level-2 "iCloud Sync" page: the sync opt-in plus the "set up another device"
+    /// pairing action, combined into one place (matches iOS's Sync & Setup page).
+    @ViewBuilder
+    private var syncSetupDetail: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                if let onSetSyncEnabled {
+                    SettingsPanel(
+                        title: "iCloud Sync",
+                        footer: "Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device — sign in or pair each server once. Off by default."
+                    ) {
+                        Toggle("Sync With iCloud", isOn: Binding(
+                            get: { syncEnabled }, set: { onSetSyncEnabled($0) }
+                        ))
+                        .toggleStyle(SettingsSwitchToggleStyle())
+                    }
                 }
-                Spacer()
-                Text(isOn ? "On" : "Off")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(isOn ? Color.green : Color.secondary)
+                if let onSetUpAnotherDevice {
+                    SettingsPanel(
+                        title: "Set Up Another Device",
+                        footer: "Sign in a phone or tablet from this Apple TV over your local network."
+                    ) {
+                        setUpAnotherDeviceRow(onSetUpAnotherDevice)
+                    }
+                }
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 12)
-            .contentShape(Rectangle())
+            .frame(maxWidth: 1200, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            .padding(.vertical, 40)
         }
-        .buttonStyle(SettingsFocusButtonStyle())
+        .scrollClipDisabled()
     }
 
     private func setUpAnotherDeviceRow(_ action: @escaping () -> Void) -> some View {        Button(action: action) {

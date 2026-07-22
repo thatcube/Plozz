@@ -111,10 +111,10 @@ struct PlozziOSSyncSetupSettingsView: View {
                     get: { appModel.syncSetup.isEnabled },
                     set: { appModel.setSyncSetupEnabled($0) }
                 )) {
-                    Label("Sync across your devices", systemImage: "arrow.triangle.2.circlepath")
+                    Label("iCloud Sync", systemImage: "arrow.triangle.2.circlepath")
                 }
             } footer: {
-                Text("Securely syncs your profiles and settings through your private iCloud (end-to-end encrypted). Off by default.")
+                Text("Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device. Off by default.")
             }
 
             Section {

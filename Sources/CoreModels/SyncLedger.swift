@@ -2,63 +2,70 @@ import Foundation
 
 // MARK: - SyncLedger — the V3 sync core (pure, CloudKit-free)
 //
-// Replaces the V2 `CloudSyncMirror`. The V2 design inferred "the user edited this"
-// from a reconstructed byte snapshot; any non-idempotent adapter, default
-// insertion, or ordering change looked like a genuine edit, got a fresh timestamp,
-// and clobbered peers (proven on-device). V3 removes that entire class of bug.
+// Replaces the V2 `CloudSyncMirror`. V2 inferred "the user edited this" from a
+// reconstructed byte snapshot; any non-idempotent adapter, default insertion, or
+// ordering change looked like a genuine edit, got a fresh timestamp, and clobbered
+// peers (proven on-device). V3 removes that entire class of bug and — after two
+// independent expert reviews — hardens the delete, resync, in-flight, and
+// stale-delivery paths that silently corrupt config.
 //
-// Model (aligned with Apple's sample-cloudkit-sync-engine + independent review):
-//   • The app's real stores remain the source of truth for VALUES. The ledger only
-//     tracks per-record SYNC METADATA: the last value we know is on the server
-//     (`syncedValue`), the server's change tag (`systemFields`), our current local
-//     value (`localValue`), a mutation-boundary edit clock (`editedAt`), and a
-//     `dirty` flag (local differs from server, needs upload).
-//   • A genuine local edit is detected by a CANONICAL value change in
-//     `reconcileLocal`. `editedAt` is bumped ONLY on that transition — never when
-//     applying a remote change. So after `applyFetched` sets
-//     `syncedValue == localValue`, a re-capture from the stores round-trips to the
-//     SAME canonical bytes (the required invariant
-//     `canonicalCapture(exactApply(record)) == record.value`), and the next
-//     reconcile sees no change → no spurious re-upload → NO CLOBBER.
-//   • Conflicts are DETECTED by CloudKit change tags on send (`serverRecordChanged`)
-//     and RESOLVED by `editedAt` last-writer-wins (later real edit wins; exact ties
-//     break deterministically by value bytes). Deletions are authoritative (a
-//     remote delete never resurrects, even against a local dirty edit).
-//   • `applyFetched`/`applySendConflict` return the EXACT set of local changes to
-//     apply (`SyncRecordID -> Data?`, where `nil` means "delete locally"), so the
-//     app removes omitted settings keys / deleted profiles instead of resurrecting
-//     them.
+// Model:
+//   • The app's real stores remain the source of truth for VALUES. The ledger tracks
+//     per-record SYNC METADATA: the last value known on the server (`syncedValue`,
+//     nil = never confirmed), the server change tag (`systemFields`), our current
+//     local value + a mutation-boundary edit clock (`editedAt`), a `dirty` flag
+//     (needs upsert), and a `pendingDelete` tombstone (locally removed, awaiting the
+//     server's confirmation — so a delete is never lost to a crash/rebuild/partial
+//     failure and can never be resurrected by a late fetch).
+//   • A genuine local edit is a CANONICAL value change vs the server baseline; only
+//     then is `editedAt` bumped — never on a remote apply — so after `applyFetched`
+//     sets `syncedValue == localValue` a re-capture is a no-op (kills the V2
+//     receiver-clobber loop). Invariant: canonicalCapture(exactApply(rec)) == rec.
+//   • Conflicts are DETECTED by change tags on send (`serverRecordChanged`) and
+//     RESOLVED by `editedAt` last-writer-wins (deterministic byte tie-break). Stale /
+//     out-of-order deliveries can neither revert a newer clean value nor regress its
+//     `editedAt`.
+//   • Deletions are authoritative and durable. A full-resync lifecycle
+//     (`beginFullResync`/`endFullResync`) makes a token-reset redownload finalize
+//     records that a complete server snapshot no longer contains as deletions — so a
+//     peer's delete is never resurrected after `CKErrorChangeTokenExpired`.
+//   • `reconcileLocal` refuses to synthesize a mass deletion from a partial/empty
+//     capture (a hydrating-store foot-gun that would wipe every peer).
 //
-// Records are addressed by an opaque `String` recordName the app layer defines
-// (e.g. "profile:<id>", "setting:<profileID>:<key>", "membership:<id>",
-// "descriptor:<id>"). The core is entity-agnostic: it moves canonical value bytes,
-// nothing more. NO secrets ever pass through here.
+// NO secrets ever pass through here.
 
 public typealias SyncRecordID = String
 
+/// EXACT local changes the app must apply to its stores after a fetch/merge/resync.
+/// `nil` value = delete that entity locally. Applying exactly these keeps
+/// `capture(apply) == record`.
+public typealias SyncLocalChanges = [SyncRecordID: Data?]
+
 // MARK: - Ledger entry
 
-/// Durable per-record sync bookkeeping. `Codable` so the service can persist the
-/// whole ledger alongside the CKSyncEngine state.
 public struct SyncLedgerEntry: Codable, Hashable, Sendable {
-    /// The canonical value last known to be on the server. `nil` = never confirmed
-    /// on the server yet (a brand-new local record).
+    /// The canonical value last known on the server. `nil` = not confirmed there yet.
     public var syncedValue: Data?
-    /// `editedAt` of the value last known on the server.
     public var syncedEditedAt: Int64
-    /// Archived CKRecord system fields (the change tag) for a conflict-safe save.
+    /// Archived CKRecord system fields (change tag) for a conflict-safe save.
     public var systemFields: Data?
-    /// This device's current canonical value for the record.
+    /// This device's current canonical value.
     public var localValue: Data
-    /// Mutation-boundary edit clock for `localValue`. Bumped ONLY on a genuine local
-    /// edit (a canonical change in `reconcileLocal`), never on a remote apply.
+    /// Mutation-boundary edit clock. Bumped ONLY on a genuine local edit.
     public var editedAt: Int64
-    /// Local value differs from `syncedValue` and must be uploaded.
+    /// Local value differs from the server and must be uploaded.
     public var dirty: Bool
+    /// Locally deleted; awaiting the server's confirmation of the delete.
+    public var pendingDelete: Bool
+    /// Transient (full-resync only): had a server baseline when the resync began.
+    public var wasSynced: Bool
+    /// Transient (full-resync only): delivered during the current full resync.
+    public var resyncSeen: Bool
 
     public init(
         syncedValue: Data?, syncedEditedAt: Int64, systemFields: Data?,
-        localValue: Data, editedAt: Int64, dirty: Bool
+        localValue: Data, editedAt: Int64, dirty: Bool,
+        pendingDelete: Bool = false, wasSynced: Bool = false, resyncSeen: Bool = false
     ) {
         self.syncedValue = syncedValue
         self.syncedEditedAt = syncedEditedAt
@@ -66,13 +73,15 @@ public struct SyncLedgerEntry: Codable, Hashable, Sendable {
         self.localValue = localValue
         self.editedAt = editedAt
         self.dirty = dirty
+        self.pendingDelete = pendingDelete
+        self.wasSynced = wasSynced
+        self.resyncSeen = resyncSeen
     }
 }
 
-// MARK: - Plans returned to the service
+// MARK: - Plans
 
-/// A record the service must upload: its canonical value + edit clock + the change
-/// tag to save against (nil = create).
+/// A record to upload: canonical value + edit clock + the change tag to save against.
 public struct SyncUpload: Equatable, Sendable {
     public let recordName: SyncRecordID
     public let value: Data
@@ -84,22 +93,19 @@ public struct SyncUpload: Equatable, Sendable {
     }
 }
 
-/// The minimal set of CloudKit operations to perform after reconciling local state.
 public struct SyncPushPlan: Equatable, Sendable {
     public var uploads: [SyncUpload]
     public var deletes: [SyncRecordID]
+    /// Deletions REFUSED because the capture looked partial/empty (a safety stop). The
+    /// service should log this and NOT treat it as "nothing to do".
+    public var refusedDeletions: [SyncRecordID]
     public var isEmpty: Bool { uploads.isEmpty && deletes.isEmpty }
-    public init(uploads: [SyncUpload] = [], deletes: [SyncRecordID] = []) {
-        self.uploads = uploads; self.deletes = deletes
+    public init(uploads: [SyncUpload] = [], deletes: [SyncRecordID] = [], refusedDeletions: [SyncRecordID] = []) {
+        self.uploads = uploads; self.deletes = deletes; self.refusedDeletions = refusedDeletions
     }
 }
 
-/// EXACT local changes the app must apply to its real stores after a fetch/merge.
-/// `nil` value = delete that entity locally. Applying these (and nothing else) is
-/// what keeps `capture(apply) == record`.
-public typealias SyncLocalChanges = [SyncRecordID: Data?]
-
-/// A fetched/conflicted server record handed to the ledger.
+/// A fetched/conflicted server record.
 public struct SyncRemoteRecord: Equatable, Sendable {
     public let recordName: SyncRecordID
     public let value: Data
@@ -115,99 +121,117 @@ public struct SyncRemoteRecord: Equatable, Sendable {
 
 public struct SyncLedger: Codable, Hashable, Sendable {
     public private(set) var entries: [SyncRecordID: SyncLedgerEntry]
-    /// Monotonic high-water mark so a burst of edits in the same millisecond still
-    /// get strictly increasing `editedAt` values (a hybrid logical clock, but one
-    /// that ONLY advances on genuine local edits and observed remote edits — never
-    /// on a byte-diff of a reconstructed snapshot).
+    /// Monotonic edit clock (a hybrid logical clock) that advances ONLY on genuine
+    /// local edits and observed remote edits — never on a byte-diff of a rebuilt
+    /// snapshot.
     private var clock: Int64
+    /// True between `beginFullResync` and `endFullResync`.
+    private var resyncing: Bool
 
-    public init() {
-        self.entries = [:]
-        self.clock = 0
+    public init() { self.entries = [:]; self.clock = 0; self.resyncing = false }
+
+    enum CodingKeys: String, CodingKey { case entries, clock }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        entries = try c.decode([SyncRecordID: SyncLedgerEntry].self, forKey: .entries)
+        clock = try c.decode(Int64.self, forKey: .clock)
+        resyncing = false
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(entries, forKey: .entries)
+        try c.encode(clock, forKey: .clock)
     }
 
-    /// Number of records currently mirrored — for the "N items in iCloud" UI.
-    public var count: Int { entries.count }
+    /// Records currently mirrored (excludes pending-delete tombstones) — the
+    /// "N items in iCloud" count.
+    public var count: Int { entries.values.filter { !$0.pendingDelete }.count }
 
-    /// Advance the edit clock and return a strictly-increasing stamp.
-    private mutating func tick(_ now: Int64) -> Int64 {
-        clock = max(now, clock + 1)
-        return clock
-    }
+    private mutating func tick(_ now: Int64) -> Int64 { clock = max(now, clock + 1); return clock }
+    private mutating func observe(_ remote: Int64) { clock = max(clock, remote) }
 
-    /// Observe a remote timestamp so our clock never falls behind the fleet.
-    private mutating func observe(_ remote: Int64) {
-        clock = max(clock, remote)
-    }
-
-    // MARK: Local reconcile (detect genuine edits)
+    // MARK: Local reconcile
 
     /// Diff the freshly-captured canonical local state against the ledger and produce
     /// the minimal upload/delete plan. `desired` maps every LOCAL record to its
-    /// canonical value bytes. A record whose canonical value actually differs from
-    /// `syncedValue` is a genuine edit: it gets a fresh `editedAt` and is queued for
-    /// upload. Records present in the ledger but ABSENT from `desired` are genuine
-    /// local deletions.
+    /// canonical value. A record whose canonical value differs from `syncedValue` is a
+    /// genuine edit (fresh `editedAt`, queued to upload). Records present in the ledger
+    /// but ABSENT from `desired` are local deletions — routed through durable
+    /// `pendingDelete` tombstones so a crash/rebuild/partial-failure can't lose them.
     ///
-    /// Idempotent: calling it twice with the same `desired` yields an empty plan the
-    /// second time. Applying a remote change (via `applyFetched`) leaves
-    /// `syncedValue == localValue`, so a reconcile right after sees no change — the
-    /// property that eliminates the V2 receiver-clobber loop.
-    public mutating func reconcileLocal(desired: [SyncRecordID: Data], now: Int64) -> SyncPushPlan {
+    /// SAFETY: a partial/empty capture must never be mistaken for mass removal. When
+    /// `synthesizeDeletions` is false, or `desired` is empty while server-backed
+    /// records exist, absent records are reported as `refusedDeletions` and NOT
+    /// deleted. The service passes `synthesizeDeletions: true` only for a trusted,
+    /// fully-hydrated snapshot.
+    public mutating func reconcileLocal(
+        desired: [SyncRecordID: Data], now: Int64, synthesizeDeletions: Bool = true
+    ) -> SyncPushPlan {
         var plan = SyncPushPlan()
 
         for (name, value) in desired {
             if var entry = entries[name] {
-                // A genuine change is a difference from what the SERVER has, not from
-                // our cached localValue — that way an edit made while a previous
-                // upload was in flight is still detected.
-                if entry.syncedValue != value {
-                    if entry.localValue != value {
-                        // Local value actually moved → stamp a new edit time.
-                        entry.editedAt = tick(now)
-                    }
+                if entry.pendingDelete {
+                    // The entity reappeared locally after we queued its delete → revive
+                    // as a genuine edit.
+                    entry.pendingDelete = false
+                    entry.localValue = value
+                    entry.editedAt = tick(now)
+                    entry.dirty = true
+                    entries[name] = entry
+                    plan.uploads.append(SyncUpload(recordName: name, value: value,
+                                                   editedAt: entry.editedAt, systemFields: entry.systemFields))
+                } else if entry.syncedValue != value {
+                    // Genuine change vs the SERVER baseline (detects edits made while a
+                    // previous upload was in flight).
+                    if entry.localValue != value { entry.editedAt = tick(now) }
                     entry.localValue = value
                     entry.dirty = true
                     entries[name] = entry
-                    plan.uploads.append(SyncUpload(
-                        recordName: name, value: value,
-                        editedAt: entry.editedAt, systemFields: entry.systemFields))
+                    plan.uploads.append(SyncUpload(recordName: name, value: value,
+                                                   editedAt: entry.editedAt, systemFields: entry.systemFields))
                 } else if entry.localValue != value || entry.dirty {
-                    // Server already has this value; heal any stale local bookkeeping.
-                    entry.localValue = value
-                    entry.dirty = false
+                    // Server already has this value; heal stale local bookkeeping.
+                    entry.localValue = value; entry.dirty = false
                     entries[name] = entry
                 }
             } else {
-                // Brand-new local record.
                 let stamp = tick(now)
-                let entry = SyncLedgerEntry(
+                entries[name] = SyncLedgerEntry(
                     syncedValue: nil, syncedEditedAt: 0, systemFields: nil,
                     localValue: value, editedAt: stamp, dirty: true)
-                entries[name] = entry
-                plan.uploads.append(SyncUpload(
-                    recordName: name, value: value, editedAt: stamp, systemFields: nil))
+                plan.uploads.append(SyncUpload(recordName: name, value: value, editedAt: stamp, systemFields: nil))
             }
         }
 
-        // Deletions: present in the ledger, gone locally.
-        for name in entries.keys where desired[name] == nil {
-            entries[name] = nil
-            plan.deletes.append(name)
+        // Deletions (present in ledger, gone locally). Never inferred from a suspicious
+        // capture.
+        let serverBacked = entries.values.contains { $0.syncedValue != nil && !$0.pendingDelete }
+        let deletionsSafe = synthesizeDeletions && !(desired.isEmpty && serverBacked)
+        for (name, var entry) in entries where desired[name] == nil && !entry.pendingDelete {
+            if !deletionsSafe {
+                plan.refusedDeletions.append(name)
+                continue
+            }
+            if entry.syncedValue == nil && !entry.dirty {
+                // Never reached the server → just forget it, no tombstone needed.
+                entries[name] = nil
+            } else {
+                entry.pendingDelete = true
+                entry.dirty = false
+                entries[name] = entry
+                plan.deletes.append(name)
+            }
         }
 
         plan.uploads.sort { $0.recordName < $1.recordName }
         plan.deletes.sort()
+        plan.refusedDeletions.sort()
         return plan
     }
 
     // MARK: Apply fetched changes (server → local, exact)
 
-    /// Fold fetched remote records + deletions into the ledger and return the EXACT
-    /// local changes to apply. A record we aren't dirty on is accepted verbatim. A
-    /// record we ARE dirty on is resolved by `editedAt` (later real edit wins; exact
-    /// tie broken by value bytes for determinism). Remote deletions are authoritative
-    /// (never resurrected).
     public mutating func applyFetched(
         saved: [SyncRemoteRecord], deleted: [SyncRecordID], now: Int64
     ) -> SyncLocalChanges {
@@ -215,53 +239,58 @@ public struct SyncLedger: Codable, Hashable, Sendable {
 
         for remote in saved {
             observe(remote.editedAt)
+
             guard var entry = entries[remote.recordName] else {
-                // New to us — accept.
                 entries[remote.recordName] = SyncLedgerEntry(
                     syncedValue: remote.value, syncedEditedAt: remote.editedAt,
-                    systemFields: remote.systemFields,
-                    localValue: remote.value, editedAt: remote.editedAt, dirty: false)
+                    systemFields: remote.systemFields, localValue: remote.value,
+                    editedAt: remote.editedAt, dirty: false,
+                    wasSynced: false, resyncSeen: resyncing)
                 changes.updateValue(remote.value, forKey: remote.recordName)
                 continue
             }
-            // Always take the server's change tag so a later save conflicts correctly.
+            if resyncing { entry.resyncSeen = true }
+
+            if entry.pendingDelete {
+                // We intend to delete this; the server still has it. Keep deleting —
+                // never resurrect. (Re-issuing the delete is the service's job.)
+                entry.systemFields = remote.systemFields
+                entries[remote.recordName] = entry
+                continue
+            }
+
             entry.systemFields = remote.systemFields
             if !entry.dirty {
-                // Clean locally → accept the server's value.
-                if entry.localValue != remote.value {
-                    changes.updateValue(remote.value, forKey: remote.recordName)
+                // Clean locally → accept the server's value ONLY if it isn't stale.
+                if entry.syncedValue != nil,
+                   entry.localValue != remote.value,
+                   !Self.remoteWins(local: entry, remoteEditedAt: remote.editedAt, remoteValue: remote.value) {
+                    // Older-than-local delivery → ignore (no value revert, no editedAt regression).
+                    entries[remote.recordName] = entry
+                    continue
                 }
-                entry.syncedValue = remote.value
-                entry.syncedEditedAt = remote.editedAt
-                entry.localValue = remote.value
-                entry.editedAt = remote.editedAt
+                if entry.localValue != remote.value { changes.updateValue(remote.value, forKey: remote.recordName) }
+                entry.syncedValue = remote.value; entry.syncedEditedAt = remote.editedAt
+                entry.localValue = remote.value; entry.editedAt = remote.editedAt
                 entries[remote.recordName] = entry
             } else if Self.remoteWins(local: entry, remoteEditedAt: remote.editedAt, remoteValue: remote.value) {
-                // Concurrent edit; server's is newer → server wins, drop our edit.
-                if entry.localValue != remote.value {
-                    changes.updateValue(remote.value, forKey: remote.recordName)
-                }
-                entry.syncedValue = remote.value
-                entry.syncedEditedAt = remote.editedAt
-                entry.localValue = remote.value
-                entry.editedAt = remote.editedAt
-                entry.dirty = false
+                // Concurrent edit; server newer → server wins, drop our edit.
+                if entry.localValue != remote.value { changes.updateValue(remote.value, forKey: remote.recordName) }
+                entry.syncedValue = remote.value; entry.syncedEditedAt = remote.editedAt
+                entry.localValue = remote.value; entry.editedAt = remote.editedAt; entry.dirty = false
                 entries[remote.recordName] = entry
             } else {
-                // Our local edit is newer → keep it, but update the baseline+tag so
-                // our pending upload lands cleanly. No local change (keep our value).
-                entry.syncedValue = remote.value
-                entry.syncedEditedAt = remote.editedAt
+                // Our edit is newer → keep it; update baseline+tag so our upload lands.
+                entry.syncedValue = remote.value; entry.syncedEditedAt = remote.editedAt
                 entries[remote.recordName] = entry
             }
         }
 
         for name in deleted {
             guard entries[name] != nil else { continue }
-            // Deletions are authoritative — remove locally even if we were dirty, to
-            // avoid resurrection loops.
+            // Deletions are authoritative — remove locally even if dirty; never resurrect.
             entries[name] = nil
-            changes.updateValue(nil, forKey: name)  // delete locally
+            changes.updateValue(nil, forKey: name)
         }
 
         return changes
@@ -269,118 +298,137 @@ public struct SyncLedger: Codable, Hashable, Sendable {
 
     // MARK: Send outcomes
 
-    /// A save succeeded. Clear `dirty` only if the local value/stamp still matches
-    /// what we sent — a newer edit made while the save was in flight must stay dirty.
+    /// A save succeeded. Update the server baseline to what we actually sent, and clear
+    /// `dirty` only if the local value still matches — a newer edit (INCLUDING a revert
+    /// to the old baseline) made while the save was in flight must stay dirty so it
+    /// re-uploads over the value the server now holds.
     public mutating func applySendSuccess(
         recordName: SyncRecordID, savedValue: Data, savedEditedAt: Int64, systemFields: Data
     ) {
-        guard var entry = entries[recordName] else { return }
+        guard var entry = entries[recordName], !entry.pendingDelete else { return }
         entry.systemFields = systemFields
-        if entry.localValue == savedValue && entry.editedAt == savedEditedAt {
-            entry.syncedValue = savedValue
-            entry.syncedEditedAt = savedEditedAt
-            entry.dirty = false
-        }
-        // else: a newer local edit is pending; keep dirty so it re-uploads.
+        entry.syncedValue = savedValue
+        entry.syncedEditedAt = savedEditedAt
+        entry.dirty = (entry.localValue != savedValue)
         entries[recordName] = entry
     }
 
-    /// A `serverRecordChanged` conflict on send: merge the server record. Returns the
-    /// local change to apply if the server won (else `nil`). If our edit is newer we
-    /// keep it dirty (the caller re-enqueues the save with the fresh tag).
+    /// A `serverRecordChanged` conflict on send. Returns the local change if the server
+    /// won (else nil, and the caller retries the save with the fresh tag). Never
+    /// resurrects a record we've stopped tracking (matches `applySendSuccess`).
     public mutating func applySendConflict(_ server: SyncRemoteRecord, now: Int64) -> (SyncRecordID, Data?)? {
         observe(server.editedAt)
-        guard var entry = entries[server.recordName] else {
-            // We no longer track it but the server has it — adopt it.
-            entries[server.recordName] = SyncLedgerEntry(
-                syncedValue: server.value, syncedEditedAt: server.editedAt,
-                systemFields: server.systemFields,
-                localValue: server.value, editedAt: server.editedAt, dirty: false)
-            return (server.recordName, .some(server.value))
-        }
+        guard var entry = entries[server.recordName], !entry.pendingDelete else { return nil }
         entry.systemFields = server.systemFields
         entry.syncedValue = server.value
         entry.syncedEditedAt = server.editedAt
         if Self.remoteWins(local: entry, remoteEditedAt: server.editedAt, remoteValue: server.value) {
-            // Server wins → adopt its value, stop retrying.
             let change: Data? = entry.localValue == server.value ? nil : server.value
-            entry.localValue = server.value
-            entry.editedAt = server.editedAt
-            entry.dirty = false
+            entry.localValue = server.value; entry.editedAt = server.editedAt; entry.dirty = false
             entries[server.recordName] = entry
             return change.map { (server.recordName, $0) }
         } else {
-            // Our edit is newer → keep dirty, caller retries the save with new tag.
             entry.dirty = true
             entries[server.recordName] = entry
             return nil
         }
     }
 
-    /// A record we tried to save no longer exists on the server (`unknownItem`), or a
-    /// delete failed because it was already gone. Drop our server bookkeeping so the
-    /// next reconcile treats it as a fresh create (if still present locally).
+    /// A delete we requested was confirmed by the server (or the record was already
+    /// gone) — drop the tombstone.
+    public mutating func applyDeleteSuccess(_ recordName: SyncRecordID) {
+        if entries[recordName]?.pendingDelete == true { entries[recordName] = nil }
+    }
+
+    /// The server reports a record we hold a tag for was DELETED by a peer. Deletion is
+    /// authoritative: drop it and delete locally, even against a dirty edit. Returns
+    /// whether a local delete is needed (false if we were already deleting it).
+    @discardableResult
+    public mutating func applyRemoteDeletion(_ recordName: SyncRecordID) -> Bool {
+        guard let entry = entries[recordName] else { return false }
+        entries[recordName] = nil
+        return !entry.pendingDelete
+    }
+
+    /// A save hit `unknownItem` (the server has no such record). Drop the stale tag so
+    /// the next reconcile re-creates it as needed. (Config policy: re-upload rather than
+    /// delete; `unknownItem` here means the record genuinely never persisted.)
     public mutating func clearServerRecord(_ recordName: SyncRecordID) {
         guard var entry = entries[recordName] else { return }
-        entry.systemFields = nil
-        entry.syncedValue = nil
-        entry.syncedEditedAt = 0
+        entry.systemFields = nil; entry.syncedValue = nil; entry.syncedEditedAt = 0
         entries[recordName] = entry
     }
 
-    /// The server reports a record we hold a change tag for was DELETED by a peer
-    /// (a save/delete that conflicts with a tombstone). Deletion is authoritative:
-    /// drop our entry and tell the caller to delete it locally too — even if we had
-    /// a pending edit — so a concurrent edit can never resurrect a deleted entity.
-    /// Returns whether a local delete is needed.
-    @discardableResult
-    public mutating func applyRemoteDeletion(_ recordName: SyncRecordID) -> Bool {
-        guard entries[recordName] != nil else { return false }
-        entries[recordName] = nil
-        return true
-    }
-
-    /// The uploads to (re)send for every currently-dirty record — used to requeue
-    /// pending work after an engine rebuild without re-stamping anything.
+    /// Uploads to (re)send for every dirty record — to requeue pending work after an
+    /// engine rebuild without re-stamping anything.
     public func pendingUploads() -> [SyncUpload] {
         entries
-            .filter { $0.value.dirty }
+            .filter { $0.value.dirty && !$0.value.pendingDelete }
             .map { SyncUpload(recordName: $0.key, value: $0.value.localValue,
                               editedAt: $0.value.editedAt, systemFields: $0.value.systemFields) }
             .sorted { $0.recordName < $1.recordName }
     }
 
-    /// Forget the server-side bookkeeping (change tags + synced baseline) WITHOUT
-    /// touching local values or dirty edits — for a token-reset redownload. After
-    /// this, a full fetch repopulates baselines and only genuinely-dirty local edits
-    /// remain queued.
-    public mutating func forgetServerState() {
+    /// Record names with an unconfirmed local deletion — to requeue deletes after a
+    /// rebuild so a delete is never lost.
+    public func pendingDeletes() -> [SyncRecordID] {
+        entries.filter { $0.value.pendingDelete }.map(\.key).sorted()
+    }
+
+    // MARK: Full-resync lifecycle (token reset / redownload)
+
+    /// Begin a full resync: forget every server baseline/tag (forcing re-fetch) but
+    /// KEEP local values, dirty edits, and pending deletes. Records confirmed present
+    /// by the resync are re-baselined; those a COMPLETE resync never delivers are
+    /// finalized as deletions in `endFullResync` — so a peer's delete can't be
+    /// resurrected after a tombstoneless (`CKErrorChangeTokenExpired`) resync.
+    public mutating func beginFullResync() {
+        resyncing = true
         for (name, var entry) in entries {
-            entry.systemFields = nil
+            entry.wasSynced = (entry.syncedValue != nil)
+            entry.resyncSeen = false
             entry.syncedValue = nil
             entry.syncedEditedAt = 0
-            // Keep localValue/editedAt/dirty as-is.
+            entry.systemFields = nil
             entries[name] = entry
         }
+    }
+
+    /// Finish a full resync. A record that HAD a server baseline but was not delivered
+    /// by the complete resync, and has no pending local change, was deleted on the
+    /// server → delete it locally. Dirty/never-synced local records survive and
+    /// re-upload. Returns the exact local deletions to apply.
+    public mutating func endFullResync() -> SyncLocalChanges {
+        var changes: SyncLocalChanges = [:]
+        for (name, var entry) in entries {
+            if entry.wasSynced && !entry.resyncSeen && !entry.dirty && !entry.pendingDelete {
+                entries[name] = nil
+                changes.updateValue(nil, forKey: name)
+            } else {
+                entry.wasSynced = false; entry.resyncSeen = false
+                entries[name] = entry
+            }
+        }
+        resyncing = false
+        return changes
     }
 
     // MARK: Conflict rule
 
     /// Later real edit wins; exact `editedAt` tie broken deterministically by value
-    /// bytes so every device resolves an exact tie identically.
+    /// bytes so every device resolves a tie identically.
     private static func remoteWins(local: SyncLedgerEntry, remoteEditedAt: Int64, remoteValue: Data) -> Bool {
         if remoteEditedAt != local.editedAt { return remoteEditedAt > local.editedAt }
         return lexicographicallyGreater(remoteValue, local.localValue)
     }
 
-    /// Deterministic total order on bytes (a > b).
     private static func lexicographicallyGreater(_ a: Data, _ b: Data) -> Bool {
         let n = min(a.count, b.count)
         var i = 0
         while i < n {
-            if a[a.index(a.startIndex, offsetBy: i)] != b[b.index(b.startIndex, offsetBy: i)] {
-                return a[a.index(a.startIndex, offsetBy: i)] > b[b.index(b.startIndex, offsetBy: i)]
-            }
+            let ai = a[a.index(a.startIndex, offsetBy: i)]
+            let bi = b[b.index(b.startIndex, offsetBy: i)]
+            if ai != bi { return ai > bi }
             i += 1
         }
         return a.count > b.count

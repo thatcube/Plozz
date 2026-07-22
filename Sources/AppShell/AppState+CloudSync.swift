@@ -127,6 +127,7 @@ extension AppState {
         //    guard would skip the default and strand its edits).
         let incomingProfiles = snapshot.profiles.map(\.profile)
         if !incomingProfiles.isEmpty { profilesModel.mergeSyncedProfiles(incomingProfiles) }
+        PlozzLog.sync.info("CloudSync: applied remote snapshot — \(incomingProfiles.count) profile(s), \(snapshot.accounts.count) server(s)")
 
         // 2. Per-profile settings: reinstall under each matching profile's namespace.
         for snap in snapshot.profileSettings {
@@ -228,6 +229,7 @@ extension AppState {
         cloudPublishTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             guard !Task.isCancelled else { return }
+            PlozzLog.sync.info("CloudSync: local config changed — publishing")
             await cloudSync.publishLocalChanges()
             _ = self
         }

@@ -107,6 +107,13 @@ public actor CloudConfigSyncService {
         }
         ensureEngine()
         setStatus(.idle)
+        // Heal any previously-dropped applies: reconcile LOCAL to what the mirror
+        // already knows BEFORE publishing. Without this, a mirror that's ahead of
+        // local (e.g. an earlier apply was skipped) would make the next publish
+        // upload the stale local value over the good synced one — a revert loop.
+        if !mirror.records.isEmpty {
+            await config.applyRemoteSnapshot(mirror.snapshot)
+        }
         // Ensure our custom zone exists, then reconcile local -> cloud.
         engine?.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
         await publishLocalChanges()
@@ -137,7 +144,10 @@ public actor CloudConfigSyncService {
         guard config.isEnabled(), let engine else { return }
         let local = await config.localSnapshot()
         let plan = mirror.publish(local: local)
-        guard !plan.isEmpty else { return }
+        guard !plan.isEmpty else {
+            PlozzLog.sync.info("CloudSync: publish — nothing changed")
+            return
+        }
 
         var pending: [CKSyncEngine.PendingRecordZoneChange] = []
         for rec in plan.saves { pending.append(.saveRecord(CloudSyncSchema.recordID(forRecordName: rec.recordName))) }

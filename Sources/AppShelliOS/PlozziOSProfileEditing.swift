@@ -25,6 +25,13 @@ struct PlozziOSSettingsAvatarButton: View {
             ProfileAvatarView(profile: displayedProfile, size: size)
                 .frame(width: size, height: size)
                 .clipShape(Circle())
+                // Expand the tappable area to at least the 44pt HIG minimum, but
+                // keep it CIRCULAR — a `Circle()` hit shape (not a rectangle) so
+                // the iOS 26 toolbar glass hugs a round button instead of a wide
+                // pill, and taps land anywhere in the 44pt circle rather than
+                // only on the (often 30pt) avatar. The avatar still renders at
+                // `size`, centered in the larger round target.
+                .frame(width: max(size, 44), height: max(size, 44))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

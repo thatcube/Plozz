@@ -136,6 +136,7 @@ private enum PlozziOSSettingsDestination: Hashable {
     case trackers
     case appearance
     case home
+    case detailPage
     case playback
     case downloads
     case syncSetup
@@ -221,6 +222,7 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.trackers, title: "Trackers", systemImage: "link")
                         settingsRow(.appearance, title: "Appearance", systemImage: "paintpalette")
                         settingsRow(.home, title: "Customize Home", systemImage: "house")
+                        settingsRow(.detailPage, title: "Detail Page", systemImage: "rectangle.portrait.on.rectangle.portrait")
                         settingsRow(.playback, title: "Playback", systemImage: "play.rectangle")
                         settingsRow(.subtitles, title: "Subtitles", systemImage: "captions.bubble")
                         settingsRow(.spoilers, title: "Spoilers", systemImage: "eye.slash")
@@ -335,16 +337,20 @@ private struct PlozziOSSettingsSplitView: View {
         case .home:
             PlozziOSHomeSettingsView(
                 hero: appModel.settings.hero,
+                heroBackground: appModel.settings.heroBackground,
                 visibility: appModel.settings.homeVisibility,
                 accounts: appModel.accountsProviders.resolvedActiveAccounts,
                 seerConfigured: appModel.seerService.isConfigured
             )
+        case .detailPage:
+            PlozziOSDetailPageSettingsView(
+                heroBackground: appModel.settings.heroBackground,
+                themeMusic: appModel.settings.themeMusic
+            )
         case .playback:
             PlozziOSPlaybackSettingsView(
                 model: appModel.settings.playback,
-                audioPolicy: appModel.settings.audioPolicy,
-                heroBackground: appModel.settings.heroBackground,
-                themeMusic: appModel.settings.themeMusic
+                audioPolicy: appModel.settings.audioPolicy
             )
         case .downloads:
             PlozziOSDownloadSettingsView(model: appModel.downloads)
@@ -498,6 +504,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 NavigationLink {
                     PlozziOSHomeSettingsView(
                         hero: appModel.settings.hero,
+                        heroBackground: appModel.settings.heroBackground,
                         visibility: appModel.settings.homeVisibility,
                         accounts: appModel.accountsProviders.resolvedActiveAccounts,
                         seerConfigured: appModel.seerService.isConfigured
@@ -506,11 +513,17 @@ private struct PlozziOSSettingsCompactMenu: View {
                     Label("Customize Home", systemImage: "house")
                 }
                 NavigationLink {
-                    PlozziOSPlaybackSettingsView(
-                        model: appModel.settings.playback,
-                        audioPolicy: appModel.settings.audioPolicy,
+                    PlozziOSDetailPageSettingsView(
                         heroBackground: appModel.settings.heroBackground,
                         themeMusic: appModel.settings.themeMusic
+                    )
+                } label: {
+                    Label("Detail Page", systemImage: "rectangle.portrait.on.rectangle.portrait")
+                }
+                NavigationLink {
+                    PlozziOSPlaybackSettingsView(
+                        model: appModel.settings.playback,
+                        audioPolicy: appModel.settings.audioPolicy
                     )
                 } label: {
                     Label("Playback", systemImage: "play.rectangle")
@@ -977,6 +990,7 @@ private struct PlozziOSAppearanceSettingsView: View {
 
 private struct PlozziOSHomeSettingsView: View {
     @Bindable var hero: HeroSettingsModel
+    @Bindable var heroBackground: HeroBackgroundSettingsModel
     let visibility: HomeLibraryVisibilityModel
     let accounts: [ResolvedAccount]
     let seerConfigured: Bool
@@ -1045,11 +1059,21 @@ private struct PlozziOSHomeSettingsView: View {
                 Text("Choose which libraries and library-specific rows appear on Home.")
             }
 
-            SettingsSectionGroup("Hero carousel") {
+            SettingsSectionGroup("Hero") {
                 Toggle("Show hero", isOn: $hero.settings.isEnabled)
                 if hero.settings.isEnabled {
                     Toggle("Hide watched titles", isOn: $hero.settings.hideWatched)
                     Toggle("Auto-advance", isOn: $hero.settings.autoAdvance)
+                    Toggle(
+                        "Play trailer behind the hero",
+                        isOn: $heroBackground.settings.homeTrailerEnabled
+                    )
+                    if heroBackground.settings.homeTrailerEnabled {
+                        Toggle(
+                            "Start muted",
+                            isOn: $heroBackground.settings.homeTrailerMuted
+                        )
+                    }
                 }
             }
 
@@ -1252,11 +1276,49 @@ private struct PlozziOSLibraryHomeSettingsView: View {
     }
 }
 
+private struct PlozziOSDetailPageSettingsView: View {
+    @Bindable var heroBackground: HeroBackgroundSettingsModel
+    @Bindable var themeMusic: ThemeMusicSettingsModel
+
+    var body: some View {
+        Form {
+            SettingsSectionGroup("Behind the hero") {
+                Picker(
+                    "Background",
+                    selection: $heroBackground.settings.detailMode
+                ) {
+                    ForEach(HeroBackgroundMode.allCases, id: \.self) {
+                        Text($0.displayName).tag($0)
+                    }
+                }
+                if heroBackground.settings.detailMode == .trailer {
+                    Toggle(
+                        "Start muted",
+                        isOn: $heroBackground.settings.detailTrailerMuted
+                    )
+                }
+                if heroBackground.settings.detailMode == .themeMusic {
+                    Picker(
+                        "Theme music volume",
+                        selection: $themeMusic.settings.volume
+                    ) {
+                        ForEach(ThemeMusicVolume.allCases, id: \.self) {
+                            Text($0.displayName).tag($0)
+                        }
+                    }
+                }
+            } footer: {
+                Text("Choose what plays behind the hero on a movie or show's detail page. Trailer and theme music never play together.")
+            }
+        }
+        .settingsPageSurface()
+        .navigationTitle("Detail Page")
+    }
+}
+
 private struct PlozziOSPlaybackSettingsView: View {
     @Bindable var model: PlaybackSettingsModel
     @Bindable var audioPolicy: AudioPolicyModel
-    @Bindable var heroBackground: HeroBackgroundSettingsModel
-    @Bindable var themeMusic: ThemeMusicSettingsModel
 
     private static let policyCategories: [ContentCategory] = [.movie, .tvShow, .anime]
     private static let audioOptions: [AudioLanguagePreference] =
@@ -1303,33 +1365,6 @@ private struct PlozziOSPlaybackSettingsView: View {
                     "Sync watch state across servers",
                     isOn: $model.settings.syncWatchAcrossServers
                 )
-            }
-
-            SettingsSectionGroup("Hero Background") {
-                Picker(
-                    "Background",
-                    selection: $heroBackground.settings.mode
-                ) {
-                    ForEach(HeroBackgroundMode.allCases, id: \.self) {
-                        Text($0.displayName).tag($0)
-                    }
-                }
-                if heroBackground.settings.mode == .trailer {
-                    Toggle(
-                        "Mute trailer audio",
-                        isOn: $heroBackground.settings.trailerMuted
-                    )
-                }
-                if heroBackground.settings.mode == .themeMusic {
-                    Picker(
-                        "Theme music volume",
-                        selection: $themeMusic.settings.volume
-                    ) {
-                        ForEach(ThemeMusicVolume.allCases, id: \.self) {
-                            Text($0.displayName).tag($0)
-                        }
-                    }
-                }
             }
 
             SettingsSectionGroup("Tracks") {

@@ -60,6 +60,11 @@ public final class HeroTrailerController {
     public private(set) var isPlaying = false
     public private(set) var isReady = false
     public private(set) var isPaused = false
+    /// The live (session) mute state of the trailer. Initialized from the active
+    /// surface's mute *default* when a trailer starts, but the in-hero mute button
+    /// flips THIS (a transient session override) — it never rewrites the saved
+    /// default, so muting/unmuting a playing trailer doesn't change the setting.
+    public private(set) var isMuted = true
     public private(set) var pauseStartedAt: Date?
     public private(set) var activeSurfaceRole: HeroTrailerSurfaceRole?
     /// The resolved trailer duration in seconds once known (`0` until ready).
@@ -166,6 +171,7 @@ public final class HeroTrailerController {
     public func prepare(itemID: String, resolvedURL: URL, muted: Bool) {
         if currentItemID == itemID, player.currentItem != nil {
             player.isMuted = muted
+            isMuted = muted
             return
         }
 
@@ -182,6 +188,7 @@ public final class HeroTrailerController {
         item.add(output)
         videoOutput = output
         player.isMuted = muted
+        isMuted = muted
         hasStartedPlayback = false
         autoplayWhenReady = false
         requestedPaused = isPaused
@@ -205,6 +212,13 @@ public final class HeroTrailerController {
     /// reloading.
     public func setMuted(_ muted: Bool) {
         player.isMuted = muted
+        isMuted = muted
+    }
+
+    /// Flip the live (session) mute — what the in-hero mute button calls. Transient:
+    /// it does NOT touch the persisted mute default.
+    public func toggleMuted() {
+        setMuted(!isMuted)
     }
 
     /// Captures the currently displayed video frame for a seamless layer handoff.

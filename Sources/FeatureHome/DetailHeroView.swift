@@ -726,7 +726,7 @@ struct DetailHeroView: View {
 
     private var isContinuingHeroTrailer: Bool {
         let heroItem = backdropItem ?? item
-        return heroBackground.settings.mode == .trailer
+        return heroBackground.settings.detailMode == .trailer
             && heroTrailerController.isShowing(heroItem.id)
             && heroTrailerController.isPlaying
     }
@@ -748,7 +748,7 @@ struct DetailHeroView: View {
             scrimTone: scrimTone,
             recedeModel: seriesRecedeModel,
             trailerController: heroTrailerController,
-            showsTrailer: heroBackground.settings.mode == .trailer
+            showsTrailer: heroBackground.settings.detailMode == .trailer
                 && heroTrailerController.isShowing((backdropItem ?? item).id)
                 && heroTrailerController.isPlaying
         )

@@ -232,7 +232,7 @@ public struct ItemDetailView: View {
             await refreshSeasonRequestAvailability()
         }
         .task(id: heroTrailerTaskID) {
-            guard heroBackground.settings.mode == .trailer,
+            guard heroBackground.settings.detailMode == .trailer,
                   let item = viewModel.state.value?.item else { return }
             if let currentID = heroTrailerController.currentItemID,
                currentID != item.id {
@@ -245,9 +245,9 @@ public struct ItemDetailView: View {
                 heroTrailerController.stop()
             }
             // Home→detail continuity: if the shared controller already has this
-            // item, do nothing — the picture keeps rolling while metadata swaps.
+            // item, do nothing — the picture keeps rolling (and keeps its live
+            // session mute) while metadata swaps.
             guard !heroTrailerController.isShowing(item.id) else {
-                heroTrailerController.setMuted(heroBackground.settings.trailerMuted)
                 heroTrailerController.setPaused(false)
                 return
             }
@@ -259,7 +259,7 @@ public struct ItemDetailView: View {
             heroTrailerController.play(
                 itemID: item.id,
                 resolvedURL: source.url,
-                muted: heroBackground.settings.trailerMuted
+                muted: heroBackground.settings.detailTrailerMuted
             )
         }
         .confirmationDialog(
@@ -297,7 +297,7 @@ public struct ItemDetailView: View {
 
     private var heroTrailerTaskID: String {
         let itemID = viewModel.state.value?.item.id ?? "-"
-        return "\(itemID)|\(heroBackground.settings.mode.rawValue)"
+        return "\(itemID)|\(heroBackground.settings.detailMode.rawValue)"
     }
 
     /// Layout for non-series detail: a hero plus, for seasons/folders/collections,

@@ -52,6 +52,7 @@ enum SettingsRoute: Hashable {
     case myLibraries
     case appearance
     case customizeHome
+    case detailPage
     case nightShift
     case playback
     case spoilers

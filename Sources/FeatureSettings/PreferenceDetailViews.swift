@@ -165,6 +165,51 @@ struct SpoilerSectionsBuilder {
         ])]
     }
 }
+/// Detail-page customization (a sibling to Customize Home): what plays behind the
+/// hero on a movie/show detail page — static art, the trailer, or the title's
+/// theme music. Kept separate from the Home hero (which lives in Customize Home)
+/// and from Playback (which is video-playback behaviour).
+struct DetailPageDetailView: View {
+    @Bindable var themeMusic: ThemeMusicSettingsModel
+    @Bindable var heroBackground: HeroBackgroundSettingsModel
+
+    var body: some View {
+        SettingsSplitLayout(title: "Detail Page", sections: [heroSection])
+    }
+
+    private var heroSection: SettingsSplitSection {
+        SettingsSplitSection(id: "detail-page-hero", header: "Behind the hero", rows: [
+            SettingsSplitRow(
+                id: "detail-page-hero-mode",
+                title: "Background",
+                description: "Choose what plays behind the hero on a title's detail page. Trailer and theme music never play together."
+            ) {
+                VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+                    DescribedSegmentedPicker(
+                        options: HeroBackgroundMode.allCases,
+                        selection: $heroBackground.settings.detailMode,
+                        title: { $0.displayName },
+                        detail: { $0.detail }
+                    )
+                    if heroBackground.settings.detailMode == .trailer {
+                        Toggle("Start muted", isOn: $heroBackground.settings.detailTrailerMuted)
+                    }
+                    if heroBackground.settings.detailMode == .themeMusic {
+                        SettingsDetailGroup(title: "Volume") {
+                            DescribedSegmentedPicker(
+                                options: ThemeMusicVolume.allCases,
+                                selection: $themeMusic.settings.volume,
+                                title: { $0.displayName },
+                                detail: { $0.detail }
+                            )
+                        }
+                    }
+                }
+            }
+        ])
+    }
+}
+
 struct PlaybackDetailView: View {
     @Bindable var playback: PlaybackSettingsModel
     /// The profile base subtitle mode/language now lives in `SubtitleBehavior`
@@ -175,10 +220,6 @@ struct PlaybackDetailView: View {
     /// Per-content-type audio-language overrides ("original audio for anime,
     /// device language for everything else").
     @Bindable var audioPolicy: AudioPolicyModel
-    /// Background theme audio for movie and series detail pages.
-    @Bindable var themeMusic: ThemeMusicSettingsModel
-    /// Structural hero-background arbitration (off / trailer / theme music).
-    @Bindable var heroBackground: HeroBackgroundSettingsModel
     /// Whether the active profile has a server that can download subtitles
     /// (Jellyfin or Plex). A share-only profile can't — so the whole "Downloading
     /// subtitles" row (auto-download + SDH/Forced ranking, all of which only act on
@@ -312,7 +353,6 @@ struct PlaybackDetailView: View {
         [
             subtitlesSection,
             audioSection,
-            themeMusicSection,
             skipIntrosSection,
             skipIntervalsSection,
             resumeSection,
@@ -433,38 +473,6 @@ struct PlaybackDetailView: View {
                     Toggle("Remember audio per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        ])
-    }
-
-    private var themeMusicSection: SettingsSplitSection {
-        SettingsSplitSection(id: "hero-background", header: "Hero Background", rows: [
-            SettingsSplitRow(
-                id: "hero-background-mode",
-                title: "Background",
-                description: "Choose one background experience. Trailer and theme music never play together."
-            ) {
-                VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
-                    DescribedSegmentedPicker(
-                        options: HeroBackgroundMode.allCases,
-                        selection: $heroBackground.settings.mode,
-                        title: { $0.displayName },
-                        detail: { $0.detail }
-                    )
-                    if heroBackground.settings.mode == .trailer {
-                        Toggle("Mute trailer audio", isOn: $heroBackground.settings.trailerMuted)
-                    }
-                    if heroBackground.settings.mode == .themeMusic {
-                        SettingsDetailGroup(title: "Volume") {
-                            DescribedSegmentedPicker(
-                                options: ThemeMusicVolume.allCases,
-                                selection: $themeMusic.settings.volume,
-                                title: { $0.displayName },
-                                detail: { $0.detail }
-                            )
-                        }
-                    }
-                }
             }
         ])
     }

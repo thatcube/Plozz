@@ -408,6 +408,9 @@ public struct SettingsView: View {
             navRow("Customize Home", icon: "house",
                    value: nil,
                    route: .customizeHome)
+            navRow("Detail Page", icon: "rectangle.portrait.on.rectangle.portrait",
+                   value: nil,
+                   route: .detailPage)
             navRow("Playback", icon: "play.rectangle",
                    value: nil,
                    route: .playback)
@@ -656,14 +659,17 @@ public struct SettingsView: View {
             )
         case .nightShift:
             NightShiftDetailView(model: nightShift)
+        case .detailPage:
+            DetailPageDetailView(
+                themeMusic: themeMusic,
+                heroBackground: heroBackground
+            )
         case .playback:
             PlaybackDetailView(
                 playback: playback,
                 subtitleBehavior: subtitleBehavior,
                 subtitlePolicy: subtitlePolicy,
                 audioPolicy: audioPolicy,
-                themeMusic: themeMusic,
-                heroBackground: heroBackground,
                 canDownloadSubtitles: activeProfileCanDownloadSubtitles
             )
         case .spoilers:

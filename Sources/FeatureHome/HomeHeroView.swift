@@ -558,7 +558,7 @@ struct HomeHeroView: View {
         // Fast/local trailers only: resolution and the three-second still-image
         // lead-in overlap. The same single player persists into detail navigation.
         .task(id: trailerTaskKey) {
-            guard isFrontmost, backgroundSettings.mode == .trailer,
+            guard isFrontmost, backgroundSettings.homeTrailerEnabled,
                   let item = current else {
                 // When detail is pushed over Home, relinquish control without
                 // stopping the shared player — the detail hero owns it now.
@@ -575,7 +575,6 @@ struct HomeHeroView: View {
                         forward: true
                     )
                 }
-                trailerController.setMuted(backgroundSettings.trailerMuted)
                 trailerVisible = trailerController.isPlaying
                 return
             }
@@ -604,7 +603,7 @@ struct HomeHeroView: View {
             trailerController.prepare(
                 itemID: item.id,
                 resolvedURL: source.url,
-                muted: backgroundSettings.trailerMuted
+                muted: backgroundSettings.homeTrailerMuted
             )
             // Do not start the progress timeline until AVPlayer is ready. This
             // absorbs startup latency behind the static image, so 3s + duration
@@ -639,9 +638,6 @@ struct HomeHeroView: View {
             } else {
                 trailerVisible = false
             }
-        }
-        .onChange(of: backgroundSettings.trailerMuted) { _, muted in
-            trailerController.setMuted(muted)
         }
         .onChange(of: trailerController.isPaused) { _, paused in
             if paused {
@@ -737,13 +733,13 @@ struct HomeHeroView: View {
     private var currentDwellDuration: TimeInterval {
         HeroTrailerTimeline.duration(
             autoAdvanceSeconds: settings.autoAdvanceSeconds,
-            mode: backgroundSettings.mode,
+            mode: backgroundSettings.homeTrailerEnabled ? .trailer : .off,
             trailerDuration: activeTrailerDuration
         )
     }
 
     private var trailerTaskKey: String {
-        "\(current?.id ?? "-")|\(backgroundSettings.mode.rawValue)|\(isFrontmost)"
+        "\(current?.id ?? "-")|\(backgroundSettings.homeTrailerEnabled)|\(isFrontmost)"
     }
 
     // MARK: - Content column

@@ -243,7 +243,9 @@ final class PlozziOSAppModel {
             }
         )
 
-    private let accountStore: AccountPersisting
+    /// Internal (not private) so the KeychainSync extension in another file can read
+    /// tokens / add accounts for iCloud-Keychain auto-connect.
+    let accountStore: AccountPersisting
     private let durableLocalStateStore: DurableLocalStateStore?
     private let mediaShareAccountService: MediaShareAccountService
     private let mediaShareConfigurationService: MediaShareAccountConfigurationService
@@ -418,38 +420,8 @@ final class PlozziOSAppModel {
                     )
                 )
             },
-            secretsProvider: {
-                // Gather this device's credentials for a no-tap transfer over the
-                // E2E pairing channel. Managed accounts (Jellyfin/Plex/Emby) carry a
-                // bearer token; media shares (WebDAV/SMB/NFS/SFTP/FTP) carry their
-                // opaque credential envelope from the vault.
-                var accts: [AccountSecret] = []
-                var shares: [ShareSecret] = []
-                for account in accountsProviders.accounts {
-                    if account.server.provider == .mediaShare {
-                        if let envelope = try? accountStore.mediaShareCredential(for: account.id) {
-                            if case .generatedKey = envelope.authentication {
-                                // The SSH key lives in THIS device's Keychain and
-                                // never travels, so a transferred copy couldn't
-                                // authenticate. Don't advertise it — the paired
-                                // device re-adds this share (minting its own key).
-                                PlozzLog.auth.info("Sync setup: skipping generated-key SFTP share \(account.id) — key is device-local")
-                            } else if let encoded = try? MediaShareCredentialCodec.encode(envelope) {
-                                shares.append(ShareSecret(accountID: account.id, credentialEnvelope: encoded))
-                            }
-                        }
-                        continue
-                    }
-                    guard let token = accountStore.token(for: account.id) else { continue }
-                    accts.append(AccountSecret(
-                        accountID: account.id,
-                        provider: account.server.provider,
-                        token: token,
-                        deviceID: account.deviceID,
-                        trustedOrigin: LocalAuthorization.origin(of: account.server.baseURL)
-                    ))
-                }
-                return SyncSecretsBundle(accounts: accts, shares: shares)
+            secretsProvider: { [accountsProviders, accountStore] in
+                PlozziOSAppModel.buildSecretsBundle(accounts: accountsProviders.accounts, accountStore: accountStore)
             }
         )
         // Keep the non-secret presence beacon fresh for same-Apple-ID devices.

@@ -158,7 +158,12 @@ extension PlozziOSAppModel {
             for (pid, ids) in membershipSet { profiles.setActiveAccountIDs(ids, for: pid) }
             for pid in membershipClear { profiles.clearActiveAccountIDs(for: pid) }
         }
-        if descriptorsTouched { refreshPendingSyncedServers() }
+        if descriptorsTouched {
+            refreshPendingSyncedServers()
+            // A newly-synced server descriptor may match a credential already in the
+            // iCloud-Keychain store → sign in automatically.
+            autoConnectFromSyncedCredentials()
+        }
 
         // Rebuild the active profile's settings model so applied preferences take
         // effect immediately.
@@ -195,6 +200,8 @@ extension PlozziOSAppModel {
         Task { await cloudSync.activate() }
         armCloudConfigObservation()
         refreshPendingSyncedServers()
+        publishPortableCredentials()          // share this device's logins via iCloud Keychain
+        autoConnectFromSyncedCredentials()    // pick up other devices' logins automatically
     }
 
     func armCloudConfigObservation() {
@@ -217,7 +224,9 @@ extension PlozziOSAppModel {
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             guard !Task.isCancelled else { return }
             await cloudSync.publishLocalChanges()
-            _ = self
+            // A local sign-in/out changed the account set → refresh the credentials
+            // shared via iCloud Keychain so the user's other devices track it.
+            await MainActor.run { self?.publishPortableCredentials() }
         }
     }
 
@@ -230,6 +239,8 @@ extension PlozziOSAppModel {
             Task { await cloudSync.activate() }
             armCloudConfigObservation()
             scheduleCloudPublish()
+            publishPortableCredentials()
+            autoConnectFromSyncedCredentials()
         }
     }
 
@@ -239,6 +250,8 @@ extension PlozziOSAppModel {
         Task { await cloudSync.fetchNow() }
         checkForSyncSetupOffer()
         refreshPendingSyncedServers()
+        publishPortableCredentials()
+        autoConnectFromSyncedCredentials()
     }
 
     /// Same-Apple-ID credential auto-skip (SOURCE side). If another of the user's

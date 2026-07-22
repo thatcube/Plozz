@@ -46,15 +46,25 @@ public struct KeychainStore: SecureStore {
     private let service: String
     private let userIndependent: Bool
     private let fallbackToPerUser: Bool
+    private let synchronizable: Bool
 
     public init(
         service: String = "com.plozz.app.tokens",
         userIndependent: Bool = true,
-        fallbackToPerUser: Bool = true
+        fallbackToPerUser: Bool = true,
+        synchronizable: Bool = false
     ) {
         self.service = service
         self.userIndependent = userIndependent
         self.fallbackToPerUser = fallbackToPerUser
+        self.synchronizable = synchronizable
+    }
+
+    /// Accessibility for written items. Synchronizable items CANNOT be
+    /// `…ThisDeviceOnly` (that's what would block iCloud Keychain sync), so a
+    /// synchronizable store uses the plain after-first-unlock class.
+    private var accessible: CFString {
+        synchronizable ? kSecAttrAccessibleAfterFirstUnlock : kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
     }
 
     private func baseQuery(for key: String, userIndependent: Bool) -> [String: Any] {
@@ -63,6 +73,11 @@ public struct KeychainStore: SecureStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key
         ]
+        if synchronizable {
+            // Must be present on EVERY query (add/update/copy/delete) or it won't
+            // match the synced items. Enables iCloud Keychain propagation.
+            query[kSecAttrSynchronizable as String] = kCFBooleanTrue
+        }
         #if os(tvOS)
         if userIndependent {
             query[kSecUseUserIndependentKeychain as String] = kCFBooleanTrue
@@ -92,7 +107,7 @@ public struct KeychainStore: SecureStore {
 
             var addQuery = query
             addQuery[kSecValueData as String] = data
-            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            addQuery[kSecAttrAccessible as String] = accessible
             status = SecItemAdd(addQuery as CFDictionary, nil)
             if status == errSecDuplicateItem {
                 status = SecItemUpdate(
@@ -114,7 +129,7 @@ public struct KeychainStore: SecureStore {
         func add(useUserIndependent: Bool) -> OSStatus {
             var query = baseQuery(for: key, userIndependent: useUserIndependent)
             query[kSecValueData as String] = data
-            query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            query[kSecAttrAccessible as String] = accessible
             return SecItemAdd(query as CFDictionary, nil)
         }
 

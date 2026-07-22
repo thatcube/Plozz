@@ -121,28 +121,42 @@ struct SyncSetupScannerScreen: View {
 /// Manual code-entry sheet.
 @MainActor
 struct SyncSetupCodeEntryScreen: View {
+    @Environment(\.themePalette) private var palette
     @State private var typedCode = ""
     let onSubmit: (String) -> Void
     let onCancel: () -> Void
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                Image(systemName: "keyboard").font(.system(size: 48)).foregroundStyle(.tint)
-                Text("Enter the code shown on your other device").font(.headline).multilineTextAlignment(.center)
-                TextField("Code", text: $typedCode)
-                    .textInputAutocapitalization(.characters).autocorrectionDisabled()
-                    .multilineTextAlignment(.center)
-                    .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                    .textFieldStyle(.roundedBorder).padding(.horizontal, 40)
-                Button("Continue") { onSubmit(typedCode) }
-                    .syncPrimaryButtonStyle()
-                    .disabled(SyncPairingCode.normalize(typedCode).count < 4)
-                Spacer()
+            ZStack {
+                palette.settingsBackground.ignoresSafeArea()
+                VStack(spacing: 20) {
+                    Image(systemName: "keyboard").font(.system(size: 48))
+                        .foregroundStyle(ThemePalette.brandBlue)
+                    Text("Enter the code shown on your other device")
+                        .font(.headline).multilineTextAlignment(.center)
+                        .foregroundStyle(palette.primaryText)
+                    TextField("Code", text: $typedCode)
+                        .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                        .multilineTextAlignment(.center)
+                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                        .textFieldStyle(.roundedBorder).padding(.horizontal, 40)
+                    Button("Continue") { onSubmit(typedCode) }
+                        .syncPrimaryButtonStyle()
+                        .disabled(SyncPairingCode.normalize(typedCode).count < 4)
+                    Spacer()
+                }
+                .padding(.top, 60)
             }
-            .padding(.top, 60)
             .navigationTitle("Enter Code").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onCancel() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }.foregroundStyle(palette.primaryText)
+                }
+            }
         }
+        // Match the sheet's chrome (nav title, text field, keyboard) to the active
+        // theme so text never lands dark-on-dark (or light-on-light).
+        .preferredColorScheme(palette.isLight ? .light : .dark)
     }
 }
 

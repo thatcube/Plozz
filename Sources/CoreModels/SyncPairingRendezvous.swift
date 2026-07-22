@@ -147,3 +147,76 @@ public enum PairingRendezvousMatcher {
             }
     }
 }
+
+// MARK: - Rendezvous store (iCloud KVS, per-device keys)
+
+/// Reads/writes pairing rendezvous offers. Abstracted so the iCloud-backed store can
+/// be swapped for an in-memory one in tests. Each device writes its OWN offer under a
+/// per-device key, and any same-Apple-ID device can enumerate all current offers.
+public protocol PairingRendezvousStoring: Sendable {
+    /// Publish (or refresh) this device's offer to be set up.
+    func publish(_ rendezvous: SyncPairingRendezvous)
+    /// Remove this device's offer (pairing finished or the screen closed).
+    func withdraw(deviceID: String)
+    /// Every offer currently visible to this Apple ID (callers filter with the matcher).
+    func all() -> [SyncPairingRendezvous]
+}
+
+/// In-memory rendezvous store for tests/previews.
+public final class InMemoryPairingRendezvousStore: PairingRendezvousStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var byDevice: [String: SyncPairingRendezvous] = [:]
+    public init(_ initial: [SyncPairingRendezvous] = []) {
+        for r in initial { byDevice[r.deviceID] = r }
+    }
+    public func publish(_ rendezvous: SyncPairingRendezvous) {
+        lock.lock(); byDevice[rendezvous.deviceID] = rendezvous; lock.unlock()
+    }
+    public func withdraw(deviceID: String) {
+        lock.lock(); byDevice[deviceID] = nil; lock.unlock()
+    }
+    public func all() -> [SyncPairingRendezvous] {
+        lock.lock(); defer { lock.unlock() }; return Array(byDevice.values)
+    }
+}
+
+/// iCloud key-value-store–backed rendezvous store (iOS + tvOS). Same transport as the
+/// presence beacon: no CloudKit schema, small non-secret blobs, auto-synced across one
+/// Apple ID's devices. Each offer lives under a per-device key so multiple devices can
+/// advertise at once; a reader enumerates every `keyPrefix`-prefixed key. NOTHING
+/// secret is stored — only a Bonjour service name and an ephemeral PUBLIC key, which
+/// is exactly what authenticates the subsequent LAN credential transfer.
+public final class UbiquitousPairingRendezvousStore: PairingRendezvousStoring, @unchecked Sendable {
+    public static let keyPrefix = "com.plozz.syncSetup.rendezvous."
+    private let store: NSUbiquitousKeyValueStore
+
+    public init(store: NSUbiquitousKeyValueStore = .default) {
+        self.store = store
+        self.store.synchronize()
+    }
+
+    private func key(for deviceID: String) -> String { Self.keyPrefix + deviceID }
+
+    public func publish(_ rendezvous: SyncPairingRendezvous) {
+        guard let data = try? JSONEncoder().encode(rendezvous) else { return }
+        store.set(data, forKey: key(for: rendezvous.deviceID))
+        store.synchronize()
+    }
+
+    public func withdraw(deviceID: String) {
+        store.removeObject(forKey: key(for: deviceID))
+        store.synchronize()
+    }
+
+    public func all() -> [SyncPairingRendezvous] {
+        store.synchronize()
+        var out: [SyncPairingRendezvous] = []
+        for (k, v) in store.dictionaryRepresentation where k.hasPrefix(Self.keyPrefix) {
+            if let data = v as? Data,
+               let r = try? JSONDecoder().decode(SyncPairingRendezvous.self, from: data) {
+                out.append(r)
+            }
+        }
+        return out
+    }
+}

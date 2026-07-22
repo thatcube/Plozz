@@ -64,4 +64,23 @@ final class SyncPairingRendezvousTests: XCTestCase {
         XCTAssertEqual(r, back)
         XCTAssertEqual(back.id, "rendezvous:A")
     }
+
+    func testInMemoryStorePublishWithdrawEnumerate() {
+        let store = InMemoryPairingRendezvousStore()
+        store.publish(make("A"))
+        store.publish(make("B"))
+        XCTAssertEqual(Set(store.all().map(\.deviceID)), ["A", "B"])
+        // Re-publishing the same device replaces, never duplicates.
+        store.publish(make("A", service: "WXYZ"))
+        XCTAssertEqual(store.all().filter { $0.deviceID == "A" }.count, 1)
+        XCTAssertEqual(store.all().first { $0.deviceID == "A" }?.serviceName, "WXYZ")
+        store.withdraw(deviceID: "A")
+        XCTAssertEqual(store.all().map(\.deviceID), ["B"])
+    }
+
+    func testMatcherOverStoreExcludesSelf() {
+        let store = InMemoryPairingRendezvousStore([make("phone"), make("tv")])
+        let target = PairingRendezvousMatcher.target(from: store.all(), thisDeviceID: "phone")
+        XCTAssertEqual(target?.deviceID, "tv")
+    }
 }

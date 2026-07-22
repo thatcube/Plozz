@@ -85,6 +85,9 @@ public final class SyncSetupPairingModel {
             // so a long window here doesn't weaken the security model.
             let pairing = service.makeHostPairing(ttlSeconds: 24 * 60 * 60)
             phase = .waitingForPeer(code: pairing.code, invite: pairing.invite)
+            // Publish a same-Apple-ID rendezvous so the user's OTHER device can set
+            // this one up with no scanned QR / typed code (the credential auto-skip).
+            service.publishRendezvous(for: pairing)
             let host = makeHostLink(pairing)
             currentHost = host
             do {
@@ -106,6 +109,7 @@ public final class SyncSetupPairingModel {
                 if currentHost === host { currentHost = nil }
                 isReceiving = false
                 hostSASCode = nil
+                service.withdrawRendezvous()   // paired — stop advertising the offer
                 phase = .applied(received)
                 return
             } catch {
@@ -129,9 +133,24 @@ public final class SyncSetupPairingModel {
         currentHost?.stop()
         currentHost = nil
         hostSASCode = nil
+        service.withdrawRendezvous()   // no longer waiting — remove the iCloud offer
     }
 
     // MARK: Source-side auto-discovery (tap-to-pair, no code)
+
+    /// Source role: if a same-Apple-ID device is currently offering to be set up (it
+    /// published a rendezvous to iCloud, e.g. an Apple TV the user just tapped "add my
+    /// servers" on), connect and push this device's config + credentials with NO typing
+    /// and NO SAS — the offer's ephemeral public key is authenticated out-of-band by
+    /// iCloud account membership and pinned, exactly like a scanned QR. Returns true if
+    /// an offer was found and a send was attempted. Safe to call on every foreground.
+    @discardableResult
+    public func autoAdoptOfferedRendezvous() async -> Bool {
+        guard case .idle = phase else { return false }   // don't interrupt an active flow
+        guard let target = service.discoverRendezvousTarget() else { return false }
+        await send(serviceName: target.serviceName, expectedPublicKey: target.publicKeyData)
+        return true
+    }
 
     /// Begin listing nearby devices waiting to be set up.
     public func startDiscovery() {

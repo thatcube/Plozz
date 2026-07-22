@@ -40,6 +40,7 @@ public final class SyncSetupService {
 
     private let flag: SyncSetupFeatureFlag
     private let beaconStore: PresenceBeaconStoring
+    private let rendezvousStore: PairingRendezvousStoring
     private let coordinator = SyncSetupCoordinator()
 
     private let configProvider: @MainActor () -> LocalConfig
@@ -53,6 +54,7 @@ public final class SyncSetupService {
     public init(
         flag: SyncSetupFeatureFlag = SyncSetupFeatureFlag(),
         beaconStore: PresenceBeaconStoring = UbiquitousPresenceBeaconStore(),
+        rendezvousStore: PairingRendezvousStoring = UbiquitousPairingRendezvousStore(),
         deviceID: @escaping @MainActor () -> String,
         deviceName: @escaping @MainActor () -> String,
         isConfigured: @escaping @MainActor () -> Bool,
@@ -61,6 +63,7 @@ public final class SyncSetupService {
     ) {
         self.flag = flag
         self.beaconStore = beaconStore
+        self.rendezvousStore = rendezvousStore
         self.deviceID = deviceID
         self.deviceName = deviceName
         self.isConfigured = isConfigured
@@ -142,6 +145,41 @@ public final class SyncSetupService {
             context: SyncPairingContext(ttlSeconds: ttlSeconds)
         )
         return HostPairing(code: code, invite: invite, identity: identity, displayName: deviceName())
+    }
+
+    // MARK: Same-Apple-ID rendezvous (zero-typing credential auto-skip)
+
+    /// Publish this device's pairing offer to iCloud so a same-Apple-ID device can set
+    /// it up WITHOUT a scanned QR or typed code. The offer carries only the Bonjour
+    /// service name + the ephemeral PUBLIC key (both non-secret); because only the
+    /// user's own devices can read it, a reader that pins this key gets QR-equivalent
+    /// authentication and skips the numeric SAS. Call when showing the receive screen.
+    public func publishRendezvous(for pairing: HostPairing, ttlSeconds: Int = 24 * 60 * 60) {
+        rendezvousStore.publish(SyncPairingRendezvous(
+            serviceName: pairing.invite.serviceName,
+            publicKeyData: pairing.identity.publicKeyData,
+            deviceName: pairing.displayName,
+            deviceID: deviceID(),
+            ttlSeconds: ttlSeconds
+        ))
+    }
+
+    /// Remove this device's rendezvous offer (pairing finished or screen closed).
+    public func withdrawRendezvous() {
+        rendezvousStore.withdraw(deviceID: deviceID())
+    }
+
+    /// The best same-Apple-ID device currently asking to be set up (freshest offer,
+    /// never this device), or nil. The source uses this to auto-adopt with no typing.
+    public func discoverRendezvousTarget(now: Date = Date()) -> SyncPairingRendezvous? {
+        PairingRendezvousMatcher.target(from: rendezvousStore.all(), thisDeviceID: deviceID(), now: now)
+    }
+
+    /// The public key of an offer to PIN when connecting — so the source authenticates
+    /// the host out-of-band (via iCloud account membership) exactly like a scanned QR,
+    /// and no SAS comparison is needed. Exposed for the pairing model's adopt path.
+    public func expectedPublicKey(for rendezvous: SyncPairingRendezvous) -> Data {
+        rendezvous.publicKeyData
     }
 
     /// Everything a target device needs to persist a received setup: the config

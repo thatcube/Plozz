@@ -22,16 +22,61 @@ final class SyncSetupPairingE2ETests: XCTestCase {
 
     private func service(accounts: [Account] = [], profiles: [Profile] = [],
                          secrets: SyncSecretsBundle = SyncSecretsBundle(),
-                         configured: Bool = false, id: String = "dev") -> SyncSetupService {
+                         configured: Bool = false, id: String = "dev",
+                         rendezvousStore: PairingRendezvousStoring = InMemoryPairingRendezvousStore()) -> SyncSetupService {
         let d = UserDefaults(suiteName: "e2e.\(UUID().uuidString)")!
         var flag = SyncSetupFeatureFlag(defaults: d); flag.isEnabled = true
         return SyncSetupService(
             flag: SyncSetupFeatureFlag(defaults: d),
             beaconStore: InMemoryPresenceBeaconStore(),
+            rendezvousStore: rendezvousStore,
             deviceID: { id }, deviceName: { "Device" }, isConfigured: { configured },
             configProvider: { .init(accounts: accounts, profiles: profiles) },
             secretsProvider: { secrets }
         )
+    }
+
+    /// The same-Apple-ID auto-skip: the TV publishes a rendezvous, the phone discovers
+    /// it and adopts with the PINNED key — credentials transfer with NO numeric SAS and
+    /// no typing, and the offer is withdrawn on success.
+    func testRendezvousAutoSkipTransfersCredentialsNoSAS() async throws {
+        let (hostLink, guestLink) = await InMemoryPairingLink.makePair()
+        let shared = InMemoryPairingRendezvousStore()
+
+        let phone = service(
+            accounts: [account("a1")], profiles: [Profile(id: "p1", name: "Brandon")],
+            secrets: SyncSecretsBundle(accounts: [AccountSecret(accountID: "a1", provider: .jellyfin,
+                                                               token: "TOK", deviceID: "phone",
+                                                               trustedOrigin: "https://h.example.com")]),
+            configured: true, id: "phone", rendezvousStore: shared)
+        let tv = service(configured: false, id: "tv", rendezvousStore: shared)
+
+        let tvModel = SyncSetupPairingModel(service: tv, makeHostLink: { _ in StaticHost(link: hostLink) })
+        let phoneModel = SyncSetupPairingModel(service: phone, makeGuestLink: { _ in StaticGuest(link: guestLink) })
+
+        async let hosting: Void = tvModel.startReceiving()
+        // Wait for the TV to advertise AND publish its offer to the shared store.
+        var offer: SyncPairingRendezvous?
+        for _ in 0..<4000 {
+            if case .waitingForPeer = tvModel.phase, let o = phone.discoverRendezvousTarget() { offer = o; break }
+            await Task.yield()
+        }
+        let target = try XCTUnwrap(offer, "TV never published a rendezvous")
+        XCTAssertEqual(target.deviceID, "tv")
+
+        // Phone adopts the offer (pinned key ⇒ QR-equivalent, no SAS).
+        await phoneModel.adopt(target)
+        await hosting
+
+        XCTAssertEqual(phoneModel.phase, .sent)
+        // Crucially, NEITHER side ran a numeric SAS comparison.
+        XCTAssertNil(tvModel.hostSASCode, "auto-skip must not compute a SAS")
+        guard case .applied(let received) = tvModel.phase else { return XCTFail("phase \(tvModel.phase)") }
+        XCTAssertEqual(received.application.authorizedAuthorizations.map(\.id), ["a1"])
+        XCTAssertEqual(received.config.profiles.map(\.id), ["p1"])
+        XCTAssertEqual(received.secrets?.accounts.first?.token, "TOK")
+        // The offer is withdrawn once paired, so it can't be re-adopted or replayed.
+        XCTAssertNil(phone.discoverRendezvousTarget(), "TV must withdraw its offer on success")
     }
 
     func testQRPathTransfersCredentialsNoPending() async throws {

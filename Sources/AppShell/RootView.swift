@@ -239,7 +239,9 @@ public struct RootView: View {
                         onWarmIdentityIndex: { appState.identityIndex.warmIdentityIndex() },
                         onSetUpAnotherDevice: { showSyncSend = true },
                         syncEnabled: appState.syncSetup.isEnabled,
-                        onSetSyncEnabled: { appState.setSyncSetupEnabled($0) }
+                        onSetSyncEnabled: { appState.setSyncSetupEnabled($0) },
+                        syncStatusSummary: appState.cloudSyncStatus.summary,
+                        onSyncNow: { appState.syncCloudNow() }
                     )
                     .id(HomeRuntimeScope.identityKey(
                         profileID: appState.profilesModel.activeProfileID,

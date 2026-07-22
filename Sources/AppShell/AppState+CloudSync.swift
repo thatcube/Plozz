@@ -48,8 +48,15 @@ extension AppState {
             },
             applyRemoteSnapshot: { [weak appState] snapshot in
                 await appState?.applyRemoteConfigSnapshot(snapshot)
-            }
+            },
+            status: appState.cloudSyncStatus
         ))
+    }
+
+    /// Force an immediate two-way sync (manual "Sync Now").
+    public func syncCloudNow() {
+        guard let cloudSync else { return }
+        Task { await cloudSync.syncNow() }
     }
 
     // MARK: Publish side

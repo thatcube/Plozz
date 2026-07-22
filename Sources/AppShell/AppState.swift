@@ -491,6 +491,9 @@ public final class AppState {
     @ObservationIgnored
     var cloudPublishTask: Task<Void, Never>?
 
+    /// Observable CloudKit sync status for the iCloud Sync settings page.
+    public let cloudSyncStatus = CloudSyncStatus()
+
     /// Persist a setup received over pairing: import profiles, create accounts from
     /// the descriptors, store their transferred tokens in the Keychain, refresh
     /// providers, and enter the app — so the device is fully set up and signed in

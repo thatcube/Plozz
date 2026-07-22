@@ -34,8 +34,15 @@ extension PlozziOSAppModel {
             },
             applyRemoteSnapshot: { [weak model] snapshot in
                 await model?.applyRemoteConfigSnapshot(snapshot)
-            }
+            },
+            status: model.cloudSyncStatus
         ))
+    }
+
+    /// Force an immediate two-way sync (manual "Sync Now").
+    func syncCloudNow() {
+        guard let cloudSync else { return }
+        Task { await cloudSync.syncNow() }
     }
 
     // MARK: Publish side

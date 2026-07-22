@@ -113,6 +113,16 @@ struct PlozziOSSyncSetupSettingsView: View {
                 )) {
                     Label("iCloud Sync", systemImage: "arrow.triangle.2.circlepath")
                 }
+                if appModel.syncSetup.isEnabled {
+                    HStack {
+                        Text(appModel.cloudSyncStatus.summary)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Sync Now") { appModel.syncCloudNow() }
+                            .font(.footnote.weight(.semibold))
+                    }
+                }
             } footer: {
                 Text("Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device. Off by default.")
             }

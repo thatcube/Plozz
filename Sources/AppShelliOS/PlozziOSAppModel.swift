@@ -58,6 +58,9 @@ final class PlozziOSAppModel {
     @ObservationIgnored
     var cloudPublishTask: Task<Void, Never>?
 
+    /// Observable CloudKit sync status for the Sync & Setup page.
+    let cloudSyncStatus = CloudSyncStatus()
+
     /// Persist a setup received over pairing: create accounts from the descriptors,
     /// store their transferred tokens in the Keychain, and refresh providers so the
     /// device is immediately signed in (no native sign-in needed).

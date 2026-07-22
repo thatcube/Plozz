@@ -40,19 +40,23 @@ public actor CloudConfigSyncService {
         public var applyRemoteSnapshot: @Sendable (SyncConfigSnapshot) async -> Void
         /// Where the mirror + engine state are persisted (per install/user container).
         public var stateFileURL: URL
+        /// Optional MainActor sink the service pushes status updates to.
+        public var status: CloudSyncStatus?
 
         public init(
             containerIdentifier: String,
             stateFileURL: URL,
             isEnabled: @escaping @Sendable () -> Bool,
             localSnapshot: @escaping @Sendable () async -> SyncConfigSnapshot,
-            applyRemoteSnapshot: @escaping @Sendable (SyncConfigSnapshot) async -> Void
+            applyRemoteSnapshot: @escaping @Sendable (SyncConfigSnapshot) async -> Void,
+            status: CloudSyncStatus? = nil
         ) {
             self.containerIdentifier = containerIdentifier
             self.stateFileURL = stateFileURL
             self.isEnabled = isEnabled
             self.localSnapshot = localSnapshot
             self.applyRemoteSnapshot = applyRemoteSnapshot
+            self.status = status
         }
     }
 
@@ -77,22 +81,53 @@ public actor CloudConfigSyncService {
 
     // MARK: Lifecycle
 
+    /// Push a status update onto the MainActor status object, if one is wired.
+    private func setStatus(_ phase: CloudSyncStatus.Phase, syncedNow: Bool = false, error: String? = nil) {
+        guard let status = config.status else { return }
+        Task { @MainActor in
+            status.phase = phase
+            if syncedNow { status.lastSyncedAt = Date() }
+            status.lastErrorMessage = error
+        }
+    }
+
     /// Bring the sync engine up (if the feature is enabled and an iCloud account is
     /// available), ensure the zone exists, and push any local config the mirror has
     /// not yet uploaded. Safe to call repeatedly.
     public func activate() async {
         guard config.isEnabled() else {
             PlozzLog.sync.info("CloudSync: not activating — feature disabled")
+            setStatus(.disabled)
             return
         }
         guard await accountIsAvailable() else {
             PlozzLog.sync.info("CloudSync: not activating — no usable iCloud account")
+            setStatus(.signedOut)
             return
         }
         ensureEngine()
+        setStatus(.idle)
         // Ensure our custom zone exists, then reconcile local -> cloud.
         engine?.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
         await publishLocalChanges()
+    }
+
+    /// Force an immediate two-way sync (fetch then send), for a manual "Sync Now".
+    public func syncNow() async {
+        guard config.isEnabled() else { setStatus(.disabled); return }
+        guard await accountIsAvailable() else { setStatus(.signedOut); return }
+        ensureEngine()
+        guard let engine else { return }
+        setStatus(.syncing)
+        do {
+            await publishLocalChanges()
+            try await engine.fetchChanges()
+            try await engine.sendChanges()
+            setStatus(.idle, syncedNow: true)
+        } catch {
+            PlozzLog.sync.error("CloudSync: manual sync failed: \(error.localizedDescription)")
+            setStatus(.error, error: (error as NSError).localizedDescription)
+        }
     }
 
     /// The app calls this whenever the non-secret config changes (same signal that
@@ -197,8 +232,13 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
         case .fetchedDatabaseChanges(let e):
             handleFetchedDatabaseChanges(e)
 
-        case .willFetchChanges, .willFetchRecordZoneChanges, .didFetchRecordZoneChanges,
-             .didFetchChanges, .willSendChanges, .didSendChanges, .sentDatabaseChanges:
+        case .willFetchChanges, .willSendChanges:
+            setStatus(.syncing)
+
+        case .didFetchChanges, .didSendChanges:
+            setStatus(.idle, syncedNow: true)
+
+        case .willFetchRecordZoneChanges, .didFetchRecordZoneChanges, .sentDatabaseChanges:
             break
 
         @unknown default:
@@ -253,6 +293,7 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
             mirror = CloudSyncMirror()
             systemFields = [:]
             persist()
+            setStatus(.signedOut)
         @unknown default:
             break
         }

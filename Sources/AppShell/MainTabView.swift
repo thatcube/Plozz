@@ -182,6 +182,9 @@ struct MainTabView: View {
     /// Cross-device sync opt-in state + setter, forwarded to Settings.
     var syncEnabled: Bool = false
     var onSetSyncEnabled: ((Bool) -> Void)?
+    /// Live sync status summary + manual sync action for the iCloud Sync page.
+    var syncStatusSummary: String?
+    var onSyncNow: (() -> Void)?
 
     @State private var discovery = LibraryDiscoveryModel()
     /// Owns the Settings library-discovery result as an `@Observable` reference so
@@ -392,7 +395,9 @@ struct MainTabView: View {
                 onSetSeerrUser: onSetSeerrUser,
                 onSetUpAnotherDevice: onSetUpAnotherDevice,
                 syncEnabled: syncEnabled,
-                onSetSyncEnabled: onSetSyncEnabled
+                onSetSyncEnabled: onSetSyncEnabled,
+                syncStatusSummary: syncStatusSummary,
+                onSyncNow: onSyncNow
             )
             }
         }

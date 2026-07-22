@@ -8,6 +8,7 @@ import SwiftUI
 
 public struct PlozziOSRootView: View {
     @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceTransparency)
     private var systemReduceTransparency
     @State private var appModel = PlozziOSAppModel()
@@ -44,6 +45,9 @@ public struct PlozziOSRootView: View {
             }
         }
         .scrollContentBackground(.hidden)
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active { appModel.syncCloudOnForeground() }
+        }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
         .environment(

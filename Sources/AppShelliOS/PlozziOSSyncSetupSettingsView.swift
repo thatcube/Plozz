@@ -127,6 +127,12 @@ struct PlozziOSSyncSetupSettingsView: View {
                             .font(.caption2)
                             .foregroundStyle(.orange)
                     }
+                    Button(role: .destructive) {
+                        appModel.resetCloudSync()
+                    } label: {
+                        Label("Reset Synced Data", systemImage: "arrow.counterclockwise.icloud")
+                            .font(.footnote)
+                    }
                 }
             } footer: {
                 Text("Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device. Off by default.")

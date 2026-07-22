@@ -245,6 +245,7 @@ public struct RootView: View {
                             "\(appState.cloudSyncStatus.summary) · \($0)"
                         } ?? appState.cloudSyncStatus.summary,
                         onSyncNow: { appState.syncCloudNow() },
+                        onResetSync: { appState.resetCloudSync() },
                         pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,
                         onIgnorePendingServer: { appState.ignorePendingSyncedServer($0) },
                         onSetUpFromAnotherDevice: { showSyncReceiveFromSettings = true }
@@ -344,7 +345,13 @@ public struct RootView: View {
             reconcileCrashReporting()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active { appState.drainWatchOutbox() }
+            if newPhase == .active {
+                appState.drainWatchOutbox()
+                // Pull the latest synced config when the app comes to the foreground
+                // (tvOS push is best-effort), so profile/setting changes made
+                // elsewhere show up promptly instead of waiting for a manual sync.
+                appState.syncCloudOnForeground()
+            }
         }
         .onOpenURL { appState.handle(url: $0) }
         // Window-level HDR/DV exit veil: a black layer above Home that the player

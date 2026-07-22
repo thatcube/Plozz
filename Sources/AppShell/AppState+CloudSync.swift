@@ -90,6 +90,21 @@ extension AppState {
         Task { await cloudSync.syncNow() }
     }
 
+    /// Lightweight pull when the app comes to the foreground, so config changed on
+    /// another device appears promptly (tvOS push is unreliable).
+    public func syncCloudOnForeground() {
+        guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
+        Task { await cloudSync.fetchNow() }
+    }
+
+    /// Reset a corrupted/divergent sync state: wipe the iCloud zone and re-seed from
+    /// THIS device. Other devices re-converge from the clean slate. Local config is
+    /// untouched.
+    public func resetCloudSync() {
+        guard let cloudSync else { return }
+        Task { await cloudSync.resetAndReseed() }
+    }
+
     // MARK: Publish side
 
     /// The NON-SECRET snapshot this device publishes. Mirrors what the pairing

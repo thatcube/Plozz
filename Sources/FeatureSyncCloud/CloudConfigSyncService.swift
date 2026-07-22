@@ -134,6 +134,17 @@ public actor CloudConfigSyncService {
         await publishLocalChanges()
     }
 
+    /// Lightweight foreground pull: fetch remote changes (and flush any pending
+    /// local changes) without the full manual-sync error surfacing. Used on app
+    /// activation so changes made elsewhere appear promptly.
+    public func fetchNow() async {
+        guard config.isEnabled(), await accountIsAvailable() else { return }
+        ensureEngine()
+        guard let engine else { return }
+        await publishLocalChanges()
+        try? await engine.fetchChanges()
+    }
+
     /// Force an immediate two-way sync, for a manual "Sync Now". Publishes local
     /// changes, pushes, then ALWAYS pulls (so pressing Sync Now on a receiver
     /// reliably fetches the latest even if the push had nothing to send / failed).
@@ -206,7 +217,8 @@ public actor CloudConfigSyncService {
         }
         engine.state.add(pendingRecordZoneChanges: pending)
         persist()
-        PlozzLog.sync.info("CloudSync: queued \(plan.saves.count) save(s), \(plan.deletes.count) delete(s)")
+        let deleteDetail = plan.deletes.isEmpty ? "" : " [deletes: \(plan.deletes.joined(separator: ", "))]"
+        PlozzLog.sync.info("CloudSync: queued \(plan.saves.count) save(s), \(plan.deletes.count) delete(s)\(deleteDetail)")
     }
 
     /// Opt-out: remove all of THIS app's synced config from the current Apple ID's
@@ -218,6 +230,34 @@ public actor CloudConfigSyncService {
         systemFields = [:]
         persist()
         try? await engine.sendChanges()
+    }
+
+    /// Reset a corrupted/divergent sync: wipe the CloudKit zone AND this device's
+    /// mirror+tags, then re-seed the zone from THIS device's current local config.
+    /// Other devices see the zone deletion, clear their mirrors, and re-converge —
+    /// a clean slate. Local config is never touched.
+    public func resetAndReseed() async {
+        guard config.isEnabled(), await accountIsAvailable() else { return }
+        ensureEngine()
+        guard let engine else { return }
+        setStatus(.syncing)
+        // 1. Delete the zone + clear all local sync bookkeeping.
+        engine.state.add(pendingDatabaseChanges: [.deleteZone(CloudSyncSchema.zoneID)])
+        mirror = CloudSyncMirror()
+        systemFields = [:]
+        persist()
+        try? await engine.sendChanges()
+        // 2. Recreate the zone and re-upload this device's config from scratch.
+        engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
+        await publishLocalChanges()
+        do {
+            try await engine.sendChanges()
+            setStatus(.idle, syncedNow: true)
+            PlozzLog.sync.info("CloudSync: reset + reseeded from this device")
+        } catch {
+            setDiagnostic("reset: \(Self.describe(error))")
+            setStatus(.error, error: (error as NSError).localizedDescription)
+        }
     }
 
     // MARK: Engine setup

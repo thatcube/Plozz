@@ -136,5 +136,18 @@ extension PlozziOSAppModel {
             scheduleCloudPublish()
         }
     }
+
+    /// Lightweight foreground pull (iOS). Same effect as tapping Sync Now's fetch.
+    func syncCloudOnForeground() {
+        guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
+        Task { await cloudSync.fetchNow() }
+    }
+
+    /// Reset a corrupted/divergent sync: wipe the iCloud zone and re-seed from this
+    /// device. Local config is untouched.
+    func resetCloudSync() {
+        guard let cloudSync else { return }
+        Task { await cloudSync.resetAndReseed() }
+    }
 }
 #endif

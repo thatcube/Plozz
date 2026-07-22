@@ -117,6 +117,7 @@ public struct SettingsView: View {
     /// Live status summary line for the iCloud Sync page, and a manual sync action.
     private let syncStatusSummary: String?
     private let onSyncNow: (() -> Void)?
+    private let onResetSync: (() -> Void)?
     /// Synced servers this device isn't signed into yet, plus ignore + set-up actions.
     private let pendingSyncedServers: [SyncedAccountDescriptor]
     private let onIgnorePendingServer: (String) -> Void
@@ -178,6 +179,7 @@ public struct SettingsView: View {
         onSetSyncEnabled: ((Bool) -> Void)? = nil,
         syncStatusSummary: String? = nil,
         onSyncNow: (() -> Void)? = nil,
+        onResetSync: (() -> Void)? = nil,
         pendingSyncedServers: [SyncedAccountDescriptor] = [],
         onIgnorePendingServer: @escaping (String) -> Void = { _ in },
         onSetUpFromAnotherDevice: (() -> Void)? = nil
@@ -234,6 +236,7 @@ public struct SettingsView: View {
         self.onSetSyncEnabled = onSetSyncEnabled
         self.syncStatusSummary = syncStatusSummary
         self.onSyncNow = onSyncNow
+        self.onResetSync = onResetSync
         self.pendingSyncedServers = pendingSyncedServers
         self.onIgnorePendingServer = onIgnorePendingServer
         self.onSetUpFromAnotherDevice = onSetUpFromAnotherDevice
@@ -870,6 +873,21 @@ public struct SettingsView: View {
                                         Button("Sync Now", action: onSyncNow)
                                             .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
                                     }
+                                }
+                            }
+                            .focusSection()
+                        }
+
+                        if syncEnabled, let onResetSync {
+                            LabeledSettingRow("Troubleshoot", labelWidth: 160) {
+                                HStack(spacing: 16) {
+                                    Text("Wipe iCloud copy and re-upload from this Apple TV. Fixes devices that won't converge.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Spacer(minLength: 0)
+                                    Button("Reset Sync", action: onResetSync)
+                                        .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
                                 }
                             }
                             .focusSection()

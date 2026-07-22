@@ -20,19 +20,25 @@ public struct EpisodeWatchStatePill: View {
     private let showsWatched: Bool
     private let showsBackground: Bool
     private let barWidth: CGFloat
+    private let barHeight: CGFloat
+    private let playGlyphHeight: CGFloat?
 
     public init(
         item: MediaItem,
         showsRuntimeWhenIdle: Bool = true,
         showsWatched: Bool = true,
         showsBackground: Bool = true,
-        barWidth: CGFloat = 54
+        barWidth: CGFloat = 54,
+        barHeight: CGFloat = 5,
+        playGlyphHeight: CGFloat? = nil
     ) {
         self.item = item
         self.showsRuntimeWhenIdle = showsRuntimeWhenIdle
         self.showsWatched = showsWatched
         self.showsBackground = showsBackground
         self.barWidth = barWidth
+        self.barHeight = barHeight
+        self.playGlyphHeight = playGlyphHeight
     }
 
     private enum State {
@@ -76,18 +82,30 @@ public struct EpisodeWatchStatePill: View {
                 .accessibilityLabel("Watched")
         case let .inProgress(fraction, remaining):
             HStack(spacing: 8) {
-                Image(systemName: "play.fill")
+                playGlyph
                 ResumeProgressCapsule(
                     progress: fraction,
                     onLight: false,
                     width: barWidth,
-                    height: 5
+                    height: barHeight
                 )
                 Text(remaining)
             }
             .accessibilityLabel("\(remaining) left")
         case let .runtime(text):
             Text(text)
+        }
+    }
+
+    @ViewBuilder
+    private var playGlyph: some View {
+        if let playGlyphHeight {
+            Image(systemName: "play.fill")
+                .resizable()
+                .scaledToFit()
+                .frame(height: playGlyphHeight)
+        } else {
+            Image(systemName: "play.fill")
         }
     }
 }

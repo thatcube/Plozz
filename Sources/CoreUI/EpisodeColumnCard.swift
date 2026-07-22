@@ -223,24 +223,26 @@ public struct EpisodeColumnCard: View {
         if presentation.artworkTreatment != .blurred {
             EpisodeWatchStatePill(
                 item: item,
-                showsRuntimeWhenIdle: false,
+                showsRuntimeWhenIdle: true,
                 showsWatched: false,
                 showsBackground: false,
-                barWidth: 110
+                barWidth: 80,
+                barHeight: 8,
+                playGlyphHeight: 8
             )
             .font(.system(size: 24, weight: .semibold))
             .padding(18)
         }
     }
 
-    /// A subtle corner-anchored legibility scrim behind the resume pill: dark at
-    /// the bottom-leading corner fading to clear, so the white play/progress/time
-    /// chip reads cleanly without a solid capsule (matches the iOS/iPadOS episode
-    /// card). Only drawn while an episode is in progress — the only time the pill
-    /// renders here (idle/watched are handled by the corner badge).
+    /// A subtle corner-anchored legibility scrim behind the resume/runtime pill:
+    /// dark at the bottom-leading corner fading to clear, so the white
+    /// play/progress/time chip reads cleanly without a solid capsule (matches the
+    /// iOS/iPadOS episode card). Drawn whenever the pill has runtime/progress to
+    /// show (``metadataText`` mirrors the pill's own show/hide condition).
     @ViewBuilder
     private var bottomLeadingScrim: some View {
-        if presentation.artworkTreatment != .blurred, presentation.progress != nil {
+        if presentation.artworkTreatment != .blurred, presentation.metadataText != nil {
             GeometryReader { proxy in
                 RadialGradient(
                     colors: [.black.opacity(0.55), .clear],

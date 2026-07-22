@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Branded (per-branch, side-by-side) tvOS build entitlements — see tools/deploy-tv.sh
+  --branded. Deliberately EMPTY: a fresh per-branch App ID can't auto-provision the
+  canonical app's two special capabilities, so we drop them for dev builds:
+    * User Management (tvOS system users) — the KeychainStore falls back to the
+      normal per-user keychain (shouldFallBack), so sign-in still works single-user.
+    * App Group group.com.thatcube.Plozz — only used to hand snapshots to the Top
+      Shelf extension; TopShelfStore guards the nil container, so Top Shelf just
+      stays empty. Both are acceptable for a side-by-side test build.
+-->
+<dict>
+</dict>
+</plist>

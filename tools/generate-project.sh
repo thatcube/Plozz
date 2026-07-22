@@ -30,6 +30,11 @@ cd "$(dirname "$0")/.."
 # literal token, which would break the canonical bundle id.
 export PLOZZ_ID_SUFFIX="${PLOZZ_ID_SUFFIX:-}"
 export PLOZZ_NAME_SUFFIX="${PLOZZ_NAME_SUFFIX:-}"
+# tvOS entitlements paths — canonical by default. A --branded build overrides
+# these with the stripped variants (User Management + App Group removed) so a
+# fresh per-branch App ID can sign without those special capabilities.
+export PLOZZ_TV_APP_ENTITLEMENTS="${PLOZZ_TV_APP_ENTITLEMENTS:-App/Resources/Plozz.entitlements}"
+export PLOZZ_TV_TOPSHELF_ENTITLEMENTS="${PLOZZ_TV_TOPSHELF_ENTITLEMENTS:-TopShelf/TopShelf.entitlements}"
 
 xcodegen generate
 

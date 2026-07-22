@@ -217,7 +217,10 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
         # App Group entitlement shared with the Top Shelf extension so both can
         # exchange the published snapshot.
-        CODE_SIGN_ENTITLEMENTS: App/Resources/Plozz.entitlements
+        # Canonical uses the full entitlements; a --branded per-branch build swaps
+        # in the stripped variant (empty ${PLOZZ_TV_APP_ENTITLEMENTS} default keeps
+        # canonical). See tools/deploy-tv.sh --branded.
+        CODE_SIGN_ENTITLEMENTS: ${PLOZZ_TV_APP_ENTITLEMENTS}
         GENERATE_INFOPLIST_FILE: NO
         # Force-keep the AVKit load command. AVKit is only used via the dynamic
         # `UIWindow.avDisplayManager` ObjC category (for the Dolby Vision / HDR
@@ -249,7 +252,7 @@ targets:
         PRODUCT_NAME: PlozzTopShelf
         INFOPLIST_FILE: TopShelf/Info.plist
         GENERATE_INFOPLIST_FILE: NO
-        CODE_SIGN_ENTITLEMENTS: TopShelf/TopShelf.entitlements
+        CODE_SIGN_ENTITLEMENTS: ${PLOZZ_TV_TOPSHELF_ENTITLEMENTS}
         # tvOS's legacy TVExtensionMain entry point (set by the
         # com.apple.product-type.tv-app-extension product type) is a no-op stub
         # in modern tvOS — it returns immediately without instantiating the

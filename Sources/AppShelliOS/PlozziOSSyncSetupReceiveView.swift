@@ -99,7 +99,7 @@ struct PlozziOSSyncSetupReceiveView: View {
                     .font(.system(size: 40, weight: .bold, design: .rounded)).monospaced()
                     .foregroundStyle(palette.primaryText)
             }
-            Text("On a device that’s already signed in, open Plozz ▸ Settings ▸ Sync & Setup ▸ “Set up another device,” then scan this code. Both devices must be on the same Wi-Fi.")
+            Text("On a device that’s already signed in, open Plozz ▸ Settings ▸ iCloud Sync ▸ “Set up another device,” then scan this code. Both devices must be on the same Wi-Fi.")
                 .font(.footnote).foregroundStyle(palette.secondaryText)
                 .multilineTextAlignment(.center).padding(.horizontal, 12)
             Spacer(minLength: 0)

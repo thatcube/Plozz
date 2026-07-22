@@ -197,8 +197,8 @@ private struct PlozziOSSettingsSplitView: View {
                         )
                         settingsRow(
                             .syncSetup,
-                            title: "Sync & Setup",
-                            systemImage: "arrow.triangle.2.circlepath"
+                            title: "iCloud Sync",
+                            systemImage: "icloud"
                         )
                     } footer: {
                         Text(
@@ -453,7 +453,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 NavigationLink {
                     PlozziOSSyncSetupSettingsView(appModel: appModel)
                 } label: {
-                    Label("Sync & Setup", systemImage: "arrow.triangle.2.circlepath")
+                    Label("iCloud Sync", systemImage: "icloud")
                 }
             } footer: {
                 Text(
@@ -1026,12 +1026,7 @@ private struct PlozziOSHomeSettingsView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(libraries) { library in
-                        NavigationLink {
-                            PlozziOSLibraryHomeSettingsView(
-                                library: library,
-                                visibility: visibility
-                            )
-                        } label: {
+                        NavigationLink(value: LibraryDetailRoute(id: library.id)) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(library.title)
                                 Text(library.serverName)
@@ -1116,6 +1111,11 @@ private struct PlozziOSHomeSettingsView: View {
         }
         .settingsPageSurface()
         .navigationTitle("Customize Home")
+        .navigationDestination(for: LibraryDetailRoute.self) { route in
+            if let library = libraries.first(where: { $0.id == route.id }) {
+                PlozziOSLibraryHomeSettingsView(library: library, visibility: visibility)
+            }
+        }
         .task(id: accounts.map(\.account.id)) {
             await loadLibraries()
         }
@@ -1191,6 +1191,8 @@ private struct PlozziOSHomeSettingsView: View {
         }
     }
 }
+
+private struct LibraryDetailRoute: Hashable { let id: String }
 
 private struct HomeLibraryChoice: Identifiable {
     let accountID: String

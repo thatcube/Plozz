@@ -4,6 +4,13 @@ import CoreModels
 import CoreUI
 import SwiftUI
 
+/// Value-based navigation routes for the Servers settings. Destination-based
+/// `NavigationLink`s inside the (non-lazy `VStack`) `SettingsSectionGroup` eagerly
+/// push EVERY destination onto the stack, so tapping any row lands on the last one
+/// and Back walks through all of them. Value links only push when tapped.
+private struct ServerDetailRoute: Hashable { let serverKey: String }
+private struct AccountDetailRoute: Hashable { let accountID: String }
+
 struct PlozziOSServersSettingsView: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
@@ -20,12 +27,7 @@ struct PlozziOSServersSettingsView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(groups, id: \.serverKey) { group in
-                        NavigationLink {
-                            PlozziOSServerSettingsDetailView(
-                                appModel: appModel,
-                                serverKey: group.serverKey
-                            )
-                        } label: {
+                        NavigationLink(value: ServerDetailRoute(serverKey: group.serverKey)) {
                             HStack(spacing: 12) {
                                 ProviderBrandMark(
                                     provider: group.providerKind,
@@ -65,6 +67,12 @@ struct PlozziOSServersSettingsView: View {
         }
         .settingsPageSurface()
         .navigationTitle("Servers")
+        // Value-based navigation: destination-based NavigationLinks inside the
+        // (non-lazy VStack) SettingsSectionGroup eagerly push EVERY destination, so
+        // tapping any row lands on the last one. Value links push only when tapped.
+        .navigationDestination(for: ServerDetailRoute.self) { route in
+            PlozziOSServerSettingsDetailView(appModel: appModel, serverKey: route.serverKey)
+        }
     }
 
     private func summary(for group: ServerAccountGroup) -> String? {
@@ -97,15 +105,7 @@ private struct PlozziOSServerSettingsDetailView: View {
             if let group {
                 SettingsSectionGroup("Signed in as") {
                     ForEach(group.accounts) { account in
-                        NavigationLink {
-                            PlozziOSAccountDetailView(
-                                appModel: appModel,
-                                account: account,
-                                onRemove: {
-                                    appModel.removeAccount(id: account.id)
-                                }
-                            )
-                        } label: {
+                        NavigationLink(value: AccountDetailRoute(accountID: account.id)) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(account.userName.isEmpty ? "Guest" : account.userName)
                                 Text(account.server.baseURL.host() ?? account.server.baseURL.absoluteString)
@@ -137,6 +137,15 @@ private struct PlozziOSServerSettingsDetailView: View {
         }
         .settingsPageSurface()
         .navigationTitle(group?.serverName ?? "Server")
+        .navigationDestination(for: AccountDetailRoute.self) { route in
+            if let account = appModel.accounts.first(where: { $0.id == route.accountID }) {
+                PlozziOSAccountDetailView(
+                    appModel: appModel,
+                    account: account,
+                    onRemove: { appModel.removeAccount(id: account.id) }
+                )
+            }
+        }
         .alert(
             "Remove \(group?.serverName ?? "server")?",
             isPresented: $confirmRemoveServer

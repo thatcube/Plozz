@@ -47,7 +47,7 @@ struct PlozziOSSyncSetupSettingsView: View {
                 centered { ProgressView() }
             }
         }
-        .navigationTitle("Sync & Setup")
+        .navigationTitle("iCloud Sync")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { if case .idle = model.phase { model.startDiscovery() } }
         .onDisappear { model.stopDiscovery() }

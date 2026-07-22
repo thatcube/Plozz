@@ -9,7 +9,7 @@ final class CloudSyncRecordMappingTests: XCTestCase {
     /// decode) unchanged. Guards the wire mapping the CKSyncEngine batch relies on.
     func testCKRecordRoundTrip() throws {
         let payload = Data("{\"hello\":\"world\"}".utf8)
-        let original = CloudSyncRecord(kind: .profile, id: "p1", version: 7, payload: payload)
+        let original = CloudSyncRecord(kind: .profile, id: "p1", editedAt: 7, payload: payload)
 
         let ck = CKRecord(recordType: CloudSyncSchema.recordType,
                           recordID: CloudSyncSchema.recordID(forRecordName: original.recordName))

@@ -134,20 +134,21 @@ public actor CloudConfigSyncService {
         await publishLocalChanges()
     }
 
-    /// Lightweight foreground pull: fetch remote changes (and flush any pending
-    /// local changes) without the full manual-sync error surfacing. Used on app
-    /// activation so changes made elsewhere appear promptly.
+    /// Lightweight foreground pull: publish pending local changes, fetch remote
+    /// changes, then send once more so any records this device won on merge
+    /// (`toPush`, enqueued during fetch) actually go out. Used on app activation.
     public func fetchNow() async {
         guard config.isEnabled(), await accountIsAvailable() else { return }
         ensureEngine()
         guard let engine else { return }
         await publishLocalChanges()
         try? await engine.fetchChanges()
+        try? await engine.sendChanges()   // flush toPush from the fetch
     }
 
-    /// Force an immediate two-way sync, for a manual "Sync Now". Publishes local
-    /// changes, pushes, then ALWAYS pulls (so pressing Sync Now on a receiver
-    /// reliably fetches the latest even if the push had nothing to send / failed).
+    /// Force an immediate two-way sync, for a manual "Sync Now". Order is
+    /// publish → FETCH → send, so a receiver pulls the latest first, and any records
+    /// this device wins on merge (`toPush`) are pushed back in the same pass.
     public func syncNow() async {
         guard config.isEnabled() else { setStatus(.disabled); return }
         guard await accountIsAvailable() else { setStatus(.signedOut); return }
@@ -156,17 +157,18 @@ public actor CloudConfigSyncService {
         setStatus(.syncing)
         await publishLocalChanges()
 
-        var sendError: Error?
-        do { try await engine.sendChanges() } catch { sendError = error }
-        // Fetch regardless of send outcome — this is how a receiver pulls updates.
-        do { try await engine.fetchChanges() } catch { if sendError == nil { sendError = error } }
+        var syncError: Error?
+        // Fetch FIRST (pull remote + enqueue toPush), then send (push local edits +
+        // toPush). Each runs regardless of the other's outcome.
+        do { try await engine.fetchChanges() } catch { syncError = error }
+        do { try await engine.sendChanges() } catch { if syncError == nil { syncError = error } }
 
-        if let sendError {
+        if let syncError {
             // The engine auto-retries transient conflicts, and its own did*Changes
             // events will flip us back to idle if that succeeds — so this error is
             // debounced and only surfaces if it's still unresolved shortly after.
-            setDiagnostic("sync: \(Self.describe(sendError))")
-            setStatus(.error, error: (sendError as NSError).localizedDescription)
+            setDiagnostic("sync: \(Self.describe(syncError))")
+            setStatus(.error, error: (syncError as NSError).localizedDescription)
         } else {
             setStatus(.idle, syncedNow: true)
         }
@@ -421,6 +423,12 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
 
         guard !incoming.isEmpty || !deletedNames.isEmpty else { return }
         let result = mirror.applyRemote(saved: incoming, deletedRecordNames: deletedNames)
+        // Re-push any records where THIS device's copy beat the server's (server is
+        // stale) so the fleet converges to the newer value.
+        if !result.toPush.isEmpty {
+            let pushes = result.toPush.map { CKSyncEngine.PendingRecordZoneChange.saveRecord(CloudSyncSchema.recordID(forRecordName: $0.recordName)) }
+            engine?.state.add(pendingRecordZoneChanges: pushes)
+        }
         persist()
         guard result.changed else { return }
         // Hand the merged, non-secret snapshot to the app to reconcile into its
@@ -458,13 +466,12 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
                 systemFields[name] = Self.archive(serverRecord)
                 guard let serverRec = CloudSyncRecord(ckRecord: serverRecord) else { continue }
                 let result = mirror.applyRemote(saved: [serverRec], deletedRecordNames: [])
-                // After merging, if the mirror's winning content differs from the
-                // server's, THIS device won the resolve — bump above the server's
-                // version and re-save so our value actually lands (a same-version
-                // re-save would just conflict again — the loop we were stuck in).
-                // If they match, we converged to the server's copy: stop re-sending.
-                if let localRec = mirror.records[name], localRec.payload != serverRec.payload {
-                    mirror.bumpVersion(of: name, toAtLeast: serverRec.version + 1)
+                // With last-writer-wins by HLC timestamp, applyRemote already merged
+                // the server's copy and advanced our clock past it. If OUR copy won
+                // (server is stale), re-save it — it now carries a strictly-later
+                // editedAt, so the save lands instead of looping. If the server won,
+                // stop re-sending.
+                if result.toPush.contains(where: { $0.recordName == name }) {
                     retry.append(.saveRecord(record.recordID))
                 } else {
                     syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(record.recordID)])

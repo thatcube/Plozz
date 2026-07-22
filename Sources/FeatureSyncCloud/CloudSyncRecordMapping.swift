@@ -10,13 +10,16 @@ import CoreModels
 // the payloads come from the non-secret `SyncConfigSnapshot` only.
 
 enum CloudSyncSchema {
-    static let recordType = "PlozzSyncConfig"
-    static let zoneName = "PlozzConfig"
+    // V2: HLC-timestamp (editedAt) model. A fresh record type + zone name so any
+    // records/mirrors from the earlier (never-working) version model are ignored
+    // rather than migrated — there is no real user data to preserve.
+    static let recordType = "PlozzSyncConfigV2"
+    static let zoneName = "PlozzConfigV2"
     static var zoneID: CKRecordZone.ID { CKRecordZone.ID(zoneName: zoneName) }
 
     static let fieldKind = "kind"
     static let fieldEntityID = "entityID"
-    static let fieldVersion = "version"
+    static let fieldEditedAt = "editedAt"
     static let fieldPayload = "payload"
 
     static func recordID(forRecordName name: String) -> CKRecord.ID {
@@ -30,7 +33,7 @@ extension CloudSyncRecord {
     func populate(_ record: CKRecord) {
         record[CloudSyncSchema.fieldKind] = kind.rawValue as CKRecordValue
         record[CloudSyncSchema.fieldEntityID] = id as CKRecordValue
-        record[CloudSyncSchema.fieldVersion] = Int64(version) as CKRecordValue
+        record[CloudSyncSchema.fieldEditedAt] = editedAt as CKRecordValue
         record[CloudSyncSchema.fieldPayload] = payload as CKRecordValue
     }
 
@@ -41,9 +44,9 @@ extension CloudSyncRecord {
               let kindRaw = record[CloudSyncSchema.fieldKind] as? String,
               let kind = CloudSyncRecord.Kind(rawValue: kindRaw),
               let id = record[CloudSyncSchema.fieldEntityID] as? String,
-              let version = record[CloudSyncSchema.fieldVersion] as? Int64,
+              let editedAt = record[CloudSyncSchema.fieldEditedAt] as? Int64,
               let payload = record[CloudSyncSchema.fieldPayload] as? Data
         else { return nil }
-        self.init(kind: kind, id: id, version: Int(version), payload: payload)
+        self.init(kind: kind, id: id, editedAt: editedAt, payload: payload)
     }
 }

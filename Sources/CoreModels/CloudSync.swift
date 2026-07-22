@@ -33,18 +33,21 @@ public struct CloudSyncRecord: Codable, Hashable, Sendable {
     public var kind: Kind
     /// Entity id: `Account.id` for accounts; `Profile.id` for profile/settings/membership.
     public var id: String
-    /// Monotonic per-record version OWNED by the sync layer (bumped on local edit).
-    /// Independent of `SyncedAccountDescriptor.recordVersion` (which the pairing
-    /// path leaves at 1) — auto-sync needs durable, ever-increasing versions so
-    /// last-writer-wins converges.
-    public var version: Int
+    /// Hybrid-logical-clock timestamp of the last local edit, in milliseconds since
+    /// 1970. This is the LAST-WRITER-WINS authority for conflict resolution: the
+    /// most-recently-edited record wins. It is NOT a plain wall clock — the mirror
+    /// advances it as `max(now, everythingSeen + 1ms)` so a local edit always
+    /// supersedes anything the device has observed, even across devices with skewed
+    /// clocks. This is what makes convergence deadlock-free (a monotonic per-device
+    /// version counter could not: the device with the most edits won forever).
+    public var editedAt: Int64
     /// JSON encoding of the entity for this `kind`. Non-secret by construction.
     public var payload: Data
 
-    public init(kind: Kind, id: String, version: Int, payload: Data) {
+    public init(kind: Kind, id: String, editedAt: Int64, payload: Data) {
         self.kind = kind
         self.id = id
-        self.version = version
+        self.editedAt = editedAt
         self.payload = payload
     }
 
@@ -66,14 +69,13 @@ public struct CloudSyncRecord: Codable, Hashable, Sendable {
 // MARK: - Deterministic per-record merge
 
 public extension CloudSyncRecord {
-    /// Order-independent winner of two records for the same `recordName`: higher
-    /// `version` wins; on an exact version tie, the lexicographically-greater
-    /// `payload` wins. The tie-break is deterministic and symmetric across devices
-    /// (no clock, no "who reached the server first"), so concurrent equal-version
-    /// edits converge to the SAME value everywhere instead of each device keeping
-    /// its own.
+    /// Order-independent winner of two records for the same `recordName`:
+    /// the later `editedAt` wins (last-writer-wins); on an exact tie, the
+    /// lexicographically-greater `payload` wins. Deterministic + symmetric across
+    /// devices, so concurrent edits converge to the SAME value everywhere and no
+    /// device can be permanently out-voted by a stale higher counter.
     static func resolve(_ a: CloudSyncRecord, _ b: CloudSyncRecord) -> CloudSyncRecord {
-        if a.version != b.version { return a.version > b.version ? a : b }
+        if a.editedAt != b.editedAt { return a.editedAt > b.editedAt ? a : b }
         return payloadGreater(a.payload, b.payload) ? a : b
     }
 
@@ -143,7 +145,7 @@ public enum CloudSyncCodec {
                 if let a = try? decoder.decode(SyncedAccountDescriptor.self, from: rec.payload) { accounts.append(a) }
             case .profile:
                 if let p = try? decoder.decode(Profile.self, from: rec.payload) {
-                    profiles.append(VersionedProfile(profile: p, recordVersion: rec.version))
+                    profiles.append(VersionedProfile(profile: p, recordVersion: 1))
                 }
             case .settings:
                 if let s = try? decoder.decode(ProfileSettingsSnapshot.self, from: rec.payload) { settings.append(s) }
@@ -170,12 +172,27 @@ public enum CloudSyncCodec {
 public struct CloudSyncMirror: Codable, Hashable, Sendable {
     /// recordName -> record.
     public private(set) var records: [String: CloudSyncRecord]
+    /// Hybrid-logical-clock high-water mark (ms since 1970): the greatest `editedAt`
+    /// this device has ever produced or observed. A local edit stamps
+    /// `max(now, clock + 1)` so it always supersedes anything seen — the property
+    /// that makes convergence deadlock-free and skew-tolerant.
+    private var clock: Int64
 
-    public init(records: [String: CloudSyncRecord] = [:]) { self.records = records }
+    public init(records: [String: CloudSyncRecord] = [:]) {
+        self.records = records
+        self.clock = records.values.map(\.editedAt).max() ?? 0
+    }
+
+    /// Advance the HLC and return the new timestamp for a local edit.
+    private mutating func tick() -> Int64 {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        clock = max(now, clock + 1)
+        return clock
+    }
 
     /// The changes to push after a local edit, keeping the mirror in lock-step.
     public struct PublishPlan: Equatable, Sendable {
-        /// Records to save/update in CloudKit (versions already bumped).
+        /// Records to save/update in CloudKit (editedAt already stamped).
         public var saves: [CloudSyncRecord]
         /// Record names to delete in CloudKit.
         public var deletes: [String]
@@ -187,32 +204,31 @@ public struct CloudSyncMirror: Codable, Hashable, Sendable {
 
     /// Diff `local` against the mirror, producing the minimal save/delete plan and
     /// advancing the mirror to match. A record is saved only when its payload
-    /// actually differs (or is new); its version is bumped to `existing + 1`.
-    /// Entities absent from `local` are deleted. Idempotent: publishing the same
-    /// local snapshot twice yields an empty plan the second time.
+    /// actually differs (or is new); a changed record is stamped with a fresh HLC
+    /// `editedAt`. Entities absent from `local` are deleted. Idempotent: publishing
+    /// the same local snapshot twice yields an empty plan the second time.
     public mutating func publish(local: SyncConfigSnapshot) -> PublishPlan {
         let desired = CloudSyncCodec.desiredRecords(from: local)
         var plan = PublishPlan()
 
         // Saves / updates.
         for (name, payload) in desired {
-            if let existing = records[name] {
-                if existing.payload == payload { continue }   // unchanged
-                guard let parsed = CloudSyncRecord.parse(recordName: name) else { continue }
-                let bumped = CloudSyncRecord(kind: parsed.kind, id: parsed.id,
-                                             version: existing.version + 1, payload: payload)
-                records[name] = bumped
-                plan.saves.append(bumped)
-            } else {
-                guard let parsed = CloudSyncRecord.parse(recordName: name) else { continue }
-                let fresh = CloudSyncRecord(kind: parsed.kind, id: parsed.id, version: 1, payload: payload)
-                records[name] = fresh
-                plan.saves.append(fresh)
-            }
+            if let existing = records[name], existing.payload == payload { continue } // unchanged
+            guard let parsed = CloudSyncRecord.parse(recordName: name) else { continue }
+            let stamped = CloudSyncRecord(kind: parsed.kind, id: parsed.id,
+                                          editedAt: tick(), payload: payload)
+            records[name] = stamped
+            plan.saves.append(stamped)
         }
 
-        // Deletes (present in mirror, gone locally).
+        // Deletes (present in mirror, gone locally). NEVER delete `account`
+        // descriptors from mere absence: a device legitimately lacks servers it
+        // isn't signed into, so deleting them here would destroy household servers
+        // for everyone (the "4 saves, 2 deletes on a rename" data-loss bug).
+        // Profile/settings/membership deletes ARE propagated — every device holds
+        // every profile, so absence there means a real removal.
         for name in records.keys where desired[name] == nil {
+            if CloudSyncRecord.parse(recordName: name)?.kind == .account { continue }
             records[name] = nil
             plan.deletes.append(name)
         }
@@ -222,16 +238,27 @@ public struct CloudSyncMirror: Codable, Hashable, Sendable {
         return plan
     }
 
-    /// Fold fetched remote changes into the mirror using the deterministic merge.
-    /// Returns the resulting snapshot to apply locally and whether anything
-    /// changed (so callers can skip a no-op apply/re-publish).
-    public mutating func applyRemote(saved: [CloudSyncRecord],
-                                     deletedRecordNames: [String]) -> (snapshot: SyncConfigSnapshot, changed: Bool) {
+    /// Fold fetched remote changes into the mirror using the last-writer-wins
+    /// resolve. Returns:
+    ///   • `snapshot` — the merged config to apply locally,
+    ///   • `changed`  — whether local state changed (skip a no-op apply otherwise),
+    ///   • `toPush`   — records where THIS device's copy beat the server's, so the
+    ///     server is stale and must be re-saved. Without pushing these back, a local
+    ///     edit that lost the transport race (its older peer reached the server last)
+    ///     would be stranded locally and never re-uploaded.
+    @discardableResult
+    public mutating func applyRemote(
+        saved: [CloudSyncRecord], deletedRecordNames: [String]
+    ) -> (snapshot: SyncConfigSnapshot, changed: Bool, toPush: [CloudSyncRecord]) {
         var changed = false
+        var toPush: [CloudSyncRecord] = []
         for incoming in saved {
+            clock = max(clock, incoming.editedAt)   // observe remote time
             if let existing = records[incoming.recordName] {
                 let winner = CloudSyncRecord.resolve(existing, incoming)
                 if winner != existing { records[incoming.recordName] = winner; changed = true }
+                // The winner isn't the server's copy ⇒ server is stale ⇒ push ours.
+                if winner != incoming { toPush.append(winner) }
             } else {
                 records[incoming.recordName] = incoming
                 changed = true
@@ -241,24 +268,10 @@ public struct CloudSyncMirror: Codable, Hashable, Sendable {
             records[name] = nil
             changed = true
         }
-        return (CloudSyncCodec.snapshot(from: records), changed)
+        return (CloudSyncCodec.snapshot(from: records), changed, toPush)
     }
 
     /// The snapshot the mirror currently represents (for the initial upload of an
     /// already-configured device, and for diagnostics).
     public var snapshot: SyncConfigSnapshot { CloudSyncCodec.snapshot(from: records) }
-
-    /// Raise a record's version to at least `version`, keeping its payload. Used by
-    /// the CloudKit conflict handler: when this device's content wins a same-version
-    /// tie-break, we must bump above the server's version so the re-save actually
-    /// lands (a same-version save would just conflict again). Returns the updated
-    /// record, or nil if absent.
-    @discardableResult
-    public mutating func bumpVersion(of recordName: String, toAtLeast version: Int) -> CloudSyncRecord? {
-        guard let rec = records[recordName] else { return nil }
-        guard rec.version < version else { return rec }
-        let bumped = CloudSyncRecord(kind: rec.kind, id: rec.id, version: version, payload: rec.payload)
-        records[recordName] = bumped
-        return bumped
-    }
 }

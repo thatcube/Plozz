@@ -33,7 +33,7 @@ final class CloudSyncTests: XCTestCase {
 
     func testRecordNameParseRoundTrip() {
         for kind in CloudSyncRecord.Kind.allCases {
-            let rec = CloudSyncRecord(kind: kind, id: "abc:def", version: 3, payload: Data())
+            let rec = CloudSyncRecord(kind: kind, id: "abc:def", editedAt: 3, payload: Data())
             let parsed = CloudSyncRecord.parse(recordName: rec.recordName)
             XCTAssertEqual(parsed?.kind, kind)
             XCTAssertEqual(parsed?.id, "abc:def", "id containing ':' must survive")
@@ -42,16 +42,16 @@ final class CloudSyncTests: XCTestCase {
         XCTAssertNil(CloudSyncRecord.parse(recordName: "account:"))
     }
 
-    // MARK: publish diffing + version bumps
+    // MARK: publish diffing + editedAt stamping
 
-    func testPublishFromEmptyCreatesV1Records() {
+    func testPublishFromEmptyCreatesStampedRecords() {
         var mirror = CloudSyncMirror()
         let local = snapshot(accounts: [descriptor("A")], profiles: [profile("p1", name: "Mom")])
         let plan = mirror.publish(local: local)
 
         XCTAssertEqual(plan.deletes, [])
         XCTAssertEqual(plan.saves.count, 2)
-        XCTAssertTrue(plan.saves.allSatisfy { $0.version == 1 })
+        XCTAssertTrue(plan.saves.allSatisfy { $0.editedAt > 0 }, "new records get a fresh HLC timestamp")
         XCTAssertEqual(Set(plan.saves.map(\.recordName)), ["account:A", "profile:p1"])
     }
 
@@ -63,21 +63,32 @@ final class CloudSyncTests: XCTestCase {
         XCTAssertTrue(second.isEmpty, "publishing an unchanged snapshot must produce no changes")
     }
 
-    func testEditBumpsVersion() {
+    func testEditAdvancesEditedAt() {
         var mirror = CloudSyncMirror()
-        _ = mirror.publish(local: snapshot(profiles: [profile("p1", name: "Mom")]))
+        let first = mirror.publish(local: snapshot(profiles: [profile("p1", name: "Mom")]))
+        let firstStamp = first.saves.first!.editedAt
         let plan = mirror.publish(local: snapshot(profiles: [profile("p1", name: "Mommy")]))
         XCTAssertEqual(plan.saves.count, 1)
         XCTAssertEqual(plan.saves.first?.recordName, "profile:p1")
-        XCTAssertEqual(plan.saves.first?.version, 2)
+        XCTAssertGreaterThan(plan.saves.first!.editedAt, firstStamp, "an edit must advance editedAt")
     }
 
-    func testRemovalProducesDelete() {
+    func testProfileRemovalProducesDelete() {
+        var mirror = CloudSyncMirror()
+        _ = mirror.publish(local: snapshot(profiles: [profile("p1", name: "A"), profile("p2", name: "B")]))
+        let plan = mirror.publish(local: snapshot(profiles: [profile("p1", name: "A")]))
+        XCTAssertEqual(plan.deletes, ["profile:p2"])
+        XCTAssertEqual(plan.saves, [])
+    }
+
+    /// Account descriptors are NEVER deleted from mere absence (a device isn't
+    /// signed into every server) — that guards against destroying household data.
+    func testAccountAbsenceDoesNotDelete() {
         var mirror = CloudSyncMirror()
         _ = mirror.publish(local: snapshot(accounts: [descriptor("A"), descriptor("B")]))
         let plan = mirror.publish(local: snapshot(accounts: [descriptor("A")]))
-        XCTAssertEqual(plan.deletes, ["account:B"])
-        XCTAssertEqual(plan.saves, [])
+        XCTAssertEqual(plan.deletes, [], "an account absent from local must NOT be deleted")
+        XCTAssertNotNil(mirror.records["account:B"], "the descriptor stays in the mirror")
     }
 
     // MARK: membership tri-state
@@ -98,10 +109,14 @@ final class CloudSyncTests: XCTestCase {
 
     // MARK: remote apply + convergence
 
+    private func record(_ kind: CloudSyncRecord.Kind, _ id: String, editedAt: Int64, payload: Data) -> CloudSyncRecord {
+        CloudSyncRecord(kind: kind, id: id, editedAt: editedAt, payload: payload)
+    }
+
     func testApplyRemoteAddsAndDeletes() {
         var mirror = CloudSyncMirror()
         let payload = try! JSONEncoder().encode(descriptor("A"))
-        let incoming = CloudSyncRecord(kind: .account, id: "A", version: 1, payload: payload)
+        let incoming = record(.account, "A", editedAt: 100, payload: payload)
 
         let added = mirror.applyRemote(saved: [incoming], deletedRecordNames: [])
         XCTAssertTrue(added.changed)
@@ -112,35 +127,37 @@ final class CloudSyncTests: XCTestCase {
         XCTAssertTrue(removed.snapshot.accounts.isEmpty)
     }
 
-    func testApplyRemoteHigherVersionWins() {
+    func testApplyRemoteLaterEditWins() {
         var mirror = CloudSyncMirror()
-        _ = mirror.publish(local: snapshot(profiles: [profile("p1", name: "Mom")]))  // v1 local
+        _ = mirror.publish(local: snapshot(profiles: [profile("p1", name: "Mom")]))  // stamped ~now
         let remotePayload = try! JSONEncoder().encode(profile("p1", name: "Remote"))
-        let remote = CloudSyncRecord(kind: .profile, id: "p1", version: 5, payload: remotePayload)
+        // Far-future editedAt => strictly later => wins.
+        let remote = record(.profile, "p1", editedAt: Int64(Date().timeIntervalSince1970 * 1000) + 1_000_000, payload: remotePayload)
 
         let result = mirror.applyRemote(saved: [remote], deletedRecordNames: [])
         XCTAssertTrue(result.changed)
         XCTAssertEqual(result.snapshot.profiles.first?.profile.name, "Remote")
     }
 
-    func testApplyRemoteLowerVersionIgnored() {
+    func testApplyRemoteOlderEditIgnoredAndPushedBack() {
         var mirror = CloudSyncMirror()
-        _ = mirror.publish(local: snapshot(profiles: [profile("p1", name: "Mom")]))
-        _ = mirror.publish(local: snapshot(profiles: [profile("p1", name: "Mom2")]))  // now v2
-        let stale = CloudSyncRecord(kind: .profile, id: "p1", version: 1,
-                                    payload: try! JSONEncoder().encode(profile("p1", name: "Stale")))
+        _ = mirror.publish(local: snapshot(profiles: [profile("p1", name: "Local")]))  // stamped ~now
+        // An OLDER remote edit (editedAt in the past) must lose AND be flagged for
+        // re-push so the stale server converges to our newer value.
+        let stale = record(.profile, "p1", editedAt: 1, payload: try! JSONEncoder().encode(profile("p1", name: "Stale")))
         let result = mirror.applyRemote(saved: [stale], deletedRecordNames: [])
-        XCTAssertFalse(result.changed, "a lower-version remote record must not win")
-        XCTAssertEqual(result.snapshot.profiles.first?.profile.name, "Mom2")
+        XCTAssertFalse(result.changed, "an older remote edit must not overwrite a newer local one")
+        XCTAssertEqual(result.snapshot.profiles.first?.profile.name, "Local")
+        XCTAssertEqual(result.toPush.map(\.recordName), ["profile:p1"], "our newer copy must be pushed back")
     }
 
-    /// The critical convergence property: applying two conflicting equal-version
+    /// The critical convergence property: applying two conflicting SAME-timestamp
     /// edits in EITHER order yields the same winner on both devices.
-    func testEqualVersionTieBreakIsOrderIndependent() {
+    func testEqualTimestampTieBreakIsOrderIndependent() {
         let payloadX = try! JSONEncoder().encode(profile("p1", name: "Xavier"))
         let payloadY = try! JSONEncoder().encode(profile("p1", name: "Yolanda"))
-        let recX = CloudSyncRecord(kind: .profile, id: "p1", version: 2, payload: payloadX)
-        let recY = CloudSyncRecord(kind: .profile, id: "p1", version: 2, payload: payloadY)
+        let recX = record(.profile, "p1", editedAt: 500, payload: payloadX)
+        let recY = record(.profile, "p1", editedAt: 500, payload: payloadY)
 
         var deviceA = CloudSyncMirror(records: ["profile:p1": recX])
         var deviceB = CloudSyncMirror(records: ["profile:p1": recY])
@@ -148,33 +165,13 @@ final class CloudSyncTests: XCTestCase {
         _ = deviceB.applyRemote(saved: [recX], deletedRecordNames: [])
 
         XCTAssertEqual(deviceA.records["profile:p1"], deviceB.records["profile:p1"],
-                       "concurrent equal-version edits must converge to the same record on both devices")
+                       "concurrent same-timestamp edits must converge to the same record on both devices")
     }
 
-    func testResolveHigherVersionWinsRegardlessOfPayload() {
-        let low = CloudSyncRecord(kind: .account, id: "A", version: 1,
-                                  payload: Data([0xFF, 0xFF]))          // "big" payload
-        let high = CloudSyncRecord(kind: .account, id: "A", version: 9,
-                                   payload: Data([0x00]))               // "small" payload
-        XCTAssertEqual(CloudSyncRecord.resolve(low, high), high)
-        XCTAssertEqual(CloudSyncRecord.resolve(high, low), high)
-    }
-
-    // MARK: full round-trip
-
-    func testBumpVersionRaisesToAtLeast() {
-        let payload = try! JSONEncoder().encode(descriptor("A"))
-        var mirror = CloudSyncMirror(records: [
-            "account:A": CloudSyncRecord(kind: .account, id: "A", version: 2, payload: payload)
-        ])
-        // Bumps up when below the target.
-        let bumped = mirror.bumpVersion(of: "account:A", toAtLeast: 5)
-        XCTAssertEqual(bumped?.version, 5)
-        XCTAssertEqual(mirror.records["account:A"]?.version, 5)
-        // No-op when already at/above target (keeps the higher version).
-        let unchanged = mirror.bumpVersion(of: "account:A", toAtLeast: 3)
-        XCTAssertEqual(unchanged?.version, 5)
-        // nil for an unknown record.
-        XCTAssertNil(mirror.bumpVersion(of: "account:ZZ", toAtLeast: 9))
+    func testResolveLaterEditWinsRegardlessOfPayload() {
+        let older = record(.account, "A", editedAt: 1, payload: Data([0xFF, 0xFF]))   // "big" payload
+        let newer = record(.account, "A", editedAt: 9, payload: Data([0x00]))         // "small" payload
+        XCTAssertEqual(CloudSyncRecord.resolve(older, newer), newer)
+        XCTAssertEqual(CloudSyncRecord.resolve(newer, older), newer)
     }
 }

@@ -67,7 +67,7 @@ extension AppState {
         guard let baseDir = Self.writableStateDirectory() else { return nil }
         let stateURL = baseDir
             .appendingPathComponent("PlozzSync", isDirectory: true)
-            .appendingPathComponent("cloud-config.json")
+            .appendingPathComponent("cloud-config-v2.json")
 
         return CloudConfigSyncService(.init(
             containerIdentifier: cloudContainerIdentifier,
@@ -124,10 +124,22 @@ extension AppState {
             profilesModel.storedActiveAccountIDs(for: p.id).map { (p.id, $0) }
         })
         return SyncConfigSnapshot(
-            accounts: accounts.map { SyncedAccountDescriptor(account: $0) },
+            accounts: Self.mergedAccountDescriptors(signedIn: accounts),
             profiles: profiles.map { VersionedProfile(profile: $0) },
             profileSettings: settings,
             profileMemberships: memberships)
+    }
+
+    /// The household's FULL server descriptor set: this device's signed-in accounts
+    /// PLUS the descriptors it has synced but isn't signed into (pending). Including
+    /// the pending ones is essential — otherwise `publish` would see them in the
+    /// mirror but absent from this device's snapshot and DELETE them from iCloud for
+    /// the whole household (a device silently destroying another device's servers).
+    static func mergedAccountDescriptors(signedIn accounts: [Account]) -> [SyncedAccountDescriptor] {
+        var byID: [String: SyncedAccountDescriptor] = [:]
+        for d in PendingSyncedServersStore().all { byID[d.id] = d }
+        for a in accounts { byID[a.id] = SyncedAccountDescriptor(account: a) } // signed-in wins
+        return byID.values.sorted { $0.id < $1.id }
     }
 
     // MARK: Apply side

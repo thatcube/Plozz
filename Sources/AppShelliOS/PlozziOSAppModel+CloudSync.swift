@@ -25,7 +25,7 @@ extension PlozziOSAppModel {
         else { return nil }
         let stateURL = baseDir
             .appendingPathComponent("PlozzSync", isDirectory: true)
-            .appendingPathComponent("cloud-config.json")
+            .appendingPathComponent("cloud-config-v2.json")
 
         return CloudConfigSyncService(.init(
             containerIdentifier: cloudContainerIdentifier,

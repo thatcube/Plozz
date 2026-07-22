@@ -37,13 +37,18 @@ public struct PasswordSignInService: Sendable {
     /// Authenticates against the server. Throws `.invalidCredentials` when the
     /// username/password is rejected, or any transport error otherwise.
     public func signIn(username: String, password: String) async throws -> UserSession {
+        let client = self.client
         let auth = try await client.authenticate(username: username, password: password)
+        // Fetch the server's real identity/name (no auth required) — otherwise the
+        // account keeps the placeholder provider name ("Jellyfin") from the add screen
+        // instead of the server's actual name / host.
+        let info = try? await client.publicSystemInfo()
         let resolvedServer = MediaServer(
-            id: auth.serverID ?? server.id,
-            name: server.name,
+            id: auth.serverID ?? info?.id ?? server.id,
+            name: info?.name ?? server.name,
             baseURL: server.baseURL,
             provider: server.provider,
-            version: server.version
+            version: info?.version ?? server.version
         )
         return UserSession(
             server: resolvedServer,

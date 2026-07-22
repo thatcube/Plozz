@@ -71,12 +71,15 @@ public struct QuickConnectService: Sendable {
             let state = try await client.quickConnectState(secret: challenge.secret)
             if state.isAuthenticated {
                 let auth = try await client.authenticate(withSecret: challenge.secret)
+                // Fetch the server's real name (no auth required) so the account
+                // doesn't keep the placeholder provider name ("Jellyfin").
+                let info = try? await client.publicSystemInfo()
                 let resolvedServer = MediaServer(
-                    id: auth.serverID ?? server.id,
-                    name: server.name,
+                    id: auth.serverID ?? info?.id ?? server.id,
+                    name: info?.name ?? server.name,
                     baseURL: server.baseURL,
                     provider: .jellyfin,
-                    version: server.version
+                    version: info?.version ?? server.version
                 )
                 return UserSession(
                     server: resolvedServer,

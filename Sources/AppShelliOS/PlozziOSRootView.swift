@@ -324,7 +324,7 @@ private struct PlozziOSTabShell: View {
                 .background { AppBackground(palette: palette) }
             }
         }
-        .tabViewStyle(.sidebarAdaptable)
+        .tabViewStyle(.tabBarOnly)
         .background { AppBackground(palette: palette) }
         .background(alignment: .topLeading) {
             PlozziOSHomeSidebarOverlapProbe(

@@ -36,14 +36,14 @@ struct PlozziOSDownloadsView: View {
         .navigationTitle("Downloads")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                PlozziOSSettingsAvatarButton(size: 36, action: onShowSettings)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     PlozziOSDownloadSettingsView(model: model)
                 } label: {
                     Label("Download Settings", systemImage: "gearshape")
                 }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                PlozziOSSettingsAvatarButton(size: 36, action: onShowSettings)
             }
         }
         .confirmationDialog(

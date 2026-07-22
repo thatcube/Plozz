@@ -518,7 +518,7 @@ public struct SettingsView: View {
                 // Cross-device sync + device pairing, combined under one entry that
                 // drills into a detail page (matches the Settings hierarchy).
                 if onSetSyncEnabled != nil || onSetUpAnotherDevice != nil {
-                    navRow("iCloud Sync", icon: "arrow.triangle.2.circlepath",
+                    navRow("iCloud Sync", icon: "icloud",
                            value: onSetSyncEnabled != nil ? (syncEnabled ? "On" : "Off") : nil,
                            route: .syncSetup)
                 }

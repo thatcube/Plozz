@@ -23,17 +23,33 @@ extension AppState {
 
     private static let cloudContainerIdentifier = "iCloud.com.thatcube.Plozz"
 
+    /// A writable directory for the sync state, robust across platforms. Tries
+    /// Application Support (iOS), then Caches (tvOS's reliably-writable area), then
+    /// the temporary directory as a last resort — so `cloudSync` is never nil just
+    /// because a preferred directory couldn't be created (the bug that left tvOS
+    /// unable to activate sync at all).
+    static func writableStateDirectory() -> URL? {
+        let fm = FileManager.default
+        for domain in [FileManager.SearchPathDirectory.applicationSupportDirectory, .cachesDirectory] {
+            if let url = try? fm.url(for: domain, in: .userDomainMask, appropriateFor: nil, create: true) {
+                return url
+            }
+        }
+        let tmp = fm.temporaryDirectory
+        return (try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)) != nil ? tmp : tmp
+    }
+
     /// Build the service, capturing `self` weakly for the config/apply closures.
     /// The enabled-check reads the device-wide flag straight from `UserDefaults`
     /// (thread-safe) so it needs no main-actor hop. Returns `nil` only if no
     /// writable state location exists.
     static func makeCloudSync(for appState: AppState) -> CloudConfigSyncService? {
-        guard let baseDir = try? FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true) else { return nil }
-        // Per-Apple-TV-user location (Application Support is partitioned by the
-        // `runs-as-current-user` entitlement), so each system user's CKSyncEngine
-        // state stays separate — never shared across Apple IDs.
+        // tvOS restricts persistent storage — .applicationSupportDirectory often
+        // can't be created — so fall back to Caches (CKSyncEngine can rebuild its
+        // state if it's ever purged). Per-Apple-TV-user (both dirs are partitioned
+        // by the runs-as-current-user entitlement), so each system user's engine
+        // state stays separate.
+        guard let baseDir = Self.writableStateDirectory() else { return nil }
         let stateURL = baseDir
             .appendingPathComponent("PlozzSync", isDirectory: true)
             .appendingPathComponent("cloud-config.json")
@@ -163,7 +179,11 @@ extension AppState {
 
     /// Activate the engine (if enabled) and start observing local config changes.
     func startCloudSyncIfEnabled() {
-        guard SyncSetupFeatureFlag().isEnabled, let cloudSync else { return }
+        guard SyncSetupFeatureFlag().isEnabled else { return }
+        guard let cloudSync else {
+            PlozzLog.sync.error("CloudSync: no writable state dir — sync unavailable")
+            return
+        }
         Task { await cloudSync.activate() }
         armCloudConfigObservation()
     }

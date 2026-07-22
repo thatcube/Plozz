@@ -19,7 +19,10 @@ extension PlozziOSAppModel {
     static func makeCloudSync(for model: PlozziOSAppModel) -> CloudConfigSyncService? {
         guard let baseDir = try? FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true) else { return nil }
+            appropriateFor: nil, create: true)
+            ?? FileManager.default.url(
+                for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        else { return nil }
         let stateURL = baseDir
             .appendingPathComponent("PlozzSync", isDirectory: true)
             .appendingPathComponent("cloud-config.json")

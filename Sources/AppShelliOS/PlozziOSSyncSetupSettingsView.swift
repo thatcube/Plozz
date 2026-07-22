@@ -111,7 +111,7 @@ struct PlozziOSSyncSetupSettingsView: View {
                     get: { appModel.syncSetup.isEnabled },
                     set: { appModel.setSyncSetupEnabled($0) }
                 )) {
-                    Label("iCloud Sync", systemImage: "arrow.triangle.2.circlepath")
+                    Label("iCloud Sync", systemImage: "icloud")
                 }
                 if appModel.syncSetup.isEnabled {
                     HStack {

@@ -118,14 +118,14 @@ struct HelpDiagnosticsDetailView: View {
         )
     }
 
-    // MARK: - Crash reporting (opt-in, off by default)
+    // MARK: - Crash reporting (channel-aware default; on in beta, opt-in on the App Store)
 
     @ViewBuilder
     private var crashReportingPanel: some View {
         if crashReportingConfigured {
             SettingsPanel(
                 title: "Crash Reports",
-                footer: "When on, Plozz sends an anonymous report if it crashes or freezes, so bugs can be fixed faster. Reports include only the crash itself plus your app version, tvOS version and device model — never your servers, logins, tokens, or what you were watching. Off by default; applies to this Apple TV."
+                footer: "When on, Plozz sends an anonymous report if it crashes or freezes, so bugs can be fixed faster. Reports include only the crash itself plus your app version, tvOS version and device model — never your servers, logins, tokens, or what you were watching. On by default during the beta; you can turn it off any time. Applies to this Apple TV."
             ) {
                 Toggle("Share Crash Reports", isOn: $crashReporting.settings.isEnabled)
                     .toggleStyle(SettingsSwitchToggleStyle())

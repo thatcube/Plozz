@@ -255,6 +255,7 @@ private struct PlozziOSSettingsSplitView: View {
                                 developerMode.disable()
                             }
                         }
+                        PlozziOSDeveloperInfoSection()
                     }
                 }
             }
@@ -445,6 +446,33 @@ private struct PlozziOSAboutSettingsView: View {
     }
 }
 
+/// Read-only "Device & Build" facts shown under Developer Mode: which build is
+/// installed (canonical vs a `--branded` side-by-side app), release channel, and
+/// whether the App Group / crash endpoint are present. A Copy button dumps it all
+/// as text for a bug report.
+private struct PlozziOSDeveloperInfoSection: View {
+    var body: some View {
+        SettingsSectionGroup("Device & Build") {
+            ForEach(DeveloperInfo.snapshot()) { item in
+                LabeledContent(item.label, value: item.value)
+            }
+            LabeledContent("OS", value: ProcessInfo.processInfo.operatingSystemVersionString)
+            Button {
+                UIPasteboard.general.string = DeveloperInfo.copyText(
+                    DeveloperInfo.snapshot(),
+                    extra: [DeveloperInfoItem(
+                        id: "os",
+                        label: "OS",
+                        value: ProcessInfo.processInfo.operatingSystemVersionString
+                    )]
+                )
+            } label: {
+                Label("Copy Info", systemImage: "doc.on.doc")
+            }
+        }
+    }
+}
+
 private struct PlozziOSSettingsCompactMenu: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
@@ -623,6 +651,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                             developerMode.disable()
                         }
                     }
+                    PlozziOSDeveloperInfoSection()
                 }
 
                 if let accountError = appModel.accountError {

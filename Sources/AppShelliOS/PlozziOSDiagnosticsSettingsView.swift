@@ -58,7 +58,7 @@ struct PlozziOSDiagnosticsSettingsView: View {
             } footer: {
                 if appModel.crashReportingController.isConfigured {
                     Text(
-                        "Off by default. When enabled, anonymous crash details help improve Plozz. Server addresses, media titles, profile names, and credentials are never included."
+                        "On by default during the beta; you can turn it off any time. When enabled, anonymous crash details help improve Plozz. Server addresses, media titles, profile names, and credentials are never included."
                     )
                 } else {
                     Text("Crash reporting is unavailable in this build.")

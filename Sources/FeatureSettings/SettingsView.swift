@@ -552,6 +552,7 @@ public struct SettingsView: View {
             // than `#if DEBUG` — hides them by default in every build (including
             // the Debug-config branded builds) while keeping them re-enableable.
             if developerMode.isEnabled {
+                developerInfoPanel
                 developerModeRow
 
                 // Only meaningful in Debug builds (the hero A/B override the
@@ -601,6 +602,32 @@ public struct SettingsView: View {
         .buttonStyle(SettingsFocusButtonStyle())
     }
 
+    /// Read-only "Device & Build" facts — which build is installed (canonical vs
+    /// branded), channel, and whether the App Group / crash endpoint are present.
+    /// Handy on-device when a branded build behaves differently from canonical.
+    private var developerInfoPanel: some View {
+        FocusableSettingsPanel(title: "Device & Build") {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(DeveloperInfo.snapshot()) { item in
+                    HStack(alignment: .top, spacing: 16) {
+                        Text(item.label)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 24)
+                        Text(item.value)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .font(.callout)
+                }
+                HStack(alignment: .top, spacing: 16) {
+                    Text("OS").foregroundStyle(.secondary)
+                    Spacer(minLength: 24)
+                    Text(ProcessInfo.processInfo.operatingSystemVersionString)
+                        .multilineTextAlignment(.trailing)
+                }
+                .font(.callout)
+            }
+        }
+    }
     #if DEBUG
     /// DEBUG-only row that cycles the Home hero foreground renderer override
     /// (Default → UIKit → SwiftUI). Writes the shared `PLZDebugHeroForegroundMode`

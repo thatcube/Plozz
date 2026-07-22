@@ -24,20 +24,32 @@ struct RecentActivityDetailView: View {
     var canSendDiagnostics: Bool = false
 
     private let entries = PlozzLog.recentEntries(limit: 500)
+    @State private var selectedCategory: String? = nil
+
+    /// Distinct categories present in the log, for the filter chips.
+    private var categories: [String] {
+        Array(Set(entries.map(\.category))).sorted()
+    }
+
+    /// Newest-first entries after applying the category filter.
+    private var filtered: [PlozzLog.LogEntry] {
+        entries.reversed().filter { selectedCategory == nil || $0.category == selectedCategory }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 sendSection
+                if !categories.isEmpty { filterChips }
 
-                if entries.isEmpty {
-                    Text("No activity recorded yet.")
+                if filtered.isEmpty {
+                    Text(entries.isEmpty ? "No activity recorded yet." : "No entries in this category.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(entries.reversed()) { entry in
+                        ForEach(filtered) { entry in
                             RecentActivityRow(entry: entry)
                         }
                     }
@@ -49,6 +61,24 @@ struct RecentActivityDetailView: View {
             .padding(.vertical, 40)
         }
         .scrollClipDisabled()
+    }
+
+    /// Focusable filter chips (All + one per category) so the log can be narrowed
+    /// to just "sync" or "networking" on the TV.
+    private var filterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                RecentActivityFilterChip(title: "All", isSelected: selectedCategory == nil) {
+                    selectedCategory = nil
+                }
+                ForEach(categories, id: \.self) { cat in
+                    RecentActivityFilterChip(title: cat.capitalized, isSelected: selectedCategory == cat) {
+                        selectedCategory = cat
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
     }
 
     private var header: some View {
@@ -133,6 +163,36 @@ private struct RecentActivityRow: View {
         .focusEffectDisabled()
         .animation(.easeOut(duration: 0.14), value: isFocused)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A focusable filter chip for the tvOS Recent Activity log.
+private struct RecentActivityFilterChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    @FocusState private var isFocused: Bool
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 20, weight: .semibold))
+                .padding(.vertical, 8)
+                .padding(.horizontal, 20)
+                .background(
+                    Capsule().fill(isSelected ? palette.accent.opacity(0.85) : Color.white.opacity(0.08))
+                )
+                .overlay(
+                    Capsule().strokeBorder(palette.accent, lineWidth: 3).opacity(isFocused ? 1 : 0)
+                )
+                .foregroundStyle(isSelected ? Color.black : Color.primary)
+        }
+        .buttonStyle(.plain)
+        .focused($isFocused)
+        .focusEffectDisabled()
+        .animation(.easeOut(duration: 0.14), value: isFocused)
     }
 }
 #endif

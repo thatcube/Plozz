@@ -457,12 +457,18 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
     }
 
     private func handleFetchedRecordZoneChanges(_ event: CKSyncEngine.Event.FetchedRecordZoneChanges) async {
+        // Raw counts BEFORE decode: distinguishes "server delivered nothing" (mods=0
+        // ⇒ send-side or token problem) from "delivered but we dropped it" (mods>0
+        // but decoded 0 ⇒ decode bug).
+        PlozzLog.sync.info("CloudSync: FETCH raw mods=\(event.modifications.count) dels=\(event.deletions.count)")
         var incoming: [CloudSyncRecord] = []
         for mod in event.modifications {
             let record = mod.record
             if let rec = CloudSyncRecord(ckRecord: record) {
                 incoming.append(rec)
                 systemFields[record.recordID.recordName] = Self.archive(record)
+            } else {
+                PlozzLog.sync.error("CloudSync: FETCH decode FAILED for \(record.recordID.recordName)")
             }
         }
         var deletedNames: [String] = []

@@ -111,22 +111,46 @@ struct PlozziOSDiagnosticsSettingsView: View {
 }
 
 private struct PlozziOSRecentActivityView: View {
-    @State private var entries = PlozzLog.recentEntries(limit: 200)
+    @State private var entries = PlozzLog.recentEntries(limit: 500)
+    @State private var selectedCategory: String? = nil
+    @State private var searchText = ""
+
+    /// Distinct categories present, for the filter menu.
+    private var categories: [String] {
+        Array(Set(entries.map(\.category))).sorted()
+    }
+
+    /// Newest-first entries after applying the category + text filters.
+    private var filtered: [PlozzLog.LogEntry] {
+        entries.reversed().filter { entry in
+            if let selectedCategory, entry.category != selectedCategory { return false }
+            if !searchText.isEmpty,
+               !entry.message.localizedCaseInsensitiveContains(searchText),
+               !entry.category.localizedCaseInsensitiveContains(searchText) { return false }
+            return true
+        }
+    }
 
     private var shareText: String {
-        PlozzLog.recentLogText(limit: 200)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return filtered.reversed()
+            .map { "\(formatter.string(from: $0.date)) [\($0.level.rawValue)] \($0.category): \($0.message)" }
+            .joined(separator: "\n")
     }
 
     var body: some View {
         List {
-            if entries.isEmpty {
+            if filtered.isEmpty {
                 ContentUnavailableView(
-                    "No Recent Activity",
-                    systemImage: "waveform.slash",
-                    description: Text("Activity recorded during this app session will appear here.")
+                    entries.isEmpty ? "No Recent Activity" : "No Matches",
+                    systemImage: entries.isEmpty ? "waveform.slash" : "line.3.horizontal.decrease.circle",
+                    description: Text(entries.isEmpty
+                        ? "Activity recorded during this app session will appear here."
+                        : "No log entries match the current filter.")
                 )
             } else {
-                ForEach(entries.reversed()) { entry in
+                ForEach(filtered) { entry in
                     VStack(alignment: .leading, spacing: 5) {
                         HStack {
                             Text(entry.category.capitalized)
@@ -146,15 +170,29 @@ private struct PlozziOSRecentActivityView: View {
         }
         .settingsPageSurface()
         .navigationTitle("Recent Activity")
+        .searchable(text: $searchText, prompt: "Search messages")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Category", selection: $selectedCategory) {
+                        Text("All Categories").tag(String?.none)
+                        ForEach(categories, id: \.self) { cat in
+                            Text(cat.capitalized).tag(String?.some(cat))
+                        }
+                    }
+                } label: {
+                    Label(selectedCategory?.capitalized ?? "Filter",
+                          systemImage: selectedCategory == nil
+                            ? "line.3.horizontal.decrease.circle"
+                            : "line.3.horizontal.decrease.circle.fill")
+                }
                 Button("Refresh", systemImage: "arrow.clockwise") {
-                    entries = PlozzLog.recentEntries(limit: 200)
+                    entries = PlozzLog.recentEntries(limit: 500)
                 }
                 ShareLink(item: shareText) {
                     Label("Share", systemImage: "square.and.arrow.up")
                 }
-                .disabled(entries.isEmpty)
+                .disabled(filtered.isEmpty)
             }
         }
     }

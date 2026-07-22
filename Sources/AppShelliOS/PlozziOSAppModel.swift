@@ -418,7 +418,15 @@ final class PlozziOSAppModel {
         )
         self.syncSetup = SyncSetupService(
             deviceID: { accountStore.deviceID() },
-            deviceName: { UIDevice.current.name },
+            deviceName: {
+                // UIDevice.name is a generic model name on iOS 16+ without a special
+                // entitlement, so recover the owner-given name from the host name
+                // ("Brando's iPad" → host "Brandos-iPad") the same way tvOS does.
+                DeviceDisplayName.fromHostName(
+                    ProcessInfo.processInfo.hostName,
+                    fallback: UIDevice.current.name
+                )
+            },
             isConfigured: { !accountsProviders.accounts.isEmpty },
             configProvider: {
                 .init(

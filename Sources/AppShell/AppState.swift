@@ -785,22 +785,13 @@ public final class AppState {
         self.syncSetup = SyncSetupService(
             deviceID: { syncStore.deviceID() },
             deviceName: {
-                // tvOS 16+ returns a generic UIDevice.name without a special
-                // entitlement, so derive the name from the Bonjour host name.
-                // Bonjour lowercases + hyphenates it ("Brando TV" -> "brando-tv"),
-                // so prettify: hyphens -> spaces, title-case, uppercase "TV".
-                let host = ProcessInfo.processInfo.hostName
-                if !host.isEmpty, host.lowercased() != "localhost" {
-                    let base = host.replacingOccurrences(of: ".local", with: "")
-                    let pretty = base.split(separator: "-").map { word -> String in
-                        let s = String(word)
-                        if s.lowercased() == "tv" { return "TV" }
-                        return s.prefix(1).uppercased() + s.dropFirst()
-                    }.joined(separator: " ")
-                    if !pretty.isEmpty { return pretty }
-                }
-                let name = UIDevice.current.name
-                return name.isEmpty ? "Apple TV" : name
+                // UIDevice.name is a generic model name on tvOS 16+ without a special
+                // entitlement, so recover the owner-given name from the host name
+                // ("Brando TV" → host "brando-tv") — shared with iOS.
+                DeviceDisplayName.fromHostName(
+                    ProcessInfo.processInfo.hostName,
+                    fallback: UIDevice.current.name.isEmpty ? "Apple TV" : UIDevice.current.name
+                )
             },
             isConfigured: { !syncAccounts.accounts.isEmpty },
             configProvider: {

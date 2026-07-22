@@ -227,8 +227,7 @@ public struct EpisodeColumnCard: View {
                 showsWatched: false,
                 showsBackground: false,
                 barWidth: 80,
-                barHeight: 8,
-                playGlyphHeight: 8
+                barHeight: 8
             )
             .font(.system(size: 24, weight: .semibold))
             .padding(18)

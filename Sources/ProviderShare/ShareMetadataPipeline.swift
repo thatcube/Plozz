@@ -55,23 +55,12 @@ struct DefaultShareMetadataPipelineFactory: ShareMetadataPipelineFactory {
         )
     }
 
-    /// The exact external resolver for the current provider configuration:
-    /// `TVDBShareResolver` when TheTVDB is configured, otherwise `KeylessShareResolver`.
-    /// Exposed (non-private) so a test can assert the selected class without a global.
+    /// The Step 5 external resolver: a single ``PipelineShareResolver`` over the
+    /// capability pipeline. The pipeline's provider set already encodes the
+    /// "TheTVDB-when-configured, keyless otherwise" behaviour as configuration (each
+    /// source inert when unusable), so no per-config resolver selection is needed.
+    /// Exposed (non-private) so a test can assert the selected type without a global.
     func makeExternalResolver() -> any ShareMetadataResolving {
-        let config = clients.tvdbConfig()
-        if config.isConfigured {
-            return TVDBShareResolver(
-                tvdb: clients.makeTVDBClient(config),
-                idResolver: clients.ids,
-                artworkResolver: clients.artwork,
-                overviewResolver: clients.overview
-            )
-        }
-        return KeylessShareResolver(
-            idResolver: clients.ids,
-            artworkResolver: clients.artwork,
-            overviewResolver: clients.overview
-        )
+        PipelineShareResolver(pipeline: clients.makePipeline())
     }
 }

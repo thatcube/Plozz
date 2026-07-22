@@ -168,6 +168,9 @@ struct MainTabView: View {
     /// Maps a household profile to a Seerr user (or clears it) — forwarded to the
     /// Settings "requests are made as" list.
     var onSetSeerrUser: (String, SeerUser?) -> Void = { _, _ in }
+    /// Step 6 metadata settings surface (providers/attribution/diagnostics/cache),
+    /// forwarded to `SettingsView`. Defaulted so previews/tests can omit it.
+    var metadataSettings: MetadataSettingsDependencies? = nil
     /// The shared source-of-truth lookup: a title → its full cross-server source
     /// set from the eager identity index. Threaded into Home/Search/Browse merging,
     /// the detail picker and the watch fan-out so all read one consistent set.
@@ -406,7 +409,8 @@ struct MainTabView: View {
                 syncRepair: syncRepair,
                 pendingSyncedServers: pendingSyncedServers,
                 onIgnorePendingServer: onIgnorePendingServer,
-                onSetUpFromAnotherDevice: onSetUpFromAnotherDevice
+                onSetUpFromAnotherDevice: onSetUpFromAnotherDevice,
+                metadataSettings: metadataSettings
             )
             }
         }

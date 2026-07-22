@@ -1,5 +1,6 @@
 import XCTest
 import CoreModels
+import MetadataKit
 @testable import ProviderShare
 
 /// Direct tests for the Batch-17 extraction out of `ShareCatalogStore`:
@@ -26,6 +27,7 @@ final class CatalogReadQueriesTests: XCTestCase {
         CatalogReadQueries(
             connection: conn,
             normalizedMetadataReady: normalizedReady,
+            metadataConfig: MetadataEnrichmentConfig(),
             localMetadataPresence: presence
         )
     }

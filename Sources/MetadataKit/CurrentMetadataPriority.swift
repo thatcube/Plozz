@@ -5,7 +5,7 @@ import CoreModels
 /// Step 2 deliberately models this as data without changing any preference. Later
 /// work can replace the policy while the router and persisted provenance stay stable.
 enum CurrentMetadataPriority {
-    static let policy = MetadataPriorityPolicy(rules: artworkRules + overviewRules)
+    static let policy = MetadataPriorityPolicy(rules: artworkRules + overviewRules + scheduleRules)
 
     static func artworkSources(
         for type: ContentType,
@@ -48,6 +48,18 @@ enum CurrentMetadataPriority {
         overview(.music, []),
     ]
 
+    /// Which schedule provider owns a series' next-episode lookup, by content type.
+    /// Anime leads with AniList (its `nextAiringEpisode` is exact and keyless); other
+    /// TV leads with TheTVDB then TVmaze (TheTVDB is key-gated and inert on keyless
+    /// builds, so keyless devices fall straight through to TVmaze). Movies have no
+    /// episode schedule.
+    private static let scheduleRules: [MetadataPriorityRule] = [
+        schedule(.anime, [.anilist, .tvdb, .tvmaze]),
+        schedule(.tvShow, [.tvdb, .tvmaze]),
+        schedule(.unknown, [.tvdb, .tvmaze]),
+        schedule(.movie, []),
+    ]
+
     private static func artwork(
         _ type: ContentType,
         _ kind: ArtworkKind,
@@ -67,6 +79,17 @@ enum CurrentMetadataPriority {
         MetadataPriorityRule(
             context: overviewContext(type),
             field: .overview,
+            sources: sources
+        )
+    }
+
+    private static func schedule(
+        _ type: ContentType,
+        _ sources: [MetadataSource]
+    ) -> MetadataPriorityRule {
+        MetadataPriorityRule(
+            context: MetadataPriorityContext(rawValue: "nextAiringEpisode.\(type.rawValue)"),
+            field: .nextAiringEpisode,
             sources: sources
         )
     }

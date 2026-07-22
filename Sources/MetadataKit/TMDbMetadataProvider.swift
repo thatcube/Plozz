@@ -18,17 +18,17 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     private var apiBase: String {
         switch access {
         case .proxy(let url): return url.absoluteString.hasSuffix("/") ? String(url.absoluteString.dropLast()) : url.absoluteString
-        case .directToken, .disabled: return "https://api.themoviedb.org"
+        case .directToken, .userToken, .disabled: return "https://api.themoviedb.org"
         }
     }
 
     private let imageBase = "https://image.tmdb.org/t/p"
 
-    /// Auth header for the JSON API: a v4 bearer in direct-token mode; none in
-    /// proxy mode (the proxy injects the key server-side).
+    /// Auth header for the JSON API: a v4 bearer in direct-token / user BYOK mode;
+    /// none in proxy mode (the proxy injects the key server-side).
     private var authHeaders: [String: String] {
         switch access {
-        case .directToken(let token): return ["Authorization": "Bearer \(token)"]
+        case .directToken(let token), .userToken(let token): return ["Authorization": "Bearer \(token)"]
         case .proxy, .disabled: return [:]
         }
     }
@@ -38,6 +38,17 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     }
 
     public var isEnabled: Bool { access.isEnabled }
+
+    /// Ordered wide-backdrop URLs (best first), up to `limit`. Retaining a *set*
+    /// (not just the single best) lets one response serve both the home hero and a
+    /// distinct detail backdrop without a second search.
+    public func backdropURLs(for query: MetadataQuery, limit: Int = 4) async -> [URL] {
+        guard access.isEnabled, query.contentType != .music,
+              let id = await resolveID(for: query) else { return [] }
+        let images = await images(forID: id, isTV: query.isTV)
+        return Self.rankedImagePaths(images?.backdrops, preferNeutral: true, limit: limit)
+            .compactMap { URL(string: "\(imageBase)/original\($0)") }
+    }
 
     public func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL? {
         guard access.isEnabled, query.contentType != .music else { return nil }
@@ -130,9 +141,16 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     // MARK: - Selection (pure, shared with the legacy resolver's logic)
 
     static func bestImagePath(_ images: [Image]?, preferNeutral: Bool) -> String? {
-        guard let images else { return nil }
+        rankedImagePaths(images, preferNeutral: preferNeutral, limit: 1).first
+    }
+
+    /// The usable image paths ranked best-first (neutral/`en` language preferred,
+    /// then by vote average), capped at `limit`. Shared by ``bestImagePath`` and the
+    /// backdrop candidate-set path so both use identical selection logic.
+    static func rankedImagePaths(_ images: [Image]?, preferNeutral: Bool, limit: Int) -> [String] {
+        guard let images, limit > 0 else { return [] }
         let usable = images.filter { ($0.file_path?.isEmpty == false) }
-        guard !usable.isEmpty else { return nil }
+        guard !usable.isEmpty else { return [] }
         func rank(_ image: Image) -> Int {
             switch image.iso_639_1 {
             case nil, "": return preferNeutral ? 0 : 1
@@ -144,7 +162,7 @@ public struct TMDbMetadataProvider: ArtworkProvider {
             let (lr, rr) = (rank($0), rank($1))
             if lr != rr { return lr < rr }
             return ($0.vote_average ?? 0) > ($1.vote_average ?? 0)
-        }.first?.file_path
+        }.prefix(limit).compactMap(\.file_path)
     }
 
     static func bestLogoPath(_ logos: [Image]?) -> String? {

@@ -376,6 +376,22 @@ public final class ArtworkImageCache: NSObject, @unchecked Sendable {
         await derivedCache.setPreferredAccounts(accounts, revision: revision)
     }
 
+    /// Current size in bytes of the derived-artwork cache (Step 6 diagnostics).
+    public func derivedArtworkCacheByteSize() async -> Int {
+        await derivedCache.currentByteSize()
+    }
+
+    /// Applies a user-chosen byte budget to the derived-artwork cache and trims
+    /// immediately (Step 6 cache-budget control).
+    public func setDerivedArtworkCacheByteCap(_ bytes: Int) async {
+        await derivedCache.setByteCap(bytes)
+    }
+
+    /// Removes every derived-artwork entry (Step 6 "Clear cache now").
+    public func clearDerivedArtworkCache() async {
+        await derivedCache.clear()
+    }
+
     public func purgeNetworkArtwork(accountID: String) async {
         let tasks = beginNetworkArtworkInvalidation(
             accountID: accountID,

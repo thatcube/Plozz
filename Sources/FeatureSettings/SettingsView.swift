@@ -137,6 +137,10 @@ public struct SettingsView: View {
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
     private let onSetSeerrUser: (String, SeerUser?) -> Void
+    /// Step 6 metadata settings surface (providers, attribution, diagnostics,
+    /// cache). Optional so tests/previews can omit it; the row + page appear only
+    /// when supplied by the app.
+    private let metadataSettings: MetadataSettingsDependencies?
 
     public init(
         subtitleBehavior: SubtitleBehaviorModel,
@@ -194,7 +198,8 @@ public struct SettingsView: View {
         syncRepair: SyncRepairActions? = nil,
         pendingSyncedServers: [SyncedAccountDescriptor] = [],
         onIgnorePendingServer: @escaping (String) -> Void = { _ in },
-        onSetUpFromAnotherDevice: (() -> Void)? = nil
+        onSetUpFromAnotherDevice: (() -> Void)? = nil,
+        metadataSettings: MetadataSettingsDependencies? = nil
     ) {
         self.subtitleBehavior = subtitleBehavior
         self.spoilers = spoilers
@@ -252,6 +257,7 @@ public struct SettingsView: View {
         self.pendingSyncedServers = pendingSyncedServers
         self.onIgnorePendingServer = onIgnorePendingServer
         self.onSetUpFromAnotherDevice = onSetUpFromAnotherDevice
+        self.metadataSettings = metadataSettings
     }
 
     /// Whether the active profile includes at least one server that can download
@@ -537,6 +543,13 @@ public struct SettingsView: View {
                            value: onSetSyncEnabled != nil ? (syncEnabled ? "On" : "Off") : nil,
                            route: .syncSetup)
                 }
+                // Metadata (artwork/details enrichment) is household-wide: one set
+                // of providers + caches serves every profile, so it lives here.
+                if metadataSettings != nil {
+                    navRow("Metadata", icon: "sparkles.rectangle.stack",
+                           value: nil,
+                           route: .metadata)
+                }
             }
             .padding(.horizontal, 28)
             .padding(.top, 16)
@@ -712,6 +725,14 @@ public struct SettingsView: View {
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:
             IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount)
+        case .metadata:
+            if let metadataSettings {
+                MetadataSettingsDetailView(deps: metadataSettings)
+            }
+        case .metadataDiagnostics:
+            if let metadataSettings {
+                MetadataDiagnosticsDetailView(deps: metadataSettings)
+            }
         case .seerr:
             SeerDetailView(seer: seer, knownServerHosts: knownServerHosts, profiles: profiles, onSetSeerrUser: onSetSeerrUser)
         case .syncSetup:

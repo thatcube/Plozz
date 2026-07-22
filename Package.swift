@@ -534,6 +534,7 @@ let package = Package(
             dependencies: [
                 "CoreModels",
                 "CoreNetworking",
+                "CoreUI",
                 "FeatureAuthCore",
                 "MediaTransportCore",
                 "MediaTransportFTP",

@@ -80,6 +80,66 @@ enum MetadataHTTP {
         return await performWithStatus(type, request: request, decoder: decoder)
     }
 
+    /// The classified outcome of a metadata HTTP call, so a provider can report
+    /// ``ProviderHealth`` to its circuit breaker instead of collapsing every failure
+    /// into `nil`.
+    enum Outcome<T: Sendable>: Sendable {
+        case success(T)
+        /// Decoded but empty, or a definitive 404 — an authoritative negative.
+        case empty
+        /// 401 / 403.
+        case unauthorized
+        /// 429, with the server's `Retry-After` in seconds when present.
+        case rateLimited(retryAfter: TimeInterval?)
+        /// Offline / DNS / TLS / timeout / 5xx / other non-authoritative failure.
+        case transient
+    }
+
+    /// Like ``get(_:url:accept:headers:decoder:)`` but classifies the transport
+    /// result so callers can drive a circuit breaker.
+    static func getOutcome<T: Decodable>(
+        _ type: T.Type,
+        url: URL,
+        accept: String = "application/json",
+        headers: [String: String] = [:],
+        decoder: JSONDecoder = JSONDecoder()
+    ) async -> Outcome<T> {
+        var request = URLRequest(url: url)
+        request.setValue(accept, forHTTPHeaderField: "Accept")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
+        guard let (data, response) = try? await session.data(for: request) else {
+            return .transient
+        }
+        if let http = response as? HTTPURLResponse {
+            let code = http.statusCode
+            switch code {
+            case 200...299:
+                if let value = try? decoder.decode(T.self, from: data) { return .success(value) }
+                return .empty
+            case 404:
+                return .empty
+            case 401, 403:
+                return .unauthorized
+            case 429:
+                return .rateLimited(retryAfter: retryAfterSeconds(http))
+            default:
+                return .transient
+            }
+        }
+        if let value = try? decoder.decode(T.self, from: data) { return .success(value) }
+        return .transient
+    }
+
+    /// Parses a `Retry-After` header (delta-seconds; an HTTP-date is treated as an
+    /// unknown delay so the breaker uses its fallback cooldown).
+    static func retryAfterSeconds(_ response: HTTPURLResponse) -> TimeInterval? {
+        guard let raw = (response.value(forHTTPHeaderField: "Retry-After"))?
+            .trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
+        if let seconds = TimeInterval(raw) { return max(0, seconds) }
+        return nil
+    }
+
     private static func perform<T: Decodable>(
         _ type: T.Type,
         request: URLRequest,

@@ -2,6 +2,7 @@ import Foundation
 import SQLite3
 import CoreModels
 import CoreNetworking
+import MetadataKit
 
 /// SQLite-backed catalog for one share — the persistent index that lets a share
 /// answer `latest()`, `search()`, and browse **Movies / TV Shows / Anime**
@@ -29,6 +30,7 @@ actor ShareCatalogStore {
 
     private let url: URL
     private let enrichmentSaveFailurePoint: EnrichmentSaveFailurePoint?
+    private let metadataConfig: @Sendable () -> MetadataEnrichmentConfig
     /// The actor-confined SQLite handle owner. Never escapes this actor and is only
     /// ever touched under the store's isolation, preserving the single-connection,
     /// single-threaded invariant. See `CatalogConnection`.
@@ -56,6 +58,7 @@ actor ShareCatalogStore {
         CatalogReadQueries(
             connection: connection,
             normalizedMetadataReady: normalizedMetadataReady,
+            metadataConfig: metadataConfig(),
             localMetadataPresence: localMetadataPresence
         )
     }
@@ -95,7 +98,10 @@ actor ShareCatalogStore {
     init(
         accountKey: String,
         directory: URL? = nil,
-        enrichmentSaveFailurePoint: EnrichmentSaveFailurePoint? = nil
+        enrichmentSaveFailurePoint: EnrichmentSaveFailurePoint? = nil,
+        metadataConfig: @escaping @Sendable () -> MetadataEnrichmentConfig = {
+            MetadataEnrichmentConfig()
+        }
     ) {
         let base = directory ?? Self.defaultDirectory()
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
@@ -103,6 +109,7 @@ actor ShareCatalogStore {
         self.url = fileURL
         self.connection = CatalogConnection(url: fileURL)
         self.enrichmentSaveFailurePoint = enrichmentSaveFailurePoint
+        self.metadataConfig = metadataConfig
     }
 
     // MARK: - Open / schema
@@ -2193,6 +2200,11 @@ actor ShareCatalogStore {
     /// Per-library counts so `libraries()` can hide an indexed library with no content.
     func libraryCounts() -> (movies: Int, tvSeries: Int, animeSeries: Int) {
         ensureOpen(); return readQueries.libraryCounts()
+    }
+
+    /// Per-source provenance-row counts (Step 6 diagnostics). Lazy/on-demand.
+    func metadataCountPerSource() -> [MetadataSource: Int] {
+        ensureOpen(); return readQueries.metadataCountPerSource()
     }
 
     /// Recently added: movies + one entry per series, newest first (Home hot path).

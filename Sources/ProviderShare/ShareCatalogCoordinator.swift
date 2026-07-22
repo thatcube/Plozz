@@ -1,6 +1,7 @@
 import Foundation
 import CoreModels
 import MediaTransportCore
+import MetadataKit
 
 public protocol ShareCatalogCoordinating: Sendable {
     /// Returns the read-only catalog capability for a share, creating the backing
@@ -40,6 +41,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     private let arbiterFactory: ArbiterFactory
     private let pipelineFactory: any ShareMetadataPipelineFactory
     private let artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle
+    private let metadataConfig: @Sendable () -> MetadataEnrichmentConfig
     /// Minimum gap between background scan *spawns* for one share. Kept equal to
     /// `ShareScanner.scanIfStale`'s default `minInterval` so a spawn is only
     /// allowed once the walk would actually run — anything sooner is a guaranteed
@@ -61,6 +63,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         self.diagnostics = DefaultShareScanDiagnostics()
         self.pipelineFactory = DefaultShareMetadataPipelineFactory(clients: .production)
         self.artworkCacheLifecycle = NoopShareLocalArtworkCacheLifecycle()
+        self.metadataConfig = { MetadataEnrichmentConfig() }
     }
 
     public init(
@@ -71,6 +74,29 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         self.diagnostics = DefaultShareScanDiagnostics()
         self.pipelineFactory = DefaultShareMetadataPipelineFactory(clients: .production)
         self.artworkCacheLifecycle = artworkCacheLifecycle
+        self.metadataConfig = { MetadataEnrichmentConfig() }
+    }
+
+    /// Step 6 composition: like the artwork-lifecycle init above, but the enrichment
+    /// pipeline is built with a user-override config and (optionally) a shared
+    /// provider runtime so Settings can read/adjust the running system. Passing
+    /// `.init()` for `metadataComposition` is byte-identical to the init above.
+    public init(
+        arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) },
+        artworkCacheLifecycle: any ShareLocalArtworkCacheLifecycle,
+        metadataComposition: ShareMetadataComposition
+    ) {
+        self.arbiterFactory = arbiterFactory
+        self.diagnostics = DefaultShareScanDiagnostics()
+        self.pipelineFactory = DefaultShareMetadataPipelineFactory(
+            clients: .production(
+                enrichmentConfig: metadataComposition.enrichmentConfig,
+                providerConfig: metadataComposition.providerConfig,
+                providerRuntime: metadataComposition.providerRuntime
+            )
+        )
+        self.artworkCacheLifecycle = artworkCacheLifecycle
+        self.metadataConfig = metadataComposition.enrichmentConfig
     }
 
     init(
@@ -84,6 +110,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         self.diagnostics = diagnostics
         self.pipelineFactory = pipelineFactory
         self.artworkCacheLifecycle = artworkCacheLifecycle
+        self.metadataConfig = { MetadataEnrichmentConfig() }
     }
 
     /// Inject the app's scan-status reporter (call once at startup). Applies to
@@ -168,7 +195,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             }
             let runtime = runtimes[accountKey] ?? {
                 let created = ShareCatalogRuntime(
-                    store: ShareCatalogStore(accountKey: accountKey),
+                    store: ShareCatalogStore(
+                        accountKey: accountKey,
+                        metadataConfig: metadataConfig
+                    ),
                     pacer: ShareScanPacer(),
                     arbiter: arbiterFactory(accountKey)
                 )
@@ -406,7 +436,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     ) {
         let runtime = runtimes[accountKey] ?? {
             let created = ShareCatalogRuntime(
-                store: ShareCatalogStore(accountKey: accountKey),
+                store: ShareCatalogStore(
+                    accountKey: accountKey,
+                    metadataConfig: metadataConfig
+                ),
                 pacer: ShareScanPacer(),
                 arbiter: arbiterFactory(accountKey)
             )
@@ -441,6 +474,38 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     public func enrichItem(accountKey: String, itemID: String) async {
         guard runtimes[accountKey]?.enricher != nil else { return }
         await metadataScheduler.enqueueItem(accountKey: accountKey, itemID: itemID)
+    }
+
+    /// Manual item-level re-enrichment (Step 6 "Refresh"): enqueues the item ahead of
+    /// the backlog, exactly like ``enrichItem(accountKey:itemID:)``. Named for the
+    /// user-facing intent so Settings/detail refresh controls read clearly; whole-share
+    /// refresh uses `rescan(accountKey:)` (surfaced via the runtime facet's `rescanShare`).
+    public func requestRefresh(accountKey: String, itemID: String) async {
+        await enrichItem(accountKey: accountKey, itemID: itemID)
+    }
+
+    /// Aggregate per-source provenance-row counts across **every** registered share
+    /// (Step 6 diagnostics). Lazy/on-demand — the caller decides when to sample and
+    /// should debounce, since each share's scan grows `metadata_values`.
+    public func metadataCountPerSource() async -> [MetadataSource: Int] {
+        var totals: [MetadataSource: Int] = [:]
+        for runtime in runtimes.values {
+            for (source, count) in await runtime.store.metadataCountPerSource() {
+                totals[source, default: 0] += count
+            }
+        }
+        return totals
+    }
+
+    /// Background metadata work status projected into the module-neutral
+    /// diagnostics shape (Step 6). Point-in-time.
+    public func metadataWorkStatus() async -> MetadataEnrichmentDiagnosticsSnapshot.WorkStatus {
+        let snapshot = await metadataScheduler.snapshot()
+        return MetadataEnrichmentDiagnosticsSnapshot.WorkStatus(
+            queuedBacklogs: snapshot.queuedBacklogs,
+            queuedItems: snapshot.queuedItems,
+            isRunning: snapshot.runningAccountKey != nil
+        )
     }
 
     public func noteInteractiveActivity(accountKey: String) async {

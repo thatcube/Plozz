@@ -238,3 +238,80 @@ private extension String {
         return t.isEmpty ? nil : t
     }
 }
+
+/// The Step 5 resolver: drives the capability-based ``MetadataEnrichmentPipeline``
+/// for a bare share item and maps its ``MetadataEnrichment`` back onto an
+/// ``EnrichmentRecord`` with provenance intact.
+///
+/// This supersedes the split Keyless/TVDB resolvers: the pipeline's provider set
+/// already contains TheTVDB (canonical, inert when unconfigured), TMDb (inert when
+/// unconfigured), and the keyless anime/TV/fallback sources, ordered by
+/// configuration — so one resolver covers every share, direct or otherwise. Locally
+/// known ids (NFO / folder tag) are seeded as `present` so the pipeline skips
+/// re-resolving them and threads them into exact-id lookups; the store's Step 3
+/// sourced-field priority still merges these external results under any
+/// higher-priority local values.
+struct PipelineShareResolver: ShareMetadataResolving {
+    let pipeline: MetadataEnrichmentPipeline
+    /// The work tier used for share enrichment. Idle backlog is the dominant path and
+    /// is the only tier that admits the idle-only fallback sources (Wikidata /
+    /// Wikipedia).
+    var tier: MetadataWorkTier = .idleBacklog
+
+    func resolve(_ request: ShareEnrichRequest) async -> EnrichmentRecord {
+        var ids = request.knownProviderIDs
+        if let tvdb = request.knownTVDBID?.nonBlank, ids.providerID(.tvdb) == nil {
+            ids["Tvdb"] = tvdb
+        }
+        let item = MediaItem(
+            id: request.itemID,
+            title: request.title,
+            kind: request.isMovie ? .movie : .series,
+            productionYear: request.isMovie ? request.year : nil,
+            genres: request.isAnime ? ["Anime"] : [],
+            providerIDs: ids
+        )
+        let query = MetadataQuery(item)
+
+        let enrichment = await pipeline.enrich(
+            query,
+            present: Self.presentFields(knownIDs: ids),
+            requesting: Self.requestedFields(isAnime: request.isAnime),
+            tier: tier
+        )
+
+        return EnrichmentRecord.sourced(
+            providerIDs: enrichment.externalIDs,
+            overview: enrichment.overview,
+            genres: enrichment.genres,
+            posterURL: enrichment.posterURL,
+            // The pipeline keeps an ordered backdrop candidate set; the record persists
+            // the top (home-hero) candidate as its single backdrop today.
+            backdropURL: enrichment.homeHero,
+            logoURL: enrichment.logoURL,
+            title: enrichment.title
+        )
+    }
+
+    /// Fields a higher-priority local source already supplies, so the pipeline neither
+    /// re-requests nor overwrites them. Today this is the locally-known id namespaces.
+    static func presentFields(knownIDs: [String: String]) -> Set<MetadataField> {
+        Set(knownIDs.keys.map { MetadataField.providerID($0) })
+    }
+
+    /// The standard external field set a share item wants filled: canonical text,
+    /// artwork (including both backdrop screens from one candidate set), and the id
+    /// namespaces that let a share merge with its server twin, pull ratings, and
+    /// scrobble.
+    static func requestedFields(isAnime: Bool) -> Set<MetadataField> {
+        var fields: Set<MetadataField> = [
+            .title, .overview, .genres,
+            .posterURL, .backdropURL, .homeHero, .detailBackdrop, .logoURL,
+            .providerID("Imdb"), .providerID("Tvdb"), .providerID("Tmdb"),
+        ]
+        if isAnime {
+            fields.formUnion([.providerID("AniList"), .providerID("Mal")])
+        }
+        return fields
+    }
+}

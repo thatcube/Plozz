@@ -2,6 +2,7 @@ import Foundation
 import SQLite3
 import CoreModels
 import CoreNetworking
+import MetadataKit
 
 /// Reference box for the store's "does this catalog have ANY local (NFO/filename)
 /// metadata at all" memo. It lets the read-query helper share — and lazily populate —
@@ -37,6 +38,8 @@ struct CatalogReadQueries {
     /// Value snapshot of the store's `normalizedMetadataReady` — whether the local
     /// metadata materialization has completed and normalized winners may be overlaid.
     let normalizedMetadataReady: Bool
+    /// Snapshot of household provider + artwork precedence for this read.
+    let metadataConfig: MetadataEnrichmentConfig
     /// Shared, store-owned memo for `hasAnyLocalMetadata()` (invalidated by store writes).
     let localMetadataPresence: LocalMetadataPresence
 
@@ -933,7 +936,11 @@ struct CatalogReadQueries {
                 )
             }
             guard !values.isEmpty else { return item }
-            return ShareCatalogReadProjection.applyLocalArtwork(item, values)
+            return ShareCatalogReadProjection.applyLocalArtwork(
+                item,
+                values,
+                metadataConfig: metadataConfig
+            )
         }
     }
 
@@ -1007,6 +1014,22 @@ struct CatalogReadQueries {
     }
 
     // MARK: - Assets-count query intents
+
+    /// Per-source count of persisted provenance rows in `metadata_values`, keyed by
+    /// ``MetadataSource`` (Step 6 diagnostics). One grouped scan — cheap relative to
+    /// a full read — but callers should still invoke it **lazily / on demand** (and
+    /// debounce) since `metadata_values` grows with the library. Empty on a fresh
+    /// catalog. Internal (server/local) and external sources are both included; the
+    /// caller decides what to surface.
+    func metadataCountPerSource() -> [MetadataSource: Int] {
+        guard db != nil else { return [:] }
+        var result: [MetadataSource: Int] = [:]
+        query("SELECT source, COUNT(*) FROM metadata_values GROUP BY source;") { stmt in
+            guard let raw = self.columnText(stmt, 0) else { return }
+            result[MetadataSource(rawValue: raw)] = Int(sqlite3_column_int64(stmt, 1))
+        }
+        return result
+    }
 
     private func count(where clause: String?) -> Int {
         guard db != nil else { return 0 }

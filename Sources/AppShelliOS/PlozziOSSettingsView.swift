@@ -400,7 +400,7 @@ private struct PlozziOSAboutSettingsView: View {
     @State private var showDeveloperUnlockedAlert = false
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Plozz") {
                 LabeledContent("Version") {
                     Text(
@@ -810,7 +810,7 @@ struct PlozziOSAccountDetailView: View {
     @State private var confirmRemoval = false
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Account") {
                 LabeledContent("Provider", value: account.server.provider.displayName)
                 if !account.userName.isEmpty {
@@ -1012,7 +1012,7 @@ private struct PlozziOSAppearanceSettingsView: View {
     @Bindable var watchIndicator: WatchStatusIndicatorSettingsModel
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Theme") {
                 Picker("Appearance", selection: $theme.theme) {
                     ForEach(AppTheme.allCases) { theme in
@@ -1069,7 +1069,7 @@ private struct PlozziOSHomeSettingsView: View {
     @State private var isLoadingLibraries = false
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Rows") {
                 ForEach(HomeGlobalRow.allCases, id: \.rawValue) { row in
                     Toggle(
@@ -1302,7 +1302,7 @@ private struct PlozziOSLibraryHomeSettingsView: View {
     let visibility: HomeLibraryVisibilityModel
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup {
                 Toggle(
                     "Enabled",
@@ -1352,7 +1352,7 @@ private struct PlozziOSDetailPageSettingsView: View {
     @Bindable var themeMusic: ThemeMusicSettingsModel
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Behind the hero") {
                 Picker(
                     "Background",
@@ -1398,7 +1398,7 @@ private struct PlozziOSPlaybackSettingsView: View {
         }
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Skipping") {
                 Picker("Intros and credits", selection: $model.settings.skipIntros) {
                     ForEach(SkipIntrosMode.allCases, id: \.self) {
@@ -1517,7 +1517,7 @@ private struct PlozziOSSubtitleSettingsView: View {
         [.movie, .tvShow, .anime]
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Appearance") {
                 Toggle("Follow system style", isOn: $style.style.followsSystemStyle)
                 Picker("Font", selection: $style.style.fontFamily) {
@@ -1633,7 +1633,7 @@ private struct PlozziOSSpoilerSettingsView: View {
     @Bindable var model: SpoilerSettingsModel
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup {
                 Toggle("Protect unwatched episodes", isOn: $model.settings.isEnabled)
                 Picker("Thumbnail treatment", selection: $model.settings.mode) {
@@ -1659,7 +1659,7 @@ private struct PlozziOSNightShiftSettingsView: View {
     @Bindable var model: NightShiftSettingsModel
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup {
                 Toggle("Circadian Mode", isOn: $model.settings.isEnabled)
                 Picker("Schedule", selection: $model.settings.scheduleMode) {

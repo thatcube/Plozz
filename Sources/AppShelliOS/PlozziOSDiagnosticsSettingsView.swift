@@ -28,7 +28,7 @@ struct PlozziOSDiagnosticsSettingsView: View {
     }
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Get Help") {
                 if let issueURL = report.newIssueURL {
                     Link(destination: issueURL) {

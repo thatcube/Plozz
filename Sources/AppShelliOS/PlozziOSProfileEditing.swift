@@ -11,7 +11,7 @@ import SwiftUI
 /// environment app model so any toolbar can drop it in with just an action.
 struct PlozziOSSettingsAvatarButton: View {
     @Environment(PlozziOSAppModel.self) private var appModel
-    var size: CGFloat = 44
+    var size: CGFloat = 36
     let action: () -> Void
 
     var body: some View {
@@ -22,19 +22,16 @@ struct PlozziOSSettingsAvatarButton: View {
             ? profile
             : Self.genericProfile
         Button(action: action) {
+            // Minimal label: the avatar already frames + circle-clips itself, so
+            // hand the toolbar a plain circular button and let IT own the glass
+            // pill and its full hit target — exactly like the sibling mute
+            // button, whose whole pill is tappable. Every extra modifier we tried
+            // here (`.buttonStyle(.plain)`, a second `.frame`/`.clipShape`, an
+            // explicit `.contentShape`) opted out of that system treatment and
+            // clamped taps to just the avatar. `.buttonBorderShape(.circle)`
+            // keeps the pill round.
             ProfileAvatarView(profile: displayedProfile, size: size)
-                .frame(width: size, height: size)
-                .clipShape(Circle())
-                // Expand the tappable area to at least the 44pt HIG minimum, but
-                // keep it CIRCULAR — a `Circle()` hit shape (not a rectangle) so
-                // the iOS 26 toolbar glass hugs a round button instead of a wide
-                // pill, and taps land anywhere in the 44pt circle rather than
-                // only on the (often 30pt) avatar. The avatar still renders at
-                // `size`, centered in the larger round target.
-                .frame(width: max(size, 44), height: max(size, 44))
-                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
         .buttonBorderShape(.circle)
         .accessibilityLabel(
             showsRealProfile

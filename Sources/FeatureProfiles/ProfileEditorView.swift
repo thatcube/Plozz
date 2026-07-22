@@ -1176,25 +1176,134 @@ fileprivate struct IOSProfileAvatarPicker: View {
     let osMajorVersion: Int
     let osMinorVersion: Int
 
+    @State private var showingFullPicker = false
+    @State private var rowWidth: CGFloat = 0
+
+    // The compact row fills the available width: it shows the leading "browse
+    // all" opener plus as many suggestions as fit one row (fewer on a narrow
+    // iPhone, more on an iPad-width sheet), with the full set behind the opener.
+    // Apple's avatar-picker pattern (a few options + a first cell that drills
+    // into everything), sized to the container rather than a fixed count.
+    private static let cellDiameter: CGFloat = 60
+    private static let cellSpacing: CGFloat = 12
+
+    /// How many cells (including the opener) fill the measured row width.
+    private var fitCount: Int {
+        iOSProfileFitCount(
+            width: rowWidth,
+            cell: Self.cellDiameter,
+            spacing: Self.cellSpacing
+        )
+    }
+
     var body: some View {
-        switch avatarMode {
-        case .symbol:
-            IOSProfileSymbolPicker(
-                avatarSymbol: $avatarSymbol,
-                colorIndex: colorIndex
-            )
-        case .emoji:
-            IOSProfileEmojiPicker(
-                avatarEmoji: $avatarEmoji,
-                osMajorVersion: osMajorVersion,
-                osMinorVersion: osMinorVersion
-            )
-        case .photo:
-            IOSProfilePhotoPicker(
-                photoCandidates: photoCandidates,
-                avatarImageURL: $avatarImageURL
-            )
+        Group {
+            switch avatarMode {
+            case .symbol: symbolRow
+            case .emoji: emojiRow
+            case .photo: photoRow
+            }
         }
+        .sheet(isPresented: $showingFullPicker) { fullPickerSheet }
+    }
+
+    private var symbolRow: some View {
+        HStack(spacing: Self.cellSpacing) {
+            IOSProfileMoreCell(systemImage: "square.grid.2x2", label: "Browse all symbols") {
+                showingFullPicker = true
+            }
+            ForEach(fewSymbols, id: \.self) { symbol in
+                IOSProfileSymbolTile(
+                    symbol: symbol,
+                    avatarSymbol: $avatarSymbol,
+                    colorIndex: colorIndex
+                )
+            }
+        }
+        .iOSProfileMeasureWidth($rowWidth)
+    }
+
+    private var emojiRow: some View {
+        HStack(spacing: Self.cellSpacing) {
+            IOSProfileMoreCell(systemImage: "face.smiling", label: "Browse all emoji") {
+                showingFullPicker = true
+            }
+            ForEach(fewEmoji, id: \.self) { emoji in
+                IOSProfileEmojiTile(emoji: emoji, avatarEmoji: $avatarEmoji)
+            }
+        }
+        .iOSProfileMeasureWidth($rowWidth)
+    }
+
+    @ViewBuilder
+    private var photoRow: some View {
+        if photoCandidates.isEmpty {
+            // Reuse the picker's empty-state hint (no "browse all" to open).
+            IOSProfilePhotoPicker(photoCandidates: [], avatarImageURL: $avatarImageURL)
+        } else {
+            HStack(spacing: Self.cellSpacing) {
+                IOSProfileMoreCell(systemImage: "photo.on.rectangle", label: "Browse all photos") {
+                    showingFullPicker = true
+                }
+                ForEach(fewPhotos) { candidate in
+                    IOSProfileCompactPhotoTile(candidate: candidate, avatarImageURL: $avatarImageURL)
+                }
+            }
+            .iOSProfileMeasureWidth($rowWidth)
+        }
+    }
+
+    private var fullPickerSheet: some View {
+        IOSProfilePickerSheet(title: sheetTitle) {
+            switch avatarMode {
+            case .symbol:
+                IOSProfileSymbolPicker(avatarSymbol: $avatarSymbol, colorIndex: colorIndex)
+            case .emoji:
+                IOSProfileEmojiPicker(
+                    avatarEmoji: $avatarEmoji,
+                    osMajorVersion: osMajorVersion,
+                    osMinorVersion: osMinorVersion
+                )
+            case .photo:
+                IOSProfilePhotoPicker(photoCandidates: photoCandidates, avatarImageURL: $avatarImageURL)
+            }
+        }
+        // Picking any item is a single choice, so close the sheet and return the
+        // user to the updated compact row + live preview.
+        .onChange(of: avatarSymbol) { _, _ in showingFullPicker = false }
+        .onChange(of: avatarEmoji) { _, _ in showingFullPicker = false }
+        .onChange(of: avatarImageURL) { _, _ in showingFullPicker = false }
+    }
+
+    private var sheetTitle: String {
+        switch avatarMode {
+        case .symbol: return "Symbols"
+        case .emoji: return "Emoji"
+        case .photo: return "Photos"
+        }
+    }
+
+    private var fewSymbols: [String] {
+        iOSProfileFew(current: avatarSymbol, from: Profile.defaultAvatarSymbols, count: fitCount - 1)
+    }
+
+    private var fewEmoji: [String] {
+        let all = Profile.avatarEmojiCategories
+            .flatMap { $0.availableEmojis(osMajor: osMajorVersion, osMinor: osMinorVersion) }
+            .map(\.value)
+        return iOSProfileFew(current: avatarEmoji, from: all, count: fitCount - 1)
+    }
+
+    private var fewPhotos: [ProfilePhotoCandidate] {
+        var ordered: [ProfilePhotoCandidate] = []
+        if let url = avatarImageURL,
+           let match = photoCandidates.first(where: { $0.imageURL.absoluteString == url }) {
+            ordered.append(match)
+        }
+        for candidate in photoCandidates where !ordered.contains(where: { $0.id == candidate.id }) {
+            ordered.append(candidate)
+        }
+        return Array(ordered.prefix(max(fitCount - 1, 1)))
     }
 }
 
@@ -1202,21 +1311,17 @@ fileprivate struct IOSProfileSymbolPicker: View {
     @Binding var avatarSymbol: String
     let colorIndex: Int
 
-    private let columns = [GridItem(.adaptive(minimum: 60, maximum: 84), spacing: 12)]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             ForEach(Profile.avatarSymbolCategories) { category in
                 VStack(alignment: .leading, spacing: 10) {
                     IOSProfileCategoryHeader(text: category.title)
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(category.symbols, id: \.self) { symbol in
-                            IOSProfileSymbolTile(
-                                symbol: symbol,
-                                avatarSymbol: $avatarSymbol,
-                                colorIndex: colorIndex
-                            )
-                        }
+                    IOSProfileCategoryGrid(items: category.symbols) { symbol in
+                        IOSProfileSymbolTile(
+                            symbol: symbol,
+                            avatarSymbol: $avatarSymbol,
+                            colorIndex: colorIndex
+                        )
                     }
                 }
             }
@@ -1262,8 +1367,6 @@ fileprivate struct IOSProfileEmojiPicker: View {
     let osMajorVersion: Int
     let osMinorVersion: Int
 
-    private let columns = [GridItem(.adaptive(minimum: 60, maximum: 84), spacing: 12)]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             ForEach(Profile.avatarEmojiCategories) { category in
@@ -1274,13 +1377,8 @@ fileprivate struct IOSProfileEmojiPicker: View {
                 if !available.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         IOSProfileCategoryHeader(text: category.title)
-                        LazyVGrid(columns: columns, spacing: 12) {
-                            ForEach(available, id: \.self) { emoji in
-                                IOSProfileEmojiTile(
-                                    emoji: emoji,
-                                    avatarEmoji: $avatarEmoji
-                                )
-                            }
+                        IOSProfileCategoryGrid(items: available) { emoji in
+                            IOSProfileEmojiTile(emoji: emoji, avatarEmoji: $avatarEmoji)
                         }
                     }
                 }
@@ -1399,18 +1497,39 @@ fileprivate struct IOSProfileColorSection: View {
     @Binding var colorIndex: Int
     @Binding var emojiColorIndex: Int?
 
+    @State private var showingAllColors = false
+    @State private var rowWidth: CGFloat = 0
+
+    // Swatches are a touch smaller than avatar tiles; fit as many as the row
+    // width allows.
+    private static let cellDiameter: CGFloat = 52
+    private static let cellSpacing: CGFloat = 12
+
+    private let columns = [GridItem(.adaptive(minimum: 44, maximum: 56), spacing: 12)]
+
+    private var fitCount: Int {
+        iOSProfileFitCount(
+            width: rowWidth,
+            cell: Self.cellDiameter,
+            spacing: Self.cellSpacing
+        )
+    }
+
     var body: some View {
         let emojiMode = avatarMode == .emoji
         VStack(alignment: .leading, spacing: 12) {
             IOSProfileSectionHeader(text: "Color")
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 44, maximum: 56), spacing: 12)],
-                spacing: 12
-            ) {
+            // A few swatches inline (current first) + a "More colors" opener to
+            // the full palette, filling the row width like the avatar rows so
+            // colour is reachable without a long scroll.
+            HStack(spacing: Self.cellSpacing) {
+                IOSProfileMoreCell(systemImage: "paintpalette", label: "More colors") {
+                    showingAllColors = true
+                }
                 if emojiMode {
                     IOSProfileNeutralSwatch(emojiColorIndex: $emojiColorIndex)
                 }
-                ForEach(0..<ProfileTileColor.palette.count, id: \.self) { index in
+                ForEach(fewColorIndices(emojiMode: emojiMode), id: \.self) { index in
                     IOSProfileColorSwatch(
                         index: index,
                         emojiMode: emojiMode,
@@ -1419,7 +1538,39 @@ fileprivate struct IOSProfileColorSection: View {
                     )
                 }
             }
+            .iOSProfileMeasureWidth($rowWidth)
         }
+        .sheet(isPresented: $showingAllColors) {
+            IOSProfilePickerSheet(title: "Color") {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    if emojiMode {
+                        IOSProfileNeutralSwatch(emojiColorIndex: $emojiColorIndex)
+                    }
+                    ForEach(0..<ProfileTileColor.palette.count, id: \.self) { index in
+                        IOSProfileColorSwatch(
+                            index: index,
+                            emojiMode: emojiMode,
+                            colorIndex: $colorIndex,
+                            emojiColorIndex: $emojiColorIndex
+                        )
+                    }
+                }
+            }
+            .onChange(of: colorIndex) { _, _ in showingAllColors = false }
+            .onChange(of: emojiColorIndex) { _, _ in showingAllColors = false }
+        }
+    }
+
+    private func fewColorIndices(emojiMode: Bool) -> [Int] {
+        let current = emojiMode ? emojiColorIndex : colorIndex
+        // The opener always takes one slot; emoji mode also spends one on the
+        // neutral swatch, so it shows one fewer palette colour.
+        let count = fitCount - (emojiMode ? 2 : 1)
+        return iOSProfileFew(
+            current: current,
+            from: Array(0..<ProfileTileColor.palette.count),
+            count: max(count, 1)
+        )
     }
 }
 
@@ -1485,6 +1636,209 @@ fileprivate struct IOSProfileColorSwatch: View {
         .buttonStyle(.plain)
         .accessibilityLabel(Text(ProfileTileColor.accessibilityName(forIndex: index)))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// The leading "custom / browse all" cell in a compact avatar or colour row.
+/// Mirrors Apple's pattern where the first cell opens a second-level picker with
+/// the full set, keeping the inline row short and the whole editor scannable.
+fileprivate struct IOSProfileMoreCell: View {
+    let systemImage: String
+    let label: String
+    let action: () -> Void
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        let diameter: CGFloat = 60
+        Button(action: action) {
+            ZStack {
+                Circle().fill(palette.accent.opacity(0.18))
+                Image(systemName: systemImage)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(palette.accent)
+            }
+            .frame(width: diameter, height: diameter)
+            .overlay {
+                Circle().strokeBorder(
+                    palette.accent.opacity(0.55),
+                    style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])
+                )
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(label))
+    }
+}
+
+/// A label-less circular photo cell for the compact row. The full photo picker
+/// (with provider labels) lives in the "browse all" sheet.
+fileprivate struct IOSProfileCompactPhotoTile: View {
+    let candidate: ProfilePhotoCandidate
+    @Binding var avatarImageURL: String?
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        let isSelected = avatarImageURL == candidate.imageURL.absoluteString
+        let diameter: CGFloat = 60
+        Button {
+            avatarImageURL = candidate.imageURL.absoluteString
+        } label: {
+            ZStack {
+                Circle().fill(palette.cardSurface)
+                FallbackAsyncImage(urls: [candidate.imageURL], variant: .musicThumbnail) {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 24))
+                        .foregroundStyle(palette.secondaryText)
+                }
+                .frame(width: diameter, height: diameter)
+                .clipShape(Circle())
+            }
+            .frame(width: diameter, height: diameter)
+            .overlay(IOSProfileSelectionRing(isSelected: isSelected))
+            .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("Photo from \(candidate.detailLabel)"))
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// A second-level modal that hosts a full picker grid with a Done button, themed
+/// to match the editor. Opened by an ``IOSProfileMoreCell``.
+fileprivate struct IOSProfilePickerSheet<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                content
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background { AppBackground(palette: palette).ignoresSafeArea() }
+            .scrollContentBackground(.hidden)
+            .environment(\.colorScheme, palette.isLight ? .light : .dark)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+/// Puts the current selection first, then fills from `list` (de-duplicated),
+/// capped at `count` — so a compact row always shows the active choice plus a
+/// few defaults, and the rest live behind the "browse all" opener.
+fileprivate func iOSProfileFew<T: Hashable>(current: T?, from list: [T], count: Int) -> [T] {
+    guard count > 0 else { return [] }
+    var ordered: [T] = []
+    if let current { ordered.append(current) }
+    for item in list where !ordered.contains(item) {
+        ordered.append(item)
+    }
+    return Array(ordered.prefix(count))
+}
+
+/// How many cells of `cell` diameter (plus `spacing`) fit in `width`, so a
+/// compact row fills the available width — fewer on a narrow iPhone, more on an
+/// iPad-width sheet. Clamped so it degrades sanely before the width is measured
+/// and never grows unreasonably wide.
+fileprivate func iOSProfileFitCount(
+    width: CGFloat,
+    cell: CGFloat,
+    spacing: CGFloat,
+    fallback: Int = 5,
+    maxCount: Int = 12
+) -> Int {
+    guard width > 0 else { return fallback }
+    let n = Int((width + spacing) / (cell + spacing))
+    return min(maxCount, max(3, n))
+}
+
+/// A category grid for the full-picker sheets that distributes each row **edge
+/// to edge**: the first tile sits flush-left, the last flush-right, with equal
+/// gaps between (a "space-between" layout) so the row fills the sheet width
+/// instead of clustering on the left with dead space on the right. The column
+/// count is the largest **divisor of 8** (8 / 4 / 2) that fits the measured
+/// width, so — because every avatar category holds exactly 8 items — each row is
+/// full and no orphan tile is stranded on a new row.
+fileprivate struct IOSProfileCategoryGrid<Item: Hashable, Cell: View>: View {
+    let items: [Item]
+    @ViewBuilder let cell: (Item) -> Cell
+
+    @State private var width: CGFloat = 0
+
+    private let cellSize: CGFloat = 60
+    private let minGap: CGFloat = 14
+    private let rowSpacing: CGFloat = 16
+
+    var body: some View {
+        let count = columnCount(for: width)
+        let rows = stride(from: 0, to: items.count, by: count).map { start in
+            Array(items[start..<min(start + count, items.count)])
+        }
+        VStack(spacing: rowSpacing) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                row.count == count ? AnyView(fullRow(row)) : AnyView(partialRow(row))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .iOSProfileMeasureWidth($width)
+    }
+
+    /// A full row: equal spacers push the tiles edge to edge.
+    private func fullRow(_ row: [Item]) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Array(row.enumerated()), id: \.offset) { index, item in
+                if index > 0 { Spacer(minLength: minGap) }
+                cell(item).frame(width: cellSize)
+            }
+        }
+    }
+
+    /// A short final row (shouldn't occur for the 8-item categories, but handled
+    /// so a filtered/odd count stays tidy): fixed gaps, left-aligned.
+    private func partialRow(_ row: [Item]) -> some View {
+        HStack(spacing: minGap) {
+            ForEach(Array(row.enumerated()), id: \.offset) { _, item in
+                cell(item).frame(width: cellSize)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func columnCount(for width: CGFloat) -> Int {
+        guard width > 0 else { return 4 }
+        let fit = max(1, Int((width + minGap) / (cellSize + minGap)))
+        for divisor in [8, 4, 2] where divisor <= fit { return divisor }
+        return 1
+    }
+}
+
+fileprivate extension View {
+    /// Writes this view's laid-out width into `width`. Because the compact rows
+    /// use width-flexible cells, the row width is driven by the parent (not the
+    /// child count), so feeding it back to compute the count can't loop.
+    func iOSProfileMeasureWidth(_ width: Binding<CGFloat>) -> some View {
+        background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { width.wrappedValue = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, newValue in
+                        width.wrappedValue = newValue
+                    }
+            }
+        }
     }
 }
 

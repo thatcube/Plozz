@@ -21,7 +21,7 @@ struct PlozziOSSeerrSettingsView: View {
     }
 
     var body: some View {
-        Form {
+        List {
             Text(
                 "Connect one Overseerr or Jellyseerr server for the household. "
                     + "Each Plozz profile can make requests as a different user."

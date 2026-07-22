@@ -253,10 +253,26 @@ public actor CloudConfigSyncService {
     public func publishLocalChanges() async {
         guard config.isEnabled(), let engine else { return }
         let local = await config.localSnapshot()
+        // Snapshot the mirror's payloads BEFORE publish so we can log exactly what
+        // changed (and how) for any record that gets re-stamped — the definitive way
+        // to see an apply≠capture round-trip mismatch that causes spurious re-uploads.
+        let before = mirror.records.mapValues { $0.payload }
         let plan = mirror.publish(local: local)
         guard !plan.isEmpty else {
             PlozzLog.sync.info("CloudSync: publish — nothing changed")
             return
+        }
+
+        // Diagnostic: for each re-stamped save, show old vs new payload as UTF-8
+        // (payloads are non-secret JSON: descriptors/profiles/memberships, or a
+        // base64-ish settings blob). Truncated to keep the log readable.
+        for rec in plan.saves {
+            let oldP = before[rec.recordName]
+            let oldS = oldP.flatMap { String(data: $0, encoding: .utf8) } ?? (oldP == nil ? "<new>" : "<binary \(oldP!.count)B>")
+            let newS = String(data: rec.payload, encoding: .utf8) ?? "<binary \(rec.payload.count)B>"
+            if oldS != newS {
+                PlozzLog.sync.info("CloudSync: DIFF \(rec.recordName)\n  old=\(oldS.prefix(300))\n  new=\(newS.prefix(300))")
+            }
         }
 
         var pending: [CKSyncEngine.PendingRecordZoneChange] = []

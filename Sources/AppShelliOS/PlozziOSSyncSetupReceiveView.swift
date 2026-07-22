@@ -84,22 +84,28 @@ struct PlozziOSSyncSetupReceiveView: View {
     private func waiting(code: String, invite: SyncPairingInvite) -> some View {
         VStack(spacing: 24) {
             Spacer(minLength: 0)
-            Text("Set up this device from another")
-                .font(.title2.bold()).multilineTextAlignment(.center)
-                .foregroundStyle(palette.primaryText)
+            VStack(spacing: 10) {
+                ProgressView().controlSize(.large)
+                Text("Check your other device")
+                    .font(.title2.bold()).multilineTextAlignment(.center)
+                    .foregroundStyle(palette.primaryText)
+                Text("If your Apple TV (or another signed-in device) is open, it’ll ask to set this up — just tap Set Up there. No code needed.")
+                    .font(.callout).foregroundStyle(palette.secondaryText)
+                    .multilineTextAlignment(.center).padding(.horizontal, 16)
+            }
             if let img = Self.qrImage(invite.encoded()) {
                 Image(uiImage: img).interpolation(.none).resizable()
-                    .frame(width: 220, height: 220)
-                    .padding(16).background(.white)
+                    .frame(width: 180, height: 180)
+                    .padding(14).background(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             VStack(spacing: 6) {
                 Text("or enter this code").font(.callout).foregroundStyle(palette.secondaryText)
                 Text(SyncPairingCode.grouped(code))
-                    .font(.system(size: 40, weight: .bold, design: .rounded)).monospaced()
+                    .font(.system(size: 36, weight: .bold, design: .rounded)).monospaced()
                     .foregroundStyle(palette.primaryText)
             }
-            Text("On a device that’s already signed in, open Plozz ▸ Settings ▸ iCloud Sync ▸ “Set up another device,” then scan this code. Both devices must be on the same Wi-Fi.")
+            Text("Not prompted automatically? On the other device open Plozz ▸ Settings ▸ iCloud Sync ▸ “Set up another device,” then scan this code. Both devices must be on the same Wi-Fi.")
                 .font(.footnote).foregroundStyle(palette.secondaryText)
                 .multilineTextAlignment(.center).padding(.horizontal, 12)
             Spacer(minLength: 0)

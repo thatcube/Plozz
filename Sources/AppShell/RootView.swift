@@ -338,6 +338,23 @@ public struct RootView: View {
         } message: { descriptor in
             Text("“\(descriptor.serverName)” is set up on another device. Sign in to watch it here — your login stays private to each device. You can also find it later under Settings ▸ iCloud Sync.")
         }
+        .alert(
+            "Set up “\(appState.cloudSyncUI.pendingSyncSetupOffer?.deviceName ?? "your device")”?",
+            isPresented: Binding(
+                // Presentation is driven purely by pendingSyncSetupOffer; the two
+                // buttons own confirm/decline, so the setter must NOT have a side
+                // effect (that would double-fire and race the button action). tvOS
+                // routes the Menu button to the .cancel role, so decline still runs.
+                get: { appState.cloudSyncUI.pendingSyncSetupOffer != nil },
+                set: { _ in }
+            ),
+            presenting: appState.cloudSyncUI.pendingSyncSetupOffer
+        ) { _ in
+            Button("Set Up") { appState.confirmSyncSetupOffer() }
+            Button("Not Now", role: .cancel) { appState.declineSyncSetupOffer() }
+        } message: { _ in
+            Text("It’s waiting to be set up. Send your servers and sign-in so it’s ready to watch — no code or typing needed.")
+        }
         .onAppear {
             if case .launching = appState.state { appState.bootstrap() }
             appState.drainWatchOutbox()

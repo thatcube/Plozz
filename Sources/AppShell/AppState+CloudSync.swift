@@ -17,6 +17,10 @@ public final class CloudSyncUIModel {
     public internal(set) var pendingSyncedServers: [SyncedAccountDescriptor] = []
     /// A newly-detected synced server to prompt about (Set Up / Ignore), or nil.
     public var pendingServerPrompt: SyncedAccountDescriptor?
+    /// A same-Apple-ID device asking to be set up (it opened its "set up from another
+    /// device" screen). Drives a one-tap source-side confirm before this TV pushes its
+    /// servers + logins over the local pairing channel. nil = no pending offer.
+    public var pendingSyncSetupOffer: SyncPairingRendezvous?
     public init() {}
 }
 
@@ -98,6 +102,71 @@ extension AppState {
     public func syncCloudOnForeground() {
         guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
         Task { await cloudSync.fetchNow() }
+        checkForSyncSetupOffer()
+        startSyncSetupOfferPolling()
+    }
+
+    // MARK: Same-Apple-ID rendezvous offer (source side)
+
+    /// Surface a one-tap confirm when another of the user's devices is asking to be set
+    /// up (it opened its "set up from another device" screen and published a rendezvous
+    /// to iCloud). We never push credentials silently — the single confirm keeps a human
+    /// in the loop (matching Apple's "set up new device" pattern) — but it's zero typing:
+    /// no code, no QR. Mirrors the iOS source-side behavior so a TV can set up a phone.
+    public func checkForSyncSetupOffer() {
+        guard SyncSetupFeatureFlag().isEnabled,
+              !isAutoAdoptingSyncSetup,
+              cloudSyncUI.pendingSyncSetupOffer == nil else { return }
+        guard !accountsProviders.accounts.isEmpty else { return }   // nothing to give
+        guard let offer = syncSetup.discoverRendezvousTargets()
+            .first(where: { !dismissedSyncSetupOfferKeys.contains(Self.syncSetupOfferKey($0)) })
+        else { return }
+        cloudSyncUI.pendingSyncSetupOffer = offer
+    }
+
+    /// The user confirmed — push config + credentials to the offered device over the
+    /// local pairing channel (pinned key ⇒ no SAS, no typing).
+    public func confirmSyncSetupOffer() {
+        guard let offer = cloudSyncUI.pendingSyncSetupOffer else { return }
+        cloudSyncUI.pendingSyncSetupOffer = nil
+        isAutoAdoptingSyncSetup = true
+        let model = SyncSetupPairingModel(service: syncSetup)
+        Task { @MainActor in
+            await model.adopt(offer)
+            isAutoAdoptingSyncSetup = false
+        }
+    }
+
+    /// The user declined — don't re-prompt for this exact offer this session.
+    public func declineSyncSetupOffer() {
+        if let offer = cloudSyncUI.pendingSyncSetupOffer {
+            dismissedSyncSetupOfferKeys.insert(Self.syncSetupOfferKey(offer))
+        }
+        cloudSyncUI.pendingSyncSetupOffer = nil
+    }
+
+    private static func syncSetupOfferKey(_ offer: SyncPairingRendezvous) -> String {
+        offer.deviceID + ":" + offer.publicKeyData.base64EncodedString()
+    }
+
+    /// Poll for rendezvous offers every few seconds while the app is open, so the TV
+    /// prompts within seconds of the phone opening its "set up from another device"
+    /// screen — iCloud KVS delivery to a foreground-idle tvOS app is otherwise
+    /// best-effort. Idempotent; guarded on the feature flag each tick.
+    func startSyncSetupOfferPolling() {
+        guard SyncSetupFeatureFlag().isEnabled, syncSetupOfferPollTask == nil else { return }
+        syncSetupOfferPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                guard !Task.isCancelled else { return }
+                let keepGoing = await MainActor.run { () -> Bool in
+                    guard let self else { return false }
+                    if SyncSetupFeatureFlag().isEnabled { self.checkForSyncSetupOffer() }
+                    return true
+                }
+                if !keepGoing { return }
+            }
+        }
     }
 
     /// Reset a corrupted/divergent sync state: wipe the iCloud zone and re-seed from
@@ -323,6 +392,8 @@ extension AppState {
         }
         Task { await cloudSync.activate() }
         armCloudConfigObservation()
+        checkForSyncSetupOffer()
+        startSyncSetupOfferPolling()
     }
 
     /// Re-arming Observation: fires whenever the roster or account set changes,
@@ -365,6 +436,11 @@ extension AppState {
             Task { await cloudSync.activate() }
             armCloudConfigObservation()
             scheduleCloudPublish()
+            startSyncSetupOfferPolling()
+        } else {
+            syncSetupOfferPollTask?.cancel()
+            syncSetupOfferPollTask = nil
+            cloudSyncUI.pendingSyncSetupOffer = nil
         }
     }
 }

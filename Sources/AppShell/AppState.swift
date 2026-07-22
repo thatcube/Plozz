@@ -505,6 +505,19 @@ public final class AppState {
     @ObservationIgnored
     var cloudPublishTask: Task<Void, Never>?
 
+    /// Guards against overlapping same-Apple-ID credential auto-adopt attempts.
+    @ObservationIgnored
+    var isAutoAdoptingSyncSetup = false
+
+    /// Rendezvous offers the user declined this session, so they aren't re-prompted.
+    @ObservationIgnored
+    var dismissedSyncSetupOfferKeys: Set<String> = []
+
+    /// Repeating check that surfaces a same-Apple-ID device asking to be set up, so the
+    /// TV prompts promptly while it's open (iCloud rendezvous delivery is best-effort).
+    @ObservationIgnored
+    var syncSetupOfferPollTask: Task<Void, Never>?
+
     /// Observable CloudKit sync status for the iCloud Sync settings page.
     public let cloudSyncStatus = CloudSyncStatus()
 

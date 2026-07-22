@@ -105,6 +105,13 @@ extension AppState {
         Task { await cloudSync.resetAndReseed() }
     }
 
+    /// Repair a device stuck not-receiving (stale CKSyncEngine change token):
+    /// re-download the whole zone fresh. Non-destructive to the shared cloud data.
+    public func redownloadCloudSync() {
+        guard let cloudSync else { return }
+        Task { await cloudSync.redownloadFromCloud() }
+    }
+
     // MARK: Publish side
 
     /// The NON-SECRET snapshot this device publishes. Mirrors what the pairing

@@ -137,6 +137,12 @@ struct PlozziOSSyncSetupSettingsView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+                    Button {
+                        appModel.redownloadCloudSync()
+                    } label: {
+                        Label("Re-download From iCloud", systemImage: "arrow.down.circle")
+                            .font(.footnote)
+                    }
                     Button(role: .destructive) {
                         appModel.resetCloudSync()
                     } label: {
@@ -145,7 +151,7 @@ struct PlozziOSSyncSetupSettingsView: View {
                     }
                 }
             } footer: {
-                Text("Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device. Off by default.")
+                Text("Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device. Off by default. If a device stops receiving changes, tap Re-download From iCloud on it.")
             }
 
             Section {

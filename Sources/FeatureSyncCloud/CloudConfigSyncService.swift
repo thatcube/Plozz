@@ -284,6 +284,43 @@ public actor CloudConfigSyncService {
         try? await engine.sendChanges()
     }
 
+    /// Repair a device that has STOPPED RECEIVING (its CKSyncEngine change token got
+    /// stuck "caught up", so `fetchChanges` returns nothing even though peers have
+    /// newer records — the "iPad updates, iPhone never does" bug). Unlike
+    /// `resetAndReseed`, this is LOCAL-ONLY and NON-DESTRUCTIVE to the server: it
+    /// throws away this device's engine state (the stale token), mirror, and cached
+    /// system fields, rebuilds the engine with a NIL token, and re-fetches the whole
+    /// zone from scratch — so the device re-downloads every record the server holds
+    /// and converges. The shared cloud data is never deleted or re-seeded.
+    public func redownloadFromCloud() async {
+        guard config.isEnabled(), await accountIsAvailable() else { setStatus(.signedOut); return }
+        setStatus(.syncing)
+        PlozzLog.sync.info("CloudSync: redownload — discarding local token/mirror, re-fetching all")
+        // Tear the engine down and forget the stuck token + everything derived from it.
+        engine = nil
+        engineState = nil
+        mirror = CloudSyncMirror()
+        systemFields = [:]
+        persist()
+        // Rebuild with stateSerialization = nil ⇒ the engine re-fetches from scratch.
+        ensureEngine()
+        guard let engine else { setStatus(.error, error: "engine unavailable"); return }
+        do {
+            try await engine.fetchChanges()
+            reportRecordCount()
+            logMirror("redownload:after")
+            // Push the freshly-downloaded, merged snapshot into the app's stores.
+            if !mirror.records.isEmpty {
+                await config.applyRemoteSnapshot(mirror.snapshot)
+            }
+            setStatus(.idle, syncedNow: true)
+            PlozzLog.sync.info("CloudSync: redownload complete — \(mirror.records.count) record(s)")
+        } catch {
+            setDiagnostic("redownload: \(Self.describe(error))")
+            setStatus(.error, error: (error as NSError).localizedDescription)
+        }
+    }
+
     /// Reset a corrupted/divergent sync: wipe the CloudKit zone AND this device's
     /// mirror+tags, then re-seed the zone from THIS device's current local config.
     /// Other devices see the zone deletion, clear their mirrors, and re-converge —

@@ -149,5 +149,12 @@ extension PlozziOSAppModel {
         guard let cloudSync else { return }
         Task { await cloudSync.resetAndReseed() }
     }
+
+    /// Repair a device stuck not-receiving (stale change token): re-download the
+    /// whole zone fresh. Non-destructive to the shared cloud data.
+    func redownloadCloudSync() {
+        guard let cloudSync else { return }
+        Task { await cloudSync.redownloadFromCloud() }
+    }
 }
 #endif

@@ -23,6 +23,9 @@ public final class CloudSyncStatus {
     public internal(set) var lastSyncedAt: Date?
     /// Short, non-secret description of the last failure (for the error state).
     public internal(set) var lastErrorMessage: String?
+    /// A PERSISTENT diagnostic detail (last CloudKit error), shown until the next
+    /// success clears it. Survives the phase flicker so it's actually readable.
+    public internal(set) var lastDiagnostic: String?
 
     public init() {}
 

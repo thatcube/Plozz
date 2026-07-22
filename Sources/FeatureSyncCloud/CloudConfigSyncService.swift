@@ -86,9 +86,21 @@ public actor CloudConfigSyncService {
         guard let status = config.status else { return }
         Task { @MainActor in
             status.phase = phase
-            if syncedNow { status.lastSyncedAt = Date() }
+            if syncedNow { status.lastSyncedAt = Date(); status.lastDiagnostic = nil }
             status.lastErrorMessage = error
         }
+    }
+
+    /// Record a PERSISTENT diagnostic detail (survives the phase flicker).
+    private func setDiagnostic(_ detail: String) {
+        PlozzLog.sync.error("CloudSync: \(detail)")
+        guard let status = config.status else { return }
+        Task { @MainActor in status.lastDiagnostic = detail }
+    }
+
+    /// Human-readable CKError code name for a save failure.
+    private static func ckCodeName(_ error: CKError) -> String {
+        "\(error.code) (\(error.code.rawValue))"
     }
 
     /// Bring the sync engine up (if the feature is enabled and an iCloud account is
@@ -239,6 +251,12 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
         case .sentRecordZoneChanges(let e):
             handleSentRecordZoneChanges(e, syncEngine: syncEngine)
 
+        case .sentDatabaseChanges(let e):
+            // A failed ZONE save cascades to every record — surface it.
+            for failure in e.failedZoneSaves {
+                setDiagnostic("zone save failed: \(Self.ckCodeName(failure.error)) — \(failure.error.localizedDescription)")
+            }
+
         case .fetchedDatabaseChanges(let e):
             handleFetchedDatabaseChanges(e)
 
@@ -248,7 +266,7 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
         case .didFetchChanges, .didSendChanges:
             setStatus(.idle, syncedNow: true)
 
-        case .willFetchRecordZoneChanges, .didFetchRecordZoneChanges, .sentDatabaseChanges:
+        case .willFetchRecordZoneChanges, .didFetchRecordZoneChanges:
             break
 
         @unknown default:
@@ -372,9 +390,11 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
                 systemFields[name] = nil
             case .networkFailure, .networkUnavailable, .zoneBusy, .serviceUnavailable,
                  .notAuthenticated, .operationCancelled:
-                PlozzLog.sync.info("CloudSync: retryable save error for \(name): \(failure.error.code.rawValue)")
+                PlozzLog.sync.info("CloudSync: retryable save error for \(name): \(Self.ckCodeName(failure.error))")
             default:
-                PlozzLog.sync.error("CloudSync: unhandled save error for \(name): \(failure.error.localizedDescription)")
+                // The real cause of a 'failed to send changes' — surface it verbatim
+                // (code + description + any per-item detail) so it's diagnosable.
+                setDiagnostic("save failed for \(name): \(Self.ckCodeName(failure.error)) — \(failure.error.localizedDescription)")
             }
         }
 

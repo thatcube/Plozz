@@ -241,7 +241,9 @@ public struct RootView: View {
                         onSetUpAnotherDevice: { showSyncSend = true },
                         syncEnabled: appState.syncSetup.isEnabled,
                         onSetSyncEnabled: { appState.setSyncSetupEnabled($0) },
-                        syncStatusSummary: appState.cloudSyncStatus.summary,
+                        syncStatusSummary: appState.cloudSyncStatus.lastDiagnostic.map {
+                            "\(appState.cloudSyncStatus.summary) · \($0)"
+                        } ?? appState.cloudSyncStatus.summary,
                         onSyncNow: { appState.syncCloudNow() },
                         pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,
                         onIgnorePendingServer: { appState.ignorePendingSyncedServer($0) },

@@ -46,6 +46,7 @@ let package = Package(
         .library(name: "FeatureSettings", targets: ["FeatureSettings"]),
         .library(name: "FeatureProfiles", targets: ["FeatureProfiles"]),
         .library(name: "FeatureSyncSetup", targets: ["FeatureSyncSetup"]),
+        .library(name: "FeatureSyncCloud", targets: ["FeatureSyncCloud"]),
         .library(name: "FeatureMusic", targets: ["FeatureMusic"]),
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "CrashReporting", targets: ["CrashReporting"]),
@@ -318,6 +319,16 @@ let package = Package(
         .target(
             name: "FeatureSyncSetup",
             dependencies: ["CoreModels"]
+        ),
+
+        // Non-secret config auto-sync over CloudKit (CKSyncEngine, private DB).
+        // Isolated here because it imports CloudKit; the pure snapshot<->records
+        // core lives in CoreModels. Propagates the shared household setup
+        // (descriptors, profiles, per-profile settings + membership) across one
+        // Apple ID's devices. NEVER carries tokens/passwords (that's pairing).
+        .target(
+            name: "FeatureSyncCloud",
+            dependencies: ["CoreModels", "CoreNetworking"]
         ),
 
         // MARK: Music (browse + audio playback engine)
@@ -642,6 +653,10 @@ let package = Package(
         .testTarget(
             name: "FeatureSyncSetupTests",
             dependencies: ["FeatureSyncSetup", "CoreModels"]
+        ),
+        .testTarget(
+            name: "FeatureSyncCloudTests",
+            dependencies: ["FeatureSyncCloud", "CoreModels"]
         ),
         .testTarget(
             name: "AppRuntimeTests",

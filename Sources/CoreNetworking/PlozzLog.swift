@@ -52,6 +52,7 @@ public enum PlozzLog {
     public static let discovery = PlozzLogger(category: "discovery")
     public static let playback = PlozzLogger(category: "playback")
     public static let app = PlozzLogger(category: "app")
+    public static let sync = PlozzLogger(category: "sync")
 
     /// Temporary startup-flow telemetry. Emits via `os_log` (category `app`) AND,
     /// when the process is launched with `PLZBOOT_STDOUT=1`, mirrors each line to

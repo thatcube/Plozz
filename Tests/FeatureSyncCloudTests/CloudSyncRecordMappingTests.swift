@@ -50,4 +50,19 @@ final class CloudSyncRecordMappingTests: XCTestCase {
         ck["payload"] = Data() as CKRecordValue
         XCTAssertNil(CloudSyncRecord(ckRecord: ck), "a newer schema's kind must decode to nil, not crash")
     }
+
+    /// The system-fields archive MUST round-trip via CKRecord(coder:). The old
+    /// unarchivedObject(ofClass:) path returned nil, so the cached change tag was
+    /// never applied and every save became a blind create the server rejected with
+    /// serverRecordChanged — blocking all sync.
+    func testSystemFieldsRoundTripPreservesRecordID() throws {
+        let id = CloudSyncSchema.recordID(forRecordName: "profile:ABC")
+        let original = CKRecord(recordType: CloudSyncSchema.recordType, recordID: id)
+        let data = CloudConfigSyncService.archive(original)
+        let restored = try XCTUnwrap(
+            CloudConfigSyncService.cachedRecord(from: data),
+            "archived system fields must decode back to a CKRecord (not nil)")
+        XCTAssertEqual(restored.recordID, id)
+        XCTAssertEqual(restored.recordType, CloudSyncSchema.recordType)
+    }
 }

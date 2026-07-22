@@ -456,15 +456,24 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
 
     // MARK: CKRecord system-field caching
 
-    private static func archive(_ record: CKRecord) -> Data {
+    static func archive(_ record: CKRecord) -> Data {
         let coder = NSKeyedArchiver(requiringSecureCoding: true)
         record.encodeSystemFields(with: coder)
         coder.finishEncoding()
         return coder.encodedData
     }
 
-    private static func cachedRecord(from data: Data?) -> CKRecord? {
+    static func cachedRecord(from data: Data?) -> CKRecord? {
         guard let data else { return nil }
-        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKRecord.self, from: data)
+        // A record archived with `encodeSystemFields(with:)` MUST be read back with
+        // `CKRecord(coder:)` — NOT `unarchivedObject(ofClass:)`, which returns nil
+        // for this encoding. Getting this wrong means the cached change tag is never
+        // applied, so every save is a blind create that the server rejects with
+        // serverRecordChanged — forever. That was the whole-sync-blocking bug.
+        guard let coder = try? NSKeyedUnarchiver(forReadingFrom: data) else { return nil }
+        coder.requiresSecureCoding = true
+        let record = CKRecord(coder: coder)
+        coder.finishDecoding()
+        return record
     }
 }

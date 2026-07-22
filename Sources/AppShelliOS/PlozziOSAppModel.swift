@@ -491,6 +491,8 @@ final class PlozziOSAppModel {
         }
         accountError = launchErrors.isEmpty ? nil : launchErrors.joined(separator: "\n")
         accountsProviders.reloadAccounts()
+        // Self-heal any stale server names (shared path with tvOS).
+        accountsProviders.refreshServerNames()
         if !accountsProviders.accounts.isEmpty,
            !profiles.firstRunProfileSetupComplete {
             pendingFirstRunStep = .profiles

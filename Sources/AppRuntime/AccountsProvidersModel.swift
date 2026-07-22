@@ -222,4 +222,16 @@ public final class AccountsProvidersModel {
         activeAccountIDs = resolved
         onActiveAccountsChanged(resolved, accounts)
     }
+
+    /// One-time self-heal for stale server names (shared by tvOS + iOS). Re-fetches
+    /// each managed server's real name and, if any changed, reloads accounts so the UI
+    /// updates. Runs in the background; offline servers are skipped and tokens are
+    /// never touched. Safe to call on every launch.
+    public func refreshServerNames() {
+        let store = accountStore
+        Task { @MainActor [weak self] in
+            let updated = await ServerNameRefresher(accountStore: store).refresh()
+            if updated > 0 { self?.reloadAccounts() }
+        }
+    }
 }

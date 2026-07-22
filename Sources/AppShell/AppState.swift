@@ -1032,6 +1032,9 @@ public final class AppState {
             PlozzLog.auth.error("Credential recovery failed; incomplete shares remain hidden")
         }
         accountsProviders.reloadAccounts()
+        // Self-heal any stale server names (older accounts stored the placeholder
+        // provider name instead of the server's real name). Shared with iOS.
+        accountsProviders.refreshServerNames()
         PlozzLog.boot("bootstrap accountsProviders.accounts=\(accountsProviders.accounts.count) activeIDs=\(accountsProviders.activeAccountIDs.count)")
         // The "Ask which profile on startup" toggle is the single source of
         // truth for whether the launch picker appears. When it's ON we MUST

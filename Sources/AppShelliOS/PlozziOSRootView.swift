@@ -51,8 +51,11 @@ public struct PlozziOSRootView: View {
         .alert(
             "Set up \(appModel.pendingSyncSetupOffer?.deviceName ?? "your device")?",
             isPresented: Binding(
+                // Presentation is driven purely by pendingSyncSetupOffer; the two
+                // buttons own confirm/decline, so the setter must NOT have a side
+                // effect (that would double-fire and race the button action).
                 get: { appModel.pendingSyncSetupOffer != nil },
-                set: { if !$0 { appModel.declineSyncSetupOffer() } }
+                set: { _ in }
             ),
             presenting: appModel.pendingSyncSetupOffer
         ) { _ in

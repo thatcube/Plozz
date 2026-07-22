@@ -175,6 +175,12 @@ public final class SyncSetupService {
         PairingRendezvousMatcher.target(from: rendezvousStore.all(), thisDeviceID: deviceID(), now: now)
     }
 
+    /// All same-Apple-ID devices currently asking to be set up (freshest first). Lets
+    /// the app skip an offer the user declined and still surface OTHER devices.
+    public func discoverRendezvousTargets(now: Date = Date()) -> [SyncPairingRendezvous] {
+        PairingRendezvousMatcher.targets(from: rendezvousStore.all(), thisDeviceID: deviceID(), now: now)
+    }
+
     /// The public key of an offer to PIN when connecting — so the source authenticates
     /// the host out-of-band (via iCloud account membership) exactly like a scanned QR,
     /// and no SAS comparison is needed. Exposed for the pairing model's adopt path.

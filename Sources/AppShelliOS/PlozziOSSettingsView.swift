@@ -164,6 +164,7 @@ private struct PlozziOSSettingsSplitView: View {
     @State private var selection: PlozziOSSettingsDestination?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var confirmSignOutAll = false
+    private var developerMode: DeveloperModeModel { .shared }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -240,14 +241,21 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.attributions, title: SettingsCopy.attributions, systemImage: "doc.text.magnifyingglass")
                         settingsRow(.about, title: "About", systemImage: "info.circle")
                     }
-                    #if DEBUG
-                    SettingsSectionGroup("Debug") {
-                        Button("Reset to First Run") {
-                            appModel.resetToFirstRunForDebugging()
-                            onClose()
+                    // Hidden until Developer Mode is unlocked (tap Version seven
+                    // times in About). Gating on the runtime flag rather than
+                    // `#if DEBUG` hides these in every build — including the
+                    // Debug-config branded builds — while keeping them reachable.
+                    if developerMode.isEnabled {
+                        SettingsSectionGroup("Developer") {
+                            Button("Reset to First Run") {
+                                appModel.resetToFirstRunForDebugging()
+                                onClose()
+                            }
+                            Button("Turn Off Developer Mode", role: .destructive) {
+                                developerMode.disable()
+                            }
                         }
                     }
-                    #endif
                 }
             }
             .navigationTitle("Settings")
@@ -387,6 +395,9 @@ private struct PlozziOSAboutSettingsView: View {
     let hasAccounts: Bool
     let onSignOutAll: () -> Void
 
+    private var developerMode: DeveloperModeModel { .shared }
+    @State private var showDeveloperUnlockedAlert = false
+
     var body: some View {
         Form {
             SettingsSectionGroup("Plozz") {
@@ -397,6 +408,8 @@ private struct PlozziOSAboutSettingsView: View {
                         ] as? String ?? "—"
                     )
                 }
+                .contentShape(Rectangle())
+                .onTapGesture(perform: handleVersionTap)
                 LabeledContent("Build") {
                     Text(
                         Bundle.main.infoDictionary?[
@@ -418,6 +431,17 @@ private struct PlozziOSAboutSettingsView: View {
         }
         .settingsPageSurface()
         .navigationTitle("About")
+        .alert("Developer Mode Enabled", isPresented: $showDeveloperUnlockedAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Diagnostic tools are now shown in Settings under Developer. Turn them off again from that section.")
+        }
+    }
+
+    private func handleVersionTap() {
+        if case .justEnabled = developerMode.registerUnlockActivation() {
+            showDeveloperUnlockedAlert = true
+        }
     }
 }
 
@@ -426,6 +450,8 @@ private struct PlozziOSSettingsCompactMenu: View {
     let onAddServer: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var confirmSignOutAll = false
+    private var developerMode: DeveloperModeModel { .shared }
+    @State private var showDeveloperUnlockedAlert = false
 
     var body: some View {
         ScrollView {
@@ -569,6 +595,12 @@ private struct PlozziOSSettingsCompactMenu: View {
                 LabeledContent("Version") {
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                 }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if case .justEnabled = developerMode.registerUnlockActivation() {
+                        showDeveloperUnlockedAlert = true
+                    }
+                }
                 LabeledContent("Build") {
                     Text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
                 }
@@ -579,14 +611,19 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
             }
 
-                #if DEBUG
-                SettingsSectionGroup("Debug") {
-                    Button("Reset to First Run") {
-                        appModel.resetToFirstRunForDebugging()
-                        dismiss()
+                // Hidden until Developer Mode is unlocked (tap Version seven
+                // times). Gated on the runtime flag in every build.
+                if developerMode.isEnabled {
+                    SettingsSectionGroup("Developer") {
+                        Button("Reset to First Run") {
+                            appModel.resetToFirstRunForDebugging()
+                            dismiss()
+                        }
+                        Button("Turn Off Developer Mode", role: .destructive) {
+                            developerMode.disable()
+                        }
                     }
                 }
-                #endif
 
                 if let accountError = appModel.accountError {
                     SettingsSectionGroup {
@@ -607,6 +644,11 @@ private struct PlozziOSSettingsCompactMenu: View {
             }
         } message: {
             Text("This removes every server and network share from this device.")
+        }
+        .alert("Developer Mode Enabled", isPresented: $showDeveloperUnlockedAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Diagnostic tools are now shown in Settings under Developer. Turn them off again from that section.")
         }
     }
 }

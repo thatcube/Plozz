@@ -186,14 +186,24 @@ struct SettingsPageHeader: View {
 struct FocusableSettingsPanel<Content: View>: View {
     let title: String?
     var footer: String?
+    /// Optional remote-select handler. When set, clicking the focused panel with
+    /// the Siri remote invokes it — used only by the About panel to drive the
+    /// hidden Developer Mode unlock gesture (seven selects on the Version row).
+    var onActivate: (() -> Void)?
     @ViewBuilder let content: Content
 
     @FocusState private var isFocused: Bool
     @Environment(\.themePalette) private var palette
 
-    init(title: String? = nil, footer: String? = nil, @ViewBuilder content: () -> Content) {
+    init(
+        title: String? = nil,
+        footer: String? = nil,
+        onActivate: (() -> Void)? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.footer = footer
+        self.onActivate = onActivate
         self.content = content()
     }
 
@@ -211,6 +221,7 @@ struct FocusableSettingsPanel<Content: View>: View {
             .focusEffectDisabled()
             .animation(.easeOut(duration: 0.16), value: isFocused)
             .accessibilityElement(children: .combine)
+            .onTapGesture { onActivate?() }
     }
 }
 

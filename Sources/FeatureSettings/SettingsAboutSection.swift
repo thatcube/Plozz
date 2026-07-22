@@ -20,9 +20,12 @@ struct SettingsAboutSection: View {
     let version: String
     let build: String
     let repoURL: String
+    /// Invoked on each remote-select of the panel — drives the hidden Developer
+    /// Mode unlock (seven selects). `nil` leaves the panel inert.
+    var onActivate: (() -> Void)? = nil
 
     var body: some View {
-        FocusableSettingsPanel {
+        FocusableSettingsPanel(onActivate: onActivate) {
             HStack(alignment: .top, spacing: 36) {
                 VStack(alignment: .leading, spacing: 16) {
                     Image("PlozzLogo")

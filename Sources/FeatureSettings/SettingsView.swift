@@ -30,6 +30,11 @@ public struct SettingsView: View {
     /// instead of popping back.
     @State private var path: [SettingsRoute] = []
     @State private var confirmSignOutAll = false
+    /// Hidden Developer Mode: reveals the diagnostic rows once unlocked by
+    /// selecting the About/Version panel seven times. Off by default in every
+    /// build. `showDeveloperUnlockedAlert` confirms the unlock.
+    private var developerMode: DeveloperModeModel { .shared }
+    @State private var showDeveloperUnlockedAlert = false
     /// Presents the profile editor sheet for the active profile (Edit button in
     /// the profile header). Mirrors the editor flow in ``ProfileDetailView``.
     @State private var editingProfile: Profile?
@@ -49,11 +54,6 @@ public struct SettingsView: View {
     private static let identityTitleFont: Font = .system(size: 36, weight: .bold)
 
     #if DEBUG
-    /// Launch with `PLOZZ_SHOW_FIRST_RUN_RESET=1` to show the destructive
-    /// "Reset to First Run (Debug)" row without changing source between runs.
-    private static let showDebugResetFirstRunRow =
-        ProcessInfo.processInfo.environment["PLOZZ_SHOW_FIRST_RUN_RESET"] == "1"
-
     /// Live A/B override for the Home hero foreground renderer, shared with
     /// `HomeHeroView` via this UserDefaults key. `0` = launch default, `1` = force
     /// UIKit, `2` = force SwiftUI. Changing it applies live on return to Home.
@@ -521,8 +521,14 @@ public struct SettingsView: View {
     private var aboutAndSignOut: some View {
         VStack(alignment: .leading, spacing: 24) {
             // Self-contained focusable inverted-card panel (logo / version /
-            // build / disclaimers / QR) — perfect to drop in inline.
-            SettingsAboutSection(version: appVersion, build: appBuild, repoURL: repoURL)
+            // build / disclaimers / QR) — perfect to drop in inline. Selecting it
+            // seven times unlocks the hidden Developer Mode rows below.
+            SettingsAboutSection(
+                version: appVersion,
+                build: appBuild,
+                repoURL: repoURL,
+                onActivate: handleAboutActivation
+            )
 
             // The one acceptable deeper page: open-source credits & licensing.
             navRow(SettingsCopy.attributions, icon: "doc.text.magnifyingglass",
@@ -541,17 +547,58 @@ public struct SettingsView: View {
                 signOutAllRow
             }
 
-            #if DEBUG
-            // DEBUG-only: flip the Home hero foreground renderer live (UIKit vs
-            // SwiftUI) for A/B comparison. Applies on return to Home; no restart.
-            debugHeroForegroundRow
+            // Diagnostic rows, hidden until Developer Mode is unlocked (seven
+            // selects on the About panel). Gating on the runtime flag — rather
+            // than `#if DEBUG` — hides them by default in every build (including
+            // the Debug-config branded builds) while keeping them re-enableable.
+            if developerMode.isEnabled {
+                developerModeRow
 
-            // DEBUG-only: wipe accounts, profiles, recents, and the first-run
-            // flag so the next server add reproduces a genuine first run. Always
-            // shown in Debug builds so it's reachable without a relaunch flag.
-            debugResetFirstRunRow
-            #endif
+                // Only meaningful in Debug builds (the hero A/B override the
+                // renderer reads is itself `#if DEBUG`), so keep it compiled out
+                // of release; still gated on Developer Mode when present.
+                #if DEBUG
+                debugHeroForegroundRow
+                #endif
+
+                // Wipe accounts, profiles, recents, and the first-run flag so the
+                // next server add reproduces a genuine first run.
+                debugResetFirstRunRow
+            }
         }
+        .alert("Developer Mode Enabled", isPresented: $showDeveloperUnlockedAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Diagnostic tools are now shown at the bottom of Settings. Turn them off again from the Developer Mode row.")
+        }
+    }
+
+    /// Records one select of the About panel and surfaces the unlock confirmation
+    /// when the seventh crosses the threshold.
+    private func handleAboutActivation() {
+        if case .justEnabled = developerMode.registerUnlockActivation() {
+            showDeveloperUnlockedAlert = true
+        }
+    }
+
+    /// Turns Developer Mode back off (re-hiding the diagnostic rows).
+    private var developerModeRow: some View {
+        Button {
+            developerMode.disable()
+        } label: {
+            HStack(spacing: 16) {
+                Image(systemName: "hammer")
+                    .font(.system(size: 22, weight: .regular))
+                    .frame(width: 30, height: 30)
+                Text("Turn Off Developer Mode").font(.callout.weight(.medium))
+                Spacer()
+            }
+            .foregroundStyle(.orange)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsFocusButtonStyle())
     }
 
     #if DEBUG
@@ -589,10 +636,9 @@ public struct SettingsView: View {
     }
     #endif
 
-    #if DEBUG
-    /// DEBUG-only "Reset to First Run" row. Collapses profiles to a pristine
-    /// default and clears the first-run flag so the first-run profile screen
-    /// can be re-tested without uninstalling.
+    /// "Reset to First Run" row. Collapses profiles to a pristine default and
+    /// clears the first-run flag so the first-run profile screen can be re-tested
+    /// without uninstalling. Available in all builds, gated behind Developer Mode.
     private var debugResetFirstRunRow: some View {
         Button {
             onResetToFirstRun()
@@ -601,7 +647,7 @@ public struct SettingsView: View {
                 Image(systemName: "arrow.counterclockwise.circle")
                     .font(.system(size: 22, weight: .regular))
                     .frame(width: 30, height: 30)
-                Text("Reset to First Run (Debug)").font(.callout.weight(.medium))
+                Text("Reset to First Run").font(.callout.weight(.medium))
                 Spacer()
             }
             .foregroundStyle(.orange)
@@ -611,7 +657,6 @@ public struct SettingsView: View {
         }
         .buttonStyle(SettingsFocusButtonStyle())
     }
-    #endif
 
     /// Destructive "Sign Out of All Accounts" row. Keeps the red tint on both
     /// idle and the inverted focus card (legible on white or black), and arms

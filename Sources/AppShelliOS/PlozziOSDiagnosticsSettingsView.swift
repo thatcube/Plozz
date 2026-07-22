@@ -5,6 +5,7 @@ import CoreUI
 import CrashReporting
 import Foundation
 import SwiftUI
+import UIKit
 
 struct PlozziOSDiagnosticsSettingsView: View {
     let appModel: PlozziOSAppModel
@@ -114,6 +115,7 @@ private struct PlozziOSRecentActivityView: View {
     @State private var entries = PlozzLog.recentEntries(limit: 500)
     @State private var selectedCategory: String? = nil
     @State private var searchText = ""
+    @State private var justCopied = false
 
     /// Distinct categories present, for the filter menu.
     private var categories: [String] {
@@ -189,6 +191,18 @@ private struct PlozziOSRecentActivityView: View {
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     entries = PlozzLog.recentEntries(limit: 500)
                 }
+                // Copy is the reliable path: a toolbar ShareLink's sheet can present
+                // with unresponsive buttons on iPad, so copying to the clipboard is
+                // the dependable way to get the (filtered) log out for a bug report.
+                Button {
+                    UIPasteboard.general.string = shareText
+                    justCopied = true
+                    Task { try? await Task.sleep(nanoseconds: 1_500_000_000); justCopied = false }
+                } label: {
+                    Label(justCopied ? "Copied" : "Copy",
+                          systemImage: justCopied ? "checkmark" : "doc.on.doc")
+                }
+                .disabled(filtered.isEmpty)
                 ShareLink(item: shareText) {
                     Label("Share", systemImage: "square.and.arrow.up")
                 }

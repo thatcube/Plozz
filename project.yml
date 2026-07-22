@@ -50,6 +50,10 @@ targets:
     info:
       path: App/Resources/Info.plist
       properties:
+        # Home-screen name. Empty ${PLOZZ_NAME_SUFFIX} → "Plozz" (canonical); an
+        # opt-in per-branch build sets it to " <slug>" so the separate app reads
+        # "Plozz <slug>" and is distinguishable on the Apple TV home screen.
+        CFBundleDisplayName: Plozz${PLOZZ_NAME_SUFFIX}
         # Marketing version (CFBundleShortVersionString) comes from the shared
         # MARKETING_VERSION build setting so the app and Top Shelf extension match.
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -194,7 +198,12 @@ targets:
               - plozz
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz
+        # ${PLOZZ_ID_SUFFIX} is EMPTY for a normal (canonical) build → the real
+        # `com.thatcube.Plozz`. An opt-in per-branch build (tools/deploy-*.sh
+        # --branded) sets it to ".<slug>" so that branch installs a SEPARATE app
+        # (`com.thatcube.Plozz.<slug>`) side-by-side, never touching the canonical.
+        # generate-project.sh always exports a default so the token expands cleanly.
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz${PLOZZ_ID_SUFFIX}
         PRODUCT_NAME: Plozz
         # Default (empty) OMDb API key so plain builds work with external-ratings
         # enrichment disabled. A real key is supplied via the gitignored
@@ -236,7 +245,7 @@ targets:
       - path: Sources/TopShelfKit/TopShelfStore.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz.TopShelf
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz${PLOZZ_ID_SUFFIX}.TopShelf
         PRODUCT_NAME: PlozzTopShelf
         INFOPLIST_FILE: TopShelf/Info.plist
         GENERATE_INFOPLIST_FILE: NO
@@ -260,7 +269,7 @@ targets:
     info:
       path: App/PlozziOS/Info.plist
       properties:
-        CFBundleDisplayName: Plozz
+        CFBundleDisplayName: Plozz${PLOZZ_NAME_SUFFIX}
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         ITSAppUsesNonExemptEncryption: false
@@ -326,7 +335,7 @@ targets:
         MALClientID: "$(MAL_CLIENT_ID)"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz${PLOZZ_ID_SUFFIX}
         PRODUCT_NAME: Plozz
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

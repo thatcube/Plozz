@@ -146,15 +146,17 @@ public actor CloudConfigSyncService {
         // across devices (which silently syncs to a different private DB) is
         // diagnosable — the classic "one device never receives" cause.
         await logAccountIdentity()
-        // Heal any previously-dropped applies: reconcile LOCAL to what the mirror
-        // already knows BEFORE publishing. Without this, a mirror that's ahead of
-        // local (e.g. an earlier apply was skipped) would make the next publish
-        // upload the stale local value over the good synced one — a revert loop.
+        // Ensure our custom zone exists.
+        engine?.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
+        // FETCH BEFORE PUBLISH: learn the server's real records + timestamps first,
+        // so a device whose mirror is empty/behind (fresh install, or after a
+        // reset) cannot re-stamp its local roster with fresh timestamps and clobber
+        // peers' genuine edits. After the fetch the mirror reflects the server, so
+        // the publish below uploads only records where LOCAL is truly newer.
+        try? await engine?.fetchChanges()
         if !mirror.records.isEmpty {
             await config.applyRemoteSnapshot(mirror.snapshot)
         }
-        // Ensure our custom zone exists, then reconcile local -> cloud.
-        engine?.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
         await publishLocalChanges()
         reportRecordCount()
     }
@@ -489,19 +491,33 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
 
     private func handleAccountChange(_ event: CKSyncEngine.Event.AccountChange) async {
         // LOCAL-FIRST: never delete local config on an Apple ID change. The
-        // household roster lives in the user-independent Keychain and belongs to
-        // the device, not to any single iCloud account (Apple's "family shares an
-        // Apple TV + a service account" model). We only re-point the mirror at the
-        // now-current Apple ID's private DB.
+        // household roster lives in the user-independent Keychain and belongs to the
+        // device, not to any single iCloud account.
         switch event.changeType {
-        case .signIn, .switchAccounts:
-            // Fresh DB context: forget what the PREVIOUS account's DB held so we
-            // don't assume records exist there, then re-derive + re-upload the
-            // still-present local roster into the new account's DB.
+        case .signIn:
+            // CRITICAL: do NOTHING to the mirror here, and never republish. This
+            // event ALSO fires whenever the engine merely (re)initializes for the
+            // SAME already-signed-in account — on every app launch, and every time
+            // our own `redownloadFromCloud` rebuilds the engine. The old behavior
+            // (wipe the mirror, then `publishLocalChanges`) re-stamped EVERY record
+            // with a fresh `editedAt` derived from an empty mirror, so this device's
+            // possibly-stale copies beat peers' real edits on last-writer-wins and
+            // OVERWROTE them on the server. That single line was the root cause of
+            // "iPad and iPhone clobber each other / edits revert / works only once".
+            // The persisted mirror already reflects the server; the engine fetches
+            // and reconciles by real timestamps on its own.
+            PlozzLog.sync.info("CloudSync: accountChange signIn — keeping mirror, no republish")
+        case .switchAccounts:
+            // A genuinely different Apple ID ⇒ a different private DB. Forget the old
+            // account's mirror/tags so we don't assume its records exist in the new
+            // DB, but do NOT republish (that would re-stamp local with fresh
+            // timestamps and clobber). The engine's fetch will populate the mirror
+            // from the new account's real records, and only a genuine local EDIT
+            // (diffed against that repopulated mirror) will upload afterwards.
+            PlozzLog.sync.info("CloudSync: accountChange switchAccounts — clearing mirror, no republish")
             mirror = CloudSyncMirror()
             systemFields = [:]
             persist()
-            await publishLocalChanges()
         case .signOut:
             // Stop mirroring; keep every bit of local config intact.
             mirror = CloudSyncMirror()

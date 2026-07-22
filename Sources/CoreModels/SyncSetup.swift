@@ -96,10 +96,38 @@ public extension SyncedAccountDescriptor {
             serverName: account.server.name,
             userID: account.userID,
             userName: account.userName,
-            avatarURL: account.avatarURL,
-            candidateBaseURLs: account.server.connectionURLs ?? [account.server.baseURL],
+            // SECURITY: strip any embedded credential (e.g. Jellyfin `?api_key=…`)
+            // BEFORE the descriptor can be synced to CloudKit. The receiving device
+            // re-signs image URLs with its own token at render time.
+            avatarURL: SyncURLSanitizer.sanitize(account.avatarURL),
+            candidateBaseURLs: (account.server.connectionURLs ?? [account.server.baseURL])
+                .map(SyncURLSanitizer.sanitize),
             recordVersion: recordVersion
         )
+    }
+
+    /// A copy with every URL field stripped of credentials — applied to records
+    /// RECEIVED from a peer too (defense in depth: never persist/display a token a
+    /// misbehaving or older peer may have left in a URL).
+    public func sanitizingURLs() -> SyncedAccountDescriptor {
+        var copy = self
+        copy.avatarURL = SyncURLSanitizer.sanitize(avatarURL)
+        copy.candidateBaseURLs = candidateBaseURLs.map(SyncURLSanitizer.sanitize)
+        return copy
+    }
+
+    /// Equality of the fields that MATTER for sync, EXCLUDING device-specific advisory
+    /// hints (`candidateBaseURLs`, which legitimately differ per device/network) and
+    /// per-record bookkeeping (`recordVersion`). A signed-in device uses this so it
+    /// doesn't churn/clobber the shared record just because its reachable URL differs
+    /// from a peer's — the record is only re-published when a meaningful field changes.
+    public func semanticallyEqualForSync(to other: SyncedAccountDescriptor) -> Bool {
+        provider == other.provider
+            && serverID == other.serverID
+            && serverName == other.serverName
+            && userID == other.userID
+            && userName == other.userName
+            && avatarURL == other.avatarURL
     }
 }
 

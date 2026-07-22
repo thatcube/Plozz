@@ -104,7 +104,9 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         self.avatarSymbol = p.avatarSymbol
         self.colorIndex = p.colorIndex
         self.createdAt = p.createdAt
-        self.avatarImageURL = p.avatarImageURL
+        // SECURITY: an avatar image URL may embed a bearer token (e.g. Jellyfin
+        // `?api_key=…`). Strip it before syncing; never publish a credential.
+        self.avatarImageURL = SyncURLSanitizer.sanitize(string: p.avatarImageURL)
         self.avatarEmoji = p.avatarEmoji
         self.avatarEmojiColorIndex = p.avatarEmojiColorIndex
     }
@@ -117,7 +119,17 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         p.avatarSymbol = avatarSymbol
         p.colorIndex = colorIndex
         p.createdAt = createdAt
-        p.avatarImageURL = avatarImageURL
+        // Preserve this device's LOCAL (tokenized) avatar URL when it refers to the
+        // same resource as the synced (stripped) one — so the local image keeps
+        // rendering without re-fetching a token, while a genuinely different remote
+        // avatar still replaces it. Keeps capture==apply: capture re-strips the
+        // local URL and gets exactly `avatarImageURL` back.
+        if let local = existing.avatarImageURL,
+           SyncURLSanitizer.sanitize(string: local) == avatarImageURL {
+            p.avatarImageURL = local
+        } else {
+            p.avatarImageURL = avatarImageURL
+        }
         p.avatarEmoji = avatarEmoji
         p.avatarEmojiColorIndex = avatarEmojiColorIndex
         return p

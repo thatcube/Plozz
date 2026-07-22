@@ -122,6 +122,15 @@ public struct PendingSyncedServersStore: Sendable {
         unignore(id)
     }
 
+    /// Forget EVERY synced descriptor and the ignored/prompted bookkeeping — used
+    /// when the iCloud account switches, so the previous household's servers can't be
+    /// re-published into the new Apple ID.
+    public mutating func removeAll() {
+        store([])
+        defaults.set([String](), forKey: Self.ignoredKey)
+        defaults.set([String](), forKey: Self.promptedKey)
+    }
+
     public var promptedIDs: Set<String> {
         Set(defaults.stringArray(forKey: Self.promptedKey) ?? [])
     }

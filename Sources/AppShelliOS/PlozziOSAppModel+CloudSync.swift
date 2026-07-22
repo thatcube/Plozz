@@ -31,12 +31,15 @@ extension PlozziOSAppModel {
             containerIdentifier: cloudContainerIdentifier,
             stateFileURL: stateURL,
             isEnabled: { SyncSetupFeatureFlag().isEnabled },
-            captureRecords: { [weak model] in
+            captureRecords: { [weak model] fallback in
                 guard let model else { return [:] }
-                return await model.captureSyncRecords()
+                return await model.captureSyncRecords(fallback: fallback)
             },
             applyRecords: { [weak model] changes in
                 await model?.applySyncRecords(changes)
+            },
+            onAccountSwitch: { [weak model] in
+                await model?.clearRemoteDerivedSyncState()
             },
             status: model.cloudSyncStatus
         ))
@@ -50,11 +53,13 @@ extension PlozziOSAppModel {
 
     // MARK: Publish side (V3 flat record capture)
 
-    func captureSyncRecords() -> [SyncRecordID: Data] {
+    func captureSyncRecords(fallback: [SyncRecordID: Data]) -> [SyncRecordID: Data] {
         var out: [SyncRecordID: Data] = [:]
+        let localProfileIDs = Set(profiles.profiles.map(\.id))
         for d in mergedAccountDescriptors() {
-            if let data = CanonicalJSON.encode(d) {
-                out[SyncRecordKey(kind: .descriptor, id: d.id).recordName] = data
+            let name = SyncRecordKey(kind: .descriptor, id: d.id).recordName
+            if let bytes = Self.stableDescriptorBytes(d, fallback: fallback[name]) {
+                out[name] = bytes
             }
         }
         for p in profiles.profiles {
@@ -70,14 +75,43 @@ extension PlozziOSAppModel {
                 out[SyncRecordKey(kind: .setting, id: p.id, subkey: baseKey).recordName] = blob
             }
         }
+        // C5: keep last-synced bytes for setting/membership of profiles not present
+        // locally, so an out-of-order capture never triggers a spurious deletion.
+        for (name, data) in fallback where out[name] == nil {
+            guard let key = SyncRecordKey.parse(name) else { continue }
+            switch key.kind {
+            case .setting, .membership:
+                if !localProfileIDs.contains(key.id) { out[name] = data }
+            case .profile, .descriptor:
+                break
+            }
+        }
         return out
+    }
+
+    /// H2 stability: reuse the last-synced descriptor bytes when the meaningful fields
+    /// are unchanged (preserving per-device advisory URLs), else emit fresh bytes.
+    static func stableDescriptorBytes(_ d: SyncedAccountDescriptor, fallback: Data?) -> Data? {
+        if let fallback,
+           let prev = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: fallback),
+           prev.semanticallyEqualForSync(to: d) {
+            return fallback
+        }
+        return CanonicalJSON.encode(d)
+    }
+
+    /// Drop state derived from a previous iCloud account on an account switch, so it's
+    /// never re-published into the new Apple ID.
+    func clearRemoteDerivedSyncState() {
+        var store = PendingSyncedServersStore()
+        store.removeAll()
     }
 
     /// This device's signed-in accounts PLUS descriptors synced-but-not-signed-into,
     /// so a device never deletes another's servers by omitting them.
     private func mergedAccountDescriptors() -> [SyncedAccountDescriptor] {
         var byID: [String: SyncedAccountDescriptor] = [:]
-        for d in PendingSyncedServersStore().all { byID[d.id] = d }
+        for d in PendingSyncedServersStore().all { byID[d.id] = d.sanitizingURLs() }
         for a in accountsProviders.accounts { byID[a.id] = SyncedAccountDescriptor(account: a) }
         return byID.values.sorted { $0.id < $1.id }
     }
@@ -108,7 +142,7 @@ extension PlozziOSAppModel {
                 else { settingRemoves.append((key.id, key.subkey)) }
             case .descriptor:
                 descriptorsTouched = true
-                if let value, let d = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: value) { pendingStore.upsertSynced(d) }
+                if let value, let d = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: value) { pendingStore.upsertSynced(d.sanitizingURLs()) }
                 else if value == nil { pendingStore.removeSynced(key.id) }
             }
         }
@@ -124,10 +158,11 @@ extension PlozziOSAppModel {
             guard let ns = namespace(forProfileID: r.pid) else { continue }
             ProfileSettingsTransfer.removeOne(baseKey: r.key, namespace: ns)
         }
+        // Membership: store the EXACT synced id set (no filter) so capture==apply;
+        // consumers intersect with signed-in accounts at the point of use.
         if !membershipSet.isEmpty || !membershipClear.isEmpty {
-            let syncedIDs = Set(mergedAccountDescriptors().map(\.id))
             for (pid, ids) in membershipSet where profiles.profiles.contains(where: { $0.id == pid }) {
-                profiles.setActiveAccountIDs(ids.filter { syncedIDs.contains($0) }, for: pid)
+                profiles.setActiveAccountIDs(ids, for: pid)
             }
             for pid in membershipClear { profiles.clearActiveAccountIDs(for: pid) }
         }

@@ -81,19 +81,70 @@ final class SyncRecordMapTests: XCTestCase {
         XCTAssertEqual(decoded, ProfileSyncDTO(profile: p))
     }
 
-    func testMakeProfileFromDTO() {
-        let dto = ProfileSyncDTO(profile: Profile(
-            id: "P9", name: "Fresh", avatarSymbol: "bolt.fill", colorIndex: 2,
-            createdAt: Date(timeIntervalSince1970: 42), avatarEmoji: "⚡️", avatarEmojiColorIndex: 3))
-        let made = dto.makeProfile()
-        XCTAssertEqual(made.id, "P9")
-        XCTAssertEqual(made.name, "Fresh")
-        XCTAssertEqual(made.avatarSymbol, "bolt.fill")
-        XCTAssertEqual(made.colorIndex, 2)
-        XCTAssertEqual(made.avatarEmoji, "⚡️")
-        XCTAssertEqual(made.avatarEmojiColorIndex, 3)
-        // Device-local fields default to nil.
-        XCTAssertNil(made.plexHomeUserID)
-        XCTAssertNil(made.seerrUserID)
+    // MARK: C1 — no credential in a synced avatar URL; local token preserved
+
+    func testProfileDTOStripsTokenFromAvatarURL() {
+        let p = Profile(id: "P1", name: "Kid", avatarSymbol: "star.fill", colorIndex: 1,
+                        avatarImageURL: "https://media.example.com/Users/u/Images/Primary?api_key=SECRETTOKEN")
+        let dto = ProfileSyncDTO(profile: p)
+        let json = String(decoding: CanonicalJSON.encode(dto)!, as: UTF8.self)
+        XCTAssertFalse(json.contains("SECRETTOKEN"), "avatar token leaked into synced DTO")
+        XCTAssertFalse(json.lowercased().contains("api_key"))
+    }
+
+    /// Applying a stripped DTO must preserve THIS device's local tokenized URL (so the
+    /// image keeps rendering) while capture re-strips it — keeping capture==apply.
+    func testMergePreservesLocalTokenWhileCaptureStaysStripped() {
+        let tokenized = "https://media.example.com/Users/u/Images/Primary?api_key=SECRETTOKEN"
+        let stripped = SyncURLSanitizer.sanitize(string: tokenized)
+        var local = Profile(id: "P1", name: "Kid", avatarSymbol: "star.fill", colorIndex: 1,
+                            avatarImageURL: tokenized)
+        local.plexHomeUserID = "home-1"
+
+        // Peer sends the (already-stripped) DTO for the same resource.
+        var remote = local
+        remote.avatarImageURL = stripped
+        remote.plexHomeUserID = nil
+        let dto = ProfileSyncDTO(profile: remote)
+
+        let applied = dto.merged(into: local)
+        XCTAssertEqual(applied.avatarImageURL, tokenized, "local token must be preserved for rendering")
+        XCTAssertEqual(applied.plexHomeUserID, "home-1", "device-local field lost")
+
+        // Re-capture is byte-identical to what we received (no clobber loop).
+        let recaptured = CanonicalJSON.encode(ProfileSyncDTO(profile: applied))!
+        XCTAssertEqual(recaptured, CanonicalJSON.encode(dto)!, "capture(apply) != x with tokenized local avatar")
+    }
+
+    func testDescriptorStripsTokenAndPreservesSemantics() {
+        // A descriptor carrying a tokenized avatar URL (as a signed-in Jellyfin
+        // account would produce) must never serialize the token.
+        let tokenized = SyncedAccountDescriptor(
+            id: "A1", provider: .jellyfin, serverID: "s1", serverName: "Home",
+            userID: "u1", userName: "User",
+            avatarURL: URL(string: "http://192.168.1.2:8096/Users/u1/Images/Primary?api_key=SECRETTOKEN"),
+            candidateBaseURLs: [URL(string: "http://192.168.1.2:8096?X-Plex-Token=T0K3N")!])
+        let clean = tokenized.sanitizingURLs()
+        let json = String(decoding: CanonicalJSON.encode(clean)!, as: UTF8.self)
+        XCTAssertFalse(json.contains("SECRETTOKEN"), "descriptor avatar token leaked")
+        XCTAssertFalse(json.contains("T0K3N"), "descriptor candidate-URL token leaked")
+        // Semantic identity intact.
+        XCTAssertEqual(clean.serverName, "Home")
+        XCTAssertEqual(clean.userID, "u1")
+    }
+
+    func testDescriptorSemanticEqualityIgnoresCandidateURLs() {
+        let base = SyncedAccountDescriptor(
+            id: "A1", provider: .jellyfin, serverID: "s1", serverName: "Home",
+            userID: "u1", userName: "User",
+            candidateBaseURLs: [URL(string: "http://10.0.0.5:8096")!])
+        var other = base
+        other.candidateBaseURLs = [URL(string: "http://192.168.1.9:8096")!]
+        other.recordVersion = 99
+        XCTAssertTrue(base.semanticallyEqualForSync(to: other),
+                      "per-device reachable URLs / recordVersion must not count as a semantic change")
+        var renamed = base
+        renamed.serverName = "Renamed"
+        XCTAssertFalse(base.semanticallyEqualForSync(to: renamed))
     }
 }

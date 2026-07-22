@@ -460,14 +460,66 @@ final class SyncLedgerTests: XCTestCase {
 
     // MARK: Persistence
 
-    func testLedgerCodableRoundTrip() throws {
+    // MARK: Review-hardening (C3/C2/C4/C5 primitives)
+
+    /// C3: an aborted (failed/partial) full resync must NEVER delete records — it
+    /// re-asserts the ones it couldn't confirm instead.
+    func testAbortFullResyncNeverDeletes() {
         let s = FakeCloudServer(); let a = FakeDevice("A", server: s, startClock: 1000)
-        a.edit("profile:1", "Alice"); a.edit("setting:1:x", "y"); a.sync()
-        let data = try JSONEncoder().encode(a.ledger)
-        let restored = try JSONDecoder().decode(SyncLedger.self, from: data)
-        XCTAssertEqual(restored, a.ledger)
-        var r = restored
-        let plan = r.reconcileLocal(desired: a.store, now: 999999)
-        XCTAssertTrue(plan.isEmpty, "restored ledger re-uploaded unchanged state")
+        a.edit("profile:1", "Alice"); a.edit("descriptor:x", "srv"); a.sync()
+        XCTAssertTrue(a.ledger.hasServerBaseline)
+
+        a.ledger.beginFullResync()          // token reset…
+        // …fetch THROWS: no records delivered. Abort instead of finalizing.
+        a.ledger.abortFullResync()
+
+        XCTAssertNotNil(a.ledger.entries["profile:1"], "abort must not delete unconfirmed records")
+        XCTAssertNotNil(a.ledger.entries["descriptor:x"])
+        XCTAssertFalse(a.ledger.pendingUploads().isEmpty, "aborted resync should re-assert records")
+        var l = a.ledger
+        let plan = l.reconcileLocal(desired: a.store, now: 99_999)
+        XCTAssertTrue(plan.deletes.isEmpty, "no deletions after an aborted resync")
+    }
+
+    /// C3 contrast: a COMPLETE resync (endFullResync) still finalizes a peer's
+    /// deletion of an unseen record.
+    func testEndFullResyncFinalizesUnseenDeletion() {
+        let s = FakeCloudServer(); let a = FakeDevice("A", server: s, startClock: 1000)
+        a.edit("profile:1", "Alice"); a.edit("profile:2", "Bob"); a.sync()
+        // profile:2 was deleted on the server; a tombstoneless resync delivers only p1.
+        a.ledger.beginFullResync()
+        let live = SyncRemoteRecord(recordName: "profile:1", value: Data("Alice".utf8), editedAt: 2000, systemFields: Data())
+        _ = a.ledger.applyFetched(saved: [live], deleted: [], now: 2001)
+        let finalized = a.ledger.endFullResync()
+        if let deletion = finalized["profile:2"] {
+            XCTAssertNil(deletion, "unseen previously-synced record must finalize as a deletion")
+        } else {
+            XCTFail("profile:2 should appear in finalized changes as a deletion")
+        }
+        XCTAssertNil(a.ledger.entries["profile:2"])
+    }
+
+    /// C2: remote-driven applies bump `remoteRevision`; the local publish reconcile
+    /// does NOT — that's how the service detects a fetch interleaving its capture.
+    func testRemoteRevisionOnlyBumpsOnRemoteApply() {
+        var l = SyncLedger()
+        let r0 = l.remoteRevision
+        _ = l.applyFetched(
+            saved: [SyncRemoteRecord(recordName: "profile:1", value: Data("a".utf8), editedAt: 5, systemFields: Data())],
+            deleted: [], now: 10)
+        XCTAssertGreaterThan(l.remoteRevision, r0, "applyFetched must bump remoteRevision")
+
+        let r1 = l.remoteRevision
+        _ = l.reconcileLocal(desired: ["profile:1": Data("a".utf8)], now: 11)
+        XCTAssertEqual(l.remoteRevision, r1, "reconcileLocal (publish) must NOT bump remoteRevision")
+    }
+
+    /// C4/C5: baseline detection + the capture fallback map.
+    func testServerBaselineAndSyncedValues() {
+        let s = FakeCloudServer(); let a = FakeDevice("A", server: s, startClock: 1000)
+        XCTAssertFalse(a.ledger.hasServerBaseline)
+        a.edit("setting:1:x", "v"); a.sync()
+        XCTAssertTrue(a.ledger.hasServerBaseline)
+        XCTAssertEqual(a.ledger.syncedValues()["setting:1:x"], Data("v".utf8))
     }
 }

@@ -73,12 +73,15 @@ extension AppState {
             containerIdentifier: cloudContainerIdentifier,
             stateFileURL: stateURL,
             isEnabled: { SyncSetupFeatureFlag().isEnabled },
-            captureRecords: { [weak appState] in
+            captureRecords: { [weak appState] fallback in
                 guard let appState else { return [:] }
-                return await appState.captureSyncRecords()
+                return await appState.captureSyncRecords(fallback: fallback)
             },
             applyRecords: { [weak appState] changes in
                 await appState?.applySyncRecords(changes)
+            },
+            onAccountSwitch: { [weak appState] in
+                await appState?.clearRemoteDerivedSyncState()
             },
             status: appState.cloudSyncStatus
         ))
@@ -119,13 +122,22 @@ extension AppState {
     /// record per per-profile setting key. Canonical (sorted-key) bytes so a
     /// re-capture after applying a remote change is byte-identical (the anti-clobber
     /// invariant). NEVER tokens; NOT the device-local active-profile selection.
-    public func captureSyncRecords() -> [SyncRecordID: Data] {
+    public func captureSyncRecords(fallback: [SyncRecordID: Data]) -> [SyncRecordID: Data] {
         var out: [SyncRecordID: Data] = [:]
+        let localProfileIDs = Set(profilesModel.profiles.map(\.id))
+
+        // Descriptors: this device's signed-in accounts PLUS the ones it has synced
+        // but isn't signed into (pending). H2: keep the last-synced bytes when the
+        // descriptor's meaningful fields are unchanged, so a per-device reachable-URL
+        // difference doesn't churn/clobber the shared record.
         for d in Self.mergedAccountDescriptors(signedIn: accountsProviders.accounts) {
-            if let data = CanonicalJSON.encode(d) {
-                out[SyncRecordKey(kind: .descriptor, id: d.id).recordName] = data
+            let name = SyncRecordKey(kind: .descriptor, id: d.id).recordName
+            if let bytes = Self.stableDescriptorBytes(d, fallback: fallback[name]) {
+                out[name] = bytes
             }
         }
+        // Profiles (default ALWAYS included ⇒ never sync-deleted), their membership,
+        // and per-key settings.
         for p in profilesModel.profiles {
             if let data = CanonicalJSON.encode(ProfileSyncDTO(profile: p)) {
                 out[SyncRecordKey(kind: .profile, id: p.id).recordName] = data
@@ -139,7 +151,45 @@ extension AppState {
                 out[SyncRecordKey(kind: .setting, id: p.id, subkey: baseKey).recordName] = blob
             }
         }
+        // C5: for setting/membership records whose profile is NOT present locally
+        // (e.g. it arrived in a later fetch batch, or hasn't hydrated yet), fall back
+        // to the last-synced bytes so we never omit them and trigger a spurious
+        // deletion that would wipe the setting/membership for the whole household.
+        // Profiles/descriptors are authoritative on this device, so their absence IS a
+        // genuine deletion and is NOT back-filled.
+        for (name, data) in fallback where out[name] == nil {
+            guard let key = SyncRecordKey.parse(name) else { continue }
+            switch key.kind {
+            case .setting, .membership:
+                if !localProfileIDs.contains(key.id) { out[name] = data }
+            case .profile, .descriptor:
+                break
+            }
+        }
         return out
+    }
+
+    /// H2 stability: if the last-synced descriptor bytes decode to a descriptor whose
+    /// meaningful fields equal the freshly-derived one, reuse those bytes verbatim
+    /// (preserving advisory `candidateBaseURLs`/`recordVersion`) so no spurious edit is
+    /// published. Otherwise emit the new canonical bytes.
+    static func stableDescriptorBytes(_ d: SyncedAccountDescriptor, fallback: Data?) -> Data? {
+        if let fallback,
+           let prev = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: fallback),
+           prev.semanticallyEqualForSync(to: d) {
+            return fallback
+        }
+        return CanonicalJSON.encode(d)
+    }
+
+    /// Drop local state DERIVED from a previous iCloud account so it is never
+    /// re-published into a newly-switched Apple ID (the pending "needs sign-in"
+    /// servers came from the old account's sync). This device's OWN signed-in
+    /// accounts and local profiles are untouched.
+    public func clearRemoteDerivedSyncState() {
+        var store = PendingSyncedServersStore()
+        store.removeAll()
+        refreshPendingSyncedServers()
     }
 
     /// The household's FULL server descriptor set: this device's signed-in accounts
@@ -148,7 +198,7 @@ extension AppState {
     /// snapshot and DELETE another device's servers for the whole household.
     static func mergedAccountDescriptors(signedIn accounts: [Account]) -> [SyncedAccountDescriptor] {
         var byID: [String: SyncedAccountDescriptor] = [:]
-        for d in PendingSyncedServersStore().all { byID[d.id] = d }
+        for d in PendingSyncedServersStore().all { byID[d.id] = d.sanitizingURLs() }
         for a in accounts { byID[a.id] = SyncedAccountDescriptor(account: a) } // signed-in wins
         return byID.values.sorted { $0.id < $1.id }
     }
@@ -190,7 +240,7 @@ extension AppState {
             case .descriptor:
                 descriptorsTouched = true
                 if let value, let d = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: value) {
-                    pendingStore.upsertSynced(d)
+                    pendingStore.upsertSynced(d.sanitizingURLs())
                 } else if value == nil {
                     pendingStore.removeSynced(key.id)
                 }
@@ -210,11 +260,14 @@ extension AppState {
             guard let ns = namespace(forProfileID: r.pid) else { continue }
             ProfileSettingsTransfer.removeOne(baseKey: r.key, namespace: ns)
         }
-        // 3. Membership: set or clear, scoped to accounts the household actually has.
+        // 3. Membership: store the EXACT synced id set (do NOT filter to the ids this
+        // device currently knows — that would make capture != apply and upload a
+        // shrunken set, dropping accounts for the whole household when a membership
+        // arrives before its descriptors). Consumers intersect with available accounts
+        // at the point of USE.
         if !membershipSet.isEmpty || !membershipClear.isEmpty {
-            let syncedIDs = Set(Self.mergedAccountDescriptors(signedIn: accountsProviders.accounts).map(\.id))
             for (pid, ids) in membershipSet where profilesModel.profiles.contains(where: { $0.id == pid }) {
-                profilesModel.setActiveAccountIDs(ids.filter { syncedIDs.contains($0) }, for: pid)
+                profilesModel.setActiveAccountIDs(ids, for: pid)
             }
             for pid in membershipClear { profilesModel.clearActiveAccountIDs(for: pid) }
         }

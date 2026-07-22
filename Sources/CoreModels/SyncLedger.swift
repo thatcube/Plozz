@@ -127,8 +127,18 @@ public struct SyncLedger: Codable, Hashable, Sendable {
     private var clock: Int64
     /// True between `beginFullResync` and `endFullResync`.
     private var resyncing: Bool
+    /// Transient, monotonically-bumped counter of REMOTE-driven mutations (fetched
+    /// applies, send-conflict server-wins, remote deletions, resync finalize). The
+    /// service reads it around the `await captureRecords()` suspension: if it changed
+    /// while capture was in flight, the captured snapshot is stale relative to the
+    /// server baseline and MUST be re-captured before reconciling — otherwise a stale
+    /// local value would be re-stamped and clobber the peer edit that just arrived.
+    /// Not persisted (only meaningful within a process's actor lifetime).
+    public private(set) var remoteRevision: Int = 0
 
     public init() { self.entries = [:]; self.clock = 0; self.resyncing = false }
+
+    private mutating func bumpRemoteRevision() { remoteRevision &+= 1 }
 
     enum CodingKeys: String, CodingKey { case entries, clock }
     public init(from decoder: Decoder) throws {
@@ -146,6 +156,29 @@ public struct SyncLedger: Codable, Hashable, Sendable {
     /// Records currently mirrored (excludes pending-delete tombstones) — the
     /// "N items in iCloud" count.
     public var count: Int { entries.values.filter { !$0.pendingDelete }.count }
+
+    /// True if any entry carries a confirmed server baseline — i.e. this ledger has
+    /// really synced with the server at least once. The service uses this to decide
+    /// whether a publish after a FAILED fetch is safe: with a baseline, reconcile
+    /// compares against known server state (safe); without one (fresh device / lost
+    /// state file), publishing would stamp fresh edits that could clobber peers.
+    public var hasServerBaseline: Bool {
+        entries.values.contains { $0.syncedValue != nil }
+    }
+
+    /// The last-known canonical bytes per record — server baseline where we have one,
+    /// otherwise the pending local value. The app's `captureRecords` uses this as a
+    /// FALLBACK for records it can't currently express locally (e.g. a setting whose
+    /// profile arrived in a later fetch batch, or a not-signed-in server descriptor),
+    /// so an out-of-order or partial capture never omits a record and triggers a
+    /// spurious deletion. Excludes pending-delete tombstones.
+    public func syncedValues() -> [SyncRecordID: Data] {
+        var out: [SyncRecordID: Data] = [:]
+        for (name, entry) in entries where !entry.pendingDelete {
+            out[name] = entry.syncedValue ?? entry.localValue
+        }
+        return out
+    }
 
     private mutating func tick(_ now: Int64) -> Int64 { clock = max(now, clock + 1); return clock }
     private mutating func observe(_ remote: Int64) { clock = max(clock, remote) }
@@ -236,6 +269,7 @@ public struct SyncLedger: Codable, Hashable, Sendable {
         saved: [SyncRemoteRecord], deleted: [SyncRecordID], now: Int64
     ) -> SyncLocalChanges {
         var changes: SyncLocalChanges = [:]
+        bumpRemoteRevision()
 
         for remote in saved {
             observe(remote.editedAt)
@@ -318,6 +352,7 @@ public struct SyncLedger: Codable, Hashable, Sendable {
     /// resurrects a record we've stopped tracking (matches `applySendSuccess`).
     public mutating func applySendConflict(_ server: SyncRemoteRecord, now: Int64) -> (SyncRecordID, Data?)? {
         observe(server.editedAt)
+        bumpRemoteRevision()
         guard var entry = entries[server.recordName], !entry.pendingDelete else { return nil }
         entry.systemFields = server.systemFields
         entry.syncedValue = server.value
@@ -384,6 +419,7 @@ public struct SyncLedger: Codable, Hashable, Sendable {
     /// resurrected after a tombstoneless (`CKErrorChangeTokenExpired`) resync.
     public mutating func beginFullResync() {
         resyncing = true
+        bumpRemoteRevision()
         for (name, var entry) in entries {
             entry.wasSynced = (entry.syncedValue != nil)
             entry.resyncSeen = false
@@ -400,6 +436,7 @@ public struct SyncLedger: Codable, Hashable, Sendable {
     /// re-upload. Returns the exact local deletions to apply.
     public mutating func endFullResync() -> SyncLocalChanges {
         var changes: SyncLocalChanges = [:]
+        bumpRemoteRevision()
         for (name, var entry) in entries {
             if entry.wasSynced && !entry.resyncSeen && !entry.dirty && !entry.pendingDelete {
                 entries[name] = nil
@@ -411,6 +448,27 @@ public struct SyncLedger: Codable, Hashable, Sendable {
         }
         resyncing = false
         return changes
+    }
+
+    /// Abort a full resync that FAILED or fetched incompletely — the opposite safety
+    /// choice to `endFullResync`. A partial/failed fetch must NEVER be finalized as a
+    /// complete snapshot (that would delete records the fetch simply didn't reach).
+    /// So a record that HAD a server baseline but wasn't re-delivered is NOT deleted;
+    /// instead it is marked dirty so it re-uploads its known-good local value,
+    /// restoring the record we couldn't confirm. A later successful fetch/resync
+    /// re-establishes the true baseline. No deletions are ever produced.
+    public mutating func abortFullResync() {
+        bumpRemoteRevision()
+        for (name, var entry) in entries {
+            if entry.wasSynced && !entry.resyncSeen && !entry.pendingDelete {
+                // Couldn't confirm this previously-synced record — re-assert it.
+                entry.dirty = true
+            }
+            entry.wasSynced = false
+            entry.resyncSeen = false
+            entries[name] = entry
+        }
+        resyncing = false
     }
 
     // MARK: Conflict rule

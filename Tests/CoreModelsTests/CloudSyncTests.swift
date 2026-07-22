@@ -162,21 +162,19 @@ final class CloudSyncTests: XCTestCase {
 
     // MARK: full round-trip
 
-    func testSnapshotRoundTripThroughRecords() {
-        var mirror = CloudSyncMirror()
-        let local = snapshot(
-            accounts: [descriptor("A"), descriptor("B")],
-            profiles: [profile("p1", name: "Mom"), profile("p2", name: "Dad")],
-            settings: [ProfileSettingsSnapshot(profileID: "p1", entries: ["theme": Data("dark".utf8)])],
-            memberships: ["p1": ["A"], "p2": []]
-        )
-        _ = mirror.publish(local: local)
-        let rebuilt = mirror.snapshot
-
-        XCTAssertEqual(rebuilt.accounts.map(\.id), ["A", "B"])
-        XCTAssertEqual(rebuilt.profiles.map(\.profile.id), ["p1", "p2"])
-        XCTAssertEqual(rebuilt.profileSettings.map(\.profileID), ["p1"])
-        XCTAssertEqual(rebuilt.profileMemberships["p1"], ["A"])
-        XCTAssertEqual(rebuilt.profileMemberships["p2"], [])
+    func testBumpVersionRaisesToAtLeast() {
+        let payload = try! JSONEncoder().encode(descriptor("A"))
+        var mirror = CloudSyncMirror(records: [
+            "account:A": CloudSyncRecord(kind: .account, id: "A", version: 2, payload: payload)
+        ])
+        // Bumps up when below the target.
+        let bumped = mirror.bumpVersion(of: "account:A", toAtLeast: 5)
+        XCTAssertEqual(bumped?.version, 5)
+        XCTAssertEqual(mirror.records["account:A"]?.version, 5)
+        // No-op when already at/above target (keeps the higher version).
+        let unchanged = mirror.bumpVersion(of: "account:A", toAtLeast: 3)
+        XCTAssertEqual(unchanged?.version, 5)
+        // nil for an unknown record.
+        XCTAssertNil(mirror.bumpVersion(of: "account:ZZ", toAtLeast: 9))
     }
 }

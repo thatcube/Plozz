@@ -247,4 +247,18 @@ public struct CloudSyncMirror: Codable, Hashable, Sendable {
     /// The snapshot the mirror currently represents (for the initial upload of an
     /// already-configured device, and for diagnostics).
     public var snapshot: SyncConfigSnapshot { CloudSyncCodec.snapshot(from: records) }
+
+    /// Raise a record's version to at least `version`, keeping its payload. Used by
+    /// the CloudKit conflict handler: when this device's content wins a same-version
+    /// tie-break, we must bump above the server's version so the re-save actually
+    /// lands (a same-version save would just conflict again). Returns the updated
+    /// record, or nil if absent.
+    @discardableResult
+    public mutating func bumpVersion(of recordName: String, toAtLeast version: Int) -> CloudSyncRecord? {
+        guard let rec = records[recordName] else { return nil }
+        guard rec.version < version else { return rec }
+        let bumped = CloudSyncRecord(kind: rec.kind, id: rec.id, version: version, payload: rec.payload)
+        records[recordName] = bumped
+        return bumped
+    }
 }

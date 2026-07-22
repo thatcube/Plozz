@@ -393,14 +393,29 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
             let name = record.recordID.recordName
             switch failure.error.code {
             case .serverRecordChanged:
-                // Conflict: merge the server's copy via the deterministic resolver.
-                guard let serverRecord = failure.error.serverRecord,
-                      let serverRec = CloudSyncRecord(ckRecord: serverRecord) else { continue }
+                // Conflict: the record already exists on the server with a change
+                // tag we don't hold. ALWAYS cache the server's system fields first
+                // (even if our payload decode fails) so the next save carries the
+                // correct tag — otherwise we conflict forever.
+                guard let serverRecord = failure.error.serverRecord else {
+                    // No server record to reconcile against — drop the pending save
+                    // to break the loop; a later fetch will re-seed it.
+                    syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(record.recordID)])
+                    continue
+                }
                 systemFields[name] = Self.archive(serverRecord)
+                guard let serverRec = CloudSyncRecord(ckRecord: serverRecord) else { continue }
                 let result = mirror.applyRemote(saved: [serverRec], deletedRecordNames: [])
-                // If OUR value still wins after merging, re-save it; else adopt server.
-                if let localRec = mirror.records[name], localRec != serverRec {
+                // After merging, if the mirror's winning content differs from the
+                // server's, THIS device won the resolve — bump above the server's
+                // version and re-save so our value actually lands (a same-version
+                // re-save would just conflict again — the loop we were stuck in).
+                // If they match, we converged to the server's copy: stop re-sending.
+                if let localRec = mirror.records[name], localRec.payload != serverRec.payload {
+                    mirror.bumpVersion(of: name, toAtLeast: serverRec.version + 1)
                     retry.append(.saveRecord(record.recordID))
+                } else {
+                    syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(record.recordID)])
                 }
                 if result.changed {
                     Task { await self.config.applyRemoteSnapshot(result.snapshot) }

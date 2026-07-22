@@ -21,6 +21,11 @@ public struct PlozziOSRootView: View {
     /// A synced server the user tapped "Set Up" on, used to pre-fill the Add Server
     /// sheet so they only have to sign in.
     @State private var serverSetupSeed: SyncedAccountDescriptor?
+    /// Action chosen in the new-server prompt, run after the prompt sheet dismisses so
+    /// we never stack two sheets in the same runloop.
+    @State private var serverPromptFollowUp: ServerPromptFollowUp?
+    /// Drives the "set up from another device" pairing flow launched from the prompt.
+    @State private var showingSyncReceive = false
 
     public init() {}
 
@@ -67,26 +72,30 @@ public struct PlozziOSRootView: View {
         } message: { _ in
             Text("Send your servers and sign-in so it's ready to watch — no typing needed.")
         }
-        .alert(
-            "New server from your other device",
-            isPresented: Binding(
-                get: { appModel.pendingSyncedServerPrompt != nil },
-                set: { if !$0 { appModel.clearPendingSyncedServerPrompt() } }
-            ),
-            presenting: appModel.pendingSyncedServerPrompt
-        ) { descriptor in
-            Button("Set Up") {
-                appModel.clearPendingSyncedServerPrompt()
-                setUpPendingSyncedServer(descriptor)
+        .sheet(item: serverPromptBinding, onDismiss: consumeServerPromptFollowUp) { descriptor in
+            PlozziOSNewServerPromptView(
+                descriptor: descriptor,
+                accent: resolvedPalette.accent,
+                onSignIn: {
+                    serverPromptFollowUp = .signIn(descriptor)
+                    appModel.clearPendingSyncedServerPrompt()
+                },
+                onUseOtherDevice: {
+                    serverPromptFollowUp = .pairDevice
+                    appModel.clearPendingSyncedServerPrompt()
+                },
+                onNotNow: {
+                    serverPromptFollowUp = nil
+                    appModel.clearPendingSyncedServerPrompt()
+                }
+            )
+            .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
+        }
+        .fullScreenCover(isPresented: $showingSyncReceive) {
+            PlozziOSSyncSetupReceiveView(appModel: appModel) {
+                showingSyncReceive = false
             }
-            Button("Ignore", role: .destructive) {
-                appModel.ignorePendingSyncedServer(descriptor.id)
-            }
-            Button("Not Now", role: .cancel) {
-                appModel.clearPendingSyncedServerPrompt()
-            }
-        } message: { descriptor in
-            Text("“\(descriptor.serverName)” is set up on another device. Sign in to watch it here — your login stays private to each device. You can also find it later under Settings ▸ iCloud Sync.")
+            .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
         }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
@@ -286,11 +295,41 @@ public struct PlozziOSRootView: View {
         serverSetupSeed = descriptor
         showAddServer()
     }
+
+    /// Presentation binding for the one-time new-server prompt. Clearing it (a button
+    /// tap or a swipe-down) dismisses the sheet.
+    private var serverPromptBinding: Binding<SyncedAccountDescriptor?> {
+        Binding(
+            get: { appModel.pendingSyncedServerPrompt },
+            set: { if $0 == nil { appModel.clearPendingSyncedServerPrompt() } }
+        )
+    }
+
+    /// Run the action chosen in the prompt once its sheet has fully dismissed. A
+    /// swipe-to-dismiss leaves `serverPromptFollowUp == nil`, which behaves like
+    /// "Not Now" (the server still lives under Settings ▸ iCloud Sync).
+    private func consumeServerPromptFollowUp() {
+        guard let follow = serverPromptFollowUp else { return }
+        serverPromptFollowUp = nil
+        switch follow {
+        case .signIn(let descriptor):
+            setUpPendingSyncedServer(descriptor)
+        case .pairDevice:
+            showingSyncReceive = true
+        }
+    }
 }
 
 private struct PendingPairing: Identifiable {
     let invite: String
     var id: String { invite }
+}
+
+/// The action a user chose in the new-server prompt, deferred until the prompt sheet
+/// dismisses so a follow-up sheet never races the dismissal.
+private enum ServerPromptFollowUp {
+    case signIn(SyncedAccountDescriptor)
+    case pairDevice
 }
 
 private enum PlozziOSDestination: String, CaseIterable, Identifiable, Hashable {

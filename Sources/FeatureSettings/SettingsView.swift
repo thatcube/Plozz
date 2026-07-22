@@ -116,10 +116,6 @@ public struct SettingsView: View {
     private let onSetSyncEnabled: ((Bool) -> Void)?
     /// Live status summary line for the iCloud Sync page, and a manual sync action.
     private let syncStatusSummary: String?
-    /// A dedicated, human-readable detail line for the iCloud Sync page — the item
-    /// count + iCloud identity — shown on its own row so it's easy to compare across
-    /// devices (a device stuck at a lower count isn't receiving).
-    private let syncItemsDetail: String?
     private let onSyncNow: (() -> Void)?
     private let onResetSync: (() -> Void)?
     /// Synced servers this device isn't signed into yet, plus ignore + set-up actions.
@@ -182,7 +178,6 @@ public struct SettingsView: View {
         syncEnabled: Bool = false,
         onSetSyncEnabled: ((Bool) -> Void)? = nil,
         syncStatusSummary: String? = nil,
-        syncItemsDetail: String? = nil,
         onSyncNow: (() -> Void)? = nil,
         onResetSync: (() -> Void)? = nil,
         pendingSyncedServers: [SyncedAccountDescriptor] = [],
@@ -240,7 +235,6 @@ public struct SettingsView: View {
         self.syncEnabled = syncEnabled
         self.onSetSyncEnabled = onSetSyncEnabled
         self.syncStatusSummary = syncStatusSummary
-        self.syncItemsDetail = syncItemsDetail
         self.onSyncNow = onSyncNow
         self.onResetSync = onResetSync
         self.pendingSyncedServers = pendingSyncedServers
@@ -882,15 +876,6 @@ public struct SettingsView: View {
                                 }
                             }
                             .focusSection()
-                        }
-
-                        if syncEnabled, let syncItemsDetail {
-                            LabeledSettingRow("Synced", labelWidth: 160) {
-                                Text(syncItemsDetail)
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
                         }
 
                         if syncEnabled, let onResetSync {

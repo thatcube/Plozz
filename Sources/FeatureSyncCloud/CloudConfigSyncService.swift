@@ -232,20 +232,6 @@ public actor CloudConfigSyncService {
         return parts.joined(separator: " | ")
     }
 
-    /// Publish pending local changes AND push them to the server right away, instead
-    /// of only enqueueing and waiting for `automaticallySync` to decide to send
-    /// (which CloudKit can defer for a long time). Called from the app's debounced
-    /// change handler so an edit reaches the server within ~a second — otherwise a
-    /// peer that fetches/taps "Sync Now" hits a server that doesn't have the edit
-    /// yet, the single biggest cause of "I changed it but the other device never
-    /// sees it".
-    public func publishAndSend() async {
-        guard config.isEnabled(), let engine else { return }
-        await publishLocalChanges()
-        do { try await engine.sendChanges() }
-        catch { setDiagnostic("send: \(Self.describe(error))") }
-    }
-
     /// The app calls this whenever the non-secret config changes (same signal that
     /// refreshes the presence beacon). Diffs local against the mirror and enqueues
     /// the minimal set of record saves/deletes. No-op when disabled or unchanged.

@@ -241,19 +241,7 @@ public struct RootView: View {
                         onSetUpAnotherDevice: { showSyncSend = true },
                         syncEnabled: appState.syncSetup.isEnabled,
                         onSetSyncEnabled: { appState.setSyncSetupEnabled($0) },
-                        syncStatusSummary: appState.cloudSyncStatus.lastDiagnostic.map {
-                            "\(appState.cloudSyncStatus.summary) · \($0)"
-                        } ?? appState.cloudSyncStatus.summary,
-                        syncItemsDetail: {
-                            let s = appState.cloudSyncStatus
-                            var parts: [String] = []
-                            if let n = s.syncedRecordCount {
-                                parts.append("\(n) item\(n == 1 ? "" : "s") in iCloud")
-                            }
-                            if let tag = s.accountTag { parts.append("identity \(tag)…") }
-                            return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
-                                + "  (should match every device)"
-                        }(),
+                        syncStatusSummary: appState.cloudSyncStatus.summaryLine,
                         onSyncNow: { appState.syncCloudNow() },
                         onResetSync: { appState.resetCloudSync() },
                         pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,

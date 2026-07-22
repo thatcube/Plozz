@@ -120,7 +120,7 @@ extension PlozziOSAppModel {
         cloudPublishTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             guard !Task.isCancelled else { return }
-            await cloudSync.publishAndSend()
+            await cloudSync.publishLocalChanges()
             _ = self
         }
     }

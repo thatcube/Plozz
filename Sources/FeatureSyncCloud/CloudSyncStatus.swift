@@ -80,4 +80,31 @@ public final class CloudSyncStatus {
         f.unitsStyle = .short
         return f.localizedString(for: date, relativeTo: Date())
     }
+
+    /// The status line for the sync page: the summary, plus the persistent
+    /// diagnostic detail when present, plus the item-count/identity detail on a
+    /// second line so it's easy to compare across devices — all folded into the one
+    /// existing summary string (tvOS's settings initializer is at the type-checker's
+    /// argument limit, so a NEW parameter there won't compile).
+    public var summaryLine: String {
+        var line = summary
+        if let diag = lastDiagnostic { line += " · \(diag)" }
+        if let detail = itemsDetail { line += "\n\(detail)" }
+        return line
+    }
+
+    /// A dedicated detail line for the sync page: how many records this device
+    /// mirrors plus its iCloud identity, so it's trivial to compare across devices
+    /// (a device stuck at a lower count isn't receiving). `nil` until known.
+    public var itemsDetail: String? {
+        var parts: [String] = []
+        if let n = syncedRecordCount {
+            parts.append("\(n) \(n == 1 ? "item" : "items") in iCloud")
+        }
+        if let tag = accountTag {
+            parts.append("identity \(tag)…")
+        }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: "  ·  ") + "  (should match every device)"
+    }
 }

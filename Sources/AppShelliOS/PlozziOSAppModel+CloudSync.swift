@@ -222,26 +222,47 @@ extension PlozziOSAppModel {
     func syncCloudOnForeground() {
         guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
         Task { await cloudSync.fetchNow() }
-        autoAdoptSyncSetupIfOffered()
+        checkForSyncSetupOffer()
     }
 
     /// Same-Apple-ID credential auto-skip (SOURCE side). If another of the user's
-    /// devices is currently asking to be set up (it published a rendezvous to iCloud,
-    /// e.g. an Apple TV the user just tapped "add my servers" on), silently connect and
-    /// push this device's config + credentials — no typing, no numeric SAS (the offer's
-    /// public key is pinned, authenticated out-of-band by iCloud account membership).
-    /// Only a configured device (one that actually HAS credentials to share) responds,
-    /// and only when cross-device sync is enabled.
-    func autoAdoptSyncSetupIfOffered() {
-        guard SyncSetupFeatureFlag().isEnabled, !isAutoAdoptingSyncSetup else { return }
+    /// devices is asking to be set up (it published a rendezvous to iCloud, e.g. an
+    /// Apple TV the user just tapped "add my servers" on), SURFACE a one-tap confirm —
+    /// we never push credentials silently. The single tap is neither typing a code nor
+    /// re-signing in, so it stays zero-friction, but it keeps a human in the loop so a
+    /// shared/stale Apple ID can't silently harvest tokens (matches Apple's "set up new
+    /// device" pattern, which also confirms on the source).
+    func checkForSyncSetupOffer() {
+        guard SyncSetupFeatureFlag().isEnabled, !isAutoAdoptingSyncSetup, pendingSyncSetupOffer == nil else { return }
         guard !accountsProviders.accounts.isEmpty else { return }         // nothing to give
-        guard syncSetup.discoverRendezvousTarget() != nil else { return } // no offer → skip
+        guard let offer = syncSetup.discoverRendezvousTarget() else { return }
+        guard !dismissedSyncSetupOfferKeys.contains(Self.offerKey(offer)) else { return }
+        pendingSyncSetupOffer = offer
+    }
+
+    /// The user confirmed — push config + credentials to the offered device (pinned
+    /// key ⇒ no SAS, no typing).
+    func confirmSyncSetupOffer() {
+        guard let offer = pendingSyncSetupOffer else { return }
+        pendingSyncSetupOffer = nil
         isAutoAdoptingSyncSetup = true
         let model = SyncSetupPairingModel(service: syncSetup)
         Task { @MainActor in
-            await model.autoAdoptOfferedRendezvous()
+            await model.adopt(offer)
             isAutoAdoptingSyncSetup = false
         }
+    }
+
+    /// The user declined — don't re-prompt for this exact offer.
+    func declineSyncSetupOffer() {
+        if let offer = pendingSyncSetupOffer {
+            dismissedSyncSetupOfferKeys.insert(Self.offerKey(offer))
+        }
+        pendingSyncSetupOffer = nil
+    }
+
+    private static func offerKey(_ offer: SyncPairingRendezvous) -> String {
+        offer.deviceID + ":" + offer.publicKeyData.base64EncodedString()
     }
 
     /// Reset a corrupted/divergent sync: wipe the iCloud zone and re-seed from this

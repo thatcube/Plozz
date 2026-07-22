@@ -62,6 +62,14 @@ final class PlozziOSAppModel {
     @ObservationIgnored
     var isAutoAdoptingSyncSetup = false
 
+    /// A same-Apple-ID device is asking to be set up; drives a one-tap source-side
+    /// confirmation before any credential is pushed (nil = no pending offer).
+    var pendingSyncSetupOffer: SyncPairingRendezvous?
+
+    /// Offers the user declined this session, so they aren't re-prompted.
+    @ObservationIgnored
+    var dismissedSyncSetupOfferKeys: Set<String> = []
+
     /// Observable CloudKit sync status for the Sync & Setup page.
     let cloudSyncStatus = CloudSyncStatus()
 

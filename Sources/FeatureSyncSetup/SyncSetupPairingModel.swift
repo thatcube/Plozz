@@ -143,13 +143,23 @@ public final class SyncSetupPairingModel {
     /// servers" on), connect and push this device's config + credentials with NO typing
     /// and NO SAS — the offer's ephemeral public key is authenticated out-of-band by
     /// iCloud account membership and pinned, exactly like a scanned QR. Returns true if
-    /// an offer was found and a send was attempted. Safe to call on every foreground.
+    /// an offer was found and a send was attempted.
+    ///
+    /// NOTE: because this transfers CREDENTIALS, the app should confirm with the user
+    /// first (a single tap — see `adopt(_:)`), so a shared/stale Apple ID can't silently
+    /// harvest tokens. This convenience is kept for tests / config-only flows.
     @discardableResult
     public func autoAdoptOfferedRendezvous() async -> Bool {
         guard case .idle = phase else { return false }   // don't interrupt an active flow
         guard let target = service.discoverRendezvousTarget() else { return false }
-        await send(serviceName: target.serviceName, expectedPublicKey: target.publicKeyData)
+        await adopt(target)
         return true
+    }
+
+    /// Source role: push this device's config + credentials to a SPECIFIC offer the
+    /// user has confirmed. Pins the offer's public key ⇒ no SAS, no typing.
+    public func adopt(_ rendezvous: SyncPairingRendezvous) async {
+        await send(serviceName: rendezvous.serviceName, expectedPublicKey: rendezvous.publicKeyData)
     }
 
     /// Begin listing nearby devices waiting to be set up.

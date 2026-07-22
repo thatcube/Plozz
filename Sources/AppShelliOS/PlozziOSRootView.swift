@@ -48,6 +48,19 @@ public struct PlozziOSRootView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active { appModel.syncCloudOnForeground() }
         }
+        .alert(
+            "Set up \(appModel.pendingSyncSetupOffer?.deviceName ?? "your device")?",
+            isPresented: Binding(
+                get: { appModel.pendingSyncSetupOffer != nil },
+                set: { if !$0 { appModel.declineSyncSetupOffer() } }
+            ),
+            presenting: appModel.pendingSyncSetupOffer
+        ) { _ in
+            Button("Set Up") { appModel.confirmSyncSetupOffer() }
+            Button("Not Now", role: .cancel) { appModel.declineSyncSetupOffer() }
+        } message: { _ in
+            Text("Send your servers and sign-in so it's ready to watch — no typing needed.")
+        }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
         .environment(

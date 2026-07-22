@@ -6,6 +6,11 @@
     <array>
         <string>group.com.thatcube.Plozz</string>
     </array>
+    <!-- NOTE: no push (aps-environment) entitlement on tvOS. tvOS background push is
+         unreliable (the system aggressively suspends/terminates apps), so CKSyncEngine
+         can't depend on it there. tvOS instead syncs on foreground (AppState
+         syncCloudOnForeground → fetchNow on scenePhase .active), which is the correct
+         platform pattern. iPhone/iPad get real background push (see PlozziOS.entitlements). -->
     <!-- iCloud key-value storage: powers the non-secret Sync & Setup "presence
          beacon" (a configured device advertises that a setup exists so a fresh
          same-Apple-ID device can offer to bring it over). No secrets stored. -->

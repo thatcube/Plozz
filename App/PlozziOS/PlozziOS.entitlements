@@ -2,6 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Push Notifications: CloudKit (CKSyncEngine) delivers SILENT pushes when
+         another device changes the synced config, which wake this app to fetch —
+         this is what makes cross-device sync automatic instead of only-on-foreground.
+         Matches Apple's CKSyncEngine sample (both keys); `development` for dev builds,
+         rewritten to `production` at distribution/export. No user-facing
+         notifications are ever sent, and CKSyncEngine handles registration itself
+         (no registerForRemoteNotifications / AppDelegate handlers needed). -->
+    <key>aps-environment</key>
+    <string>development</string>
+    <key>com.apple.developer.aps-environment</key>
+    <string>development</string>
     <!-- iCloud key-value storage: powers the non-secret Sync & Setup "presence
          beacon" so a fresh device on the same Apple ID can offer to bring your
          setup over. No secrets are ever stored here. -->

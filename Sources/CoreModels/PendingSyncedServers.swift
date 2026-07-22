@@ -70,6 +70,38 @@ public struct PendingSyncedServersStore: Sendable {
         defaults.set(Array(ids), forKey: Self.ignoredKey)
     }
 
+    /// Upsert one synced descriptor (V3 per-record apply). The full synced set is kept
+    /// so `pending(excludingLocal:)` can recompute the needs-sign-in list from deltas.
+    public mutating func upsertSynced(_ descriptor: SyncedAccountDescriptor) {
+        var all = Dictionary(uniqueKeysWithValues: storedDescriptors.map { ($0.id, $0) })
+        all[descriptor.id] = descriptor
+        store(all.values.sorted { $0.id < $1.id })
+    }
+
+    /// Remove one synced descriptor (its record was deleted from the household).
+    public mutating func removeSynced(_ id: String) {
+        var all = Dictionary(uniqueKeysWithValues: storedDescriptors.map { ($0.id, $0) })
+        all[id] = nil
+        store(all.values.sorted { $0.id < $1.id })
+        unignore(id)
+    }
+
+    /// The needs-sign-in list: synced descriptors this device isn't signed into and
+    /// hasn't ignored.
+    public func pending(excludingLocal localAccountIDs: Set<String>) -> [SyncedAccountDescriptor] {
+        let ignored = ignoredIDs
+        return storedDescriptors
+            .filter { !localAccountIDs.contains($0.id) && !ignored.contains($0.id) }
+            .sorted { $0.id < $1.id }
+    }
+
+    /// Descriptors newly needing sign-in that haven't been prompted yet, for the
+    /// one-time "adopt these servers" nudge.
+    public func newlyPending(excludingLocal localAccountIDs: Set<String>) -> [SyncedAccountDescriptor] {
+        let prompted = promptedIDs
+        return pending(excludingLocal: localAccountIDs).filter { !prompted.contains($0.id) }
+    }
+
     public mutating func unignore(_ id: String) {
         var ids = ignoredIDs
         ids.remove(id)

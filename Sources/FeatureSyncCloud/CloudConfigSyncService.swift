@@ -3,32 +3,24 @@ import CloudKit
 import CoreModels
 import CoreNetworking
 
-// MARK: - CloudConfigSyncService
+// MARK: - CloudConfigSyncService (V3)
 //
-// The CloudKit "Stage 1" auto-sync layer: keeps the NON-SECRET household setup
-// (server descriptors, profiles, per-profile settings + membership) in sync across
-// one Apple ID's devices via `CKSyncEngine` on the private database.
+// The CloudKit "Stage 1" auto-sync layer, rebuilt on the pure `SyncLedger` (CoreModels)
+// after two independent reviews condemned the V2 mirror. The ledger is the merge /
+// conflict brain; this actor is the thin, CORRECT CloudKit glue around it:
+//   • Local edits: capture a flat [recordName: canonicalBytes] map, `reconcileLocal`
+//     into upload/delete plans, enqueue them, let CKSyncEngine send (automatic).
+//   • Remote changes: decode fetched CKRecords → `applyFetched` → apply the EXACT
+//     local changes to the app's stores (never re-derives/clobbers).
+//   • Conflicts: CloudKit change tags detect them on send (`serverRecordChanged`);
+//     the ledger resolves by mutation-boundary last-writer-wins.
+//   • Deletions are durable (pendingDelete tombstones) and authoritative.
+//   • Redownload is a full-resync lifecycle that can't resurrect peer deletions.
+//   • Engine events are GENERATION-FENCED: a stale engine (after a rebuild) can never
+//     mutate state.
 //
-// Design (verified against Apple's `sample-cloudkit-sync-engine` + WWDC22 110384
-// "Mapping Apple TV users to app profiles"):
-//   • The pure `CloudSyncMirror` (CoreModels) is the merge/versioning brain; this
-//     actor is the thin CloudKit glue around it.
-//   • LOCAL-FIRST: Plozz's real config lives in the app's stores; CloudKit is a
-//     MIRROR, not the source of truth. Unlike Apple's sample, an account change
-//     (switching the signed-in Apple ID, e.g. via a tvOS system-user switch) NEVER
-//     deletes local data — the household roster lives in the user-independent
-//     Keychain and belongs to the box. We just re-point at the new Apple ID's DB
-//     and re-derive the snapshot from the unchanged local state.
-//   • NO SECRETS: only `SyncConfigSnapshot` payloads travel; tokens/passwords are
-//     never representable in a `CloudSyncRecord`.
-//   • Loop-prevention/idempotency come from the mirror: applying a remote change
-//     leaves the mirror equal to local, so the app's follow-up change signal
-//     produces an empty publish.
-//
-// The app wires this with two closures: `localSnapshot` (build the current
-// non-secret snapshot) and `applyRemoteSnapshot` (merge an incoming snapshot into
-// the app's stores, config-only — never signs a device in). Both hop to the
-// MainActor inside the app.
+// Automatic by design: `automaticallySync = true` + CKSyncEngine's own push
+// subscription do the syncing; the manual affordances are just nudges. NO secrets.
 public actor CloudConfigSyncService {
 
     // MARK: Dependencies
@@ -36,26 +28,34 @@ public actor CloudConfigSyncService {
     public struct Configuration: Sendable {
         public var containerIdentifier: String
         public var isEnabled: @Sendable () -> Bool
-        public var localSnapshot: @Sendable () async -> SyncConfigSnapshot
-        public var applyRemoteSnapshot: @Sendable (SyncConfigSnapshot) async -> Void
-        /// Where the mirror + engine state are persisted (per install/user container).
+        /// Capture the current canonical, NON-SECRET flat record map from the app's
+        /// stores (recordName -> canonical value bytes).
+        public var captureRecords: @Sendable () async -> [SyncRecordID: Data]
+        /// Apply the EXACT local changes the ledger dictates (nil value = delete).
+        public var applyRecords: @Sendable (SyncLocalChanges) async -> Void
+        /// Whether the app's stores are loaded enough to trust that an absent record is
+        /// a genuine deletion (guards a hydrating capture from wiping every peer).
+        public var isHydrated: @Sendable () -> Bool
+        /// Where the ledger + engine state are persisted (per install/user container).
         public var stateFileURL: URL
-        /// Optional MainActor sink the service pushes status updates to.
+        /// Optional MainActor sink for status updates.
         public var status: CloudSyncStatus?
 
         public init(
             containerIdentifier: String,
             stateFileURL: URL,
             isEnabled: @escaping @Sendable () -> Bool,
-            localSnapshot: @escaping @Sendable () async -> SyncConfigSnapshot,
-            applyRemoteSnapshot: @escaping @Sendable (SyncConfigSnapshot) async -> Void,
+            captureRecords: @escaping @Sendable () async -> [SyncRecordID: Data],
+            applyRecords: @escaping @Sendable (SyncLocalChanges) async -> Void,
+            isHydrated: @escaping @Sendable () -> Bool = { true },
             status: CloudSyncStatus? = nil
         ) {
             self.containerIdentifier = containerIdentifier
             self.stateFileURL = stateFileURL
             self.isEnabled = isEnabled
-            self.localSnapshot = localSnapshot
-            self.applyRemoteSnapshot = applyRemoteSnapshot
+            self.captureRecords = captureRecords
+            self.applyRecords = applyRecords
+            self.isHydrated = isHydrated
             self.status = status
         }
     }
@@ -63,160 +63,104 @@ public actor CloudConfigSyncService {
     private let config: Configuration
     private let container: CKContainer
     private var engine: CKSyncEngine?
+    /// Bumped every time the engine is rebuilt; events from an older engine are
+    /// ignored (generation fencing).
+    private var engineGeneration = 0
 
     // Persisted across launches.
-    private var mirror: CloudSyncMirror
+    private var ledger: SyncLedger
     private var engineState: CKSyncEngine.State.Serialization?
-    /// recordName -> archived CKRecord system fields (change tag) for conflict-safe saves.
-    private var systemFields: [String: Data]
 
     public init(_ configuration: Configuration) {
         self.config = configuration
         self.container = CKContainer(identifier: configuration.containerIdentifier)
         let loaded = Self.loadPersisted(from: configuration.stateFileURL)
-        self.mirror = loaded?.mirror ?? CloudSyncMirror()
+        self.ledger = loaded?.ledger ?? SyncLedger()
         self.engineState = loaded?.engineState
-        self.systemFields = loaded?.systemFields ?? [:]
     }
 
-    // MARK: Lifecycle
+    private func nowMillis() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
-    /// Push a status update onto the MainActor status object, if one is wired.
+    // MARK: Status helpers
+
     private func setStatus(_ phase: CloudSyncStatus.Phase, syncedNow: Bool = false, error: String? = nil) {
         guard let status = config.status else { return }
         Task { @MainActor in
-            if phase == .error {
-                status.setError(error ?? "Couldn't sync", diagnostic: nil)
-            } else {
-                status.setPhase(phase, syncedNow: syncedNow)
-            }
+            if phase == .error { status.setError(error ?? "Couldn't sync", diagnostic: nil) }
+            else { status.setPhase(phase, syncedNow: syncedNow) }
         }
     }
 
-    /// Record a PERSISTENT diagnostic detail (survives the phase flicker). Does NOT
-    /// itself flip to the error phase — a self-healing conflict logs quietly.
     private func setDiagnostic(_ detail: String) {
         PlozzLog.sync.error("CloudSync: \(detail)")
         guard let status = config.status else { return }
         Task { @MainActor in status.lastDiagnostic = detail }
     }
 
-    /// Push the current mirror record count to the status object so the UI can show
-    /// "N items in iCloud" — a device stuck at a lower count than its peers is the
-    /// clearest signal it isn't receiving.
     private func reportRecordCount() {
-        let count = mirror.records.count
+        let count = ledger.count
         guard let status = config.status else { return }
         Task { @MainActor in status.syncedRecordCount = count }
     }
 
-    /// Log every record the mirror holds with its `editedAt`, so the SAME record's
-    /// timestamp can be compared across devices — the definitive way to see whether
-    /// an edit reached this device and who "wins" a conflict. Diagnostic only.
-    private func logMirror(_ tag: String) {
-        let items = mirror.records.values
-            .sorted { $0.recordName < $1.recordName }
-            .map { "\($0.recordName)@\($0.editedAt)" }
-            .joined(separator: " | ")
-        PlozzLog.sync.info("CloudSync[\(tag)] mirror(\(mirror.records.count)): \(items)")
-    }
+    private static func ckCodeName(_ error: CKError) -> String { "\(error.code) (\(error.code.rawValue))" }
 
-    /// Human-readable CKError code name for a save failure.
-    private static func ckCodeName(_ error: CKError) -> String {
-        "\(error.code) (\(error.code.rawValue))"
-    }
+    // MARK: Lifecycle
 
-    /// Bring the sync engine up (if the feature is enabled and an iCloud account is
-    /// available), ensure the zone exists, and push any local config the mirror has
-    /// not yet uploaded. Safe to call repeatedly.
+    /// Bring the engine up (if enabled + an account is available), ensure the zone,
+    /// FETCH the server's real state FIRST (so a fresh/behind device learns the truth
+    /// before it can publish stale local data over a peer), then publish genuine local
+    /// diffs. Safe to call repeatedly.
     public func activate() async {
-        guard config.isEnabled() else {
-            PlozzLog.sync.info("CloudSync: not activating — feature disabled")
-            setStatus(.disabled)
-            return
-        }
-        guard await accountIsAvailable() else {
-            PlozzLog.sync.info("CloudSync: not activating — no usable iCloud account")
-            setStatus(.signedOut)
-            return
-        }
+        guard config.isEnabled() else { setStatus(.disabled); return }
+        guard await accountIsAvailable() else { setStatus(.signedOut); return }
         ensureEngine()
         setStatus(.idle)
-        // Log the iCloud identity this device syncs as, so a mismatched Apple ID
-        // across devices (which silently syncs to a different private DB) is
-        // diagnosable — the classic "one device never receives" cause.
         await logAccountIdentity()
-        // Ensure our custom zone exists.
-        engine?.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
-        // FETCH BEFORE PUBLISH: learn the server's real records + timestamps first,
-        // so a device whose mirror is empty/behind (fresh install, or after a
-        // reset) cannot re-stamp its local roster with fresh timestamps and clobber
-        // peers' genuine edits. After the fetch the mirror reflects the server, so
-        // the publish below uploads only records where LOCAL is truly newer.
-        try? await engine?.fetchChanges()
-        if !mirror.records.isEmpty {
-            await config.applyRemoteSnapshot(mirror.snapshot)
-        }
+        guard let engine else { return }
+        engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
+        // Fetch before publish — the anti-clobber ordering.
+        try? await engine.fetchChanges()
         await publishLocalChanges()
         reportRecordCount()
     }
 
-    /// Log (and surface) the CloudKit user-record id + account status so the SAME
-    /// value across devices can be confirmed — different ids ⇒ different Apple IDs ⇒
-    /// they can never see each other's data.
     private func logAccountIdentity() async {
         do {
             let status = try await container.accountStatus()
             let userID = try await container.userRecordID()
             let short = String(userID.recordName.prefix(10))
-            PlozzLog.sync.info("CloudSync: iCloud account status=\(status.rawValue) userID=\(short)…")
-            if let s = config.status {
-                await MainActor.run { s.accountTag = short }
-            }
+            PlozzLog.sync.info("CloudSync: iCloud status=\(status.rawValue) userID=\(short)…")
+            if let s = config.status { await MainActor.run { s.accountTag = short } }
         } catch {
             PlozzLog.sync.error("CloudSync: could not read iCloud identity: \(error.localizedDescription)")
         }
     }
 
-    /// Lightweight foreground pull: publish pending local changes, fetch remote
-    /// changes, then send once more so any records this device won on merge
-    /// (`toPush`, enqueued during fetch) actually go out. Used on app activation.
+    /// Lightweight foreground pull.
     public func fetchNow() async {
         guard config.isEnabled(), await accountIsAvailable() else { return }
         ensureEngine()
         guard let engine else { return }
         await publishLocalChanges()
         try? await engine.fetchChanges()
-        try? await engine.sendChanges()   // flush toPush from the fetch
+        try? await engine.sendChanges()
         reportRecordCount()
     }
 
-    /// Force an immediate two-way sync, for a manual "Sync Now". Order is
-    /// publish → FETCH → send, so a receiver pulls the latest first, and any records
-    /// this device wins on merge (`toPush`) are pushed back in the same pass.
+    /// Manual "Sync Now": publish → fetch → send.
     public func syncNow() async {
         guard config.isEnabled() else { setStatus(.disabled); return }
         guard await accountIsAvailable() else { setStatus(.signedOut); return }
         ensureEngine()
         guard let engine else { return }
         setStatus(.syncing)
-        logMirror("syncNow:before")
         await publishLocalChanges()
-
         var syncError: Error?
-        // Fetch FIRST (pull remote + enqueue toPush), then send (push local edits +
-        // toPush). Each runs regardless of the other's outcome.
-        do { try await engine.fetchChanges(); PlozzLog.sync.info("CloudSync: syncNow fetch done") }
-        catch { syncError = error; PlozzLog.sync.error("CloudSync: syncNow fetch FAILED: \(Self.describe(error))") }
-        do { try await engine.sendChanges(); PlozzLog.sync.info("CloudSync: syncNow send done") }
-        catch { if syncError == nil { syncError = error }; PlozzLog.sync.error("CloudSync: syncNow send FAILED: \(Self.describe(error))") }
+        do { try await engine.fetchChanges() } catch { syncError = error }
+        do { try await engine.sendChanges() } catch { if syncError == nil { syncError = error } }
         reportRecordCount()
-        logMirror("syncNow:after")
-
         if let syncError {
-            // The engine auto-retries transient conflicts, and its own did*Changes
-            // events will flip us back to idle if that succeeds — so this error is
-            // debounced and only surfaces if it's still unresolved shortly after.
             setDiagnostic("sync: \(Self.describe(syncError))")
             setStatus(.error, error: (syncError as NSError).localizedDescription)
         } else {
@@ -224,145 +168,77 @@ public actor CloudConfigSyncService {
         }
     }
 
-    /// Unwrap a CloudKit / sync error into a readable chain: domain, code, message,
-    /// any underlying error, and any per-item partial errors — the detail the
-    /// generic "Failed to send changes" wrapper hides.
     static func describe(_ error: Error) -> String {
         let ns = error as NSError
         var parts = ["\(ns.domain) code=\(ns.code): \(ns.localizedDescription)"]
         if let ck = error as? CKError {
             if let partials = ck.partialErrorsByItemID, !partials.isEmpty {
-                let items = partials.prefix(4).map { key, value in
-                    let e = value as NSError
-                    return "\(key): \(e.domain) \(e.code)"
-                }.joined(separator: ", ")
+                let items = partials.prefix(4).map { "\($0.key): \(($0.value as NSError).code)" }.joined(separator: ", ")
                 parts.append("partials[\(partials.count)]: \(items)")
             }
             if let retry = ck.retryAfterSeconds { parts.append("retryAfter=\(retry)s") }
         }
-        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
-            parts.append("underlying: \(underlying.domain) code=\(underlying.code) \(underlying.localizedDescription)")
-            if let deepest = underlying.userInfo[NSUnderlyingErrorKey] as? NSError {
-                parts.append("deepest: \(deepest.domain) code=\(deepest.code) \(deepest.localizedDescription)")
-            }
+        if let u = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+            parts.append("underlying: \(u.domain) code=\(u.code) \(u.localizedDescription)")
         }
         return parts.joined(separator: " | ")
     }
 
-    /// The app calls this whenever the non-secret config changes (same signal that
-    /// refreshes the presence beacon). Diffs local against the mirror and enqueues
-    /// the minimal set of record saves/deletes. No-op when disabled or unchanged.
+    // MARK: Publish (local → cloud)
+
+    /// Capture local state, reconcile into the ledger, and enqueue the minimal
+    /// save/delete plan. No-op when disabled or unchanged.
     public func publishLocalChanges() async {
         guard config.isEnabled(), let engine else { return }
-        let local = await config.localSnapshot()
-        // Snapshot the mirror's payloads BEFORE publish so we can log exactly what
-        // changed (and how) for any record that gets re-stamped — the definitive way
-        // to see an apply≠capture round-trip mismatch that causes spurious re-uploads.
-        let before = mirror.records.mapValues { $0.payload }
-        let plan = mirror.publish(local: local)
+        let desired = await config.captureRecords()
+        let plan = ledger.reconcileLocal(
+            desired: desired, now: nowMillis(), synthesizeDeletions: config.isHydrated())
+        if !plan.refusedDeletions.isEmpty {
+            setDiagnostic("refused \(plan.refusedDeletions.count) deletion(s) — capture looked incomplete; not wiping peers")
+        }
         guard !plan.isEmpty else {
+            persist()
             PlozzLog.sync.info("CloudSync: publish — nothing changed")
             return
         }
-
-        // Diagnostic: for each re-stamped save, show old vs new payload as UTF-8
-        // (payloads are non-secret JSON: descriptors/profiles/memberships, or a
-        // base64-ish settings blob). Truncated to keep the log readable.
-        for rec in plan.saves {
-            let oldP = before[rec.recordName]
-            let oldS = oldP.flatMap { String(data: $0, encoding: .utf8) } ?? (oldP == nil ? "<new>" : "<binary \(oldP!.count)B>")
-            let newS = String(data: rec.payload, encoding: .utf8) ?? "<binary \(rec.payload.count)B>"
-            if oldS != newS {
-                PlozzLog.sync.info("CloudSync: DIFF \(rec.recordName)\n  old=\(oldS.prefix(300))\n  new=\(newS.prefix(300))")
-            }
-        }
-
         var pending: [CKSyncEngine.PendingRecordZoneChange] = []
-        for rec in plan.saves { pending.append(.saveRecord(CloudSyncSchema.recordID(forRecordName: rec.recordName))) }
-        for name in plan.deletes {
-            pending.append(.deleteRecord(CloudSyncSchema.recordID(forRecordName: name)))
-            systemFields[name] = nil
-        }
+        for up in plan.uploads { pending.append(.saveRecord(CloudSyncSchema.recordID(forRecordName: up.recordName))) }
+        for name in plan.deletes { pending.append(.deleteRecord(CloudSyncSchema.recordID(forRecordName: name))) }
         engine.state.add(pendingRecordZoneChanges: pending)
         persist()
         reportRecordCount()
-        let saveDetail = plan.saves.map { "\($0.recordName)@\($0.editedAt)" }.joined(separator: ", ")
-        let deleteDetail = plan.deletes.isEmpty ? "" : " [deletes: \(plan.deletes.joined(separator: ", "))]"
-        PlozzLog.sync.info("CloudSync: queued \(plan.saves.count) save(s) [\(saveDetail)], \(plan.deletes.count) delete(s)\(deleteDetail)")
+        PlozzLog.sync.info("CloudSync: queued \(plan.uploads.count) save(s), \(plan.deletes.count) delete(s)")
     }
 
-    /// Opt-out: remove all of THIS app's synced config from the current Apple ID's
-    /// private DB (deletes the zone). Local data is untouched (local-first).
+    /// Publish and immediately send is intentionally NOT used — forcing sendChanges
+    /// from the debounce raced CKSyncEngine's own scheduler and crashed on-device.
+    /// `automaticallySync` sends queued changes; `syncNow`/`fetchNow` force it.
+
+    /// Opt-out: erase this app's synced config from iCloud but KEEP the zone, so peers
+    /// receive normal record deletions (never a zone-delete that strands their tokens).
     public func deleteAllServerData() async {
         guard let engine else { return }
-        engine.state.add(pendingDatabaseChanges: [.deleteZone(CloudSyncSchema.zoneID)])
-        mirror = CloudSyncMirror()
-        systemFields = [:]
-        persist()
+        let names = ledger.entries.keys
+        var pending: [CKSyncEngine.PendingRecordZoneChange] = []
+        for name in names { pending.append(.deleteRecord(CloudSyncSchema.recordID(forRecordName: name))) }
+        engine.state.add(pendingRecordZoneChanges: pending)
         try? await engine.sendChanges()
-    }
-
-    /// Repair a device that has STOPPED RECEIVING (its CKSyncEngine change token got
-    /// stuck "caught up", so `fetchChanges` returns nothing even though peers have
-    /// newer records — the "iPad updates, iPhone never does" bug). This resets ONLY
-    /// the engine's fetch token and re-fetches the whole zone; it deliberately KEEPS
-    /// the mirror.
-    ///
-    /// Why keep the mirror: the mirror holds each record's true `editedAt` (real
-    /// edit time). If we cleared it and re-published local, this device's STALE
-    /// local values would be re-stamped with a fresh "now" timestamp and then WIN
-    /// last-writer-wins against peers' genuinely-newer edits — clobbering good data
-    /// on the server (the bug that made "Reset Synced Data" make things worse).
-    /// Keeping the mirror means the re-fetched peer records merge against their real
-    /// timestamps and correctly win, and a follow-up publish sees "nothing changed".
-    public func redownloadFromCloud() async {
-        guard config.isEnabled(), await accountIsAvailable() else { setStatus(.signedOut); return }
-        setStatus(.syncing)
-        PlozzLog.sync.info("CloudSync: redownload — resetting fetch token, KEEPING mirror, re-fetching all")
-        // Tear down the engine and forget ONLY the stuck fetch token. Mirror and
-        // systemFields are preserved so real edit timestamps and change tags survive.
-        engine = nil
-        engineState = nil
+        ledger = SyncLedger()
         persist()
-        // Rebuild with stateSerialization = nil ⇒ the engine re-fetches from scratch.
-        ensureEngine()
-        guard let engine else { setStatus(.error, error: "engine unavailable"); return }
-        do {
-            try await engine.fetchChanges()   // merges into the kept mirror by real editedAt
-            reportRecordCount()
-            logMirror("redownload:after")
-            // Push the merged snapshot into the app's stores so the UI reflects it.
-            if !mirror.records.isEmpty {
-                await config.applyRemoteSnapshot(mirror.snapshot)
-            }
-            setStatus(.idle, syncedNow: true)
-            PlozzLog.sync.info("CloudSync: redownload complete — \(mirror.records.count) record(s)")
-        } catch {
-            setDiagnostic("redownload: \(Self.describe(error))")
-            setStatus(.error, error: (error as NSError).localizedDescription)
-        }
     }
 
-    /// Reset a corrupted/divergent sync: wipe the CloudKit zone AND this device's
-    /// mirror+tags, then re-seed the zone from THIS device's current local config.
-    /// Other devices see the zone deletion, clear their mirrors, and re-converge —
-    /// a clean slate. Local config is never touched.
+    /// Erase this app's synced config from iCloud and RE-SEED it from THIS device's
+    /// current local config — the "Reset Synced Data" action. Deletes records (keeps
+    /// the zone so peers get normal deletions), clears the ledger, then republishes
+    /// local as fresh creates. Local config is never touched.
     public func resetAndReseed() async {
         guard config.isEnabled(), await accountIsAvailable() else { return }
-        ensureEngine()
-        guard let engine else { return }
         setStatus(.syncing)
-        // 1. Delete the zone + clear all local sync bookkeeping.
-        engine.state.add(pendingDatabaseChanges: [.deleteZone(CloudSyncSchema.zoneID)])
-        mirror = CloudSyncMirror()
-        systemFields = [:]
-        persist()
-        try? await engine.sendChanges()
-        // 2. Recreate the zone and re-upload this device's config from scratch.
-        engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
-        await publishLocalChanges()
+        await deleteAllServerData()   // deletes records + clears the ledger
+        rebuildEngine()
+        await publishLocalChanges()   // fresh creates from this device's local config
         do {
-            try await engine.sendChanges()
+            try await engine?.sendChanges()
             setStatus(.idle, syncedNow: true)
             PlozzLog.sync.info("CloudSync: reset + reseeded from this device")
         } catch {
@@ -371,34 +247,65 @@ public actor CloudConfigSyncService {
         }
     }
 
+    /// Repair a device stuck not-receiving: full-resync lifecycle. Resets ONLY the
+    /// fetch token (keeps local values + dirty edits + pending deletes), re-fetches the
+    /// whole zone, and finalizes records a COMPLETE server snapshot no longer contains
+    /// as deletions — so a peer's delete can never be resurrected. Non-destructive to
+    /// the shared cloud data.
+    public func redownloadFromCloud() async {
+        guard config.isEnabled(), await accountIsAvailable() else { setStatus(.signedOut); return }
+        setStatus(.syncing)
+        PlozzLog.sync.info("CloudSync: redownload — full resync (keep local, reset token)")
+        ledger.beginFullResync()
+        rebuildEngine()   // fresh engine, nil token ⇒ full re-fetch; fences old events
+        guard let engine else { setStatus(.error, error: "engine unavailable"); return }
+        do {
+            engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
+            try await engine.fetchChanges()
+            let finalized = ledger.endFullResync()
+            persist(); reportRecordCount()
+            if !finalized.isEmpty { await config.applyRecords(finalized) }
+            // Requeue anything still dirty / pending-delete without re-stamping.
+            var pending: [CKSyncEngine.PendingRecordZoneChange] = []
+            pending += ledger.pendingUploads().map { .saveRecord(CloudSyncSchema.recordID(forRecordName: $0.recordName)) }
+            pending += ledger.pendingDeletes().map { .deleteRecord(CloudSyncSchema.recordID(forRecordName: $0)) }
+            if !pending.isEmpty { engine.state.add(pendingRecordZoneChanges: pending); try await engine.sendChanges() }
+            setStatus(.idle, syncedNow: true)
+            PlozzLog.sync.info("CloudSync: redownload complete — \(ledger.count) record(s)")
+        } catch {
+            _ = ledger.endFullResync()   // leave the ledger in a consistent (non-resyncing) state
+            persist()
+            setDiagnostic("redownload: \(Self.describe(error))")
+            setStatus(.error, error: (error as NSError).localizedDescription)
+        }
+    }
+
     // MARK: Engine setup
 
     private func ensureEngine() {
         guard engine == nil else { return }
+        rebuildEngine()
+    }
+
+    private func rebuildEngine() {
+        engineGeneration += 1
         var configuration = CKSyncEngine.Configuration(
-            database: container.privateCloudDatabase,
-            stateSerialization: engineState,
-            delegate: self
-        )
+            database: container.privateCloudDatabase, stateSerialization: engineState, delegate: self)
         configuration.automaticallySync = true
         engine = CKSyncEngine(configuration)
-        PlozzLog.sync.info("CloudSync: engine initialized")
+        PlozzLog.sync.info("CloudSync: engine initialized (gen \(engineGeneration))")
     }
 
     private func accountIsAvailable() async -> Bool {
         do { return try await container.accountStatus() == .available }
-        catch {
-            PlozzLog.sync.error("CloudSync: accountStatus failed: \(error.localizedDescription)")
-            return false
-        }
+        catch { PlozzLog.sync.error("CloudSync: accountStatus failed: \(error.localizedDescription)"); return false }
     }
 
     // MARK: Persistence
 
     private struct Persisted: Codable {
-        var mirror: CloudSyncMirror
+        var ledger: SyncLedger
         var engineState: CKSyncEngine.State.Serialization?
-        var systemFields: [String: Data]
     }
 
     private static func loadPersisted(from url: URL) -> Persisted? {
@@ -407,11 +314,10 @@ public actor CloudConfigSyncService {
     }
 
     private func persist() {
-        let snapshot = Persisted(mirror: mirror, engineState: engineState, systemFields: systemFields)
+        let snapshot = Persisted(ledger: ledger, engineState: engineState)
         do {
             try FileManager.default.createDirectory(
-                at: config.stateFileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
+                at: config.stateFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             let data = try JSONEncoder().encode(snapshot)
             try data.write(to: config.stateFileURL, options: .atomic)
         } catch {
@@ -425,64 +331,54 @@ public actor CloudConfigSyncService {
 extension CloudConfigSyncService: CKSyncEngineDelegate {
 
     public func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
+        // Generation fence: ignore events from a stale engine (post-rebuild).
+        guard syncEngine === engine else {
+            PlozzLog.sync.info("CloudSync: ignoring event from a stale engine")
+            return
+        }
         switch event {
         case .stateUpdate(let e):
             engineState = e.stateSerialization
             persist()
-
         case .accountChange(let e):
             await handleAccountChange(e)
-
         case .fetchedRecordZoneChanges(let e):
             await handleFetchedRecordZoneChanges(e)
-
         case .sentRecordZoneChanges(let e):
-            handleSentRecordZoneChanges(e, syncEngine: syncEngine)
-
+            await handleSentRecordZoneChanges(e, syncEngine: syncEngine)
         case .sentDatabaseChanges(let e):
-            // A failed ZONE save cascades to every record — surface it.
             for failure in e.failedZoneSaves {
-                setDiagnostic("zone save failed: \(Self.ckCodeName(failure.error)) — \(failure.error.localizedDescription)")
+                setDiagnostic("zone save failed: \(Self.ckCodeName(failure.error))")
             }
-
         case .fetchedDatabaseChanges(let e):
             handleFetchedDatabaseChanges(e)
-
         case .willFetchChanges, .willSendChanges:
             setStatus(.syncing)
-
         case .didFetchChanges, .didSendChanges:
             setStatus(.idle, syncedNow: true)
-
         case .willFetchRecordZoneChanges, .didFetchRecordZoneChanges:
             break
-
         @unknown default:
             PlozzLog.sync.info("CloudSync: unknown event")
         }
     }
 
     public func nextRecordZoneChangeBatch(
-        _ context: CKSyncEngine.SendChangesContext,
-        syncEngine: CKSyncEngine
+        _ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine
     ) async -> CKSyncEngine.RecordZoneChangeBatch? {
         let scope = context.options.scope
         let changes = syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }
-        // Capture Sendable snapshots so the record provider never touches actor
-        // state or a non-Sendable CKRecord across the boundary.
-        let records = mirror.records
-        let sysFields = systemFields
-
+        let entries = ledger.entries
         return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: changes) { recordID in
             let name = recordID.recordName
-            guard let rec = records[name] else {
-                // The entity disappeared locally before upload — drop the pending save.
+            guard let entry = entries[name], !entry.pendingDelete else {
                 syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)])
                 return nil
             }
-            let base = Self.cachedRecord(from: sysFields[name])
+            let base = CloudSyncSystemFields.record(from: entry.systemFields)
                 ?? CKRecord(recordType: CloudSyncSchema.recordType, recordID: recordID)
-            rec.populate(base)
+            SyncUpload(recordName: name, value: entry.localValue,
+                       editedAt: entry.editedAt, systemFields: entry.systemFields).populate(base)
             return base
         }
     }
@@ -490,38 +386,22 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
     // MARK: Event handlers
 
     private func handleAccountChange(_ event: CKSyncEngine.Event.AccountChange) async {
-        // LOCAL-FIRST: never delete local config on an Apple ID change. The
-        // household roster lives in the user-independent Keychain and belongs to the
-        // device, not to any single iCloud account.
         switch event.changeType {
         case .signIn:
-            // CRITICAL: do NOTHING to the mirror here, and never republish. This
-            // event ALSO fires whenever the engine merely (re)initializes for the
-            // SAME already-signed-in account — on every app launch, and every time
-            // our own `redownloadFromCloud` rebuilds the engine. The old behavior
-            // (wipe the mirror, then `publishLocalChanges`) re-stamped EVERY record
-            // with a fresh `editedAt` derived from an empty mirror, so this device's
-            // possibly-stale copies beat peers' real edits on last-writer-wins and
-            // OVERWROTE them on the server. That single line was the root cause of
-            // "iPad and iPhone clobber each other / edits revert / works only once".
-            // The persisted mirror already reflects the server; the engine fetches
-            // and reconciles by real timestamps on its own.
-            PlozzLog.sync.info("CloudSync: accountChange signIn — keeping mirror, no republish")
+            // Fires on EVERY engine init for the SAME account too. Do NOTHING to the
+            // ledger and never republish — the persisted ledger already reflects the
+            // server, and the engine fetches/reconciles on its own. (Wiping+republishing
+            // here was THE V2 clobber.)
+            PlozzLog.sync.info("CloudSync: accountChange signIn — keeping ledger, no republish")
         case .switchAccounts:
-            // A genuinely different Apple ID ⇒ a different private DB. Forget the old
-            // account's mirror/tags so we don't assume its records exist in the new
-            // DB, but do NOT republish (that would re-stamp local with fresh
-            // timestamps and clobber). The engine's fetch will populate the mirror
-            // from the new account's real records, and only a genuine local EDIT
-            // (diffed against that repopulated mirror) will upload afterwards.
-            PlozzLog.sync.info("CloudSync: accountChange switchAccounts — clearing mirror, no republish")
-            mirror = CloudSyncMirror()
-            systemFields = [:]
+            // A different Apple ID ⇒ a different private DB. Forget server bookkeeping so
+            // we don't assume records exist there; keep local config intact. Do NOT
+            // republish (that would push this device's config into the new account).
+            PlozzLog.sync.info("CloudSync: accountChange switchAccounts — clearing ledger, no republish")
+            ledger = SyncLedger()
             persist()
         case .signOut:
-            // Stop mirroring; keep every bit of local config intact.
-            mirror = CloudSyncMirror()
-            systemFields = [:]
+            ledger = SyncLedger()
             persist()
             setStatus(.signedOut)
         @unknown default:
@@ -530,56 +410,41 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
     }
 
     private func handleFetchedRecordZoneChanges(_ event: CKSyncEngine.Event.FetchedRecordZoneChanges) async {
-        // Raw counts BEFORE decode: distinguishes "server delivered nothing" (mods=0
-        // ⇒ send-side or token problem) from "delivered but we dropped it" (mods>0
-        // but decoded 0 ⇒ decode bug).
-        PlozzLog.sync.info("CloudSync: FETCH raw mods=\(event.modifications.count) dels=\(event.deletions.count)")
-        var incoming: [CloudSyncRecord] = []
+        var incoming: [SyncRemoteRecord] = []
         for mod in event.modifications {
-            let record = mod.record
-            if let rec = CloudSyncRecord(ckRecord: record) {
+            if let rec = SyncRemoteRecord(ckRecord: mod.record) {
                 incoming.append(rec)
-                systemFields[record.recordID.recordName] = Self.archive(record)
             } else {
-                PlozzLog.sync.error("CloudSync: FETCH decode FAILED for \(record.recordID.recordName)")
+                // Never silently drop: a rejected record is a real signal (old-schema or
+                // malformed). Logged, not consumed as data.
+                PlozzLog.sync.error("CloudSync: fetch ignored non-V3 record \(mod.record.recordID.recordName) type=\(mod.record.recordType) zone=\(mod.record.recordID.zoneID.zoneName)")
             }
         }
-        var deletedNames: [String] = []
-        for del in event.deletions {
-            deletedNames.append(del.recordID.recordName)
-            systemFields[del.recordID.recordName] = nil
-        }
+        var deletedNames: [SyncRecordID] = []
+        for del in event.deletions { deletedNames.append(del.recordID.recordName) }
 
         guard !incoming.isEmpty || !deletedNames.isEmpty else { return }
-        let inDesc = incoming.map { "\($0.recordName)@\($0.editedAt)" }.joined(separator: ",")
-        PlozzLog.sync.info("CloudSync: FETCHED \(incoming.count) [\(inDesc)] del=\(deletedNames.count)")
-        let result = mirror.applyRemote(saved: incoming, deletedRecordNames: deletedNames)
-        PlozzLog.sync.info("CloudSync: applyRemote changed=\(result.changed) toPush=\(result.toPush.count)")
-        // Re-push any records where THIS device's copy beat the server's (server is
-        // stale) so the fleet converges to the newer value.
-        if !result.toPush.isEmpty {
-            let pushes = result.toPush.map { CKSyncEngine.PendingRecordZoneChange.saveRecord(CloudSyncSchema.recordID(forRecordName: $0.recordName)) }
-            engine?.state.add(pendingRecordZoneChanges: pushes)
-        }
+        let changes = ledger.applyFetched(saved: incoming, deleted: deletedNames, now: nowMillis())
         persist()
-        guard result.changed else { return }
         reportRecordCount()
-        // Hand the merged, non-secret snapshot to the app to reconcile into its
-        // stores (config-only; never signs a device in).
-        await config.applyRemoteSnapshot(result.snapshot)
-        PlozzLog.sync.info("CloudSync: applied \(incoming.count) fetched change(s), \(deletedNames.count) deletion(s)")
+        if !changes.isEmpty {
+            await config.applyRecords(changes)
+            PlozzLog.sync.info("CloudSync: applied \(changes.count) change(s) from \(incoming.count) fetched, \(deletedNames.count) deletion(s)")
+        }
     }
 
     private func handleSentRecordZoneChanges(
-        _ event: CKSyncEngine.Event.SentRecordZoneChanges,
-        syncEngine: CKSyncEngine
-    ) {
-        let sentDesc = event.savedRecords.map { $0.recordID.recordName }.joined(separator: ",")
-        PlozzLog.sync.info("CloudSync: SENT ok=\(event.savedRecords.count) [\(sentDesc)] failed=\(event.failedRecordSaves.count)")
+        _ event: CKSyncEngine.Event.SentRecordZoneChanges, syncEngine: CKSyncEngine
+    ) async {
         for saved in event.savedRecords {
-            systemFields[saved.recordID.recordName] = Self.archive(saved)
+            let value = (saved[CloudSyncSchema.fieldValue] as? Data) ?? Data()
+            let editedAt = CloudSyncSchema.int64(saved[CloudSyncSchema.fieldEditedAt]) ?? 0
+            ledger.applySendSuccess(recordName: saved.recordID.recordName, savedValue: value,
+                                    savedEditedAt: editedAt, systemFields: CloudSyncSystemFields.archive(saved))
         }
+        for id in event.deletedRecordIDs { ledger.applyDeleteSuccess(id.recordName) }
 
+        var applied: SyncLocalChanges = [:]
         var retry: [CKSyncEngine.PendingRecordZoneChange] = []
         var zoneRetry: [CKSyncEngine.PendingDatabaseChange] = []
 
@@ -588,86 +453,51 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
             let name = record.recordID.recordName
             switch failure.error.code {
             case .serverRecordChanged:
-                // Conflict: the record already exists on the server with a change
-                // tag we don't hold. ALWAYS cache the server's system fields first
-                // (even if our payload decode fails) so the next save carries the
-                // correct tag — otherwise we conflict forever.
-                guard let serverRecord = failure.error.serverRecord else {
-                    // No server record to reconcile against — drop the pending save
-                    // to break the loop; a later fetch will re-seed it.
+                guard let serverRecord = failure.error.serverRecord,
+                      let rec = SyncRemoteRecord(ckRecord: serverRecord) else {
                     syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(record.recordID)])
                     continue
                 }
-                systemFields[name] = Self.archive(serverRecord)
-                guard let serverRec = CloudSyncRecord(ckRecord: serverRecord) else { continue }
-                let result = mirror.applyRemote(saved: [serverRec], deletedRecordNames: [])
-                // With last-writer-wins by HLC timestamp, applyRemote already merged
-                // the server's copy and advanced our clock past it. If OUR copy won
-                // (server is stale), re-save it — it now carries a strictly-later
-                // editedAt, so the save lands instead of looping. If the server won,
-                // stop re-sending.
-                if result.toPush.contains(where: { $0.recordName == name }) {
-                    retry.append(.saveRecord(record.recordID))
+                if let (rn, val) = ledger.applySendConflict(rec, now: nowMillis()) {
+                    applied.updateValue(val, forKey: rn)   // server won → apply its value
                 } else {
-                    syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(record.recordID)])
-                }
-                if result.changed {
-                    Task { await self.config.applyRemoteSnapshot(result.snapshot) }
+                    retry.append(.saveRecord(record.recordID))  // we won → retry with fresh tag
                 }
             case .zoneNotFound:
                 zoneRetry.append(.saveZone(CKRecordZone(zoneID: record.recordID.zoneID)))
+                ledger.clearServerRecord(name)
                 retry.append(.saveRecord(record.recordID))
-                systemFields[name] = nil
             case .unknownItem:
-                // Server lost the record but we still have it locally — re-upload.
+                // The record we tried to update doesn't exist — re-create (config policy).
+                ledger.clearServerRecord(name)
                 retry.append(.saveRecord(record.recordID))
-                systemFields[name] = nil
             case .networkFailure, .networkUnavailable, .zoneBusy, .serviceUnavailable,
                  .notAuthenticated, .operationCancelled:
                 PlozzLog.sync.info("CloudSync: retryable save error for \(name): \(Self.ckCodeName(failure.error))")
             default:
-                // The real cause of a 'failed to send changes' — surface it verbatim
-                // (code + description + any per-item detail) so it's diagnosable.
-                setDiagnostic("save failed for \(name): \(Self.ckCodeName(failure.error)) — \(failure.error.localizedDescription)")
+                setDiagnostic("save failed for \(name): \(Self.ckCodeName(failure.error))")
             }
+        }
+
+        for (id, error) in event.failedRecordDeletes {
+            if error.code == .unknownItem { ledger.applyDeleteSuccess(id.recordName) }  // already gone
+            else { retry.append(.deleteRecord(id)) }
         }
 
         if !zoneRetry.isEmpty { syncEngine.state.add(pendingDatabaseChanges: zoneRetry) }
         if !retry.isEmpty { syncEngine.state.add(pendingRecordZoneChanges: retry) }
         persist()
+        reportRecordCount()
+        if !applied.isEmpty { await config.applyRecords(applied) }
     }
 
     private func handleFetchedDatabaseChanges(_ event: CKSyncEngine.Event.FetchedDatabaseChanges) {
-        // Our zone was deleted on the server (e.g. another device opted out or
-        // reset). Clear the mirror so we re-derive from local on the next publish;
-        // local config is untouched.
+        // Our zone was deleted on the server (a peer opted out / reset). Clear the ledger
+        // so we re-derive from local on the next publish; local config is untouched. We
+        // never delete the zone ourselves, so this is rare.
         for deletion in event.deletions where deletion.zoneID.zoneName == CloudSyncSchema.zoneName {
-            mirror = CloudSyncMirror()
-            systemFields = [:]
+            ledger = SyncLedger()
             persist()
         }
-    }
-
-    // MARK: CKRecord system-field caching
-
-    static func archive(_ record: CKRecord) -> Data {
-        let coder = NSKeyedArchiver(requiringSecureCoding: true)
-        record.encodeSystemFields(with: coder)
-        coder.finishEncoding()
-        return coder.encodedData
-    }
-
-    static func cachedRecord(from data: Data?) -> CKRecord? {
-        guard let data else { return nil }
-        // A record archived with `encodeSystemFields(with:)` MUST be read back with
-        // `CKRecord(coder:)` — NOT `unarchivedObject(ofClass:)`, which returns nil
-        // for this encoding. Getting this wrong means the cached change tag is never
-        // applied, so every save is a blind create that the server rejects with
-        // serverRecordChanged — forever. That was the whole-sync-blocking bug.
-        guard let coder = try? NSKeyedUnarchiver(forReadingFrom: data) else { return nil }
-        coder.requiresSecureCoding = true
-        let record = CKRecord(coder: coder)
-        coder.finishDecoding()
-        return record
     }
 }

@@ -28,6 +28,8 @@ public protocol ProfilePersisting: Sendable {
     func activeAccountIDs(forProfile profileID: String) -> [String]?
     /// Records the account-id subset for a profile.
     func setActiveAccountIDs(_ ids: [String], forProfile profileID: String)
+    /// Remove a profile's explicit account selection (revert to "never chose" = all).
+    func clearActiveAccountIDs(forProfile profileID: String)
     /// One-time bootstrap: if no profiles exist yet, create a single default
     /// profile (seeded from `defaultName`/`defaultActiveAccountIDs`) and make it
     /// active. Idempotent; returns the profile list after running.
@@ -78,6 +80,7 @@ extension ProfilePersisting {
     public func firstRunProfileSetupComplete() -> Bool { false }
     public func setFirstRunProfileSetupComplete(_ value: Bool) {}
     public func resetForDebugging() {}
+    public func clearActiveAccountIDs(forProfile profileID: String) {}
 }
 
 public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
@@ -154,6 +157,11 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
         if let data = try? JSONEncoder().encode(ids) {
             setSharedData(data, forKey: accountsKey(profileID))
         }
+    }
+
+    public func clearActiveAccountIDs(forProfile profileID: String) {
+        lock.lock(); defer { lock.unlock() }
+        removeSharedData(forKey: accountsKey(profileID))
     }
 
     // MARK: Household preferences
@@ -305,6 +313,11 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
         } else {
             defaults.set(data, forKey: key)
         }
+    }
+
+    private func removeSharedData(forKey key: String) {
+        if let secureStore { try? secureStore.removeValue(for: key) }
+        else { defaults.removeObject(forKey: key) }
     }
 
     /// One-time copy of an existing install's profile set from per-user
@@ -530,6 +543,42 @@ public final class ProfilesModel {
         recomputeHouseholdDefaults()
     }
 
+    /// V3 exact apply: merge incoming cosmetic profile DTOs (upserts) and apply
+    /// deletions, in one pass. Merging preserves every DEVICE-LOCAL field (Plex Home /
+    /// Seerr / bindings) — only name/avatar/color/createdAt travel — so a re-capture
+    /// reproduces the exact same canonical bytes (the round-trip invariant). The
+    /// default profile is never deleted.
+    public func applySyncedProfileDTOs(_ upserts: [String: ProfileSyncDTO], deletions: Set<String>) {
+        var byID: [String: Profile] = [:]
+        var order: [String] = []
+        for p in profiles {
+            if byID[p.id] == nil { order.append(p.id) }
+            byID[p.id] = p
+        }
+        var changed = false
+        for (id, dto) in upserts {
+            if let existing = byID[id] {
+                let merged = dto.merged(into: existing)
+                if merged != existing { byID[id] = merged; changed = true }
+            } else {
+                byID[id] = dto.makeProfile(); order.append(id); changed = true
+            }
+        }
+        for id in deletions where id != ProfileStore.defaultProfileID {
+            if byID[id] != nil { byID[id] = nil; changed = true }
+        }
+        guard changed else { return }
+        var next = order.compactMap { byID[$0] }
+        next.sort { $0.createdAt < $1.createdAt }
+        profiles = next
+        store.saveProfiles(profiles)
+        if !profiles.contains(where: { $0.id == activeProfileID }) {
+            activeProfileID = profiles.first?.id ?? ProfileStore.defaultProfileID
+            store.setActiveProfileID(activeProfileID)
+        }
+        recomputeHouseholdDefaults()
+    }
+
     /// Updates an existing profile's editable fields in place.
     public func update(_ profile: Profile) {
         guard let idx = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
@@ -615,6 +664,12 @@ public final class ProfilesModel {
 
     public func setActiveAccountIDs(_ ids: [String], for profileID: String) {
         store.setActiveAccountIDs(ids, forProfile: profileID)
+    }
+
+    /// Clear a profile's explicit account selection (a synced membership deletion →
+    /// revert to "watches all servers").
+    public func clearActiveAccountIDs(for profileID: String) {
+        store.clearActiveAccountIDs(forProfile: profileID)
     }
 
     // MARK: Household preferences

@@ -124,4 +124,25 @@ public enum ProfileSettingsTransfer {
             defaults.set(value, forKey: SettingsKey.scoped(base, namespace: namespace))
         }
     }
+
+    /// Write ONE captured setting (a single base key's blob, as produced by `capture`)
+    /// into a profile namespace. Used by the V3 per-setting record sync so an exact
+    /// remote change writes exactly that key.
+    public static func applyOne(
+        baseKey: String, blob: Data, namespace: String?, defaults: UserDefaults = .standard
+    ) {
+        guard transferableBaseKeys.contains(baseKey) else { return }
+        guard let unwrapped = try? PropertyListSerialization.propertyList(
+            from: blob, options: [], format: nil) as? [Any], let value = unwrapped.first else { return }
+        defaults.set(value, forKey: SettingsKey.scoped(baseKey, namespace: namespace))
+    }
+
+    /// Remove ONE setting key from a profile namespace (a synced deletion → this
+    /// device reverts that key to its default).
+    public static func removeOne(
+        baseKey: String, namespace: String?, defaults: UserDefaults = .standard
+    ) {
+        guard transferableBaseKeys.contains(baseKey) else { return }
+        defaults.removeObject(forKey: SettingsKey.scoped(baseKey, namespace: namespace))
+    }
 }

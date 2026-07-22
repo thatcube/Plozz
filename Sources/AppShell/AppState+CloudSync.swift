@@ -67,18 +67,18 @@ extension AppState {
         guard let baseDir = Self.writableStateDirectory() else { return nil }
         let stateURL = baseDir
             .appendingPathComponent("PlozzSync", isDirectory: true)
-            .appendingPathComponent("cloud-config-v2.json")
+            .appendingPathComponent("cloud-config-v3.json")
 
         return CloudConfigSyncService(.init(
             containerIdentifier: cloudContainerIdentifier,
             stateFileURL: stateURL,
             isEnabled: { SyncSetupFeatureFlag().isEnabled },
-            localSnapshot: { [weak appState] in
-                guard let appState else { return SyncConfigSnapshot() }
-                return await appState.currentSyncConfigSnapshot()
+            captureRecords: { [weak appState] in
+                guard let appState else { return [:] }
+                return await appState.captureSyncRecords()
             },
-            applyRemoteSnapshot: { [weak appState] snapshot in
-                await appState?.applyRemoteConfigSnapshot(snapshot)
+            applyRecords: { [weak appState] changes in
+                await appState?.applySyncRecords(changes)
             },
             status: appState.cloudSyncStatus
         ))
@@ -112,36 +112,40 @@ extension AppState {
         Task { await cloudSync.redownloadFromCloud() }
     }
 
-    // MARK: Publish side
+    // MARK: Publish side (V3 flat record capture)
 
-    /// The NON-SECRET snapshot this device publishes. Mirrors what the pairing
-    /// `configProvider` builds (descriptors, profiles, per-profile settings +
-    /// explicit membership) — no tokens, and NOT the device-local active-profile
-    /// selection (that never syncs).
-    public func currentSyncConfigSnapshot() -> SyncConfigSnapshot {
-        let accounts = accountsProviders.accounts
-        let profiles = profilesModel.profiles
-        let settings = profiles.map { p in
-            ProfileSettingsSnapshot(
-                profileID: p.id,
-                entries: ProfileSettingsTransfer.capture(
-                    namespace: p.settingsNamespace(isDefault: profilesModel.isDefault(p))))
+    /// Capture the current canonical, NON-SECRET flat record map this device syncs:
+    /// server descriptors, cosmetic profile DTOs, per-profile membership, and one
+    /// record per per-profile setting key. Canonical (sorted-key) bytes so a
+    /// re-capture after applying a remote change is byte-identical (the anti-clobber
+    /// invariant). NEVER tokens; NOT the device-local active-profile selection.
+    public func captureSyncRecords() -> [SyncRecordID: Data] {
+        var out: [SyncRecordID: Data] = [:]
+        for d in Self.mergedAccountDescriptors(signedIn: accountsProviders.accounts) {
+            if let data = CanonicalJSON.encode(d) {
+                out[SyncRecordKey(kind: .descriptor, id: d.id).recordName] = data
+            }
         }
-        let memberships = Dictionary(uniqueKeysWithValues: profiles.compactMap { p in
-            profilesModel.storedActiveAccountIDs(for: p.id).map { (p.id, $0) }
-        })
-        return SyncConfigSnapshot(
-            accounts: Self.mergedAccountDescriptors(signedIn: accounts),
-            profiles: profiles.map { VersionedProfile(profile: $0) },
-            profileSettings: settings,
-            profileMemberships: memberships)
+        for p in profilesModel.profiles {
+            if let data = CanonicalJSON.encode(ProfileSyncDTO(profile: p)) {
+                out[SyncRecordKey(kind: .profile, id: p.id).recordName] = data
+            }
+            if let ids = profilesModel.storedActiveAccountIDs(for: p.id),
+               let data = CanonicalJSON.encode(ids.sorted()) {
+                out[SyncRecordKey(kind: .membership, id: p.id).recordName] = data
+            }
+            let ns = p.settingsNamespace(isDefault: profilesModel.isDefault(p))
+            for (baseKey, blob) in ProfileSettingsTransfer.capture(namespace: ns) {
+                out[SyncRecordKey(kind: .setting, id: p.id, subkey: baseKey).recordName] = blob
+            }
+        }
+        return out
     }
 
     /// The household's FULL server descriptor set: this device's signed-in accounts
     /// PLUS the descriptors it has synced but isn't signed into (pending). Including
-    /// the pending ones is essential — otherwise `publish` would see them in the
-    /// mirror but absent from this device's snapshot and DELETE them from iCloud for
-    /// the whole household (a device silently destroying another device's servers).
+    /// the pending ones is essential — otherwise a device would omit them from its
+    /// snapshot and DELETE another device's servers for the whole household.
     static func mergedAccountDescriptors(signedIn accounts: [Account]) -> [SyncedAccountDescriptor] {
         var byID: [String: SyncedAccountDescriptor] = [:]
         for d in PendingSyncedServersStore().all { byID[d.id] = d }
@@ -149,62 +153,99 @@ extension AppState {
         return byID.values.sorted { $0.id < $1.id }
     }
 
-    // MARK: Apply side
+    // MARK: Apply side (V3 exact apply)
 
-    /// Reconcile an incoming merged snapshot into the app's stores. CONFIG-ONLY:
-    /// roster + settings + membership. Never signs a device in, never writes the
-    /// Keychain. Safe to call for background CloudKit merges (unlike
-    /// `applyReceivedSetup`, it does not mark first-run complete or enter the app).
-    public func applyRemoteConfigSnapshot(_ snapshot: SyncConfigSnapshot) {
-        // 1. Roster: update/add by id — INCLUDING the shared default profile — so an
-        //    edit to the default's name/avatar converges (importProfiles' pairing
-        //    guard would skip the default and strand its edits).
-        let incomingProfiles = snapshot.profiles.map(\.profile)
-        if !incomingProfiles.isEmpty { profilesModel.mergeSyncedProfiles(incomingProfiles) }
-        PlozzLog.sync.info("CloudSync: applied remote snapshot — \(incomingProfiles.count) profile(s), \(snapshot.accounts.count) server(s)")
+    /// Apply the EXACT local changes the ledger dictated (nil value = delete). CONFIG
+    /// ONLY: roster + settings + membership + the pending-server list. Never signs a
+    /// device in, never writes the Keychain. Applying exactly these keeps
+    /// capture(apply) == record (no clobber).
+    public func applySyncRecords(_ changes: SyncLocalChanges) {
+        var profileUpserts: [String: ProfileSyncDTO] = [:]
+        var profileDeletes: Set<String> = []
+        var membershipSet: [String: [String]] = [:]
+        var membershipClear: Set<String> = []
+        var settingWrites: [(pid: String, key: String, blob: Data)] = []
+        var settingRemoves: [(pid: String, key: String)] = []
+        var descriptorsTouched = false
+        var pendingStore = PendingSyncedServersStore()
 
-        // 2. Per-profile settings: reinstall under each matching profile's namespace.
-        for snap in snapshot.profileSettings {
-            guard let profile = profilesModel.profiles.first(where: { $0.id == snap.profileID }) else { continue }
-            ProfileSettingsTransfer.apply(
-                snap.entries,
-                namespace: profile.settingsNamespace(isDefault: profilesModel.isDefault(profile)))
+        for (name, value) in changes {
+            guard let key = SyncRecordKey.parse(name) else { continue }
+            switch key.kind {
+            case .profile:
+                if let value, let dto = CanonicalJSON.decode(ProfileSyncDTO.self, from: value) {
+                    profileUpserts[key.id] = dto
+                } else if value == nil {
+                    profileDeletes.insert(key.id)
+                }
+            case .membership:
+                if let value, let ids = CanonicalJSON.decode([String].self, from: value) {
+                    membershipSet[key.id] = ids
+                } else if value == nil {
+                    membershipClear.insert(key.id)
+                }
+            case .setting:
+                if let value { settingWrites.append((key.id, key.subkey, value)) }
+                else { settingRemoves.append((key.id, key.subkey)) }
+            case .descriptor:
+                descriptorsTouched = true
+                if let value, let d = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: value) {
+                    pendingStore.upsertSynced(d)
+                } else if value == nil {
+                    pendingStore.removeSynced(key.id)
+                }
+            }
         }
 
-        // 3. Per-profile server membership: apply for profiles present locally,
-        //    scoped to accounts the synced household actually has.
-        let syncedAccountIDs = Set(snapshot.accounts.map(\.id))
-        for (pid, ids) in snapshot.profileMemberships {
-            guard profilesModel.profiles.contains(where: { $0.id == pid }) else { continue }
-            profilesModel.setActiveAccountIDs(ids.filter { syncedAccountIDs.contains($0) }, for: pid)
+        // 1. Profiles: cosmetic upserts + deletions (default never deleted).
+        if !profileUpserts.isEmpty || !profileDeletes.isEmpty {
+            profilesModel.applySyncedProfileDTOs(profileUpserts, deletions: profileDeletes)
         }
-
-        // NOTE: account *descriptors* travel in the mirror (non-secret server list)
-        // but we do not auto-create pending accounts here — native sign-in on a new
-        // device stays the pairing / add-server flow. Instead we record servers this
-        // device isn't signed into as "pending", surfaced as Needs-sign-in entries.
-        refreshPendingSyncedServers(from: snapshot)
+        // 2. Settings: write/remove exactly the changed keys, under each profile's ns.
+        for w in settingWrites {
+            guard let ns = namespace(forProfileID: w.pid) else { continue }
+            ProfileSettingsTransfer.applyOne(baseKey: w.key, blob: w.blob, namespace: ns)
+        }
+        for r in settingRemoves {
+            guard let ns = namespace(forProfileID: r.pid) else { continue }
+            ProfileSettingsTransfer.removeOne(baseKey: r.key, namespace: ns)
+        }
+        // 3. Membership: set or clear, scoped to accounts the household actually has.
+        if !membershipSet.isEmpty || !membershipClear.isEmpty {
+            let syncedIDs = Set(Self.mergedAccountDescriptors(signedIn: accountsProviders.accounts).map(\.id))
+            for (pid, ids) in membershipSet where profilesModel.profiles.contains(where: { $0.id == pid }) {
+                profilesModel.setActiveAccountIDs(ids.filter { syncedIDs.contains($0) }, for: pid)
+            }
+            for pid in membershipClear { profilesModel.clearActiveAccountIDs(for: pid) }
+        }
+        // 4. Descriptors → pending "needs sign-in" servers.
+        if descriptorsTouched { refreshPendingSyncedServers() }
 
         rebuildSettingsModels()
+        PlozzLog.sync.info("CloudSync: applied \(changes.count) exact change(s)")
+    }
+
+    /// The settings UserDefaults namespace for a profile id, or nil if unknown here.
+    private func namespace(forProfileID pid: String) -> String?? {
+        guard let p = profilesModel.profiles.first(where: { $0.id == pid }) else { return nil }
+        return .some(p.settingsNamespace(isDefault: profilesModel.isDefault(p)))
     }
 
     // MARK: Pending synced servers
 
-    /// Recompute the pending (needs-sign-in) server list from a synced snapshot and,
-    /// on the Apple TV, queue a one-time prompt for any newly-detected server. Runs
-    /// after applying config so `accountsProviders.accounts` reflects this device.
-    func refreshPendingSyncedServers(from snapshot: SyncConfigSnapshot) {
+    /// Recompute the pending (needs-sign-in) server list from the synced descriptor
+    /// set this device has accumulated, and — on the Apple TV — queue a one-time
+    /// prompt for any newly-detected server. Runs after applying config so
+    /// `accountsProviders.accounts` reflects this device.
+    public func refreshPendingSyncedServers() {
         var store = PendingSyncedServersStore()
         let localIDs = Set(accountsProviders.accounts.map(\.id))
-        let newlyPending = store.reconcile(
-            syncedDescriptors: snapshot.accounts, localAccountIDs: localIDs)
-        cloudSyncUI.pendingSyncedServers = store.pending
-        // Offer to set up the first newly-detected server (one at a time), then mark
-        // it prompted so it never nags again. Only when sync is enabled.
+        let newly = store.newlyPending(excludingLocal: localIDs)
+        cloudSyncUI.pendingSyncedServers = store.pending(excludingLocal: localIDs)
         if SyncSetupFeatureFlag().isEnabled, cloudSyncUI.pendingServerPrompt == nil,
-           let first = newlyPending.first {
+           let first = newly.first {
             cloudSyncUI.pendingServerPrompt = first
-            store.markPrompted(newlyPending.map(\.id))
+            store.markPrompted(newly.map(\.id))
         }
     }
 
@@ -214,17 +255,11 @@ extension AppState {
         var store = PendingSyncedServersStore()
         store.ignore(id)
         if cloudSyncUI.pendingServerPrompt?.id == id { cloudSyncUI.pendingServerPrompt = nil }
-        cloudSyncUI.pendingSyncedServers = store.pending
+        cloudSyncUI.pendingSyncedServers = store.pending(excludingLocal: Set(accountsProviders.accounts.map(\.id)))
     }
 
     /// The user dismissed / handled the current prompt.
     public func clearPendingServerPrompt() { cloudSyncUI.pendingServerPrompt = nil }
-
-    /// Refresh the pending list from the current local snapshot (e.g. after a
-    /// pairing/sign-in signs the device into one of them).
-    public func refreshPendingSyncedServers() {
-        refreshPendingSyncedServers(from: currentSyncConfigSnapshot())
-    }
 
     // MARK: Lifecycle + change observation
 

@@ -2,58 +2,86 @@ import Foundation
 import CloudKit
 import CoreModels
 
-// MARK: - CloudSyncRecord <-> CKRecord mapping
+// MARK: - V3 CloudKit schema + SyncLedger <-> CKRecord mapping
 //
-// One `CloudSyncRecord` <-> one `CKRecord` of type `PlozzSyncConfig` in a single
-// custom zone. Fields are deliberately flat + non-secret: `kind`, `entityID`,
-// `version`, and the JSON `payload`. Nothing here can carry a token or password —
-// the payloads come from the non-secret `SyncConfigSnapshot` only.
+// One CKRecord per synced entity in a single custom zone. The record NAME is the
+// ledger's `SyncRecordID` (e.g. "profile:<id>", "setting:<pid>:<key>"), so CloudKit's
+// own record identity IS the sync key — no separate id field to drift. Fields are
+// flat and NON-SECRET: the entity kind, the canonical value blob, and the
+// mutation-boundary edit clock. Nothing here can carry a token.
+//
+// Fresh record type + zone (V3) so any leftover V1/V2 records are simply a different
+// type in a different zone and are never confused with V3 data (the V2 "13 decode
+// failures" were exactly old-schema records the decoder rejected).
 
 enum CloudSyncSchema {
-    // V2: HLC-timestamp (editedAt) model. A fresh record type + zone name so any
-    // records/mirrors from the earlier (never-working) version model are ignored
-    // rather than migrated — there is no real user data to preserve.
-    static let recordType = "PlozzSyncConfigV2"
-    static let zoneName = "PlozzConfigV2"
+    static let recordType = "PlozzSyncV3"
+    static let zoneName = "PlozzSyncV3Zone"
     static var zoneID: CKRecordZone.ID { CKRecordZone.ID(zoneName: zoneName) }
 
-    static let fieldKind = "kind"
-    static let fieldEntityID = "entityID"
-    static let fieldEditedAt = "editedAt"
-    static let fieldPayload = "payload"
+    static let fieldKind = "kind"        // SyncRecordKind raw value (diagnostics/filtering)
+    static let fieldValue = "value"      // canonical value bytes
+    static let fieldEditedAt = "editedAt" // Int64 mutation clock
 
     static func recordID(forRecordName name: String) -> CKRecord.ID {
         CKRecord.ID(recordName: name, zoneID: zoneID)
     }
+
+    /// Bridge an integer field back regardless of how CloudKit boxed it (Int / Int64 /
+    /// NSNumber), so a valid record is never silently dropped on fetch.
+    static func int64(_ value: Any?) -> Int64? {
+        (value as? Int64) ?? (value as? Int).map(Int64.init) ?? (value as? NSNumber)?.int64Value
+    }
 }
 
-extension CloudSyncRecord {
-    /// Populate a `CKRecord` (a fresh one, or a cached one carrying server system
-    /// fields) with this record's fields.
+extension SyncUpload {
+    /// Populate a CKRecord (fresh, or one carrying cached server system fields) from
+    /// this upload.
     func populate(_ record: CKRecord) {
-        record[CloudSyncSchema.fieldKind] = kind.rawValue as CKRecordValue
-        record[CloudSyncSchema.fieldEntityID] = id as CKRecordValue
+        let kind = SyncRecordKey.parse(recordName)?.kind.rawValue ?? "unknown"
+        record[CloudSyncSchema.fieldKind] = kind as CKRecordValue
+        record[CloudSyncSchema.fieldValue] = value as CKRecordValue
         record[CloudSyncSchema.fieldEditedAt] = editedAt as CKRecordValue
-        record[CloudSyncSchema.fieldPayload] = payload as CKRecordValue
     }
+}
 
-    /// Decode a fetched `CKRecord` back into a `CloudSyncRecord`, or nil if it is
-    /// malformed / from a newer schema we don't understand.
+extension SyncRemoteRecord {
+    /// Decode a fetched CKRecord into a `SyncRemoteRecord`, or nil if it isn't a valid
+    /// V3 record (wrong type/zone, or malformed — the caller logs those, never drops
+    /// silently).
     init?(ckRecord record: CKRecord) {
         guard record.recordType == CloudSyncSchema.recordType,
-              let kindRaw = record[CloudSyncSchema.fieldKind] as? String,
-              let kind = CloudSyncRecord.Kind(rawValue: kindRaw),
-              let id = record[CloudSyncSchema.fieldEntityID] as? String,
-              let payload = record[CloudSyncSchema.fieldPayload] as? Data
+              record.recordID.zoneID.zoneName == CloudSyncSchema.zoneName,
+              let value = record[CloudSyncSchema.fieldValue] as? Data,
+              let editedAt = CloudSyncSchema.int64(record[CloudSyncSchema.fieldEditedAt])
         else { return nil }
-        // CloudKit can bridge an integer field back as Int, Int64, or NSNumber
-        // depending on platform/path; accept any of them rather than dropping the
-        // record (a failed `as? Int64` silently loses that update on fetch).
-        let editedAtValue = record[CloudSyncSchema.fieldEditedAt]
-        guard let editedAt = (editedAtValue as? Int64)
-            ?? (editedAtValue as? Int).map(Int64.init)
-            ?? (editedAtValue as? NSNumber)?.int64Value
-        else { return nil }
-        self.init(kind: kind, id: id, editedAt: editedAt, payload: payload)
+        self.init(
+            recordName: record.recordID.recordName,
+            value: value, editedAt: editedAt,
+            systemFields: CloudSyncSystemFields.archive(record))
+    }
+}
+
+// MARK: - CKRecord system-field archiving (change-tag persistence)
+
+enum CloudSyncSystemFields {
+    /// Archive ONLY the system fields (record id + change tag), so a later save carries
+    /// the correct tag for conflict detection. MUST use encodeSystemFields (not the
+    /// whole record) and decode via CKRecord(coder:).
+    static func archive(_ record: CKRecord) -> Data {
+        let coder = NSKeyedArchiver(requiringSecureCoding: true)
+        record.encodeSystemFields(with: coder)
+        coder.finishEncoding()
+        return coder.encodedData
+    }
+
+    /// Rebuild a bare CKRecord carrying the cached change tag, or nil.
+    static func record(from data: Data?) -> CKRecord? {
+        guard let data else { return nil }
+        guard let coder = try? NSKeyedUnarchiver(forReadingFrom: data) else { return nil }
+        coder.requiresSecureCoding = true
+        let record = CKRecord(coder: coder)
+        coder.finishDecoding()
+        return record
     }
 }

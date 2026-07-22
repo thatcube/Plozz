@@ -171,18 +171,37 @@ extension PlozziOSAppModel {
     }
 
     /// Recompute the "servers from your other devices" list (synced descriptors this
-    /// device isn't signed into and hasn't ignored), for display on iOS.
+    /// device isn't signed into and hasn't ignored), for display on iOS — and queue a
+    /// one-time "set it up here?" prompt for any newly-detected media server. Mirrors
+    /// tvOS `AppState.refreshPendingSyncedServers()`.
     func refreshPendingSyncedServers() {
+        var store = PendingSyncedServersStore()
         let localIDs = Set(accountsProviders.accounts.map(\.id))
-        pendingSyncedServers = PendingSyncedServersStore().pending(excludingLocal: localIDs)
+        pendingSyncedServers = store.pending(excludingLocal: localIDs)
+        guard SyncSetupFeatureFlag().isEnabled, pendingSyncedServerPrompt == nil else { return }
+        let newly = store.newlyPending(excludingLocal: localIDs)
+        // Only nudge for media servers we can sign into here (Jellyfin/Emby/Plex).
+        // Media shares are set up differently and aren't offered via this prompt.
+        if let first = newly.first(where: { $0.provider != .mediaShare }) {
+            pendingSyncedServerPrompt = first
+        }
+        // Mark every newly-pending id prompted (including any skipped media shares) so
+        // the one-time nudge never re-fires for them.
+        if !newly.isEmpty {
+            store.markPrompted(newly.map(\.id))
+        }
     }
 
     /// Stop surfacing a synced server the user doesn't want here.
     func ignorePendingSyncedServer(_ id: String) {
         var store = PendingSyncedServersStore()
         store.ignore(id)
+        if pendingSyncedServerPrompt?.id == id { pendingSyncedServerPrompt = nil }
         refreshPendingSyncedServers()
     }
+
+    /// The user dismissed / handled the current one-time server prompt.
+    func clearPendingSyncedServerPrompt() { pendingSyncedServerPrompt = nil }
 
     private func namespace(forProfileID pid: String) -> String?? {
         if let p = profiles.profiles.first(where: { $0.id == pid }) {

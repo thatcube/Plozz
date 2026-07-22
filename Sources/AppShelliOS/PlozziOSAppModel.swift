@@ -72,6 +72,11 @@ final class PlozziOSAppModel {
     /// so the user can sign in / pair to use them here (parity with tvOS).
     var pendingSyncedServers: [SyncedAccountDescriptor] = []
 
+    /// A newly-synced server from another device, queued for a one-time "set it up
+    /// here?" prompt (nil = nothing to prompt). Nudged only once per server; drives the
+    /// root alert. Parity with tvOS `cloudSyncUI.pendingServerPrompt`.
+    var pendingSyncedServerPrompt: SyncedAccountDescriptor?
+
     /// Offers the user declined this session, so they aren't re-prompted.
     @ObservationIgnored
     var dismissedSyncSetupOfferKeys: Set<String> = []

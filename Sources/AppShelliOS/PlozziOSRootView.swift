@@ -18,6 +18,9 @@ public struct PlozziOSRootView: View {
     @State private var addServerPresentationColorScheme: ColorScheme = .dark
     @State private var showingSettings = false
     @State private var completedLaunchProfileSelection = false
+    /// A synced server the user tapped "Set Up" on, used to pre-fill the Add Server
+    /// sheet so they only have to sign in.
+    @State private var serverSetupSeed: SyncedAccountDescriptor?
 
     public init() {}
 
@@ -64,6 +67,27 @@ public struct PlozziOSRootView: View {
         } message: { _ in
             Text("Send your servers and sign-in so it's ready to watch — no typing needed.")
         }
+        .alert(
+            "New server from your other device",
+            isPresented: Binding(
+                get: { appModel.pendingSyncedServerPrompt != nil },
+                set: { if !$0 { appModel.clearPendingSyncedServerPrompt() } }
+            ),
+            presenting: appModel.pendingSyncedServerPrompt
+        ) { descriptor in
+            Button("Set Up") {
+                appModel.clearPendingSyncedServerPrompt()
+                setUpPendingSyncedServer(descriptor)
+            }
+            Button("Ignore", role: .destructive) {
+                appModel.ignorePendingSyncedServer(descriptor.id)
+            }
+            Button("Not Now", role: .cancel) {
+                appModel.clearPendingSyncedServerPrompt()
+            }
+        } message: { descriptor in
+            Text("“\(descriptor.serverName)” is set up on another device. Sign in to watch it here — your login stays private to each device. You can also find it later under Settings ▸ iCloud Sync.")
+        }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
         .environment(
@@ -98,9 +122,16 @@ public struct PlozziOSRootView: View {
         }
         .sheet(
             isPresented: $showingAddServer,
-            onDismiss: appModel.finishManagedServerPresentation
+            onDismiss: {
+                serverSetupSeed = nil
+                appModel.finishManagedServerPresentation()
+            }
         ) {
-            AddServerView(appModel: appModel)
+            AddServerView(
+                appModel: appModel,
+                initialProvider: serverSetupSeed?.provider ?? .jellyfin,
+                initialAddress: serverSetupSeed?.candidateBaseURLs.first?.absoluteString ?? ""
+            )
                 .preferredColorScheme(addServerPresentationColorScheme)
                 .presentationSizing(.page)
         }
@@ -247,6 +278,13 @@ public struct PlozziOSRootView: View {
         addServerPresentationColorScheme = resolvedPalette.isLight ? .light : .dark
         appModel.beginManagedServerPresentation()
         showingAddServer = true
+    }
+
+    /// Adopt a server synced from another device: open the Add Server sheet pre-filled
+    /// with its provider + address, so the user only has to sign in.
+    private func setUpPendingSyncedServer(_ descriptor: SyncedAccountDescriptor) {
+        serverSetupSeed = descriptor
+        showAddServer()
     }
 }
 

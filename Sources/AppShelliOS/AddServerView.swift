@@ -10,7 +10,7 @@ import SwiftUI
 struct AddServerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var provider: ProviderKind
-    @State private var address = ""
+    @State private var address: String
     @State private var server: MediaServer?
     @State private var jellyfinDiscovery = ServerPickerViewModel(provider: .jellyfin)
     @State private var embyDiscovery = ServerPickerViewModel(provider: .emby)
@@ -19,11 +19,14 @@ struct AddServerView: View {
 
     let appModel: PlozziOSAppModel
 
-    init(appModel: PlozziOSAppModel, initialProvider: ProviderKind = .jellyfin) {
+    init(appModel: PlozziOSAppModel, initialProvider: ProviderKind = .jellyfin, initialAddress: String = "") {
         self.appModel = appModel
         // Media Share isn't a media *server*; callers route it elsewhere. Guard
         // against it here so the provider picker never lands on an invalid state.
         _provider = State(initialValue: initialProvider == .mediaShare ? .jellyfin : initialProvider)
+        // Pre-fill the address when adopting a server synced from another device, so
+        // the user only has to sign in. Plex is account-based (no address field).
+        _address = State(initialValue: initialProvider == .plex ? "" : initialAddress)
     }
 
     var body: some View {

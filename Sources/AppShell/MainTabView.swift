@@ -179,6 +179,10 @@ struct MainTabView: View {
     /// feature can be omitted; hosted by RootView where AppState is available.
     var onSetUpAnotherDevice: (() -> Void)?
 
+    /// Cross-device sync opt-in state + setter, forwarded to Settings.
+    var syncEnabled: Bool = false
+    var onSetSyncEnabled: ((Bool) -> Void)?
+
     @State private var discovery = LibraryDiscoveryModel()
     /// Owns the Settings library-discovery result as an `@Observable` reference so
     /// that a reload (which fires on Settings appearance, DURING the tab focus-flip)
@@ -386,7 +390,9 @@ struct MainTabView: View {
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
                 onSelectPlexHomeUser: onSelectPlexHomeUser,
                 onSetSeerrUser: onSetSeerrUser,
-                onSetUpAnotherDevice: onSetUpAnotherDevice
+                onSetUpAnotherDevice: onSetUpAnotherDevice,
+                syncEnabled: syncEnabled,
+                onSetSyncEnabled: onSetSyncEnabled
             )
             }
         }

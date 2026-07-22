@@ -172,6 +172,9 @@ final class PlozziOSAppModel {
         // Rebuild the active profile's settings model so freshly-applied
         // preferences take effect immediately.
         selectProfile(profiles.activeProfileID)
+        // Pairing is an explicit consent to share this household, so turn on
+        // cross-device CloudKit sync (idempotent; a no-op if already on).
+        setSyncSetupEnabled(true)
         PlozzLog.auth.info("Sync setup applied: added \(added)/\(expected) account(s), \(incomingProfiles.count) profile(s), \(failedAccountIDs.count) failed")
         return outcome
     }

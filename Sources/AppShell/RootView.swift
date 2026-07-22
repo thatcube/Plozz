@@ -237,7 +237,9 @@ public struct RootView: View {
                         onSetSeerrUser: { appState.setSeerrUserForProfile(profileID: $0, user: $1) },
                         identitySources: appState.identityIndex.identitySourcesProvider,
                         onWarmIdentityIndex: { appState.identityIndex.warmIdentityIndex() },
-                        onSetUpAnotherDevice: { showSyncSend = true }
+                        onSetUpAnotherDevice: { showSyncSend = true },
+                        syncEnabled: appState.syncSetup.isEnabled,
+                        onSetSyncEnabled: { appState.setSyncSetupEnabled($0) }
                     )
                     .id(HomeRuntimeScope.identityKey(
                         profileID: appState.profilesModel.activeProfileID,

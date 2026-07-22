@@ -110,6 +110,10 @@ public struct SettingsView: View {
     private let onSignOutAll: () -> Void
     private let onResetToFirstRun: () -> Void
     private let onSetUpAnotherDevice: (() -> Void)?
+    /// Current cross-device sync opt-in state, and the setter. When the setter is
+    /// nil the row is hidden (e.g. a host that doesn't wire sync).
+    private let syncEnabled: Bool
+    private let onSetSyncEnabled: ((Bool) -> Void)?
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
     private let onSetSeerrUser: (String, SeerUser?) -> Void
@@ -162,7 +166,9 @@ public struct SettingsView: View {
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void,
         onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in },
-        onSetUpAnotherDevice: (() -> Void)? = nil
+        onSetUpAnotherDevice: (() -> Void)? = nil,
+        syncEnabled: Bool = false,
+        onSetSyncEnabled: ((Bool) -> Void)? = nil
     ) {
         self.subtitleBehavior = subtitleBehavior
         self.spoilers = spoilers
@@ -212,6 +218,8 @@ public struct SettingsView: View {
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
         self.onSetSeerrUser = onSetSeerrUser
         self.onSetUpAnotherDevice = onSetUpAnotherDevice
+        self.syncEnabled = syncEnabled
+        self.onSetSyncEnabled = onSetSyncEnabled
     }
 
     /// Whether the active profile includes at least one server that can download
@@ -489,6 +497,11 @@ public struct SettingsView: View {
                 navRow("Seerr", icon: "sparkles.tv", assetIcon: "SeerrIcon",
                        value: seerrRowValue,
                        route: .seerr)
+
+                // Cross-device sync opt-in (CloudKit; non-secret config only).
+                if let onSetSyncEnabled {
+                    syncEnabledRow(syncEnabled, onSetSyncEnabled)
+                }
 
                 // Set up another device (sender): push this Apple TV's servers +
                 // profiles to a phone/tablet that's waiting to be set up.
@@ -814,8 +827,31 @@ public struct SettingsView: View {
 
     // MARK: - Enable profiles row (single-profile household)
 
-    private func setUpAnotherDeviceRow(_ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func syncEnabledRow(_ isOn: Bool, _ setOn: @escaping (Bool) -> Void) -> some View {
+        Button { setOn(!isOn) } label: {
+            HStack(alignment: .top, spacing: 16) {
+                rowIcon("arrow.triangle.2.circlepath")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sync Across Your Devices")
+                        .font(.callout.weight(.medium))
+                    Text("Keep your profiles, settings, and server list in sync across devices signed in to your iCloud account. Off by default.")
+                        .font(.footnote)
+                        .settingsRowSecondary()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Text(isOn ? "On" : "Off")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(isOn ? Color.green : Color.secondary)
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsFocusButtonStyle())
+    }
+
+    private func setUpAnotherDeviceRow(_ action: @escaping () -> Void) -> some View {        Button(action: action) {
             HStack(alignment: .top, spacing: 16) {
                 rowIcon("qrcode")
                 VStack(alignment: .leading, spacing: 4) {

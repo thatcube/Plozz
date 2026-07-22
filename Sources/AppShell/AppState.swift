@@ -597,6 +597,9 @@ public final class AppState {
         profilesModel.markFirstRunProfileSetupComplete()
         rebuildSettingsModels()
         apply(.accountsChanged(accountsProviders.accounts))
+        // Pairing is an explicit consent to share this household, so turn on
+        // cross-device CloudKit sync (idempotent; a no-op if already on).
+        setSyncSetupEnabled(true)
         return outcome
     }
 

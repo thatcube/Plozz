@@ -44,8 +44,15 @@ extension CloudSyncRecord {
               let kindRaw = record[CloudSyncSchema.fieldKind] as? String,
               let kind = CloudSyncRecord.Kind(rawValue: kindRaw),
               let id = record[CloudSyncSchema.fieldEntityID] as? String,
-              let editedAt = record[CloudSyncSchema.fieldEditedAt] as? Int64,
               let payload = record[CloudSyncSchema.fieldPayload] as? Data
+        else { return nil }
+        // CloudKit can bridge an integer field back as Int, Int64, or NSNumber
+        // depending on platform/path; accept any of them rather than dropping the
+        // record (a failed `as? Int64` silently loses that update on fetch).
+        let editedAtValue = record[CloudSyncSchema.fieldEditedAt]
+        guard let editedAt = (editedAtValue as? Int64)
+            ?? (editedAtValue as? Int).map(Int64.init)
+            ?? (editedAtValue as? NSNumber)?.int64Value
         else { return nil }
         self.init(kind: kind, id: id, editedAt: editedAt, payload: payload)
     }

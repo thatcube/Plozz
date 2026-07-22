@@ -286,30 +286,34 @@ public actor CloudConfigSyncService {
 
     /// Repair a device that has STOPPED RECEIVING (its CKSyncEngine change token got
     /// stuck "caught up", so `fetchChanges` returns nothing even though peers have
-    /// newer records — the "iPad updates, iPhone never does" bug). Unlike
-    /// `resetAndReseed`, this is LOCAL-ONLY and NON-DESTRUCTIVE to the server: it
-    /// throws away this device's engine state (the stale token), mirror, and cached
-    /// system fields, rebuilds the engine with a NIL token, and re-fetches the whole
-    /// zone from scratch — so the device re-downloads every record the server holds
-    /// and converges. The shared cloud data is never deleted or re-seeded.
+    /// newer records — the "iPad updates, iPhone never does" bug). This resets ONLY
+    /// the engine's fetch token and re-fetches the whole zone; it deliberately KEEPS
+    /// the mirror.
+    ///
+    /// Why keep the mirror: the mirror holds each record's true `editedAt` (real
+    /// edit time). If we cleared it and re-published local, this device's STALE
+    /// local values would be re-stamped with a fresh "now" timestamp and then WIN
+    /// last-writer-wins against peers' genuinely-newer edits — clobbering good data
+    /// on the server (the bug that made "Reset Synced Data" make things worse).
+    /// Keeping the mirror means the re-fetched peer records merge against their real
+    /// timestamps and correctly win, and a follow-up publish sees "nothing changed".
     public func redownloadFromCloud() async {
         guard config.isEnabled(), await accountIsAvailable() else { setStatus(.signedOut); return }
         setStatus(.syncing)
-        PlozzLog.sync.info("CloudSync: redownload — discarding local token/mirror, re-fetching all")
-        // Tear the engine down and forget the stuck token + everything derived from it.
+        PlozzLog.sync.info("CloudSync: redownload — resetting fetch token, KEEPING mirror, re-fetching all")
+        // Tear down the engine and forget ONLY the stuck fetch token. Mirror and
+        // systemFields are preserved so real edit timestamps and change tags survive.
         engine = nil
         engineState = nil
-        mirror = CloudSyncMirror()
-        systemFields = [:]
         persist()
         // Rebuild with stateSerialization = nil ⇒ the engine re-fetches from scratch.
         ensureEngine()
         guard let engine else { setStatus(.error, error: "engine unavailable"); return }
         do {
-            try await engine.fetchChanges()
+            try await engine.fetchChanges()   // merges into the kept mirror by real editedAt
             reportRecordCount()
             logMirror("redownload:after")
-            // Push the freshly-downloaded, merged snapshot into the app's stores.
+            // Push the merged snapshot into the app's stores so the UI reflects it.
             if !mirror.records.isEmpty {
                 await config.applyRemoteSnapshot(mirror.snapshot)
             }

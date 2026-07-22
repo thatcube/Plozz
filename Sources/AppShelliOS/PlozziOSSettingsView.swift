@@ -982,6 +982,7 @@ private struct PlozziOSHomeSettingsView: View {
     let seerConfigured: Bool
     @State private var libraries: [HomeLibraryChoice] = []
     @State private var isLoadingLibraries = false
+    @State private var selectedLibraryID: String?
 
     var body: some View {
         Form {
@@ -1026,14 +1027,24 @@ private struct PlozziOSHomeSettingsView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(libraries) { library in
-                        NavigationLink(value: LibraryDetailRoute(id: library.id)) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(library.title)
-                                Text(library.serverName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                        Button {
+                            selectedLibraryID = library.id
+                        } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(library.title)
+                                    Text(library.serverName)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
                             }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             } footer: {
@@ -1111,8 +1122,8 @@ private struct PlozziOSHomeSettingsView: View {
         }
         .settingsPageSurface()
         .navigationTitle("Customize Home")
-        .navigationDestination(for: LibraryDetailRoute.self) { route in
-            if let library = libraries.first(where: { $0.id == route.id }) {
+        .navigationDestination(item: $selectedLibraryID) { id in
+            if let library = libraries.first(where: { $0.id == id }) {
                 PlozziOSLibraryHomeSettingsView(library: library, visibility: visibility)
             }
         }
@@ -1191,8 +1202,6 @@ private struct PlozziOSHomeSettingsView: View {
         }
     }
 }
-
-private struct LibraryDetailRoute: Hashable { let id: String }
 
 private struct HomeLibraryChoice: Identifiable {
     let accountID: String

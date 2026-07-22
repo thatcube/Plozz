@@ -2,6 +2,7 @@
 import AppRuntime
 import CoreModels
 import CoreUI
+import FeatureSettings
 import SwiftUI
 import UIKit
 
@@ -139,6 +140,7 @@ private enum PlozziOSSettingsDestination: Hashable {
     case playback
     case downloads
     case syncSetup
+    case metadata
     case subtitles
     case spoilers
     case nightShift
@@ -199,6 +201,11 @@ private struct PlozziOSSettingsSplitView: View {
                             .syncSetup,
                             title: "iCloud Sync",
                             systemImage: "icloud"
+                        )
+                        settingsRow(
+                            .metadata,
+                            title: "Metadata",
+                            systemImage: "sparkles.rectangle.stack"
                         )
                     } footer: {
                         Text(
@@ -350,6 +357,8 @@ private struct PlozziOSSettingsSplitView: View {
             PlozziOSDownloadSettingsView(model: appModel.downloads)
         case .syncSetup:
             PlozziOSSyncSetupSettingsView(appModel: appModel)
+        case .metadata:
+            MetadataSettingsDetailView(deps: appModel.makeMetadataSettingsDependencies())
         case .subtitles:
             PlozziOSSubtitleSettingsView(
                 behavior: appModel.settings.subtitleBehavior,
@@ -420,6 +429,7 @@ private struct PlozziOSSettingsCompactMenu: View {
     let onAddServer: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var confirmSignOutAll = false
+    @State private var showMetadata = false
 
     var body: some View {
         ScrollView {
@@ -455,6 +465,17 @@ private struct PlozziOSSettingsCompactMenu: View {
                 } label: {
                     Label("iCloud Sync", systemImage: "icloud")
                 }
+                // Metadata uses the Button + navigationDestination pattern rather than
+                // a NavigationLink: a destination/value NavigationLink nested in a
+                // SettingsSectionGroup eager-pushes/swallows taps on this codebase.
+                Button {
+                    showMetadata = true
+                } label: {
+                    Label("Metadata", systemImage: "sparkles.rectangle.stack")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             } footer: {
                 Text(
                     appModel.profiles.profilesEnabled
@@ -585,6 +606,9 @@ private struct PlozziOSSettingsCompactMenu: View {
         }
         .settingsPageSurface()
         .navigationTitle("Settings")
+        .navigationDestination(isPresented: $showMetadata) {
+            MetadataSettingsDetailView(deps: appModel.makeMetadataSettingsDependencies())
+        }
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Cancel", role: .cancel) {}
             Button("Sign Out", role: .destructive) {

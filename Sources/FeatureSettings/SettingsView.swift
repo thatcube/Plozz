@@ -1,4 +1,4 @@
-#if canImport(SwiftUI)
+#if os(tvOS)
 import SwiftUI
 import CoreModels
 import CoreUI
@@ -908,7 +908,7 @@ public struct SettingsView: View {
                                     }
                                 }
                             }
-                            .focusSection()
+                            .tvOSFocusSection()
                         }
 
                         if syncEnabled, let syncRepair {
@@ -934,7 +934,7 @@ public struct SettingsView: View {
                                     }
                                 }
                             }
-                            .focusSection()
+                            .tvOSFocusSection()
                             .alert("Reset synced data?", isPresented: $showResetSyncConfirm) {
                                 Button("Reset", role: .destructive) { syncRepair.reset() }
                                 Button("Cancel", role: .cancel) {}
@@ -990,7 +990,7 @@ public struct SettingsView: View {
                 .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
         }
         .padding(.vertical, 8)
-        .focusSection()
+        .tvOSFocusSection()
     }
 
     private func setUpAnotherDeviceRow(_ action: @escaping () -> Void) -> some View {        Button(action: action) {

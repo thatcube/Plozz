@@ -629,6 +629,8 @@ let package = Package(
                 "FeaturePlayback",
                 "FeatureProfiles",
                 "FeatureSearchCore",
+                "FeatureSettings",
+                "MetadataKit",
                 "MediaDownloads",
                 "MediaTransportCore",
                 "MediaTransportFTP",

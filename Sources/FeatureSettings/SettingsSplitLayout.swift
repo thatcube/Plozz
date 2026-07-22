@@ -142,7 +142,7 @@ struct SettingsSplitLayout: View {
                     ForEach(section.rows) { row in
                         masterRow(row)
                             .focused($focusedRow, equals: row.id)
-                            .prefersDefaultFocus(selectedRowID == row.id, in: masterScope)
+                            .tvOSPrefersDefaultFocus(selectedRowID == row.id, in: masterScope)
                             .id(row.id)
                     }
                 }
@@ -162,8 +162,8 @@ struct SettingsSplitLayout: View {
                 focusInDetail = true
             }
         }
-        .focusScope(masterScope)
-        .focusSection()
+        .tvOSFocusScope(masterScope)
+        .tvOSFocusSection()
     }
 
     private func masterRow(_ row: SettingsSplitRow) -> some View {
@@ -234,7 +234,7 @@ struct SettingsSplitLayout: View {
         // inserting the animated Text, freeing a view UIKit still references.
         // So the detail pane updates INSTANTLY as focus moves (no `.animation`
         // here). A tap that pins a row still animates via its `withAnimation`.
-        .focusSection()
+        .tvOSFocusSection()
     }
 }
 

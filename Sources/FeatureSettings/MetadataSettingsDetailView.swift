@@ -229,8 +229,12 @@ private extension MetadataProviderListLogic.ListItem {
 /// The "Metadata" Settings page: provider enable/disable + ordering (over the
 /// Info.plist baseline), TMDB credentials, and a focused diagnostics destination.
 /// A household-wide concern (like Servers/Seerr), so it lives under "This Apple TV".
-struct MetadataSettingsDetailView: View {
+public struct MetadataSettingsDetailView: View {
     let deps: MetadataSettingsDependencies
+
+    public init(deps: MetadataSettingsDependencies) {
+        self.deps = deps
+    }
 
     /// The source currently "lifted" for reordering (nil = none lifted).
     @State private var liftedSource: MetadataSource?
@@ -240,7 +244,7 @@ struct MetadataSettingsDetailView: View {
 
     private var providers: MetadataProviderSettingsModel { deps.providers }
 
-    var body: some View {
+    public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 SettingsPageHeader("Metadata")
@@ -256,6 +260,16 @@ struct MetadataSettingsDetailView: View {
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
+        #if os(iOS)
+        // On tvOS the diagnostics `SettingsRoute` destination is registered by the
+        // module's own `SettingsView`. AppShelliOS can't see the internal route, so
+        // register it here for the stack this view is pushed onto.
+        .navigationDestination(for: SettingsRoute.self) { route in
+            if route == .metadataDiagnostics {
+                MetadataDiagnosticsDetailView(deps: deps)
+            }
+        }
+        #endif
     }
 
     // MARK: - Providers

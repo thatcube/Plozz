@@ -105,7 +105,7 @@ struct ProfileDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .focusSection()
+            .tvOSFocusSection()
         }
     }
 

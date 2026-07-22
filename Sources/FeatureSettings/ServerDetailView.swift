@@ -44,14 +44,14 @@ struct ServerDetailView: View {
                     // and the right-aligned "Sign Out & Remove Server" button, which
                     // tvOS otherwise can't connect (a diagonal move it won't make).
                     accountsPanel(group)
-                        .focusSection()
+                        .tvOSFocusSection()
                     if group.providerKind == .mediaShare {
                         shareLibraryPanel(group)
-                            .focusSection()
+                            .tvOSFocusSection()
                     }
                     if group.accounts.count > 1 {
                         removeServerPanel(group)
-                            .focusSection()
+                            .tvOSFocusSection()
                     }
                 } else {
                     // Focusable so Menu/Back can pop back to the Servers list

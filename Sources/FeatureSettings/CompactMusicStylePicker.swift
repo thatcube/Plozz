@@ -53,7 +53,7 @@ struct MusicPlayerStyleDetail: View {
             FocusGatedSwitch("Show album, quality & lyrics source", isOn: $showTrackDetails, canFocus: cardFocused)
                 .focused($focused, equals: .toggle)
         }
-        .focusSection()
+        .tvOSFocusSection()
         .onChange(of: focused) { _, new in
             switch new {
             case .style:

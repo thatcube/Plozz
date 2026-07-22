@@ -222,6 +222,26 @@ extension PlozziOSAppModel {
     func syncCloudOnForeground() {
         guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
         Task { await cloudSync.fetchNow() }
+        autoAdoptSyncSetupIfOffered()
+    }
+
+    /// Same-Apple-ID credential auto-skip (SOURCE side). If another of the user's
+    /// devices is currently asking to be set up (it published a rendezvous to iCloud,
+    /// e.g. an Apple TV the user just tapped "add my servers" on), silently connect and
+    /// push this device's config + credentials — no typing, no numeric SAS (the offer's
+    /// public key is pinned, authenticated out-of-band by iCloud account membership).
+    /// Only a configured device (one that actually HAS credentials to share) responds,
+    /// and only when cross-device sync is enabled.
+    func autoAdoptSyncSetupIfOffered() {
+        guard SyncSetupFeatureFlag().isEnabled, !isAutoAdoptingSyncSetup else { return }
+        guard !accountsProviders.accounts.isEmpty else { return }         // nothing to give
+        guard syncSetup.discoverRendezvousTarget() != nil else { return } // no offer → skip
+        isAutoAdoptingSyncSetup = true
+        let model = SyncSetupPairingModel(service: syncSetup)
+        Task { @MainActor in
+            await model.autoAdoptOfferedRendezvous()
+            isAutoAdoptingSyncSetup = false
+        }
     }
 
     /// Reset a corrupted/divergent sync: wipe the iCloud zone and re-seed from this

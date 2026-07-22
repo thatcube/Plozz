@@ -58,6 +58,10 @@ final class PlozziOSAppModel {
     @ObservationIgnored
     var cloudPublishTask: Task<Void, Never>?
 
+    /// Guards against overlapping same-Apple-ID credential auto-adopt attempts.
+    @ObservationIgnored
+    var isAutoAdoptingSyncSetup = false
+
     /// Observable CloudKit sync status for the Sync & Setup page.
     let cloudSyncStatus = CloudSyncStatus()
 

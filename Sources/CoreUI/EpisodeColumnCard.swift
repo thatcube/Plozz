@@ -41,6 +41,7 @@ public struct EpisodeColumnCard: View {
         VStack(alignment: .leading, spacing: 0) {
             artwork
                 .frame(width: Self.artworkSize.width, height: Self.artworkSize.height)
+                .overlay { bottomLeadingScrim }
                 .overlay(alignment: .topTrailing) { statusIndicator }
                 .overlay(alignment: .bottomLeading) { progressBar }
                 .clipShape(RoundedRectangle(
@@ -60,13 +61,6 @@ public struct EpisodeColumnCard: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .padding(.top, metrics.landscapeCaptionTopSpacing + metrics.focusCaptionPush)
-
-                Text(presentation.metadataText ?? " ")
-                    .font(.system(size: metrics.cardSubtitleFontSize))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .opacity(presentation.metadataText == nil ? 0 : 1)
-                    .padding(.top, 2)
 
                 SpoilerSafeOverviewText(
                     overview: presentation.overviewTreatment == .blurred
@@ -231,10 +225,31 @@ public struct EpisodeColumnCard: View {
                 item: item,
                 showsRuntimeWhenIdle: false,
                 showsWatched: false,
+                showsBackground: false,
                 barWidth: 110
             )
             .font(.system(size: 24, weight: .semibold))
             .padding(18)
+        }
+    }
+
+    /// A subtle corner-anchored legibility scrim behind the resume pill: dark at
+    /// the bottom-leading corner fading to clear, so the white play/progress/time
+    /// chip reads cleanly without a solid capsule (matches the iOS/iPadOS episode
+    /// card). Only drawn while an episode is in progress — the only time the pill
+    /// renders here (idle/watched are handled by the corner badge).
+    @ViewBuilder
+    private var bottomLeadingScrim: some View {
+        if presentation.artworkTreatment != .blurred, presentation.progress != nil {
+            GeometryReader { proxy in
+                RadialGradient(
+                    colors: [.black.opacity(0.55), .clear],
+                    center: .bottomLeading,
+                    startRadius: 0,
+                    endRadius: max(proxy.size.width, proxy.size.height) * 0.8
+                )
+            }
+            .allowsHitTesting(false)
         }
     }
 }

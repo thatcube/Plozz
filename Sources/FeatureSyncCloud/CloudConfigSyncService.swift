@@ -110,6 +110,17 @@ public actor CloudConfigSyncService {
         Task { @MainActor in status.syncedRecordCount = count }
     }
 
+    /// Log every record the mirror holds with its `editedAt`, so the SAME record's
+    /// timestamp can be compared across devices — the definitive way to see whether
+    /// an edit reached this device and who "wins" a conflict. Diagnostic only.
+    private func logMirror(_ tag: String) {
+        let items = mirror.records.values
+            .sorted { $0.recordName < $1.recordName }
+            .map { "\($0.recordName)@\($0.editedAt)" }
+            .joined(separator: " | ")
+        PlozzLog.sync.info("CloudSync[\(tag)] mirror(\(mirror.records.count)): \(items)")
+    }
+
     /// Human-readable CKError code name for a save failure.
     private static func ckCodeName(_ error: CKError) -> String {
         "\(error.code) (\(error.code.rawValue))"
@@ -187,14 +198,18 @@ public actor CloudConfigSyncService {
         ensureEngine()
         guard let engine else { return }
         setStatus(.syncing)
+        logMirror("syncNow:before")
         await publishLocalChanges()
 
         var syncError: Error?
         // Fetch FIRST (pull remote + enqueue toPush), then send (push local edits +
         // toPush). Each runs regardless of the other's outcome.
-        do { try await engine.fetchChanges() } catch { syncError = error }
-        do { try await engine.sendChanges() } catch { if syncError == nil { syncError = error } }
+        do { try await engine.fetchChanges(); PlozzLog.sync.info("CloudSync: syncNow fetch done") }
+        catch { syncError = error; PlozzLog.sync.error("CloudSync: syncNow fetch FAILED: \(Self.describe(error))") }
+        do { try await engine.sendChanges(); PlozzLog.sync.info("CloudSync: syncNow send done") }
+        catch { if syncError == nil { syncError = error }; PlozzLog.sync.error("CloudSync: syncNow send FAILED: \(Self.describe(error))") }
         reportRecordCount()
+        logMirror("syncNow:after")
 
         if let syncError {
             // The engine auto-retries transient conflicts, and its own did*Changes
@@ -253,8 +268,9 @@ public actor CloudConfigSyncService {
         engine.state.add(pendingRecordZoneChanges: pending)
         persist()
         reportRecordCount()
+        let saveDetail = plan.saves.map { "\($0.recordName)@\($0.editedAt)" }.joined(separator: ", ")
         let deleteDetail = plan.deletes.isEmpty ? "" : " [deletes: \(plan.deletes.joined(separator: ", "))]"
-        PlozzLog.sync.info("CloudSync: queued \(plan.saves.count) save(s), \(plan.deletes.count) delete(s)\(deleteDetail)")
+        PlozzLog.sync.info("CloudSync: queued \(plan.saves.count) save(s) [\(saveDetail)], \(plan.deletes.count) delete(s)\(deleteDetail)")
     }
 
     /// Opt-out: remove all of THIS app's synced config from the current Apple ID's
@@ -456,7 +472,10 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
         }
 
         guard !incoming.isEmpty || !deletedNames.isEmpty else { return }
+        let inDesc = incoming.map { "\($0.recordName)@\($0.editedAt)" }.joined(separator: ",")
+        PlozzLog.sync.info("CloudSync: FETCHED \(incoming.count) [\(inDesc)] del=\(deletedNames.count)")
         let result = mirror.applyRemote(saved: incoming, deletedRecordNames: deletedNames)
+        PlozzLog.sync.info("CloudSync: applyRemote changed=\(result.changed) toPush=\(result.toPush.count)")
         // Re-push any records where THIS device's copy beat the server's (server is
         // stale) so the fleet converges to the newer value.
         if !result.toPush.isEmpty {
@@ -476,6 +495,8 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
         _ event: CKSyncEngine.Event.SentRecordZoneChanges,
         syncEngine: CKSyncEngine
     ) {
+        let sentDesc = event.savedRecords.map { $0.recordID.recordName }.joined(separator: ",")
+        PlozzLog.sync.info("CloudSync: SENT ok=\(event.savedRecords.count) [\(sentDesc)] failed=\(event.failedRecordSaves.count)")
         for saved in event.savedRecords {
             systemFields[saved.recordID.recordName] = Self.archive(saved)
         }

@@ -494,6 +494,15 @@ public final class AppState {
     /// Observable CloudKit sync status for the iCloud Sync settings page.
     public let cloudSyncStatus = CloudSyncStatus()
 
+    /// Synced servers this device isn't signed into yet ("Needs sign-in"), surfaced
+    /// on the iCloud Sync page. Device-local; never injected into the account pipeline.
+    /// Settable only via the AppState+CloudSync helpers (kept module-internal).
+    public internal(set) var pendingSyncedServers: [SyncedAccountDescriptor] = []
+
+    /// A newly-detected synced server to prompt the user about (Set Up / Ignore),
+    /// or nil. RootView observes this to present a one-time prompt.
+    public var pendingServerPrompt: SyncedAccountDescriptor?
+
     /// Persist a setup received over pairing: import profiles, create accounts from
     /// the descriptors, store their transferred tokens in the Keychain, refresh
     /// providers, and enter the app — so the device is fully set up and signed in
@@ -603,6 +612,8 @@ public final class AppState {
         // Pairing is an explicit consent to share this household, so turn on
         // cross-device CloudKit sync (idempotent; a no-op if already on).
         setSyncSetupEnabled(true)
+        // Signing in via pairing may clear some pending "needs sign-in" servers.
+        refreshPendingSyncedServers()
         return outcome
     }
 

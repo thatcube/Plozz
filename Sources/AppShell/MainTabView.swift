@@ -185,6 +185,10 @@ struct MainTabView: View {
     /// Live sync status summary + manual sync action for the iCloud Sync page.
     var syncStatusSummary: String?
     var onSyncNow: (() -> Void)?
+    /// Pending (needs-sign-in) synced servers + their actions.
+    var pendingSyncedServers: [SyncedAccountDescriptor] = []
+    var onIgnorePendingServer: (String) -> Void = { _ in }
+    var onSetUpFromAnotherDevice: (() -> Void)?
 
     @State private var discovery = LibraryDiscoveryModel()
     /// Owns the Settings library-discovery result as an `@Observable` reference so
@@ -397,7 +401,10 @@ struct MainTabView: View {
                 syncEnabled: syncEnabled,
                 onSetSyncEnabled: onSetSyncEnabled,
                 syncStatusSummary: syncStatusSummary,
-                onSyncNow: onSyncNow
+                onSyncNow: onSyncNow,
+                pendingSyncedServers: pendingSyncedServers,
+                onIgnorePendingServer: onIgnorePendingServer,
+                onSetUpFromAnotherDevice: onSetUpFromAnotherDevice
             )
             }
         }

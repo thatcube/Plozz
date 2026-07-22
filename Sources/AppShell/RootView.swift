@@ -38,6 +38,7 @@ enum HomeRuntimeScope {
 public struct RootView: View {
     @State private var appState: AppState
     @State private var showSyncReceive = false
+    @State private var showSyncReceiveFromSettings = false
     @State private var showSyncSend = false
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -241,7 +242,10 @@ public struct RootView: View {
                         syncEnabled: appState.syncSetup.isEnabled,
                         onSetSyncEnabled: { appState.setSyncSetupEnabled($0) },
                         syncStatusSummary: appState.cloudSyncStatus.summary,
-                        onSyncNow: { appState.syncCloudNow() }
+                        onSyncNow: { appState.syncCloudNow() },
+                        pendingSyncedServers: appState.pendingSyncedServers,
+                        onIgnorePendingServer: { appState.ignorePendingSyncedServer($0) },
+                        onSetUpFromAnotherDevice: { showSyncReceiveFromSettings = true }
                     )
                     .id(HomeRuntimeScope.identityKey(
                         profileID: appState.profilesModel.activeProfileID,
@@ -301,6 +305,33 @@ public struct RootView: View {
         }
         .fullScreenCover(isPresented: $showSyncSend) {
             SyncSetupSendView(appState: appState) { showSyncSend = false }
+        }
+        .fullScreenCover(isPresented: $showSyncReceiveFromSettings) {
+            SyncSetupReceiveView(appState: appState) {
+                showSyncReceiveFromSettings = false
+                appState.refreshPendingSyncedServers()
+            }
+        }
+        .alert(
+            "New server from your other device",
+            isPresented: Binding(
+                get: { appState.pendingServerPrompt != nil },
+                set: { if !$0 { appState.clearPendingServerPrompt() } }
+            ),
+            presenting: appState.pendingServerPrompt
+        ) { descriptor in
+            Button("Set Up") {
+                appState.clearPendingServerPrompt()
+                showSyncReceiveFromSettings = true
+            }
+            Button("Ignore", role: .destructive) {
+                appState.ignorePendingSyncedServer(descriptor.id)
+            }
+            Button("Not Now", role: .cancel) {
+                appState.clearPendingServerPrompt()
+            }
+        } message: { descriptor in
+            Text("“\(descriptor.serverName)” is set up on another device. Sign in to watch it here — your login stays private to each device. You can also find it later under Settings ▸ iCloud Sync.")
         }
         .onAppear {
             if case .launching = appState.state { appState.bootstrap() }

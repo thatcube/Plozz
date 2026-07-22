@@ -114,6 +114,13 @@ public struct SettingsView: View {
     /// nil the row is hidden (e.g. a host that doesn't wire sync).
     private let syncEnabled: Bool
     private let onSetSyncEnabled: ((Bool) -> Void)?
+    /// Live status summary line for the iCloud Sync page, and a manual sync action.
+    private let syncStatusSummary: String?
+    private let onSyncNow: (() -> Void)?
+    /// Synced servers this device isn't signed into yet, plus ignore + set-up actions.
+    private let pendingSyncedServers: [SyncedAccountDescriptor]
+    private let onIgnorePendingServer: (String) -> Void
+    private let onSetUpFromAnotherDevice: (() -> Void)?
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
     private let onSetSeerrUser: (String, SeerUser?) -> Void
@@ -168,7 +175,12 @@ public struct SettingsView: View {
         onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in },
         onSetUpAnotherDevice: (() -> Void)? = nil,
         syncEnabled: Bool = false,
-        onSetSyncEnabled: ((Bool) -> Void)? = nil
+        onSetSyncEnabled: ((Bool) -> Void)? = nil,
+        syncStatusSummary: String? = nil,
+        onSyncNow: (() -> Void)? = nil,
+        pendingSyncedServers: [SyncedAccountDescriptor] = [],
+        onIgnorePendingServer: @escaping (String) -> Void = { _ in },
+        onSetUpFromAnotherDevice: (() -> Void)? = nil
     ) {
         self.subtitleBehavior = subtitleBehavior
         self.spoilers = spoilers
@@ -220,6 +232,11 @@ public struct SettingsView: View {
         self.onSetUpAnotherDevice = onSetUpAnotherDevice
         self.syncEnabled = syncEnabled
         self.onSetSyncEnabled = onSetSyncEnabled
+        self.syncStatusSummary = syncStatusSummary
+        self.onSyncNow = onSyncNow
+        self.pendingSyncedServers = pendingSyncedServers
+        self.onIgnorePendingServer = onIgnorePendingServer
+        self.onSetUpFromAnotherDevice = onSetUpFromAnotherDevice
     }
 
     /// Whether the active profile includes at least one server that can download
@@ -841,6 +858,32 @@ public struct SettingsView: View {
                             get: { syncEnabled }, set: { onSetSyncEnabled($0) }
                         ))
                         .toggleStyle(SettingsSwitchToggleStyle())
+
+                        if syncEnabled, let syncStatusSummary {
+                            LabeledSettingRow("Status", labelWidth: 160) {
+                                HStack(spacing: 16) {
+                                    Text(syncStatusSummary)
+                                        .font(.callout)
+                                        .foregroundStyle(.secondary)
+                                    Spacer(minLength: 0)
+                                    if let onSyncNow {
+                                        Button("Sync Now", action: onSyncNow)
+                                            .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
+                                    }
+                                }
+                            }
+                            .focusSection()
+                        }
+                    }
+                }
+                if !pendingSyncedServers.isEmpty {
+                    SettingsPanel(
+                        title: "Servers From Your Other Devices",
+                        footer: "These servers are set up on another device on your iCloud account. Sign in to watch them here — your login stays private to each device."
+                    ) {
+                        ForEach(pendingSyncedServers, id: \.id) { server in
+                            pendingServerRow(server)
+                        }
                     }
                 }
                 if let onSetUpAnotherDevice {
@@ -858,6 +901,28 @@ public struct SettingsView: View {
             .padding(.vertical, 40)
         }
         .scrollClipDisabled()
+    }
+
+    private func pendingServerRow(_ server: SyncedAccountDescriptor) -> some View {
+        HStack(alignment: .center, spacing: 16) {
+            rowIcon("externaldrive.badge.person.crop")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(server.serverName)
+                    .font(.callout.weight(.medium))
+                Text("Needs sign-in on this device")
+                    .font(.footnote)
+                    .settingsRowSecondary()
+            }
+            Spacer()
+            if let onSetUpFromAnotherDevice {
+                Button("Set Up", action: onSetUpFromAnotherDevice)
+                    .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
+            }
+            Button("Ignore") { onIgnorePendingServer(server.id) }
+                .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
+        }
+        .padding(.vertical, 8)
+        .focusSection()
     }
 
     private func setUpAnotherDeviceRow(_ action: @escaping () -> Void) -> some View {        Button(action: action) {

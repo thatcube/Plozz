@@ -114,9 +114,49 @@ extension AppState {
 
         // NOTE: account *descriptors* travel in the mirror (non-secret server list)
         // but we do not auto-create pending accounts here — native sign-in on a new
-        // device stays the pairing / add-server flow. That UX is a follow-up.
+        // device stays the pairing / add-server flow. Instead we record servers this
+        // device isn't signed into as "pending", surfaced as Needs-sign-in entries.
+        refreshPendingSyncedServers(from: snapshot)
 
         rebuildSettingsModels()
+    }
+
+    // MARK: Pending synced servers
+
+    /// Recompute the pending (needs-sign-in) server list from a synced snapshot and,
+    /// on the Apple TV, queue a one-time prompt for any newly-detected server. Runs
+    /// after applying config so `accountsProviders.accounts` reflects this device.
+    func refreshPendingSyncedServers(from snapshot: SyncConfigSnapshot) {
+        var store = PendingSyncedServersStore()
+        let localIDs = Set(accountsProviders.accounts.map(\.id))
+        let newlyPending = store.reconcile(
+            syncedDescriptors: snapshot.accounts, localAccountIDs: localIDs)
+        pendingSyncedServers = store.pending
+        // Offer to set up the first newly-detected server (one at a time), then mark
+        // it prompted so it never nags again. Only when sync is enabled.
+        if SyncSetupFeatureFlag().isEnabled, pendingServerPrompt == nil,
+           let first = newlyPending.first {
+            pendingServerPrompt = first
+            store.markPrompted(newlyPending.map(\.id))
+        }
+    }
+
+    /// The user chose to ignore a pending server — keep it listed (deletable) but
+    /// stop surfacing it / prompting for it.
+    public func ignorePendingSyncedServer(_ id: String) {
+        var store = PendingSyncedServersStore()
+        store.ignore(id)
+        if pendingServerPrompt?.id == id { pendingServerPrompt = nil }
+        pendingSyncedServers = store.pending
+    }
+
+    /// The user dismissed / handled the current prompt.
+    public func clearPendingServerPrompt() { pendingServerPrompt = nil }
+
+    /// Refresh the pending list from the current local snapshot (e.g. after a
+    /// pairing/sign-in signs the device into one of them).
+    public func refreshPendingSyncedServers() {
+        refreshPendingSyncedServers(from: currentSyncConfigSnapshot())
     }
 
     // MARK: Lifecycle + change observation

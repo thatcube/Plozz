@@ -66,6 +66,10 @@ final class PlozziOSAppModel {
     /// confirmation before any credential is pushed (nil = no pending offer).
     var pendingSyncSetupOffer: SyncPairingRendezvous?
 
+    /// Servers synced from other devices that this device isn't signed into yet — shown
+    /// so the user can sign in / pair to use them here (parity with tvOS).
+    var pendingSyncedServers: [SyncedAccountDescriptor] = []
+
     /// Offers the user declined this session, so they aren't re-prompted.
     @ObservationIgnored
     var dismissedSyncSetupOfferKeys: Set<String> = []

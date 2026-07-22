@@ -158,11 +158,25 @@ extension PlozziOSAppModel {
             for (pid, ids) in membershipSet { profiles.setActiveAccountIDs(ids, for: pid) }
             for pid in membershipClear { profiles.clearActiveAccountIDs(for: pid) }
         }
-        if descriptorsTouched { _ = pendingStore }  // descriptors persisted; iOS has no pending-server UI
+        if descriptorsTouched { refreshPendingSyncedServers() }
 
         // Rebuild the active profile's settings model so applied preferences take
         // effect immediately.
         selectProfile(profiles.activeProfileID)
+    }
+
+    /// Recompute the "servers from your other devices" list (synced descriptors this
+    /// device isn't signed into and hasn't ignored), for display on iOS.
+    func refreshPendingSyncedServers() {
+        let localIDs = Set(accountsProviders.accounts.map(\.id))
+        pendingSyncedServers = PendingSyncedServersStore().pending(excludingLocal: localIDs)
+    }
+
+    /// Stop surfacing a synced server the user doesn't want here.
+    func ignorePendingSyncedServer(_ id: String) {
+        var store = PendingSyncedServersStore()
+        store.ignore(id)
+        refreshPendingSyncedServers()
     }
 
     private func namespace(forProfileID pid: String) -> String?? {
@@ -180,6 +194,7 @@ extension PlozziOSAppModel {
         guard SyncSetupFeatureFlag().isEnabled, let cloudSync else { return }
         Task { await cloudSync.activate() }
         armCloudConfigObservation()
+        refreshPendingSyncedServers()
     }
 
     func armCloudConfigObservation() {
@@ -223,6 +238,7 @@ extension PlozziOSAppModel {
         guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
         Task { await cloudSync.fetchNow() }
         checkForSyncSetupOffer()
+        refreshPendingSyncedServers()
     }
 
     /// Same-Apple-ID credential auto-skip (SOURCE side). If another of the user's

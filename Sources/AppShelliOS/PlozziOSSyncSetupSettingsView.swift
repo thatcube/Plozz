@@ -167,6 +167,31 @@ struct PlozziOSSyncSetupSettingsView: View {
                 Text("Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device. Off by default. If a device stops receiving changes, tap Re-download From iCloud on it.")
             }
 
+            if !appModel.pendingSyncedServers.isEmpty {
+                Section {
+                    ForEach(appModel.pendingSyncedServers, id: \.id) { server in
+                        HStack(spacing: 12) {
+                            Image(systemName: "externaldrive.badge.person.crop")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(server.serverName).fontWeight(.medium)
+                                Text("Set up on another device — sign in to watch here")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Ignore") { appModel.ignorePendingSyncedServer(server.id) }
+                                .font(.footnote)
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                } header: {
+                    Text("Servers From Your Other Devices")
+                } footer: {
+                    Text("These are signed in on your iPad or Apple TV. To use them here without retyping anything, tap “Set up this device from another” below and confirm on that device.")
+                }
+            }
+
             Section {
                 if model.nearbyDevices.isEmpty {
                     HStack(spacing: 12) {

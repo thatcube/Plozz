@@ -257,7 +257,7 @@ extension AppState {
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             guard !Task.isCancelled else { return }
             PlozzLog.sync.info("CloudSync: local config changed — publishing")
-            await cloudSync.publishLocalChanges()
+            await cloudSync.publishAndSend()
             _ = self
         }
     }

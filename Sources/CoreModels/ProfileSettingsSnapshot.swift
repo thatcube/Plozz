@@ -73,15 +73,41 @@ public enum ProfileSettingsTransfer {
         for base in transferableBaseKeys {
             let key = SettingsKey.scoped(base, namespace: namespace)
             guard let value = defaults.object(forKey: key) else { continue }
+            // Canonicalize so the SAME logical value always yields the SAME bytes.
+            // Without this, a value stored as a JSON `Data` blob whose Codable type
+            // has `Dictionary` properties re-encodes with NON-DETERMINISTIC key
+            // order every time a settings model's `didSet` re-saves it (e.g. when
+            // applying a remote change rebuilds the active profile's models). That
+            // made `capture` return different bytes for unchanged settings, so the
+            // sync mirror saw a phantom "change", re-stamped the record, and the
+            // devices ping-ponged republishes forever — starving real fetches and
+            // producing the "works maybe once, then wildly inconsistent" behavior.
             // Wrap in an array so scalar values (Bool/Int/String) are valid
             // top-level property-list roots too.
+            let canonical = canonicalize(value)
             if let data = try? PropertyListSerialization.data(
-                fromPropertyList: [value], format: .binary, options: 0
+                fromPropertyList: [canonical], format: .binary, options: 0
             ) {
                 entries[base] = data
             }
         }
         return entries
+    }
+
+    /// Normalize a persisted settings value into a byte-stable form. A `Data` blob
+    /// that is really JSON (the common case — most settings stores persist
+    /// `JSONEncoder().encode(...)` output) is re-serialized with SORTED keys so
+    /// dictionary ordering can't vary run-to-run. Everything else is returned
+    /// unchanged: property-list scalars/strings/arrays already serialize
+    /// deterministically, and a non-JSON `Data` blob is left as its (stable) bytes.
+    static func canonicalize(_ value: Any) -> Any {
+        guard let data = value as? Data else { return value }
+        guard let object = try? JSONSerialization.jsonObject(
+            with: data, options: [.fragmentsAllowed]),
+              let canonical = try? JSONSerialization.data(
+                withJSONObject: object, options: [.sortedKeys, .fragmentsAllowed])
+        else { return value }
+        return canonical
     }
 
     /// Reinstall captured settings into a profile namespace on this device.

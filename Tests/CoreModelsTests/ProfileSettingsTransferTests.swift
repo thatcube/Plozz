@@ -51,4 +51,42 @@ final class ProfileSettingsTransferTests: XCTestCase {
         let data = try JSONEncoder().encode(snap)
         XCTAssertEqual(try JSONDecoder().decode(ProfileSettingsSnapshot.self, from: data), snap)
     }
+
+    /// The regression that caused the endless republish storm: a JSON `Data` blob
+    /// whose object key order differs (as `JSONEncoder` emits `Dictionary`
+    /// properties in non-deterministic order on each re-encode) MUST capture to the
+    /// SAME bytes, or the sync mirror sees a phantom change and re-stamps forever.
+    func testCaptureIsByteStableAcrossJSONKeyOrder() {
+        // Two encodings of the same logical object, keys in different order.
+        let orderA = Data(#"{"b":2,"a":1,"c":3}"#.utf8)
+        let orderB = Data(#"{"c":3,"a":1,"b":2}"#.utf8)
+
+        let dA = makeDefaults(); dA.set(orderA, forKey: "com.plozz.playbackSettings")
+        let dB = makeDefaults(); dB.set(orderB, forKey: "com.plozz.playbackSettings")
+
+        let capA = ProfileSettingsTransfer.capture(namespace: nil, defaults: dA)
+        let capB = ProfileSettingsTransfer.capture(namespace: nil, defaults: dB)
+
+        XCTAssertEqual(capA["com.plozz.playbackSettings"],
+                       capB["com.plozz.playbackSettings"],
+                       "capture must be byte-stable regardless of JSON key ordering")
+    }
+
+    /// Capturing the SAME value twice is idempotent (no phantom changes), and a
+    /// non-JSON `Data` blob is preserved verbatim (canonicalization only touches
+    /// values that actually parse as JSON).
+    func testCaptureIdempotentAndPreservesNonJSONData() {
+        let d = makeDefaults()
+        d.set(Data(#"{"z":1,"a":2}"#.utf8), forKey: "com.plozz.subtitleStyle")
+        d.set(Data([0xFF, 0x00, 0x42]), forKey: "com.plozz.appTheme") // not JSON
+
+        let first = ProfileSettingsTransfer.capture(namespace: nil, defaults: d)
+        let second = ProfileSettingsTransfer.capture(namespace: nil, defaults: d)
+        XCTAssertEqual(first, second, "capture must be deterministic for unchanged input")
+
+        // Non-JSON blob round-trips byte-for-byte through apply.
+        let target = makeDefaults()
+        ProfileSettingsTransfer.apply(first, namespace: nil, defaults: target)
+        XCTAssertEqual(target.data(forKey: "com.plozz.appTheme"), Data([0xFF, 0x00, 0x42]))
+    }
 }

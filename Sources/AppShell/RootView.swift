@@ -241,9 +241,13 @@ public struct RootView: View {
                         onSetUpAnotherDevice: { showSyncSend = true },
                         syncEnabled: appState.syncSetup.isEnabled,
                         onSetSyncEnabled: { appState.setSyncSetupEnabled($0) },
-                        syncStatusSummary: appState.cloudSyncStatus.lastDiagnostic.map {
-                            "\(appState.cloudSyncStatus.summary) · \($0)"
-                        } ?? appState.cloudSyncStatus.summary,
+                        syncStatusSummary: {
+                            let s = appState.cloudSyncStatus
+                            var line = s.lastDiagnostic.map { "\(s.summary) · \($0)" } ?? s.summary
+                            if let n = s.syncedRecordCount { line += " · \(n) item\(n == 1 ? "" : "s")" }
+                            if let tag = s.accountTag { line += " · id \(tag)…" }
+                            return line
+                        }(),
                         onSyncNow: { appState.syncCloudNow() },
                         onResetSync: { appState.resetCloudSync() },
                         pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,

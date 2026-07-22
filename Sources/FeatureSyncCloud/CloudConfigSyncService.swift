@@ -101,6 +101,15 @@ public actor CloudConfigSyncService {
         Task { @MainActor in status.lastDiagnostic = detail }
     }
 
+    /// Push the current mirror record count to the status object so the UI can show
+    /// "N items in iCloud" — a device stuck at a lower count than its peers is the
+    /// clearest signal it isn't receiving.
+    private func reportRecordCount() {
+        let count = mirror.records.count
+        guard let status = config.status else { return }
+        Task { @MainActor in status.syncedRecordCount = count }
+    }
+
     /// Human-readable CKError code name for a save failure.
     private static func ckCodeName(_ error: CKError) -> String {
         "\(error.code) (\(error.code.rawValue))"
@@ -122,6 +131,10 @@ public actor CloudConfigSyncService {
         }
         ensureEngine()
         setStatus(.idle)
+        // Log the iCloud identity this device syncs as, so a mismatched Apple ID
+        // across devices (which silently syncs to a different private DB) is
+        // diagnosable — the classic "one device never receives" cause.
+        await logAccountIdentity()
         // Heal any previously-dropped applies: reconcile LOCAL to what the mirror
         // already knows BEFORE publishing. Without this, a mirror that's ahead of
         // local (e.g. an earlier apply was skipped) would make the next publish
@@ -132,6 +145,24 @@ public actor CloudConfigSyncService {
         // Ensure our custom zone exists, then reconcile local -> cloud.
         engine?.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
         await publishLocalChanges()
+        reportRecordCount()
+    }
+
+    /// Log (and surface) the CloudKit user-record id + account status so the SAME
+    /// value across devices can be confirmed — different ids ⇒ different Apple IDs ⇒
+    /// they can never see each other's data.
+    private func logAccountIdentity() async {
+        do {
+            let status = try await container.accountStatus()
+            let userID = try await container.userRecordID()
+            let short = String(userID.recordName.prefix(10))
+            PlozzLog.sync.info("CloudSync: iCloud account status=\(status.rawValue) userID=\(short)…")
+            if let s = config.status {
+                await MainActor.run { s.accountTag = short }
+            }
+        } catch {
+            PlozzLog.sync.error("CloudSync: could not read iCloud identity: \(error.localizedDescription)")
+        }
     }
 
     /// Lightweight foreground pull: publish pending local changes, fetch remote
@@ -199,6 +230,20 @@ public actor CloudConfigSyncService {
         return parts.joined(separator: " | ")
     }
 
+    /// Publish pending local changes AND push them to the server right away, instead
+    /// of only enqueueing and waiting for `automaticallySync` to decide to send
+    /// (which CloudKit can defer for a long time). Called from the app's debounced
+    /// change handler so an edit reaches the server within ~a second — otherwise a
+    /// peer that fetches/taps "Sync Now" hits a server that doesn't have the edit
+    /// yet, the single biggest cause of "I changed it but the other device never
+    /// sees it".
+    public func publishAndSend() async {
+        guard config.isEnabled(), let engine else { return }
+        await publishLocalChanges()
+        do { try await engine.sendChanges() }
+        catch { setDiagnostic("send: \(Self.describe(error))") }
+    }
+
     /// The app calls this whenever the non-secret config changes (same signal that
     /// refreshes the presence beacon). Diffs local against the mirror and enqueues
     /// the minimal set of record saves/deletes. No-op when disabled or unchanged.
@@ -219,6 +264,7 @@ public actor CloudConfigSyncService {
         }
         engine.state.add(pendingRecordZoneChanges: pending)
         persist()
+        reportRecordCount()
         let deleteDetail = plan.deletes.isEmpty ? "" : " [deletes: \(plan.deletes.joined(separator: ", "))]"
         PlozzLog.sync.info("CloudSync: queued \(plan.saves.count) save(s), \(plan.deletes.count) delete(s)\(deleteDetail)")
     }
@@ -431,6 +477,7 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
         }
         persist()
         guard result.changed else { return }
+        reportRecordCount()
         // Hand the merged, non-secret snapshot to the app to reconcile into its
         // stores (config-only; never signs a device in).
         await config.applyRemoteSnapshot(result.snapshot)

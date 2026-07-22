@@ -127,6 +127,16 @@ struct PlozziOSSyncSetupSettingsView: View {
                             .font(.caption2)
                             .foregroundStyle(.orange)
                     }
+                    if let tag = appModel.cloudSyncStatus.accountTag {
+                        Text("iCloud identity: \(tag)…  (must match on every device)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let n = appModel.cloudSyncStatus.syncedRecordCount {
+                        Text("\(n) item\(n == 1 ? "" : "s") in iCloud  (should match your other devices)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     Button(role: .destructive) {
                         appModel.resetCloudSync()
                     } label: {

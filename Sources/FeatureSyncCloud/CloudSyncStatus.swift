@@ -26,6 +26,13 @@ public final class CloudSyncStatus {
     /// A PERSISTENT diagnostic detail (last CloudKit error), shown until the next
     /// success clears it. Survives the phase flicker so it's actually readable.
     public internal(set) var lastDiagnostic: String?
+    /// Short prefix of the CloudKit user-record id (the iCloud identity this device
+    /// syncs as). Compare across devices — a MISMATCH means different Apple IDs.
+    public internal(set) var accountTag: String?
+    /// How many config records this device currently mirrors from iCloud. Compare
+    /// across devices: if one shows 0 (or fewer) than another, that device isn't
+    /// receiving — the fastest on-device confirmation of a one-way sync.
+    public internal(set) var syncedRecordCount: Int?
 
     /// Debounces error display: a transient conflict that self-heals on the engine's
     /// own retry shouldn't flash a scary "Couldn't sync". The error is only shown if

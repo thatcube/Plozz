@@ -95,6 +95,7 @@ public final class HeroTrailerController {
     private var hasStartedPlayback = false
     private var autoplayWhenReady = false
     private var requestedPaused = false
+    private var captionSelectionTask: Task<Void, Never>?
     @ObservationIgnored private var videoOutput: AVPlayerItemVideoOutput?
     @ObservationIgnored private let imageContext = CIContext(options: nil)
 
@@ -102,6 +103,7 @@ public final class HeroTrailerController {
         // Never let the trailer claim the Now-Playing transport or interrupt
         // music; it's ambient. Muting is applied per play() call.
         player.actionAtItemEnd = .pause
+        player.appliesMediaSelectionCriteriaAutomatically = false
         #if canImport(UIKit)
         homeSurfaceView.playerLayer.player = player
         detailSurfaceView.playerLayer.player = player
@@ -197,6 +199,7 @@ public final class HeroTrailerController {
         observeEnd(of: item)
         observeStatus(of: item)
         player.replaceCurrentItem(with: item)
+        disableCaptions(on: item)
 
         currentItemID = itemID
         PlozzLog.app.info("Hero trailer: queued item=\(itemID) muted=\(muted) url=\(PlozzLog.redact(url: resolvedURL))")
@@ -301,6 +304,8 @@ public final class HeroTrailerController {
     private func stopPlayback(resetItem: Bool) {
         hasStartedPlayback = false
         player.pause()
+        captionSelectionTask?.cancel()
+        captionSelectionTask = nil
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
             self.endObserver = nil
@@ -318,6 +323,20 @@ public final class HeroTrailerController {
             currentItemID = nil
             activeSurfaceRole = nil
             duration = 0
+        }
+    }
+
+    private func disableCaptions(on item: AVPlayerItem) {
+        captionSelectionTask = Task { @MainActor [weak self, weak item] in
+            guard let item,
+                  let group = try? await item.asset.loadMediaSelectionGroup(
+                    for: .legible
+                  ),
+                  !Task.isCancelled,
+                  self?.player.currentItem === item else {
+                return
+            }
+            item.select(nil, in: group)
         }
     }
 

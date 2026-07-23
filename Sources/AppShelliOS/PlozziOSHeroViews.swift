@@ -94,7 +94,6 @@ struct PlozziOSHomeHeroSlide: View {
             isActive: isSelected,
             showsBackdrop: false,
             showsScrim: false,
-            showsMuteButton: false,
             trailerController: trailerController,
             backgroundSettings: appModel.settings.heroBackground,
             trailerResolver: appModel.heroTrailerResolver()
@@ -250,7 +249,6 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
     let isActive: Bool
     var showsBackdrop = true
     var showsScrim = true
-    var showsMuteButton = true
     let trailerController: HeroTrailerController
     let backgroundSettings: HeroBackgroundSettingsModel
     let trailerResolver: HeroTrailerResolving
@@ -326,22 +324,6 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
                 )
                 .padding(.bottom, style == .compactPortrait ? 30 : 42)
 
-            if showsMuteButton,
-               surfaceTrailerEnabled,
-               trailerController.currentItemID == item.id,
-               trailerController.isPlaying {
-                PlozziOSHeroMuteButton(
-                    isMuted: trailerController.isMuted,
-                    onToggle: toggleMuted
-                )
-                .frame(
-                    maxWidth: .infinity,
-                    maxHeight: .infinity,
-                    alignment: .topTrailing
-                )
-                .padding(.top, 18)
-                .padding(.trailing, 18)
-            }
         }
         .frame(height: height)
         .task(
@@ -419,11 +401,6 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
             return
         }
         trailerController.startPrepared()
-    }
-
-    private func toggleMuted() {
-        // Session-only: flip the live trailer mute; never rewrite the saved default.
-        trailerController.toggleMuted()
     }
 
     private func releaseTrailerSurface() {
@@ -1796,20 +1773,14 @@ private struct PlozziOSDetailCredits: View {
 
 }
 
-private struct PlozziOSHeroMuteButton: View {
-    @Environment(\.themePalette) private var palette
+struct PlozziOSTrailerMuteToolbarButton: View {
     let isMuted: Bool
     let onToggle: () -> Void
 
     var body: some View {
         Button(action: onToggle) {
             Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .font(.headline)
-                .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(palette.primaryText)
         .accessibilityLabel(isMuted ? "Unmute trailer" : "Mute trailer")
     }
 }

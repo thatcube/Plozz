@@ -221,6 +221,18 @@ private struct PlozziOSCanonicalItemDetailView: View {
         }
         .background(palette.backgroundBase.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if trailerController.isPlaying,
+               trailerController.activeSurfaceRole == .detail,
+               trailerController.currentItemID == viewModel.state.value?.item.id {
+                ToolbarItem(placement: .topBarTrailing) {
+                    PlozziOSTrailerMuteToolbarButton(
+                        isMuted: trailerController.isMuted,
+                        onToggle: trailerController.toggleMuted
+                    )
+                }
+            }
+        }
         .task { await viewModel.load() }
         .alert(
             "Seerr",

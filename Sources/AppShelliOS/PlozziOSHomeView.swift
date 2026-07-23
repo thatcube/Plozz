@@ -96,17 +96,9 @@ struct PlozziOSHomeView: View {
         .toolbar {
             if trailerController.isPlaying {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: toggleTrailerMute) {
-                        Image(
-                            systemName: trailerController.isMuted
-                                ? "speaker.slash.fill"
-                                : "speaker.wave.2.fill"
-                        )
-                    }
-                    .accessibilityLabel(
-                        trailerController.isMuted
-                            ? "Unmute trailer"
-                            : "Mute trailer"
+                    PlozziOSTrailerMuteToolbarButton(
+                        isMuted: trailerController.isMuted,
+                        onToggle: toggleTrailerMute
                     )
                 }
             }

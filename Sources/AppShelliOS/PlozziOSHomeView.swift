@@ -612,6 +612,10 @@ private struct PlozziOSHomeHeroCarousel: View {
             surfaceRole: .home,
             dynamicTypeSize: dynamicTypeSize
         )
+        let pullScale = 1
+            + min(pullDistance / max(heroHeight, 1), 0.18)
+        let upwardScaleGrowth = (pullScale - 1) * heroHeight / 2
+        let pullOffset = max(pullDistance - upwardScaleGrowth, 0)
         GeometryReader { proxy in
             let swipeDistance = max(proxy.size.width, 1)
             let progress = min(abs(dragOffset) / swipeDistance, 1)
@@ -646,7 +650,8 @@ private struct PlozziOSHomeHeroCarousel: View {
                                 height: heroHeight,
                                 contentOffsetX: incomingX,
                                 showsTrailer: false,
-                                usesSlidingArtwork: true
+                                usesSlidingArtwork: true,
+                                ancestorScale: pullScale
                             )
 
                             PlozziOSHomeStaticBackdrop(
@@ -655,7 +660,8 @@ private struct PlozziOSHomeHeroCarousel: View {
                                 height: heroHeight,
                                 contentOffsetX: outgoingX,
                                 showsTrailer: false,
-                                usesSlidingArtwork: true
+                                usesSlidingArtwork: true,
+                                ancestorScale: pullScale
                             )
                             .opacity(1 - progress)
                         } else {
@@ -663,7 +669,8 @@ private struct PlozziOSHomeHeroCarousel: View {
                             PlozziOSHomeStaticBackdrop(
                                 item: currentItem,
                                 style: style,
-                                height: heroHeight
+                                height: heroHeight,
+                                ancestorScale: pullScale
                             )
                             .id(currentItem.id)
                         }
@@ -766,9 +773,10 @@ private struct PlozziOSHomeHeroCarousel: View {
             }
         }
         .scaleEffect(
-            1 + min(pullDistance / max(heroHeight, 1), 0.18),
+            pullScale,
             anchor: .center
         )
+        .offset(y: -pullOffset)
         .onChange(of: items.map(\.id), initial: true) { _, itemIDs in
             if selectedItemID == nil || !itemIDs.contains(selectedItemID ?? "") {
                 selectedItemID = itemIDs.first

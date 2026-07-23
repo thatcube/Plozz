@@ -698,6 +698,9 @@ struct PlozziOSHomeStaticBackdrop: View {
     /// Transition artwork carries adjacent reflected edge panels. At rest the
     /// sharp center is pixel-identical to the ordinary idle backdrop.
     var usesSlidingArtwork: Bool = false
+    /// An outer visual zoom changes `frame(in: .global)` without changing layout.
+    /// Pass it through so the reflected stage can recover its pre-zoom position.
+    var ancestorScale: CGFloat = 1
 
     var body: some View {
         let presentation = HeroPresentation(
@@ -705,7 +708,10 @@ struct PlozziOSHomeStaticBackdrop: View {
             artworkStyle: style,
             surface: .home
         )
-        PlozziOSReflectedHeroStage(height: height) { usableWidth in
+        PlozziOSReflectedHeroStage(
+            height: height,
+            ancestorScale: ancestorScale
+        ) { usableWidth in
             if usesSlidingArtwork {
                 PlozziOSSlidingHeroArtwork(
                     presentation: presentation,
@@ -1904,12 +1910,16 @@ private struct PlozziOSReflectedHeroStage<
     @State private var windowWidth: CGFloat?
 
     let height: CGFloat
+    var ancestorScale: CGFloat = 1
     @ViewBuilder let content: (CGFloat) -> Content
     @ViewBuilder let reflection: (CGFloat, CGFloat) -> Reflection
 
     var body: some View {
         GeometryReader { proxy in
-            let globalMinX = proxy.frame(in: .global).minX
+            let scaledGlobalMinX = proxy.frame(in: .global).minX
+            let horizontalScaleGrowth = proxy.size.width
+                * (max(ancestorScale, 1) - 1) / 2
+            let globalMinX = scaledGlobalMinX + horizontalScaleGrowth
             let width = windowWidth ?? proxy.size.width
             let locallyCoveredWidth = max(
                 proxy.safeAreaInsets.leading,

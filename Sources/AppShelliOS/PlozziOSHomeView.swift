@@ -288,10 +288,6 @@ struct PlozziOSHomeView: View {
         } action: { _, pullDistance in
             heroPullDistance = pullDistance
         }
-        .refreshable {
-            await viewModel.load()
-            await loadFeatured()
-        }
         .task(
             id: PlozziOSHeroLoadID(
                 content: content,

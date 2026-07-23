@@ -450,5 +450,27 @@ extension PlozziOSAppModel {
         guard let cloudSync else { return }
         Task { await cloudSync.redownloadFromCloud() }
     }
+
+    /// DEBUG: nuke the ENTIRE household from iCloud so you can test a true cold start
+    /// (e.g. "set up only on the Apple TV, then fresh-install the iPad"). Unlike
+    /// `resetCloudSync` (which deletes then immediately RE-uploads from this device),
+    /// this deletes and does NOT republish, then takes this device out of sync so it
+    /// can't refill iCloud. It:
+    ///   1. deletes every CloudKit config + removal-tombstone record (flushed to peers
+    ///      as normal deletions, so their synced view empties too);
+    ///   2. removes every synchronizable iCloud-Keychain login (propagates the deletion
+    ///      through iCloud Keychain so no device silently auto-reconnects);
+    ///   3. wipes this device's local roster/profiles/sync bookkeeping (first-run);
+    ///   4. turns iCloud Sync OFF here so this device stays out of the household until
+    ///      you re-enable it — leaving iCloud genuinely empty for the next publisher.
+    func eraseEverythingFromICloudForDebugging() {
+        let cloud = cloudSync
+        Task { @MainActor in
+            await cloud?.deleteAllServerData()   // step 1 (flushes deletes to peers)
+            removeAllPortableCredentials()        // step 2
+            resetToFirstRunForDebugging()         // step 3
+            setSyncSetupEnabled(false)            // step 4
+        }
+    }
 }
 #endif

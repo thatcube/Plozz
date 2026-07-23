@@ -83,6 +83,16 @@ extension PlozziOSAppModel {
         try? portableCredStore.removeValue(for: accountID)
     }
 
+    /// Debug: purge EVERY synced iCloud-Keychain login for the whole household —
+    /// including credentials synced in from other devices whose account IDs this
+    /// device never held locally. Because the store is synchronizable, the deletion
+    /// propagates through iCloud Keychain to the household's other devices, so no
+    /// device silently auto-reconnects afterward. Used by "Erase Everything From
+    /// iCloud" to reach a true clean slate for cold-start testing.
+    func removeAllPortableCredentials() {
+        try? portableCredStore.removeAll()
+    }
+
     /// Whether this device already has a synced iCloud-Keychain login for `accountID`,
     /// i.e. `autoConnectFromSyncedCredentials()` can sign it in with no user action. Used
     /// to suppress the manual "add this server?" prompt when a silent auto-connect will

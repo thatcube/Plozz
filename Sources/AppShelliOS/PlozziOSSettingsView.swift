@@ -166,6 +166,7 @@ private struct PlozziOSSettingsSplitView: View {
     @State private var selection: PlozziOSSettingsDestination?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var confirmSignOutAll = false
+    @State private var confirmEraseICloud = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -251,6 +252,22 @@ private struct PlozziOSSettingsSplitView: View {
                         Button("Reset to First Run") {
                             appModel.resetToFirstRunForDebugging()
                             onClose()
+                        }
+                        Button("Erase Everything From iCloud", role: .destructive) {
+                            confirmEraseICloud = true
+                        }
+                        .confirmationDialog(
+                            "Erase everything from iCloud?",
+                            isPresented: $confirmEraseICloud,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Erase Household From iCloud", role: .destructive) {
+                                appModel.eraseEverythingFromICloudForDebugging()
+                                onClose()
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("Deletes the whole household — every profile, server, and synced login — from iCloud (all your devices), wipes this device to first-run, and turns iCloud Sync OFF here. Use to test a clean cold start (e.g. set up only on the Apple TV, then fresh-install another device). Re-enable Sync when done.")
                         }
                     }
                     #endif
@@ -430,6 +447,7 @@ private struct PlozziOSSettingsCompactMenu: View {
     let onAddServer: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var confirmSignOutAll = false
+    @State private var confirmEraseICloud = false
     @State private var showMetadata = false
 
     var body: some View {
@@ -593,6 +611,22 @@ private struct PlozziOSSettingsCompactMenu: View {
                     Button("Reset to First Run") {
                         appModel.resetToFirstRunForDebugging()
                         dismiss()
+                    }
+                    Button("Erase Everything From iCloud", role: .destructive) {
+                        confirmEraseICloud = true
+                    }
+                    .confirmationDialog(
+                        "Erase everything from iCloud?",
+                        isPresented: $confirmEraseICloud,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Erase Household From iCloud", role: .destructive) {
+                            appModel.eraseEverythingFromICloudForDebugging()
+                            dismiss()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Deletes the whole household — every profile, server, and synced login — from iCloud (all your devices), wipes this device to first-run, and turns iCloud Sync OFF here. Use to test a clean cold start (e.g. set up only on the Apple TV, then fresh-install another device). Re-enable Sync when done.")
                     }
                 }
                 #endif

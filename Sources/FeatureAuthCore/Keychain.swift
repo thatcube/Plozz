@@ -222,6 +222,39 @@ public struct KeychainStore: SecureStore {
             throw KeychainError.unexpectedStatus(status)
         }
     }
+
+    /// Delete EVERY item stored under this service — not just a single key. Used by
+    /// the debug "Erase Everything From iCloud" flow to purge all synced logins
+    /// (including credentials synced in from other devices whose keys this device
+    /// never knew). For a synchronizable store this also removes the items from
+    /// iCloud Keychain, propagating the deletion to the household's other devices.
+    public func removeAll() throws {
+        func serviceQuery(useUserIndependent: Bool) -> [String: Any] {
+            var query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service
+            ]
+            if synchronizable {
+                query[kSecAttrSynchronizable as String] = kCFBooleanTrue
+            }
+            #if os(tvOS)
+            if useUserIndependent {
+                query[kSecUseUserIndependentKeychain as String] = kCFBooleanTrue
+            }
+            #endif
+            return query
+        }
+        let status = SecItemDelete(serviceQuery(useUserIndependent: userIndependent) as CFDictionary)
+        let sharedOK = status == errSecSuccess || status == errSecItemNotFound
+            || status == errSecMissingEntitlement || status == errSecParam
+        guard sharedOK else { throw KeychainError.unexpectedStatus(status) }
+        if userIndependent, fallbackToPerUser {
+            let perUser = SecItemDelete(serviceQuery(useUserIndependent: false) as CFDictionary)
+            guard perUser == errSecSuccess || perUser == errSecItemNotFound else {
+                throw KeychainError.unexpectedStatus(perUser)
+            }
+        }
+    }
 }
 #endif
 

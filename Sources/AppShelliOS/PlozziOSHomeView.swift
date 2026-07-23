@@ -672,6 +672,7 @@ private struct PlozziOSHomeHeroCarousel: View {
                             height: heroHeight
                         )
                         .mask { PlozziOSHeroFadeMask() }
+                        .offset(y: -pullDistance)
                     }
 
                     PlozziOSHomeHeroSlide(

@@ -142,15 +142,6 @@ struct DetailHeroView: View {
     /// washes out — when focused we switch it to a darker green that stays legible.
     @FocusState private var refreshButtonHasFocus: Bool
 
-    /// Whether the trailing "…" (server/version) menu holds focus. After a
-    /// cross-server switch the page rebuilds the hero in place (same "…" menu is
-    /// still present), but the focus engine can otherwise drop focus to the
-    /// default Play button; re-asserting this on `selectedSourceAccountID` change
-    /// keeps the user parked on the "…" menu where they just made the switch. It
-    /// is *not* set on first appearance (only on change), so it never steals the
-    /// initial focus that Play should have when the page opens.
-    @FocusState private var moreMenuFocused: Bool
-
     /// Identifies each focusable control in the hero action row. A single
     /// `@FocusState` bound to this enum funnels every action button through one
     /// signal, so the parent can be told the instant focus lands on — or moves
@@ -711,7 +702,7 @@ struct DetailHeroView: View {
         .onChange(of: selectedSourceAccountID) { _, _ in
             guard userInitiatedSourceSwitch else { return }
             userInitiatedSourceSwitch = false
-            if showsMoreMenu { moreMenuFocused = true }
+            if showsMoreMenu { heroActionRowFocus = .more }
         }
 
     }
@@ -983,7 +974,6 @@ struct DetailHeroView: View {
         )
         .equatable()
         .modifier(HeroActionButtonStyle(prominent: false, circular: true))
-        .focused($moreMenuFocused)
         .focused($heroActionRowFocus, equals: .more)
         .accessibilityLabel("More actions")
     }
@@ -1341,17 +1331,6 @@ private struct CheckmarkShape: Shape {
     }
 }
 
-/// Equatable wrapper around the hero's "…" overflow Menu. Sits in its own view
-/// so that re-renders of `DetailHeroView` (e.g. when `@FocusState
-/// moreMenuFocused` flips as the picker opens, when async cross-server
-/// discovery / alternate-source enrichment in `ItemDetailViewModel` updates
-/// `sources` after the page has settled, or when an optimistic watched-state
-/// notification arrives) don't rebuild the Menu while it's already open — that
-/// rebuild is what produces the single-frame flash users see right after
-/// opening the menu. Closures are intentionally excluded from `==`: they're
-/// recreated on every parent render but invoke stable view-model methods, so
-/// comparing the data inputs is sufficient to decide whether the menu needs
-/// to redraw.
 private struct DetailHeroCreditLine: View {
     let label: String
     let values: [String]
@@ -1376,6 +1355,11 @@ private struct HeroMenuChoice: Identifiable, Equatable {
     let title: String
 }
 
+/// Equatable wrapper around the hero's "…" overflow Menu. Sits in its own view
+/// so that unrelated hero state and asynchronous metadata enrichment don't
+/// rebuild an already-presented native menu. Closures are intentionally excluded
+/// from `==`: they invoke stable view-model methods, so comparing the rendered
+/// choice identities and selection is sufficient.
 private struct HeroMoreMenu: View, Equatable {
     let serverChoices: [HeroMenuChoice]
     let versions: [HeroMenuChoice]

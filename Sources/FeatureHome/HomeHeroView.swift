@@ -1667,7 +1667,8 @@ struct HomeHeroView: View {
                     progress: item.resumeProgressFraction,
                     remainingText: item.resumeRemainingText,
                     seasonEpisodeText: HeroForegroundModelBuilder.seasonEpisodeButtonText(for: item),
-                    onLight: selected || colorScheme == .light
+                    onLight: selected || colorScheme == .light,
+                    barHeight: 12
                 )
                 .font(.system(size: 28, weight: .semibold))
             }

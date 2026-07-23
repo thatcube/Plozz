@@ -244,12 +244,14 @@ public struct PosterCardView: View {
                 MediaCardPlaybackIndicators(
                     item: item,
                     hidesStatus: hideThumbnail,
+                    showsProgressBar: !showsResumeChip,
                     badgeInset: borderlessBadgeInset,
                     progressHeight: metrics.progressBarHeight,
                     progressHorizontalInset: borderlessProgressInset,
                     progressBottomInset: borderlessProgressInset
                 )
             }
+            .overlay { resumeChip }
             .clipShape(RoundedRectangle(cornerRadius: borderlessCornerRadius, style: .continuous))
             .plozzMediaEdge(cornerRadius: borderlessCornerRadius)
             .plozzFocusHalo(
@@ -401,7 +403,7 @@ public struct PosterCardView: View {
                     showsWatched: false,
                     showsBackground: false,
                     barWidth: 80,
-                    barHeight: 16
+                    barHeight: 8
                 )
                 .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                 .padding(16)

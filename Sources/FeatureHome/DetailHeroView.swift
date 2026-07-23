@@ -784,7 +784,8 @@ struct DetailHeroView: View {
                     progress: playProgress,
                     remainingText: playRemainingText,
                     seasonEpisodeText: playSeasonEpisodeText,
-                    onLight: playButtonHasFocus || colorScheme == .light
+                    onLight: playButtonHasFocus || colorScheme == .light,
+                    barHeight: 12
                 )
             }
         }

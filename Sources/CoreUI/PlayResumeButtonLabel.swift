@@ -66,6 +66,9 @@ public struct PlayResumeButtonLabel: View {
     public let onLight: Bool
     public var spacing: CGFloat
     public var capsuleWidth: CGFloat
+    /// Height of the resume progress bar inside the button. Defaults to the
+    /// compact 6pt used on iOS; tvOS heroes pass a taller bar.
+    public var barHeight: CGFloat
 
     public init(
         title: String,
@@ -74,7 +77,8 @@ public struct PlayResumeButtonLabel: View {
         seasonEpisodeText: String? = nil,
         onLight: Bool,
         spacing: CGFloat = 16,
-        capsuleWidth: CGFloat = 75
+        capsuleWidth: CGFloat = 75,
+        barHeight: CGFloat = 6
     ) {
         self.title = title
         self.progress = progress
@@ -83,6 +87,7 @@ public struct PlayResumeButtonLabel: View {
         self.onLight = onLight
         self.spacing = spacing
         self.capsuleWidth = capsuleWidth
+        self.barHeight = barHeight
     }
 
     /// The resume form is used only for a genuinely in-progress item: a fraction
@@ -104,7 +109,7 @@ public struct PlayResumeButtonLabel: View {
         HStack(spacing: spacing) {
             Image(systemName: "play.fill")
             if let resumeForm {
-                ResumeProgressCapsule(progress: resumeForm.progress, onLight: onLight, width: capsuleWidth)
+                ResumeProgressCapsule(progress: resumeForm.progress, onLight: onLight, width: capsuleWidth, height: barHeight)
                 Text(resumeForm.remaining)
                     .lineLimit(1)
             } else {

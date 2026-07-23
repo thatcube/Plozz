@@ -483,6 +483,26 @@ private struct PlozziOSHeroBackdrop: View {
             if showsScrim {
                 PlozziOSHeroScrim(style: style)
             }
+
+            // Resolve the very bottom of the hero to the EXACT page background
+            // colour before the dissolve mask runs. The legibility scrim darkens
+            // toward pure black, which overshoots a non-black themed background
+            // (dark mode's base is a grey ~0.13) and leaves a darker band that
+            // reads as a hard line where the hero meets the page. Fading to
+            // `palette.backgroundBase` instead means the hero's lower edge matches
+            // the page exactly, so there's no luminance step — just a smooth melt.
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.30),
+                    .init(color: palette.backgroundBase.opacity(0.5), location: 0.62),
+                    .init(color: palette.backgroundBase.opacity(0.9), location: 0.82),
+                    .init(color: palette.backgroundBase, location: 0.93),
+                    .init(color: palette.backgroundBase, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
         }
         .frame(height: height)
         // Fade the complete artwork/video stack to transparent rather than

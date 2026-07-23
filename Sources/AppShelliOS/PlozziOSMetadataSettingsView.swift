@@ -99,9 +99,7 @@ struct PlozziOSMetadataSettingsView: View {
                         // SettingsSectionGroup already pads its child by 16pt; zero
                         // the List's own horizontal inset so padding isn't doubled.
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                        .listRowBackground(item == .divider
-                            ? Color.secondary.opacity(0.12)
-                            : Color.clear)
+                        .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
                 .onMove { offsets, destination in
@@ -126,7 +124,7 @@ struct PlozziOSMetadataSettingsView: View {
     /// extra room for the taller dashed drop-target placeholder when present.
     private func rowStackHeight(_ items: [MetadataProviderListLogic.ListItem]) -> CGFloat {
         let base = CGFloat(items.count) * 48
-        return items.contains(.disabledPlaceholder) ? base + 20 : base
+        return items.contains(.disabledPlaceholder) ? base + 44 : base
     }
 
     @ViewBuilder

@@ -13,12 +13,11 @@ public struct MenuSelectionLabel: View {
     }
 
     public var body: some View {
-        Label {
-            Text(title)
-        } icon: {
+        HStack(spacing: 10) {
             Image(systemName: "checkmark")
                 .opacity(isSelected ? 1 : 0)
                 .accessibilityHidden(!isSelected)
+            Text(title)
         }
     }
 }

@@ -630,58 +630,49 @@ private struct PlozziOSHomeHeroCarousel: View {
             let incomingX = -slideDir * slideTravel * (1 - progress)
             ZStack {
                 if let currentItem {
-                    // Images + legibility scrim live in ONE container that carries a
-                    // single static dissolve mask, so the fade never shifts during a
-                    // swipe (only the image/video underneath crossfades), and the
-                    // whole thing melts to the page via ALPHA — the tvOS look — with
-                    // no opaque grey wash. The current slide stays fully opaque while
-                    // the incoming one fades in on top, so the stack never dips.
                     ZStack {
-                        if let dragTargetItem {
-                            // TRANSITION: both slides render through the SAME
-                            // reflected-stage backdrop as idle. Transition artwork
-                            // includes clipped mirrored edge panels beside the sharp
-                            // center, so only an exposed edge reveals the reflection;
-                            // there is no full blurred duplicate beneath the image.
-                            PlozziOSHomeStaticBackdrop(
-                                item: dragTargetItem,
-                                style: style,
-                                height: heroHeight,
-                                contentOffsetX: incomingX,
-                                showsTrailer: false,
-                                usesSlidingArtwork: true,
-                                ancestorScale: pullScale
-                            )
+                        ZStack {
+                            if let dragTargetItem {
+                                PlozziOSHomeStaticBackdrop(
+                                    item: dragTargetItem,
+                                    style: style,
+                                    height: heroHeight,
+                                    contentOffsetX: incomingX,
+                                    showsTrailer: false,
+                                    usesSlidingArtwork: true,
+                                    ancestorScale: pullScale
+                                )
 
-                            PlozziOSHomeStaticBackdrop(
-                                item: currentItem,
-                                style: style,
-                                height: heroHeight,
-                                contentOffsetX: outgoingX,
-                                showsTrailer: false,
-                                usesSlidingArtwork: true,
-                                ancestorScale: pullScale
-                            )
-                            .opacity(1 - progress)
-                        } else {
-                            // IDLE: the full backdrop (reflected stage + trailer).
-                            PlozziOSHomeStaticBackdrop(
-                                item: currentItem,
-                                style: style,
-                                height: heroHeight,
-                                ancestorScale: pullScale
-                            )
-                            .id(currentItem.id)
+                                PlozziOSHomeStaticBackdrop(
+                                    item: currentItem,
+                                    style: style,
+                                    height: heroHeight,
+                                    contentOffsetX: outgoingX,
+                                    showsTrailer: false,
+                                    usesSlidingArtwork: true,
+                                    ancestorScale: pullScale
+                                )
+                                .opacity(1 - progress)
+                            } else {
+                                PlozziOSHomeStaticBackdrop(
+                                    item: currentItem,
+                                    style: style,
+                                    height: heroHeight,
+                                    ancestorScale: pullScale
+                                )
+                                .id(currentItem.id)
+                            }
                         }
+                        .mask { PlozziOSHeroFadeMask() }
+                        .scaleEffect(pullScale, anchor: .center)
+                        .offset(y: -pullOffset)
 
                         PlozziOSStationaryHeroScrim(
                             style: style,
                             height: heroHeight
                         )
+                        .mask { PlozziOSHeroFadeMask() }
                     }
-                    .mask { PlozziOSHeroFadeMask() }
-                    .scaleEffect(pullScale, anchor: .center)
-                    .offset(y: -pullOffset)
 
                     PlozziOSHomeHeroSlide(
                         item: currentItem,

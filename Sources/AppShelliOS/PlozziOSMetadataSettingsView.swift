@@ -91,30 +91,26 @@ struct PlozziOSMetadataSettingsView: View {
     private var prioritySection: some View {
         let split = sections
         let items = MetadataProviderListLogic.listItems(for: split)
-        SettingsSectionGroup("Priority") {
-            List {
-                ForEach(items, id: \.self) { item in
-                    priorityRow(item, split: split)
-                        .moveDisabled(item == .divider)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
-                .onMove { offsets, destination in
-                    let next = MetadataProviderListLogic.moving(
-                        fromOffsets: offsets,
-                        toOffset: destination,
-                        in: split
-                    )
-                    providers.settings.setLists(enabled: next.enabled, disabled: next.disabled)
-                }
+        Section {
+            ForEach(items, id: \.self) { item in
+                priorityRow(item, split: split)
+                    .moveDisabled(item == .divider)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
             }
-            .listStyle(.plain)
-            .scrollDisabled(true)
-            .environment(\.editMode, .constant(.active))
-            .frame(height: CGFloat(items.count) * 44)
+            .onMove { offsets, destination in
+                let next = MetadataProviderListLogic.moving(
+                    fromOffsets: offsets,
+                    toOffset: destination,
+                    in: split
+                )
+                providers.settings.setLists(enabled: next.enabled, disabled: next.disabled)
+            }
+        } header: {
+            Text("Priority")
         } footer: {
-            Text("Drag to reorder. Sources below the line are turned off.")
+            Text("Drag to reorder. Sources below the Disabled line are turned off.")
         }
+        .environment(\.editMode, .constant(.active))
     }
 
     @ViewBuilder
@@ -124,22 +120,34 @@ struct PlozziOSMetadataSettingsView: View {
     ) -> some View {
         switch item {
         case let .provider(source):
-            HStack(spacing: 10) {
+            let isEnabled = split.enabled.contains(source)
+            HStack(spacing: 12) {
                 if let index = split.enabled.firstIndex(of: source) {
                     Text(index + 1, format: .number)
-                        .font(.caption.monospacedDigit())
+                        .font(.callout.monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .frame(minWidth: 18, alignment: .trailing)
+                        .frame(minWidth: 20, alignment: .trailing)
+                } else {
+                    Image(systemName: "slash.circle")
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                        .frame(minWidth: 20)
                 }
                 Text(displayName(source))
-                    .foregroundStyle(split.enabled.contains(source) ? .primary : .secondary)
+                    .foregroundStyle(isEnabled ? .primary : .secondary)
                 Spacer()
             }
         case .divider:
-            Text("Disabled")
-                .font(.caption.weight(.semibold))
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text("Disabled")
+                    .font(.caption.weight(.bold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(.secondary)
+                Rectangle()
+                    .fill(.secondary.opacity(0.4))
+                    .frame(height: 1)
+            }
+            .listRowBackground(Color.secondary.opacity(0.12))
         }
     }
 

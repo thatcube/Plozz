@@ -14,7 +14,7 @@ private func movie(imdbID: String? = "tt0111161", native: [ExternalRating] = [])
 final class OMDbRatingsProviderTests: XCTestCase {
     private func omdbJSON() -> String {
         """
-        {"Response":"True","imdbRating":"8.8",
+        {"Response":"True","imdbRating":"8.8","imdbVotes":"2,345,678",
          "Ratings":[
            {"Source":"Internet Movie Database","Value":"8.8/10"},
            {"Source":"Rotten Tomatoes","Value":"74%"},
@@ -35,6 +35,7 @@ final class OMDbRatingsProviderTests: XCTestCase {
         XCTAssertEqual(Set(ratings.map(\.source)), [.imdb])
         XCTAssertEqual(ratings.first { $0.source == .imdb }?.value, 8.8)
         XCTAssertEqual(ratings.first { $0.source == .imdb }?.scale, .outOfTen)
+        XCTAssertEqual(ratings.first { $0.source == .imdb }?.ratingCount, 2_345_678)
     }
 
     func testReturnsEmptyWithoutIMDbID() async {

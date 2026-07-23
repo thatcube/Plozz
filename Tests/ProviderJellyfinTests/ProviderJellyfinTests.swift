@@ -565,16 +565,16 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.providerIDs["Imdb"], "tt0111161")
         XCTAssertEqual(item.providerIDs["Tmdb"], "278")
 
-        let community = item.ratings.first { $0.source == .tmdb }
+        let community = item.ratings.first { $0.source == .community }
         XCTAssertEqual(community?.value, 7.2)
         XCTAssertEqual(community?.scale, .outOfTen)
 
-        let critic = item.ratings.first { $0.source == .rottenTomatoes }
+        let critic = item.ratings.first { $0.source == .critic }
         XCTAssertEqual(critic?.value, 74)
-        XCTAssertEqual(critic?.scale, .percent)
+        XCTAssertEqual(critic?.scale, .outOfHundred)
     }
 
-    func testItemCommunityRatingMapsToTMDBEvenWithoutTMDBProviderID() async throws {
+    func testItemCommunityRatingDoesNotInventTMDBProvenance() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i3", json: """
         {"Id":"i3","Name":"Show","Type":"Series","RunTimeTicks":0,
@@ -586,12 +586,10 @@ final class JellyfinProviderMappingTests: XCTestCase {
 
         let item = try await provider.item(id: "i3")
 
-        // The native community score is TMDB-sourced regardless of item type or
-        // which provider ids happen to be present, so it always brands as TMDB.
-        let tmdb = item.ratings.first { $0.source == .tmdb }
-        XCTAssertEqual(tmdb?.value, 7.9)
-        XCTAssertEqual(tmdb?.scale, .outOfTen)
-        XCTAssertFalse(item.ratings.contains { $0.source == .community })
+        let community = item.ratings.first { $0.source == .community }
+        XCTAssertEqual(community?.value, 7.9)
+        XCTAssertEqual(community?.scale, .outOfTen)
+        XCTAssertFalse(item.ratings.contains { $0.source == .tmdb })
     }
 
     func testItemWithoutRatingFieldsHasEmptyRatings() async throws {

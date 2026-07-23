@@ -52,11 +52,11 @@ final class ExternalRatingTests: XCTestCase {
 
     func testIcons() {
         XCTAssertEqual(RatingSource.rottenTomatoes.icon, .tomato)
-        XCTAssertEqual(RatingSource.critic.icon, .tomato)
+        XCTAssertEqual(RatingSource.critic.icon, .critic)
         XCTAssertEqual(RatingSource.rottenTomatoesAudience.icon, .popcorn)
         XCTAssertEqual(RatingSource.imdb.icon, .imdb)
         XCTAssertEqual(RatingSource.tmdb.icon, .tmdb)
-        XCTAssertEqual(RatingSource.community.icon, .tmdb)
+        XCTAssertEqual(RatingSource.community.icon, .star)
         XCTAssertEqual(RatingSource.metacritic.icon, .metacritic)
     }
 
@@ -72,6 +72,24 @@ final class ExternalRatingTests: XCTestCase {
     func testFreshnessNoneForNonFreshnessSources() {
         XCTAssertEqual(ExternalRating(source: .imdb, value: 9, scale: .outOfTen).freshness, .none)
         XCTAssertEqual(ExternalRating(source: .metacritic, value: 90, scale: .outOfHundred).freshness, .none)
+        XCTAssertEqual(ExternalRating(source: .critic, value: 90, scale: .outOfHundred).freshness, .none)
+    }
+
+    func testExplicitRottenTomatoesVerdictWinsOverThreshold() {
+        let rating = ExternalRating(
+            source: .rottenTomatoesAudience,
+            value: 90,
+            scale: .percent,
+            verdict: .stale
+        )
+        XCTAssertEqual(rating.freshness, .rotten)
+    }
+
+    func testNewOptionalFieldsDecodeFromLegacyPayload() throws {
+        let data = Data(#"{"source":"imdb","value":8.8,"scale":"outOfTen"}"#.utf8)
+        let rating = try JSONDecoder().decode(ExternalRating.self, from: data)
+        XCTAssertNil(rating.ratingCount)
+        XCTAssertNil(rating.verdict)
     }
 
     // MARK: OMDb value parsing
@@ -126,5 +144,19 @@ final class ExternalRatingTests: XCTestCase {
         XCTAssertTrue(merged.contains { $0.source == .community })
         // Ordered by sortRank: imdb, rottenTomatoes, metacritic, community.
         XCTAssertEqual(merged.map(\.source), [.imdb, .rottenTomatoes, .metacritic, .community])
+    }
+
+    func testMergePreservesNativeCountWhenAuthoritativeScoreHasNone() {
+        let native = [ExternalRating(
+            source: .imdb,
+            value: 8.1,
+            scale: .outOfTen,
+            ratingCount: 12_345
+        )]
+        let merged = native.mergedWithAuthoritative([
+            ExternalRating(source: .imdb, value: 8.8, scale: .outOfTen)
+        ])
+        XCTAssertEqual(merged.first?.value, 8.8)
+        XCTAssertEqual(merged.first?.ratingCount, 12_345)
     }
 }

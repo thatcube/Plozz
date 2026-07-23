@@ -295,6 +295,8 @@ struct PlexRole: Decodable {
 struct PlexMedia: Decodable {
     @LenientInt var id: Int?
     let duration: Int?
+    /// Plex reports this media-level value in kilobits per second.
+    let bitrate: Int?
     let container: String?
     let videoCodec: String?
     let audioCodec: String?
@@ -322,6 +324,7 @@ struct PlexMedia: Decodable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = c.flexibleInt(.id)
         duration = c.flexibleInt(.duration)
+        bitrate = c.flexibleInt(.bitrate)
         container = c.flexibleString(.container)
         videoCodec = c.flexibleString(.videoCodec)
         audioCodec = c.flexibleString(.audioCodec)
@@ -336,7 +339,7 @@ struct PlexMedia: Decodable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, duration, container, videoCodec, audioCodec, videoResolution
+        case id, duration, bitrate, container, videoCodec, audioCodec, videoResolution
         case width, height, audioChannels, videoProfile, audioProfile, videoStreamDisplayTitle, Part
     }
 }

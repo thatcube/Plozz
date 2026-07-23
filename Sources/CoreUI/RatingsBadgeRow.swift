@@ -112,6 +112,10 @@ public struct RatingBadge: View {
             emoji("🍿")
         case .metacritic:
             metacriticChip
+        case .critic:
+            Image(systemName: "quote.bubble.fill")
+                .font(.system(size: iconSize * 0.78, weight: .semibold))
+                .foregroundStyle(.secondary)
         }
     }
 

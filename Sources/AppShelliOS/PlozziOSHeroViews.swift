@@ -1121,7 +1121,7 @@ private struct PlozziOSDetailHeroForeground: View {
             primaryActionButtons
             downloadActionButton
             if hasSourceVersionOptions {
-                sourceVersionMenuButton
+                sourceVersionMenuButton()
             }
         }
     }
@@ -1130,22 +1130,8 @@ private struct PlozziOSDetailHeroForeground: View {
         HStack(spacing: 12) {
             playActionButton
             heroRequestButton
-            if !primaryActions.isEmpty
-                || downloadItem != nil
-                || hasSourceVersionOptions {
-                Menu {
-                    overflowActions
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.headline.weight(.bold))
-                }
-                .buttonStyle(
-                    PlozziOSHeroActionButtonStyle(
-                        kind: .secondary,
-                        circular: true
-                    )
-                )
-                .accessibilityLabel("More actions")
+            if !compactPanelActions.isEmpty || hasSourceVersionOptions {
+                sourceVersionMenuButton(actions: compactPanelActions)
             }
         }
     }
@@ -1218,32 +1204,19 @@ private struct PlozziOSDetailHeroForeground: View {
         }
     }
 
-    @ViewBuilder
-    private var overflowActions: some View {
-        ForEach(primaryActions) { entry in
-            Button(
-                entry.action.title,
-                systemImage: primaryActionSymbol(for: entry)
-            ) {
-                actionHandler.perform(
-                    entry.action,
-                    on: entry.target,
-                    context: .none
-                )
-            }
-        }
-        if downloadItem != nil {
-            Button(downloadActionTitle, systemImage: downloadActionSymbol) {
-                Task { await performDownloadAction() }
-            }
-        }
-        sourceVersionMenuActions
-    }
-
-    private var sourceVersionMenuButton: some View {
-        Menu {
-            sourceVersionMenuActions
-        } label: {
+    private func sourceVersionMenuButton(
+        actions: [PlaybackSourceMenuAction] = []
+    ) -> some View {
+        PlaybackSourceMenuButton(
+            sources: sources,
+            selectedSourceID: selectedSourceAccountID,
+            versions: versions,
+            selectedVersionID: selectedVersionID,
+            actions: actions,
+            onSelectSource: onSelectSource,
+            onSelectVersion: onSelectVersion,
+            onPerformAction: performCompactPanelAction
+        ) {
             Image(systemName: "ellipsis")
                 .font(.headline.weight(.bold))
         }
@@ -1253,7 +1226,39 @@ private struct PlozziOSDetailHeroForeground: View {
                 circular: true
             )
         )
-        .accessibilityLabel("Server and version options")
+        .accessibilityLabel("More actions")
+    }
+
+    private var compactPanelActions: [PlaybackSourceMenuAction] {
+        var result = primaryActions.map { entry in
+            PlaybackSourceMenuAction(
+                id: "media.\(entry.action.rawValue)",
+                title: entry.action.title,
+                systemImage: primaryActionSymbol(for: entry)
+            )
+        }
+        if downloadItem != nil {
+            result.append(PlaybackSourceMenuAction(
+                id: "download",
+                title: downloadActionTitle,
+                systemImage: downloadActionSymbol
+            ))
+        }
+        return result
+    }
+
+    private func performCompactPanelAction(_ id: String) {
+        if id == "download" {
+            Task { await performDownloadAction() }
+            return
+        }
+        guard id.hasPrefix("media."),
+              let entry = primaryActions.first(where: {
+                  "media.\($0.action.rawValue)" == id
+              }) else {
+            return
+        }
+        actionHandler.perform(entry.action, on: entry.target, context: .none)
     }
 
     private func primaryActionSymbol(for entry: ActionEntry) -> String {
@@ -1290,8 +1295,6 @@ private struct PlozziOSDetailHeroForeground: View {
 
     @ViewBuilder
     private var sourceVersionMenuActions: some View {
-        Button("Temporary Width Test — This Label Is Deliberately Very Long") {}
-
         if sources.count > 1, let selectedSource {
             Picker(
                 selection: Binding(

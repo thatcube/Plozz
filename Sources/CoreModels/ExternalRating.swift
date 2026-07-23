@@ -78,15 +78,14 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
     /// emoji, or chip.
     public var icon: RatingIcon {
         switch self {
-        case .rottenTomatoes, .critic: return .tomato
+        case .rottenTomatoes: return .tomato
         case .rottenTomatoesAudience: return .popcorn
-        // A backend "community" score is TMDB-sourced in practice, so it shares
-        // TMDB's branding rather than a generic star.
-        case .tmdb, .community: return .tmdb
+        case .tmdb: return .tmdb
         // IMDb gets its own branded yellow pill; the remaining star sources
         // (Letterboxd, AniList) keep the generic filled star.
         case .imdb: return .imdb
-        case .letterboxd, .anilist: return .star
+        case .letterboxd, .anilist, .community: return .star
+        case .critic: return .critic
         case .metacritic: return .metacritic
         }
     }
@@ -106,8 +105,40 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
     /// the UI can tint the score red (fresh) or green (rotten).
     public var hasFreshness: Bool {
         switch self {
-        case .rottenTomatoes, .rottenTomatoesAudience, .critic: return true
+        case .rottenTomatoes, .rottenTomatoesAudience: return true
         default: return false
+        }
+    }
+}
+
+/// Who contributed the score. This is deliberately separate from the named
+/// service because some servers expose a cohort without exposing provenance.
+public enum RatingCohort: String, Codable, Sendable, Hashable {
+    case critics
+    case audience
+    case community
+}
+
+/// An explicit qualitative state supplied by the upstream source.
+///
+/// Only base states are represented. Certified Fresh and Verified Hot require
+/// eligibility facts that media servers do not consistently expose.
+public enum RatingVerdict: String, Codable, Sendable, Hashable {
+    case fresh
+    case rotten
+    case hot
+    case stale
+    case positive
+    case negative
+
+    public var displayName: String {
+        switch self {
+        case .fresh: return "Fresh"
+        case .rotten: return "Rotten"
+        case .hot: return "Hot"
+        case .stale: return "Stale"
+        case .positive: return "Positive"
+        case .negative: return "Negative"
         }
     }
 }
@@ -136,6 +167,8 @@ public enum RatingIcon: String, Sendable, Hashable {
     case popcorn
     /// Metacritic's coloured Metascore chip.
     case metacritic
+    /// A provider-supplied critic aggregate whose originating service is unknown.
+    case critic
 }
 
 /// The native scale a raw rating value is expressed in.
@@ -168,13 +201,43 @@ public struct ExternalRating: Codable, Hashable, Sendable, Identifiable {
     /// The raw score in `scale`'s units (e.g. `8.8`, `74`).
     public var value: Double
     public var scale: RatingScale
+    /// Number of submitted scores contributing to the aggregate, when reported.
+    /// This is not a written-review count.
+    public var ratingCount: Int?
+    /// Upstream-provided verdict, when available.
+    public var verdict: RatingVerdict?
 
     public var id: RatingSource { source }
 
-    public init(source: RatingSource, value: Double, scale: RatingScale) {
+    public init(
+        source: RatingSource,
+        value: Double,
+        scale: RatingScale,
+        ratingCount: Int? = nil,
+        verdict: RatingVerdict? = nil
+    ) {
         self.source = source
         self.value = value
         self.scale = scale
+        self.ratingCount = ratingCount
+        self.verdict = verdict
+    }
+
+    public var cohort: RatingCohort {
+        switch source {
+        case .rottenTomatoes, .metacritic, .critic:
+            return .critics
+        case .rottenTomatoesAudience:
+            return .audience
+        case .imdb, .letterboxd, .anilist, .tmdb, .community:
+            return .community
+        }
+    }
+
+    /// Localized compact count such as `12K`, or `nil` when unavailable.
+    public var ratingCountText: String? {
+        guard let ratingCount, ratingCount > 0 else { return nil }
+        return ratingCount.formatted(.number.notation(.compactName))
     }
 
     /// The score normalized to `0...1`, clamped.
@@ -212,6 +275,11 @@ public struct ExternalRating: Codable, Hashable, Sendable, Identifiable {
     /// Rotten Tomatoes' own "Fresh" threshold.
     public var freshness: RatingFreshness {
         guard source.hasFreshness else { return .none }
+        switch verdict {
+        case .fresh, .hot, .positive: return .fresh
+        case .rotten, .stale, .negative: return .rotten
+        case nil: break
+        }
         return normalized >= 0.6 ? .fresh : .rotten
     }
 }
@@ -253,7 +321,14 @@ public extension Array where Element == ExternalRating {
     func mergedWithAuthoritative(_ authoritative: [ExternalRating]) -> [ExternalRating] {
         var bySource: [RatingSource: ExternalRating] = [:]
         for rating in self { bySource[rating.source] = rating }
-        for rating in authoritative { bySource[rating.source] = rating }
+        for rating in authoritative {
+            var enriched = rating
+            if let existing = bySource[rating.source] {
+                enriched.ratingCount = enriched.ratingCount ?? existing.ratingCount
+                enriched.verdict = enriched.verdict ?? existing.verdict
+            }
+            bySource[rating.source] = enriched
+        }
         return bySource.values.sorted { $0.source.sortRank < $1.source.sortRank }
     }
 }

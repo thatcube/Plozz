@@ -149,6 +149,7 @@ final class ShareCatalogDecompositionTests: XCTestCase {
             MediaItem(id: "f:m.mkv", title: "M", kind: .movie), fields
         )
         XCTAssertTrue(out.ratings.contains { $0.source == .imdb && abs($0.value - 8.6) < 0.001 })
+        XCTAssertEqual(out.ratings.first { $0.source == .imdb }?.ratingCount, 1000)
         XCTAssertFalse(out.ratings.contains { $0.source == .tmdb },
                        "An unrecognized rating source must not project")
     }

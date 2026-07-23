@@ -10,6 +10,7 @@ struct OMDbResponse: Decodable {
     let Response: String?
     let Ratings: [OMDbRating]?
     let imdbRating: String?
+    let imdbVotes: String?
 }
 
 struct OMDbRating: Decodable {
@@ -23,10 +24,9 @@ struct OMDbRating: Decodable {
 /// OMDb also surfaces Rotten Tomatoes and Metacritic scores, but OMDb is **not
 /// licensed to redistribute** them (it's why post-2017 OMDb keys lost Rotten
 /// Tomatoes), and both carry trademark/enforcement risk. So we deliberately map
-/// **only** IMDb here. Rotten Tomatoes still appears when the user's own media
-/// server provides it (Plex `rating`/`audienceRating`, Jellyfin `CriticRating`),
-/// which is their server's licensed metadata rather than something this app
-/// fetches.
+/// **only** IMDb here. Rotten Tomatoes still appears when the user's own Plex
+/// server explicitly identifies it. Generic Jellyfin/Emby critic fields remain
+/// generic because those servers do not preserve the originating service.
 public struct OMDbRatingsProvider: ExternalRatingsProviding {
     private let apiKey: String
     private let baseURL: URL
@@ -75,13 +75,16 @@ public struct OMDbRatingsProvider: ExternalRatingsProviding {
             guard let source = source(forOMDbName: entry.Source),
                   let rating = ExternalRating.parseOMDb(source: source, value: entry.Value)
             else { continue }
-            ratings.append(rating)
+            var enriched = rating
+            enriched.ratingCount = parsedVoteCount(response.imdbVotes)
+            ratings.append(enriched)
         }
 
         // Fall back to the top-level `imdbRating` if it wasn't in the array.
         if !ratings.contains(where: { $0.source == .imdb }),
            let imdb = response.imdbRating,
-           let rating = ExternalRating.parseOMDb(source: .imdb, value: imdb) {
+           var rating = ExternalRating.parseOMDb(source: .imdb, value: imdb) {
+            rating.ratingCount = parsedVoteCount(response.imdbVotes)
             ratings.append(rating)
         }
         return ratings
@@ -95,6 +98,12 @@ public struct OMDbRatingsProvider: ExternalRatingsProviding {
         // user's own server metadata (see the type doc comment).
         default: return nil
         }
+    }
+
+    private static func parsedVoteCount(_ value: String?) -> Int? {
+        guard let value else { return nil }
+        let digits = value.filter(\.isNumber)
+        return digits.isEmpty ? nil : Int(digits)
     }
 }
 

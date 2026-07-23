@@ -21,7 +21,8 @@ final class JellyfinVersionsWatchlistRefreshTests: XCTestCase {
         {"Id":"i1","Name":"Movie","Type":"Movie",
          "UserData":{"IsFavorite":true},
          "MediaSources":[
-           {"Id":"src4k","Name":"4K Remux","Size":42000000000,"Bitrate":80000000,
+           {"Id":"src4k","Name":"4K Remux","Path":"/media/Movie.Extended.mkv",
+            "Size":42000000000,"Bitrate":80000000,"RunTimeTicks":72000000000,
             "MediaStreams":[
               {"Index":0,"Type":"Video","Codec":"hevc","Width":3840,"Height":2160,"VideoRangeType":"DOVI"},
               {"Index":1,"Type":"Audio","Codec":"truehd","Channels":8,"Profile":"Dolby Atmos"}]},
@@ -43,6 +44,9 @@ final class JellyfinVersionsWatchlistRefreshTests: XCTestCase {
         XCTAssertEqual(uhd.videoCodec, "hevc")
         XCTAssertEqual(uhd.hdrLabel, "Dolby Vision")
         XCTAssertEqual(uhd.audioLabel, "Atmos")
+        XCTAssertEqual(uhd.fileName, "Movie.Extended.mkv")
+        XCTAssertEqual(uhd.bitrateLabel, "80 Mbps")
+        XCTAssertEqual(uhd.duration, 7200)
         XCTAssertTrue(uhd.isDefault)
 
         let hd = item.versions[1]

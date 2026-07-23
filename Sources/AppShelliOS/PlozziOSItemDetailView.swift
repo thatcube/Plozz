@@ -357,6 +357,11 @@ private struct PlozziOSCanonicalItemDetailView: View {
                 if !detail.item.people.filter(\.isCast).isEmpty {
                     PlozziOSCastSection(people: detail.item.people.filter(\.isCast))
                 }
+
+                DetailInformationSections(
+                    item: detail.item,
+                    horizontalInset: pageInset
+                )
             }
             .padding(.bottom, 32)
             .frame(maxWidth: .infinity, alignment: .leading)

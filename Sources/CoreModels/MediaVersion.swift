@@ -40,6 +40,9 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     /// Raw provider-supplied source name (Jellyfin `MediaSources[].Name`), e.g.
     /// "Movie (2009) Bluray-2160p Atmos". `nil` when the server reports none.
     public var name: String?
+    /// Basename of the backing file, including its extension, when the provider
+    /// exposes a path. The full server path is never stored or presented.
+    public var fileName: String?
     /// The edition / cut of the title when the provider states it *explicitly*
     /// (e.g. Plex's `editionTitle`: "Director's Cut", "Theatrical"). Takes
     /// precedence over anything parsed from `name`. `nil` when the provider
@@ -54,6 +57,8 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     public var bitrate: Int?
     /// File size in bytes, when known (drives the human-readable size in the label).
     public var sizeBytes: Int64?
+    /// Runtime of this specific file in seconds, when known.
+    public var duration: TimeInterval?
     /// The server's default/primary source — used as the selection fallback when
     /// no version direct-plays and as a tie-breaker.
     public var isDefault: Bool
@@ -98,11 +103,13 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     public init(
         id: String,
         name: String? = nil,
+        fileName: String? = nil,
         edition: String? = nil,
         width: Int? = nil,
         height: Int? = nil,
         bitrate: Int? = nil,
         sizeBytes: Int64? = nil,
+        duration: TimeInterval? = nil,
         isDefault: Bool = false,
         videoCodec: String? = nil,
         videoRange: String? = nil,
@@ -116,11 +123,13 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     ) {
         self.id = id
         self.name = name
+        self.fileName = fileName
         self.edition = edition
         self.width = width
         self.height = height
         self.bitrate = bitrate
         self.sizeBytes = sizeBytes
+        self.duration = duration
         self.isDefault = isDefault
         self.videoCodec = videoCodec
         self.videoRange = videoRange
@@ -161,6 +170,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
             height: video?.height,
             bitrate: video?.bitrate,
             sizeBytes: item.mediaInfo?.fileSizeBytes,
+            duration: item.runtime,
             isDefault: false,
             videoCodec: video?.codec,
             videoRange: video?.videoRangeType ?? video?.videoRange,
@@ -255,6 +265,19 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
         MediaFileSizeFormatter.string(fromByteCount: sizeBytes)
     }
 
+    /// A compact overall bitrate, e.g. `80 Mbps`.
+    public var bitrateLabel: String? {
+        guard let bitrate, bitrate > 0 else { return nil }
+        let megabits = Double(bitrate) / 1_000_000
+        let value = megabits.formatted(.number.precision(.fractionLength(0...1)))
+        return "\(value) Mbps"
+    }
+
+    /// Runtime of this file in the app's compact duration style.
+    public var durationLabel: String? {
+        duration?.runtimeBadgeText
+    }
+
     /// The edition / cut to surface for this version: the provider's explicit
     /// `edition` when present, otherwise one parsed from the source `name`
     /// (Extended, Theatrical, Director's Cut, …). `nil` when neither names a cut.
@@ -290,6 +313,32 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
         if !parts.isEmpty { return parts.joined(separator: " · ") }
         if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
         return "Version"
+    }
+
+    /// First line of a rich version row. The edition/cut is the strongest
+    /// differentiator; resolution is the fallback.
+    public var menuTitle: String {
+        if let editionLabel { return editionLabel }
+        if let resolutionLabel { return resolutionLabel }
+        if let name {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return "Version"
+    }
+
+    /// Technical facts that help distinguish files without claiming a playback
+    /// outcome. Filename remains a separate tertiary line.
+    public var menuFacts: [String] {
+        var facts: [String] = []
+        if menuTitle != resolutionLabel, let resolutionLabel { facts.append(resolutionLabel) }
+        if let hdrLabel { facts.append(hdrLabel) }
+        if let sourceQualityLabel { facts.append(sourceQualityLabel) }
+        if let audioLabel { facts.append(audioLabel) }
+        if let bitrateLabel { facts.append(bitrateLabel) }
+        if let sizeLabel { facts.append(sizeLabel) }
+        if let durationLabel { facts.append(durationLabel) }
+        return facts
     }
 
     /// A coarse quality score used to order versions and pick a default. Driven

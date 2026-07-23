@@ -101,6 +101,28 @@ final class MediaVersionTests: XCTestCase {
         XCTAssertEqual(MediaVersion(id: "3").displayLabel, "Version")
     }
 
+    func testRichMenuFactsKeepFileNameSeparate() {
+        let version = MediaVersion(
+            id: "1",
+            name: "Extended Remux",
+            fileName: "Movie.Extended.2160p.mkv",
+            height: 2160,
+            bitrate: 80_000_000,
+            sizeBytes: 42_000_000_000,
+            duration: 7_200,
+            videoRange: "DOVI",
+            audioChannels: 8,
+            audioProfile: "Dolby Atmos"
+        )
+
+        XCTAssertEqual(version.menuTitle, "Extended")
+        XCTAssertEqual(
+            version.menuFacts,
+            ["4K", "Dolby Vision", "Remux", "Atmos", "80 Mbps", "42 GB", "2h"]
+        )
+        XCTAssertEqual(version.fileName, "Movie.Extended.2160p.mkv")
+    }
+
     func testSynthesizedVersionCarriesSourceFileSize() {
         let item = MediaItem(
             id: "movie",

@@ -150,7 +150,12 @@ enum ShareCatalogReadProjection {
         if let row = fields[.ratings], let value = CatalogJSON.decode([ParsedNFORating].self, row.valueJSON), !value.isEmpty {
             let recognized: [ExternalRating] = value.compactMap { rating in
                 guard let source = recognizedRatingSource(rating.source), rating.max > 0 else { return nil }
-                return ExternalRating(source: source, value: rating.value, scale: ratingScale(forMax: rating.max))
+                return ExternalRating(
+                    source: source,
+                    value: rating.value,
+                    scale: ratingScale(forMax: rating.max),
+                    ratingCount: rating.votes
+                )
             }
             if !recognized.isEmpty {
                 copy.ratings = copy.ratings.mergedWithAuthoritative(recognized)

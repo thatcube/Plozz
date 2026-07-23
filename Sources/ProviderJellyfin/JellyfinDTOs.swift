@@ -236,6 +236,8 @@ struct MediaSourceInfo: Decodable {
     let Size: Int64?
     /// Overall declared bitrate in bits/sec.
     let Bitrate: Int?
+    /// Per-source runtime in 100-nanosecond ticks.
+    let RunTimeTicks: Int64?
     let MediaStreams: [MediaStreamDto]?
     /// Why the server chose to transcode this source rather than direct-play it
     /// (e.g. `["SubtitleCodecNotSupported"]`, `["VideoRangeTypeNotSupported"]`,

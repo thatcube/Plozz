@@ -949,30 +949,24 @@ struct DetailHeroView: View {
     /// visible single-frame flash right after the user opens it.
     @ViewBuilder
     private func moreMenu() -> some View {
-        let menuServers = serverChoices.map {
-            HeroMenuChoice(id: $0.accountID, title: $0.displayName)
-        }
-        let menuVersions = versions.sortedForPicker().map {
-            HeroMenuChoice(id: $0.id, title: $0.displayLabel)
-        }
-        HeroMoreMenu(
-            serverChoices: menuServers,
-            versions: menuVersions,
-            selectedSourceAccountID: menuServers.first {
-                $0.id == selectedSourceAccountID
-            }?.id ?? menuServers.first?.id,
-            selectedVersionID: menuVersions.first {
-                $0.id == selectedVersionID
-            }?.id ?? menuVersions.first?.id,
-            glyphSize: heroGlyphSize,
-            iconSize: heroIconSize,
-            onSelectSource: onSelectSource,
-            onSelectVersion: onSelectVersion,
-            onUserInitiatedSourceSwitch: {
+        PlaybackSourceMenuButton(
+            sources: serverChoices,
+            selectedSourceID: selectedSourceAccountID,
+            versions: versions,
+            selectedVersionID: selectedVersionID,
+            onSelectSource: { accountID in
                 userInitiatedSourceSwitch = true
+                onSelectSource?(accountID)
+            },
+            onSelectVersion: { versionID in
+                onSelectVersion?(versionID)
             }
-        )
-        .equatable()
+        ) {
+            Image(systemName: "ellipsis")
+                .font(.system(size: heroGlyphSize))
+                .foregroundStyle(Color.primary)
+                .frame(width: heroIconSize, height: heroIconSize)
+        }
         .modifier(HeroActionButtonStyle(prominent: false, circular: true))
         .focused($heroActionRowFocus, equals: .more)
         .accessibilityLabel("More actions")
@@ -1347,94 +1341,6 @@ private struct DetailHeroCreditLine: View {
                 .foregroundStyle(.primary)
         )
         .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-private struct HeroMenuChoice: Identifiable, Equatable {
-    let id: String
-    let title: String
-}
-
-/// Equatable wrapper around the hero's "…" overflow Menu. Sits in its own view
-/// so that unrelated hero state and asynchronous metadata enrichment don't
-/// rebuild an already-presented native menu. Closures are intentionally excluded
-/// from `==`: they invoke stable view-model methods, so comparing the rendered
-/// choice identities and selection is sufficient.
-private struct HeroMoreMenu: View, Equatable {
-    let serverChoices: [HeroMenuChoice]
-    let versions: [HeroMenuChoice]
-    let selectedSourceAccountID: String?
-    let selectedVersionID: String?
-    let glyphSize: CGFloat
-    let iconSize: CGFloat
-    let onSelectSource: ((String) -> Void)?
-    let onSelectVersion: ((String) -> Void)?
-    let onUserInitiatedSourceSwitch: () -> Void
-
-    static func == (lhs: HeroMoreMenu, rhs: HeroMoreMenu) -> Bool {
-        lhs.serverChoices.map(\.id).sorted() == rhs.serverChoices.map(\.id).sorted()
-            && lhs.versions.map(\.id).sorted() == rhs.versions.map(\.id).sorted()
-            && lhs.selectedSourceAccountID == rhs.selectedSourceAccountID
-            && lhs.selectedVersionID == rhs.selectedVersionID
-            && lhs.glyphSize == rhs.glyphSize
-            && lhs.iconSize == rhs.iconSize
-            && (lhs.onSelectSource == nil) == (rhs.onSelectSource == nil)
-            && (lhs.onSelectVersion == nil) == (rhs.onSelectVersion == nil)
-    }
-
-    var body: some View {
-        Menu {
-            if serverChoices.count > 1, let onSelectSource {
-                let currentServer = serverChoices.first {
-                    $0.id == selectedSourceAccountID
-                } ?? serverChoices.first
-                if let currentServer {
-                    Picker(
-                        selection: Binding(
-                            get: { currentServer.id },
-                            set: { accountID in
-                                onUserInitiatedSourceSwitch()
-                                onSelectSource(accountID)
-                            }
-                        )
-                    ) {
-                        ForEach(serverChoices) { source in
-                            Text(source.title)
-                                .tag(source.id)
-                        }
-                    } label: {
-                        Label(currentServer.title, systemImage: "server.rack")
-                    }
-                    .pickerStyle(.menu)
-                }
-            }
-            if versions.count > 1, let onSelectVersion {
-                let currentVersion = versions.first {
-                    $0.id == selectedVersionID
-                } ?? versions.first
-                if let currentVersion {
-                    Picker(
-                        selection: Binding(
-                            get: { currentVersion.id },
-                            set: onSelectVersion
-                        )
-                    ) {
-                        ForEach(versions) { version in
-                            Text(version.title)
-                                .tag(version.id)
-                        }
-                    } label: {
-                        Label(currentVersion.title, systemImage: "film.stack")
-                    }
-                    .pickerStyle(.menu)
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: glyphSize))
-                .foregroundStyle(Color.primary)
-                .frame(width: iconSize, height: iconSize)
-        }
     }
 }
 

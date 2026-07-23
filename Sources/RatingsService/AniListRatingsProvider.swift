@@ -31,7 +31,10 @@ public struct AniListRatingsProvider: ExternalRatingsProviding {
 
         let document = """
         query ($id: Int, $idMal: Int, $search: String) {
-          Media(id: $id, idMal: $idMal, search: $search, type: ANIME) { averageScore }
+          Media(id: $id, idMal: $idMal, search: $search, type: ANIME) {
+            averageScore
+            stats { scoreDistribution { amount } }
+          }
         }
         """
         var variables: [String: Any] = [:]
@@ -52,7 +55,15 @@ public struct AniListRatingsProvider: ExternalRatingsProviding {
         else { return [] }
 
         // AniList's weighted mean is on 0–100 and shown by AniList as a percentage.
-        return [ExternalRating(source: .anilist, value: Double(score), scale: .percent)]
+        let count = decoded.data?.Media?.stats?.scoreDistribution?
+            .compactMap(\.amount)
+            .reduce(0, +)
+        return [ExternalRating(
+            source: .anilist,
+            value: Double(score),
+            scale: .percent,
+            ratingCount: count.flatMap { $0 > 0 ? $0 : nil }
+        )]
     }
 
     /// Whether this is anime and, if so, the best AniList lookup variable to use.
@@ -90,7 +101,16 @@ public struct AniListRatingsProvider: ExternalRatingsProviding {
     private struct GraphQLResponse: Decodable {
         let data: DataField?
         struct DataField: Decodable { let Media: Media? }
-        struct Media: Decodable { let averageScore: Int? }
+        struct Media: Decodable {
+            let averageScore: Int?
+            let stats: Stats?
+        }
+        struct Stats: Decodable {
+            let scoreDistribution: [ScoreBucket]?
+        }
+        struct ScoreBucket: Decodable {
+            let amount: Int?
+        }
     }
 }
 

@@ -692,6 +692,7 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.mediaInfo?.video?.isInterlaced, true)
         // RT critic rendered as a percentage; IMDb audience stays 0–10 (one decimal).
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "83%")
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.verdict, .fresh)
         XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "9.0")
     }
 
@@ -725,6 +726,8 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "7.3")
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "53%")
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoesAudience })?.displayValue, "77%")
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.verdict, .rotten)
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoesAudience })?.verdict, .positive)
         // TMDB kept in its native 0–10 decimal.
         XCTAssertEqual(item.ratings.first(where: { $0.source == .tmdb })?.displayValue, "7.1")
     }

@@ -25,7 +25,18 @@ struct DetailExtrasView: View {
     var onCastFocusEntered: (() -> Void)? = nil
 
     private var hasContent: Bool {
-        !item.cast.isEmpty || !item.studios.isEmpty || !item.tags.isEmpty
+        !item.cast.isEmpty
+            || item.tagline != nil
+            || item.overview != nil
+            || !item.ratings.isEmpty
+            || item.productionYear != nil
+            || item.runtime != nil
+            || item.officialRating != nil
+            || item.originalTitle != nil
+            || !item.genres.isEmpty
+            || !item.studios.isEmpty
+            || !item.tags.isEmpty
+            || item.people.contains { !$0.isCast }
     }
 
     var body: some View {
@@ -45,12 +56,7 @@ struct DetailExtrasView: View {
                             revealsWithoutBrowser: revealsSeriesCastWithoutBrowser
                         ))
                 }
-                if !item.studios.isEmpty {
-                    StudiosRow(studios: item.studios)
-                }
-                if !item.tags.isEmpty {
-                    InfoChipsRow(title: "Tags", values: Array(item.tags.prefix(40)), leadingInset: leadingInset)
-                }
+                DetailInformationSections(item: item, horizontalInset: leadingInset)
             }
         }
     }

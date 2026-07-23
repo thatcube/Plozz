@@ -1142,11 +1142,13 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             MediaVersion(
                 id: m.id.map(String.init) ?? "\(index)",
                 name: Self.releaseName(from: m),
+                fileName: Self.fileName(from: m),
                 edition: edition,
                 width: m.width,
                 height: m.height,
-                bitrate: nil,
+                bitrate: Self.bitrateBitsPerSecond(from: m),
                 sizeBytes: fileSizeBytes(from: m),
+                duration: m.duration.map { TimeInterval($0) / 1_000 },
                 isDefault: index == 0,
                 videoCodec: m.videoCodec,
                 videoRange: nil,
@@ -1170,14 +1172,26 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         return total
     }
 
+    private static func bitrateBitsPerSecond(from media: PlexMedia) -> Int? {
+        guard let bitrate = media.bitrate, bitrate > 0 else { return nil }
+        let result = bitrate.multipliedReportingOverflow(by: 1_000)
+        return result.overflow ? nil : result.partialValue
+    }
+
     /// The release name to parse for source quality: the first part's file
     /// basename without its extension, e.g.
     /// `Movie (2009) Extended Bluray-2160p`. `nil` when no file path is reported.
     static func releaseName(from media: PlexMedia) -> String? {
-        guard let file = media.Part?.first?.file, !file.isEmpty else { return nil }
-        let base = (file as NSString).lastPathComponent
+        guard let base = fileName(from: media) else { return nil }
         let name = (base as NSString).deletingPathExtension
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    static func fileName(from media: PlexMedia) -> String? {
+        guard let file = media.Part?.first?.file, !file.isEmpty else { return nil }
+        let base = (file as NSString).lastPathComponent
+        let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
@@ -1405,7 +1419,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     /// Rotten Tomatoes critic + audience, and The Movie Database there), falling
     /// back to the two `rating`/`audienceRating` scalars for items scanned with
     /// older agents that only populate the primary pair. Rotten Tomatoes and
-    /// TMDB scores render as the familiar percentage; IMDb stays 0–10.
+    /// RT scores render as percentages; IMDb and TMDB stay on their native 0–10.
     static func ratings(from dto: PlexMetadata) -> [ExternalRating] {
         if let entries = dto.Rating, !entries.isEmpty {
             let parsed = entries.compactMap(rating(fromArrayEntry:))
@@ -1434,7 +1448,18 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             let isAudience = type == "audience"
                 || image.contains("upright") || image.contains("spilled")
             let source: RatingSource = isAudience ? .rottenTomatoesAudience : .rottenTomatoes
-            return ExternalRating(source: source, value: value * 10, scale: .percent)
+            let verdict: RatingVerdict?
+            if image.contains("rating.ripe") { verdict = .fresh }
+            else if image.contains("rating.rotten") { verdict = .rotten }
+            else if image.contains("rating.upright") { verdict = .positive }
+            else if image.contains("rating.spilled") { verdict = .negative }
+            else { verdict = nil }
+            return ExternalRating(
+                source: source,
+                value: value * 10,
+                scale: .percent,
+                verdict: verdict
+            )
         }
         if image.contains("imdb") {
             return ExternalRating(source: .imdb, value: value, scale: .outOfTen)
@@ -1458,7 +1483,14 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         if let critic = dto.rating {
             let image = (dto.ratingImage ?? "").lowercased()
             if image.contains("rottentomatoes") {
-                ratings.append(ExternalRating(source: .rottenTomatoes, value: critic * 10, scale: .percent))
+                ratings.append(ExternalRating(
+                    source: .rottenTomatoes,
+                    value: critic * 10,
+                    scale: .percent,
+                    verdict: image.contains("rating.rotten")
+                        ? .rotten
+                        : (image.contains("rating.ripe") ? .fresh : nil)
+                ))
             } else if image.contains("imdb") {
                 ratings.append(ExternalRating(source: .imdb, value: critic, scale: .outOfTen))
             } else {
@@ -1468,7 +1500,14 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         if let audience = dto.audienceRating {
             let image = (dto.audienceRatingImage ?? "").lowercased()
             if image.contains("rottentomatoes") {
-                ratings.append(ExternalRating(source: .rottenTomatoesAudience, value: audience * 10, scale: .percent))
+                ratings.append(ExternalRating(
+                    source: .rottenTomatoesAudience,
+                    value: audience * 10,
+                    scale: .percent,
+                    verdict: image.contains("rating.spilled")
+                        ? .negative
+                        : (image.contains("rating.upright") ? .positive : nil)
+                ))
             } else if image.contains("imdb") {
                 ratings.append(ExternalRating(source: .imdb, value: audience, scale: .outOfTen))
             } else {

@@ -1421,10 +1421,12 @@ public struct JellyfinProvider: MediaProvider {
             return MediaVersion(
                 id: source.Id ?? "\(index)",
                 name: source.Name,
+                fileName: source.Path.flatMap(Self.fileName(fromPath:)),
                 width: video?.Width,
                 height: video?.Height,
                 bitrate: source.Bitrate ?? video?.BitRate,
                 sizeBytes: source.Size,
+                duration: source.RunTimeTicks.map { TimeInterval($0) / 10_000_000 },
                 isDefault: index == 0,
                 videoCodec: video?.Codec,
                 videoRange: video.flatMap(Self.normalizedVideoRangeType(for:))
@@ -1435,6 +1437,12 @@ public struct JellyfinProvider: MediaProvider {
                 container: source.Container
             )
         }
+    }
+
+    private static func fileName(fromPath path: String) -> String? {
+        let base = (path as NSString).lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return base.isEmpty ? nil : base
     }
 
     private static func sourceRevision(
@@ -1535,16 +1543,16 @@ public struct JellyfinProvider: MediaProvider {
 
     /// Maps Jellyfin's native rating fields onto provider-agnostic ratings.
     ///
-    /// `CommunityRating` is a 0–10 audience score sourced from TMDB, so we brand
-    /// it as TMDB for every item type (movies, series, episodes, …). `CriticRating`
-    /// is a 0–100 Rotten Tomatoes Tomatometer percentage.
+    /// Jellyfin and Emby do not preserve the originating service for these
+    /// aggregate fields. Keep their cohorts while avoiding invented TMDB/RT
+    /// attribution.
     private static func ratings(from dto: BaseItemDto) -> [ExternalRating] {
         var ratings: [ExternalRating] = []
         if let community = dto.CommunityRating {
-            ratings.append(ExternalRating(source: .tmdb, value: community, scale: .outOfTen))
+            ratings.append(ExternalRating(source: .community, value: community, scale: .outOfTen))
         }
         if let critic = dto.CriticRating {
-            ratings.append(ExternalRating(source: .rottenTomatoes, value: critic, scale: .percent))
+            ratings.append(ExternalRating(source: .critic, value: critic, scale: .outOfHundred))
         }
         return ratings
     }

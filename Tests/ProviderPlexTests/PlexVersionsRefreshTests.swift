@@ -19,8 +19,9 @@ final class PlexVersionsRefreshTests: XCTestCase {
         let media = try JSONDecoder.plozz.decode([PlexMedia].self, from: Data("""
         [
           {"id":1001,"container":"mkv","videoCodec":"hevc","audioCodec":"truehd",
+           "duration":7200000,"bitrate":80000,
            "width":3840,"height":2160,"audioChannels":8,
-           "Part":[{"size":12000000000}]},
+           "Part":[{"file":"/movies/Movie.Extended.mkv","size":12000000000}]},
           {"id":1002,"container":"mp4","videoCodec":"h264","audioCodec":"aac",
            "width":1920,"height":1080,"audioChannels":2,
            "Part":[{"size":3000000000}]}
@@ -34,6 +35,9 @@ final class PlexVersionsRefreshTests: XCTestCase {
         XCTAssertEqual(versions[0].audioLabel, "7.1")
         XCTAssertEqual(versions[0].sizeBytes, 12_000_000_000)
         XCTAssertEqual(versions[0].sizeLabel, "12 GB")
+        XCTAssertEqual(versions[0].fileName, "Movie.Extended.mkv")
+        XCTAssertEqual(versions[0].bitrate, 80_000_000)
+        XCTAssertEqual(versions[0].duration, 7200)
         XCTAssertTrue(versions[0].isDefault)
         XCTAssertEqual(versions[1].resolutionLabel, "1080p")
         XCTAssertFalse(versions[1].isDefault)

@@ -123,6 +123,7 @@ struct SyncSetupReceiveView: View {
             VStack(spacing: 40) {
                 Text("You’re all set")
                     .font(.largeTitle.bold()).foregroundStyle(palette.primaryText)
+                    .padding(.top, 12)
 
             // Stacked full-width cards so a long profiles list can't squeeze the
             // servers card. Each card wraps its items into a grid so any count fits.
@@ -135,7 +136,10 @@ struct SyncSetupReceiveView: View {
                         ) {
                             ForEach(servers) { server in
                                 HStack(spacing: 16) {
-                                    ProviderBrandMark(provider: server.provider, size: 44)
+                                    ProviderBrandMark(
+                                        provider: server.provider, size: 44,
+                                        mediaShareTransport: MediaShareTransportKind(
+                                            mediaShareScheme: server.candidateBaseURLs.first?.scheme))
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(server.serverName)
                                             .font(.title3.weight(.semibold))
@@ -186,7 +190,6 @@ struct SyncSetupReceiveView: View {
         }
         .frame(maxWidth: .infinity)
         }
-        .scrollClipDisabled()
     }
 
     @ViewBuilder

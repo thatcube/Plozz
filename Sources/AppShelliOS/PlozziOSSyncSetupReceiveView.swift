@@ -197,7 +197,10 @@ struct PlozziOSSyncSetupReceiveView: View {
                     card(title: servers.count == 1 ? "Server" : "Servers") {
                         ForEach(servers) { server in
                             HStack(spacing: 14) {
-                                ProviderBrandMark(provider: server.provider, size: 32)
+                                ProviderBrandMark(
+                                    provider: server.provider, size: 32,
+                                    mediaShareTransport: MediaShareTransportKind(
+                                        mediaShareScheme: server.candidateBaseURLs.first?.scheme))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(server.serverName).font(.body.weight(.semibold))
                                         .foregroundStyle(palette.primaryText)

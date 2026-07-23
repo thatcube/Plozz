@@ -709,6 +709,42 @@ struct PlozziOSHomeStaticBackdrop: View {
     }
 }
 
+/// A full-width, heavily-blurred, over-scaled copy of a hero's artwork used to
+/// fill the horizontal gap the parallax slide would otherwise open at a screen
+/// edge (dark page showing through). Sits BEHIND the sharp sliding image so any
+/// exposed edge reveals a soft blurred continuation of the same image instead of
+/// a hard gap. Image-only (no trailer) so it stays cheap.
+struct PlozziOSHeroBlurFill: View {
+    @Environment(\.themePalette) private var palette
+
+    let item: MediaItem
+    let style: HeroArtworkStyle
+    let height: CGFloat
+
+    var body: some View {
+        let presentation = HeroPresentation(
+            item: item,
+            artworkStyle: style,
+            surface: .home
+        )
+        FallbackAsyncImage(
+            references: presentation.artworkReferences,
+            variant: .heroBackdrop
+        ) {
+            palette.backgroundBase
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Over-scale so the blurred copy extends well past both edges, covering
+        // the full slide travel on either side; blur hides the scaling + seams.
+        .scaleEffect(x: 1.5, y: 1.15)
+        .blur(radius: 40, opaque: true)
+        .frame(height: height)
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct PlozziOSHeroReflection: View {
     @Environment(\.colorScheme) private var colorScheme
 

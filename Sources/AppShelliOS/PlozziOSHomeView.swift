@@ -584,6 +584,11 @@ private struct PlozziOSHomeHeroCarousel: View {
     @State private var transitionTargetID: String?
     @State private var transitionInProgress = false
     @State private var foregroundVisible = true
+    /// Latest hero stage width, captured so a committed (tap/auto-advance)
+    /// transition can drive `dragOffset` to exactly the swipe threshold — making
+    /// `progress` sweep 0→1 over the whole animation instead of hitting its cap
+    /// early (which slid the outgoing image almost instantly).
+    @State private var stageWidth: CGFloat = 1
 
     let items: [MediaItem]
     let autoAdvance: Bool
@@ -603,10 +608,8 @@ private struct PlozziOSHomeHeroCarousel: View {
             dynamicTypeSize: dynamicTypeSize
         )
         GeometryReader { proxy in
-            let progress = min(
-                abs(dragOffset) / max(proxy.size.width * 0.45, 1),
-                1
-            )
+            let swipeThreshold = max(proxy.size.width * 0.45, 1)
+            let progress = min(abs(dragOffset) / swipeThreshold, 1)
             // Parallax slide: the outgoing image drifts up to `slideTravel` in the
             // drag direction (partly off-screen, subtle), while the incoming image
             // enters from the opposite edge and settles into place by the same
@@ -624,6 +627,28 @@ private struct PlozziOSHomeHeroCarousel: View {
                     // no opaque grey wash. The current slide stays fully opaque while
                     // the incoming one fades in on top, so the stack never dips.
                     ZStack {
+                        // Blurred full-width fill behind each sliding image, moving
+                        // with it, so the slide never exposes a dark edge gap — the
+                        // exposed area shows a soft blurred continuation of the same
+                        // hero instead. (Only needed while a transition is active.)
+                        if dragTargetItem != nil {
+                            PlozziOSHeroBlurFill(
+                                item: currentItem,
+                                style: style,
+                                height: heroHeight
+                            )
+                            .opacity(1 - progress)
+                            .offset(x: outgoingX)
+                        }
+                        if let dragTargetItem {
+                            PlozziOSHeroBlurFill(
+                                item: dragTargetItem,
+                                style: style,
+                                height: heroHeight
+                            )
+                            .offset(x: incomingX)
+                        }
+
                         // Incoming slide sits UNDERNEATH, fully opaque; the outgoing
                         // slide fades OUT on top. So the old image genuinely
                         // dissolves away to reveal the new (already solid) one —
@@ -719,6 +744,9 @@ private struct PlozziOSHomeHeroCarousel: View {
                     }
                 )
             )
+            .onChange(of: proxy.size.width, initial: true) { _, width in
+                stageWidth = max(width, 1)
+            }
         }
         .frame(height: heroHeight)
         .overlay(alignment: .bottom) {
@@ -968,11 +996,16 @@ private struct PlozziOSHomeHeroCarousel: View {
         }
         transitionInProgress = true
         transitionTargetID = target.id
-        withAnimation(.easeInOut(duration: 0.28)) {
-            dragOffset = forward ? -1_000 : 1_000
+        // Drive dragOffset to exactly the swipe threshold so `progress` sweeps
+        // 0→1 across the WHOLE animation (rather than hitting its cap in the first
+        // third, which made the outgoing image slide almost instantly). Now the
+        // old image visibly slides out over the full duration as the new slides in.
+        let threshold = max(stageWidth * 0.45, 1)
+        withAnimation(.easeInOut(duration: 0.34)) {
+            dragOffset = forward ? -threshold : threshold
         }
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(280))
+            try? await Task.sleep(for: .milliseconds(340))
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {

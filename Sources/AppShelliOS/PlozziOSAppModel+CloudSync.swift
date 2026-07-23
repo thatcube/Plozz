@@ -295,10 +295,12 @@ extension PlozziOSAppModel {
     /// auto-connect from an iCloud-Keychain credential (`hasPortableCredential` — the
     /// iOS→iOS case, which needs no screen at all). What remains is servers whose only
     /// login lives on a device that can't hand it over automatically — in practice the
-    /// Apple TV. Media shares are excluded (set up differently, not via pairing). This
-    /// is the SAME predicate that decides the mid-session drawer, so the two agree.
+    /// Apple TV. Media shares (NFS/SMB/WebDAV/…) are INCLUDED: they're never published
+    /// to the synced credential store (so never auto-connect) but the pairing transfer
+    /// this page runs DOES bring them over, so listing them keeps the "we found" summary
+    /// honest — otherwise a share would appear only after setup, which is confusing.
     var pendingServersNeedingSetup: [SyncedAccountDescriptor] {
-        pendingSyncedServers.filter { $0.provider != .mediaShare && !hasPortableCredential($0.id) }
+        pendingSyncedServers.filter { !hasPortableCredential($0.id) }
     }
 
     /// The friendly origin device name shared by the detected servers ("Brando TV"),

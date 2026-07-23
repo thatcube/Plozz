@@ -456,7 +456,6 @@ private struct PlozziOSHeroBackdrop: View {
     let itemID: String
     let height: CGFloat
     let showsScrim: Bool
-    var appliesFadeMask: Bool = true
     let ignoresHorizontalSafeArea: Bool
     let surfaceRole: HeroTrailerSurfaceRole
     let trailerController: HeroTrailerController
@@ -481,39 +480,22 @@ private struct PlozziOSHeroBackdrop: View {
                 .transition(.opacity)
             }
 
+            // The dissolve to the page background: a single monotonic melt to the
+            // theme's backgroundBase (grey in Dark, near-black in Black, white in
+            // Light). Painting the page colour directly — instead of masking the
+            // stack to transparent over a black scrim — means the hero melts to the
+            // EXACT page colour with no dark-band seam, in every theme.
             if showsScrim {
-                PlozziOSHeroScrim(style: style)
+                PlozziOSHeroBackgroundMelt(style: style)
             }
         }
         .frame(height: height)
-        // Fade the complete artwork/video stack to transparent rather than
-        // painting an approximate background color over its bottom edge. The
-        // actual themed page background then shows through with no visible seam.
-        // Skipped for the Home carousel (appliesFadeMask == false): there the
-        // fade is applied ONCE to the container of both cross-fading slides so it
-        // stays perfectly static during a transition instead of two per-slide
-        // fades compositing.
-        .modifier(OptionalHeroFadeMask(enabled: appliesFadeMask))
         .clipped()
         .ignoresSafeArea(
             edges: ignoresHorizontalSafeArea
                 ? [.top, .horizontal]
                 : .top
         )
-    }
-}
-
-/// Applies the hero dissolve mask only when enabled, so callers that mask a whole
-/// cross-fading container (the Home carousel) can opt each slide out.
-private struct OptionalHeroFadeMask: ViewModifier {
-    let enabled: Bool
-
-    func body(content: Content) -> some View {
-        if enabled {
-            content.mask { PlozziOSHeroFadeMask() }
-        } else {
-            content
-        }
     }
 }
 
@@ -575,51 +557,57 @@ struct PlozziOSHeroFadeMask: View {
     }
 }
 
-struct PlozziOSStationaryHeroScrim: View {
+/// The shared hero → page-background dissolve. A single monotonic melt whose
+/// opacity only ever increases toward the active theme's `backgroundBase`, so the
+/// hero never dips darker than the page and the bottom is the EXACT page colour
+/// (grey in Dark, near-black in Black, white in Light) — seamless in every theme.
+/// Used by both the Home carousel (as the static overlay) and the detail hero.
+struct PlozziOSHeroBackgroundMelt: View {
     @Environment(\.themePalette) private var palette
+    let style: HeroArtworkStyle
+
+    var body: some View {
+        let base = palette.backgroundBase
+        ZStack {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .clear, location: 0.28),
+                    .init(color: base.opacity(0.10), location: 0.42),
+                    .init(color: base.opacity(0.26), location: 0.54),
+                    .init(color: base.opacity(0.45), location: 0.64),
+                    .init(color: base.opacity(0.64), location: 0.73),
+                    .init(color: base.opacity(0.80), location: 0.82),
+                    .init(color: base.opacity(0.91), location: 0.89),
+                    .init(color: base.opacity(0.975), location: 0.95),
+                    .init(color: base, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            // Landscape keeps a gentle leading wash so left-aligned title text
+            // stays legible over a busy image — also melting to the page base,
+            // never black, so it can't introduce its own edge.
+            if style == .landscape {
+                LinearGradient(
+                    colors: [base.opacity(0.55), .clear],
+                    startPoint: .leading,
+                    endPoint: .center
+                )
+            }
+        }
+    }
+}
+
+struct PlozziOSStationaryHeroScrim: View {
     let style: HeroArtworkStyle
     let height: CGFloat
 
     var body: some View {
-        let base = palette.backgroundBase
         PlozziOSFullWidthHeroStage(height: height) {
-            ZStack {
-                // A SINGLE monotonic melt from the image to the exact page
-                // background. Opacity only ever increases toward `backgroundBase`,
-                // so the hero never dips darker than the page (the old black
-                // legibility scrim overshot past the grey base and had to climb
-                // back up — that dark band was the "line"). Reaching full
-                // backgroundBase at the bottom means the hero and the page are the
-                // same colour there, so the meeting point is seamless.
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .clear, location: 0.28),
-                        .init(color: base.opacity(0.10), location: 0.42),
-                        .init(color: base.opacity(0.26), location: 0.54),
-                        .init(color: base.opacity(0.45), location: 0.64),
-                        .init(color: base.opacity(0.64), location: 0.73),
-                        .init(color: base.opacity(0.80), location: 0.82),
-                        .init(color: base.opacity(0.91), location: 0.89),
-                        .init(color: base.opacity(0.975), location: 0.95),
-                        .init(color: base, location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-
-                // Landscape keeps a gentle leading wash so left-aligned title text
-                // stays legible over a busy image — also melting to the page base,
-                // never black, so it can't introduce its own edge.
-                if style == .landscape {
-                    LinearGradient(
-                        colors: [base.opacity(0.55), .clear],
-                        startPoint: .leading,
-                        endPoint: .center
-                    )
-                }
-            }
-            .frame(height: height)
+            PlozziOSHeroBackgroundMelt(style: style)
+                .frame(height: height)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -701,7 +689,6 @@ struct PlozziOSHomeStaticBackdrop: View {
                 itemID: item.id,
                 height: height,
                 showsScrim: false,
-                appliesFadeMask: false,
                 ignoresHorizontalSafeArea: false,
                 surfaceRole: .home,
                 trailerController: trailerController

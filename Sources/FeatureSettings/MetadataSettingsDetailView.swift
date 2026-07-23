@@ -50,23 +50,28 @@ public struct MetadataSettingsDependencies {
 /// the view so they're unit-testable without a running SwiftUI hierarchy. The user
 /// model is a single ordered list split by a "Disabled" divider: ``enabled`` above (in
 /// priority order), ``disabled`` below.
-enum MetadataProviderListLogic {
+public enum MetadataProviderListLogic {
     /// The two sections the UI shows, derived from the sparse override + the build
     /// baseline so no source is ever hidden and a stale/foreign persisted token can't
     /// materialize a phantom row.
-    struct Sections: Equatable {
-        var enabled: [MetadataSource]
-        var disabled: [MetadataSource]
+    public struct Sections: Equatable {
+        public var enabled: [MetadataSource]
+        public var disabled: [MetadataSource]
+
+        public init(enabled: [MetadataSource], disabled: [MetadataSource]) {
+            self.enabled = enabled
+            self.disabled = disabled
+        }
     }
 
     /// The flattened native-List representation used by iOS/iPadOS. The divider stays
     /// in the collection so dragging a provider across it changes enablement.
-    enum ListItem: Hashable {
+    public enum ListItem: Hashable {
         case provider(MetadataSource)
         case divider
     }
 
-    static func listItems(for sections: Sections) -> [ListItem] {
+    public static func listItems(for sections: Sections) -> [ListItem] {
         sections.enabled.map(ListItem.provider)
             + [.divider]
             + sections.disabled.map(ListItem.provider)
@@ -75,7 +80,7 @@ enum MetadataProviderListLogic {
     /// Applies native `List.onMove` offsets to the flattened list, then splits it back
     /// at the divider. The divider itself is immovable; providers dropped before it are
     /// enabled, providers dropped after it are disabled.
-    static func moving(
+    public static func moving(
         fromOffsets offsets: IndexSet,
         toOffset destination: Int,
         in sections: Sections
@@ -102,7 +107,7 @@ enum MetadataProviderListLogic {
 
     /// Splits the known sources into enabled (above divider, priority order) and
     /// disabled (below), honoring the user's explicit lists first, then the baseline.
-    static func sections(
+    public static func sections(
         settings: MetadataProviderSettings,
         baselineOrder: [MetadataSource],
         baselineDisabled: Set<MetadataSource>
@@ -137,7 +142,7 @@ enum MetadataProviderListLogic {
         return Sections(enabled: enabled, disabled: disabled)
     }
 
-    static func settings(
+    public static func settings(
         _ settings: MetadataProviderSettings,
         selecting mode: MetadataProviderOrderMode,
         baselineOrder: [MetadataSource],

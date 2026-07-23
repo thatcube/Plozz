@@ -358,7 +358,7 @@ private struct PlozziOSSettingsSplitView: View {
         case .syncSetup:
             PlozziOSSyncSetupSettingsView(appModel: appModel)
         case .metadata:
-            MetadataSettingsDetailView(deps: appModel.makeMetadataSettingsDependencies())
+            PlozziOSMetadataSettingsView(deps: appModel.makeMetadataSettingsDependencies())
         case .subtitles:
             PlozziOSSubtitleSettingsView(
                 behavior: appModel.settings.subtitleBehavior,
@@ -607,7 +607,7 @@ private struct PlozziOSSettingsCompactMenu: View {
         .settingsPageSurface()
         .navigationTitle("Settings")
         .navigationDestination(isPresented: $showMetadata) {
-            MetadataSettingsDetailView(deps: appModel.makeMetadataSettingsDependencies())
+            PlozziOSMetadataSettingsView(deps: appModel.makeMetadataSettingsDependencies())
         }
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Cancel", role: .cancel) {}

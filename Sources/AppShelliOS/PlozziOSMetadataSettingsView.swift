@@ -95,7 +95,7 @@ struct PlozziOSMetadataSettingsView: View {
             List {
                 ForEach(items, id: \.self) { item in
                     priorityRow(item, split: split)
-                        .moveDisabled(item == .divider)
+                        .moveDisabled(item == .divider || item == .disabledPlaceholder)
                         // SettingsSectionGroup already pads its child by 16pt; zero
                         // the List's own horizontal inset so padding isn't doubled.
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
@@ -116,10 +116,17 @@ struct PlozziOSMetadataSettingsView: View {
             .listStyle(.plain)
             .scrollDisabled(true)
             .environment(\.editMode, .constant(.active))
-            .frame(height: CGFloat(items.count) * 48)
+            .frame(height: rowStackHeight(items))
         } footer: {
             Text("Drag to reorder. Sources below the Disabled line are turned off.")
         }
+    }
+
+    /// Total height for the fixed (non-scrolling) reorder list: standard rows plus
+    /// extra room for the taller dashed drop-target placeholder when present.
+    private func rowStackHeight(_ items: [MetadataProviderListLogic.ListItem]) -> CGFloat {
+        let base = CGFloat(items.count) * 48
+        return items.contains(.disabledPlaceholder) ? base + 20 : base
     }
 
     @ViewBuilder
@@ -156,6 +163,17 @@ struct PlozziOSMetadataSettingsView: View {
                     .fill(.secondary.opacity(0.4))
                     .frame(height: 1)
             }
+        case .disabledPlaceholder:
+            Text("Drag a provider here to turn it off")
+                .font(.callout)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, minHeight: 40, alignment: .center)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                        .foregroundStyle(.secondary.opacity(0.35))
+                )
         }
     }
 

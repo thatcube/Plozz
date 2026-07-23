@@ -65,16 +65,21 @@ public enum MetadataProviderListLogic {
     }
 
     /// The flattened native-List representation used by iOS/iPadOS. The divider stays
-    /// in the collection so dragging a provider across it changes enablement.
+    /// in the collection so dragging a provider across it changes enablement; the
+    /// placeholder is appended after the divider when nothing is disabled yet, giving
+    /// a visible drop target to drag a provider into.
     public enum ListItem: Hashable {
         case provider(MetadataSource)
         case divider
+        case disabledPlaceholder
     }
 
     public static func listItems(for sections: Sections) -> [ListItem] {
         sections.enabled.map(ListItem.provider)
             + [.divider]
-            + sections.disabled.map(ListItem.provider)
+            + (sections.disabled.isEmpty
+                ? [.disabledPlaceholder]
+                : sections.disabled.map(ListItem.provider))
     }
 
     /// Applies native `List.onMove` offsets to the flattened list, then splits it back
@@ -87,7 +92,7 @@ public enum MetadataProviderListLogic {
     ) -> Sections {
         var items = listItems(for: sections)
         let movableOffsets = offsets
-            .filter { items.indices.contains($0) && items[$0] != .divider }
+            .filter { items.indices.contains($0) && items[$0] != .divider && items[$0] != .disabledPlaceholder }
             .sorted()
         guard !movableOffsets.isEmpty else { return sections }
 
@@ -515,6 +520,10 @@ public struct MetadataSettingsDetailView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
+        case .disabledPlaceholder:
+            Text("Drag a provider here to turn it off")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
     #endif

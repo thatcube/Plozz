@@ -3,6 +3,7 @@ import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureSettings
+import FeatureSyncSetup
 import SwiftUI
 import UIKit
 
@@ -746,8 +747,9 @@ struct PlozziOSAccountDetailView: View {
 
     let appModel: PlozziOSAppModel
     let account: Account
-    let onRemove: () -> Void
     @State private var confirmRemoval = false
+
+    private var syncEnabled: Bool { SyncSetupFeatureFlag().isEnabled }
 
     var body: some View {
         Form {
@@ -785,7 +787,7 @@ struct PlozziOSAccountDetailView: View {
             }
 
             SettingsSectionGroup {
-                Button("Remove Account", role: .destructive) {
+                Button("Remove Server", role: .destructive) {
                     confirmRemoval = true
                 }
             }
@@ -793,14 +795,31 @@ struct PlozziOSAccountDetailView: View {
         .settingsPageSurface()
         .navigationTitle(account.server.name)
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Remove \(account.server.name)?", isPresented: $confirmRemoval) {
-            Button("Cancel", role: .cancel) {}
-            Button("Remove", role: .destructive) {
-                onRemove()
-                dismiss()
+        .confirmationDialog(
+            "Remove \(account.server.name)?",
+            isPresented: $confirmRemoval,
+            titleVisibility: .visible
+        ) {
+            if syncEnabled {
+                Button("Remove Everywhere", role: .destructive) {
+                    appModel.removeAccountEverywhere(id: account.id)
+                    dismiss()
+                }
+                Button("Remove from This \(deviceName)", role: .destructive) {
+                    appModel.removeAccount(id: account.id)
+                    dismiss()
+                }
+            } else {
+                Button("Remove", role: .destructive) {
+                    appModel.removeAccount(id: account.id)
+                    dismiss()
+                }
             }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Credentials and locally cached data for this source will be removed.")
+            Text(syncEnabled
+                 ? "Everywhere signs it out on all your devices. This \(deviceName) keeps your other servers."
+                 : "Removes this server’s sign-in and cached data from this \(deviceName).")
         }
     }
 }

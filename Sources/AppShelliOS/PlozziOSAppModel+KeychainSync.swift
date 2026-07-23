@@ -92,7 +92,10 @@ extension PlozziOSAppModel {
         guard SyncSetupFeatureFlag().isEnabled else { return }
         let store = portableCredStore
         let localIDs = Set(accountsProviders.accounts.map(\.id))
+        let removedIDs = RemovedAccountsStore().removedIDs
+        // Don't auto-resurrect a server the user removed household-wide.
         let pending = PendingSyncedServersStore().pending(excludingLocal: localIDs)
+            .filter { !removedIDs.contains($0.id) }
         guard !pending.isEmpty else { return }
         var connected = 0
         for desc in pending {

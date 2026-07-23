@@ -2,6 +2,7 @@
 import AppRuntime
 import CoreModels
 import CoreUI
+import FeatureSyncSetup
 import SwiftUI
 
 struct PlozziOSServersSettingsView: View {
@@ -161,23 +162,38 @@ private struct PlozziOSServerSettingsDetailView: View {
             if let account = appModel.accounts.first(where: { $0.id == accountID }) {
                 PlozziOSAccountDetailView(
                     appModel: appModel,
-                    account: account,
-                    onRemove: { appModel.removeAccount(id: account.id) }
+                    account: account
                 )
             }
         }
-        .alert(
+        .confirmationDialog(
             "Remove \(group?.serverName ?? "server")?",
-            isPresented: $confirmRemoveServer
+            isPresented: $confirmRemoveServer,
+            titleVisibility: .visible
         ) {
-            Button("Cancel", role: .cancel) {}
-            Button("Remove Server", role: .destructive) {
-                for account in group?.accounts ?? [] {
-                    appModel.removeAccount(id: account.id)
+            if SyncSetupFeatureFlag().isEnabled {
+                Button("Remove Everywhere", role: .destructive) {
+                    for account in group?.accounts ?? [] {
+                        appModel.removeAccountEverywhere(id: account.id)
+                    }
+                }
+                Button("Remove from This \(deviceName)", role: .destructive) {
+                    for account in group?.accounts ?? [] {
+                        appModel.removeAccount(id: account.id)
+                    }
+                }
+            } else {
+                Button("Remove Server", role: .destructive) {
+                    for account in group?.accounts ?? [] {
+                        appModel.removeAccount(id: account.id)
+                    }
                 }
             }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This signs everyone out and removes the server from this \(deviceName).")
+            Text(SyncSetupFeatureFlag().isEnabled
+                 ? "Everywhere signs everyone out on all your devices."
+                 : "This signs everyone out and removes the server from this \(deviceName).")
         }
     }
 }

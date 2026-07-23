@@ -56,10 +56,19 @@ extension PlozziOSAppModel {
     func captureSyncRecords(fallback: [SyncRecordID: Data]) -> [SyncRecordID: Data] {
         var out: [SyncRecordID: Data] = [:]
         let localProfileIDs = Set(profiles.profiles.map(\.id))
-        for d in mergedAccountDescriptors() {
+        // Household-removed (tombstoned) accounts are excluded from descriptors and get
+        // a `.removal` record instead, so peers sign them out and stop re-publishing.
+        let removedStore = RemovedAccountsStore()
+        let removedIDs = removedStore.removedIDs
+        for d in mergedAccountDescriptors() where !removedIDs.contains(d.id) {
             let name = SyncRecordKey(kind: .descriptor, id: d.id).recordName
             if let bytes = Self.stableDescriptorBytes(d, fallback: fallback[name]) {
                 out[name] = bytes
+            }
+        }
+        for (id, epoch) in removedStore.all {
+            if let data = CanonicalJSON.encode(AccountRemovalDTO(accountID: id, removedAtEpoch: epoch)) {
+                out[SyncRecordKey(kind: .removal, id: id).recordName] = data
             }
         }
         for p in profiles.profiles {
@@ -99,6 +108,8 @@ extension PlozziOSAppModel {
     func clearRemoteDerivedSyncState() {
         var store = PendingSyncedServersStore()
         store.removeAll()
+        var removed = RemovedAccountsStore()
+        removed.removeAll()
     }
 
     /// This device's signed-in accounts PLUS descriptors synced-but-not-signed-into,
@@ -121,6 +132,8 @@ extension PlozziOSAppModel {
         var settingRemoves: [(pid: String, key: String)] = []
         var descriptorsTouched = false
         var pendingStore = PendingSyncedServersStore()
+        var removalUpserts: [String: Int] = [:]
+        var removalClears: Set<String> = []
 
         for (name, value) in changes {
             guard let key = SyncRecordKey.parse(name) else { continue }
@@ -138,7 +151,28 @@ extension PlozziOSAppModel {
                 descriptorsTouched = true
                 if let value, let d = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: value) { pendingStore.upsertSynced(d.sanitizingURLs()) }
                 else if value == nil { pendingStore.removeSynced(key.id) }
+            case .removal:
+                if let value, let dto = CanonicalJSON.decode(AccountRemovalDTO.self, from: value) { removalUpserts[key.id] = dto.removedAtEpoch }
+                else if value == nil { removalClears.insert(key.id) }
             }
+        }
+
+        // Household removals: record the tombstone, sign the account out here if this
+        // device holds it, and drop it from the pending list. A cleared removal (the
+        // server was re-added on a peer) lets its descriptor flow again.
+        if !removalUpserts.isEmpty || !removalClears.isEmpty {
+            descriptorsTouched = true   // re-add clears must refresh pending/auto-connect too
+            var removed = RemovedAccountsStore()
+            for (id, epoch) in removalUpserts {
+                removed.markRemoved(id, at: epoch)
+                pendingStore.removeSynced(id)
+                // A queued setup prompt for a now-removed server must not linger.
+                if pendingSyncedServerPrompt?.id == id { pendingSyncedServerPrompt = nil }
+                if accountsProviders.accounts.contains(where: { $0.id == id }) {
+                    removeAccount(id: id)
+                }
+            }
+            for id in removalClears { removed.clear(id) }
         }
 
         if !profileUpserts.isEmpty || !profileDeletes.isEmpty {
@@ -177,9 +211,14 @@ extension PlozziOSAppModel {
     func refreshPendingSyncedServers() {
         var store = PendingSyncedServersStore()
         let localIDs = Set(accountsProviders.accounts.map(\.id))
-        pendingSyncedServers = store.pending(excludingLocal: localIDs)
+        // Household-removed (tombstoned) servers are hidden and never prompted here.
+        let removedIDs = RemovedAccountsStore().removedIDs
+        if let prompt = pendingSyncedServerPrompt, removedIDs.contains(prompt.id) {
+            pendingSyncedServerPrompt = nil
+        }
+        pendingSyncedServers = store.pending(excludingLocal: localIDs).filter { !removedIDs.contains($0.id) }
         guard SyncSetupFeatureFlag().isEnabled, pendingSyncedServerPrompt == nil else { return }
-        let newly = store.newlyPending(excludingLocal: localIDs)
+        let newly = store.newlyPending(excludingLocal: localIDs).filter { !removedIDs.contains($0.id) }
         // Only nudge for media servers we can sign into here (Jellyfin/Emby/Plex).
         // Media shares are set up differently and aren't offered via this prompt.
         if let first = newly.first(where: { $0.provider != .mediaShare }) {
@@ -202,6 +241,27 @@ extension PlozziOSAppModel {
 
     /// The user dismissed / handled the current one-time server prompt.
     func clearPendingSyncedServerPrompt() { pendingSyncedServerPrompt = nil }
+
+    /// Remove a server from EVERY device on this iCloud account: publish a removal
+    /// tombstone so peers sign it out and stop re-publishing it, remove it here, and
+    /// push now. Reversible by re-adding the server anywhere.
+    func removeAccountEverywhere(id: String) {
+        var removed = RemovedAccountsStore()
+        removed.markRemoved(id, at: Int(Date().timeIntervalSince1970))
+        var pending = PendingSyncedServersStore()
+        pending.removeSynced(id)
+        removeAccount(id: id)   // local removal (also drops the portable credential)
+        refreshPendingSyncedServers()
+        scheduleCloudPublish()  // propagate the tombstone + delete the descriptor
+    }
+
+    /// Clear any household-removal tombstone for an account the user just (re)added.
+    func clearRemovalTombstone(for id: String) {
+        var removed = RemovedAccountsStore()
+        guard removed.isRemoved(id) else { return }
+        removed.clear(id)
+        scheduleCloudPublish()
+    }
 
     private func namespace(forProfileID pid: String) -> String?? {
         if let p = profiles.profiles.first(where: { $0.id == pid }) {

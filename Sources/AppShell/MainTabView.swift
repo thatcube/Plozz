@@ -159,6 +159,7 @@ struct MainTabView: View {
     let onDeleteProfile: (String) -> Void
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void
+    let onRemoveAccountEverywhere: (Account) -> Void
     let onRescanShare: (String) -> Void
     let onSignOutAll: () -> Void
     let onSwitchProfile: () -> Void
@@ -395,6 +396,7 @@ struct MainTabView: View {
                 onDeleteProfile: onDeleteProfile,
                 onAddAccount: onAddAccount,
                 onRemoveAccount: onRemoveAccount,
+                onRemoveAccountEverywhere: onRemoveAccountEverywhere,
                 onRescanShare: onRescanShare,
                 onSignOutAll: onSignOutAll,
                 onResetToFirstRun: onResetToFirstRun,

@@ -20,6 +20,11 @@ import Foundation
 
 public enum SyncRecordKind: String, Sendable, CaseIterable {
     case descriptor, profile, membership, setting
+    /// A household-wide "this server was removed" tombstone (accountID → removal
+    /// marker). Propagates a "Remove Everywhere" so every device signs the account
+    /// out and stops re-publishing its descriptor. Absence = the removal was undone
+    /// (the server was re-added somewhere).
+    case removal
 }
 
 /// A parsed record name: its kind and the id parts after the prefix.
@@ -89,7 +94,7 @@ public enum SyncCaptureFallback {
                 if !localProfileIDs.contains(key.id) && fallback[parent] == nil {
                     out[name] = data
                 }
-            case .profile, .descriptor:
+            case .profile, .descriptor, .removal:
                 break   // authoritative on this device: absence is a genuine deletion
             }
         }

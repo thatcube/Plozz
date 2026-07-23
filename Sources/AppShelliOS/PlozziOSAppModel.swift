@@ -668,6 +668,8 @@ final class PlozziOSAppModel {
         for account in accountsProviders.accounts { removePortableCredential(account.id) }
         var pendingSynced = PendingSyncedServersStore()
         pendingSynced.removeAll()
+        var removedSynced = RemovedAccountsStore()
+        removedSynced.removeAll()
         pendingSyncedServers = []
         pendingSyncedServerPrompt = nil
         try? accountStore.clearAll()
@@ -1142,6 +1144,8 @@ final class PlozziOSAppModel {
             for session in sessions {
                 let account = Account(from: session)
                 try accountStore.add(account, token: session.accessToken)
+                // A (re)added server clears any household-removal tombstone for it.
+                clearRemovalTombstone(for: account.id)
                 if !existingIDs.contains(account.id) {
                     addedAccounts.append(account)
                 }

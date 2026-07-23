@@ -72,21 +72,48 @@ struct ServerDetailView: View {
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .scrollClipDisabled()
-        .alert(item: $pendingSignOut) { pending in
-            let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
-            let isCredentialFree = transport == .nfs
-            let trimmedUser = pending.account.userName.trimmingCharacters(in: .whitespaces)
-            return Alert(
-                title: Text(isCredentialFree
-                    ? "Remove \(pending.serverName)?"
-                    : (trimmedUser.isEmpty ? "Remove \(pending.serverName)?" : "Sign out \(trimmedUser)?")),
-                message: Text(signOutMessage(for: pending)),
-                primaryButton: .destructive(Text(isCredentialFree ? "Remove" : "Sign Out")) {
+        .alert(
+            pendingSignOutTitle(pendingSignOut),
+            isPresented: Binding(
+                get: { pendingSignOut != nil },
+                set: { if !$0 { pendingSignOut = nil } }
+            ),
+            presenting: pendingSignOut
+        ) { pending in
+            if context.syncEnabled {
+                Button("Remove Everywhere", role: .destructive) {
+                    context.onRemoveAccountEverywhere(pending.account)
+                }
+                Button("Remove from This Apple TV", role: .destructive) {
                     context.onRemoveAccount(pending.account)
-                },
-                secondaryButton: .cancel()
-            )
+                }
+            } else {
+                Button(signOutPrimaryLabel(pending), role: .destructive) {
+                    context.onRemoveAccount(pending.account)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            Text(context.syncEnabled
+                 ? "Everywhere signs it out on all your devices. This Apple TV keeps your other servers."
+                 : signOutMessage(for: pending))
         }
+    }
+
+    /// Title for the sign-out/remove confirmation, derived from the pending account.
+    private func pendingSignOutTitle(_ pending: PendingSignOut?) -> String {
+        guard let pending else { return "" }
+        let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
+        let isCredentialFree = transport == .nfs
+        let trimmedUser = pending.account.userName.trimmingCharacters(in: .whitespaces)
+        if isCredentialFree || trimmedUser.isEmpty { return "Remove \(pending.serverName)?" }
+        return "Sign out \(trimmedUser)?"
+    }
+
+    /// Primary button label when sync is off (a credential-free share reads "Remove").
+    private func signOutPrimaryLabel(_ pending: PendingSignOut) -> String {
+        let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
+        return transport == .nfs ? "Remove" : "Sign Out"
     }
 
     private func signOutMessage(for pending: PendingSignOut) -> String {
@@ -264,14 +291,23 @@ struct ServerDetailView: View {
                     .font(.callout.weight(.semibold))
             }
             .alert("Remove \(group.serverName)?", isPresented: $confirmRemoveServer) {
-                Button("Remove Server", role: .destructive) {
-                    for account in group.accounts {
-                        context.onRemoveAccount(account)
+                if context.syncEnabled {
+                    Button("Remove Everywhere", role: .destructive) {
+                        for account in group.accounts { context.onRemoveAccountEverywhere(account) }
+                    }
+                    Button("Remove from This Apple TV", role: .destructive) {
+                        for account in group.accounts { context.onRemoveAccount(account) }
+                    }
+                } else {
+                    Button("Remove Server", role: .destructive) {
+                        for account in group.accounts { context.onRemoveAccount(account) }
                     }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This signs everyone out of \(group.serverName) on this Apple TV. Any profile will need to sign in again to use it.")
+                Text(context.syncEnabled
+                     ? "Everywhere signs everyone out on all your devices. This Apple TV keeps your other servers."
+                     : "This signs everyone out of \(group.serverName) on this Apple TV. Any profile will need to sign in again to use it.")
             }
         }
     }

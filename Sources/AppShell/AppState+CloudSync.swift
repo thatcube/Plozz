@@ -203,11 +203,23 @@ extension AppState {
         // Descriptors: this device's signed-in accounts PLUS the ones it has synced
         // but isn't signed into (pending). H2: keep the last-synced bytes when the
         // descriptor's meaningful fields are unchanged, so a per-device reachable-URL
-        // difference doesn't churn/clobber the shared record.
-        for d in Self.mergedAccountDescriptors(signedIn: accountsProviders.accounts) {
+        // difference doesn't churn/clobber the shared record. Household-removed
+        // (tombstoned) accounts are excluded so their descriptor is deleted from the
+        // zone; a `.removal` record is published for each instead.
+        let removedStore = RemovedAccountsStore()
+        let removedIDs = removedStore.removedIDs
+        for d in Self.mergedAccountDescriptors(signedIn: accountsProviders.accounts)
+        where !removedIDs.contains(d.id) {
             let name = SyncRecordKey(kind: .descriptor, id: d.id).recordName
             if let bytes = Self.stableDescriptorBytes(d, fallback: fallback[name]) {
                 out[name] = bytes
+            }
+        }
+        // Removal tombstones: one per household-removed account, so every device signs
+        // it out and stops re-publishing it.
+        for (id, epoch) in removedStore.all {
+            if let data = CanonicalJSON.encode(AccountRemovalDTO(accountID: id, removedAtEpoch: epoch)) {
+                out[SyncRecordKey(kind: .removal, id: id).recordName] = data
             }
         }
         // Profiles (default ALWAYS included ⇒ never sync-deleted), their membership,
@@ -257,6 +269,8 @@ extension AppState {
     public func clearRemoteDerivedSyncState() {
         var store = PendingSyncedServersStore()
         store.removeAll()
+        var removed = RemovedAccountsStore()
+        removed.removeAll()
         refreshPendingSyncedServers()
     }
 
@@ -286,6 +300,8 @@ extension AppState {
         var settingRemoves: [(pid: String, key: String)] = []
         var descriptorsTouched = false
         var pendingStore = PendingSyncedServersStore()
+        var removalUpserts: [String: Int] = [:]
+        var removalClears: Set<String> = []
 
         for (name, value) in changes {
             guard let key = SyncRecordKey.parse(name) else { continue }
@@ -312,7 +328,32 @@ extension AppState {
                 } else if value == nil {
                     pendingStore.removeSynced(key.id)
                 }
+            case .removal:
+                if let value, let dto = CanonicalJSON.decode(AccountRemovalDTO.self, from: value) {
+                    removalUpserts[key.id] = dto.removedAtEpoch
+                } else if value == nil {
+                    removalClears.insert(key.id)
+                }
             }
+        }
+
+        // Household removals: record the tombstone, sign the account out here if this
+        // device holds it, and drop it from the pending list. A cleared removal (the
+        // server was re-added on a peer) lets its descriptor flow again.
+        if !removalUpserts.isEmpty || !removalClears.isEmpty {
+            descriptorsTouched = true   // re-add clears must refresh pending/auto-connect too
+            var removed = RemovedAccountsStore()
+            for (id, epoch) in removalUpserts {
+                removed.markRemoved(id, at: epoch)
+                pendingStore.removeSynced(id)
+                // A queued setup prompt for a now-removed server must not linger — the
+                // user could otherwise accept it and undo the removal.
+                if cloudSyncUI.pendingServerPrompt?.id == id { cloudSyncUI.pendingServerPrompt = nil }
+                if accountsProviders.accounts.contains(where: { $0.id == id }) {
+                    removeAccount(id: id)
+                }
+            }
+            for id in removalClears { removed.clear(id) }
         }
 
         // 1. Profiles: cosmetic upserts + deletions (default never deleted).
@@ -365,13 +406,41 @@ extension AppState {
     public func refreshPendingSyncedServers() {
         var store = PendingSyncedServersStore()
         let localIDs = Set(accountsProviders.accounts.map(\.id))
-        let newly = store.newlyPending(excludingLocal: localIDs)
+        // Household-removed (tombstoned) servers are hidden here and never prompted.
+        let removedIDs = RemovedAccountsStore().removedIDs
+        if let prompt = cloudSyncUI.pendingServerPrompt, removedIDs.contains(prompt.id) {
+            cloudSyncUI.pendingServerPrompt = nil
+        }
+        let newly = store.newlyPending(excludingLocal: localIDs).filter { !removedIDs.contains($0.id) }
         cloudSyncUI.pendingSyncedServers = store.pending(excludingLocal: localIDs)
+            .filter { !removedIDs.contains($0.id) }
         if SyncSetupFeatureFlag().isEnabled, cloudSyncUI.pendingServerPrompt == nil,
            let first = newly.first {
             cloudSyncUI.pendingServerPrompt = first
             store.markPrompted(newly.map(\.id))
         }
+    }
+
+    /// Remove a server from EVERY device on this iCloud account: publish a removal
+    /// tombstone so peers sign it out and stop re-publishing it, remove it here, and
+    /// push the change now. Reversible by re-adding the server anywhere.
+    public func removeAccountEverywhere(id: String) {
+        var removed = RemovedAccountsStore()
+        removed.markRemoved(id, at: Int(Date().timeIntervalSince1970))
+        var pending = PendingSyncedServersStore()
+        pending.removeSynced(id)
+        removeAccount(id: id)   // local removal (also retires credentials)
+        refreshPendingSyncedServers()
+        scheduleCloudPublish()  // propagate the tombstone + delete the descriptor
+    }
+
+    /// Clear any household-removal tombstone for an account the user just (re)added, so
+    /// its descriptor syncs again and peers stop treating it as removed.
+    public func clearRemovalTombstone(for id: String) {
+        var removed = RemovedAccountsStore()
+        guard removed.isRemoved(id) else { return }
+        removed.clear(id)
+        scheduleCloudPublish()
     }
 
     /// The user chose to ignore a pending server — keep it listed (deletable) but

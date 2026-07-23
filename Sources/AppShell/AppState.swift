@@ -1213,6 +1213,9 @@ public final class AppState {
             mediaShare.accountService.retireCredential(for: previousAccount)
         }
         accountsProviders.reloadAccounts()
+        // A (re)added server clears any household-removal tombstone for it, so its
+        // descriptor syncs again and peers stop treating it as removed.
+        clearRemovalTombstone(for: account.id)
         // Flow finished — next add-account starts at the chooser.
         pendingOnboardingProvider = nil
         pendingLibrarySelectionAccountIDs = [account.id]
@@ -1244,6 +1247,7 @@ public final class AppState {
             }
         }
         accountsProviders.reloadAccounts()
+        addedIDs.forEach(clearRemovalTombstone)   // (re)add clears removal tombstones
         pendingOnboardingProvider = nil
         guard !addedIDs.isEmpty else {
             apply(.authenticationFailed(.unknown("")))

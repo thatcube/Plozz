@@ -709,6 +709,39 @@ struct PlozziOSHomeStaticBackdrop: View {
     }
 }
 
+/// A plain, full-width sharp copy of a hero's artwork used for the parallax slide
+/// transition. Unlike `PlozziOSHomeStaticBackdrop` it does NOT use the
+/// self-aligning `PlozziOSReflectedHeroStage` (which re-reads its own global frame
+/// and cancels an applied `.offset`, breaking the slide asymmetrically), so it can
+/// be freely offset. Image-only (the trailer resumes on the idle backdrop once the
+/// transition settles).
+struct PlozziOSHeroSlidingBackdrop: View {
+    @Environment(\.themePalette) private var palette
+
+    let item: MediaItem
+    let style: HeroArtworkStyle
+    let height: CGFloat
+
+    var body: some View {
+        let presentation = HeroPresentation(
+            item: item,
+            artworkStyle: style,
+            surface: .home
+        )
+        FallbackAsyncImage(
+            references: presentation.artworkReferences,
+            variant: .heroBackdrop
+        ) {
+            palette.backgroundBase
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(height: height)
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 /// A full-width, heavily-blurred, over-scaled copy of a hero's artwork used to
 /// fill the horizontal gap the parallax slide would otherwise open at a screen
 /// edge (dark page showing through). Sits BEHIND the sharp sliding image so any

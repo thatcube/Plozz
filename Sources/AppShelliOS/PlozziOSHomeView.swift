@@ -627,11 +627,13 @@ private struct PlozziOSHomeHeroCarousel: View {
                     // no opaque grey wash. The current slide stays fully opaque while
                     // the incoming one fades in on top, so the stack never dips.
                     ZStack {
-                        // Blurred full-width fill behind each sliding image, moving
-                        // with it, so the slide never exposes a dark edge gap — the
-                        // exposed area shows a soft blurred continuation of the same
-                        // hero instead. (Only needed while a transition is active.)
-                        if dragTargetItem != nil {
+                        if let dragTargetItem {
+                            // TRANSITION: slide plain sharp images (freely
+                            // offsettable — the normal reflected-stage backdrop
+                            // cancels an applied offset). Blur-fill behind each so a
+                            // slid edge shows a soft blurred continuation, not a gap.
+                            // Incoming underneath (opaque) so the outgoing dissolves
+                            // away to reveal it; both physically slide.
                             PlozziOSHeroBlurFill(
                                 item: currentItem,
                                 style: style,
@@ -639,40 +641,37 @@ private struct PlozziOSHomeHeroCarousel: View {
                             )
                             .opacity(1 - progress)
                             .offset(x: outgoingX)
-                        }
-                        if let dragTargetItem {
+
                             PlozziOSHeroBlurFill(
                                 item: dragTargetItem,
                                 style: style,
                                 height: heroHeight
                             )
                             .offset(x: incomingX)
-                        }
 
-                        // Incoming slide sits UNDERNEATH, fully opaque; the outgoing
-                        // slide fades OUT on top. So the old image genuinely
-                        // dissolves away to reveal the new (already solid) one —
-                        // rather than the new fading in over a still-opaque old,
-                        // which left the old lingering behind and visible through the
-                        // alpha dissolve. The stack stays fully opaque throughout
-                        // (incoming is opaque), so there's no mid-swipe wash either.
-                        if let dragTargetItem {
-                            PlozziOSHomeStaticBackdrop(
+                            PlozziOSHeroSlidingBackdrop(
                                 item: dragTargetItem,
                                 style: style,
                                 height: heroHeight
                             )
                             .offset(x: incomingX)
-                        }
 
-                        PlozziOSHomeStaticBackdrop(
-                            item: currentItem,
-                            style: style,
-                            height: heroHeight
-                        )
-                        .id(currentItem.id)
-                        .opacity(dragTargetItem != nil ? 1 - progress : 1)
-                        .offset(x: outgoingX)
+                            PlozziOSHeroSlidingBackdrop(
+                                item: currentItem,
+                                style: style,
+                                height: heroHeight
+                            )
+                            .opacity(1 - progress)
+                            .offset(x: outgoingX)
+                        } else {
+                            // IDLE: the full backdrop (reflected stage + trailer).
+                            PlozziOSHomeStaticBackdrop(
+                                item: currentItem,
+                                style: style,
+                                height: heroHeight
+                            )
+                            .id(currentItem.id)
+                        }
 
                         PlozziOSStationaryHeroScrim(
                             style: style,
@@ -1001,11 +1000,13 @@ private struct PlozziOSHomeHeroCarousel: View {
         // third, which made the outgoing image slide almost instantly). Now the
         // old image visibly slides out over the full duration as the new slides in.
         let threshold = max(stageWidth * 0.45, 1)
+        // Commit the swap on the animation's COMPLETION (not a fixed Task.sleep,
+        // which raced the animation and produced a snap when it fired a hair
+        // early/late). At completion the incoming image is exactly at rest, so the
+        // hard swap to the idle backdrop is seamless — one fluid motion.
         withAnimation(.easeInOut(duration: 0.34)) {
             dragOffset = forward ? -threshold : threshold
-        }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(340))
+        } completion: {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {

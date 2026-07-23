@@ -1435,7 +1435,7 @@ private struct PlozziOSHeroMetadata: View {
             }
 
             if let descriptionText {
-                Text(descriptionText)
+                Text(descriptionText.overviewMarkdown ?? AttributedString(descriptionText))
                     .font(.subheadline)
                     .foregroundStyle(palette.primaryText.opacity(0.82))
                     .lineLimit(3)

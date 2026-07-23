@@ -1228,7 +1228,7 @@ private struct PlozziOSPlaybackInfoSheet: View {
                     Text(viewModel.controls.infoHeadline)
                         .font(.headline)
                     if !viewModel.controls.overview.isEmpty {
-                        Text(viewModel.controls.overview)
+                        Text(verbatim: viewModel.controls.overview.overviewPlainText)
                             .foregroundStyle(.secondary)
                     }
                 }

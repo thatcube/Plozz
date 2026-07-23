@@ -46,7 +46,7 @@ public struct SpoilerSafeOverviewText: View {
             if hidesSpoilers {
                 hiddenOverview
             } else if let overview {
-                Text(overview)
+                overviewText(overview)
             }
         }
         .font(.system(size: fontSize))
@@ -55,6 +55,17 @@ public struct SpoilerSafeOverviewText: View {
         .lineLimit(lineCount)
         .frame(maxWidth: maxWidth, alignment: .topLeading)
         .contentTransition(.opacity)
+    }
+
+    /// Renders the overview with inline markdown resolved: tvOS flattens links to
+    /// plain label text (no pointer to tap them); iOS/iPadOS renders tappable links.
+    @ViewBuilder
+    private func overviewText(_ overview: String) -> some View {
+        #if os(tvOS)
+        Text(verbatim: overview.overviewPlainText)
+        #else
+        Text(overview.overviewMarkdown ?? AttributedString(overview))
+        #endif
     }
 
     private var layoutReservation: String {
@@ -66,7 +77,7 @@ public struct SpoilerSafeOverviewText: View {
         switch mode {
         case .blur:
             if let overview {
-                Text(overview)
+                Text(verbatim: overview.overviewPlainText)
                     .blur(radius: 6)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(EpisodeColumnPresentation.hiddenOverviewLabel)

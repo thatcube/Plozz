@@ -1515,7 +1515,7 @@ private struct PlozziOSInlineEpisodeEntry: View {
                     .font(.headline)
                     .lineLimit(1)
                 if let overview = episode.overview, !overview.isEmpty {
-                    Text(overview)
+                    Text(overview.overviewMarkdown ?? AttributedString(overview))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)

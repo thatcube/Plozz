@@ -607,6 +607,14 @@ private struct PlozziOSHomeHeroCarousel: View {
                 abs(dragOffset) / max(proxy.size.width * 0.45, 1),
                 1
             )
+            // Parallax slide: the outgoing image drifts up to `slideTravel` in the
+            // drag direction (partly off-screen, subtle), while the incoming image
+            // enters from the opposite edge and settles into place by the same
+            // amount — both tracking the finger via `progress`, in either direction.
+            let slideTravel: CGFloat = 180
+            let slideDir: CGFloat = dragOffset == 0 ? 0 : (dragOffset < 0 ? -1 : 1)
+            let outgoingX = slideDir * slideTravel * progress
+            let incomingX = -slideDir * slideTravel * (1 - progress)
             ZStack {
                 if let currentItem {
                     // Images + legibility scrim live in ONE container that carries a
@@ -629,6 +637,7 @@ private struct PlozziOSHomeHeroCarousel: View {
                                 style: style,
                                 height: heroHeight
                             )
+                            .offset(x: incomingX)
                         }
 
                         PlozziOSHomeStaticBackdrop(
@@ -638,6 +647,7 @@ private struct PlozziOSHomeHeroCarousel: View {
                         )
                         .id(currentItem.id)
                         .opacity(dragTargetItem != nil ? 1 - progress : 1)
+                        .offset(x: outgoingX)
 
                         PlozziOSStationaryHeroScrim(
                             style: style,
@@ -715,7 +725,12 @@ private struct PlozziOSHomeHeroCarousel: View {
             if items.count > 1 {
                 PlozziOSHeroPagingIndicator(
                     itemIDs: items.map(\.id),
-                    selectedItemID: selectedItemID,
+                    // During a committed transition the dot animates to the target
+                    // over the same window as the image slide (transitionTargetID is
+                    // set outside the disable-animations transaction, unlike
+                    // selectedItemID which snaps at the end). Falls back to the
+                    // selected id when idle.
+                    selectedItemID: transitionTargetID ?? selectedItemID,
                     autoAdvance: autoAdvance,
                     autoAdvanceSeconds: autoAdvanceSeconds,
                     dwellStart: dwellStart,

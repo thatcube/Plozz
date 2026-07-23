@@ -158,16 +158,25 @@ extension AppState {
     /// Poll for rendezvous offers every few seconds while the app is open, so the TV
     /// prompts within seconds of the phone opening its "set up from another device"
     /// screen — iCloud KVS delivery to a foreground-idle tvOS app is otherwise
-    /// best-effort. Idempotent; guarded on the feature flag each tick.
+    /// best-effort. Also pulls config changes roughly every 30s so household edits
+    /// made elsewhere (e.g. a "Remove Everywhere") converge on an idle, already-open
+    /// Apple TV without the user backgrounding the app (tvOS push is unreliable).
+    /// Idempotent; guarded on the feature flag each tick.
     func startSyncSetupOfferPolling() {
         guard SyncSetupFeatureFlag().isEnabled, syncSetupOfferPollTask == nil else { return }
         syncSetupOfferPollTask = Task { [weak self] in
+            var tick = 0
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
                 guard !Task.isCancelled else { return }
+                tick += 1
+                let fetchConfig = tick % 4 == 0   // ~every 32s
                 let keepGoing = await MainActor.run { () -> Bool in
-                    guard let self else { return false }
-                    if SyncSetupFeatureFlag().isEnabled { self.checkForSyncSetupOffer() }
+                    guard let self, SyncSetupFeatureFlag().isEnabled else { return self != nil }
+                    self.checkForSyncSetupOffer()
+                    if fetchConfig, let cloudSync = self.cloudSync {
+                        Task { await cloudSync.fetchNow() }
+                    }
                     return true
                 }
                 if !keepGoing { return }

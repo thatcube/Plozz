@@ -616,21 +616,28 @@ private struct PlozziOSHomeHeroCarousel: View {
                     // no opaque grey wash. The current slide stays fully opaque while
                     // the incoming one fades in on top, so the stack never dips.
                     ZStack {
-                        PlozziOSHomeStaticBackdrop(
-                            item: currentItem,
-                            style: style,
-                            height: heroHeight
-                        )
-                        .id(currentItem.id)
-
+                        // Incoming slide sits UNDERNEATH, fully opaque; the outgoing
+                        // slide fades OUT on top. So the old image genuinely
+                        // dissolves away to reveal the new (already solid) one —
+                        // rather than the new fading in over a still-opaque old,
+                        // which left the old lingering behind and visible through the
+                        // alpha dissolve. The stack stays fully opaque throughout
+                        // (incoming is opaque), so there's no mid-swipe wash either.
                         if let dragTargetItem {
                             PlozziOSHomeStaticBackdrop(
                                 item: dragTargetItem,
                                 style: style,
                                 height: heroHeight
                             )
-                            .opacity(progress)
                         }
+
+                        PlozziOSHomeStaticBackdrop(
+                            item: currentItem,
+                            style: style,
+                            height: heroHeight
+                        )
+                        .id(currentItem.id)
+                        .opacity(dragTargetItem != nil ? 1 - progress : 1)
 
                         PlozziOSStationaryHeroScrim(
                             style: style,

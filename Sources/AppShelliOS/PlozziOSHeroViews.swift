@@ -570,40 +570,8 @@ struct PlozziOSHeroBackgroundMelt: View {
     var body: some View {
         let base = palette.backgroundBase
         ZStack {
-            // A/B (Dark/Black themes only): an extra BLACK darkening over the image
-            // in the mid/text region — punchier than the flat base melt. It fades
-            // out before the very bottom, and the base melt on top still resolves
-            // the bottom to the EXACT page colour, so the seamless meeting point is
-            // unchanged; this only deepens the middle.
-            if blackTint && !palette.isLight {
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .clear, location: 0.30),
-                        .init(color: .black.opacity(0.28), location: 0.50),
-                        .init(color: .black.opacity(0.55), location: 0.68),
-                        .init(color: .black.opacity(0.70), location: 0.82),
-                        .init(color: .black.opacity(0.45), location: 0.92),
-                        .init(color: .clear, location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-
             LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: .clear, location: 0.28),
-                    .init(color: base.opacity(0.10), location: 0.42),
-                    .init(color: base.opacity(0.26), location: 0.54),
-                    .init(color: base.opacity(0.45), location: 0.64),
-                    .init(color: base.opacity(0.64), location: 0.73),
-                    .init(color: base.opacity(0.80), location: 0.82),
-                    .init(color: base.opacity(0.91), location: 0.89),
-                    .init(color: base.opacity(0.975), location: 0.95),
-                    .init(color: base, location: 1)
-                ],
+                stops: meltStops(base: base),
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -619,6 +587,42 @@ struct PlozziOSHeroBackgroundMelt: View {
                 )
             }
         }
+    }
+
+    /// A/B variants for the vertical dissolve:
+    /// - default: a single monotonic melt straight to the page `backgroundBase`
+    ///   (never darker than the page — no dark band).
+    /// - blackTint (Dark/Black themes): darkens over the image with BLACK for a
+    ///   punchier look, then transitions black → the page background near the
+    ///   bottom so the meeting point still lands on the exact page colour.
+    private func meltStops(base: Color) -> [Gradient.Stop] {
+        if blackTint && !palette.isLight {
+            return [
+                .init(color: .clear, location: 0),
+                .init(color: .clear, location: 0.28),
+                .init(color: .black.opacity(0.16), location: 0.42),
+                .init(color: .black.opacity(0.40), location: 0.54),
+                .init(color: .black.opacity(0.62), location: 0.64),
+                .init(color: .black.opacity(0.80), location: 0.73),
+                .init(color: .black.opacity(0.90), location: 0.82),
+                // Transition black → page background so the bottom melts to the
+                // exact page colour instead of staying black.
+                .init(color: base.opacity(0.94), location: 0.91),
+                .init(color: base, location: 1)
+            ]
+        }
+        return [
+            .init(color: .clear, location: 0),
+            .init(color: .clear, location: 0.28),
+            .init(color: base.opacity(0.10), location: 0.42),
+            .init(color: base.opacity(0.26), location: 0.54),
+            .init(color: base.opacity(0.45), location: 0.64),
+            .init(color: base.opacity(0.64), location: 0.73),
+            .init(color: base.opacity(0.80), location: 0.82),
+            .init(color: base.opacity(0.91), location: 0.89),
+            .init(color: base.opacity(0.975), location: 0.95),
+            .init(color: base, location: 1)
+        ]
     }
 }
 

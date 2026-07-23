@@ -435,10 +435,9 @@ final class PlozziOSAppModel {
                 // UIDevice.name is a generic model name on iOS 16+ without a special
                 // entitlement, so recover the owner-given name from the host name
                 // ("Brando's iPad" → host "Brandos-iPad") the same way tvOS does.
-                DeviceDisplayName.fromHostName(
-                    ProcessInfo.processInfo.hostName,
-                    fallback: UIDevice.current.name
-                )
+                // Non-blocking: never reads ProcessInfo.hostName on the main thread
+                // (that reverse-DNS call hangs launch + prompts for local network).
+                DeviceDisplayName.current(fallback: UIDevice.current.name)
             },
             isConfigured: { !accountsProviders.accounts.isEmpty },
             configProvider: {

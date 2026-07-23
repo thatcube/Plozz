@@ -329,7 +329,7 @@ extension AppState {
         // Stamp this Apple TV as the origin of its own signed-in servers so peers can
         // show "Set up with <this TV>". Preserved across re-publish (origin is excluded
         // from semanticallyEqualForSync), so it names the ORIGIN device.
-        let originName = DeviceDisplayName.fromHostName(ProcessInfo.processInfo.hostName, fallback: "Apple TV")
+        let originName = DeviceDisplayName.current(fallback: "Apple TV")
         for a in accounts {
             byID[a.id] = SyncedAccountDescriptor(account: a).stampingOrigin(name: originName, kind: "tv") // signed-in wins
         }
@@ -487,7 +487,7 @@ extension AppState {
         guard SyncSetupFeatureFlag().isEnabled else { return }
         HouseholdDevicesStore().heartbeat(
             deviceID: accountsProviders.accountStore.deviceID(),
-            deviceName: DeviceDisplayName.fromHostName(ProcessInfo.processInfo.hostName, fallback: "Apple TV"))
+            deviceName: DeviceDisplayName.current(fallback: "Apple TV"))
     }
 
     /// Remove a server from EVERY device on this iCloud account: publish a removal

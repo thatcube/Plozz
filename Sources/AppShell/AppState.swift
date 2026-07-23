@@ -787,9 +787,10 @@ public final class AppState {
             deviceName: {
                 // UIDevice.name is a generic model name on tvOS 16+ without a special
                 // entitlement, so recover the owner-given name from the host name
-                // ("Brando TV" → host "brando-tv") — shared with iOS.
-                DeviceDisplayName.fromHostName(
-                    ProcessInfo.processInfo.hostName,
+                // ("Brando TV" → host "brando-tv") — shared with iOS. Non-blocking:
+                // never reads ProcessInfo.hostName on the main thread (see
+                // DeviceDisplayName — that reverse-DNS call hangs launch + prompts LAN).
+                DeviceDisplayName.current(
                     fallback: UIDevice.current.name.isEmpty ? "Apple TV" : UIDevice.current.name
                 )
             },

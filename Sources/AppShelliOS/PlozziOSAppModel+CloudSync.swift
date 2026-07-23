@@ -136,8 +136,7 @@ extension PlozziOSAppModel {
     private func mergedAccountDescriptors() -> [SyncedAccountDescriptor] {
         var byID: [String: SyncedAccountDescriptor] = [:]
         for d in PendingSyncedServersStore().all { byID[d.id] = d.sanitizingURLs() }
-        let originName = DeviceDisplayName.fromHostName(
-            ProcessInfo.processInfo.hostName, fallback: UIDevice.current.name)
+        let originName = DeviceDisplayName.current(fallback: UIDevice.current.name)
         let originKind = UIDevice.current.userInterfaceIdiom == .pad ? "pad" : "phone"
         for a in accountsProviders.accounts {
             byID[a.id] = SyncedAccountDescriptor(account: a).stampingOrigin(name: originName, kind: originKind)
@@ -327,8 +326,7 @@ extension PlozziOSAppModel {
         guard SyncSetupFeatureFlag().isEnabled else { return }
         HouseholdDevicesStore().heartbeat(
             deviceID: deviceID,
-            deviceName: DeviceDisplayName.fromHostName(
-                ProcessInfo.processInfo.hostName, fallback: UIDevice.current.name))
+            deviceName: DeviceDisplayName.current(fallback: UIDevice.current.name))
     }
 
     /// Remove a server from EVERY device on this iCloud account: publish a removal

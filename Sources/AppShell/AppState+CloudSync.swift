@@ -470,9 +470,11 @@ extension AppState {
         let newly = store.newlyPending(excludingLocal: localIDs)
             .filter { !removedIDs.contains($0.id) }
             .excludingSemanticMatches(of: localSemanticKeys)
+            .dedupedBySemanticIdentity()
         cloudSyncUI.pendingSyncedServers = store.pending(excludingLocal: localIDs)
             .filter { !removedIDs.contains($0.id) }
             .excludingSemanticMatches(of: localSemanticKeys)
+            .dedupedBySemanticIdentity()
         if SyncSetupFeatureFlag().isEnabled, cloudSyncUI.pendingServerPrompt == nil,
            let first = newly.first {
             cloudSyncUI.pendingServerPrompt = first

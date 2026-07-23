@@ -180,6 +180,26 @@ public extension Array where Element == SyncedAccountDescriptor {
     func excludingSemanticMatches(of localSemanticKeys: Set<String>) -> [SyncedAccountDescriptor] {
         filter { !localSemanticKeys.contains($0.semanticServerKey) }
     }
+
+    /// Collapse descriptors that share a (server + user) identity down to ONE, keeping
+    /// the lowest `id` for a deterministic, cross-device-stable choice. Handles LEGACY
+    /// duplicates already in iCloud from before token-provider dedup existed (the same
+    /// Plex server+user published under two random ids), so the pending list / detected
+    /// page shows a server once instead of twice.
+    func dedupedBySemanticIdentity() -> [SyncedAccountDescriptor] {
+        var byKey: [String: SyncedAccountDescriptor] = [:]
+        for d in self {
+            if let existing = byKey[d.semanticServerKey], existing.id <= d.id { continue }
+            byKey[d.semanticServerKey] = d
+        }
+        // Preserve the original ordering by first-seen id.
+        var seen = Set<String>()
+        return filter { d in
+            guard byKey[d.semanticServerKey]?.id == d.id, !seen.contains(d.semanticServerKey) else { return false }
+            seen.insert(d.semanticServerKey)
+            return true
+        }
+    }
 }
 
 /// Whether THIS device has usable credentials for a synced account.

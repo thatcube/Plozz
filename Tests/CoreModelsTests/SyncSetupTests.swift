@@ -45,6 +45,40 @@ final class SyncSetupTests: XCTestCase {
         XCTAssertFalse(json.lowercased().contains("deviceid"))
     }
 
+    // MARK: Cross-device duplicate dedup (same server+user, different random ids)
+
+    private func plexDesc(id: String, serverID: String = "plex-machine-1", userID: String = "u-brandon", name: String = "Brandoland") -> SyncedAccountDescriptor {
+        SyncedAccountDescriptor(id: id, provider: .plex, serverID: serverID, serverName: name, userID: userID, userName: "brandon")
+    }
+
+    func testDedupBySemanticIdentityCollapsesDuplicatePlex() {
+        // Two Plex descriptors for the SAME server+user but different (random) ids —
+        // the legacy-duplicate case. Collapse to one, deterministically the lowest id.
+        let dupes = [plexDesc(id: "B-uuid"), plexDesc(id: "A-uuid"), plexDesc(id: "C-uuid")]
+        let deduped = dupes.dedupedBySemanticIdentity()
+        XCTAssertEqual(deduped.count, 1)
+        XCTAssertEqual(deduped.first?.id, "A-uuid", "keeps the lowest id for a stable cross-device choice")
+    }
+
+    func testDedupKeepsDistinctServersAndUsers() {
+        let a = plexDesc(id: "1", serverID: "srvA")
+        let b = plexDesc(id: "2", serverID: "srvB")            // different server
+        let c = plexDesc(id: "3", userID: "u-someone-else")    // different user
+        XCTAssertEqual([a, b, c].dedupedBySemanticIdentity().count, 3)
+    }
+
+    func testExcludingSemanticMatchesDropsAlreadySignedInServer() {
+        let synced = [plexDesc(id: "remote-uuid")]
+        // Local account for the same server+user but a DIFFERENT random id.
+        let localAccount = Account(
+            id: "local-uuid",
+            server: MediaServer(id: "plex-machine-1", name: "Brandoland", baseURL: url("https://plex.example"), provider: .plex),
+            userID: "u-brandon", userName: "brandon", deviceID: "dev-A"
+        )
+        let filtered = synced.excludingSemanticMatches(of: [localAccount.semanticServerKey])
+        XCTAssertTrue(filtered.isEmpty, "a server already signed in (by identity) must not be surfaced as pending")
+    }
+
     // MARK: Endpoint-retarget protection
 
     func testAuthorizedDeviceWithholdsUntrustedOrigin() {

@@ -252,10 +252,12 @@ extension PlozziOSAppModel {
         pendingSyncedServers = store.pending(excludingLocal: localIDs)
             .filter { !removedIDs.contains($0.id) }
             .excludingSemanticMatches(of: localSemanticKeys)
+            .dedupedBySemanticIdentity()
         guard SyncSetupFeatureFlag().isEnabled, pendingSyncedServerPrompt == nil else { return }
         let newly = store.newlyPending(excludingLocal: localIDs)
             .filter { !removedIDs.contains($0.id) }
             .excludingSemanticMatches(of: localSemanticKeys)
+            .dedupedBySemanticIdentity()
         // Only nudge for media servers we can sign into here (Jellyfin/Emby/Plex), AND
         // only when there's no synced login already waiting — if this device already has
         // the iCloud-Keychain credential (e.g. published by the user's iPhone),

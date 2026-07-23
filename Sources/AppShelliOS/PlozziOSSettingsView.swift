@@ -1094,7 +1094,6 @@ private struct PlozziOSAppearanceSettingsView: View {
     @Bindable var cardStyle: CardStyleSettingsModel
     @Bindable var density: UIDensitySettingsModel
     @Bindable var watchIndicator: WatchStatusIndicatorSettingsModel
-    @AppStorage("plozz.heroFadeBlackTint") private var heroFadeBlackTint = false
 
     var body: some View {
         List {
@@ -1118,12 +1117,6 @@ private struct PlozziOSAppearanceSettingsView: View {
                         .tag(preference)
                     }
                 }
-            }
-
-            SettingsSectionGroup("Hero fade (A/B test)") {
-                Toggle("Black tint over image", isOn: $heroFadeBlackTint)
-            } footer: {
-                Text("Dark/Black themes only. Adds a deeper black darkening over the hero image; the bottom still melts to the page background either way. Toggle to compare.")
             }
 
             SettingsSectionGroup("Library cards") {

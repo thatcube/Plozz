@@ -487,16 +487,18 @@ private struct PlozziOSHeroBackdrop: View {
                 .transition(.opacity)
             }
 
-            // The dissolve to the page background: a single monotonic melt to the
-            // theme's backgroundBase (grey in Dark, near-black in Black, white in
-            // Light). Painting the page colour directly — instead of masking the
-            // stack to transparent over a black scrim — means the hero melts to the
-            // EXACT page colour with no dark-band seam, in every theme.
+            // Gentle black legibility darkening behind the title (kept true to the
+            // image, not a grey wash).
             if showsScrim {
-                PlozziOSHeroBackgroundMelt(style: style)
+                PlozziOSHeroLegibilityScrim(style: style)
             }
         }
         .frame(height: height)
+        // Dissolve the whole stack (image + trailer + scrim) to transparent at the
+        // bottom so it melts into the page via ALPHA — the tvOS approach. The
+        // image keeps its true colours and gently reveals the page, instead of
+        // being painted over with an opaque grey that reads as muddy.
+        .mask { PlozziOSHeroFadeMask() }
         .clipped()
         .ignoresSafeArea(
             edges: ignoresHorizontalSafeArea
@@ -564,83 +566,50 @@ struct PlozziOSHeroFadeMask: View {
     }
 }
 
-/// The shared hero → page-background dissolve. A single monotonic melt whose
-/// opacity only ever increases toward the active theme's `backgroundBase`, so the
-/// hero never dips darker than the page and the bottom is the EXACT page colour
-/// (grey in Dark, near-black in Black, white in Light) — seamless in every theme.
-/// Used by both the Home carousel (as the static overlay) and the detail hero.
-struct PlozziOSHeroBackgroundMelt: View {
-    @Environment(\.themePalette) private var palette
-    @AppStorage("plozz.heroFadeBlackTint") private var blackTint = false
+/// A gentle BLACK legibility darkening for the hero (bottom + landscape leading),
+/// designed to sit UNDER the dissolve mask: it deepens the image cleanly behind
+/// the title (rather than washing it grey) and is carried to the page background
+/// by the enclosing dissolve — mirroring the tvOS hero, which keeps the image's
+/// true colours and fades it to transparent instead of painting grey over it.
+struct PlozziOSHeroLegibilityScrim: View {
     let style: HeroArtworkStyle
 
     var body: some View {
-        let base = palette.backgroundBase
         ZStack {
             LinearGradient(
-                stops: meltStops(base: base),
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .clear, location: 0.34),
+                    .init(color: .black.opacity(0.20), location: 0.52),
+                    .init(color: .black.opacity(0.44), location: 0.70),
+                    .init(color: .black.opacity(0.60), location: 0.86),
+                    .init(color: .black.opacity(0.66), location: 1)
+                ],
                 startPoint: .top,
                 endPoint: .bottom
             )
 
-            // Landscape keeps a gentle leading wash so left-aligned title text
-            // stays legible over a busy image — also melting to the page base,
-            // never black, so it can't introduce its own edge.
             if style == .landscape {
                 LinearGradient(
-                    colors: [base.opacity(0.55), .clear],
+                    colors: [.black.opacity(0.45), .clear],
                     startPoint: .leading,
                     endPoint: .center
                 )
             }
         }
     }
-
-    /// A/B variants for the vertical dissolve:
-    /// - default: a single monotonic melt straight to the page `backgroundBase`
-    ///   (never darker than the page — no dark band).
-    /// - blackTint (Dark/Black themes): darkens over the image with BLACK for a
-    ///   punchier look, then transitions black → the page background near the
-    ///   bottom so the meeting point still lands on the exact page colour.
-    private func meltStops(base: Color) -> [Gradient.Stop] {
-        if blackTint && !palette.isLight {
-            return [
-                .init(color: .clear, location: 0),
-                .init(color: .clear, location: 0.24),
-                .init(color: .black.opacity(0.55), location: 0.40),
-                .init(color: .black.opacity(0.90), location: 0.54),
-                // Reach FULLY opaque black so the image is gone before the blend —
-                // no image show-through ("clear") between the black and the page.
-                .init(color: .black, location: 0.64),
-                // Pure opaque colour blend from black straight into the page
-                // background (grey in Dark), so the black melts into the page with
-                // nothing lightening in between.
-                .init(color: base, location: 0.94),
-                .init(color: base, location: 1)
-            ]
-        }
-        return [
-            .init(color: .clear, location: 0),
-            .init(color: .clear, location: 0.28),
-            .init(color: base.opacity(0.10), location: 0.42),
-            .init(color: base.opacity(0.26), location: 0.54),
-            .init(color: base.opacity(0.45), location: 0.64),
-            .init(color: base.opacity(0.64), location: 0.73),
-            .init(color: base.opacity(0.80), location: 0.82),
-            .init(color: base.opacity(0.91), location: 0.89),
-            .init(color: base.opacity(0.975), location: 0.95),
-            .init(color: base, location: 1)
-        ]
-    }
 }
 
+/// The static legibility scrim overlay for the Home carousel. Rendered once over
+/// the cross-fading images and carried to the page by the container's dissolve
+/// mask, so it never shifts during a swipe.
 struct PlozziOSStationaryHeroScrim: View {
     let style: HeroArtworkStyle
     let height: CGFloat
 
     var body: some View {
         PlozziOSFullWidthHeroStage(height: height) {
-            PlozziOSHeroBackgroundMelt(style: style)
+            PlozziOSHeroLegibilityScrim(style: style)
                 .frame(height: height)
         }
         .allowsHitTesting(false)

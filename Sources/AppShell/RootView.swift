@@ -13,6 +13,7 @@ import FeatureDiscovery
 import FeatureDiscoveryCore
 import FeatureHome
 import FeaturePlayback
+import FeatureSettings
 import MetadataKit
 
 /// Composes the identity that scopes the Home tab subtree — and the retained
@@ -173,6 +174,17 @@ public struct RootView: View {
                             ) + "|" + HomeRuntimeScope.accountScopeKey(accounts.map(\.account))
                         )
                     )
+                    // Hoisted into explicitly-typed locals so the (very large)
+                    // MainTabView initializer stays within the Swift type-checker's
+                    // time budget — inline trailing closures here tip it over.
+                    let debugActions = DebugSettingsActions(
+                        resetToFirstRun: { appState.resetToFirstRunForDebugging() },
+                        eraseICloud: { appState.eraseEverythingFromICloudForDebugging() }
+                    )
+                    let syncRepairActions = SyncRepairActions(
+                        redownload: { appState.redownloadCloudSync() },
+                        reset: { appState.resetCloudSync() }
+                    )
                     MainTabView(
                         accounts: accounts,
                         detailSnapshotCache: detailCache,
@@ -253,7 +265,7 @@ public struct RootView: View {
                         onRescanShare: { appState.mediaShare.rescanShare(accountID: $0) },
                         onSignOutAll: { appState.signOutAll() },
                         onSwitchProfile: { appState.profileFlow.requestProfileSelection() },
-                        onResetToFirstRun: { appState.resetToFirstRunForDebugging() },
+                        debugActions: debugActions,
                         plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
                         onSelectPlexHomeUser: { appState.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
                         onSetSeerrUser: { appState.setSeerrUserForProfile(profileID: $0, user: $1) },
@@ -265,10 +277,7 @@ public struct RootView: View {
                         onSetSyncEnabled: { appState.setSyncSetupEnabled($0) },
                         syncStatusSummary: appState.cloudSyncStatus.summaryLine,
                         onSyncNow: { appState.syncCloudNow() },
-                        syncRepair: .init(
-                            redownload: { appState.redownloadCloudSync() },
-                            reset: { appState.resetCloudSync() }
-                        ),
+                        syncRepair: syncRepairActions,
                         pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,
                         onIgnorePendingServer: { appState.ignorePendingSyncedServer($0) },
                         onSetUpFromAnotherDevice: { showSyncReceiveFromSettings = true }

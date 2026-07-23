@@ -199,6 +199,27 @@ extension AppState {
         Task { await cloudSync.redownloadFromCloud() }
     }
 
+    /// DEBUG: nuke the ENTIRE household from iCloud so you can test a true cold start
+    /// (e.g. "set up only on this Apple TV, then fresh-install another device"). Unlike
+    /// `resetCloudSync` (which deletes then immediately RE-uploads from this device),
+    /// this deletes and does NOT republish, then takes this device out of sync so it
+    /// can't refill iCloud. It:
+    ///   1. deletes every CloudKit config + removal-tombstone record (flushed to peers
+    ///      as normal deletions, so their synced view empties too);
+    ///   2. wipes this device's local roster/profiles/sync bookkeeping (first-run);
+    ///   3. turns iCloud Sync OFF here so this device stays out of the household until
+    ///      you re-enable it — leaving iCloud genuinely empty for the next publisher.
+    /// tvOS holds no synchronizable iCloud-Keychain logins (that channel is iOS-only),
+    /// so there are none to purge here.
+    public func eraseEverythingFromICloudForDebugging() {
+        let cloud = cloudSync
+        Task { @MainActor in
+            await cloud?.deleteAllServerData()   // step 1 (flushes deletes to peers)
+            resetToFirstRunForDebugging()         // step 2
+            setSyncSetupEnabled(false)            // step 3
+        }
+    }
+
     // MARK: Publish side (V3 flat record capture)
 
     /// Capture the current canonical, NON-SECRET flat record map this device syncs:

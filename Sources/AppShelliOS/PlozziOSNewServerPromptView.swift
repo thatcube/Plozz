@@ -36,22 +36,8 @@ struct PlozziOSNewServerPromptView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack(alignment: .bottomTrailing) {
-                ProviderBrandMark(provider: descriptor.provider, size: 76)
-                // Badge the origin device kind on the provider logo. Neutral high-
-                // contrast (white glyph on a dark disc with a light ring) so it reads
-                // on any provider color / theme.
-                if originName != nil {
-                    Image(systemName: originIcon)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 34, height: 34)
-                        .background(Circle().fill(.black))
-                        .overlay(Circle().strokeBorder(.white.opacity(0.9), lineWidth: 2))
-                        .offset(x: 10, y: 8)
-                }
-            }
-            .padding(.top, 32)
+            ProviderBrandMark(provider: descriptor.provider, size: 76)
+                .padding(.top, 32)
 
             Text("Add “\(descriptor.serverName)”?")
                 .font(.title2.weight(.bold))
@@ -59,8 +45,8 @@ struct PlozziOSNewServerPromptView: View {
                 .padding(.top, 18)
                 .padding(.horizontal, 24)
 
-            Text(originName.map { "You’re signed in on \($0). Add it here to start watching." }
-                 ?? "You’re signed in on another device. Add it here to start watching.")
+            Text(originName.map { "You’re already signed in on \($0). Add it here?" }
+                 ?? "You’re already signed in on another device. Add it here?")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -69,11 +55,15 @@ struct PlozziOSNewServerPromptView: View {
 
             VStack(spacing: 12) {
                 // Zero-typing path (preferred): pull the login from the other device.
+                // The device icon sits inline right before its name.
                 Button(action: onUseOtherDevice) {
-                    Label(
-                        originName.map { "Auto Sign In with \($0)" } ?? "Auto Sign In from Other Device",
-                        systemImage: originIcon
-                    )
+                    Group {
+                        if let originName {
+                            Text("Auto Sign In with \(Image(systemName: originIcon)) \(originName)")
+                        } else {
+                            Text("Auto Sign In from Other Device")
+                        }
+                    }
                     .fontWeight(.semibold)
                     .frame(maxWidth: .infinity)
                 }
@@ -100,7 +90,7 @@ struct PlozziOSNewServerPromptView: View {
             Spacer(minLength: 0)
         }
         .padding(.bottom, 24)
-        .presentationDetents([.height(460)])
+        .presentationDetents([.height(430)])
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(28)
     }

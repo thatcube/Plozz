@@ -50,22 +50,35 @@ public struct SyncRecordKey: Hashable, Sendable {
         }
     }
 
-    /// Parse a record name back into a key. Settings names carry a third segment;
-    /// the id itself never contains a colon (account/profile ids are UUIDs or the
-    /// fixed default token), so splitting on ":" is unambiguous.
+    /// Parse a record name back into a key. Settings names carry a third segment.
+    ///
+    /// The id CAN contain colons: media-share account ids are structured strings like
+    /// `share:nfs://host:2049/export#guest` (see MediaShareAccountConfigurationService),
+    /// so a descriptor record name is `descriptor:share:nfs://host:2049/export#guest`.
+    /// We therefore split only the LEADING `kind:` prefix off and treat the entire
+    /// remainder as the id. This preserves the round-trip `recordName -> parse -> id`
+    /// exactly (the id is re-joined verbatim). Profile ids are UUIDs / the default
+    /// token (never contain a colon), so `.setting`'s `setting:<id>:<baseKey>` split is
+    /// still unambiguous — the FIRST post-kind segment is the profile id, the rest is
+    /// the base key.
     public static func parse(_ recordName: String) -> SyncRecordKey? {
-        let parts = recordName.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
-        guard parts.count >= 2, let kind = SyncRecordKind(rawValue: parts[0]) else { return nil }
+        guard let firstColon = recordName.firstIndex(of: ":") else { return nil }
+        let kindRaw = String(recordName[..<firstColon])
+        guard let kind = SyncRecordKind(rawValue: kindRaw) else { return nil }
+        let remainder = String(recordName[recordName.index(after: firstColon)...])
+        guard !remainder.isEmpty else { return nil }
         switch kind {
         case .setting:
-            // setting:<id>:<baseKey> — baseKey may itself contain dots but not colons.
-            guard parts.count >= 3 else { return nil }
-            let id = parts[1]
-            let subkey = parts[2...].joined(separator: ":")
+            // setting:<profileID>:<baseKey> — profileID has no colon; baseKey may.
+            guard let sep = remainder.firstIndex(of: ":") else { return nil }
+            let id = String(remainder[..<sep])
+            let subkey = String(remainder[remainder.index(after: sep)...])
+            guard !id.isEmpty else { return nil }
             return SyncRecordKey(kind: .setting, id: id, subkey: subkey)
         default:
-            guard parts.count == 2 else { return nil }
-            return SyncRecordKey(kind: kind, id: parts[1])
+            // descriptor / profile / membership / removal — the id is the whole
+            // remainder (may legitimately contain colons for media shares).
+            return SyncRecordKey(kind: kind, id: remainder)
         }
     }
 }

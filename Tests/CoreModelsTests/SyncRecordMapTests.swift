@@ -13,6 +13,14 @@ final class SyncRecordMapTests: XCTestCase {
             SyncRecordKey(kind: .setting, id: "P1", subkey: "com.plozz.appTheme"),
             // A setting base key that itself contains dots must survive.
             SyncRecordKey(kind: .setting, id: "P1", subkey: "com.plozz.homeLayout.v2"),
+            // Media-share account ids are structured strings that CONTAIN COLONS
+            // (see MediaShareAccountConfigurationService.filesystemID/smbID), so a
+            // descriptor record name has extra colons. These must round-trip or the
+            // receiving device silently drops the share's descriptor (it never appears
+            // in "servers from your other devices" / the detected-setup page).
+            SyncRecordKey(kind: .descriptor, id: "share:nfs://192.168.1.5:2049/export#guest"),
+            SyncRecordKey(kind: .descriptor, id: "share:host.local/movies#brandon"),
+            SyncRecordKey(kind: .removal, id: "share:smb://nas:445/media#guest"),
         ]
         for key in cases {
             let parsed = SyncRecordKey.parse(key.recordName)
@@ -24,7 +32,16 @@ final class SyncRecordMapTests: XCTestCase {
         XCTAssertNil(SyncRecordKey.parse("bogus"))
         XCTAssertNil(SyncRecordKey.parse("unknownkind:1"))
         XCTAssertNil(SyncRecordKey.parse("setting:onlyid"))     // missing subkey
-        XCTAssertNil(SyncRecordKey.parse("profile:a:b"))        // too many parts for non-setting
+        XCTAssertNil(SyncRecordKey.parse("descriptor:"))        // empty id
+        XCTAssertNil(SyncRecordKey.parse(":acct"))              // empty kind
+    }
+
+    /// A colon-bearing id (media share) parses to the WHOLE remainder as the id, for
+    /// non-setting kinds — the previous parser rejected these, dropping the record.
+    func testRecordKeyColonBearingIDIsWholeRemainder() {
+        let parsed = SyncRecordKey.parse("descriptor:share:nfs://host:2049/x#u")
+        XCTAssertEqual(parsed?.kind, .descriptor)
+        XCTAssertEqual(parsed?.id, "share:nfs://host:2049/x#u")
     }
 
     // MARK: ProfileSyncDTO — cosmetic-only, canonical, round-trips exactly

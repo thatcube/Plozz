@@ -457,14 +457,22 @@ extension AppState {
     public func refreshPendingSyncedServers() {
         var store = PendingSyncedServersStore()
         let localIDs = Set(accountsProviders.accounts.map(\.id))
+        // Servers this device is already signed into, keyed by (provider, serverID,
+        // userID) rather than the random account id — so a synced descriptor for the
+        // SAME Plex/Jellyfin server+user (which carries a different id, minted per
+        // sign-in) is recognized as already-present and never re-prompted/duplicated.
+        let localSemanticKeys = Set(accountsProviders.accounts.map(\.semanticServerKey))
         // Household-removed (tombstoned) servers are hidden here and never prompted.
         let removedIDs = RemovedAccountsStore().removedIDs
         if let prompt = cloudSyncUI.pendingServerPrompt, removedIDs.contains(prompt.id) {
             cloudSyncUI.pendingServerPrompt = nil
         }
-        let newly = store.newlyPending(excludingLocal: localIDs).filter { !removedIDs.contains($0.id) }
+        let newly = store.newlyPending(excludingLocal: localIDs)
+            .filter { !removedIDs.contains($0.id) }
+            .excludingSemanticMatches(of: localSemanticKeys)
         cloudSyncUI.pendingSyncedServers = store.pending(excludingLocal: localIDs)
             .filter { !removedIDs.contains($0.id) }
+            .excludingSemanticMatches(of: localSemanticKeys)
         if SyncSetupFeatureFlag().isEnabled, cloudSyncUI.pendingServerPrompt == nil,
            let first = newly.first {
             cloudSyncUI.pendingServerPrompt = first

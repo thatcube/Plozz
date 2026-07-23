@@ -94,3 +94,13 @@ extension Account: CustomStringConvertible {
         "Account(id: \(id), server: \(server.name), user: \(userName))"
     }
 }
+
+public extension Account {
+    /// The (server + user) identity — provider + backend server id + user id —
+    /// INDEPENDENT of the random app-minted `id`. Matches
+    /// `SyncedAccountDescriptor.semanticServerKey`, so a synced descriptor can be
+    /// recognized as "a server this device is already signed into" even though the
+    /// two accounts carry different `id`s (Plex/Jellyfin mint a fresh UUID per
+    /// sign-in). Used to dedup cross-device prompts and pending entries.
+    var semanticServerKey: String { "\(server.provider.rawValue)|\(server.id)|\(userID)" }
+}

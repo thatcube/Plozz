@@ -159,6 +159,27 @@ public extension SyncedAccountDescriptor {
             && userName == other.userName
             && avatarURL == other.avatarURL
     }
+
+    /// A stable identity for the (server + user) this descriptor represents —
+    /// provider + backend server id + user id — INDEPENDENT of the app-minted `id`.
+    ///
+    /// Plex/Jellyfin/Emby accounts get a fresh random `id` (UUID) on every sign-in, so
+    /// the SAME server+user signed in on two devices has two different `id`s. Keying
+    /// dedup on this semantic identity instead lets a device recognize "I'm already
+    /// signed into this exact server as this user" and avoid prompting to "add" it
+    /// again / surfacing a duplicate. (Media shares already dedup via a deterministic
+    /// `id`; this covers the token-provider case.)
+    var semanticServerKey: String { "\(provider.rawValue)|\(serverID)|\(userID)" }
+}
+
+public extension Array where Element == SyncedAccountDescriptor {
+    /// Drop descriptors whose (server + user) identity matches one already present in
+    /// `localSemanticKeys` — i.e. a server this device is already signed into, even if
+    /// under a different app-minted `id`. Prevents duplicate prompts/pending entries
+    /// for the same Plex/Jellyfin server+user across devices.
+    func excludingSemanticMatches(of localSemanticKeys: Set<String>) -> [SyncedAccountDescriptor] {
+        filter { !localSemanticKeys.contains($0.semanticServerKey) }
+    }
 }
 
 /// Whether THIS device has usable credentials for a synced account.

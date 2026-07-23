@@ -110,10 +110,14 @@ extension PlozziOSAppModel {
         guard SyncSetupFeatureFlag().isEnabled else { return }
         let store = portableCredStore
         let localIDs = Set(accountsProviders.accounts.map(\.id))
+        let localSemanticKeys = Set(accountsProviders.accounts.map(\.semanticServerKey))
         let removedIDs = RemovedAccountsStore().removedIDs
-        // Don't auto-resurrect a server the user removed household-wide.
+        // Don't auto-resurrect a server the user removed household-wide, and don't add a
+        // second copy of a server already signed in here under a different id (same
+        // Plex/Jellyfin server+user, whose id is minted per sign-in).
         let pending = PendingSyncedServersStore().pending(excludingLocal: localIDs)
             .filter { !removedIDs.contains($0.id) }
+            .excludingSemanticMatches(of: localSemanticKeys)
         guard !pending.isEmpty else { return }
         var connected = 0
         for desc in pending {

@@ -7,10 +7,17 @@ final class SyncSetupTests: XCTestCase {
 
     // MARK: Feature flag
 
-    func testFeatureFlagDefaultsOff() {
+    func testFeatureFlagDefaultsOnAndPreservesExplicitOptOut() {
+        // Default ON: an unset flag (fresh install) participates in the household so
+        // "open a new device and your stuff is already there" works without hunting
+        // for a toggle.
         let d = UserDefaults(suiteName: "syncsetup.test.\(UUID().uuidString)")!
         let flag = SyncSetupFeatureFlag(defaults: d)
-        XCTAssertFalse(flag.isEnabled)
+        XCTAssertTrue(flag.isEnabled, "unset flag should default ON")
+        // An explicit opt-out the user chose must be preserved (not re-defaulted ON).
+        flag.isEnabled = false
+        XCTAssertFalse(SyncSetupFeatureFlag(defaults: d).isEnabled, "explicit OFF must stick")
+        // And it can be turned back on.
         flag.isEnabled = true
         XCTAssertTrue(SyncSetupFeatureFlag(defaults: d).isEnabled)
     }

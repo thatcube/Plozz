@@ -318,9 +318,9 @@ struct DetailHeroView: View {
         actionHandler?.perform(action, on: item, context: actionContext)
     }
 
-    /// The capability badges shown above the ratings: resolution/HDR/audio. The
-    /// content-rating certificate is rendered separately, inline with the
-    /// year/runtime/genre metadata line.
+    /// Resolution/HDR/audio badges shown after the external ratings in the
+    /// wrapping facts row. The content-rating certificate is rendered separately
+    /// beside the genres.
     private var featureBadges: [MediaBadge] {
         // When the user has picked a non-default version from the picker,
         // prefer that version's own resolution/HDR/audio badges so the hero
@@ -522,31 +522,17 @@ struct DetailHeroView: View {
                 maxWidth: 800,
                 reservesSpace: false
             )
-            // Bottom facts line just above the action buttons: year · runtime,
-            // then the ratings, then the capability badges (4K / Atmos / HDR …),
-            // all inline on one row.
+            // Bottom facts region just above the action buttons: year · runtime,
+            // ratings, then capability badges (4K / Atmos / HDR …). One wrapping
+            // layout owns every item so an unusually rich title can add a real
+            // second line that reserves space instead of drawing behind the buttons.
             ZStack(alignment: .leading) {
                 if !factParts.isEmpty || showRatings || !featureBadges.isEmpty {
-                    HStack(alignment: .center, spacing: 16) {
-                        if !factParts.isEmpty {
-                            Text(factParts.joined(separator: "  ·  "))
-                                .font(.system(size: 23, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .contentTransition(.opacity)
-                        }
-                        if showRatings {
-                            if heroRatings.count == 1,
-                               let rating = heroRatings.first {
-                                RatingBadge(rating: rating)
-                            } else {
-                                RatingsBadgeRow(ratings: heroRatings)
-                            }
-                        }
-                        if !featureBadges.isEmpty {
-                            MediaBadgeRow(badges: featureBadges)
-                        }
-                    }
+                    DetailHeroFactsRow(
+                        facts: factParts,
+                        ratings: showRatings ? heroRatings : [],
+                        featureBadges: featureBadges
+                    )
                 }
             }
             if isDiscoveryItem ? showsRequestPill : ((playTitle != nil && onPlay != nil) || onPlayTrailer != nil || hasHeroActionButtons) {
@@ -1450,6 +1436,36 @@ private struct HeroMoreMenu: View, Equatable {
                 .foregroundStyle(Color.primary)
                 .frame(width: iconSize, height: iconSize)
         }
+    }
+}
+
+private struct DetailHeroFactsRow: View {
+    let facts: [String]
+    let ratings: [ExternalRating]
+    let featureBadges: [MediaBadge]
+
+    var body: some View {
+        WrappingHStackLayout(
+            alignment: .leading,
+            spacing: 16,
+            lineSpacing: 8
+        ) {
+            if !facts.isEmpty {
+                Text(facts.joined(separator: "  ·  "))
+                    .font(.system(size: 23, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .contentTransition(.opacity)
+            }
+            ForEach(ratings) { rating in
+                RatingBadge(rating: rating)
+            }
+            ForEach(featureBadges) { badge in
+                MediaBadgeChip(badge: badge)
+            }
+        }
+        .frame(maxWidth: 1200, alignment: .leading)
     }
 }
 

@@ -16,6 +16,7 @@ struct PlozziOSHomeView: View {
     @State private var playbackRequest: PlozziOSPlaybackRequest?
     @State private var isRequestingHero = false
     @State private var heroRequestStatuses: [String: MediaAvailabilityStatus] = [:]
+    @State private var heroPullDistance: CGFloat = 0
     /// When each optimistic override was set. An override may shield the CTA from
     /// an untracked (`.unknown`) poll only briefly — long enough to bridge the gap
     /// until Seerr commits a freshly-created request — after which the authoritative
@@ -217,7 +218,8 @@ struct PlozziOSHomeView: View {
                         onPlay: play,
                         isRequesting: isRequestingHero,
                         requestStatus: { heroRequestStatuses[$0.id] },
-                        onRequest: beginHeroRequest
+                        onRequest: beginHeroRequest,
+                        pullDistance: heroPullDistance
                     )
                 }
 
@@ -278,6 +280,13 @@ struct PlozziOSHomeView: View {
             geometry.contentOffset.y > trailerPauseThreshold
         } action: { _, isPastHalfHero in
             trailerController.setPaused(isPastHalfHero)
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            let topOffset = geometry.contentOffset.y
+                + geometry.contentInsets.top
+            return max(0, -topOffset)
+        } action: { _, pullDistance in
+            heroPullDistance = pullDistance
         }
         .refreshable {
             await viewModel.load()
@@ -582,6 +591,7 @@ private struct PlozziOSHomeHeroCarousel: View {
     @State private var rootItems: [String: MediaItem] = [:]
     @State private var playTargets: [String: MediaItem] = [:]
     @State private var transitionTargetID: String?
+    @State private var transitionDirection: CGFloat = 0
     @State private var transitionInProgress = false
     @State private var foregroundVisible = true
     /// Latest hero stage width. A full-width finger drag maps to exactly one
@@ -595,6 +605,7 @@ private struct PlozziOSHomeHeroCarousel: View {
     var isRequesting: Bool = false
     var requestStatus: (MediaItem) -> MediaAvailabilityStatus? = { _ in nil }
     var onRequest: ((MediaItem) -> Void)?
+    var pullDistance: CGFloat = 0
 
     var body: some View {
         let style: HeroArtworkStyle = horizontalSizeClass == .compact
@@ -613,7 +624,9 @@ private struct PlozziOSHomeHeroCarousel: View {
             // enters from the opposite edge and settles into place by the same
             // amount — both tracking the finger via `progress`, in either direction.
             let slideTravel = proxy.size.width * 0.35
-            let slideDir: CGFloat = dragOffset == 0 ? 0 : (dragOffset < 0 ? -1 : 1)
+            let slideDir: CGFloat = dragOffset == 0
+                ? transitionDirection
+                : (dragOffset < 0 ? -1 : 1)
             let outgoingX = slideDir * slideTravel * progress
             let incomingX = -slideDir * slideTravel * (1 - progress)
             ZStack {
@@ -756,6 +769,10 @@ private struct PlozziOSHomeHeroCarousel: View {
                 .offset(y: 10)
             }
         }
+        .scaleEffect(
+            1 + min(pullDistance / max(heroHeight, 1), 0.18),
+            anchor: .center
+        )
         .onChange(of: items.map(\.id), initial: true) { _, itemIDs in
             if selectedItemID == nil || !itemIDs.contains(selectedItemID ?? "") {
                 selectedItemID = itemIDs.first
@@ -992,6 +1009,7 @@ private struct PlozziOSHomeHeroCarousel: View {
             return
         }
         transitionInProgress = true
+        transitionDirection = forward ? -1 : 1
         transitionTargetID = target.id
         let distance = max(stageWidth, 1)
         let currentProgress = min(abs(dragOffset) / distance, 1)
@@ -1020,6 +1038,7 @@ private struct PlozziOSHomeHeroCarousel: View {
             withTransaction(transaction) {
                 selectedItemID = target.id
                 transitionTargetID = nil
+                transitionDirection = 0
                 dragOffset = 0
                 foregroundVisible = false
             }

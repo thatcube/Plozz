@@ -17,6 +17,7 @@ import CoreUI
 struct ServerDetailView: View {
     let context: SettingsContext
     let serverKey: String
+    @Environment(\.dismiss) private var dismiss
 
     /// Account the user has asked to sign out, captured at button-tap so the
     /// confirmation alert can show its name + recompute "is this the last
@@ -64,13 +65,13 @@ struct ServerDetailView: View {
                             .tvOSFocusSection()
                     }
                 } else {
-                    // Focusable so Menu/Back can pop back to the Servers list
-                    // instead of falling through and quitting the app.
+                    // Safety net if the group vanishes while viewing (e.g. a remote
+                    // "Remove Everywhere" landed): offer a working way back.
                     VStack(alignment: .leading, spacing: 16) {
                         Text("This server is no longer signed in.")
                             .font(.headline)
                             .foregroundStyle(.secondary)
-                        Button { /* no-op — anchors focus */ } label: {
+                        Button { dismiss() } label: {
                             Label("Go back", systemImage: "chevron.backward")
                         }
                     }
@@ -97,10 +98,12 @@ struct ServerDetailView: View {
                 }
                 Button("Remove from This Apple TV", role: .destructive) {
                     context.onRemoveAccount(pending.account)
+                    if pending.isLastAccount { dismiss() }
                 }
             } else {
                 Button(signOutPrimaryLabel(pending), role: .destructive) {
                     context.onRemoveAccount(pending.account)
+                    if pending.isLastAccount { dismiss() }
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -115,6 +118,7 @@ struct ServerDetailView: View {
                 message: Text("“\(removal.serverName)” will also be removed from your other devices signed in to iCloud."),
                 primaryButton: .destructive(Text("Remove Everywhere")) {
                     for account in removal.accounts { context.onRemoveAccountEverywhere(account) }
+                    dismiss()   // the server is gone → return to the Servers list
                 },
                 secondaryButton: .cancel()
             )
@@ -319,10 +323,12 @@ struct ServerDetailView: View {
                     }
                     Button("Remove from This Apple TV", role: .destructive) {
                         for account in group.accounts { context.onRemoveAccount(account) }
+                        dismiss()   // server gone → back to the Servers list
                     }
                 } else {
                     Button("Remove Server", role: .destructive) {
                         for account in group.accounts { context.onRemoveAccount(account) }
+                        dismiss()
                     }
                 }
                 Button("Cancel", role: .cancel) {}

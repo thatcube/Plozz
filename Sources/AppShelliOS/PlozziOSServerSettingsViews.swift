@@ -102,6 +102,7 @@ struct PlozziOSServersSettingsView: View {
 private struct PlozziOSServerSettingsDetailView: View {
     let appModel: PlozziOSAppModel
     let serverKey: String
+    @Environment(\.dismiss) private var dismiss
     @State private var confirmRemoveServer = false
     @State private var confirmRemoveEverywhere = false
     @State private var selectedAccountID: String?
@@ -159,6 +160,12 @@ private struct PlozziOSServerSettingsDetailView: View {
         }
         .settingsPageSurface()
         .navigationTitle(group?.serverName ?? "Server")
+        // When the server is gone (removed here, or the last sign-in removed on the
+        // pushed account detail, or a remote "Remove Everywhere" landed), pop back to
+        // the Servers list instead of stranding the user on an empty detail.
+        .onChange(of: group == nil) { _, gone in
+            if gone { dismiss() }
+        }
         .navigationDestination(item: $selectedAccountID) { accountID in
             if let account = appModel.accounts.first(where: { $0.id == accountID }) {
                 PlozziOSAccountDetailView(

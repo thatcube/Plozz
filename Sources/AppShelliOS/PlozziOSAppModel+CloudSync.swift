@@ -98,8 +98,23 @@ extension PlozziOSAppModel {
             // candidateBaseURLs heals instead of being re-published.
             let cleanPrev = prev.sanitizingURLs()
             if cleanPrev.semanticallyEqualForSync(to: d) {
-                return CanonicalJSON.encode(cleanPrev)
+                // Preserve the original publisher's origin, but back-fill it once if the
+                // stored record predates origin stamping and this device knows it.
+                var merged = cleanPrev
+                if merged.originDeviceName == nil, d.originDeviceName != nil {
+                    merged.originDeviceName = d.originDeviceName
+                    merged.originDeviceKind = d.originDeviceKind
+                }
+                return CanonicalJSON.encode(merged)
             }
+            // Meaningful fields changed (e.g. a rename) → publish the new descriptor,
+            // but keep the ORIGINAL publisher's origin rather than the editing device.
+            var out = d
+            if cleanPrev.originDeviceName != nil {
+                out.originDeviceName = cleanPrev.originDeviceName
+                out.originDeviceKind = cleanPrev.originDeviceKind
+            }
+            return CanonicalJSON.encode(out)
         }
         return CanonicalJSON.encode(d)
     }
@@ -114,11 +129,19 @@ extension PlozziOSAppModel {
     }
 
     /// This device's signed-in accounts PLUS descriptors synced-but-not-signed-into,
-    /// so a device never deletes another's servers by omitting them.
+    /// so a device never deletes another's servers by omitting them. Local signed-in
+    /// accounts are stamped with THIS device as the origin (preserved across re-publish
+    /// via `semanticallyEqualForSync`, which ignores origin) so peers can show
+    /// "Set up with <this device>".
     private func mergedAccountDescriptors() -> [SyncedAccountDescriptor] {
         var byID: [String: SyncedAccountDescriptor] = [:]
         for d in PendingSyncedServersStore().all { byID[d.id] = d.sanitizingURLs() }
-        for a in accountsProviders.accounts { byID[a.id] = SyncedAccountDescriptor(account: a) }
+        let originName = DeviceDisplayName.fromHostName(
+            ProcessInfo.processInfo.hostName, fallback: UIDevice.current.name)
+        let originKind = UIDevice.current.userInterfaceIdiom == .pad ? "pad" : "phone"
+        for a in accountsProviders.accounts {
+            byID[a.id] = SyncedAccountDescriptor(account: a).stampingOrigin(name: originName, kind: originKind)
+        }
         return byID.values.sorted { $0.id < $1.id }
     }
 

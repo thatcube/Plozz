@@ -260,14 +260,28 @@ extension AppState {
     static func stableDescriptorBytes(_ d: SyncedAccountDescriptor, fallback: Data?) -> Data? {
         if let fallback,
            let prev = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: fallback) {
-            // S7: never reuse RAW fallback bytes — a legacy record could carry a token
-            // in candidateBaseURLs (which semantic equality ignores). Sanitize first,
-            // so a tokenized fallback heals to a stripped upload instead of re-publishing
-            // the credential.
             let cleanPrev = prev.sanitizingURLs()
             if cleanPrev.semanticallyEqualForSync(to: d) {
-                return CanonicalJSON.encode(cleanPrev)
+                // Reuse the stable bytes (preserving advisory URLs + the ORIGINAL
+                // publisher's origin), but back-fill origin once if the stored record
+                // predates origin stamping and this device knows it — a one-time
+                // re-publish that then re-stabilizes.
+                var merged = cleanPrev
+                if merged.originDeviceName == nil, d.originDeviceName != nil {
+                    merged.originDeviceName = d.originDeviceName
+                    merged.originDeviceKind = d.originDeviceKind
+                }
+                return CanonicalJSON.encode(merged)
             }
+            // Meaningful fields changed (e.g. a rename) → publish the new descriptor,
+            // but keep the ORIGINAL publisher's origin rather than overwriting it with
+            // the editing device.
+            var out = d
+            if cleanPrev.originDeviceName != nil {
+                out.originDeviceName = cleanPrev.originDeviceName
+                out.originDeviceKind = cleanPrev.originDeviceKind
+            }
+            return CanonicalJSON.encode(out)
         }
         return CanonicalJSON.encode(d)
     }
@@ -291,7 +305,13 @@ extension AppState {
     static func mergedAccountDescriptors(signedIn accounts: [Account]) -> [SyncedAccountDescriptor] {
         var byID: [String: SyncedAccountDescriptor] = [:]
         for d in PendingSyncedServersStore().all { byID[d.id] = d.sanitizingURLs() }
-        for a in accounts { byID[a.id] = SyncedAccountDescriptor(account: a) } // signed-in wins
+        // Stamp this Apple TV as the origin of its own signed-in servers so peers can
+        // show "Set up with <this TV>". Preserved across re-publish (origin is excluded
+        // from semanticallyEqualForSync), so it names the ORIGIN device.
+        let originName = DeviceDisplayName.fromHostName(ProcessInfo.processInfo.hostName, fallback: "Apple TV")
+        for a in accounts {
+            byID[a.id] = SyncedAccountDescriptor(account: a).stampingOrigin(name: originName, kind: "tv") // signed-in wins
+        }
         return byID.values.sorted { $0.id < $1.id }
     }
 

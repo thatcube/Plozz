@@ -17,10 +17,39 @@ struct PlozziOSNewServerPromptView: View {
     let onUseOtherDevice: () -> Void
     let onNotNow: () -> Void
 
+    /// The friendly origin device name ("Brando's TV"), when the publisher stamped one.
+    private var originName: String? {
+        let n = descriptor.originDeviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (n?.isEmpty ?? true) ? nil : n
+    }
+
+    /// SF Symbol for the origin device kind, defaulting to a generic device.
+    private var originIcon: String {
+        switch descriptor.originDeviceKind {
+        case "tv": return "appletv.fill"
+        case "pad": return "ipad"
+        case "phone": return "iphone"
+        case "mac": return "desktopcomputer"
+        default: return "display"
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            ProviderBrandMark(provider: descriptor.provider, size: 76)
-                .padding(.top, 32)
+            ZStack(alignment: .bottomTrailing) {
+                ProviderBrandMark(provider: descriptor.provider, size: 76)
+                // Badge the origin device kind on the provider logo, when known.
+                if originName != nil {
+                    Image(systemName: originIcon)
+                        .font(.system(size: 22))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(accent)
+                        .padding(6)
+                        .background(.background, in: Circle())
+                        .offset(x: 8, y: 6)
+                }
+            }
+            .padding(.top, 32)
 
             Text("Add “\(descriptor.serverName)”?")
                 .font(.title2.weight(.bold))
@@ -28,7 +57,8 @@ struct PlozziOSNewServerPromptView: View {
                 .padding(.top, 18)
                 .padding(.horizontal, 24)
 
-            Text("It’s ready on your other device. Add it here to start watching.")
+            Text(originName.map { "It’s ready on \($0). Add it here to start watching." }
+                 ?? "It’s ready on your other device. Add it here to start watching.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -44,7 +74,7 @@ struct PlozziOSNewServerPromptView: View {
                 .buttonStyle(.borderedProminent)
 
                 Button(action: onUseOtherDevice) {
-                    Text("Set Up With Other Device")
+                    Text(originName.map { "Set Up With \($0)" } ?? "Set Up With Other Device")
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                 }
@@ -63,7 +93,7 @@ struct PlozziOSNewServerPromptView: View {
             Spacer(minLength: 0)
         }
         .padding(.bottom, 24)
-        .presentationDetents([.height(430)])
+        .presentationDetents([.height(440)])
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(28)
     }

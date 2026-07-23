@@ -57,6 +57,13 @@ public struct SyncedAccountDescriptor: Codable, Hashable, Identifiable, Sendable
     public var recordVersion: Int
     /// Schema version so older clients can skip records they don't understand.
     public var schemaVersion: Int
+    /// Friendly name of the device that first published this server ("Brando's TV"),
+    /// for a "Set up with <device>" prompt. Non-secret; optional (older records + the
+    /// publisher-unknown case decode nil). Preserved across re-publish (not overwritten
+    /// per device), so it names the ORIGIN device.
+    public var originDeviceName: String?
+    /// Kind of the origin device ("tv" / "phone" / "pad" / "mac"), to pick an icon.
+    public var originDeviceKind: String?
 
     public static let currentSchemaVersion = 1
 
@@ -70,7 +77,9 @@ public struct SyncedAccountDescriptor: Codable, Hashable, Identifiable, Sendable
         avatarURL: URL? = nil,
         candidateBaseURLs: [URL] = [],
         recordVersion: Int = 1,
-        schemaVersion: Int = SyncedAccountDescriptor.currentSchemaVersion
+        schemaVersion: Int = SyncedAccountDescriptor.currentSchemaVersion,
+        originDeviceName: String? = nil,
+        originDeviceKind: String? = nil
     ) {
         self.id = id
         self.provider = provider
@@ -82,6 +91,19 @@ public struct SyncedAccountDescriptor: Codable, Hashable, Identifiable, Sendable
         self.candidateBaseURLs = candidateBaseURLs
         self.recordVersion = recordVersion
         self.schemaVersion = schemaVersion
+        self.originDeviceName = originDeviceName
+        self.originDeviceKind = originDeviceKind
+    }
+
+    /// A copy stamped with this device as the origin — used only when FIRST publishing a
+    /// locally-signed-in server (a fresh descriptor with no prior synced bytes to
+    /// preserve). Excluded from `semanticallyEqualForSync`, so a re-publish reuses the
+    /// original bytes and never overwrites the first publisher's name.
+    public func stampingOrigin(name: String, kind: String) -> SyncedAccountDescriptor {
+        var copy = self
+        copy.originDeviceName = name
+        copy.originDeviceKind = kind
+        return copy
     }
 }
 

@@ -612,8 +612,7 @@ private struct PlozziOSHomeHeroCarousel: View {
             surfaceRole: .home,
             dynamicTypeSize: dynamicTypeSize
         )
-        let pullScale = 1
-            + min(pullDistance / max(heroHeight, 1), 0.18)
+        let pullScale = 1 + (pullDistance / max(heroHeight, 1))
         let upwardScaleGrowth = (pullScale - 1) * heroHeight / 2
         let pullOffset = max(pullDistance - upwardScaleGrowth, 0)
         GeometryReader { proxy in
@@ -681,6 +680,8 @@ private struct PlozziOSHomeHeroCarousel: View {
                         )
                     }
                     .mask { PlozziOSHeroFadeMask() }
+                    .scaleEffect(pullScale, anchor: .center)
+                    .offset(y: -pullOffset)
 
                     PlozziOSHomeHeroSlide(
                         item: currentItem,
@@ -772,11 +773,6 @@ private struct PlozziOSHomeHeroCarousel: View {
                 .offset(y: 10)
             }
         }
-        .scaleEffect(
-            pullScale,
-            anchor: .center
-        )
-        .offset(y: -pullOffset)
         .onChange(of: items.map(\.id), initial: true) { _, itemIDs in
             if selectedItemID == nil || !itemIDs.contains(selectedItemID ?? "") {
                 selectedItemID = itemIDs.first

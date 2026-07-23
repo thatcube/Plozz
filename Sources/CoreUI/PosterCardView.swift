@@ -403,7 +403,7 @@ public struct PosterCardView: View {
                     showsWatched: false,
                     showsBackground: false,
                     barWidth: 80,
-                    barHeight: 8
+                    barHeight: 6
                 )
                 .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                 .padding(16)

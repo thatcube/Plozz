@@ -1668,7 +1668,7 @@ struct HomeHeroView: View {
                     remainingText: item.resumeRemainingText,
                     seasonEpisodeText: HeroForegroundModelBuilder.seasonEpisodeButtonText(for: item),
                     onLight: selected || colorScheme == .light,
-                    barHeight: 12
+                    barHeight: 8
                 )
                 .font(.system(size: 28, weight: .semibold))
             }

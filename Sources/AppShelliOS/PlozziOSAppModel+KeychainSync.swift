@@ -61,18 +61,30 @@ extension PlozziOSAppModel {
         return SyncSecretsBundle(accounts: accts, shares: shares)
     }
 
-    /// WRITE: publish this device's account bearer tokens to the iCloud-Keychain-synced
-    /// store so the user's OTHER iPhone/iPad auto-connect with zero taps. Gated on sync
-    /// being enabled (the household consent decision).
+    /// WRITE: publish this device's transferable credentials to the iCloud-Keychain-
+    /// synced store so the user's OTHER iPhone/iPad auto-connect with zero taps —
+    /// bearer tokens (Plex/Jellyfin/Emby) AND media-share credential envelopes
+    /// (NFS/SMB/WebDAV). Gated on sync being enabled (the household consent decision).
+    ///
+    /// SFTP shares with a device-local generated SSH key are intentionally NOT
+    /// published (the private key must never leave the device) — `buildSecretsBundle`
+    /// already omits those, so they still require a manual re-add on each device.
     func publishPortableCredentials() {
         guard SyncSetupFeatureFlag().isEnabled else { return }
         let store = portableCredStore
+        let bundle = currentSecretsBundle()
         var published = 0
-        for secret in currentSecretsBundle().accounts {
+        for secret in bundle.accounts {
             guard let data = try? JSONEncoder().encode(secret),
                   let json = String(data: data, encoding: .utf8) else { continue }
             do { try store.setString(json, for: secret.accountID); published += 1 }
             catch { PlozzLog.auth.error("KeychainSync: publish failed for \(secret.accountID): \(error.localizedDescription)") }
+        }
+        for share in bundle.shares {
+            guard let data = try? JSONEncoder().encode(share),
+                  let json = String(data: data, encoding: .utf8) else { continue }
+            do { try store.setString(json, for: share.accountID); published += 1 }
+            catch { PlozzLog.auth.error("KeychainSync: publish failed for share \(share.accountID): \(error.localizedDescription)") }
         }
         if published > 0 { PlozzLog.auth.info("KeychainSync: published \(published) portable credential(s)") }
     }
@@ -120,10 +132,28 @@ extension PlozziOSAppModel {
         var connected = 0
         for desc in pending {
             guard let json = store.string(for: desc.id),
-                  let data = json.data(using: .utf8),
-                  let secret = try? JSONDecoder().decode(AccountSecret.self, from: data) else { continue }
-            // Media-share credentials aren't published to the synced store; skip.
-            guard desc.provider != .mediaShare else { continue }
+                  let data = json.data(using: .utf8) else { continue }
+            if desc.provider == .mediaShare {
+                // Media share: restore from a published ShareSecret envelope (NFS/SMB/
+                // WebDAV). SFTP-with-generated-key was never published, so those simply
+                // aren't found here and fall through to manual/pairing setup.
+                guard let share = try? JSONDecoder().decode(ShareSecret.self, from: data),
+                      let envelope = try? MediaShareCredentialCodec.decodeVersioned(share.credentialEnvelope),
+                      let baseURL = desc.candidateBaseURLs.first else { continue }
+                if case .generatedKey = envelope.authentication { continue } // never travels
+                let server = MediaServer(
+                    id: desc.serverID, name: desc.serverName, baseURL: baseURL,
+                    provider: .mediaShare,
+                    connectionURLs: desc.candidateBaseURLs.isEmpty ? nil : desc.candidateBaseURLs)
+                let account = Account(
+                    id: desc.id, server: server, userID: desc.userID, userName: desc.userName,
+                    avatarURL: desc.avatarURL, deviceID: accountStore.deviceID())
+                do { try accountStore.addMediaShare(account, credential: envelope, generatedPrivateKey: nil); connected += 1 }
+                catch { PlozzLog.auth.error("KeychainSync: auto-connect share failed for \(desc.id): \(error.localizedDescription)") }
+                continue
+            }
+            // Token provider (Plex/Jellyfin/Emby): restore from an AccountSecret.
+            guard let secret = try? JSONDecoder().decode(AccountSecret.self, from: data) else { continue }
             let baseURL = desc.candidateBaseURLs.first
                 ?? URL(string: secret.trustedOrigin)
                 ?? URL(string: "https://localhost")!

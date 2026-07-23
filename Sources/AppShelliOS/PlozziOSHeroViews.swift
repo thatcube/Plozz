@@ -464,6 +464,7 @@ private struct PlozziOSHeroBackdrop: View {
     let height: CGFloat
     let showsScrim: Bool
     var showsTrailer: Bool = true
+    var appliesFadeMask: Bool = true
     let ignoresHorizontalSafeArea: Bool
     let surfaceRole: HeroTrailerSurfaceRole
     let trailerController: HeroTrailerController
@@ -500,7 +501,13 @@ private struct PlozziOSHeroBackdrop: View {
         // bottom so it melts into the page via ALPHA — the tvOS approach. The
         // image keeps its true colours and gently reveals the page, instead of
         // being painted over with an opaque grey that reads as muddy.
-        .mask { PlozziOSHeroFadeMask() }
+        .mask {
+            if appliesFadeMask {
+                PlozziOSHeroFadeMask()
+            } else {
+                Rectangle().fill(.white)
+            }
+        }
         .clipped()
         .ignoresSafeArea(
             edges: ignoresHorizontalSafeArea
@@ -676,7 +683,6 @@ struct PlozziOSHomeWipeBackdrop: View {
 
 struct PlozziOSHomeStaticBackdrop: View {
     @Environment(HeroTrailerController.self) private var trailerController
-    @Environment(\.themePalette) private var palette
 
     let item: MediaItem
     let style: HeroArtworkStyle
@@ -689,6 +695,9 @@ struct PlozziOSHomeStaticBackdrop: View {
     /// Suppress the trailer while sliding (image-only) — the trailer resumes on
     /// the idle backdrop once the transition settles.
     var showsTrailer: Bool = true
+    /// Transition artwork carries adjacent reflected edge panels. At rest the
+    /// sharp center is pixel-identical to the ordinary idle backdrop.
+    var usesSlidingArtwork: Bool = false
 
     var body: some View {
         let presentation = HeroPresentation(
@@ -697,24 +706,14 @@ struct PlozziOSHomeStaticBackdrop: View {
             surface: .home
         )
         PlozziOSReflectedHeroStage(height: height) { usableWidth in
-            ZStack {
-                // Blurred, over-scaled bleed behind the sharp image so a slide
-                // reveals a soft blurred continuation of the same hero at the
-                // exposed edge instead of a dark gap.
-                if contentOffsetX != 0 {
-                    FallbackAsyncImage(
-                        references: presentation.artworkReferences,
-                        variant: .heroBackdrop
-                    ) {
-                        palette.backgroundBase
-                    }
-                    .frame(width: usableWidth, height: height)
-                    .scaleEffect(x: 1.6, y: 1.15)
-                    .blur(radius: 44, opaque: true)
-                    .frame(width: usableWidth, height: height)
-                    .clipped()
-                }
-
+            if usesSlidingArtwork {
+                PlozziOSSlidingHeroArtwork(
+                    presentation: presentation,
+                    width: usableWidth,
+                    height: height,
+                    offsetX: contentOffsetX
+                )
+            } else {
                 PlozziOSHeroBackdrop(
                     presentation: presentation,
                     style: style,
@@ -722,12 +721,12 @@ struct PlozziOSHomeStaticBackdrop: View {
                     height: height,
                     showsScrim: false,
                     showsTrailer: showsTrailer,
+                    appliesFadeMask: false,
                     ignoresHorizontalSafeArea: false,
                     surfaceRole: .home,
                     trailerController: trailerController
                 )
             }
-            .offset(x: contentOffsetX)
         } reflection: { reflectionWidth, contentWidth in
             PlozziOSHeroReflection(
                 presentation: presentation,
@@ -738,6 +737,61 @@ struct PlozziOSHomeStaticBackdrop: View {
                 trailerController: trailerController
             )
         }
+    }
+}
+
+private struct PlozziOSSlidingHeroArtwork: View {
+    @Environment(\.themePalette) private var palette
+
+    let presentation: HeroPresentation
+    let width: CGFloat
+    let height: CGFloat
+    let offsetX: CGFloat
+
+    private var edgeWidth: CGFloat {
+        min(220, width)
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            mirroredEdge(alignment: .trailing)
+            artwork
+            mirroredEdge(alignment: .leading)
+        }
+        .frame(width: width + (edgeWidth * 2), height: height)
+        .offset(x: offsetX)
+        .frame(width: width, height: height)
+        .clipped()
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var artwork: some View {
+        FallbackAsyncImage(
+            references: presentation.artworkReferences,
+            variant: .heroBackdrop
+        ) {
+            palette.backgroundBase
+        }
+        .frame(width: width, height: height)
+        .clipped()
+    }
+
+    private func mirroredEdge(alignment: Alignment) -> some View {
+        FallbackAsyncImage(
+            references: presentation.artworkReferences,
+            variant: .heroBackdrop
+        ) {
+            palette.backgroundBase
+        }
+        .frame(width: width, height: height)
+        .scaleEffect(x: -1)
+        .frame(width: edgeWidth, height: height, alignment: alignment)
+        .clipped()
+        .blur(radius: 28, opaque: true)
+        .frame(width: edgeWidth, height: height)
+        .clipped()
     }
 }
 

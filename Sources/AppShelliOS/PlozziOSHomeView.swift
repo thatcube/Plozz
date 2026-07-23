@@ -629,19 +629,17 @@ private struct PlozziOSHomeHeroCarousel: View {
                     ZStack {
                         if let dragTargetItem {
                             // TRANSITION: both slides render through the SAME
-                            // reflected-stage backdrop as idle, sliding via the inner
-                            // contentOffsetX (so positions match the idle backdrop
-                            // exactly at rest — no snap on iPad where the stage shifts
-                            // content by the sidebar width). Each carries its own
-                            // blurred bleed, so a slid edge shows a soft blurred
-                            // continuation. Incoming underneath (opaque) so the
-                            // outgoing dissolves away on top to reveal it.
+                            // reflected-stage backdrop as idle. Transition artwork
+                            // includes clipped mirrored edge panels beside the sharp
+                            // center, so only an exposed edge reveals the reflection;
+                            // there is no full blurred duplicate beneath the image.
                             PlozziOSHomeStaticBackdrop(
                                 item: dragTargetItem,
                                 style: style,
                                 height: heroHeight,
                                 contentOffsetX: incomingX,
-                                showsTrailer: false
+                                showsTrailer: false,
+                                usesSlidingArtwork: true
                             )
 
                             PlozziOSHomeStaticBackdrop(
@@ -649,7 +647,8 @@ private struct PlozziOSHomeHeroCarousel: View {
                                 style: style,
                                 height: heroHeight,
                                 contentOffsetX: outgoingX,
-                                showsTrailer: false
+                                showsTrailer: false,
+                                usesSlidingArtwork: true
                             )
                             .opacity(1 - progress)
                         } else {

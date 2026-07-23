@@ -589,8 +589,14 @@ public final class ProfilesModel {
     // MARK: First-run setup
 
     /// Whether the one-time first-run profile setup has completed.
+    ///
+    /// True when the local flag is set OR the household already has more than the
+    /// default profile — extra profiles only exist because setup was already done
+    /// (here or on another device, arriving via sync/pairing), so a device that
+    /// receives a multi-profile household must not re-run first-run onboarding just
+    /// because its LOCAL flag (which isn't synced) is still false.
     public var firstRunProfileSetupComplete: Bool {
-        store.firstRunProfileSetupComplete()
+        store.firstRunProfileSetupComplete() || profiles.count > 1
     }
 
     /// Marks the one-time first-run profile setup as done so it never runs

@@ -1511,9 +1511,22 @@ final class PlozziOSAppModel {
     }
 
     private func scheduleFirstRunStep(_ step: FirstRunStep) {
+        // Don't start (or re-start) first-run onboarding if the household is already
+        // set up — e.g. profiles arrived via sync on a fresh device. Guards against a
+        // "use profiles?"/theme prompt when the user already has profiles.
+        guard !profiles.firstRunProfileSetupComplete else { return }
         Task {
             await Task.yield()
             pendingFirstRunStep = step
+        }
+    }
+
+    /// Dismiss any queued first-run onboarding step once the household is known to be
+    /// already set up (e.g. profiles arrived via sync after a race queued the step).
+    /// Lives here (not the CloudSync extension) so it can touch `private(set)` state.
+    func clearFirstRunStepIfHouseholdSetUp() {
+        if pendingFirstRunStep != nil, profiles.firstRunProfileSetupComplete {
+            pendingFirstRunStep = nil
         }
     }
 

@@ -226,6 +226,11 @@ extension PlozziOSAppModel {
         // Rebuild the active profile's settings model so applied preferences take
         // effect immediately.
         selectProfile(profiles.activeProfileID)
+
+        // If synced profiles just established an already-set-up household, dismiss any
+        // first-run onboarding step that a race queued before they arrived — the user
+        // already has profiles, so "use profiles?"/theme prompts are wrong here.
+        clearFirstRunStepIfHouseholdSetUp()
     }
 
     /// Recompute the "servers from your other devices" list (synced descriptors this

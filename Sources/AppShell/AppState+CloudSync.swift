@@ -117,10 +117,15 @@ extension AppState {
         guard SyncSetupFeatureFlag().isEnabled,
               !isAutoAdoptingSyncSetup,
               cloudSyncUI.pendingSyncSetupOffer == nil else { return }
-        guard !accountsProviders.accounts.isEmpty else { return }   // nothing to give
-        guard let offer = syncSetup.discoverRendezvousTargets()
-            .first(where: { !dismissedSyncSetupOfferKeys.contains(Self.syncSetupOfferKey($0)) })
-        else { return }
+        let localIDs = Set(accountsProviders.accounts.map(\.id))
+        guard !localIDs.isEmpty else { return }   // nothing to give
+        guard let offer = syncSetup.discoverRendezvousTargets().first(where: { offer in
+            guard !dismissedSyncSetupOfferKeys.contains(Self.syncSetupOfferKey(offer)) else { return false }
+            // A per-server request is only fulfillable if THIS device holds that
+            // account; otherwise skip it (another device may be able to serve it).
+            if let requested = offer.requestedAccountID { return localIDs.contains(requested) }
+            return true
+        }) else { return }
         cloudSyncUI.pendingSyncSetupOffer = offer
     }
 

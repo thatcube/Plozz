@@ -24,8 +24,9 @@ public struct PlozziOSRootView: View {
     /// Action chosen in the new-server prompt, run after the prompt sheet dismisses so
     /// we never stack two sheets in the same runloop.
     @State private var serverPromptFollowUp: ServerPromptFollowUp?
-    /// Drives the "set up from another device" pairing flow launched from the prompt.
-    @State private var showingSyncReceive = false
+    /// Drives the "set up from another device" pairing flow launched from the prompt,
+    /// carrying which server the user wants signed in (nil = not pairing).
+    @State private var pairingServer: SyncedAccountDescriptor?
 
     public init() {}
 
@@ -57,7 +58,7 @@ public struct PlozziOSRootView: View {
             if newPhase == .active { appModel.syncCloudOnForeground() }
         }
         .alert(
-            "Set up \(appModel.pendingSyncSetupOffer?.deviceName ?? "your device")?",
+            syncSetupOfferTitle,
             isPresented: Binding(
                 // Presentation is driven purely by pendingSyncSetupOffer; the two
                 // buttons own confirm/decline, so the setter must NOT have a side
@@ -70,7 +71,9 @@ public struct PlozziOSRootView: View {
             Button("Set Up") { appModel.confirmSyncSetupOffer() }
             Button("Not Now", role: .cancel) { appModel.declineSyncSetupOffer() }
         } message: { _ in
-            Text("Send your servers and sign-in so it's ready to watch — no typing needed.")
+            Text(syncSetupOfferServerName != nil
+                 ? "Sign this device in to “\(syncSetupOfferServerName!)”."
+                 : "Send your servers and sign-in so it’s ready to watch.")
         }
         .sheet(item: serverPromptBinding, onDismiss: consumeServerPromptFollowUp) { descriptor in
             PlozziOSNewServerPromptView(
@@ -81,7 +84,7 @@ public struct PlozziOSRootView: View {
                     appModel.clearPendingSyncedServerPrompt()
                 },
                 onUseOtherDevice: {
-                    serverPromptFollowUp = .pairDevice
+                    serverPromptFollowUp = .pairDevice(descriptor)
                     appModel.clearPendingSyncedServerPrompt()
                 },
                 onNotNow: {
@@ -91,9 +94,9 @@ public struct PlozziOSRootView: View {
             )
             .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
         }
-        .fullScreenCover(isPresented: $showingSyncReceive) {
-            PlozziOSSyncSetupReceiveView(appModel: appModel) {
-                showingSyncReceive = false
+        .fullScreenCover(item: $pairingServer) { descriptor in
+            PlozziOSSyncSetupReceiveView(appModel: appModel, requestedServer: descriptor) {
+                pairingServer = nil
             }
             .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
         }
@@ -209,6 +212,24 @@ public struct PlozziOSRootView: View {
         )
     }
 
+    /// The name THIS device holds for the offer's requested account (a per-server
+    /// offer is only surfaced when this device has the account), rather than trusting
+    /// the rendezvous-supplied string.
+    private var syncSetupOfferServerName: String? {
+        guard let requested = appModel.pendingSyncSetupOffer?.requestedAccountID else { return nil }
+        return appModel.accountsProviders.accounts.first(where: { $0.id == requested })?.server.name
+    }
+
+    /// Title for the same-Apple-ID setup offer alert. Names the specific server when
+    /// the offering device asked for just one, else the device-level framing.
+    private var syncSetupOfferTitle: String {
+        let device = appModel.pendingSyncSetupOffer?.deviceName ?? "your device"
+        if let server = syncSetupOfferServerName {
+            return "Set up “\(server)” on “\(device)”?"
+        }
+        return "Set up “\(device)”?"
+    }
+
     private var shellIdentity: String {
         if appModel.requiresLaunchProfileSelection
             && !completedLaunchProfileSelection {
@@ -314,8 +335,8 @@ public struct PlozziOSRootView: View {
         switch follow {
         case .signIn(let descriptor):
             setUpPendingSyncedServer(descriptor)
-        case .pairDevice:
-            showingSyncReceive = true
+        case .pairDevice(let descriptor):
+            pairingServer = descriptor
         }
     }
 }
@@ -329,7 +350,7 @@ private struct PendingPairing: Identifiable {
 /// dismisses so a follow-up sheet never races the dismissal.
 private enum ServerPromptFollowUp {
     case signIn(SyncedAccountDescriptor)
-    case pairDevice
+    case pairDevice(SyncedAccountDescriptor)
 }
 
 private enum PlozziOSDestination: String, CaseIterable, Identifiable, Hashable {

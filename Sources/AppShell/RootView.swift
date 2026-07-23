@@ -70,6 +70,25 @@ public struct RootView: View {
         _appState = State(initialValue: appState ?? AppState())
     }
 
+    /// The name THIS device holds for the offer's requested account. Since a per-server
+    /// offer is only surfaced when this device has that account, this resolves the name
+    /// locally rather than trusting the rendezvous-supplied string.
+    private var syncSetupOfferServerName: String? {
+        guard let requested = appState.cloudSyncUI.pendingSyncSetupOffer?.requestedAccountID else { return nil }
+        return appState.accountsProviders.accounts.first(where: { $0.id == requested })?.server.name
+    }
+
+    /// Title for the same-Apple-ID setup offer alert. Names the specific server when
+    /// the offering device asked for just one (per-server "set up with other device"),
+    /// else falls back to the device-level framing.
+    private var syncSetupOfferTitle: String {
+        let device = appState.cloudSyncUI.pendingSyncSetupOffer?.deviceName ?? "your device"
+        if let server = syncSetupOfferServerName {
+            return "Set up “\(server)” on “\(device)”?"
+        }
+        return "Set up “\(device)”?"
+    }
+
     /// The palette for the currently-selected theme. `.system` resolves against
     /// `systemColorScheme` — which stays the TRUE device scheme because we no
     /// longer force `preferredColorScheme` (that override polluted every colour-
@@ -339,7 +358,7 @@ public struct RootView: View {
             Text("“\(descriptor.serverName)” is set up on another device. Sign in to watch it here — your login stays private to each device. You can also find it later under Settings ▸ iCloud Sync.")
         }
         .alert(
-            "Set up “\(appState.cloudSyncUI.pendingSyncSetupOffer?.deviceName ?? "your device")”?",
+            syncSetupOfferTitle,
             isPresented: Binding(
                 // Presentation is driven purely by pendingSyncSetupOffer; the two
                 // buttons own confirm/decline, so the setter must NOT have a side
@@ -353,7 +372,9 @@ public struct RootView: View {
             Button("Set Up") { appState.confirmSyncSetupOffer() }
             Button("Not Now", role: .cancel) { appState.declineSyncSetupOffer() }
         } message: { _ in
-            Text("It’s waiting to be set up. Send your servers and sign-in so it’s ready to watch — no code or typing needed.")
+            Text(syncSetupOfferServerName != nil
+                 ? "Sign this device in to “\(syncSetupOfferServerName!)”."
+                 : "Send your servers and sign-in so it’s ready to watch.")
         }
         .onAppear {
             if case .launching = appState.state { appState.bootstrap() }

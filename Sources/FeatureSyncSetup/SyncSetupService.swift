@@ -154,13 +154,20 @@ public final class SyncSetupService {
     /// service name + the ephemeral PUBLIC key (both non-secret); because only the
     /// user's own devices can read it, a reader that pins this key gets QR-equivalent
     /// authentication and skips the numeric SAS. Call when showing the receive screen.
-    public func publishRendezvous(for pairing: HostPairing, ttlSeconds: Int = 24 * 60 * 60) {
+    public func publishRendezvous(
+        for pairing: HostPairing,
+        ttlSeconds: Int = 24 * 60 * 60,
+        requestedAccountID: String? = nil,
+        requestedServerName: String? = nil
+    ) {
         rendezvousStore.publish(SyncPairingRendezvous(
             serviceName: pairing.invite.serviceName,
             publicKeyData: pairing.identity.publicKeyData,
             deviceName: pairing.displayName,
             deviceID: deviceID(),
-            ttlSeconds: ttlSeconds
+            ttlSeconds: ttlSeconds,
+            requestedAccountID: requestedAccountID,
+            requestedServerName: requestedServerName
         ))
     }
 
@@ -270,14 +277,38 @@ public final class SyncSetupService {
         over link: PairingLink,
         expectedPublicKey: Data?,
         configOnly: Bool = false,
+        restrictToAccountIDs: Set<String>? = nil,
         confirmSAS: @escaping @Sendable (String) async -> Bool = { _ in true }
     ) async throws {
         let cfg = configProvider()
+        // A per-server request (restrictToAccountIDs set) transfers ONLY the chosen
+        // account(s) and no profiles/settings — the receiver just wants that one
+        // server. A whole-device request (nil) sends everything, as before.
+        let accounts: [Account]
+        let profiles: [Profile]
+        let profileSettings: [ProfileSettingsSnapshot]
+        let memberships: [String: [String]]
+        if let ids = restrictToAccountIDs {
+            accounts = cfg.accounts.filter { ids.contains($0.id) }
+            profiles = []
+            profileSettings = []
+            memberships = [:]
+        } else {
+            accounts = cfg.accounts
+            profiles = cfg.profiles
+            profileSettings = cfg.profileSettings
+            memberships = cfg.profileMemberships
+        }
         let snapshot = coordinator.exportSnapshot(
-            accounts: cfg.accounts, profiles: cfg.profiles,
-            profileSettings: cfg.profileSettings, profileMemberships: cfg.profileMemberships
+            accounts: accounts, profiles: profiles,
+            profileSettings: profileSettings, profileMemberships: memberships
         )
-        let secrets = configOnly ? nil : secretsProvider()
+        var secrets = configOnly ? nil : secretsProvider()
+        if let ids = restrictToAccountIDs, var filtered = secrets {
+            filtered.accounts = filtered.accounts.filter { ids.contains($0.accountID) }
+            filtered.shares = filtered.shares.filter { ids.contains($0.accountID) }
+            secrets = filtered
+        }
         let bundle = SyncTransferBundle(config: snapshot, secrets: (secrets?.isEmpty ?? true) ? nil : secrets)
         try await SyncPairingSession.guestSendSetup(
             bundle, over: link, expectedPublicKey: expectedPublicKey, confirmSAS: confirmSAS

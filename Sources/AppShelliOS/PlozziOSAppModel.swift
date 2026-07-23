@@ -87,19 +87,31 @@ final class PlozziOSAppModel {
     /// Persist a setup received over pairing: create accounts from the descriptors,
     /// store their transferred tokens in the Keychain, and refresh providers so the
     /// device is immediately signed in (no native sign-in needed).
+    ///
+    /// - Parameter restrictToAccountID: when set (a per-server "set up with other
+    ///   device" request), ONLY that account is applied and no profiles/settings are
+    ///   imported — even if the source sent the whole household (e.g. an older source,
+    ///   or a manual QR/code pairing that couldn't carry the request). This makes the
+    ///   receiver the source of truth for its own intent, so a single-server request
+    ///   can never silently sign the device into servers it didn't ask for.
     @discardableResult
-    func applyReceivedSetup(_ received: SyncSetupService.ReceivedSetup) -> SyncSetupService.ApplyOutcome {
+    func applyReceivedSetup(
+        _ received: SyncSetupService.ReceivedSetup,
+        restrictToAccountID: String? = nil
+    ) -> SyncSetupService.ApplyOutcome {
         // Captured BEFORE markFirstRunProfileSetupComplete below: whether this
         // receiver had already completed setup (used to guard its own default
         // profile from being clobbered by the incoming default).
         let receiverWasConfigured = profiles.firstRunProfileSetupComplete
-        let incomingProfiles = received.config.profiles.map(\.profile)
+        // Per-server request → never import profiles (the user only wanted one server).
+        let incomingProfiles = restrictToAccountID == nil ? received.config.profiles.map(\.profile) : []
         if !incomingProfiles.isEmpty {
             profiles.importProfiles(incomingProfiles)
         }
         // Reinstall each transferred profile's per-profile settings under the
-        // matching namespace on this device (default profile → nil namespace).
-        for snap in received.config.profileSettings {
+        // matching namespace on this device (default profile → nil namespace). Skipped
+        // entirely for a per-server request (no profiles come along).
+        for snap in (restrictToAccountID == nil ? received.config.profileSettings : []) {
             guard let profile = profiles.profiles.first(where: { $0.id == snap.profileID }) else { continue }
             ProfileSettingsTransfer.apply(
                 snap.entries,
@@ -115,7 +127,8 @@ final class PlozziOSAppModel {
         // are NOT counted as expected — they were never going to work here.
         var expected = 0, added = 0
         var failedAccountIDs: [String] = []
-        for auth in received.application.authorizedAuthorizations {
+        for auth in received.application.authorizedAuthorizations
+        where restrictToAccountID == nil || auth.id == restrictToAccountID {
             guard let desc = descByID[auth.id] else { continue }
             if let secret = secretByID[auth.id] {
                 expected += 1
@@ -184,7 +197,7 @@ final class PlozziOSAppModel {
         // same guard importProfiles uses so a "bring my setup here" transfer never
         // rewrites an existing device's default.
         let receivedAccountIDs = Set(received.config.accounts.map(\.id))
-        for (pid, ids) in received.config.profileMemberships {
+        for (pid, ids) in (restrictToAccountID == nil ? received.config.profileMemberships : [:]) {
             guard profiles.profiles.contains(where: { $0.id == pid }) else { continue }
             if pid == ProfileStore.defaultProfileID, receiverWasConfigured { continue }
             profiles.setActiveAccountIDs(ids.filter { receivedAccountIDs.contains($0) }, for: pid)

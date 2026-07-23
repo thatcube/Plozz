@@ -44,6 +44,13 @@ public struct SyncPairingRendezvous: Codable, Hashable, Sendable, Identifiable {
     public var expiresAtEpoch: Int
     /// Schema guard for forward compatibility.
     public var protocolVersion: Int
+    /// The specific account/server the receiver wants set up (nil = the whole device).
+    /// When set, the source filters its transfer to just this account and names the
+    /// server in the confirm prompt. Optional so old records still decode.
+    public var requestedAccountID: String?
+    /// Friendly name of the requested server, for the source's "Set up <server> on
+    /// <device>?" prompt. Optional; nil for a whole-device request.
+    public var requestedServerName: String?
 
     public static let currentProtocolVersion = 1
 
@@ -53,7 +60,9 @@ public struct SyncPairingRendezvous: Codable, Hashable, Sendable, Identifiable {
         deviceName: String,
         deviceID: String,
         expiresAtEpoch: Int,
-        protocolVersion: Int = SyncPairingRendezvous.currentProtocolVersion
+        protocolVersion: Int = SyncPairingRendezvous.currentProtocolVersion,
+        requestedAccountID: String? = nil,
+        requestedServerName: String? = nil
     ) {
         self.serviceName = serviceName
         self.publicKeyData = publicKeyData
@@ -61,6 +70,8 @@ public struct SyncPairingRendezvous: Codable, Hashable, Sendable, Identifiable {
         self.deviceID = deviceID
         self.expiresAtEpoch = expiresAtEpoch
         self.protocolVersion = protocolVersion
+        self.requestedAccountID = requestedAccountID
+        self.requestedServerName = requestedServerName
     }
 
     /// Convenience initializer that derives the expiry from a TTL.
@@ -70,14 +81,18 @@ public struct SyncPairingRendezvous: Codable, Hashable, Sendable, Identifiable {
         deviceName: String,
         deviceID: String,
         ttlSeconds: Int,
-        now: Date = Date()
+        now: Date = Date(),
+        requestedAccountID: String? = nil,
+        requestedServerName: String? = nil
     ) {
         self.init(
             serviceName: serviceName,
             publicKeyData: publicKeyData,
             deviceName: deviceName,
             deviceID: deviceID,
-            expiresAtEpoch: Int(now.timeIntervalSince1970) + ttlSeconds
+            expiresAtEpoch: Int(now.timeIntervalSince1970) + ttlSeconds,
+            requestedAccountID: requestedAccountID,
+            requestedServerName: requestedServerName
         )
     }
 

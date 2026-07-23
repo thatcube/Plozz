@@ -282,11 +282,16 @@ extension PlozziOSAppModel {
     /// device" pattern, which also confirms on the source).
     func checkForSyncSetupOffer() {
         guard SyncSetupFeatureFlag().isEnabled, !isAutoAdoptingSyncSetup, pendingSyncSetupOffer == nil else { return }
-        guard !accountsProviders.accounts.isEmpty else { return }         // nothing to give
+        let localIDs = Set(accountsProviders.accounts.map(\.id))
+        guard !localIDs.isEmpty else { return }         // nothing to give
         // Surface the freshest offer the user hasn't already declined — so declining
-        // one device still lets another simultaneously-advertising device prompt.
-        guard let offer = syncSetup.discoverRendezvousTargets()
-            .first(where: { !dismissedSyncSetupOfferKeys.contains(Self.offerKey($0)) }) else { return }
+        // one device still lets another simultaneously-advertising device prompt. A
+        // per-server request is only fulfillable if THIS device holds that account.
+        guard let offer = syncSetup.discoverRendezvousTargets().first(where: { offer in
+            guard !dismissedSyncSetupOfferKeys.contains(Self.offerKey(offer)) else { return false }
+            if let requested = offer.requestedAccountID { return localIDs.contains(requested) }
+            return true
+        }) else { return }
         pendingSyncSetupOffer = offer
     }
 

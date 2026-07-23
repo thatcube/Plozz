@@ -16,12 +16,21 @@ struct PlozziOSSyncSetupReceiveView: View {
     @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let onClose: () -> Void
+    /// When set, this device only wants ONE server signed in (from the per-server
+    /// "set up with other device" entry): advertise just that server so the source
+    /// transfers only it and names it in its confirm prompt.
+    let requestedServer: SyncedAccountDescriptor?
     @State private var model: SyncSetupPairingModel
     @State private var didApply = false
     @State private var applyError: String?
 
-    init(appModel: PlozziOSAppModel, onClose: @escaping () -> Void) {
+    init(
+        appModel: PlozziOSAppModel,
+        requestedServer: SyncedAccountDescriptor? = nil,
+        onClose: @escaping () -> Void
+    ) {
         self.appModel = appModel
+        self.requestedServer = requestedServer
         self.onClose = onClose
         _model = State(initialValue: SyncSetupPairingModel(service: appModel.syncSetup))
     }
@@ -46,7 +55,12 @@ struct PlozziOSSyncSetupReceiveView: View {
                     Button("OK", role: .cancel) {}
                 } message: { Text(applyError ?? "") }
         }
-        .task { await model.startReceiving() }
+        .task {
+            await model.startReceiving(
+                requestedAccountID: requestedServer?.id,
+                requestedServerName: requestedServer?.serverName
+            )
+        }
         .onDisappear { model.stopReceiving() }
     }
 
@@ -81,35 +95,62 @@ struct PlozziOSSyncSetupReceiveView: View {
         }
     }
 
+    private var waitingSubtitle: String {
+        if let name = requestedServer?.serverName {
+            return "Open Plozz on your Apple TV or another signed-in device and it’ll offer to add “\(name)” here automatically."
+        }
+        return "Open Plozz on your Apple TV or another signed-in device and it’ll offer to set this one up automatically."
+    }
+
     private func waiting(code: String, invite: SyncPairingInvite) -> some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 0) {
             Spacer(minLength: 0)
-            VStack(spacing: 10) {
+
+            VStack(spacing: 12) {
                 ProgressView().controlSize(.large)
                 Text("Check your other device")
-                    .font(.title2.bold()).multilineTextAlignment(.center)
+                    .font(.largeTitle.bold())
+                    .multilineTextAlignment(.center)
                     .foregroundStyle(palette.primaryText)
-                Text("If your Apple TV (or another signed-in device) is open, it’ll ask to set this up — just tap Set Up there. No code needed.")
-                    .font(.callout).foregroundStyle(palette.secondaryText)
-                    .multilineTextAlignment(.center).padding(.horizontal, 16)
+                Text(waitingSubtitle)
+                    .font(.body)
+                    .foregroundStyle(palette.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            if let img = Self.qrImage(invite.encoded()) {
-                Image(uiImage: img).interpolation(.none).resizable()
-                    .frame(width: 180, height: 180)
-                    .padding(14).background(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            // Manual fallback, visually demoted into its own card so the automatic
+            // path above reads as the primary action.
+            VStack(spacing: 16) {
+                if let img = Self.qrImage(invite.encoded()) {
+                    Image(uiImage: img).interpolation(.none).resizable()
+                        .frame(width: 176, height: 176)
+                        .padding(14).background(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                VStack(spacing: 4) {
+                    Text("or enter this code").font(.subheadline)
+                        .foregroundStyle(palette.secondaryText)
+                    Text(SyncPairingCode.grouped(code))
+                        .font(.system(size: 32, weight: .bold, design: .rounded)).monospaced()
+                        .foregroundStyle(palette.primaryText)
+                }
+                Text("You can also scan this from the other device’s iCloud Sync settings.")
+                    .font(.footnote).foregroundStyle(palette.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            VStack(spacing: 6) {
-                Text("or enter this code").font(.callout).foregroundStyle(palette.secondaryText)
-                Text(SyncPairingCode.grouped(code))
-                    .font(.system(size: 36, weight: .bold, design: .rounded)).monospaced()
-                    .foregroundStyle(palette.primaryText)
-            }
-            Text("Not prompted automatically? On the other device open Plozz ▸ Settings ▸ iCloud Sync ▸ “Set up another device,” then scan this code. Both devices must be on the same Wi-Fi.")
-                .font(.footnote).foregroundStyle(palette.secondaryText)
-                .multilineTextAlignment(.center).padding(.horizontal, 12)
+            .padding(24)
+            .frame(maxWidth: .infinity)
+            .background(palette.cardSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(palette.cardBorder, lineWidth: 1))
+            .padding(.top, 36)
+
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: 460)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: Verification code (SAS) — the receiver shows the number so the user can
@@ -138,8 +179,13 @@ struct PlozziOSSyncSetupReceiveView: View {
     @ViewBuilder
     private func appliedSummary(_ received: SyncSetupService.ReceivedSetup) -> some View {
         let authIDs = Set(received.application.authorizedAuthorizations.map(\.id))
-        let servers = received.config.accounts.filter { authIDs.contains($0.id) }
-        let profiles = received.config.profiles.map(\.profile)
+        // For a per-server request, only surface the one server the user asked for,
+        // even if an older/manual source happened to send the whole household.
+        let servers = received.config.accounts.filter { account in
+            authIDs.contains(account.id)
+                && (requestedServer == nil || account.id == requestedServer?.id)
+        }
+        let profiles = requestedServer == nil ? received.config.profiles.map(\.profile) : []
 
         VStack(spacing: 22) {
             Spacer(minLength: 0)
@@ -183,8 +229,14 @@ struct PlozziOSSyncSetupReceiveView: View {
             Button("Start Watching") {
                 guard !didApply else { return }
                 didApply = true
-                let outcome = appModel.applyReceivedSetup(received)
-                if outcome.isTotalCredentialFailure {
+                let outcome = appModel.applyReceivedSetup(received, restrictToAccountID: requestedServer?.id)
+                // For a per-server request, success means that one server actually
+                // signed in. For a whole-device transfer, success means at least one
+                // credential stuck (the existing gate).
+                let failed = requestedServer != nil
+                    ? outcome.addedCredentialed == 0
+                    : outcome.isTotalCredentialFailure
+                if failed {
                     didApply = false   // allow a retry
                     applyError = "Couldn’t finish signing in on this device. Check both devices are on the same Wi-Fi and try again."
                 } else {

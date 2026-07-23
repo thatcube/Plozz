@@ -1613,7 +1613,7 @@ struct HomeHeroView: View {
         case let .downloading(progress):
             HStack(spacing: 16) {
                 Image(systemName: "arrow.down.circle")
-                ResumeProgressCapsule(progress: progress, onLight: selected || colorScheme == .light, minVisibleFraction: 0)
+                ResumeProgressCapsule(progress: progress, onLight: selected || colorScheme == .light, floorsMinimumFill: false)
                 Text("\(Int((progress * 100).rounded()))%")
                     .lineLimit(1)
             }

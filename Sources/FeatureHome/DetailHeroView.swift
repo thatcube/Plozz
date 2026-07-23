@@ -885,7 +885,7 @@ struct DetailHeroView: View {
             Button {} label: {
                 HStack(spacing: 16) {
                     Image(systemName: "arrow.down.circle")
-                    ResumeProgressCapsule(progress: progress, onLight: requestPillHasFocus || colorScheme == .light, minVisibleFraction: 0)
+                    ResumeProgressCapsule(progress: progress, onLight: requestPillHasFocus || colorScheme == .light, floorsMinimumFill: false)
                     Text("\(percent)%").lineLimit(1)
                 }
             }

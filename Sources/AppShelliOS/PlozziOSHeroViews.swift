@@ -155,7 +155,7 @@ struct PlozziOSHeroRequestButton: View {
                         onLight: palette.isLight,
                         width: 54,
                         height: 5,
-                        minVisibleFraction: 0
+                        floorsMinimumFill: false
                     )
                     Text("\(Int((progress * 100).rounded()))%")
                         .lineLimit(1)

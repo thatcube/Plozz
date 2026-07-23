@@ -95,9 +95,11 @@ struct PlozziOSMetadataSettingsView: View {
             List {
                 ForEach(items, id: \.self) { item in
                     priorityRow(item, split: split)
-                        .moveDisabled(item == .divider || item == .disabledPlaceholder)
-                        // SettingsSectionGroup already pads its child by 16pt; zero
-                        // the List's own horizontal inset so padding isn't doubled.
+                        // NOTE: intentionally NOT .moveDisabled — a moveDisabled
+                        // trailing row blocks drops *past* it, making the disabled
+                        // zone unreachable. moving() already ignores the divider /
+                        // placeholder when they're the drag source, so dragging one
+                        // is a harmless no-op while drops past them still register.
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)

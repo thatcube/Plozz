@@ -1,4 +1,5 @@
 #if os(iOS)
+import CoreUI
 import SwiftUI
 import FeatureSyncSetup
 
@@ -106,8 +107,8 @@ struct PlozziOSSyncSetupSettingsView: View {
     // MARK: Idle list
 
     private var idleList: some View {
-        List {
-            Section {
+        SettingsPageList {
+            SettingsSectionGroup {
                 Toggle(isOn: Binding(
                     get: { appModel.syncSetup.isEnabled },
                     set: { appModel.setSyncSetupEnabled($0) }
@@ -168,7 +169,7 @@ struct PlozziOSSyncSetupSettingsView: View {
             }
 
             if !appModel.pendingSyncedServers.isEmpty {
-                Section {
+                SettingsSectionGroup("Servers From Your Other Devices") {
                     ForEach(appModel.pendingSyncedServers, id: \.id) { server in
                         HStack(spacing: 12) {
                             Image(systemName: "externaldrive.badge.person.crop")
@@ -185,14 +186,12 @@ struct PlozziOSSyncSetupSettingsView: View {
                                 .buttonStyle(.borderless)
                         }
                     }
-                } header: {
-                    Text("Servers From Your Other Devices")
                 } footer: {
                     Text("These are signed in on your iPad or Apple TV. To use them here without retyping anything, tap “Set up this device from another” below and confirm on that device.")
                 }
             }
 
-            Section {
+            SettingsSectionGroup("Set up another device") {
                 if model.nearbyDevices.isEmpty {
                     HStack(spacing: 12) {
                         ProgressView()
@@ -220,13 +219,11 @@ struct PlozziOSSyncSetupSettingsView: View {
                         .buttonStyle(.plain)
                     }
                 }
-            } header: {
-                Text("Set up another device")
             } footer: {
                 Text("On your Apple TV, iPad, or another device, open Plozz and choose “Set up from another device.” It’ll appear here — tap to sign it in. Both devices must be on the same Wi-Fi.")
             }
 
-            Section {
+            SettingsSectionGroup {
                 Button { showScanner = true } label: {
                     Label("Scan QR code", systemImage: "qrcode.viewfinder")
                 }
@@ -237,12 +234,10 @@ struct PlozziOSSyncSetupSettingsView: View {
                 Text("Not seeing it nearby? Scan the QR or type the short code shown on the other device.")
             }
 
-            Section {
+            SettingsSectionGroup("Set up this device") {
                 Button { showReceive = true } label: {
                     Label("Set up this device from another", systemImage: "qrcode")
                 }
-            } header: {
-                Text("Set up this device")
             } footer: {
                 Text("Coming from a device that’s already signed in? Show a code here and scan it from your other phone, tablet, or Apple TV to sign this one in.")
             }

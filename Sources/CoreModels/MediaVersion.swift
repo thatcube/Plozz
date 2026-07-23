@@ -2,11 +2,20 @@ import Foundation
 
 public enum MediaFileSizeFormatter {
     public static func string(fromByteCount bytes: Int64?) -> String? {
+        string(fromByteCount: bytes, locale: .autoupdatingCurrent)
+    }
+
+    static func string(fromByteCount bytes: Int64?, locale: Locale) -> String? {
         guard let bytes, bytes > 0 else { return nil }
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useGB, .useMB]
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: bytes)
+        let gigabyte = 1_000_000_000.0
+        let megabyte = 1_000_000.0
+        let usesGigabytes = Double(bytes) >= gigabyte
+        let value = Double(bytes) / (usesGigabytes ? gigabyte : megabyte)
+        let formatted = value.formatted(
+            .number.precision(.fractionLength(0...1))
+                .locale(locale)
+        )
+        return "\(formatted) \(usesGigabytes ? "GB" : "MB")"
     }
 }
 

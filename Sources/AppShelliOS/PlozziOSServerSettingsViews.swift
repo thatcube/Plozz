@@ -15,7 +15,7 @@ struct PlozziOSServersSettingsView: View {
     }
 
     var body: some View {
-        List {
+        SettingsPageList {
             SettingsSectionGroup("Servers") {
                 if groups.isEmpty {
                     Text("You’re not signed in to any servers yet.")
@@ -54,7 +54,6 @@ struct PlozziOSServersSettingsView: View {
                 }
             }
         }
-        .settingsPageSurface()
         .navigationTitle("Servers")
         .navigationDestination(item: $selectedServerKey) { key in
             PlozziOSServerSettingsDetailView(appModel: appModel, serverKey: key)
@@ -114,7 +113,7 @@ private struct PlozziOSServerSettingsDetailView: View {
     }
 
     var body: some View {
-        List {
+        SettingsPageList {
             if let group {
                 SettingsSectionGroup("Signed in as") {
                     ForEach(group.accounts) { account in
@@ -158,7 +157,6 @@ private struct PlozziOSServerSettingsDetailView: View {
                 )
             }
         }
-        .settingsPageSurface()
         .navigationTitle(group?.serverName ?? "Server")
         // When the server is gone (removed here, or the last sign-in removed on the
         // pushed account detail, or a remote "Remove Everywhere" landed), pop back to
@@ -227,7 +225,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
     }
 
     var body: some View {
-        List {
+        SettingsPageList {
             if groups.isEmpty {
                 SettingsSectionGroup {
                     Text("No servers are available on this \(deviceName).")
@@ -240,7 +238,6 @@ struct PlozziOSMyLibrariesSettingsView: View {
                 }
             }
         }
-        .settingsPageSurface()
         .navigationTitle(SettingsCopy.libraries)
         .task(id: appModel.accounts.map(\.credentialRevision)) {
             await loadLibraries()

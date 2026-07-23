@@ -114,6 +114,31 @@ final class MediaVersionTests: XCTestCase {
         XCTAssertEqual(version.sizeLabel, "8.5 GB")
     }
 
+    func testFileSizeUsesAtMostOneFractionDigit() {
+        let locale = Locale(identifier: "en_US")
+        XCTAssertEqual(
+            MediaFileSizeFormatter.string(
+                fromByteCount: 65_270_000_000,
+                locale: locale
+            ),
+            "65.3 GB"
+        )
+        XCTAssertEqual(
+            MediaFileSizeFormatter.string(
+                fromByteCount: 682_600_000,
+                locale: locale
+            ),
+            "682.6 MB"
+        )
+        XCTAssertEqual(
+            MediaFileSizeFormatter.string(
+                fromByteCount: 12_000_000_000,
+                locale: locale
+            ),
+            "12 GB"
+        )
+    }
+
     func testQualityScoreRanksHDRAndResolution() {
         let uhdHDR = MediaVersion(id: "1", height: 2160, videoRange: "HDR10")
         let uhdSDR = MediaVersion(id: "2", height: 2160, videoRange: "SDR")

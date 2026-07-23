@@ -1004,6 +1004,8 @@ private struct PlozziOSDetailHeroForeground: View {
     @Environment(PlozziOSAppModel.self) private var appModel
     @State private var downloadRecord: DownloadedMediaRecord?
     @State private var downloadError: String?
+    @State private var isSourceVersionPopoverPresented = false
+    @State private var isCompactOptionsPopoverPresented = false
 
     let item: MediaItem
     let rootItem: MediaItem
@@ -1133,8 +1135,8 @@ private struct PlozziOSDetailHeroForeground: View {
             if !primaryActions.isEmpty
                 || downloadItem != nil
                 || hasSourceVersionOptions {
-                Menu {
-                    overflowActions
+                Button {
+                    isCompactOptionsPopoverPresented = true
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.headline.weight(.bold))
@@ -1146,6 +1148,22 @@ private struct PlozziOSDetailHeroForeground: View {
                     )
                 )
                 .accessibilityLabel("More actions")
+                .popover(
+                    isPresented: $isCompactOptionsPopoverPresented,
+                    attachmentAnchor: .rect(.bounds),
+                    arrowEdge: .top
+                ) {
+                    PlozziOSHeroOptionsPopover(
+                        actions: compactPopoverActions,
+                        sources: sources,
+                        selectedSourceAccountID: selectedSourceAccountID,
+                        versions: versions.sortedForPicker(),
+                        selectedVersionID: selectedVersionID,
+                        onSelectSource: onSelectSource,
+                        onSelectVersion: onSelectVersion
+                    )
+                    .presentationCompactAdaptation(.popover)
+                }
             }
         }
     }
@@ -1218,11 +1236,11 @@ private struct PlozziOSDetailHeroForeground: View {
         }
     }
 
-    @ViewBuilder
-    private var overflowActions: some View {
-        ForEach(primaryActions) { entry in
-            Button(
-                entry.action.title,
+    private var compactPopoverActions: [PlozziOSHeroPopoverAction] {
+        var entries = primaryActions.map { entry in
+            PlozziOSHeroPopoverAction(
+                id: "action:\(entry.action.title)",
+                title: entry.action.title,
                 systemImage: primaryActionSymbol(for: entry)
             ) {
                 actionHandler.perform(
@@ -1233,16 +1251,22 @@ private struct PlozziOSDetailHeroForeground: View {
             }
         }
         if downloadItem != nil {
-            Button(downloadActionTitle, systemImage: downloadActionSymbol) {
-                Task { await performDownloadAction() }
-            }
+            entries.append(
+                PlozziOSHeroPopoverAction(
+                    id: "download",
+                    title: downloadActionTitle,
+                    systemImage: downloadActionSymbol
+                ) {
+                    Task { await performDownloadAction() }
+                }
+            )
         }
-        sourceVersionMenuActions
+        return entries
     }
 
     private var sourceVersionMenuButton: some View {
-        Menu {
-            sourceVersionMenuActions
+        Button {
+            isSourceVersionPopoverPresented = true
         } label: {
             Image(systemName: "ellipsis")
                 .font(.headline.weight(.bold))
@@ -1254,6 +1278,22 @@ private struct PlozziOSDetailHeroForeground: View {
             )
         )
         .accessibilityLabel("Server and version options")
+        .popover(
+            isPresented: $isSourceVersionPopoverPresented,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .top
+        ) {
+            PlozziOSHeroOptionsPopover(
+                actions: [],
+                sources: sources,
+                selectedSourceAccountID: selectedSourceAccountID,
+                versions: versions.sortedForPicker(),
+                selectedVersionID: selectedVersionID,
+                onSelectSource: onSelectSource,
+                onSelectVersion: onSelectVersion
+            )
+            .presentationCompactAdaptation(.popover)
+        }
     }
 
     private func primaryActionSymbol(for entry: ActionEntry) -> String {
@@ -1291,32 +1331,36 @@ private struct PlozziOSDetailHeroForeground: View {
     @ViewBuilder
     private var sourceVersionMenuActions: some View {
         if sources.count > 1 {
-            Menu {
+            Picker(
+                selection: Binding(
+                    get: { selectedSource?.accountID ?? sources[0].accountID },
+                    set: onSelectSource
+                )
+            ) {
                 ForEach(sources) { source in
-                    Button {
-                        onSelectSource(source.accountID)
-                    } label: {
-                        sourceContextLabel(source)
-                    }
+                    Text(source.displayName)
+                        .tag(source.accountID)
                 }
             } label: {
                 sourceContextLabel(selectedSource)
             }
+            .pickerStyle(.menu)
         }
-        if versions.count > 1 {
-            Menu(selectedVersionLabel, systemImage: "film.stack") {
-                ForEach(versions) { version in
-                    Button {
-                        onSelectVersion(version.id)
-                    } label: {
-                        if version.id == selectedVersionID {
-                            Label(version.displayLabel, systemImage: "checkmark")
-                        } else {
-                            Text(version.displayLabel)
-                        }
-                    }
+        if versions.count > 1, let selectedVersion {
+            Picker(
+                selection: Binding(
+                    get: { selectedVersion.id },
+                    set: onSelectVersion
+                )
+            ) {
+                ForEach(versions.sortedForPicker()) { version in
+                    Text(version.displayLabel)
+                        .tag(version.id)
                 }
+            } label: {
+                Label(selectedVersion.displayLabel, systemImage: "film.stack")
             }
+            .pickerStyle(.menu)
         }
     }
 
@@ -1350,11 +1394,8 @@ private struct PlozziOSDetailHeroForeground: View {
         }
     }
 
-    private var selectedVersionLabel: String {
-        versions.first { $0.id == selectedVersionID }?
-            .displayLabel
-            ?? versions.first?.displayLabel
-            ?? "Play Version"
+    private var selectedVersion: MediaVersion? {
+        versions.first { $0.id == selectedVersionID } ?? versions.first
     }
 
     private func seasonEpisodeText(for item: MediaItem) -> String? {
@@ -1459,6 +1500,147 @@ private struct PlozziOSDetailHeroForeground: View {
         guard let record = currentDownloadRecord else { return }
         await appModel.downloads.remove(record)
         downloadRecord = nil
+    }
+}
+
+private struct PlozziOSHeroPopoverAction: Identifiable {
+    let id: String
+    let title: String
+    let systemImage: String
+    let perform: () -> Void
+}
+
+private struct PlozziOSHeroOptionsPopover: View {
+    let actions: [PlozziOSHeroPopoverAction]
+    let sources: [MediaSourceRef]
+    let selectedSourceAccountID: String?
+    let versions: [MediaVersion]
+    let selectedVersionID: String?
+    let onSelectSource: (String) -> Void
+    let onSelectVersion: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                if !actions.isEmpty {
+                    sectionHeader("Actions")
+                    ForEach(actions) { action in
+                        Button {
+                            action.perform()
+                            dismiss()
+                        } label: {
+                            optionRow(
+                                title: action.title,
+                                systemImage: action.systemImage
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if sources.count > 1 {
+                    if !actions.isEmpty {
+                        Divider()
+                            .padding(.vertical, 6)
+                    }
+                    sectionHeader("Server")
+                    ForEach(sources) { source in
+                        Button {
+                            onSelectSource(source.accountID)
+                            dismiss()
+                        } label: {
+                            selectionRow(
+                                title: source.displayName,
+                                provider: source.providerKind,
+                                selected: source.accountID == selectedSourceAccountID
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(
+                            source.accountID == selectedSourceAccountID ? .isSelected : []
+                        )
+                    }
+                }
+
+                if versions.count > 1 {
+                    if !actions.isEmpty || sources.count > 1 {
+                        Divider()
+                            .padding(.vertical, 6)
+                    }
+                    sectionHeader("Version")
+                    ForEach(versions) { version in
+                        Button {
+                            onSelectVersion(version.id)
+                            dismiss()
+                        } label: {
+                            selectionRow(
+                                title: version.displayLabel,
+                                selected: version.id == selectedVersionID
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(
+                            version.id == selectedVersionID ? .isSelected : []
+                        )
+                    }
+                }
+            }
+            .padding(.vertical, 8)
+        }
+        .frame(minWidth: 340, idealWidth: 460, maxWidth: 520, maxHeight: 520)
+    }
+
+    private func sectionHeader(_ title: LocalizedStringKey) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+            .padding(.horizontal, 18)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+    }
+
+    private func optionRow(
+        title: String,
+        systemImage: String
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .frame(width: 20)
+            Text(title)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .padding(.horizontal, 18)
+        .padding(.vertical, 11)
+    }
+
+    private func selectionRow(
+        title: String,
+        provider: ProviderKind? = nil,
+        selected: Bool
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Image(systemName: "checkmark")
+                .frame(width: 20)
+                .opacity(selected ? 1 : 0)
+                .accessibilityHidden(true)
+            if let provider {
+                ProviderBrandMark(
+                    provider: provider,
+                    size: 18,
+                    showsBackground: false
+                )
+            }
+            Text(title)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .padding(.horizontal, 18)
+        .padding(.vertical, 11)
     }
 }
 

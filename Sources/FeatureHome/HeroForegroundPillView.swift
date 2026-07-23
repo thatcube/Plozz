@@ -312,7 +312,20 @@ final class HeroForegroundPillView: UIView {
         if !progressTrack.isHidden {
             progressTrack.frame = CGRect(x: x, y: midY - barHeight / 2, width: barWidth, height: barHeight)
             progressTrack.layer.cornerRadius = barHeight / 2
-            progressFill.frame = CGRect(x: 0, y: 0, width: barWidth * progressFraction, height: barHeight)
+            // Floor the RESUME fill so any real progress reads as a clear rounded
+            // nub, not a hairline sliver that looks like a bug (matching
+            // ResumeProgressCapsule). A live download gauge is left exact so it
+            // isn't misrepresented at low percentages.
+            let floorsFill = pill?.kind == .play
+            let fillWidth: CGFloat
+            if progressFraction <= 0 {
+                fillWidth = 0
+            } else if floorsFill {
+                fillWidth = min(barWidth, max(max(barHeight, barWidth * 0.15), barWidth * progressFraction))
+            } else {
+                fillWidth = barWidth * progressFraction
+            }
+            progressFill.frame = CGRect(x: 0, y: 0, width: fillWidth, height: barHeight)
             progressFill.layer.cornerRadius = barHeight / 2
             x += barWidth + glyphTextGap
         }

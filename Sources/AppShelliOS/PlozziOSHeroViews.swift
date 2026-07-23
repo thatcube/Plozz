@@ -154,7 +154,8 @@ struct PlozziOSHeroRequestButton: View {
                         // colour scheme (which left a dark bar on the dark pill).
                         onLight: palette.isLight,
                         width: 54,
-                        height: 5
+                        height: 5,
+                        minVisibleFraction: 0
                     )
                     Text("\(Int((progress * 100).rounded()))%")
                         .lineLimit(1)

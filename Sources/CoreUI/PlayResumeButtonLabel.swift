@@ -14,17 +14,24 @@ public struct ResumeProgressCapsule: View {
     public let onLight: Bool
     public var width: CGFloat
     public var height: CGFloat
+    /// Smallest fill shown for any real progress (`> 0`), as a fraction of the
+    /// track, so a tiny resume position reads as a clear rounded nub rather than a
+    /// hairline sliver that looks like a bug. Live gauges (downloads) pass `0` to
+    /// stay exact at low percentages.
+    public var minVisibleFraction: CGFloat
 
     public init(
         progress: Double,
         onLight: Bool,
         width: CGFloat = 150,
-        height: CGFloat = 6
+        height: CGFloat = 6,
+        minVisibleFraction: CGFloat = 0.15
     ) {
         self.progress = progress
         self.onLight = onLight
         self.width = width
         self.height = height
+        self.minVisibleFraction = minVisibleFraction
     }
 
     public var body: some View {
@@ -36,9 +43,18 @@ public struct ResumeProgressCapsule: View {
             .overlay(alignment: .leading) {
                 Capsule()
                     .fill(fill)
-                    .frame(width: max(8, width * progress), height: height)
+                    .frame(width: filledWidth, height: height)
             }
             .animation(.easeInOut(duration: 0.2), value: onLight)
+    }
+
+    /// The fill width. Any real progress (`> 0`) shows at least `minVisibleFraction`
+    /// of the track (and at least the bar height so the cap stays a full circle).
+    /// Exactly 0 shows nothing.
+    private var filledWidth: CGFloat {
+        guard progress > 0 else { return 0 }
+        let minFill = minVisibleFraction > 0 ? max(height, width * minVisibleFraction) : 0
+        return min(width, max(minFill, width * progress))
     }
 }
 

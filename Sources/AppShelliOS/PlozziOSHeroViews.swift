@@ -606,15 +606,16 @@ struct PlozziOSHeroBackgroundMelt: View {
         if blackTint && !palette.isLight {
             return [
                 .init(color: .clear, location: 0),
-                .init(color: .clear, location: 0.20),
-                .init(color: .black.opacity(0.24), location: 0.34),
-                .init(color: .black.opacity(0.48), location: 0.46),
-                .init(color: .black.opacity(0.70), location: 0.58),
-                .init(color: .black.opacity(0.88), location: 0.70),
-                .init(color: .black.opacity(0.97), location: 0.80),
-                // Transition black → page background so the bottom melts to the
-                // exact page colour instead of staying black.
-                .init(color: base.opacity(0.95), location: 0.92),
+                .init(color: .clear, location: 0.24),
+                .init(color: .black.opacity(0.55), location: 0.40),
+                .init(color: .black.opacity(0.90), location: 0.54),
+                // Reach FULLY opaque black so the image is gone before the blend —
+                // no image show-through ("clear") between the black and the page.
+                .init(color: .black, location: 0.64),
+                // Pure opaque colour blend from black straight into the page
+                // background (grey in Dark), so the black melts into the page with
+                // nothing lightening in between.
+                .init(color: base, location: 0.94),
                 .init(color: base, location: 1)
             ]
         }

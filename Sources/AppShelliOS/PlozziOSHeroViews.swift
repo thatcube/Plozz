@@ -581,24 +581,44 @@ struct PlozziOSStationaryHeroScrim: View {
     let height: CGFloat
 
     var body: some View {
+        let base = palette.backgroundBase
         PlozziOSFullWidthHeroStage(height: height) {
             ZStack {
-                PlozziOSHeroScrim(style: style)
-                // Gently melt the scrim's lower edge to the EXACT page background
-                // so it doesn't overshoot to black past a non-black themed base
-                // (which left a faint seam). Subtle + confined to the bottom, and
-                // rendered once here (static) so it never shifts during a swipe.
+                // A SINGLE monotonic melt from the image to the exact page
+                // background. Opacity only ever increases toward `backgroundBase`,
+                // so the hero never dips darker than the page (the old black
+                // legibility scrim overshot past the grey base and had to climb
+                // back up — that dark band was the "line"). Reaching full
+                // backgroundBase at the bottom means the hero and the page are the
+                // same colour there, so the meeting point is seamless.
                 LinearGradient(
                     stops: [
-                        .init(color: .clear, location: 0.58),
-                        .init(color: palette.backgroundBase.opacity(0.65), location: 0.84),
-                        .init(color: palette.backgroundBase, location: 1)
+                        .init(color: .clear, location: 0),
+                        .init(color: .clear, location: 0.28),
+                        .init(color: base.opacity(0.10), location: 0.42),
+                        .init(color: base.opacity(0.26), location: 0.54),
+                        .init(color: base.opacity(0.45), location: 0.64),
+                        .init(color: base.opacity(0.64), location: 0.73),
+                        .init(color: base.opacity(0.80), location: 0.82),
+                        .init(color: base.opacity(0.91), location: 0.89),
+                        .init(color: base.opacity(0.975), location: 0.95),
+                        .init(color: base, location: 1)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
+
+                // Landscape keeps a gentle leading wash so left-aligned title text
+                // stays legible over a busy image — also melting to the page base,
+                // never black, so it can't introduce its own edge.
+                if style == .landscape {
+                    LinearGradient(
+                        colors: [base.opacity(0.55), .clear],
+                        startPoint: .leading,
+                        endPoint: .center
+                    )
+                }
             }
-            .mask { PlozziOSHeroFadeMask() }
             .frame(height: height)
         }
         .allowsHitTesting(false)

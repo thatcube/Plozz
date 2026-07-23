@@ -612,12 +612,12 @@ private struct PlozziOSHomeHeroCarousel: View {
             )
             ZStack {
                 if let currentItem {
-                    // Both cross-fading slides live in ONE container that carries a
-                    // single static fade mask, so the dissolve never changes during
-                    // a swipe — only the image/video underneath it crossfades. The
-                    // current slide stays fully opaque while the incoming slide
-                    // fades in on top, so the combined stack is always opaque (no
-                    // mid-transition wash) and the fade edge is rock-steady.
+                    // Both cross-fading slides live in ONE container so only the
+                    // image/video underneath crossfades; the current slide stays
+                    // fully opaque while the incoming one fades in on top, so the
+                    // stack is always opaque (no mid-swipe wash). The dissolve to the
+                    // page background is a single static melt in the stationary scrim
+                    // on top — never a per-slide mask — so it never shifts on a swipe.
                     ZStack {
                         PlozziOSHomeStaticBackdrop(
                             item: currentItem,
@@ -635,7 +635,6 @@ private struct PlozziOSHomeHeroCarousel: View {
                             .opacity(progress)
                         }
                     }
-                    .mask { PlozziOSHeroFadeMask() }
 
                     PlozziOSStationaryHeroScrim(
                         style: style,

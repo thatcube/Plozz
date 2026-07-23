@@ -1071,6 +1071,10 @@ private struct PlozziOSDetailHeroForeground: View {
         actions.filter { !$0.action.isPrimaryDetailAction }
     }
 
+    private var hasSourceVersionOptions: Bool {
+        sources.count > 1 || versions.count > 1
+    }
+
     var body: some View {
         VStack(
             alignment: style == .compactPortrait ? .center : .leading,
@@ -1139,6 +1143,9 @@ private struct PlozziOSDetailHeroForeground: View {
             heroRequestButton
             primaryActionButtons
             downloadActionButton
+            if hasSourceVersionOptions {
+                sourceVersionMenuButton
+            }
         }
     }
 
@@ -1146,7 +1153,9 @@ private struct PlozziOSDetailHeroForeground: View {
         HStack(spacing: 12) {
             playActionButton
             heroRequestButton
-            if !primaryActions.isEmpty || downloadItem != nil {
+            if !primaryActions.isEmpty
+                || downloadItem != nil
+                || hasSourceVersionOptions {
                 Menu {
                     overflowActions
                 } label: {
@@ -1251,6 +1260,23 @@ private struct PlozziOSDetailHeroForeground: View {
                 Task { await performDownloadAction() }
             }
         }
+        sourceVersionMenuActions
+    }
+
+    private var sourceVersionMenuButton: some View {
+        Menu {
+            sourceVersionMenuActions
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.headline.weight(.bold))
+        }
+        .buttonStyle(
+            PlozziOSHeroActionButtonStyle(
+                kind: .secondary,
+                circular: true
+            )
+        )
+        .accessibilityLabel("Server and version options")
     }
 
     private func primaryActionSymbol(for entry: ActionEntry) -> String {
@@ -1282,6 +1308,11 @@ private struct PlozziOSDetailHeroForeground: View {
                 )
             }
         }
+        sourceVersionMenuActions
+    }
+
+    @ViewBuilder
+    private var sourceVersionMenuActions: some View {
         if sources.count > 1 {
             Menu {
                 ForEach(sources) { source in

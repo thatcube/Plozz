@@ -290,10 +290,6 @@ struct DetailHeroView: View {
             .filter { !$0.isNavigation && seen.insert($0).inserted }
     }
 
-    private var heroPrimaryMenuActions: [MediaItemAction] {
-        heroMenuActions.filter(\.isPrimaryDetailAction)
-    }
-
     private var heroContextMenuActions: [MediaItemAction] {
         heroMenuActions.filter { !$0.isPrimaryDetailAction }
     }
@@ -302,6 +298,7 @@ struct DetailHeroView: View {
     /// whether the action row appears even when there's no Play/Trailer/Version.
     private var hasHeroActionButtons: Bool {
         heroWatchlistAction != nil || heroWatchedAction != nil
+            || showsMoreMenu
     }
 
     /// Whether the discovery request/status pill should render: a discovery title
@@ -575,6 +572,9 @@ struct DetailHeroView: View {
                     if let heroWatchlistAction {
                         watchlistButton(action: heroWatchlistAction)
                     }
+                    if showsMoreMenu {
+                        moreMenu()
+                    }
                     }
                 }
                 .padding(.top, 8)
@@ -725,6 +725,7 @@ struct DetailHeroView: View {
         .onChange(of: selectedSourceAccountID) { _, _ in
             guard userInitiatedSourceSwitch else { return }
             userInitiatedSourceSwitch = false
+            if showsMoreMenu { moreMenuFocused = true }
         }
 
     }
@@ -947,7 +948,8 @@ struct DetailHeroView: View {
     /// Whether the trailing "…" menu has anything to offer: more than one server
     /// hosting the title, or more than one playable version on the active server.
     private var showsMoreMenu: Bool {
-        !heroPrimaryMenuActions.isEmpty
+        (serverChoices.count > 1 && onSelectSource != nil)
+            || (versions.count > 1 && onSelectVersion != nil)
     }
 
     /// A single subtle trailing "…" menu that folds BOTH the cross-server picker
@@ -971,10 +973,17 @@ struct DetailHeroView: View {
     @ViewBuilder
     private func moreMenu() -> some View {
         HeroMoreMenu(
-            actions: heroPrimaryMenuActions,
+            serverChoices: serverChoices,
+            versions: versions,
+            selectedSourceAccountID: selectedSourceAccountID,
+            selectedVersionID: selectedVersionID,
             glyphSize: heroGlyphSize,
             iconSize: heroIconSize,
-            onPerformAction: performHeroMenuAction
+            onSelectSource: onSelectSource,
+            onSelectVersion: onSelectVersion,
+            onUserInitiatedSourceSwitch: {
+                userInitiatedSourceSwitch = true
+            }
         )
         .equatable()
         .modifier(HeroActionButtonStyle(prominent: false, circular: true))
@@ -1369,25 +1378,70 @@ private struct DetailHeroCreditLine: View {
 }
 
 private struct HeroMoreMenu: View, Equatable {
-    let actions: [MediaItemAction]
+    let serverChoices: [MediaSourceRef]
+    let versions: [MediaVersion]
+    let selectedSourceAccountID: String?
+    let selectedVersionID: String?
     let glyphSize: CGFloat
     let iconSize: CGFloat
-    let onPerformAction: (MediaItemAction) -> Void
+    let onSelectSource: ((String) -> Void)?
+    let onSelectVersion: ((String) -> Void)?
+    let onUserInitiatedSourceSwitch: () -> Void
 
     static func == (lhs: HeroMoreMenu, rhs: HeroMoreMenu) -> Bool {
-        lhs.actions == rhs.actions
+        lhs.serverChoices == rhs.serverChoices
+            && lhs.versions == rhs.versions
+            && lhs.selectedSourceAccountID == rhs.selectedSourceAccountID
+            && lhs.selectedVersionID == rhs.selectedVersionID
             && lhs.glyphSize == rhs.glyphSize
             && lhs.iconSize == rhs.iconSize
+            && (lhs.onSelectSource == nil) == (rhs.onSelectSource == nil)
+            && (lhs.onSelectVersion == nil) == (rhs.onSelectVersion == nil)
     }
 
     var body: some View {
         Menu {
-            ForEach(actions) { action in
-                Button(
-                    action.title,
-                    systemImage: action.systemImage
-                ) {
-                    onPerformAction(action)
+            if serverChoices.count > 1, let onSelectSource {
+                let currentServer = serverChoices.first {
+                    $0.accountID == selectedSourceAccountID
+                } ?? serverChoices.first
+                Section("Server") {
+                    ForEach(serverChoices) { source in
+                        Button {
+                            onUserInitiatedSourceSwitch()
+                            onSelectSource(source.accountID)
+                        } label: {
+                            if source.accountID == currentServer?.accountID {
+                                Label(
+                                    source.displayName,
+                                    systemImage: "checkmark"
+                                )
+                            } else {
+                                Text(source.displayName)
+                            }
+                        }
+                    }
+                }
+            }
+            if versions.count > 1, let onSelectVersion {
+                let currentVersion = versions.first {
+                    $0.id == selectedVersionID
+                } ?? versions.first
+                Section("Version") {
+                    ForEach(versions) { version in
+                        Button {
+                            onSelectVersion(version.id)
+                        } label: {
+                            if version.id == currentVersion?.id {
+                                Label(
+                                    version.displayLabel,
+                                    systemImage: "checkmark"
+                                )
+                            } else {
+                                Text(version.displayLabel)
+                            }
+                        }
+                    }
                 }
             }
         } label: {

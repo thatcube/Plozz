@@ -989,51 +989,45 @@ struct DetailHeroView: View {
             let currentServer = serverChoices.first {
                 $0.accountID == selectedSourceAccountID
             } ?? serverChoices.first
-            Menu {
-                ForEach(serverChoices) { source in
-                    Button {
-                        userInitiatedSourceSwitch = true
-                        onSelectSource(source.accountID)
-                    } label: {
-                        if source.accountID == currentServer?.accountID {
-                            Label(source.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(source.displayName)
+            if let currentServer {
+                Picker(
+                    selection: Binding(
+                        get: { currentServer.accountID },
+                        set: { accountID in
+                            userInitiatedSourceSwitch = true
+                            onSelectSource(accountID)
                         }
+                    )
+                ) {
+                    ForEach(serverChoices) { source in
+                        Text(source.displayName)
+                            .tag(source.accountID)
                     }
+                } label: {
+                    Label(currentServer.displayName, systemImage: "server.rack")
                 }
-            } label: {
-                Label(
-                    currentServer?.displayName ?? "Server",
-                    systemImage: "server.rack"
-                )
+                .pickerStyle(.menu)
             }
         }
         if versions.count > 1, let onSelectVersion {
             let currentVersion = versions.first {
                 $0.id == selectedVersionID
             } ?? versions.first
-            Menu {
-                if let currentVersion {
-                    Picker(
-                        "Version",
-                        selection: Binding(
-                            get: { currentVersion.id },
-                            set: onSelectVersion
-                        )
-                    ) {
-                        ForEach(versions.sortedForPicker()) { version in
-                            Text(version.displayLabel)
-                                .tag(version.id)
-                        }
+            if let currentVersion {
+                Picker(
+                    selection: Binding(
+                        get: { currentVersion.id },
+                        set: onSelectVersion
+                    )
+                ) {
+                    ForEach(versions.sortedForPicker()) { version in
+                        Text(version.displayLabel)
+                            .tag(version.id)
                     }
-                    .pickerStyle(.inline)
+                } label: {
+                    Label(currentVersion.displayLabel, systemImage: "film.stack")
                 }
-            } label: {
-                Label(
-                    currentVersion?.displayLabel ?? "Play Version",
-                    systemImage: "film.stack"
-                )
+                .pickerStyle(.menu)
             }
         }
     }
@@ -1395,22 +1389,24 @@ private struct HeroMoreMenu: View, Equatable {
                 let currentServer = serverChoices.first {
                     $0.accountID == selectedSourceAccountID
                 } ?? serverChoices.first
-                Section("Server") {
-                    ForEach(serverChoices) { source in
-                        Button {
-                            onUserInitiatedSourceSwitch()
-                            onSelectSource(source.accountID)
-                        } label: {
-                            if source.accountID == currentServer?.accountID {
-                                Label(
-                                    source.displayName,
-                                    systemImage: "checkmark"
-                                )
-                            } else {
-                                Text(source.displayName)
+                if let currentServer {
+                    Picker(
+                        selection: Binding(
+                            get: { currentServer.accountID },
+                            set: { accountID in
+                                onUserInitiatedSourceSwitch()
+                                onSelectSource(accountID)
                             }
+                        )
+                    ) {
+                        ForEach(serverChoices) { source in
+                            Text(source.displayName)
+                                .tag(source.accountID)
                         }
+                    } label: {
+                        Label(currentServer.displayName, systemImage: "server.rack")
                     }
+                    .pickerStyle(.menu)
                 }
             }
             if versions.count > 1, let onSelectVersion {
@@ -1419,7 +1415,6 @@ private struct HeroMoreMenu: View, Equatable {
                 } ?? versions.first
                 if let currentVersion {
                     Picker(
-                        "Version",
                         selection: Binding(
                             get: { currentVersion.id },
                             set: onSelectVersion
@@ -1429,8 +1424,10 @@ private struct HeroMoreMenu: View, Equatable {
                             Text(version.displayLabel)
                                 .tag(version.id)
                         }
+                    } label: {
+                        Label(currentVersion.displayLabel, systemImage: "film.stack")
                     }
-                    .pickerStyle(.inline)
+                    .pickerStyle(.menu)
                 }
             }
         } label: {

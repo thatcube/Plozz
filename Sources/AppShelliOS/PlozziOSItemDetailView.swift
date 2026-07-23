@@ -776,29 +776,24 @@ private struct PlozziOSSourceVersionControls: View {
                 .buttonStyle(.bordered)
             }
 
-            if versions.count > 1 {
-                Menu {
-                    if let selectedVersion {
-                        Picker(
-                            "Version",
-                            selection: Binding(
-                                get: { selectedVersion.id },
-                                set: onSelectVersion
-                            )
-                        ) {
-                            ForEach(versions.sortedForPicker()) { version in
-                                Text(version.displayLabel)
-                                    .tag(version.id)
-                            }
-                        }
-                        .pickerStyle(.inline)
+            if versions.count > 1, let selectedVersion {
+                Picker(
+                    selection: Binding(
+                        get: { selectedVersion.id },
+                        set: onSelectVersion
+                    )
+                ) {
+                    ForEach(versions.sortedForPicker()) { version in
+                        Text(version.displayLabel)
+                            .tag(version.id)
                     }
                 } label: {
                     Label(
-                        selectedVersion?.displayLabel ?? "Version",
+                        selectedVersion.displayLabel,
                         systemImage: "film.stack"
                     )
                 }
+                .pickerStyle(.menu)
                 .buttonStyle(.bordered)
             }
         }

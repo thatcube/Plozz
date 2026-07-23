@@ -91,26 +91,35 @@ struct PlozziOSMetadataSettingsView: View {
     private var prioritySection: some View {
         let split = sections
         let items = MetadataProviderListLogic.listItems(for: split)
-        Section {
-            ForEach(items, id: \.self) { item in
-                priorityRow(item, split: split)
-                    .moveDisabled(item == .divider)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+        SettingsSectionGroup("Priority") {
+            List {
+                ForEach(items, id: \.self) { item in
+                    priorityRow(item, split: split)
+                        .moveDisabled(item == .divider)
+                        // SettingsSectionGroup already pads its child by 16pt; zero
+                        // the List's own horizontal inset so padding isn't doubled.
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                        .listRowBackground(item == .divider
+                            ? Color.secondary.opacity(0.12)
+                            : Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+                .onMove { offsets, destination in
+                    let next = MetadataProviderListLogic.moving(
+                        fromOffsets: offsets,
+                        toOffset: destination,
+                        in: split
+                    )
+                    providers.settings.setLists(enabled: next.enabled, disabled: next.disabled)
+                }
             }
-            .onMove { offsets, destination in
-                let next = MetadataProviderListLogic.moving(
-                    fromOffsets: offsets,
-                    toOffset: destination,
-                    in: split
-                )
-                providers.settings.setLists(enabled: next.enabled, disabled: next.disabled)
-            }
-        } header: {
-            Text("Priority")
+            .listStyle(.plain)
+            .scrollDisabled(true)
+            .environment(\.editMode, .constant(.active))
+            .frame(height: CGFloat(items.count) * 48)
         } footer: {
             Text("Drag to reorder. Sources below the Disabled line are turned off.")
         }
-        .environment(\.editMode, .constant(.active))
     }
 
     @ViewBuilder
@@ -126,12 +135,12 @@ struct PlozziOSMetadataSettingsView: View {
                     Text(index + 1, format: .number)
                         .font(.callout.monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .frame(minWidth: 20, alignment: .trailing)
+                        .frame(minWidth: 22, alignment: .trailing)
                 } else {
                     Image(systemName: "slash.circle")
                         .font(.callout)
                         .foregroundStyle(.tertiary)
-                        .frame(minWidth: 20)
+                        .frame(minWidth: 22)
                 }
                 Text(displayName(source))
                     .foregroundStyle(isEnabled ? .primary : .secondary)
@@ -147,7 +156,6 @@ struct PlozziOSMetadataSettingsView: View {
                     .fill(.secondary.opacity(0.4))
                     .frame(height: 1)
             }
-            .listRowBackground(Color.secondary.opacity(0.12))
         }
     }
 

@@ -2,10 +2,12 @@ import Foundation
 
 // MARK: - Sync & Setup feature flag
 //
-// v1 cross-device Sync & Setup is OFF by default and gated by this flag. Nothing
-// user-visible or network-touching happens unless it is explicitly enabled. The
-// flag is a plain, household/device-wide `UserDefaults` bool (NOT per-profile):
-// syncing is a device capability, not a per-profile preference.
+// v1 cross-device Sync & Setup is ON by default: a fresh install participates in the
+// household so the "open a new device and your stuff is already there" experience
+// works without the user first hunting for a toggle. Turning it OFF is respected and
+// sticky (an explicit `false` is never overridden). The flag is a plain,
+// household/device-wide `UserDefaults` bool (NOT per-profile): syncing is a device
+// capability, not a per-profile preference.
 
 public struct SyncSetupFeatureFlag: Sendable {
     public static let storageKey = "com.plozz.syncSetup.enabled"
@@ -14,7 +16,13 @@ public struct SyncSetupFeatureFlag: Sendable {
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
     public var isEnabled: Bool {
-        get { defaults.bool(forKey: Self.storageKey) }
+        // Default ON: an unset flag (fresh install, or an existing user who never
+        // touched the toggle) reads as enabled. An explicit `false` the user chose
+        // is preserved — we only default when no value has been written.
+        get {
+            guard defaults.object(forKey: Self.storageKey) != nil else { return true }
+            return defaults.bool(forKey: Self.storageKey)
+        }
         nonmutating set { defaults.set(newValue, forKey: Self.storageKey) }
     }
 }

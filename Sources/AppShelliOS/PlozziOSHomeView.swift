@@ -612,22 +612,30 @@ private struct PlozziOSHomeHeroCarousel: View {
             )
             ZStack {
                 if let currentItem {
-                    PlozziOSHomeStaticBackdrop(
-                        item: currentItem,
-                        style: style,
-                        height: heroHeight
-                    )
-                    .id(currentItem.id)
-                    .opacity(1 - progress)
-
-                    if let dragTargetItem {
+                    // Both cross-fading slides live in ONE container that carries a
+                    // single static fade mask, so the dissolve never changes during
+                    // a swipe — only the image/video underneath it crossfades. The
+                    // current slide stays fully opaque while the incoming slide
+                    // fades in on top, so the combined stack is always opaque (no
+                    // mid-transition wash) and the fade edge is rock-steady.
+                    ZStack {
                         PlozziOSHomeStaticBackdrop(
-                            item: dragTargetItem,
+                            item: currentItem,
                             style: style,
                             height: heroHeight
                         )
-                        .opacity(progress)
+                        .id(currentItem.id)
+
+                        if let dragTargetItem {
+                            PlozziOSHomeStaticBackdrop(
+                                item: dragTargetItem,
+                                style: style,
+                                height: heroHeight
+                            )
+                            .opacity(progress)
+                        }
                     }
+                    .mask { PlozziOSHeroFadeMask() }
 
                     PlozziOSStationaryHeroScrim(
                         style: style,

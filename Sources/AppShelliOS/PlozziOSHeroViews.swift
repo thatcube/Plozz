@@ -456,6 +456,7 @@ private struct PlozziOSHeroBackdrop: View {
     let itemID: String
     let height: CGFloat
     let showsScrim: Bool
+    var appliesFadeMask: Bool = true
     let ignoresHorizontalSafeArea: Bool
     let surfaceRole: HeroTrailerSurfaceRole
     let trailerController: HeroTrailerController
@@ -483,38 +484,36 @@ private struct PlozziOSHeroBackdrop: View {
             if showsScrim {
                 PlozziOSHeroScrim(style: style)
             }
-
-            // Resolve the very bottom of the hero to the EXACT page background
-            // colour before the dissolve mask runs. The legibility scrim darkens
-            // toward pure black, which overshoots a non-black themed background
-            // (dark mode's base is a grey ~0.13) and leaves a darker band that
-            // reads as a hard line where the hero meets the page. Fading to
-            // `palette.backgroundBase` instead means the hero's lower edge matches
-            // the page exactly, so there's no luminance step — just a smooth melt.
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0.30),
-                    .init(color: palette.backgroundBase.opacity(0.5), location: 0.62),
-                    .init(color: palette.backgroundBase.opacity(0.9), location: 0.82),
-                    .init(color: palette.backgroundBase, location: 0.93),
-                    .init(color: palette.backgroundBase, location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .allowsHitTesting(false)
         }
         .frame(height: height)
         // Fade the complete artwork/video stack to transparent rather than
         // painting an approximate background color over its bottom edge. The
         // actual themed page background then shows through with no visible seam.
-        .mask { PlozziOSHeroFadeMask() }
+        // Skipped for the Home carousel (appliesFadeMask == false): there the
+        // fade is applied ONCE to the container of both cross-fading slides so it
+        // stays perfectly static during a transition instead of two per-slide
+        // fades compositing.
+        .modifier(OptionalHeroFadeMask(enabled: appliesFadeMask))
         .clipped()
         .ignoresSafeArea(
             edges: ignoresHorizontalSafeArea
                 ? [.top, .horizontal]
                 : .top
         )
+    }
+}
+
+/// Applies the hero dissolve mask only when enabled, so callers that mask a whole
+/// cross-fading container (the Home carousel) can opt each slide out.
+private struct OptionalHeroFadeMask: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.mask { PlozziOSHeroFadeMask() }
+        } else {
+            content
+        }
     }
 }
 
@@ -551,7 +550,7 @@ struct PlozziOSHeroScrim: View {
     }
 }
 
-private struct PlozziOSHeroFadeMask: View {
+struct PlozziOSHeroFadeMask: View {
     var body: some View {
         LinearGradient(
             stops: [
@@ -577,14 +576,30 @@ private struct PlozziOSHeroFadeMask: View {
 }
 
 struct PlozziOSStationaryHeroScrim: View {
+    @Environment(\.themePalette) private var palette
     let style: HeroArtworkStyle
     let height: CGFloat
 
     var body: some View {
         PlozziOSFullWidthHeroStage(height: height) {
-            PlozziOSHeroScrim(style: style)
-                .mask { PlozziOSHeroFadeMask() }
-                .frame(height: height)
+            ZStack {
+                PlozziOSHeroScrim(style: style)
+                // Gently melt the scrim's lower edge to the EXACT page background
+                // so it doesn't overshoot to black past a non-black themed base
+                // (which left a faint seam). Subtle + confined to the bottom, and
+                // rendered once here (static) so it never shifts during a swipe.
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.58),
+                        .init(color: palette.backgroundBase.opacity(0.65), location: 0.84),
+                        .init(color: palette.backgroundBase, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .mask { PlozziOSHeroFadeMask() }
+            .frame(height: height)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -666,6 +681,7 @@ struct PlozziOSHomeStaticBackdrop: View {
                 itemID: item.id,
                 height: height,
                 showsScrim: false,
+                appliesFadeMask: false,
                 ignoresHorizontalSafeArea: false,
                 surfaceRole: .home,
                 trailerController: trailerController

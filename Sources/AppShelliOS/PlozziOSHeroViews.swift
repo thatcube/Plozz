@@ -1290,6 +1290,8 @@ private struct PlozziOSDetailHeroForeground: View {
 
     @ViewBuilder
     private var sourceVersionMenuActions: some View {
+        Button("Temporary Width Test — This Label Is Deliberately Very Long") {}
+
         if sources.count > 1, let selectedSource {
             Picker(
                 selection: Binding(

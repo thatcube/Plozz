@@ -606,15 +606,15 @@ struct PlozziOSHeroBackgroundMelt: View {
         if blackTint && !palette.isLight {
             return [
                 .init(color: .clear, location: 0),
-                .init(color: .clear, location: 0.28),
-                .init(color: .black.opacity(0.16), location: 0.42),
-                .init(color: .black.opacity(0.40), location: 0.54),
-                .init(color: .black.opacity(0.62), location: 0.64),
-                .init(color: .black.opacity(0.80), location: 0.73),
-                .init(color: .black.opacity(0.90), location: 0.82),
+                .init(color: .clear, location: 0.20),
+                .init(color: .black.opacity(0.24), location: 0.34),
+                .init(color: .black.opacity(0.48), location: 0.46),
+                .init(color: .black.opacity(0.70), location: 0.58),
+                .init(color: .black.opacity(0.88), location: 0.70),
+                .init(color: .black.opacity(0.97), location: 0.80),
                 // Transition black → page background so the bottom melts to the
                 // exact page colour instead of staying black.
-                .init(color: base.opacity(0.94), location: 0.91),
+                .init(color: base.opacity(0.95), location: 0.92),
                 .init(color: base, location: 1)
             ]
         }

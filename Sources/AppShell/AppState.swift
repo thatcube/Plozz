@@ -1171,14 +1171,13 @@ public final class AppState {
     /// otherwise it enters the app directly.
     public func didAuthenticate(_ session: UserSession) {
         let isFirstRun = accountsProviders.accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
-        // Media shares are identified by their share path (host/port/share), not a
-        // random UUID, so re-adding the same share — e.g. to fix its password —
-        // updates the existing account in place (new credential revision, old one
-        // retired) instead of forking a duplicate account. Other providers keep a
-        // freshly-minted UUID identity.
-        let account = session.server.provider == .mediaShare
-            ? Account(id: session.server.id, from: session)
-            : Account(from: session)
+        // Every provider now gets a STABLE, deterministic id derived from its
+        // (provider + server + user) identity — so re-adding the same server (e.g. to
+        // fix a password) updates the existing account in place instead of forking a
+        // duplicate, and the SAME server+user resolves to the SAME id on every device
+        // (so sync/pairing can't create cross-device duplicates). Media shares keep
+        // their existing deterministic id via the same helper.
+        let account = Account(id: Account.stableID(for: session), from: session)
         let previousAccount = accountsProviders.accounts.first { $0.id == account.id }
         do {
             try accountsProviders.accountStore.add(account, token: session.accessToken)
@@ -1234,7 +1233,7 @@ public final class AppState {
         let isFirstRun = accountsProviders.accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
         var addedIDs: [String] = []
         for session in sessions {
-            let account = Account(from: session)
+            let account = Account(id: Account.stableID(for: session), from: session)
             let previousAccount = accountsProviders.accounts.first { $0.id == account.id }
             do {
                 try accountsProviders.accountStore.add(account, token: session.accessToken)

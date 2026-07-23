@@ -235,29 +235,19 @@ extension PlozziOSAppModel {
     func refreshPendingSyncedServers() {
         var store = PendingSyncedServersStore()
         let localIDs = Set(accountsProviders.accounts.map(\.id))
-        // Servers this device is already signed into, keyed by (provider, serverID,
-        // userID) rather than the random account id — so a synced descriptor for the
-        // SAME Plex/Jellyfin server+user (which carries a different id, minted per
-        // sign-in) is recognized as already-present and never re-prompted/duplicated.
-        let localSemanticKeys = Set(accountsProviders.accounts.map(\.semanticServerKey))
         // Household-removed (tombstoned) servers are hidden and never prompted here.
         let removedIDs = RemovedAccountsStore().removedIDs
         // If the queued prompt's server has since been signed in here (e.g. a synced
         // credential arrived and auto-connected) or was removed, drop the prompt.
         if let prompt = pendingSyncedServerPrompt,
-           removedIDs.contains(prompt.id) || localIDs.contains(prompt.id)
-            || localSemanticKeys.contains(prompt.semanticServerKey) {
+           removedIDs.contains(prompt.id) || localIDs.contains(prompt.id) {
             pendingSyncedServerPrompt = nil
         }
         pendingSyncedServers = store.pending(excludingLocal: localIDs)
             .filter { !removedIDs.contains($0.id) }
-            .excludingSemanticMatches(of: localSemanticKeys)
-            .dedupedBySemanticIdentity()
         guard SyncSetupFeatureFlag().isEnabled, pendingSyncedServerPrompt == nil else { return }
         let newly = store.newlyPending(excludingLocal: localIDs)
             .filter { !removedIDs.contains($0.id) }
-            .excludingSemanticMatches(of: localSemanticKeys)
-            .dedupedBySemanticIdentity()
         // Only nudge for media servers we can sign into here (Jellyfin/Emby/Plex), AND
         // only when there's no synced login already waiting — if this device already has
         // the iCloud-Keychain credential (e.g. published by the user's iPhone),

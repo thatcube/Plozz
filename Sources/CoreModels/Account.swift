@@ -96,11 +96,19 @@ extension Account: CustomStringConvertible {
 }
 
 public extension Account {
-    /// The (server + user) identity — provider + backend server id + user id —
-    /// INDEPENDENT of the random app-minted `id`. Matches
-    /// `SyncedAccountDescriptor.semanticServerKey`, so a synced descriptor can be
-    /// recognized as "a server this device is already signed into" even though the
-    /// two accounts carry different `id`s (Plex/Jellyfin mint a fresh UUID per
-    /// sign-in). Used to dedup cross-device prompts and pending entries.
-    var semanticServerKey: String { "\(server.provider.rawValue)|\(server.id)|\(userID)" }
+    /// A STABLE, deterministic account id derived from the (provider + backend server
+    /// id + user) identity — so the SAME server+user always maps to the SAME account
+    /// id, on every device and on every sign-in. This is why media shares never
+    /// duplicated (they've always used a deterministic id); applying the same rule to
+    /// token providers (Plex/Jellyfin/Emby) is the holistic fix for cross-device
+    /// duplicate accounts: re-adding updates in place, sync joins on a matching id, and
+    /// a pairing transfer can't create a second copy.
+    ///
+    /// Media shares keep their existing deterministic id (`session.server.id`, which
+    /// already encodes host/path/user) so their persisted Keychain credentials aren't
+    /// orphaned by an id change.
+    static func stableID(for session: UserSession) -> String {
+        if session.server.provider == .mediaShare { return session.server.id }
+        return "\(session.server.provider.rawValue)|\(session.server.id)|\(session.userID)"
+    }
 }

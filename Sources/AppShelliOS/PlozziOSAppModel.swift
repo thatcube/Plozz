@@ -1142,7 +1142,7 @@ final class PlozziOSAppModel {
                 && !profiles.firstRunProfileSetupComplete
             var addedAccounts: [Account] = []
             for session in sessions {
-                let account = Account(from: session)
+                let account = Account(id: Account.stableID(for: session), from: session)
                 try accountStore.add(account, token: session.accessToken)
                 // A (re)added server clears any household-removal tombstone for it.
                 clearRemovalTombstone(for: account.id)
@@ -1155,7 +1155,7 @@ final class PlozziOSAppModel {
             identityIndex.warmIdentityIndex()
             if isFirstRun,
                let session = sessions.first(where: {
-                   let account = Account(from: $0)
+                   let account = Account(id: Account.stableID(for: $0), from: $0)
                    return addedAccounts.contains(where: { $0.id == account.id })
                }) {
                 profiles.seedDefaultProfileIdentity(

@@ -45,38 +45,35 @@ final class SyncSetupTests: XCTestCase {
         XCTAssertFalse(json.lowercased().contains("deviceid"))
     }
 
-    // MARK: Cross-device duplicate dedup (same server+user, different random ids)
+    // MARK: Deterministic account ids (holistic cross-device duplicate prevention)
 
-    private func plexDesc(id: String, serverID: String = "plex-machine-1", userID: String = "u-brandon", name: String = "Brandoland") -> SyncedAccountDescriptor {
-        SyncedAccountDescriptor(id: id, provider: .plex, serverID: serverID, serverName: name, userID: userID, userName: "brandon")
+    func testStableIDIsDeterministicForTokenProviders() {
+        let server = MediaServer(id: "plex-machine-1", name: "Brandoland", baseURL: url("https://plex.example"), provider: .plex)
+        let s1 = UserSession(server: server, userID: "u-brandon", userName: "brandon", deviceID: "dev-A", accessToken: "tok1")
+        let s2 = UserSession(server: server, userID: "u-brandon", userName: "brandon", deviceID: "dev-B", accessToken: "tok2")
+        // Same server+user on two devices / two sign-ins → SAME id (so re-adding
+        // updates in place and sync/pairing can't fork a duplicate).
+        XCTAssertEqual(Account.stableID(for: s1), Account.stableID(for: s2))
     }
 
-    func testDedupBySemanticIdentityCollapsesDuplicatePlex() {
-        // Two Plex descriptors for the SAME server+user but different (random) ids —
-        // the legacy-duplicate case. Collapse to one, deterministically the lowest id.
-        let dupes = [plexDesc(id: "B-uuid"), plexDesc(id: "A-uuid"), plexDesc(id: "C-uuid")]
-        let deduped = dupes.dedupedBySemanticIdentity()
-        XCTAssertEqual(deduped.count, 1)
-        XCTAssertEqual(deduped.first?.id, "A-uuid", "keeps the lowest id for a stable cross-device choice")
+    func testStableIDDistinguishesUsersServersAndProviders() {
+        let plex = MediaServer(id: "srv", name: "S", baseURL: url("https://x"), provider: .plex)
+        let jelly = MediaServer(id: "srv", name: "S", baseURL: url("https://x"), provider: .jellyfin)
+        func sid(_ server: MediaServer, _ user: String) -> String {
+            Account.stableID(for: UserSession(server: server, userID: user, userName: user, deviceID: "d", accessToken: "t"))
+        }
+        XCTAssertNotEqual(sid(plex, "a"), sid(plex, "b"))     // different user
+        XCTAssertNotEqual(sid(plex, "a"), sid(jelly, "a"))    // different provider
+        let plex2 = MediaServer(id: "srv2", name: "S", baseURL: url("https://x"), provider: .plex)
+        XCTAssertNotEqual(sid(plex, "a"), sid(plex2, "a"))    // different server
     }
 
-    func testDedupKeepsDistinctServersAndUsers() {
-        let a = plexDesc(id: "1", serverID: "srvA")
-        let b = plexDesc(id: "2", serverID: "srvB")            // different server
-        let c = plexDesc(id: "3", userID: "u-someone-else")    // different user
-        XCTAssertEqual([a, b, c].dedupedBySemanticIdentity().count, 3)
-    }
-
-    func testExcludingSemanticMatchesDropsAlreadySignedInServer() {
-        let synced = [plexDesc(id: "remote-uuid")]
-        // Local account for the same server+user but a DIFFERENT random id.
-        let localAccount = Account(
-            id: "local-uuid",
-            server: MediaServer(id: "plex-machine-1", name: "Brandoland", baseURL: url("https://plex.example"), provider: .plex),
-            userID: "u-brandon", userName: "brandon", deviceID: "dev-A"
-        )
-        let filtered = synced.excludingSemanticMatches(of: [localAccount.semanticServerKey])
-        XCTAssertTrue(filtered.isEmpty, "a server already signed in (by identity) must not be surfaced as pending")
+    func testStableIDPreservesMediaShareIdentity() {
+        // Media shares keep their existing deterministic id (server.id) so persisted
+        // credentials aren't orphaned.
+        let share = MediaServer(id: "share:nfs://host:2049/media#guest", name: "Media", baseURL: url("nfs://host/media"), provider: .mediaShare)
+        let session = UserSession(server: share, userID: "guest", userName: "guest", deviceID: "d", accessToken: "")
+        XCTAssertEqual(Account.stableID(for: session), "share:nfs://host:2049/media#guest")
     }
 
     // MARK: Endpoint-retarget protection

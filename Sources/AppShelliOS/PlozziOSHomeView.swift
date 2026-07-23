@@ -614,7 +614,7 @@ private struct PlozziOSHomeHeroCarousel: View {
             // drag direction (partly off-screen, subtle), while the incoming image
             // enters from the opposite edge and settles into place by the same
             // amount — both tracking the finger via `progress`, in either direction.
-            let slideTravel: CGFloat = 180
+            let slideTravel = proxy.size.width * 0.35
             let slideDir: CGFloat = dragOffset == 0 ? 0 : (dragOffset < 0 ? -1 : 1)
             let outgoingX = slideDir * slideTravel * progress
             let incomingX = -slideDir * slideTravel * (1 - progress)

@@ -749,7 +749,7 @@ private struct PlozziOSSlidingHeroArtwork: View {
     let offsetX: CGFloat
 
     private var edgeWidth: CGFloat {
-        min(220, width)
+        width * 0.45
     }
 
     var body: some View {
@@ -789,7 +789,6 @@ private struct PlozziOSSlidingHeroArtwork: View {
         .scaleEffect(x: -1)
         .frame(width: edgeWidth, height: height, alignment: alignment)
         .clipped()
-        .blur(radius: 28, opaque: true)
         .frame(width: edgeWidth, height: height)
         .clipped()
     }

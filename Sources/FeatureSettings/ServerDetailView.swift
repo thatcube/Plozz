@@ -80,7 +80,7 @@ struct ServerDetailView: View {
             ),
             presenting: pendingSignOut
         ) { pending in
-            if context.syncEnabled {
+            if context.offersRemoveEverywhere {
                 Button("Remove Everywhere", role: .destructive) {
                     context.onRemoveAccountEverywhere(pending.account)
                 }
@@ -94,8 +94,8 @@ struct ServerDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { pending in
-            Text(context.syncEnabled
-                 ? "Everywhere signs it out on all your devices. This Apple TV keeps your other servers."
+            Text(context.offersRemoveEverywhere
+                 ? "Remove it from all your devices, or just this Apple TV?"
                  : signOutMessage(for: pending))
         }
     }
@@ -291,7 +291,7 @@ struct ServerDetailView: View {
                     .font(.callout.weight(.semibold))
             }
             .alert("Remove \(group.serverName)?", isPresented: $confirmRemoveServer) {
-                if context.syncEnabled {
+                if context.offersRemoveEverywhere {
                     Button("Remove Everywhere", role: .destructive) {
                         for account in group.accounts { context.onRemoveAccountEverywhere(account) }
                     }
@@ -305,8 +305,8 @@ struct ServerDetailView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text(context.syncEnabled
-                     ? "Everywhere signs everyone out on all your devices. This Apple TV keeps your other servers."
+                Text(context.offersRemoveEverywhere
+                     ? "Remove it from all your devices, or just this Apple TV?"
                      : "This signs everyone out of \(group.serverName) on this Apple TV. Any profile will need to sign in again to use it.")
             }
         }

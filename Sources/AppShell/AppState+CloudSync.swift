@@ -102,6 +102,7 @@ extension AppState {
     public func syncCloudOnForeground() {
         guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
         Task { await cloudSync.fetchNow() }
+        heartbeatHouseholdPresence()
         checkForSyncSetupOffer()
         startSyncSetupOfferPolling()
     }
@@ -421,6 +422,24 @@ extension AppState {
         }
     }
 
+    /// Whether the user has other devices on this iCloud account.
+    public var hasOtherHouseholdDevices: Bool {
+        !HouseholdDevicesStore().otherDevices(excluding: accountsProviders.accountStore.deviceID()).isEmpty
+    }
+
+    /// Whether a "Remove Everywhere" choice is meaningful (sync on AND other devices).
+    public var offersRemoveEverywhere: Bool {
+        SyncSetupFeatureFlag().isEnabled && hasOtherHouseholdDevices
+    }
+
+    /// Register this Apple TV in the household presence registry.
+    func heartbeatHouseholdPresence() {
+        guard SyncSetupFeatureFlag().isEnabled else { return }
+        HouseholdDevicesStore().heartbeat(
+            deviceID: accountsProviders.accountStore.deviceID(),
+            deviceName: DeviceDisplayName.fromHostName(ProcessInfo.processInfo.hostName, fallback: "Apple TV"))
+    }
+
     /// Remove a server from EVERY device on this iCloud account: publish a removal
     /// tombstone so peers sign it out and stop re-publishing it, remove it here, and
     /// push the change now. Reversible by re-adding the server anywhere.
@@ -466,6 +485,7 @@ extension AppState {
         }
         Task { await cloudSync.activate() }
         armCloudConfigObservation()
+        heartbeatHouseholdPresence()
         checkForSyncSetupOffer()
         startSyncSetupOfferPolling()
     }
@@ -510,8 +530,10 @@ extension AppState {
             Task { await cloudSync.activate() }
             armCloudConfigObservation()
             scheduleCloudPublish()
+            heartbeatHouseholdPresence()
             startSyncSetupOfferPolling()
         } else {
+            HouseholdDevicesStore().remove(deviceID: accountsProviders.accountStore.deviceID())
             syncSetupOfferPollTask?.cancel()
             syncSetupOfferPollTask = nil
             cloudSyncUI.pendingSyncSetupOffer = nil

@@ -749,7 +749,7 @@ struct PlozziOSAccountDetailView: View {
     let account: Account
     @State private var confirmRemoval = false
 
-    private var syncEnabled: Bool { SyncSetupFeatureFlag().isEnabled }
+    private var offerEverywhere: Bool { appModel.offersRemoveEverywhere }
 
     var body: some View {
         Form {
@@ -800,7 +800,7 @@ struct PlozziOSAccountDetailView: View {
             isPresented: $confirmRemoval,
             titleVisibility: .visible
         ) {
-            if syncEnabled {
+            if offerEverywhere {
                 Button("Remove Everywhere", role: .destructive) {
                     appModel.removeAccountEverywhere(id: account.id)
                     dismiss()
@@ -817,9 +817,9 @@ struct PlozziOSAccountDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(syncEnabled
-                 ? "Everywhere signs it out on all your devices. This \(deviceName) keeps your other servers."
-                 : "Removes this server’s sign-in and cached data from this \(deviceName).")
+            Text(offerEverywhere
+                 ? "Remove it from all your devices, or just this \(deviceName)?"
+                 : "Signs out and removes this server.")
         }
     }
 }

@@ -5,6 +5,7 @@ import CoreModels
 import CoreNetworking
 import FeatureSyncSetup
 import FeatureSyncCloud
+import UIKit
 
 // MARK: - PlozziOSAppModel + CloudKit config auto-sync
 //
@@ -242,6 +243,27 @@ extension PlozziOSAppModel {
     /// The user dismissed / handled the current one-time server prompt.
     func clearPendingSyncedServerPrompt() { pendingSyncedServerPrompt = nil }
 
+    /// Whether the user has other devices on this iCloud account (a recently-seen
+    /// device other than this one in the presence registry).
+    var hasOtherHouseholdDevices: Bool {
+        !HouseholdDevicesStore().otherDevices(excluding: deviceID).isEmpty
+    }
+
+    /// Whether a "Remove Everywhere" choice is meaningful: sync is on AND there's at
+    /// least one other device to remove it from.
+    var offersRemoveEverywhere: Bool {
+        SyncSetupFeatureFlag().isEnabled && hasOtherHouseholdDevices
+    }
+
+    /// Record this device in the household presence registry (so peers know it exists).
+    func heartbeatHouseholdPresence() {
+        guard SyncSetupFeatureFlag().isEnabled else { return }
+        HouseholdDevicesStore().heartbeat(
+            deviceID: deviceID,
+            deviceName: DeviceDisplayName.fromHostName(
+                ProcessInfo.processInfo.hostName, fallback: UIDevice.current.name))
+    }
+
     /// Remove a server from EVERY device on this iCloud account: publish a removal
     /// tombstone so peers sign it out and stop re-publishing it, remove it here, and
     /// push now. Reversible by re-adding the server anywhere.
@@ -278,6 +300,7 @@ extension PlozziOSAppModel {
         guard SyncSetupFeatureFlag().isEnabled, let cloudSync else { return }
         Task { await cloudSync.activate() }
         armCloudConfigObservation()
+        heartbeatHouseholdPresence()          // register this device in the household
         refreshPendingSyncedServers()
         publishPortableCredentials()          // share this device's logins via iCloud Keychain
         autoConnectFromSyncedCredentials()    // pick up other devices' logins automatically
@@ -318,8 +341,11 @@ extension PlozziOSAppModel {
             Task { await cloudSync.activate() }
             armCloudConfigObservation()
             scheduleCloudPublish()
+            heartbeatHouseholdPresence()
             publishPortableCredentials()
             autoConnectFromSyncedCredentials()
+        } else {
+            HouseholdDevicesStore().remove(deviceID: deviceID)
         }
     }
 
@@ -327,6 +353,7 @@ extension PlozziOSAppModel {
     func syncCloudOnForeground() {
         guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
         Task { await cloudSync.fetchNow() }
+        heartbeatHouseholdPresence()
         checkForSyncSetupOffer()
         refreshPendingSyncedServers()
         publishPortableCredentials()

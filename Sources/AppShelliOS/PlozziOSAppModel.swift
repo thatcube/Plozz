@@ -670,6 +670,7 @@ final class PlozziOSAppModel {
         pendingSynced.removeAll()
         var removedSynced = RemovedAccountsStore()
         removedSynced.removeAll()
+        HouseholdDevicesStore().removeAll()
         pendingSyncedServers = []
         pendingSyncedServerPrompt = nil
         try? accountStore.clearAll()

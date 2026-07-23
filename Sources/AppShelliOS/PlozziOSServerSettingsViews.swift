@@ -171,7 +171,7 @@ private struct PlozziOSServerSettingsDetailView: View {
             isPresented: $confirmRemoveServer,
             titleVisibility: .visible
         ) {
-            if SyncSetupFeatureFlag().isEnabled {
+            if appModel.offersRemoveEverywhere {
                 Button("Remove Everywhere", role: .destructive) {
                     for account in group?.accounts ?? [] {
                         appModel.removeAccountEverywhere(id: account.id)
@@ -191,9 +191,9 @@ private struct PlozziOSServerSettingsDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(SyncSetupFeatureFlag().isEnabled
-                 ? "Everywhere signs everyone out on all your devices."
-                 : "This signs everyone out and removes the server from this \(deviceName).")
+            Text(appModel.offersRemoveEverywhere
+                 ? "Remove it from all your devices, or just this \(deviceName)?"
+                 : "Signs everyone out and removes this server.")
         }
     }
 }

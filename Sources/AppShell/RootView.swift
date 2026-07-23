@@ -249,6 +249,7 @@ public struct RootView: View {
                         onAddAccount: { appState.addAccount() },
                         onRemoveAccount: { appState.removeAccount(id: $0.id) },
                         onRemoveAccountEverywhere: { appState.removeAccountEverywhere(id: $0.id) },
+                        offersRemoveEverywhere: appState.offersRemoveEverywhere,
                         onRescanShare: { appState.mediaShare.rescanShare(accountID: $0) },
                         onSignOutAll: { appState.signOutAll() },
                         onSwitchProfile: { appState.profileFlow.requestProfileSelection() },

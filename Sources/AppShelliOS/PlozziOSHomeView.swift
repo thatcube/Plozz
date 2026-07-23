@@ -628,41 +628,30 @@ private struct PlozziOSHomeHeroCarousel: View {
                     // the incoming one fades in on top, so the stack never dips.
                     ZStack {
                         if let dragTargetItem {
-                            // TRANSITION: slide plain sharp images (freely
-                            // offsettable — the normal reflected-stage backdrop
-                            // cancels an applied offset). Blur-fill behind each so a
-                            // slid edge shows a soft blurred continuation, not a gap.
-                            // Incoming underneath (opaque) so the outgoing dissolves
-                            // away to reveal it; both physically slide.
-                            PlozziOSHeroBlurFill(
-                                item: currentItem,
-                                style: style,
-                                height: heroHeight
-                            )
-                            .opacity(1 - progress)
-                            .offset(x: outgoingX)
-
-                            PlozziOSHeroBlurFill(
+                            // TRANSITION: both slides render through the SAME
+                            // reflected-stage backdrop as idle, sliding via the inner
+                            // contentOffsetX (so positions match the idle backdrop
+                            // exactly at rest — no snap on iPad where the stage shifts
+                            // content by the sidebar width). Each carries its own
+                            // blurred bleed, so a slid edge shows a soft blurred
+                            // continuation. Incoming underneath (opaque) so the
+                            // outgoing dissolves away on top to reveal it.
+                            PlozziOSHomeStaticBackdrop(
                                 item: dragTargetItem,
                                 style: style,
-                                height: heroHeight
+                                height: heroHeight,
+                                contentOffsetX: incomingX,
+                                showsTrailer: false
                             )
-                            .offset(x: incomingX)
 
-                            PlozziOSHeroSlidingBackdrop(
-                                item: dragTargetItem,
-                                style: style,
-                                height: heroHeight
-                            )
-                            .offset(x: incomingX)
-
-                            PlozziOSHeroSlidingBackdrop(
+                            PlozziOSHomeStaticBackdrop(
                                 item: currentItem,
                                 style: style,
-                                height: heroHeight
+                                height: heroHeight,
+                                contentOffsetX: outgoingX,
+                                showsTrailer: false
                             )
                             .opacity(1 - progress)
-                            .offset(x: outgoingX)
                         } else {
                             // IDLE: the full backdrop (reflected stage + trailer).
                             PlozziOSHomeStaticBackdrop(

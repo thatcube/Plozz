@@ -463,6 +463,7 @@ private struct PlozziOSHeroBackdrop: View {
     let itemID: String
     let height: CGFloat
     let showsScrim: Bool
+    var showsTrailer: Bool = true
     let ignoresHorizontalSafeArea: Bool
     let surfaceRole: HeroTrailerSurfaceRole
     let trailerController: HeroTrailerController
@@ -478,7 +479,8 @@ private struct PlozziOSHeroBackdrop: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
 
-            if trailerController.currentItemID == itemID,
+            if showsTrailer,
+               trailerController.currentItemID == itemID,
                trailerController.isPlaying {
                 HeroTrailerVideoLayer(
                     controller: trailerController,
@@ -674,10 +676,19 @@ struct PlozziOSHomeWipeBackdrop: View {
 
 struct PlozziOSHomeStaticBackdrop: View {
     @Environment(HeroTrailerController.self) private var trailerController
+    @Environment(\.themePalette) private var palette
 
     let item: MediaItem
     let style: HeroArtworkStyle
     let height: CGFloat
+    /// Horizontal slide applied to the backdrop CONTENT (inside the reflected
+    /// stage, so the stage's own self-alignment isn't disturbed — offsetting the
+    /// whole stage makes it re-read its global frame and cancel the move). 0 at
+    /// rest, so a settled slide matches the idle backdrop exactly (no snap).
+    var contentOffsetX: CGFloat = 0
+    /// Suppress the trailer while sliding (image-only) — the trailer resumes on
+    /// the idle backdrop once the transition settles.
+    var showsTrailer: Bool = true
 
     var body: some View {
         let presentation = HeroPresentation(
@@ -685,17 +696,38 @@ struct PlozziOSHomeStaticBackdrop: View {
             artworkStyle: style,
             surface: .home
         )
-        PlozziOSReflectedHeroStage(height: height) { _ in
-            PlozziOSHeroBackdrop(
-                presentation: presentation,
-                style: style,
-                itemID: item.id,
-                height: height,
-                showsScrim: false,
-                ignoresHorizontalSafeArea: false,
-                surfaceRole: .home,
-                trailerController: trailerController
-            )
+        PlozziOSReflectedHeroStage(height: height) { usableWidth in
+            ZStack {
+                // Blurred, over-scaled bleed behind the sharp image so a slide
+                // reveals a soft blurred continuation of the same hero at the
+                // exposed edge instead of a dark gap.
+                if contentOffsetX != 0 {
+                    FallbackAsyncImage(
+                        references: presentation.artworkReferences,
+                        variant: .heroBackdrop
+                    ) {
+                        palette.backgroundBase
+                    }
+                    .frame(width: usableWidth, height: height)
+                    .scaleEffect(x: 1.6, y: 1.15)
+                    .blur(radius: 44, opaque: true)
+                    .frame(width: usableWidth, height: height)
+                    .clipped()
+                }
+
+                PlozziOSHeroBackdrop(
+                    presentation: presentation,
+                    style: style,
+                    itemID: item.id,
+                    height: height,
+                    showsScrim: false,
+                    showsTrailer: showsTrailer,
+                    ignoresHorizontalSafeArea: false,
+                    surfaceRole: .home,
+                    trailerController: trailerController
+                )
+            }
+            .offset(x: contentOffsetX)
         } reflection: { reflectionWidth, contentWidth in
             PlozziOSHeroReflection(
                 presentation: presentation,
@@ -706,75 +738,6 @@ struct PlozziOSHomeStaticBackdrop: View {
                 trailerController: trailerController
             )
         }
-    }
-}
-
-/// A plain, full-width sharp copy of a hero's artwork used for the parallax slide
-/// transition. Unlike `PlozziOSHomeStaticBackdrop` it does NOT use the
-/// self-aligning `PlozziOSReflectedHeroStage` (which re-reads its own global frame
-/// and cancels an applied `.offset`, breaking the slide asymmetrically), so it can
-/// be freely offset. Image-only (the trailer resumes on the idle backdrop once the
-/// transition settles).
-struct PlozziOSHeroSlidingBackdrop: View {
-    @Environment(\.themePalette) private var palette
-
-    let item: MediaItem
-    let style: HeroArtworkStyle
-    let height: CGFloat
-
-    var body: some View {
-        let presentation = HeroPresentation(
-            item: item,
-            artworkStyle: style,
-            surface: .home
-        )
-        FallbackAsyncImage(
-            references: presentation.artworkReferences,
-            variant: .heroBackdrop
-        ) {
-            palette.backgroundBase
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .frame(height: height)
-        .clipped()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
-
-/// A full-width, heavily-blurred, over-scaled copy of a hero's artwork used to
-/// fill the horizontal gap the parallax slide would otherwise open at a screen
-/// edge (dark page showing through). Sits BEHIND the sharp sliding image so any
-/// exposed edge reveals a soft blurred continuation of the same image instead of
-/// a hard gap. Image-only (no trailer) so it stays cheap.
-struct PlozziOSHeroBlurFill: View {
-    @Environment(\.themePalette) private var palette
-
-    let item: MediaItem
-    let style: HeroArtworkStyle
-    let height: CGFloat
-
-    var body: some View {
-        let presentation = HeroPresentation(
-            item: item,
-            artworkStyle: style,
-            surface: .home
-        )
-        FallbackAsyncImage(
-            references: presentation.artworkReferences,
-            variant: .heroBackdrop
-        ) {
-            palette.backgroundBase
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Over-scale so the blurred copy extends well past both edges, covering
-        // the full slide travel on either side; blur hides the scaling + seams.
-        .scaleEffect(x: 1.5, y: 1.15)
-        .blur(radius: 40, opaque: true)
-        .frame(height: height)
-        .clipped()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
 

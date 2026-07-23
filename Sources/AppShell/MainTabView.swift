@@ -497,23 +497,19 @@ struct MainTabView: View {
             heroTrailerController.setPaused(videoStarting)
         }
         .onChange(of: heroBackgroundModel.settings, initial: true) { _, settings in
-            // Keep the legacy theme-music settings/controller in sync with the
-            // new structural XOR setting. Volume remains owned by its existing
-            // model; only enabled state moves here.
+            // Theme music is a DETAIL-page concern; keep the legacy theme-music
+            // controller's enabled state mirrored from the detail mode.
             themeMusicModel.settings.isEnabled = settings.themeMusicEnabled
-            if settings.mode != .trailer {
+            // Stop the shared trailer player only when NEITHER surface wants a
+            // trailer; otherwise leave it to the active hero view. Mute is a live
+            // session state on the controller, so it isn't touched here.
+            if !settings.homeTrailerEnabled && !settings.detailTrailerEnabled {
                 heroTrailerController.stop()
-            } else {
-                heroTrailerController.setMuted(settings.trailerMuted)
             }
-            themeMusicController.setBlocked(
-                settings.mode == .trailer && heroTrailerController.isPlaying
-            )
+            themeMusicController.setBlocked(heroTrailerController.isPlaying)
         }
         .onChange(of: heroTrailerController.isPlaying) { _, playing in
-            themeMusicController.setBlocked(
-                heroBackgroundModel.settings.mode == .trailer && playing
-            )
+            themeMusicController.setBlocked(playing)
         }
         .onChange(of: selectedTabRaw) {
             themeMusicController.stop()

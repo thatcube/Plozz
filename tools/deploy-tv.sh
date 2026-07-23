@@ -42,6 +42,7 @@ BUILD_ONLY=0
 REGEN=1
 SIM_BUILD=0
 CLEAN=0
+BRANDED=0
 for arg in "$@"; do
   case "$arg" in
     --build-only) BUILD_ONLY=1 ;;
@@ -49,6 +50,7 @@ for arg in "$@"; do
     --no-regen)   REGEN=0 ;;
     --sim-build)  SIM_BUILD=1 ;;
     --clean)      CLEAN=1 ;;
+    --branded)    BRANDED=1 ;;
     -h|--help)    grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown flag: $arg (try --help)"; exit 2 ;;
   esac
@@ -58,6 +60,34 @@ done
 # The host injects `safe.bareRepository=explicit`; without this export SwiftPM's
 # git resolve fails with "cannot use bare repository". This is EXPECTED.
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS-'safe.bareRepository=all'}"
+
+# --- Opt-in per-branch app (--branded) ---------------------------------------
+# Installs a SEPARATE app `com.thatcube.Plozz.<slug>` named "Plozz <slug>" so this
+# branch can live side-by-side with the canonical app (and other branches') on the
+# Apple TV. Off by default → the canonical `com.thatcube.Plozz`. Because xcodegen
+# writes the branded name into the tracked Info.plists, we force a regen here and
+# restore the canonical project + plists on exit so the working tree stays clean.
+if [[ "$BRANDED" == "1" ]]; then
+  SLUG="$(git rev-parse --abbrev-ref HEAD 2>/dev/null \
+    | sed 's/^thatcube-//' | tr '[:upper:]' '[:lower:]' \
+    | tr -c 'a-z0-9-' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//' | cut -c1-24)"
+  [[ -z "$SLUG" ]] && SLUG="branch"
+  export PLOZZ_ID_SUFFIX=".$SLUG"
+  export PLOZZ_NAME_SUFFIX=" $SLUG"
+  # A fresh per-branch App ID can't auto-provision the canonical app's User
+  # Management + App Group capabilities, so sign the branded build against the
+  # stripped entitlements (both degrade gracefully — see the branded plists).
+  export PLOZZ_TV_APP_ENTITLEMENTS="App/Resources/Plozz.branded.entitlements"
+  export PLOZZ_TV_TOPSHELF_ENTITLEMENTS="TopShelf/TopShelf.branded.entitlements"
+  REGEN=1
+  echo "▸ Branded build: installing separate app com.thatcube.Plozz.$SLUG (\"Plozz $SLUG\")"
+  restore_canonical() {
+    echo "▸ Restoring canonical project + Info.plists (keeping the tree clean)…"
+    git checkout -- App/Resources/Info.plist App/PlozziOS/Info.plist 2>/dev/null || true
+    ( unset PLOZZ_ID_SUFFIX PLOZZ_NAME_SUFFIX PLOZZ_TV_APP_ENTITLEMENTS PLOZZ_TV_TOPSHELF_ENTITLEMENTS; tools/generate-project.sh >/dev/null 2>&1 ) || true
+  }
+  trap restore_canonical EXIT
+fi
 
 if [[ "$CLEAN" == "1" ]]; then
   echo "▸ Cleaning this worktree's DerivedData…"

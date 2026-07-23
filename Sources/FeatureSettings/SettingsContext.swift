@@ -58,6 +58,7 @@ enum SettingsRoute: Hashable {
     case myLibraries
     case appearance
     case customizeHome
+    case detailPage
     case nightShift
     case playback
     case spoilers
@@ -194,14 +195,24 @@ struct SettingsPageHeader: View {
 struct FocusableSettingsPanel<Content: View>: View {
     let title: String?
     var footer: String?
+    /// Optional remote-select handler. When set, clicking the focused panel with
+    /// the Siri remote invokes it — used only by the About panel to drive the
+    /// hidden Developer Mode unlock gesture (seven selects on the Version row).
+    var onActivate: (() -> Void)?
     @ViewBuilder let content: Content
 
     @FocusState private var isFocused: Bool
     @Environment(\.themePalette) private var palette
 
-    init(title: String? = nil, footer: String? = nil, @ViewBuilder content: () -> Content) {
+    init(
+        title: String? = nil,
+        footer: String? = nil,
+        onActivate: (() -> Void)? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.footer = footer
+        self.onActivate = onActivate
         self.content = content()
     }
 
@@ -212,6 +223,12 @@ struct FocusableSettingsPanel<Content: View>: View {
                     .strokeBorder(palette.accent, lineWidth: 4)
                     .opacity(isFocused ? 1 : 0)
             }
+            // Flatten the panel (card fill + logo + QR + text) into one layer
+            // BEFORE the drop shadow so the shadow is cast by the card's outer
+            // silhouette only. Without this, `.shadow` applies per opaque subview,
+            // so the QR code and inner content each drop their own shadow on
+            // focus instead of just the whole card.
+            .compositingGroup()
             .shadow(color: .black.opacity(isFocused ? 0.28 : 0), radius: isFocused ? 14 : 0, y: isFocused ? 6 : 0)
             .scaleEffect(isFocused ? 1.01 : 1)
             .focusable()
@@ -219,6 +236,7 @@ struct FocusableSettingsPanel<Content: View>: View {
             .focusEffectDisabled()
             .animation(.easeOut(duration: 0.16), value: isFocused)
             .accessibilityElement(children: .combine)
+            .onTapGesture { onActivate?() }
     }
 }
 

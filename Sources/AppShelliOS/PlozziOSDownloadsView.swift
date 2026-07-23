@@ -36,14 +36,14 @@ struct PlozziOSDownloadsView: View {
         .navigationTitle("Downloads")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                PlozziOSSettingsAvatarButton(size: 30, action: onShowSettings)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     PlozziOSDownloadSettingsView(model: model)
                 } label: {
                     Label("Download Settings", systemImage: "gearshape")
                 }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                PlozziOSSettingsAvatarButton(size: 36, action: onShowSettings)
             }
         }
         .confirmationDialog(
@@ -547,7 +547,7 @@ struct PlozziOSDownloadSettingsView: View {
     @State private var pendingBulkDeletion: PlozziOSDownloadsBulkDeletion?
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup {
                 Toggle("Allow Cellular Downloads", isOn: $model.allowsCellular)
                 Toggle(

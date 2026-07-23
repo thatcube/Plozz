@@ -31,6 +31,7 @@ struct CustomizeHomeDetailView: View {
     let seerConfigured: Bool
 
     @Environment(HeroSettingsModel.self) private var hero
+    @Environment(HeroBackgroundSettingsModel.self) private var heroBackground
 
     var body: some View {
         SettingsSplitLayout(title: "Customize Home", sections: sections)
@@ -284,10 +285,32 @@ struct CustomizeHomeDetailView: View {
                         }
                     }
                 }
+
+                heroTrailerGroup
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.easeInOut(duration: 0.22), value: hero.settings.isEnabled)
+    }
+
+    @ViewBuilder private var heroTrailerGroup: some View {
+        @Bindable var heroBackground = heroBackground
+        SettingsDetailGroup(title: "Trailer") {
+            VStack(alignment: .leading, spacing: 24) {
+                Toggle(
+                    "Play the trailer behind the hero",
+                    isOn: $heroBackground.settings.homeTrailerEnabled
+                )
+                .toggleStyle(SettingsSwitchToggleStyle())
+                if heroBackground.settings.homeTrailerEnabled {
+                    Toggle(
+                        "Start muted",
+                        isOn: $heroBackground.settings.homeTrailerMuted
+                    )
+                    .toggleStyle(SettingsSwitchToggleStyle())
+                }
+            }
+        }
     }
 
     // MARK: - Per-library row option identity

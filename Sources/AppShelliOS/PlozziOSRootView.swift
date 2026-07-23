@@ -503,7 +503,7 @@ private struct PlozziOSTabShell: View {
                 .background { AppBackground(palette: palette) }
             }
         }
-        .tabViewStyle(.sidebarAdaptable)
+        .tabViewStyle(.tabBarOnly)
         .background { AppBackground(palette: palette) }
         .background(alignment: .topLeading) {
             PlozziOSHomeSidebarOverlapProbe(
@@ -520,8 +520,46 @@ private struct PlozziOSTabShell: View {
             )
             .preferredColorScheme(settingsPresentationColorScheme)
             .presentationSizing(.page)
+            // Elevation edge for the all-black theme: without it the sheet's
+            // dark surface blends straight into the dark page behind it, so the
+            // drawer doesn't read as a layer above the content. Reuse the exact
+            // hairline the settings group cards use (`cardOpaqueBorder`), pin the
+            // sheet corner radius so the stroke traces the card's rounded top
+            // corners precisely, and mask it to the top so only the floating top
+            // rim shows — the sides/bottom sit at the screen edge where a border
+            // adds nothing. Dark themes only; a light sheet already separates
+            // itself from the page behind it.
+            .presentationCornerRadius(Self.settingsSheetCornerRadius)
+            .overlay {
+                if !settingsPalette.isLight {
+                    RoundedRectangle(
+                        cornerRadius: Self.settingsSheetCornerRadius,
+                        style: .continuous
+                    )
+                    .strokeBorder(settingsPalette.cardOpaqueBorder, lineWidth: 1)
+                    .mask {
+                        LinearGradient(
+                            stops: [
+                                .init(color: .white, location: 0),
+                                .init(color: .white, location: 0.04),
+                                .init(color: .clear, location: 0.12),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    }
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                }
+            }
         }
     }
+
+    /// Corner radius pinned on the Settings sheet so the elevation border can
+    /// trace the card's rounded edge exactly (SwiftUI's default sheet radius is
+    /// unspecified, which would leave the overlay stroke and the real corner
+    /// slightly misaligned).
+    private static let settingsSheetCornerRadius: CGFloat = 20
 
     private var settingsPalette: ThemePalette {
         ThemePalette.palette(

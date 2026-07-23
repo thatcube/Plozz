@@ -24,55 +24,83 @@ public enum HeroBackgroundMode: String, Codable, CaseIterable, Sendable {
     public var detail: String {
         switch self {
         case .off: "Show static hero artwork only."
-        case .trailer: "Play the trailer behind the hero, then move to the next title."
+        case .trailer: "Play the title's trailer behind the hero."
         case .themeMusic: "Play a title's theme music while you browse its detail page."
         }
     }
 }
 
-/// Per-profile hero background preferences: which background mode is active and,
-/// for the trailer mode, whether its audio is muted.
+/// Per-profile hero background preferences, split by surface:
+///  - the **Home** hero (carousel) can play a trailer behind the artwork;
+///  - the **Detail** page hero can play a trailer OR the title's theme music
+///    (mutually exclusive by construction — one `detailMode`).
+/// Each surface owns its own mute *default* (`homeTrailerMuted`/`detailTrailerMuted`);
+/// the in-hero mute button is a transient session override that never writes these.
 ///
-/// Lenient decode (per-field fallbacks) so adding a field later reads an older
-/// persisted blob as "that field at its default" instead of failing the decode.
+/// Lenient decode with a migration from the legacy single-mode shape (`mode` +
+/// `trailerMuted`): the old mode maps to the detail page (theme music was always
+/// detail-only), and the home trailer inherits whether the old mode was `.trailer`.
 public struct HeroBackgroundSettings: Codable, Equatable, Sendable {
-    /// What plays behind the hero. Trailer autoplay is the default (muted), per
-    /// the product intent that the feature is on out of the box; it degrades
-    /// gracefully to static artwork when no fast trailer is available.
-    public var mode: HeroBackgroundMode
-    /// Whether an autoplaying trailer is muted. Default `true` — trailer sound is
-    /// opt-in, so the hero never blares audio unexpectedly.
-    public var trailerMuted: Bool
+    /// Whether a trailer autoplays behind the HOME hero. Default `true`.
+    public var homeTrailerEnabled: Bool
+    /// Mute *default* for the home hero's trailer. Default `true`.
+    public var homeTrailerMuted: Bool
+    /// What plays behind the DETAIL page hero (static / trailer / theme music).
+    public var detailMode: HeroBackgroundMode
+    /// Mute *default* for the detail hero's trailer. Default `true`.
+    public var detailTrailerMuted: Bool
 
     public init(
-        mode: HeroBackgroundMode = .trailer,
-        trailerMuted: Bool = true
+        homeTrailerEnabled: Bool = true,
+        homeTrailerMuted: Bool = true,
+        detailMode: HeroBackgroundMode = .trailer,
+        detailTrailerMuted: Bool = true
     ) {
-        self.mode = mode
-        self.trailerMuted = trailerMuted
+        self.homeTrailerEnabled = homeTrailerEnabled
+        self.homeTrailerMuted = homeTrailerMuted
+        self.detailMode = detailMode
+        self.detailTrailerMuted = detailTrailerMuted
     }
 
     public static let `default` = HeroBackgroundSettings()
 
-    /// Whether autoplay trailers should run for this profile.
-    public var trailerAutoplayEnabled: Bool { mode == .trailer }
-
-    /// Whether theme music should play for this profile.
-    public var themeMusicEnabled: Bool { mode == .themeMusic }
+    /// Whether the DETAIL page should play theme music.
+    public var themeMusicEnabled: Bool { detailMode == .themeMusic }
+    /// Whether the DETAIL page should autoplay a trailer.
+    public var detailTrailerEnabled: Bool { detailMode == .trailer }
 
     private enum CodingKeys: String, CodingKey {
+        // New per-surface keys.
+        case homeTrailerEnabled, homeTrailerMuted, detailMode, detailTrailerMuted
+        // Legacy single-mode keys (read for migration only).
         case mode, trailerMuted
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(homeTrailerEnabled, forKey: .homeTrailerEnabled)
+        try c.encode(homeTrailerMuted, forKey: .homeTrailerMuted)
+        try c.encode(detailMode, forKey: .detailMode)
+        try c.encode(detailTrailerMuted, forKey: .detailTrailerMuted)
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = HeroBackgroundSettings.default
-        if let token = (try? c.decodeIfPresent(String.self, forKey: .mode)) ?? nil {
-            mode = HeroBackgroundMode(rawValue: token) ?? d.mode
-        } else {
-            mode = d.mode
-        }
-        trailerMuted = ((try? c.decodeIfPresent(Bool.self, forKey: .trailerMuted)) ?? nil) ?? d.trailerMuted
+        // Legacy single-mode values (present only in a pre-split persisted blob).
+        let legacyMode = ((try? c.decodeIfPresent(String.self, forKey: .mode)) ?? nil)
+            .flatMap { HeroBackgroundMode(rawValue: $0) }
+        let legacyMuted = (try? c.decodeIfPresent(Bool.self, forKey: .trailerMuted)) ?? nil
+
+        homeTrailerEnabled = ((try? c.decodeIfPresent(Bool.self, forKey: .homeTrailerEnabled)) ?? nil)
+            ?? legacyMode.map { $0 == .trailer } ?? d.homeTrailerEnabled
+        homeTrailerMuted = ((try? c.decodeIfPresent(Bool.self, forKey: .homeTrailerMuted)) ?? nil)
+            ?? legacyMuted ?? d.homeTrailerMuted
+        detailMode = ((try? c.decodeIfPresent(String.self, forKey: .detailMode)) ?? nil)
+            .flatMap { HeroBackgroundMode(rawValue: $0) }
+            ?? legacyMode ?? d.detailMode
+        detailTrailerMuted = ((try? c.decodeIfPresent(Bool.self, forKey: .detailTrailerMuted)) ?? nil)
+            ?? legacyMuted ?? d.detailTrailerMuted
     }
 }
 
@@ -113,7 +141,7 @@ public final class HeroBackgroundSettingsStore: HeroBackgroundSettingsStoring, @
                    from: legacyData
                ),
                legacy.isEnabled {
-                return HeroBackgroundSettings(mode: .themeMusic)
+                return HeroBackgroundSettings(detailMode: .themeMusic)
             }
             return .default
         }

@@ -97,21 +97,20 @@ struct PlozziOSHomeView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: toggleTrailerMute) {
                         Image(
-                            systemName: appModel.settings.heroBackground
-                                .settings.trailerMuted
+                            systemName: trailerController.isMuted
                                 ? "speaker.slash.fill"
                                 : "speaker.wave.2.fill"
                         )
                     }
                     .accessibilityLabel(
-                        appModel.settings.heroBackground.settings.trailerMuted
+                        trailerController.isMuted
                             ? "Unmute trailer"
                             : "Mute trailer"
                     )
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                PlozziOSSettingsAvatarButton(size: 30, action: onShowSettings)
+                PlozziOSSettingsAvatarButton(size: 36, action: onShowSettings)
             }
         }
         .task(id: appModel.settings.homeVisibility.visibility) {
@@ -188,10 +187,8 @@ struct PlozziOSHomeView: View {
     }
 
     private func toggleTrailerMute() {
-        appModel.settings.heroBackground.settings.trailerMuted.toggle()
-        trailerController.setMuted(
-            appModel.settings.heroBackground.settings.trailerMuted
-        )
+        // Session-only override — never rewrites the saved mute default.
+        trailerController.toggleMuted()
     }
 
     private func loadedContent(_ content: HomeViewModel.Content) -> some View {

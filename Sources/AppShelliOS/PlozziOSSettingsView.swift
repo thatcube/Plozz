@@ -138,6 +138,7 @@ private enum PlozziOSSettingsDestination: Hashable {
     case trackers
     case appearance
     case home
+    case detailPage
     case playback
     case downloads
     case syncSetup
@@ -167,6 +168,7 @@ private struct PlozziOSSettingsSplitView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var confirmSignOutAll = false
     @State private var confirmEraseICloud = false
+    private var developerMode: DeveloperModeModel { .shared }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -230,6 +232,7 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.trackers, title: "Trackers", systemImage: "link")
                         settingsRow(.appearance, title: "Appearance", systemImage: "paintpalette")
                         settingsRow(.home, title: "Customize Home", systemImage: "house")
+                        settingsRow(.detailPage, title: "Detail Page", systemImage: "rectangle.portrait.on.rectangle.portrait")
                         settingsRow(.playback, title: "Playback", systemImage: "play.rectangle")
                         settingsRow(.subtitles, title: "Subtitles", systemImage: "captions.bubble")
                         settingsRow(.spoilers, title: "Spoilers", systemImage: "eye.slash")
@@ -247,11 +250,19 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.attributions, title: SettingsCopy.attributions, systemImage: "doc.text.magnifyingglass")
                         settingsRow(.about, title: "About", systemImage: "info.circle")
                     }
-                    #if DEBUG
-                    SettingsSectionGroup("Debug") {
-                        Button("Reset to First Run") {
-                            appModel.resetToFirstRunForDebugging()
-                            onClose()
+                    // Hidden until Developer Mode is unlocked (tap Version seven
+                    // times in About). Gating on the runtime flag rather than
+                    // `#if DEBUG` hides these in every build — including the
+                    // Debug-config branded builds — while keeping them reachable.
+                    if developerMode.isEnabled {
+                        SettingsSectionGroup("Developer") {
+                            Button("Reset to First Run") {
+                                appModel.resetToFirstRunForDebugging()
+                                onClose()
+                            }
+                            Button("Turn Off Developer Mode", role: .destructive) {
+                                developerMode.disable()
+                            }
                         }
                         Button("Erase Everything From iCloud", role: .destructive) {
                             confirmEraseICloud = true
@@ -269,8 +280,8 @@ private struct PlozziOSSettingsSplitView: View {
                         } message: {
                             Text("Deletes the whole household — every profile, server, and synced login — from iCloud (all your devices), wipes this device to first-run, and turns iCloud Sync OFF here. Use to test a clean cold start (e.g. set up only on the Apple TV, then fresh-install another device). Re-enable Sync when done.")
                         }
+                        PlozziOSDeveloperInfoSection()
                     }
-                    #endif
                 }
             }
             .navigationTitle("Settings")
@@ -360,16 +371,20 @@ private struct PlozziOSSettingsSplitView: View {
         case .home:
             PlozziOSHomeSettingsView(
                 hero: appModel.settings.hero,
+                heroBackground: appModel.settings.heroBackground,
                 visibility: appModel.settings.homeVisibility,
                 accounts: appModel.accountsProviders.resolvedActiveAccounts,
                 seerConfigured: appModel.seerService.isConfigured
             )
+        case .detailPage:
+            PlozziOSDetailPageSettingsView(
+                heroBackground: appModel.settings.heroBackground,
+                themeMusic: appModel.settings.themeMusic
+            )
         case .playback:
             PlozziOSPlaybackSettingsView(
                 model: appModel.settings.playback,
-                audioPolicy: appModel.settings.audioPolicy,
-                heroBackground: appModel.settings.heroBackground,
-                themeMusic: appModel.settings.themeMusic
+                audioPolicy: appModel.settings.audioPolicy
             )
         case .downloads:
             PlozziOSDownloadSettingsView(model: appModel.downloads)
@@ -408,8 +423,11 @@ private struct PlozziOSAboutSettingsView: View {
     let hasAccounts: Bool
     let onSignOutAll: () -> Void
 
+    private var developerMode: DeveloperModeModel { .shared }
+    @State private var showDeveloperUnlockedAlert = false
+
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Plozz") {
                 LabeledContent("Version") {
                     Text(
@@ -418,6 +436,8 @@ private struct PlozziOSAboutSettingsView: View {
                         ] as? String ?? "—"
                     )
                 }
+                .contentShape(Rectangle())
+                .onTapGesture(perform: handleVersionTap)
                 LabeledContent("Build") {
                     Text(
                         Bundle.main.infoDictionary?[
@@ -439,6 +459,44 @@ private struct PlozziOSAboutSettingsView: View {
         }
         .settingsPageSurface()
         .navigationTitle("About")
+        .alert("Developer Mode Enabled", isPresented: $showDeveloperUnlockedAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Diagnostic tools are now shown in Settings under Developer. Turn them off again from that section.")
+        }
+    }
+
+    private func handleVersionTap() {
+        if case .justEnabled = developerMode.registerUnlockActivation() {
+            showDeveloperUnlockedAlert = true
+        }
+    }
+}
+
+/// Read-only "Device & Build" facts shown under Developer Mode: which build is
+/// installed (canonical vs a `--branded` side-by-side app), release channel, and
+/// whether the App Group / crash endpoint are present. A Copy button dumps it all
+/// as text for a bug report.
+private struct PlozziOSDeveloperInfoSection: View {
+    var body: some View {
+        SettingsSectionGroup("Device & Build") {
+            ForEach(DeveloperInfo.snapshot()) { item in
+                LabeledContent(item.label, value: item.value)
+            }
+            LabeledContent("OS", value: ProcessInfo.processInfo.operatingSystemVersionString)
+            Button {
+                UIPasteboard.general.string = DeveloperInfo.copyText(
+                    DeveloperInfo.snapshot(),
+                    extra: [DeveloperInfoItem(
+                        id: "os",
+                        label: "OS",
+                        value: ProcessInfo.processInfo.operatingSystemVersionString
+                    )]
+                )
+            } label: {
+                Label("Copy Info", systemImage: "doc.on.doc")
+            }
+        }
     }
 }
 
@@ -449,6 +507,8 @@ private struct PlozziOSSettingsCompactMenu: View {
     @State private var confirmSignOutAll = false
     @State private var confirmEraseICloud = false
     @State private var showMetadata = false
+    private var developerMode: DeveloperModeModel { .shared }
+    @State private var showDeveloperUnlockedAlert = false
 
     var body: some View {
         ScrollView {
@@ -538,6 +598,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 NavigationLink {
                     PlozziOSHomeSettingsView(
                         hero: appModel.settings.hero,
+                        heroBackground: appModel.settings.heroBackground,
                         visibility: appModel.settings.homeVisibility,
                         accounts: appModel.accountsProviders.resolvedActiveAccounts,
                         seerConfigured: appModel.seerService.isConfigured
@@ -546,11 +607,17 @@ private struct PlozziOSSettingsCompactMenu: View {
                     Label("Customize Home", systemImage: "house")
                 }
                 NavigationLink {
-                    PlozziOSPlaybackSettingsView(
-                        model: appModel.settings.playback,
-                        audioPolicy: appModel.settings.audioPolicy,
+                    PlozziOSDetailPageSettingsView(
                         heroBackground: appModel.settings.heroBackground,
                         themeMusic: appModel.settings.themeMusic
+                    )
+                } label: {
+                    Label("Detail Page", systemImage: "rectangle.portrait.on.rectangle.portrait")
+                }
+                NavigationLink {
+                    PlozziOSPlaybackSettingsView(
+                        model: appModel.settings.playback,
+                        audioPolicy: appModel.settings.audioPolicy
                     )
                 } label: {
                     Label("Playback", systemImage: "play.rectangle")
@@ -596,6 +663,12 @@ private struct PlozziOSSettingsCompactMenu: View {
                 LabeledContent("Version") {
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                 }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if case .justEnabled = developerMode.registerUnlockActivation() {
+                        showDeveloperUnlockedAlert = true
+                    }
+                }
                 LabeledContent("Build") {
                     Text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
                 }
@@ -606,11 +679,17 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
             }
 
-                #if DEBUG
-                SettingsSectionGroup("Debug") {
-                    Button("Reset to First Run") {
-                        appModel.resetToFirstRunForDebugging()
-                        dismiss()
+                // Hidden until Developer Mode is unlocked (tap Version seven
+                // times). Gated on the runtime flag in every build.
+                if developerMode.isEnabled {
+                    SettingsSectionGroup("Developer") {
+                        Button("Reset to First Run") {
+                            appModel.resetToFirstRunForDebugging()
+                            dismiss()
+                        }
+                        Button("Turn Off Developer Mode", role: .destructive) {
+                            developerMode.disable()
+                        }
                     }
                     Button("Erase Everything From iCloud", role: .destructive) {
                         confirmEraseICloud = true
@@ -628,8 +707,8 @@ private struct PlozziOSSettingsCompactMenu: View {
                     } message: {
                         Text("Deletes the whole household — every profile, server, and synced login — from iCloud (all your devices), wipes this device to first-run, and turns iCloud Sync OFF here. Use to test a clean cold start (e.g. set up only on the Apple TV, then fresh-install another device). Re-enable Sync when done.")
                     }
+                    PlozziOSDeveloperInfoSection()
                 }
-                #endif
 
                 if let accountError = appModel.accountError {
                     SettingsSectionGroup {
@@ -653,6 +732,11 @@ private struct PlozziOSSettingsCompactMenu: View {
             }
         } message: {
             Text("This removes every server and network share from this device.")
+        }
+        .alert("Developer Mode Enabled", isPresented: $showDeveloperUnlockedAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Diagnostic tools are now shown in Settings under Developer. Turn them off again from that section.")
         }
     }
 }
@@ -787,7 +871,7 @@ struct PlozziOSAccountDetailView: View {
     private var offerEverywhere: Bool { appModel.offersRemoveEverywhere }
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Account") {
                 LabeledContent("Provider", value: account.server.provider.displayName)
                 if !account.userName.isEmpty {
@@ -1013,7 +1097,7 @@ private struct PlozziOSAppearanceSettingsView: View {
     @AppStorage("plozz.heroFadeBlackTint") private var heroFadeBlackTint = false
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Theme") {
                 Picker("Appearance", selection: $theme.theme) {
                     ForEach(AppTheme.allCases) { theme in
@@ -1068,6 +1152,7 @@ private struct PlozziOSAppearanceSettingsView: View {
 
 private struct PlozziOSHomeSettingsView: View {
     @Bindable var hero: HeroSettingsModel
+    @Bindable var heroBackground: HeroBackgroundSettingsModel
     let visibility: HomeLibraryVisibilityModel
     let accounts: [ResolvedAccount]
     let seerConfigured: Bool
@@ -1076,7 +1161,7 @@ private struct PlozziOSHomeSettingsView: View {
     @State private var selectedLibraryID: String?
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Rows") {
                 ForEach(HomeGlobalRow.allCases, id: \.rawValue) { row in
                     Toggle(
@@ -1142,11 +1227,21 @@ private struct PlozziOSHomeSettingsView: View {
                 Text("Choose which libraries and library-specific rows appear on Home.")
             }
 
-            SettingsSectionGroup("Hero carousel") {
+            SettingsSectionGroup("Hero") {
                 Toggle("Show hero", isOn: $hero.settings.isEnabled)
                 if hero.settings.isEnabled {
                     Toggle("Hide watched titles", isOn: $hero.settings.hideWatched)
                     Toggle("Auto-advance", isOn: $hero.settings.autoAdvance)
+                    Toggle(
+                        "Play trailer behind the hero",
+                        isOn: $heroBackground.settings.homeTrailerEnabled
+                    )
+                    if heroBackground.settings.homeTrailerEnabled {
+                        Toggle(
+                            "Start muted",
+                            isOn: $heroBackground.settings.homeTrailerMuted
+                        )
+                    }
                 }
             }
 
@@ -1309,7 +1404,7 @@ private struct PlozziOSLibraryHomeSettingsView: View {
     let visibility: HomeLibraryVisibilityModel
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup {
                 Toggle(
                     "Enabled",
@@ -1354,11 +1449,49 @@ private struct PlozziOSLibraryHomeSettingsView: View {
     }
 }
 
+private struct PlozziOSDetailPageSettingsView: View {
+    @Bindable var heroBackground: HeroBackgroundSettingsModel
+    @Bindable var themeMusic: ThemeMusicSettingsModel
+
+    var body: some View {
+        List {
+            SettingsSectionGroup("Behind the hero") {
+                Picker(
+                    "Background",
+                    selection: $heroBackground.settings.detailMode
+                ) {
+                    ForEach(HeroBackgroundMode.allCases, id: \.self) {
+                        Text($0.displayName).tag($0)
+                    }
+                }
+                if heroBackground.settings.detailMode == .trailer {
+                    Toggle(
+                        "Start muted",
+                        isOn: $heroBackground.settings.detailTrailerMuted
+                    )
+                }
+                if heroBackground.settings.detailMode == .themeMusic {
+                    Picker(
+                        "Theme music volume",
+                        selection: $themeMusic.settings.volume
+                    ) {
+                        ForEach(ThemeMusicVolume.allCases, id: \.self) {
+                            Text($0.displayName).tag($0)
+                        }
+                    }
+                }
+            } footer: {
+                Text("Choose what plays behind the hero on a movie or show's detail page. Trailer and theme music never play together.")
+            }
+        }
+        .settingsPageSurface()
+        .navigationTitle("Detail Page")
+    }
+}
+
 private struct PlozziOSPlaybackSettingsView: View {
     @Bindable var model: PlaybackSettingsModel
     @Bindable var audioPolicy: AudioPolicyModel
-    @Bindable var heroBackground: HeroBackgroundSettingsModel
-    @Bindable var themeMusic: ThemeMusicSettingsModel
 
     private static let policyCategories: [ContentCategory] = [.movie, .tvShow, .anime]
     private static let audioOptions: [AudioLanguagePreference] =
@@ -1367,7 +1500,7 @@ private struct PlozziOSPlaybackSettingsView: View {
         }
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Skipping") {
                 Picker("Intros and credits", selection: $model.settings.skipIntros) {
                     ForEach(SkipIntrosMode.allCases, id: \.self) {
@@ -1405,33 +1538,6 @@ private struct PlozziOSPlaybackSettingsView: View {
                     "Sync watch state across servers",
                     isOn: $model.settings.syncWatchAcrossServers
                 )
-            }
-
-            SettingsSectionGroup("Hero Background") {
-                Picker(
-                    "Background",
-                    selection: $heroBackground.settings.mode
-                ) {
-                    ForEach(HeroBackgroundMode.allCases, id: \.self) {
-                        Text($0.displayName).tag($0)
-                    }
-                }
-                if heroBackground.settings.mode == .trailer {
-                    Toggle(
-                        "Mute trailer audio",
-                        isOn: $heroBackground.settings.trailerMuted
-                    )
-                }
-                if heroBackground.settings.mode == .themeMusic {
-                    Picker(
-                        "Theme music volume",
-                        selection: $themeMusic.settings.volume
-                    ) {
-                        ForEach(ThemeMusicVolume.allCases, id: \.self) {
-                            Text($0.displayName).tag($0)
-                        }
-                    }
-                }
             }
 
             SettingsSectionGroup("Tracks") {
@@ -1513,7 +1619,7 @@ private struct PlozziOSSubtitleSettingsView: View {
         [.movie, .tvShow, .anime]
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup("Appearance") {
                 Toggle("Follow system style", isOn: $style.style.followsSystemStyle)
                 Picker("Font", selection: $style.style.fontFamily) {
@@ -1629,7 +1735,7 @@ private struct PlozziOSSpoilerSettingsView: View {
     @Bindable var model: SpoilerSettingsModel
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup {
                 Toggle("Protect unwatched episodes", isOn: $model.settings.isEnabled)
                 Picker("Thumbnail treatment", selection: $model.settings.mode) {
@@ -1655,7 +1761,7 @@ private struct PlozziOSNightShiftSettingsView: View {
     @Bindable var model: NightShiftSettingsModel
 
     var body: some View {
-        Form {
+        List {
             SettingsSectionGroup {
                 Toggle("Circadian Mode", isOn: $model.settings.isEnabled)
                 Picker("Schedule", selection: $model.settings.scheduleMode) {

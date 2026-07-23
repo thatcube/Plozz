@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Branded (per-branch) Top Shelf entitlements — empty on purpose. The canonical
+  App Group (group.com.thatcube.Plozz) can't be shared by a fresh per-branch App
+  ID, and Top Shelf content isn't needed for a dev/side-by-side build, so we drop
+  it. See App/Resources/Plozz.branded.entitlements and tools/deploy-tv.sh --branded.
+-->
+<dict>
+</dict>
+</plist>

@@ -33,6 +33,7 @@ NO_BUILD=0
 # implies it (nothing new is compiled).
 REGEN=1
 INCLUDE_METADATA_KEYS=0
+BRANDED=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -42,6 +43,7 @@ for arg in "$@"; do
     --no-build) NO_BUILD=1; REGEN=0 ;;
     --regen) REGEN=1 ;;
     --no-regen) REGEN=0 ;;
+    --branded) BRANDED=1 ;;
     --metadata-keys) INCLUDE_METADATA_KEYS=1 ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown flag: $arg (try --help)" >&2; exit 2 ;;
@@ -49,6 +51,29 @@ for arg in "$@"; do
 done
 
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS-'safe.bareRepository=all'}"
+
+# --- Opt-in per-branch app (--branded) ---------------------------------------
+# Installs a SEPARATE app `com.thatcube.Plozz.<slug>` named "Plozz <slug>" so this
+# branch lives side-by-side with the canonical app (and other branches') on the
+# device. Off by default → canonical `com.thatcube.Plozz`. Forces a regen and
+# restores the canonical project + tracked Info.plists on exit (xcodegen writes the
+# branded name into them) so the working tree stays clean.
+if [[ "$BRANDED" == "1" ]]; then
+  SLUG="$(git rev-parse --abbrev-ref HEAD 2>/dev/null \
+    | sed 's/^thatcube-//' | tr '[:upper:]' '[:lower:]' \
+    | tr -c 'a-z0-9-' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//' | cut -c1-24)"
+  [[ -z "$SLUG" ]] && SLUG="branch"
+  export PLOZZ_ID_SUFFIX=".$SLUG"
+  export PLOZZ_NAME_SUFFIX=" $SLUG"
+  REGEN=1
+  echo "▸ Branded build: installing separate app com.thatcube.Plozz.$SLUG (\"Plozz $SLUG\")"
+  restore_canonical() {
+    echo "▸ Restoring canonical project + Info.plists (keeping the tree clean)…"
+    git checkout -- App/Resources/Info.plist App/PlozziOS/Info.plist 2>/dev/null || true
+    ( unset PLOZZ_ID_SUFFIX PLOZZ_NAME_SUFFIX; tools/generate-project.sh >/dev/null 2>&1 ) || true
+  }
+  trap restore_canonical EXIT
+fi
 
 # App Store Connect API key for provisioning. When present, xcodebuild can enable
 # NEW App ID capabilities (e.g. Associated Domains) and regenerate profiles via

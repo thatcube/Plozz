@@ -256,6 +256,20 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
     let trailerResolver: HeroTrailerResolving
     @ViewBuilder let foreground: () -> Foreground
 
+    /// Whether a trailer should autoplay for THIS surface (home vs detail read
+    /// their own setting), and the surface's mute *default* (the session mute
+    /// itself lives on the shared controller).
+    private var surfaceTrailerEnabled: Bool {
+        surfaceRole == .home
+            ? backgroundSettings.settings.homeTrailerEnabled
+            : backgroundSettings.settings.detailTrailerEnabled
+    }
+    private var surfaceMuteDefault: Bool {
+        surfaceRole == .home
+            ? backgroundSettings.settings.homeTrailerMuted
+            : backgroundSettings.settings.detailTrailerMuted
+    }
+
     private var height: CGFloat {
         PlozziOSHeroMetrics.height(
             style: style,
@@ -313,11 +327,11 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
                 .padding(.bottom, style == .compactPortrait ? 30 : 42)
 
             if showsMuteButton,
-               backgroundSettings.settings.mode == .trailer,
+               surfaceTrailerEnabled,
                trailerController.currentItemID == item.id,
                trailerController.isPlaying {
                 PlozziOSHeroMuteButton(
-                    isMuted: backgroundSettings.settings.trailerMuted,
+                    isMuted: trailerController.isMuted,
                     onToggle: toggleMuted
                 )
                 .frame(
@@ -334,25 +348,17 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
             id: PlozziOSHeroPlaybackID(
                 itemID: item.id,
                 isActive: isActive,
-                mode: backgroundSettings.settings.mode,
+                trailerEnabled: surfaceTrailerEnabled,
                 role: surfaceRole
             )
         ) {
             await updateTrailerPlayback()
         }
-        .onChange(
-            of: backgroundSettings.settings.trailerMuted,
-            initial: true
-        ) { _, muted in
-            if trailerController.isShowing(item.id) {
-                trailerController.setMuted(muted)
-            }
-        }
         .onDisappear(perform: releaseTrailerSurface)
     }
 
     private func updateTrailerPlayback() async {
-        guard isActive, backgroundSettings.settings.trailerAutoplayEnabled else {
+        guard isActive, surfaceTrailerEnabled else {
             trailerController.stop(ifShowing: item.id)
             return
         }
@@ -367,7 +373,8 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
             )
         }
         if trailerController.isShowing(item.id) {
-            trailerController.setMuted(backgroundSettings.settings.trailerMuted)
+            // Already rolling for this item — keep the live (session) mute; don't
+            // reset it to the default.
             if !trailerController.isPlaying {
                 await startPreparedAfterLeadIn()
             }
@@ -380,7 +387,7 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
         trailerController.prepare(
             itemID: item.id,
             resolvedURL: source.url,
-            muted: backgroundSettings.settings.trailerMuted
+            muted: surfaceMuteDefault
         )
         trailerController.claimSurface(surfaceRole, itemID: item.id)
         while !trailerController.isReady {
@@ -415,8 +422,8 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
     }
 
     private func toggleMuted() {
-        backgroundSettings.settings.trailerMuted.toggle()
-        trailerController.setMuted(backgroundSettings.settings.trailerMuted)
+        // Session-only: flip the live trailer mute; never rewrite the saved default.
+        trailerController.toggleMuted()
     }
 
     private func releaseTrailerSurface() {
@@ -444,7 +451,7 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
 private struct PlozziOSHeroPlaybackID: Equatable {
     let itemID: String
     let isActive: Bool
-    let mode: HeroBackgroundMode
+    let trailerEnabled: Bool
     let role: HeroTrailerSurfaceRole
 }
 

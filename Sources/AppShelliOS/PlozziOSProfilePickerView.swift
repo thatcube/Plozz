@@ -1,5 +1,6 @@
 #if os(iOS)
 import CoreModels
+import FeatureProfiles
 import Foundation
 import SwiftUI
 
@@ -49,7 +50,12 @@ struct PlozziOSProfilePickerView: View {
 
     private func profileCard(_ profile: Profile) -> some View {
         VStack(spacing: 14) {
-            profileAvatar(profile)
+            // Shared avatar renderer so the picker matches every other avatar
+            // surface (Settings list, editor preview): symbol / emoji on the
+            // profile's CHOSEN colour, or a borrowed photo. The old local
+            // `fallbackAvatar` painted a flat accent tint and ignored the
+            // profile's colour entirely.
+            ProfileAvatarView(profile: profile, size: 116)
                 .frame(width: 116, height: 116)
                 .clipShape(Circle())
                 .overlay {
@@ -75,38 +81,6 @@ struct PlozziOSProfilePickerView: View {
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private func profileAvatar(_ profile: Profile) -> some View {
-        if let rawURL = profile.avatarImageURL,
-           let url = URL(string: rawURL) {
-            AsyncImage(url: url) { phase in
-                if case let .success(image) = phase {
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    fallbackAvatar(profile)
-                }
-            }
-        } else {
-            fallbackAvatar(profile)
-        }
-    }
-
-    private func fallbackAvatar(_ profile: Profile) -> some View {
-        ZStack {
-            Color.accentColor.opacity(0.16)
-            if let emoji = profile.avatarEmoji, !emoji.isEmpty {
-                Text(emoji)
-                    .font(.system(size: 54))
-            } else {
-                Image(systemName: profile.avatarSymbol)
-                    .font(.system(size: 46, weight: .medium))
-                    .foregroundStyle(.tint)
-            }
-        }
     }
 }
 #endif

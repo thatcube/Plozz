@@ -10,7 +10,7 @@ struct PlozziOSTrackerSettingsView: View {
     let appModel: PlozziOSAppModel
 
     var body: some View {
-        Form {
+        List {
             Text(
                 "Connections are stored separately for each Plozz profile. "
                     + "Playback progress is sent to every connected tracker."

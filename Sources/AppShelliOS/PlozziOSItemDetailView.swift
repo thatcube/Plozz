@@ -778,13 +778,13 @@ private struct PlozziOSSourceVersionControls: View {
 
             if versions.count > 1 {
                 Menu {
-                    ForEach(versions) { version in
+                    ForEach(versions.sortedForPicker()) { version in
                         Button {
                             onSelectVersion(version.id)
                         } label: {
-                            selectionLabel(
+                            MenuSelectionLabel(
                                 version.displayLabel,
-                                selected: version.id == selectedVersionID
+                                isSelected: version.id == selectedVersionID
                             )
                         }
                     }
@@ -841,14 +841,6 @@ private struct PlozziOSSourceVersionControls: View {
         }
     }
 
-    @ViewBuilder
-    private func selectionLabel(_ title: String, selected: Bool) -> some View {
-        if selected {
-            Label(title, systemImage: "checkmark")
-        } else {
-            Text(title)
-        }
-    }
 }
 
 private struct PlozziOSRequestAction: View {

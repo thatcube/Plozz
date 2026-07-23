@@ -1014,15 +1014,14 @@ struct DetailHeroView: View {
                 $0.id == selectedVersionID
             } ?? versions.first
             Menu {
-                ForEach(versions) { version in
+                ForEach(versions.sortedForPicker()) { version in
                     Button {
                         onSelectVersion(version.id)
                     } label: {
-                        if version.id == currentVersion?.id {
-                            Label(version.displayLabel, systemImage: "checkmark")
-                        } else {
-                            Text(version.displayLabel)
-                        }
+                        MenuSelectionLabel(
+                            version.displayLabel,
+                            isSelected: version.id == currentVersion?.id
+                        )
                     }
                 }
             } label: {
@@ -1414,18 +1413,14 @@ private struct HeroMoreMenu: View, Equatable {
                     $0.id == selectedVersionID
                 } ?? versions.first
                 Section("Version") {
-                    ForEach(versions) { version in
+                    ForEach(versions.sortedForPicker()) { version in
                         Button {
                             onSelectVersion(version.id)
                         } label: {
-                            if version.id == currentVersion?.id {
-                                Label(
-                                    version.displayLabel,
-                                    systemImage: "checkmark"
-                                )
-                            } else {
-                                Text(version.displayLabel)
-                            }
+                            MenuSelectionLabel(
+                                version.displayLabel,
+                                isSelected: version.id == currentVersion?.id
+                            )
                         }
                     }
                 }

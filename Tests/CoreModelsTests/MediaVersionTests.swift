@@ -191,4 +191,18 @@ final class MediaVersionTests: XCTestCase {
     func testRecommendedSelectionEmptyIsNil() {
         XCTAssertNil([MediaVersion]().recommendedSelection(for: .default))
     }
+
+    func testPickerOrderSortsKnownSizesLargestFirstAndUnknownLast() {
+        let versions = [
+            MediaVersion(id: "small", height: 2160, sizeBytes: 5_510_000_000),
+            MediaVersion(id: "unknown", height: 4320),
+            MediaVersion(id: "largest", height: 2160, sizeBytes: 65_270_000_000),
+            MediaVersion(id: "medium", height: 480, sizeBytes: 11_410_000_000)
+        ]
+
+        XCTAssertEqual(
+            versions.sortedForPicker().map(\.id),
+            ["largest", "medium", "small", "unknown"]
+        )
+    }
 }

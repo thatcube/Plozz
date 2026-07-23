@@ -370,16 +370,20 @@ public extension Array where Element == MediaVersion {
         return first
     }
 
-    /// A deterministic display order for the version picker. Sorts by
-    /// `qualityScore` descending with stable tiebreaks (height, sizeBytes,
-    /// then `sourceItemID`/`id`) so the picker shows the same order on first
-    /// open and after async same-account sibling discovery folds new entries
-    /// in — independent of insertion/arrival order.
+    /// A deterministic display order for the version picker. Known file sizes
+    /// sort largest-first because they are the clearest scan-friendly proxy for
+    /// source quality; unknown sizes follow, ordered by quality. Stable
+    /// tiebreaks keep the order independent of insertion/arrival order.
     func sortedForPicker() -> [MediaVersion] {
         sorted { lhs, rhs in
+            let lhsSize = lhs.sizeBytes.flatMap { $0 > 0 ? $0 : nil }
+            let rhsSize = rhs.sizeBytes.flatMap { $0 > 0 ? $0 : nil }
+            if lhsSize != rhsSize {
+                if let lhsSize, let rhsSize { return lhsSize > rhsSize }
+                return lhsSize != nil
+            }
             if lhs.qualityScore != rhs.qualityScore { return lhs.qualityScore > rhs.qualityScore }
             if (lhs.height ?? 0) != (rhs.height ?? 0) { return (lhs.height ?? 0) > (rhs.height ?? 0) }
-            if (lhs.sizeBytes ?? 0) != (rhs.sizeBytes ?? 0) { return (lhs.sizeBytes ?? 0) > (rhs.sizeBytes ?? 0) }
             let lhsKey = lhs.sourceItemID ?? lhs.id
             let rhsKey = rhs.sourceItemID ?? rhs.id
             if lhsKey != rhsKey { return lhsKey < rhsKey }

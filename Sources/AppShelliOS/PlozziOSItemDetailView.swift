@@ -114,6 +114,7 @@ struct PlozziOSItemDetailView: View {
 private struct PlozziOSCanonicalItemDetailView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.themePalette) private var palette
     @Environment(HeroTrailerController.self) private var trailerController
     @Environment(PlozziOSAppModel.self) private var appModel
     @State private var viewModel: ItemDetailViewModel
@@ -218,6 +219,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
 
             }
         }
+        .background(palette.backgroundBase.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.load() }
         .alert(

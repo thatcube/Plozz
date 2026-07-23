@@ -564,11 +564,33 @@ struct PlozziOSHeroFadeMask: View {
 /// Used by both the Home carousel (as the static overlay) and the detail hero.
 struct PlozziOSHeroBackgroundMelt: View {
     @Environment(\.themePalette) private var palette
+    @AppStorage("plozz.heroFadeBlackTint") private var blackTint = false
     let style: HeroArtworkStyle
 
     var body: some View {
         let base = palette.backgroundBase
         ZStack {
+            // A/B (Dark/Black themes only): an extra BLACK darkening over the image
+            // in the mid/text region — punchier than the flat base melt. It fades
+            // out before the very bottom, and the base melt on top still resolves
+            // the bottom to the EXACT page colour, so the seamless meeting point is
+            // unchanged; this only deepens the middle.
+            if blackTint && !palette.isLight {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .clear, location: 0.30),
+                        .init(color: .black.opacity(0.28), location: 0.50),
+                        .init(color: .black.opacity(0.55), location: 0.68),
+                        .init(color: .black.opacity(0.70), location: 0.82),
+                        .init(color: .black.opacity(0.45), location: 0.92),
+                        .init(color: .clear, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0),

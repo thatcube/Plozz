@@ -755,6 +755,7 @@ private struct PlozziOSSourceVersionControls: View {
     let selectedVersionID: String?
     let onSelectSource: (String) -> Void
     let onSelectVersion: (String) -> Void
+    @State private var isVersionPickerPresented = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -777,24 +778,27 @@ private struct PlozziOSSourceVersionControls: View {
             }
 
             if versions.count > 1, let selectedVersion {
-                Picker(
-                    selection: Binding(
-                        get: { selectedVersion.id },
-                        set: onSelectVersion
-                    )
-                ) {
-                    ForEach(versions.sortedForPicker()) { version in
-                        Text(version.displayLabel)
-                            .tag(version.id)
-                    }
+                Button {
+                    isVersionPickerPresented = true
                 } label: {
                     Label(
                         selectedVersion.displayLabel,
                         systemImage: "film.stack"
                     )
                 }
-                .pickerStyle(.menu)
                 .buttonStyle(.bordered)
+                .popover(
+                    isPresented: $isVersionPickerPresented,
+                    attachmentAnchor: .rect(.bounds),
+                    arrowEdge: .top
+                ) {
+                    PlozziOSVersionPickerPopover(
+                        versions: versions.sortedForPicker(),
+                        selectedVersionID: selectedVersion.id,
+                        onSelectVersion: onSelectVersion
+                    )
+                    .presentationCompactAdaptation(.popover)
+                }
             }
         }
     }
@@ -841,6 +845,45 @@ private struct PlozziOSSourceVersionControls: View {
         }
     }
 
+}
+
+private struct PlozziOSVersionPickerPopover: View {
+    let versions: [MediaVersion]
+    let selectedVersionID: String
+    let onSelectVersion: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                ForEach(versions) { version in
+                    Button {
+                        onSelectVersion(version.id)
+                        dismiss()
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Image(systemName: "checkmark")
+                                .frame(width: 18)
+                                .opacity(version.id == selectedVersionID ? 1 : 0)
+                                .accessibilityHidden(version.id != selectedVersionID)
+                            Text(version.displayLabel)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 11)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(
+                        version.id == selectedVersionID ? .isSelected : []
+                    )
+                }
+            }
+            .padding(.vertical, 8)
+        }
+        .frame(minWidth: 320, idealWidth: 380, maxWidth: 440, maxHeight: 440)
+    }
 }
 
 private struct PlozziOSRequestAction: View {

@@ -958,11 +958,21 @@ struct DetailHeroView: View {
     /// visible single-frame flash right after the user opens it.
     @ViewBuilder
     private func moreMenu() -> some View {
+        let menuServers = serverChoices.map {
+            HeroMenuChoice(id: $0.accountID, title: $0.displayName)
+        }
+        let menuVersions = versions.sortedForPicker().map {
+            HeroMenuChoice(id: $0.id, title: $0.displayLabel)
+        }
         HeroMoreMenu(
-            serverChoices: serverChoices,
-            versions: versions,
-            selectedSourceAccountID: selectedSourceAccountID,
-            selectedVersionID: selectedVersionID,
+            serverChoices: menuServers,
+            versions: menuVersions,
+            selectedSourceAccountID: menuServers.first {
+                $0.id == selectedSourceAccountID
+            }?.id ?? menuServers.first?.id,
+            selectedVersionID: menuVersions.first {
+                $0.id == selectedVersionID
+            }?.id ?? menuVersions.first?.id,
             glyphSize: heroGlyphSize,
             iconSize: heroIconSize,
             onSelectSource: onSelectSource,
@@ -1361,9 +1371,14 @@ private struct DetailHeroCreditLine: View {
     }
 }
 
+private struct HeroMenuChoice: Identifiable, Equatable {
+    let id: String
+    let title: String
+}
+
 private struct HeroMoreMenu: View, Equatable {
-    let serverChoices: [MediaSourceRef]
-    let versions: [MediaVersion]
+    let serverChoices: [HeroMenuChoice]
+    let versions: [HeroMenuChoice]
     let selectedSourceAccountID: String?
     let selectedVersionID: String?
     let glyphSize: CGFloat
@@ -1373,8 +1388,8 @@ private struct HeroMoreMenu: View, Equatable {
     let onUserInitiatedSourceSwitch: () -> Void
 
     static func == (lhs: HeroMoreMenu, rhs: HeroMoreMenu) -> Bool {
-        lhs.serverChoices == rhs.serverChoices
-            && lhs.versions == rhs.versions
+        lhs.serverChoices.map(\.id).sorted() == rhs.serverChoices.map(\.id).sorted()
+            && lhs.versions.map(\.id).sorted() == rhs.versions.map(\.id).sorted()
             && lhs.selectedSourceAccountID == rhs.selectedSourceAccountID
             && lhs.selectedVersionID == rhs.selectedVersionID
             && lhs.glyphSize == rhs.glyphSize
@@ -1387,12 +1402,12 @@ private struct HeroMoreMenu: View, Equatable {
         Menu {
             if serverChoices.count > 1, let onSelectSource {
                 let currentServer = serverChoices.first {
-                    $0.accountID == selectedSourceAccountID
+                    $0.id == selectedSourceAccountID
                 } ?? serverChoices.first
                 if let currentServer {
                     Picker(
                         selection: Binding(
-                            get: { currentServer.accountID },
+                            get: { currentServer.id },
                             set: { accountID in
                                 onUserInitiatedSourceSwitch()
                                 onSelectSource(accountID)
@@ -1400,11 +1415,11 @@ private struct HeroMoreMenu: View, Equatable {
                         )
                     ) {
                         ForEach(serverChoices) { source in
-                            Text(source.displayName)
-                                .tag(source.accountID)
+                            Text(source.title)
+                                .tag(source.id)
                         }
                     } label: {
-                        Label(currentServer.displayName, systemImage: "server.rack")
+                        Label(currentServer.title, systemImage: "server.rack")
                     }
                     .pickerStyle(.menu)
                 }
@@ -1420,12 +1435,12 @@ private struct HeroMoreMenu: View, Equatable {
                             set: onSelectVersion
                         )
                     ) {
-                        ForEach(versions.sortedForPicker()) { version in
-                            Text(version.displayLabel)
+                        ForEach(versions) { version in
+                            Text(version.title)
                                 .tag(version.id)
                         }
                     } label: {
-                        Label(currentVersion.displayLabel, systemImage: "film.stack")
+                        Label(currentVersion.title, systemImage: "film.stack")
                     }
                     .pickerStyle(.menu)
                 }

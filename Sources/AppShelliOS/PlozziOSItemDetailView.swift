@@ -778,15 +778,20 @@ private struct PlozziOSSourceVersionControls: View {
 
             if versions.count > 1 {
                 Menu {
-                    ForEach(versions.sortedForPicker()) { version in
-                        Button {
-                            onSelectVersion(version.id)
-                        } label: {
-                            MenuSelectionLabel(
-                                version.displayLabel,
-                                isSelected: version.id == selectedVersionID
+                    if let selectedVersion {
+                        Picker(
+                            "Version",
+                            selection: Binding(
+                                get: { selectedVersion.id },
+                                set: onSelectVersion
                             )
+                        ) {
+                            ForEach(versions.sortedForPicker()) { version in
+                                Text(version.displayLabel)
+                                    .tag(version.id)
+                            }
                         }
+                        .pickerStyle(.inline)
                     }
                 } label: {
                     Label(
@@ -804,7 +809,7 @@ private struct PlozziOSSourceVersionControls: View {
     }
 
     private var selectedVersion: MediaVersion? {
-        versions.first { $0.id == selectedVersionID }
+        versions.first { $0.id == selectedVersionID } ?? versions.first
     }
 
     private func sourceMenuLabel(

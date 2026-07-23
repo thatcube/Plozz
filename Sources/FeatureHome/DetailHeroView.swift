@@ -1014,15 +1014,20 @@ struct DetailHeroView: View {
                 $0.id == selectedVersionID
             } ?? versions.first
             Menu {
-                ForEach(versions.sortedForPicker()) { version in
-                    Button {
-                        onSelectVersion(version.id)
-                    } label: {
-                        MenuSelectionLabel(
-                            version.displayLabel,
-                            isSelected: version.id == currentVersion?.id
+                if let currentVersion {
+                    Picker(
+                        "Version",
+                        selection: Binding(
+                            get: { currentVersion.id },
+                            set: onSelectVersion
                         )
+                    ) {
+                        ForEach(versions.sortedForPicker()) { version in
+                            Text(version.displayLabel)
+                                .tag(version.id)
+                        }
                     }
+                    .pickerStyle(.inline)
                 }
             } label: {
                 Label(
@@ -1412,17 +1417,20 @@ private struct HeroMoreMenu: View, Equatable {
                 let currentVersion = versions.first {
                     $0.id == selectedVersionID
                 } ?? versions.first
-                Section("Version") {
-                    ForEach(versions.sortedForPicker()) { version in
-                        Button {
-                            onSelectVersion(version.id)
-                        } label: {
-                            MenuSelectionLabel(
-                                version.displayLabel,
-                                isSelected: version.id == currentVersion?.id
-                            )
+                if let currentVersion {
+                    Picker(
+                        "Version",
+                        selection: Binding(
+                            get: { currentVersion.id },
+                            set: onSelectVersion
+                        )
+                    ) {
+                        ForEach(versions.sortedForPicker()) { version in
+                            Text(version.displayLabel)
+                                .tag(version.id)
                         }
                     }
+                    .pickerStyle(.inline)
                 }
             }
         } label: {

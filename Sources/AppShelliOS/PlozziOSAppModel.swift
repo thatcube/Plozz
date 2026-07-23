@@ -661,6 +661,15 @@ final class PlozziOSAppModel {
     /// Debug-only: clear all accounts + profiles so the app returns to the
     /// first-run / onboarding empty state (used to test Sync & Setup receive).
     func resetToFirstRunForDebugging() {
+        // Clear cross-device sync state too, so a debug reset is a truly clean slate
+        // for re-testing "new server from another device": pull each account's
+        // iCloud-Keychain portable credential (stops auto-connect) and wipe the
+        // pending/ignored/prompted bookkeeping for synced servers.
+        for account in accountsProviders.accounts { removePortableCredential(account.id) }
+        var pendingSynced = PendingSyncedServersStore()
+        pendingSynced.removeAll()
+        pendingSyncedServers = []
+        pendingSyncedServerPrompt = nil
         try? accountStore.clearAll()
         accountsProviders.reloadAccounts()
         plexHomeUsers.resetAllForDebug()
@@ -1323,6 +1332,11 @@ final class PlozziOSAppModel {
             if let shareAccountKey {
                 mediaShareAccountService.invalidate(shareAccountKey: shareAccountKey)
             }
+            // Drop this device's iCloud-Keychain portable credential for the account,
+            // so a deleted server doesn't silently auto-reconnect on the next launch
+            // (and isn't re-offered to the user's other devices). Without this, sync's
+            // auto-connect immediately re-adds the account the user just removed.
+            removePortableCredential(id)
             accountError = nil
         } catch {
             accountError = error.localizedDescription

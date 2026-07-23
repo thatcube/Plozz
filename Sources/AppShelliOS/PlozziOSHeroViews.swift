@@ -536,16 +536,18 @@ private struct PlozziOSHeroFadeMask: View {
         LinearGradient(
             stops: [
                 .init(color: .black, location: 0),
-                // Start dissolving much higher (was 0.76) so the image melts into
-                // the page over a long, gentle run — proportionally close to the
-                // tvOS hero (which begins its dissolve at ~0.33) rather than the
-                // old abrupt bottom-quarter fade. Eased with extra stops so there's
-                // no hard edge anywhere along the fade.
-                .init(color: .black, location: 0.40),
-                .init(color: .black.opacity(0.92), location: 0.54),
-                .init(color: .black.opacity(0.70), location: 0.68),
-                .init(color: .black.opacity(0.42), location: 0.82),
-                .init(color: .black.opacity(0.16), location: 0.92),
+                // Begin the dissolve at the tvOS start point (~0.33) and ease it out
+                // over a long, many-stepped tail so opacity approaches zero
+                // asymptotically — no perceptible edge where the hero meets the page
+                // background at the very bottom.
+                .init(color: .black, location: 0.33),
+                .init(color: .black.opacity(0.94), location: 0.48),
+                .init(color: .black.opacity(0.80), location: 0.60),
+                .init(color: .black.opacity(0.60), location: 0.72),
+                .init(color: .black.opacity(0.40), location: 0.82),
+                .init(color: .black.opacity(0.22), location: 0.90),
+                .init(color: .black.opacity(0.10), location: 0.955),
+                .init(color: .black.opacity(0.03), location: 0.985),
                 .init(color: .clear, location: 1)
             ],
             startPoint: .top,

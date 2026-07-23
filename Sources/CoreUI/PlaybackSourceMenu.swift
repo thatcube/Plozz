@@ -144,7 +144,9 @@ private struct PlaybackSourceMenuPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header
+            if page != .root {
+                header
+            }
             ScrollView {
                 LazyVStack(spacing: 8) {
                     switch page {
@@ -162,7 +164,7 @@ private struct PlaybackSourceMenuPanel: View {
             .scrollIndicators(.hidden)
         }
         .frame(width: panelWidth)
-        .frame(maxHeight: panelMaxHeight)
+        .frame(height: panelHeight)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -445,6 +447,24 @@ private struct PlaybackSourceMenuPanel: View {
         700
         #else
         620
+        #endif
+    }
+
+    private var panelHeight: CGFloat {
+        #if os(tvOS)
+        switch page {
+        case .root:
+            let optionCount = (sources.count > 1 ? 1 : 0)
+                + (versions.count > 1 ? 1 : 0)
+                + actions.count
+            return min(max(CGFloat(optionCount) * 104 + 32, 136), panelMaxHeight)
+        case .servers:
+            return min(max(CGFloat(sources.count) * 104 + 94, 250), panelMaxHeight)
+        case .versions:
+            return min(max(CGFloat(versions.count) * 142 + 94, 300), panelMaxHeight)
+        }
+        #else
+        return panelMaxHeight
         #endif
     }
 

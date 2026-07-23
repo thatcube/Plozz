@@ -539,7 +539,12 @@ struct DetailHeroView: View {
                                 .contentTransition(.opacity)
                         }
                         if showRatings {
-                            RatingsBadgeRow(ratings: heroRatings)
+                            if heroRatings.count == 1,
+                               let rating = heroRatings.first {
+                                RatingBadge(rating: rating)
+                            } else {
+                                RatingsBadgeRow(ratings: heroRatings)
+                            }
                         }
                         if !featureBadges.isEmpty {
                             MediaBadgeRow(badges: featureBadges)

@@ -323,12 +323,20 @@ public struct ShareProvider: MediaProvider {
         let startPosition = (record?.played == true) ? 0 : (record?.position ?? 0)
         var playItem = (mediaSourceID != nil) ? item.selectingVersion(mediaSourceID) : item
         let probedFacts = await streamProbeCache.completedFacts(for: locator)
-        var sourceMetadata: MediaSourceMetadata?
+        let selectedFileSize = item.versions.first(where: { $0.id == relPath })?.sizeBytes
+        var sourceMetadata: MediaSourceMetadata? = {
+            let metadata = MediaSourceMetadata(
+                container: locator.formatHint.container,
+                fileSizeBytes: selectedFileSize
+            )
+            return metadata.isEmpty ? nil : metadata
+        }()
         var audioTracks: [MediaTrack] = []
         if let probedFacts {
             playItem = playItem.applyingSupplementalStreamFacts(probedFacts)
             var metadata = probedFacts.applying()
             metadata.container = locator.formatHint.container
+            metadata.fileSizeBytes = selectedFileSize
             sourceMetadata = metadata
             if let trackID = probedFacts.audioTrackID {
                 audioTracks = [

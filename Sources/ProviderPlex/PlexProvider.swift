@@ -526,7 +526,8 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
                 container: media.container ?? part.container,
                 streams: streams,
                 mediaAudioProfile: media.audioProfile,
-                mediaVideoDisplayTitle: media.videoStreamDisplayTitle
+                mediaVideoDisplayTitle: media.videoStreamDisplayTitle,
+                fileSizeBytes: part.size
             ),
             originalFileSource: originalFileSource,
             localRemuxSource: localRemuxSource,
@@ -686,7 +687,8 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         container: String?,
         streams: [PlexStream],
         mediaAudioProfile: String? = nil,
-        mediaVideoDisplayTitle: String? = nil
+        mediaVideoDisplayTitle: String? = nil,
+        fileSizeBytes: Int64? = nil
     ) -> MediaSourceMetadata? {
         let video = streams.first { $0.streamType == 1 }
         let audio = streams.first { ($0.streamType == 2) && ($0.selected ?? $0.default ?? false) }
@@ -759,6 +761,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
 
         let metadata = MediaSourceMetadata(
             container: container,
+            fileSizeBytes: fileSizeBytes,
             video: videoStream,
             audio: audioStream,
             subtitle: subtitleStream
@@ -1143,7 +1146,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
                 width: m.width,
                 height: m.height,
                 bitrate: nil,
-                sizeBytes: nil,
+                sizeBytes: fileSizeBytes(from: m),
                 isDefault: index == 0,
                 videoCodec: m.videoCodec,
                 videoRange: nil,
@@ -1153,6 +1156,18 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
                 container: m.container
             )
         }
+    }
+
+    private static func fileSizeBytes(from media: PlexMedia) -> Int64? {
+        guard let parts = media.Part, !parts.isEmpty else { return nil }
+        var total: Int64 = 0
+        for part in parts {
+            guard let size = part.size, size > 0 else { return nil }
+            let result = total.addingReportingOverflow(size)
+            guard !result.overflow else { return nil }
+            total = result.partialValue
+        }
+        return total
     }
 
     /// The release name to parse for source quality: the first part's file
@@ -1336,7 +1351,12 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         } else {
             audio = nil
         }
-        let metadata = MediaSourceMetadata(container: media.container, video: video, audio: audio)
+        let metadata = MediaSourceMetadata(
+            container: media.container,
+            fileSizeBytes: fileSizeBytes(from: media),
+            video: video,
+            audio: audio
+        )
         return metadata.isEmpty ? nil : metadata
     }
 

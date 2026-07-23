@@ -236,6 +236,7 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
     func testBaseFromSourceMetadataBuildsCompositeLines() {
         let metadata = MediaSourceMetadata(
             container: "mkv",
+            fileSizeBytes: 12_000_000_000,
             video: .init(
                 codec: "hevc",
                 codecTag: "dvh1",
@@ -268,6 +269,8 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
         )
 
         XCTAssertEqual(d.containerText, "Matroska (MKV)")
+        XCTAssertEqual(d.sourceFileSizeBytes, 12_000_000_000)
+        XCTAssertEqual(d.sourceFileSizeText, "12 GB")
         XCTAssertEqual(d.hdr, .dolbyVision)
         XCTAssertEqual(d.videoLineText, "HEVC · Dolby Vision · 1920×1080 · 4.8 Mbps · 24.00 fps")
         XCTAssertEqual(d.audioLineText, "Dolby Atmos · 48 kHz · 5.1 · 768 Kbps")

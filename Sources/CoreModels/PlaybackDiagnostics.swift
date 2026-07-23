@@ -193,6 +193,8 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     /// Basename of the actual selected source file. This is provider-supplied
     /// rather than derived from the playback URL, which may be a transcode API.
     public var sourceFileName: String?
+    /// Total byte count of the selected original source file.
+    public var sourceFileSizeBytes: Int64?
     /// Container codec FourCC tag, e.g. `hvc1` / `hev1` / `dvh1`. The hvc1-vs-hev1
     /// distinction is make-or-break for AVPlayer (hev1 plays audio with a black
     /// screen), so it's surfaced explicitly.
@@ -258,6 +260,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         liveNativeEngines: Int? = nil,
         sourceProvider: ProviderKind? = nil,
         sourceFileName: String? = nil,
+        sourceFileSizeBytes: Int64? = nil,
         videoCodecTag: String? = nil,
         videoBitDepth: Int? = nil,
         dolbyVisionProfile: Int? = nil,
@@ -302,6 +305,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.liveNativeEngines = liveNativeEngines
         self.sourceProvider = sourceProvider
         self.sourceFileName = sourceFileName
+        self.sourceFileSizeBytes = sourceFileSizeBytes
         self.videoCodecTag = videoCodecTag
         self.videoBitDepth = videoBitDepth
         self.dolbyVisionProfile = dolbyVisionProfile
@@ -869,6 +873,10 @@ public extension PlaybackDiagnostics {
         return value
     }
 
+    var sourceFileSizeText: String {
+        MediaFileSizeFormatter.string(fromByteCount: sourceFileSizeBytes) ?? Self.placeholder
+    }
+
     /// Current position over duration, e.g. `12:34 / 1:58:24`.
     var positionText: String {
         guard positionSeconds != nil || durationSeconds != nil else { return Self.placeholder }
@@ -952,6 +960,7 @@ public extension PlaybackDiagnostics {
         guard let metadata else { return d }
 
         d.container = metadata.container
+        d.sourceFileSizeBytes = metadata.fileSizeBytes
 
         if let v = metadata.video {
             d.videoCodec = friendlyCodecName(v.codec)

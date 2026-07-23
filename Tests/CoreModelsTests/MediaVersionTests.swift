@@ -89,6 +89,7 @@ final class MediaVersionTests: XCTestCase {
         let derived = MediaVersion(id: "1", height: 2160, sizeBytes: 12_000_000_000, videoRange: "HDR10")
         XCTAssertTrue(derived.displayLabel.contains("4K"))
         XCTAssertTrue(derived.displayLabel.contains("HDR10"))
+        XCTAssertTrue(derived.displayLabel.contains("12 GB"))
 
         // A name that names a source-quality token now surfaces that token (the
         // edition/source recovery the picker needs) rather than echoing the raw
@@ -98,6 +99,19 @@ final class MediaVersionTests: XCTestCase {
         XCTAssertEqual(MediaVersion(id: "2b", name: "Server Copy").displayLabel, "Server Copy")
 
         XCTAssertEqual(MediaVersion(id: "3").displayLabel, "Version")
+    }
+
+    func testSynthesizedVersionCarriesSourceFileSize() {
+        let item = MediaItem(
+            id: "movie",
+            title: "Movie",
+            kind: .movie,
+            mediaInfo: MediaSourceMetadata(fileSizeBytes: 8_500_000_000)
+        )
+
+        let version = MediaVersion.synthesized(from: item)
+        XCTAssertEqual(version.sizeBytes, 8_500_000_000)
+        XCTAssertEqual(version.sizeLabel, "8.5 GB")
     }
 
     func testQualityScoreRanksHDRAndResolution() {

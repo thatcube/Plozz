@@ -694,7 +694,8 @@ public struct JellyfinProvider: MediaProvider {
         var mappedSourceMetadata = Self.sourceMetadata(
             container: originalContainer,
             streams: originalStreams,
-            sourceRevision: sourceRevision
+            sourceRevision: sourceRevision,
+            fileSizeBytes: originalSource.Size
         )
         if confirmsAtmos {
             mappedItem = mappedItem.confirmingAtmos()
@@ -1016,7 +1017,8 @@ public struct JellyfinProvider: MediaProvider {
     static func sourceMetadata(
         container: String?,
         streams: [MediaStreamDto],
-        sourceRevision: String? = nil
+        sourceRevision: String? = nil,
+        fileSizeBytes: Int64? = nil
     ) -> MediaSourceMetadata? {
         let video = streams.first { $0.`Type` == "Video" }
         let audio = streams.first { ($0.`Type` == "Audio") && ($0.IsDefault ?? false) }
@@ -1066,6 +1068,7 @@ public struct JellyfinProvider: MediaProvider {
 
         let metadata = MediaSourceMetadata(
             container: container,
+            fileSizeBytes: fileSizeBytes,
             sourceRevision: sourceRevision,
             video: videoStream,
             audio: audioStream,
@@ -1354,7 +1357,8 @@ public struct JellyfinProvider: MediaProvider {
                 streams: dto.MediaStreams ?? dto.MediaSources?.first?.MediaStreams ?? [],
                 sourceRevision: dto.MediaSources?.first.map {
                     Self.sourceRevision(itemID: dto.Id, source: $0)
-                }
+                },
+                fileSizeBytes: dto.MediaSources?.first?.Size
             ),
             versions: Self.versions(
                 from: dto.MediaSources,

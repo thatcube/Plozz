@@ -102,6 +102,7 @@ struct PlaybackDiagnosticsOverlay: View {
     private func sourceSection(_ d: PlaybackDiagnostics) -> some View {
         section("SOURCE") {
             optionalRow("File", d.sourceFileNameText)
+            optionalRow("Size", d.sourceFileSizeText)
             row("Delivery", sourceText(d))
             optionalRow("Stream", d.streamTransportText)
             optionalRow("Container", d.containerText)

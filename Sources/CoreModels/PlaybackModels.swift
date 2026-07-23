@@ -236,6 +236,8 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
 
     /// Original container, e.g. `mkv`, `mp4`.
     public var container: String?
+    /// Total byte count of the original source file, when the provider reports it.
+    public var fileSizeBytes: Int64?
     /// Provider source revision used to retain asynchronously-probed facts only
     /// while the underlying file is unchanged.
     public var sourceRevision: String?
@@ -245,12 +247,14 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
 
     public init(
         container: String? = nil,
+        fileSizeBytes: Int64? = nil,
         sourceRevision: String? = nil,
         video: VideoStream? = nil,
         audio: AudioStream? = nil,
         subtitle: SubtitleStream? = nil
     ) {
         self.container = container
+        self.fileSizeBytes = fileSizeBytes
         self.sourceRevision = sourceRevision
         self.video = video
         self.audio = audio
@@ -259,7 +263,12 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
 
     /// True when no useful field was populated (lets callers skip wiring it up).
     public var isEmpty: Bool {
-        container == nil && sourceRevision == nil && video == nil && audio == nil && subtitle == nil
+        container == nil
+            && fileSizeBytes == nil
+            && sourceRevision == nil
+            && video == nil
+            && audio == nil
+            && subtitle == nil
     }
 }
 

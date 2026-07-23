@@ -369,6 +369,7 @@ struct PlexPart: Decodable {
     /// basename is the release name we parse for the source quality (Remux /
     /// BluRay / WEB-DL) and, as a fallback, the edition.
     let file: String?
+    let size: Int64?
     let duration: Int?
     let container: String?
     /// Which trickplay (BIF) index resolutions the server has generated for this

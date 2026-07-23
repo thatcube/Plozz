@@ -1,5 +1,15 @@
 import Foundation
 
+public enum MediaFileSizeFormatter {
+    public static func string(fromByteCount bytes: Int64?) -> String? {
+        guard let bytes, bytes > 0 else { return nil }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useGB, .useMB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+}
+
 /// One selectable media source ("version") of a title — e.g. a 4K HDR Atmos
 /// remux alongside a 1080p web-dl. Provider-agnostic: Jellyfin maps each
 /// `MediaSources` entry onto one of these, Plex each `Media` entry.
@@ -141,7 +151,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
             width: video?.width,
             height: video?.height,
             bitrate: video?.bitrate,
-            sizeBytes: nil,
+            sizeBytes: item.mediaInfo?.fileSizeBytes,
             isDefault: false,
             videoCodec: video?.codec,
             videoRange: video?.videoRangeType ?? video?.videoRange,
@@ -233,11 +243,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
 
     /// A human-readable file size, e.g. `12.4 GB`, or `nil` when unknown.
     public var sizeLabel: String? {
-        guard let sizeBytes, sizeBytes > 0 else { return nil }
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useGB, .useMB]
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: sizeBytes)
+        MediaFileSizeFormatter.string(fromByteCount: sizeBytes)
     }
 
     /// The edition / cut to surface for this version: the provider's explicit

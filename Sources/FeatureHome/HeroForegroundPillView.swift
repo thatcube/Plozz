@@ -110,7 +110,10 @@ final class HeroForegroundPillView: UIView {
     /// prefix, so a shorter bar keeps the pill from growing over-wide. Mirrors
     /// `PlayResumeButtonLabel.capsuleWidth`.
     private let barWidth: CGFloat = 75
-    private let barHeight: CGFloat = 6
+    /// Matches `PlayResumeButtonLabel`'s resume bar height on tvOS heroes (the
+    /// SwiftUI detail hero passes `barHeight: 10`) so the UIKit home hero pill and
+    /// the SwiftUI detail hero render an identical bar.
+    private let barHeight: CGFloat = 10
 
     private var pill: HeroForegroundModel.Pill?
     private var selected = false

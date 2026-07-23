@@ -584,10 +584,8 @@ private struct PlozziOSHomeHeroCarousel: View {
     @State private var transitionTargetID: String?
     @State private var transitionInProgress = false
     @State private var foregroundVisible = true
-    /// Latest hero stage width, captured so a committed (tap/auto-advance)
-    /// transition can drive `dragOffset` to exactly the swipe threshold — making
-    /// `progress` sweep 0→1 over the whole animation instead of hitting its cap
-    /// early (which slid the outgoing image almost instantly).
+    /// Latest hero stage width. A full-width finger drag maps to exactly one
+    /// complete transition.
     @State private var stageWidth: CGFloat = 1
 
     let items: [MediaItem]
@@ -608,8 +606,8 @@ private struct PlozziOSHomeHeroCarousel: View {
             dynamicTypeSize: dynamicTypeSize
         )
         GeometryReader { proxy in
-            let swipeThreshold = max(proxy.size.width * 0.45, 1)
-            let progress = min(abs(dragOffset) / swipeThreshold, 1)
+            let swipeDistance = max(proxy.size.width, 1)
+            let progress = min(abs(dragOffset) / swipeDistance, 1)
             // Parallax slide: the outgoing image drifts up to `slideTravel` in the
             // drag direction (partly off-screen, subtle), while the incoming image
             // enters from the opposite edge and settles into place by the same
@@ -726,8 +724,11 @@ private struct PlozziOSHomeHeroCarousel: View {
                     onChanged: { translation in
                         dragOffset = translation.width
                     },
-                    onEnded: { translation in
-                        finishDrag(translation: translation)
+                    onEnded: { translation, velocity in
+                        finishDrag(
+                            translation: translation,
+                            velocity: velocity
+                        )
                     }
                 )
             )
@@ -965,35 +966,54 @@ private struct PlozziOSHomeHeroCarousel: View {
         return items[targetIndex]
     }
 
-    private func finishDrag(translation: CGSize) {
+    private func finishDrag(translation: CGSize, velocity: CGSize) {
+        let projectedWidth = translation.width + (velocity.width * 0.15)
+        let shouldCommit = abs(translation.width) >= stageWidth * 0.18
+            || abs(projectedWidth) >= stageWidth * 0.28
         guard abs(translation.width) > abs(translation.height) * 1.2,
-              abs(translation.width) >= 50 else {
+              shouldCommit else {
             withAnimation(.easeOut(duration: 0.2)) {
                 dragOffset = 0
             }
             return
         }
-        beginTransition(forward: translation.width < 0)
+        beginTransition(
+            forward: translation.width < 0,
+            releaseVelocity: velocity.width
+        )
     }
 
-    private func beginTransition(forward: Bool) {
+    private func beginTransition(
+        forward: Bool,
+        releaseVelocity: CGFloat? = nil
+    ) {
         guard !transitionInProgress,
               let target = adjacentItem(forward: forward) else {
             return
         }
         transitionInProgress = true
         transitionTargetID = target.id
-        // Drive dragOffset to exactly the swipe threshold so `progress` sweeps
-        // 0→1 across the WHOLE animation (rather than hitting its cap in the first
-        // third, which made the outgoing image slide almost instantly). Now the
-        // old image visibly slides out over the full duration as the new slides in.
-        let threshold = max(stageWidth * 0.45, 1)
+        let distance = max(stageWidth, 1)
+        let currentProgress = min(abs(dragOffset) / distance, 1)
+        let remainingProgress = max(1 - currentProgress, 0)
+        let animation: Animation
+        if let releaseVelocity {
+            let velocityProgressPerSecond = abs(releaseVelocity) / distance
+            let completionRate = max(velocityProgressPerSecond, 2.8)
+            let duration = min(
+                0.34,
+                max(0.01, remainingProgress / completionRate)
+            )
+            animation = .easeOut(duration: duration)
+        } else {
+            animation = .easeInOut(duration: 0.34)
+        }
         // Commit the swap on the animation's COMPLETION (not a fixed Task.sleep,
         // which raced the animation and produced a snap when it fired a hair
         // early/late). At completion the incoming image is exactly at rest, so the
         // hard swap to the idle backdrop is seamless — one fluid motion.
-        withAnimation(.easeInOut(duration: 0.34)) {
-            dragOffset = forward ? -threshold : threshold
+        withAnimation(animation) {
+            dragOffset = forward ? -distance : distance
         } completion: {
             var transaction = Transaction()
             transaction.disablesAnimations = true
@@ -1041,7 +1061,7 @@ private struct PlozziOSHorizontalHeroDragGesture:
     UIGestureRecognizerRepresentable {
     let isEnabled: Bool
     let onChanged: (CGSize) -> Void
-    let onEnded: (CGSize) -> Void
+    let onEnded: (CGSize, CGSize) -> Void
 
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
         Coordinator()
@@ -1070,13 +1090,15 @@ private struct PlozziOSHorizontalHeroDragGesture:
     ) {
         let point = recognizer.translation(in: recognizer.view)
         let translation = CGSize(width: point.x, height: point.y)
+        let velocityPoint = recognizer.velocity(in: recognizer.view)
+        let velocity = CGSize(width: velocityPoint.x, height: velocityPoint.y)
         switch recognizer.state {
         case .began, .changed:
             onChanged(translation)
         case .ended:
-            onEnded(translation)
+            onEnded(translation, velocity)
         case .cancelled, .failed:
-            onEnded(.zero)
+            onEnded(.zero, .zero)
         default:
             break
         }

@@ -699,7 +699,7 @@ private struct PlozziOSHomeHeroCarousel: View {
                     .id(currentItem.id)
                     .transition(.opacity)
                     .opacity(
-                        (1 - progress)
+                        max(1 - (progress * 2), 0)
                             * (foregroundVisible ? 1 : 0)
                     )
                     .frame(

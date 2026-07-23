@@ -38,7 +38,10 @@ struct SyncSetupSentSuccessView: View {
                     sectionCard(title: servers.count == 1 ? "Server" : "Servers") {
                         ForEach(servers) { account in
                             HStack(spacing: 14) {
-                                ProviderBrandMark(provider: account.server.provider, size: 32)
+                                ProviderBrandMark(
+                                    provider: account.server.provider, size: 32,
+                                    mediaShareTransport: MediaShareTransportKind(
+                                        mediaShareScheme: account.server.baseURL.scheme))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(account.server.name)
                                         .font(.body.weight(.semibold))

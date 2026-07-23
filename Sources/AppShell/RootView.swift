@@ -13,6 +13,7 @@ import FeatureDiscovery
 import FeatureDiscoveryCore
 import FeatureHome
 import FeaturePlayback
+import FeatureSettings
 import MetadataKit
 
 /// Composes the identity that scopes the Home tab subtree — and the retained
@@ -68,6 +69,25 @@ public struct RootView: View {
     @MainActor
     public init(appState: AppState? = nil) {
         _appState = State(initialValue: appState ?? AppState())
+    }
+
+    /// The name THIS device holds for the offer's requested account. Since a per-server
+    /// offer is only surfaced when this device has that account, this resolves the name
+    /// locally rather than trusting the rendezvous-supplied string.
+    private var syncSetupOfferServerName: String? {
+        guard let requested = appState.cloudSyncUI.pendingSyncSetupOffer?.requestedAccountID else { return nil }
+        return appState.accountsProviders.accounts.first(where: { $0.id == requested })?.server.name
+    }
+
+    /// Title for the same-Apple-ID setup offer alert. Names the specific server when
+    /// the offering device asked for just one (per-server "set up with other device"),
+    /// else falls back to the device-level framing.
+    private var syncSetupOfferTitle: String {
+        let device = appState.cloudSyncUI.pendingSyncSetupOffer?.deviceName ?? "your device"
+        if let server = syncSetupOfferServerName {
+            return "Set up “\(server)” on “\(device)”?"
+        }
+        return "Set up “\(device)”?"
     }
 
     /// The palette for the currently-selected theme. `.system` resolves against
@@ -154,6 +174,17 @@ public struct RootView: View {
                             ) + "|" + HomeRuntimeScope.accountScopeKey(accounts.map(\.account))
                         )
                     )
+                    // Hoisted into explicitly-typed locals so the (very large)
+                    // MainTabView initializer stays within the Swift type-checker's
+                    // time budget — inline trailing closures here tip it over.
+                    let debugActions = DebugSettingsActions(
+                        resetToFirstRun: { appState.resetToFirstRunForDebugging() },
+                        eraseICloud: { appState.eraseEverythingFromICloudForDebugging() }
+                    )
+                    let syncRepairActions = SyncRepairActions(
+                        redownload: { appState.redownloadCloudSync() },
+                        reset: { appState.resetCloudSync() }
+                    )
                     MainTabView(
                         accounts: accounts,
                         detailSnapshotCache: detailCache,
@@ -229,10 +260,12 @@ public struct RootView: View {
                         onDeleteProfile: { appState.profileFlow.removeProfile(id: $0) },
                         onAddAccount: { appState.addAccount() },
                         onRemoveAccount: { appState.removeAccount(id: $0.id) },
+                        onRemoveAccountEverywhere: { appState.removeAccountEverywhere(id: $0.id) },
+                        offersRemoveEverywhere: appState.offersRemoveEverywhere,
                         onRescanShare: { appState.mediaShare.rescanShare(accountID: $0) },
                         onSignOutAll: { appState.signOutAll() },
                         onSwitchProfile: { appState.profileFlow.requestProfileSelection() },
-                        onResetToFirstRun: { appState.resetToFirstRunForDebugging() },
+                        debugActions: debugActions,
                         plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
                         onSelectPlexHomeUser: { appState.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
                         onSetSeerrUser: { appState.setSeerrUserForProfile(profileID: $0, user: $1) },
@@ -244,10 +277,7 @@ public struct RootView: View {
                         onSetSyncEnabled: { appState.setSyncSetupEnabled($0) },
                         syncStatusSummary: appState.cloudSyncStatus.summaryLine,
                         onSyncNow: { appState.syncCloudNow() },
-                        syncRepair: .init(
-                            redownload: { appState.redownloadCloudSync() },
-                            reset: { appState.resetCloudSync() }
-                        ),
+                        syncRepair: syncRepairActions,
                         pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,
                         onIgnorePendingServer: { appState.ignorePendingSyncedServer($0) },
                         onSetUpFromAnotherDevice: { showSyncReceiveFromSettings = true }
@@ -337,6 +367,25 @@ public struct RootView: View {
             }
         } message: { descriptor in
             Text("“\(descriptor.serverName)” is set up on another device. Sign in to watch it here — your login stays private to each device. You can also find it later under Settings ▸ iCloud Sync.")
+        }
+        .alert(
+            syncSetupOfferTitle,
+            isPresented: Binding(
+                // Presentation is driven purely by pendingSyncSetupOffer; the two
+                // buttons own confirm/decline, so the setter must NOT have a side
+                // effect (that would double-fire and race the button action). tvOS
+                // routes the Menu button to the .cancel role, so decline still runs.
+                get: { appState.cloudSyncUI.pendingSyncSetupOffer != nil },
+                set: { _ in }
+            ),
+            presenting: appState.cloudSyncUI.pendingSyncSetupOffer
+        ) { _ in
+            Button("Set Up") { appState.confirmSyncSetupOffer() }
+            Button("Not Now", role: .cancel) { appState.declineSyncSetupOffer() }
+        } message: { _ in
+            Text(syncSetupOfferServerName != nil
+                 ? "Sign this device in to “\(syncSetupOfferServerName!)”."
+                 : "Send your servers and sign-in so it’s ready to watch.")
         }
         .onAppear {
             if case .launching = appState.state { appState.bootstrap() }

@@ -72,6 +72,11 @@ final class PlozziOSAppModel {
     /// so the user can sign in / pair to use them here (parity with tvOS).
     var pendingSyncedServers: [SyncedAccountDescriptor] = []
 
+    /// A newly-synced server from another device, queued for a one-time "set it up
+    /// here?" prompt (nil = nothing to prompt). Nudged only once per server; drives the
+    /// root alert. Parity with tvOS `cloudSyncUI.pendingServerPrompt`.
+    var pendingSyncedServerPrompt: SyncedAccountDescriptor?
+
     /// Offers the user declined this session, so they aren't re-prompted.
     @ObservationIgnored
     var dismissedSyncSetupOfferKeys: Set<String> = []
@@ -82,19 +87,31 @@ final class PlozziOSAppModel {
     /// Persist a setup received over pairing: create accounts from the descriptors,
     /// store their transferred tokens in the Keychain, and refresh providers so the
     /// device is immediately signed in (no native sign-in needed).
+    ///
+    /// - Parameter restrictToAccountID: when set (a per-server "set up with other
+    ///   device" request), ONLY that account is applied and no profiles/settings are
+    ///   imported — even if the source sent the whole household (e.g. an older source,
+    ///   or a manual QR/code pairing that couldn't carry the request). This makes the
+    ///   receiver the source of truth for its own intent, so a single-server request
+    ///   can never silently sign the device into servers it didn't ask for.
     @discardableResult
-    func applyReceivedSetup(_ received: SyncSetupService.ReceivedSetup) -> SyncSetupService.ApplyOutcome {
+    func applyReceivedSetup(
+        _ received: SyncSetupService.ReceivedSetup,
+        restrictToAccountID: String? = nil
+    ) -> SyncSetupService.ApplyOutcome {
         // Captured BEFORE markFirstRunProfileSetupComplete below: whether this
         // receiver had already completed setup (used to guard its own default
         // profile from being clobbered by the incoming default).
         let receiverWasConfigured = profiles.firstRunProfileSetupComplete
-        let incomingProfiles = received.config.profiles.map(\.profile)
+        // Per-server request → never import profiles (the user only wanted one server).
+        let incomingProfiles = restrictToAccountID == nil ? received.config.profiles.map(\.profile) : []
         if !incomingProfiles.isEmpty {
             profiles.importProfiles(incomingProfiles)
         }
         // Reinstall each transferred profile's per-profile settings under the
-        // matching namespace on this device (default profile → nil namespace).
-        for snap in received.config.profileSettings {
+        // matching namespace on this device (default profile → nil namespace). Skipped
+        // entirely for a per-server request (no profiles come along).
+        for snap in (restrictToAccountID == nil ? received.config.profileSettings : []) {
             guard let profile = profiles.profiles.first(where: { $0.id == snap.profileID }) else { continue }
             ProfileSettingsTransfer.apply(
                 snap.entries,
@@ -110,7 +127,8 @@ final class PlozziOSAppModel {
         // are NOT counted as expected — they were never going to work here.
         var expected = 0, added = 0
         var failedAccountIDs: [String] = []
-        for auth in received.application.authorizedAuthorizations {
+        for auth in received.application.authorizedAuthorizations
+        where restrictToAccountID == nil || auth.id == restrictToAccountID {
             guard let desc = descByID[auth.id] else { continue }
             if let secret = secretByID[auth.id] {
                 expected += 1
@@ -179,7 +197,7 @@ final class PlozziOSAppModel {
         // same guard importProfiles uses so a "bring my setup here" transfer never
         // rewrites an existing device's default.
         let receivedAccountIDs = Set(received.config.accounts.map(\.id))
-        for (pid, ids) in received.config.profileMemberships {
+        for (pid, ids) in (restrictToAccountID == nil ? received.config.profileMemberships : [:]) {
             guard profiles.profiles.contains(where: { $0.id == pid }) else { continue }
             if pid == ProfileStore.defaultProfileID, receiverWasConfigured { continue }
             profiles.setActiveAccountIDs(ids.filter { receivedAccountIDs.contains($0) }, for: pid)
@@ -413,7 +431,14 @@ final class PlozziOSAppModel {
         )
         self.syncSetup = SyncSetupService(
             deviceID: { accountStore.deviceID() },
-            deviceName: { UIDevice.current.name },
+            deviceName: {
+                // UIDevice.name is a generic model name on iOS 16+ without a special
+                // entitlement, so recover the owner-given name from the host name
+                // ("Brando's iPad" → host "Brandos-iPad") the same way tvOS does.
+                // Non-blocking: never reads ProcessInfo.hostName on the main thread
+                // (that reverse-DNS call hangs launch + prompts for local network).
+                DeviceDisplayName.current(fallback: UIDevice.current.name)
+            },
             isConfigured: { !accountsProviders.accounts.isEmpty },
             configProvider: {
                 .init(
@@ -635,6 +660,18 @@ final class PlozziOSAppModel {
     /// Debug-only: clear all accounts + profiles so the app returns to the
     /// first-run / onboarding empty state (used to test Sync & Setup receive).
     func resetToFirstRunForDebugging() {
+        // Clear cross-device sync state too, so a debug reset is a truly clean slate
+        // for re-testing "new server from another device": pull each account's
+        // iCloud-Keychain portable credential (stops auto-connect) and wipe the
+        // pending/ignored/prompted bookkeeping for synced servers.
+        for account in accountsProviders.accounts { removePortableCredential(account.id) }
+        var pendingSynced = PendingSyncedServersStore()
+        pendingSynced.removeAll()
+        var removedSynced = RemovedAccountsStore()
+        removedSynced.removeAll()
+        HouseholdDevicesStore().removeAll()
+        pendingSyncedServers = []
+        pendingSyncedServerPrompt = nil
         try? accountStore.clearAll()
         accountsProviders.reloadAccounts()
         plexHomeUsers.resetAllForDebug()
@@ -1105,8 +1142,10 @@ final class PlozziOSAppModel {
                 && !profiles.firstRunProfileSetupComplete
             var addedAccounts: [Account] = []
             for session in sessions {
-                let account = Account(from: session)
+                let account = Account(id: Account.stableID(for: session), from: session)
                 try accountStore.add(account, token: session.accessToken)
+                // A (re)added server clears any household-removal tombstone for it.
+                clearRemovalTombstone(for: account.id)
                 if !existingIDs.contains(account.id) {
                     addedAccounts.append(account)
                 }
@@ -1116,7 +1155,7 @@ final class PlozziOSAppModel {
             identityIndex.warmIdentityIndex()
             if isFirstRun,
                let session = sessions.first(where: {
-                   let account = Account(from: $0)
+                   let account = Account(id: Account.stableID(for: $0), from: $0)
                    return addedAccounts.contains(where: { $0.id == account.id })
                }) {
                 profiles.seedDefaultProfileIdentity(
@@ -1297,6 +1336,11 @@ final class PlozziOSAppModel {
             if let shareAccountKey {
                 mediaShareAccountService.invalidate(shareAccountKey: shareAccountKey)
             }
+            // Drop this device's iCloud-Keychain portable credential for the account,
+            // so a deleted server doesn't silently auto-reconnect on the next launch
+            // (and isn't re-offered to the user's other devices). Without this, sync's
+            // auto-connect immediately re-adds the account the user just removed.
+            removePortableCredential(id)
             accountError = nil
         } catch {
             accountError = error.localizedDescription
@@ -1467,9 +1511,22 @@ final class PlozziOSAppModel {
     }
 
     private func scheduleFirstRunStep(_ step: FirstRunStep) {
+        // Don't start (or re-start) first-run onboarding if the household is already
+        // set up — e.g. profiles arrived via sync on a fresh device. Guards against a
+        // "use profiles?"/theme prompt when the user already has profiles.
+        guard !profiles.firstRunProfileSetupComplete else { return }
         Task {
             await Task.yield()
             pendingFirstRunStep = step
+        }
+    }
+
+    /// Dismiss any queued first-run onboarding step once the household is known to be
+    /// already set up (e.g. profiles arrived via sync after a race queued the step).
+    /// Lives here (not the CloudSync extension) so it can touch `private(set)` state.
+    func clearFirstRunStepIfHouseholdSetUp() {
+        if pendingFirstRunStep != nil, profiles.firstRunProfileSetupComplete {
+            pendingFirstRunStep = nil
         }
     }
 

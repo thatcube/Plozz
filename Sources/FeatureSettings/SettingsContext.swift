@@ -34,6 +34,12 @@ struct SettingsContext {
     let onDeleteProfile: (String) -> Void
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void
+    /// Remove a server from EVERY device on this iCloud account (household tombstone).
+    let onRemoveAccountEverywhere: (Account) -> Void
+    /// Whether a "Remove Everywhere" choice is meaningful here: cross-device sync is on
+    /// AND the account has at least one other device to remove it from. When false the
+    /// remove UI shows a single plain "Remove".
+    let offersRemoveEverywhere: Bool
     /// Force a fresh scan + enrichment of a media share now (its account id).
     let onRescanShare: (String) -> Void
     let onSignOutAll: () -> Void

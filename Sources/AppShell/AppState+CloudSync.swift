@@ -17,6 +17,10 @@ public final class CloudSyncUIModel {
     public internal(set) var pendingSyncedServers: [SyncedAccountDescriptor] = []
     /// A newly-detected synced server to prompt about (Set Up / Ignore), or nil.
     public var pendingServerPrompt: SyncedAccountDescriptor?
+    /// A same-Apple-ID device asking to be set up (it opened its "set up from another
+    /// device" screen). Drives a one-tap source-side confirm before this TV pushes its
+    /// servers + logins over the local pairing channel. nil = no pending offer.
+    public var pendingSyncSetupOffer: SyncPairingRendezvous?
     public init() {}
 }
 
@@ -98,6 +102,86 @@ extension AppState {
     public func syncCloudOnForeground() {
         guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
         Task { await cloudSync.fetchNow() }
+        heartbeatHouseholdPresence()
+        checkForSyncSetupOffer()
+        startSyncSetupOfferPolling()
+    }
+
+    // MARK: Same-Apple-ID rendezvous offer (source side)
+
+    /// Surface a one-tap confirm when another of the user's devices is asking to be set
+    /// up (it opened its "set up from another device" screen and published a rendezvous
+    /// to iCloud). We never push credentials silently — the single confirm keeps a human
+    /// in the loop (matching Apple's "set up new device" pattern) — but it's zero typing:
+    /// no code, no QR. Mirrors the iOS source-side behavior so a TV can set up a phone.
+    public func checkForSyncSetupOffer() {
+        guard SyncSetupFeatureFlag().isEnabled,
+              !isAutoAdoptingSyncSetup,
+              cloudSyncUI.pendingSyncSetupOffer == nil else { return }
+        let localIDs = Set(accountsProviders.accounts.map(\.id))
+        guard !localIDs.isEmpty else { return }   // nothing to give
+        guard let offer = syncSetup.discoverRendezvousTargets().first(where: { offer in
+            guard !dismissedSyncSetupOfferKeys.contains(Self.syncSetupOfferKey(offer)) else { return false }
+            // A per-server request is only fulfillable if THIS device holds that
+            // account; otherwise skip it (another device may be able to serve it).
+            if let requested = offer.requestedAccountID { return localIDs.contains(requested) }
+            return true
+        }) else { return }
+        cloudSyncUI.pendingSyncSetupOffer = offer
+    }
+
+    /// The user confirmed — push config + credentials to the offered device over the
+    /// local pairing channel (pinned key ⇒ no SAS, no typing).
+    public func confirmSyncSetupOffer() {
+        guard let offer = cloudSyncUI.pendingSyncSetupOffer else { return }
+        cloudSyncUI.pendingSyncSetupOffer = nil
+        isAutoAdoptingSyncSetup = true
+        let model = SyncSetupPairingModel(service: syncSetup)
+        Task { @MainActor in
+            await model.adopt(offer)
+            isAutoAdoptingSyncSetup = false
+        }
+    }
+
+    /// The user declined — don't re-prompt for this exact offer this session.
+    public func declineSyncSetupOffer() {
+        if let offer = cloudSyncUI.pendingSyncSetupOffer {
+            dismissedSyncSetupOfferKeys.insert(Self.syncSetupOfferKey(offer))
+        }
+        cloudSyncUI.pendingSyncSetupOffer = nil
+    }
+
+    private static func syncSetupOfferKey(_ offer: SyncPairingRendezvous) -> String {
+        offer.deviceID + ":" + offer.publicKeyData.base64EncodedString()
+    }
+
+    /// Poll for rendezvous offers every few seconds while the app is open, so the TV
+    /// prompts within seconds of the phone opening its "set up from another device"
+    /// screen — iCloud KVS delivery to a foreground-idle tvOS app is otherwise
+    /// best-effort. Also pulls config changes roughly every 30s so household edits
+    /// made elsewhere (e.g. a "Remove Everywhere") converge on an idle, already-open
+    /// Apple TV without the user backgrounding the app (tvOS push is unreliable).
+    /// Idempotent; guarded on the feature flag each tick.
+    func startSyncSetupOfferPolling() {
+        guard SyncSetupFeatureFlag().isEnabled, syncSetupOfferPollTask == nil else { return }
+        syncSetupOfferPollTask = Task { [weak self] in
+            var tick = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                guard !Task.isCancelled else { return }
+                tick += 1
+                let fetchConfig = tick % 4 == 0   // ~every 32s
+                let keepGoing = await MainActor.run { () -> Bool in
+                    guard let self, SyncSetupFeatureFlag().isEnabled else { return self != nil }
+                    self.checkForSyncSetupOffer()
+                    if fetchConfig, let cloudSync = self.cloudSync {
+                        Task { await cloudSync.fetchNow() }
+                    }
+                    return true
+                }
+                if !keepGoing { return }
+            }
+        }
     }
 
     /// Reset a corrupted/divergent sync state: wipe the iCloud zone and re-seed from
@@ -115,6 +199,27 @@ extension AppState {
         Task { await cloudSync.redownloadFromCloud() }
     }
 
+    /// DEBUG: nuke the ENTIRE household from iCloud so you can test a true cold start
+    /// (e.g. "set up only on this Apple TV, then fresh-install another device"). Unlike
+    /// `resetCloudSync` (which deletes then immediately RE-uploads from this device),
+    /// this deletes and does NOT republish, then takes this device out of sync so it
+    /// can't refill iCloud. It:
+    ///   1. deletes every CloudKit config + removal-tombstone record (flushed to peers
+    ///      as normal deletions, so their synced view empties too);
+    ///   2. wipes this device's local roster/profiles/sync bookkeeping (first-run);
+    ///   3. turns iCloud Sync OFF here so this device stays out of the household until
+    ///      you re-enable it — leaving iCloud genuinely empty for the next publisher.
+    /// tvOS holds no synchronizable iCloud-Keychain logins (that channel is iOS-only),
+    /// so there are none to purge here.
+    public func eraseEverythingFromICloudForDebugging() {
+        let cloud = cloudSync
+        Task { @MainActor in
+            await cloud?.deleteAllServerData()   // step 1 (flushes deletes to peers)
+            resetToFirstRunForDebugging()         // step 2
+            setSyncSetupEnabled(false)            // step 3
+        }
+    }
+
     // MARK: Publish side (V3 flat record capture)
 
     /// Capture the current canonical, NON-SECRET flat record map this device syncs:
@@ -129,11 +234,23 @@ extension AppState {
         // Descriptors: this device's signed-in accounts PLUS the ones it has synced
         // but isn't signed into (pending). H2: keep the last-synced bytes when the
         // descriptor's meaningful fields are unchanged, so a per-device reachable-URL
-        // difference doesn't churn/clobber the shared record.
-        for d in Self.mergedAccountDescriptors(signedIn: accountsProviders.accounts) {
+        // difference doesn't churn/clobber the shared record. Household-removed
+        // (tombstoned) accounts are excluded so their descriptor is deleted from the
+        // zone; a `.removal` record is published for each instead.
+        let removedStore = RemovedAccountsStore()
+        let removedIDs = removedStore.removedIDs
+        for d in Self.mergedAccountDescriptors(signedIn: accountsProviders.accounts)
+        where !removedIDs.contains(d.id) {
             let name = SyncRecordKey(kind: .descriptor, id: d.id).recordName
             if let bytes = Self.stableDescriptorBytes(d, fallback: fallback[name]) {
                 out[name] = bytes
+            }
+        }
+        // Removal tombstones: one per household-removed account, so every device signs
+        // it out and stops re-publishing it.
+        for (id, epoch) in removedStore.all {
+            if let data = CanonicalJSON.encode(AccountRemovalDTO(accountID: id, removedAtEpoch: epoch)) {
+                out[SyncRecordKey(kind: .removal, id: id).recordName] = data
             }
         }
         // Profiles (default ALWAYS included ⇒ never sync-deleted), their membership,
@@ -164,14 +281,28 @@ extension AppState {
     static func stableDescriptorBytes(_ d: SyncedAccountDescriptor, fallback: Data?) -> Data? {
         if let fallback,
            let prev = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: fallback) {
-            // S7: never reuse RAW fallback bytes — a legacy record could carry a token
-            // in candidateBaseURLs (which semantic equality ignores). Sanitize first,
-            // so a tokenized fallback heals to a stripped upload instead of re-publishing
-            // the credential.
             let cleanPrev = prev.sanitizingURLs()
             if cleanPrev.semanticallyEqualForSync(to: d) {
-                return CanonicalJSON.encode(cleanPrev)
+                // Reuse the stable bytes (preserving advisory URLs + the ORIGINAL
+                // publisher's origin), but back-fill origin once if the stored record
+                // predates origin stamping and this device knows it — a one-time
+                // re-publish that then re-stabilizes.
+                var merged = cleanPrev
+                if merged.originDeviceName == nil, d.originDeviceName != nil {
+                    merged.originDeviceName = d.originDeviceName
+                    merged.originDeviceKind = d.originDeviceKind
+                }
+                return CanonicalJSON.encode(merged)
             }
+            // Meaningful fields changed (e.g. a rename) → publish the new descriptor,
+            // but keep the ORIGINAL publisher's origin rather than overwriting it with
+            // the editing device.
+            var out = d
+            if cleanPrev.originDeviceName != nil {
+                out.originDeviceName = cleanPrev.originDeviceName
+                out.originDeviceKind = cleanPrev.originDeviceKind
+            }
+            return CanonicalJSON.encode(out)
         }
         return CanonicalJSON.encode(d)
     }
@@ -183,6 +314,8 @@ extension AppState {
     public func clearRemoteDerivedSyncState() {
         var store = PendingSyncedServersStore()
         store.removeAll()
+        var removed = RemovedAccountsStore()
+        removed.removeAll()
         refreshPendingSyncedServers()
     }
 
@@ -193,7 +326,13 @@ extension AppState {
     static func mergedAccountDescriptors(signedIn accounts: [Account]) -> [SyncedAccountDescriptor] {
         var byID: [String: SyncedAccountDescriptor] = [:]
         for d in PendingSyncedServersStore().all { byID[d.id] = d.sanitizingURLs() }
-        for a in accounts { byID[a.id] = SyncedAccountDescriptor(account: a) } // signed-in wins
+        // Stamp this Apple TV as the origin of its own signed-in servers so peers can
+        // show "Set up with <this TV>". Preserved across re-publish (origin is excluded
+        // from semanticallyEqualForSync), so it names the ORIGIN device.
+        let originName = DeviceDisplayName.current(fallback: "Apple TV")
+        for a in accounts {
+            byID[a.id] = SyncedAccountDescriptor(account: a).stampingOrigin(name: originName, kind: "tv") // signed-in wins
+        }
         return byID.values.sorted { $0.id < $1.id }
     }
 
@@ -212,6 +351,8 @@ extension AppState {
         var settingRemoves: [(pid: String, key: String)] = []
         var descriptorsTouched = false
         var pendingStore = PendingSyncedServersStore()
+        var removalUpserts: [String: Int] = [:]
+        var removalClears: Set<String> = []
 
         for (name, value) in changes {
             guard let key = SyncRecordKey.parse(name) else { continue }
@@ -238,7 +379,32 @@ extension AppState {
                 } else if value == nil {
                     pendingStore.removeSynced(key.id)
                 }
+            case .removal:
+                if let value, let dto = CanonicalJSON.decode(AccountRemovalDTO.self, from: value) {
+                    removalUpserts[key.id] = dto.removedAtEpoch
+                } else if value == nil {
+                    removalClears.insert(key.id)
+                }
             }
+        }
+
+        // Household removals: record the tombstone, sign the account out here if this
+        // device holds it, and drop it from the pending list. A cleared removal (the
+        // server was re-added on a peer) lets its descriptor flow again.
+        if !removalUpserts.isEmpty || !removalClears.isEmpty {
+            descriptorsTouched = true   // re-add clears must refresh pending/auto-connect too
+            var removed = RemovedAccountsStore()
+            for (id, epoch) in removalUpserts {
+                removed.markRemoved(id, at: epoch)
+                pendingStore.removeSynced(id)
+                // A queued setup prompt for a now-removed server must not linger — the
+                // user could otherwise accept it and undo the removal.
+                if cloudSyncUI.pendingServerPrompt?.id == id { cloudSyncUI.pendingServerPrompt = nil }
+                if accountsProviders.accounts.contains(where: { $0.id == id }) {
+                    removeAccount(id: id)
+                }
+            }
+            for id in removalClears { removed.clear(id) }
         }
 
         // 1. Profiles: cosmetic upserts + deletions (default never deleted).
@@ -291,13 +457,59 @@ extension AppState {
     public func refreshPendingSyncedServers() {
         var store = PendingSyncedServersStore()
         let localIDs = Set(accountsProviders.accounts.map(\.id))
-        let newly = store.newlyPending(excludingLocal: localIDs)
+        // Household-removed (tombstoned) servers are hidden here and never prompted.
+        let removedIDs = RemovedAccountsStore().removedIDs
+        if let prompt = cloudSyncUI.pendingServerPrompt, removedIDs.contains(prompt.id) {
+            cloudSyncUI.pendingServerPrompt = nil
+        }
+        let newly = store.newlyPending(excludingLocal: localIDs).filter { !removedIDs.contains($0.id) }
         cloudSyncUI.pendingSyncedServers = store.pending(excludingLocal: localIDs)
+            .filter { !removedIDs.contains($0.id) }
         if SyncSetupFeatureFlag().isEnabled, cloudSyncUI.pendingServerPrompt == nil,
            let first = newly.first {
             cloudSyncUI.pendingServerPrompt = first
             store.markPrompted(newly.map(\.id))
         }
+    }
+
+    /// Whether the delete UI should offer the "Everywhere" vs "This device" choice —
+    /// simply whether cross-device sync is on. The destructive "Everywhere" action has
+    /// its own second confirm, so we don't gate on live device detection (which lags).
+    public var offersRemoveEverywhere: Bool { SyncSetupFeatureFlag().isEnabled }
+
+    /// Whether the user has other devices on this iCloud account.
+    public var hasOtherHouseholdDevices: Bool {
+        !HouseholdDevicesStore().otherDevices(excluding: accountsProviders.accountStore.deviceID()).isEmpty
+    }
+
+    /// Register this Apple TV in the household presence registry.
+    func heartbeatHouseholdPresence() {
+        guard SyncSetupFeatureFlag().isEnabled else { return }
+        HouseholdDevicesStore().heartbeat(
+            deviceID: accountsProviders.accountStore.deviceID(),
+            deviceName: DeviceDisplayName.current(fallback: "Apple TV"))
+    }
+
+    /// Remove a server from EVERY device on this iCloud account: publish a removal
+    /// tombstone so peers sign it out and stop re-publishing it, remove it here, and
+    /// push the change now. Reversible by re-adding the server anywhere.
+    public func removeAccountEverywhere(id: String) {
+        var removed = RemovedAccountsStore()
+        removed.markRemoved(id, at: Int(Date().timeIntervalSince1970))
+        var pending = PendingSyncedServersStore()
+        pending.removeSynced(id)
+        removeAccount(id: id)   // local removal (also retires credentials)
+        refreshPendingSyncedServers()
+        scheduleCloudPublish()  // propagate the tombstone + delete the descriptor
+    }
+
+    /// Clear any household-removal tombstone for an account the user just (re)added, so
+    /// its descriptor syncs again and peers stop treating it as removed.
+    public func clearRemovalTombstone(for id: String) {
+        var removed = RemovedAccountsStore()
+        guard removed.isRemoved(id) else { return }
+        removed.clear(id)
+        scheduleCloudPublish()
     }
 
     /// The user chose to ignore a pending server — keep it listed (deletable) but
@@ -323,6 +535,9 @@ extension AppState {
         }
         Task { await cloudSync.activate() }
         armCloudConfigObservation()
+        heartbeatHouseholdPresence()
+        checkForSyncSetupOffer()
+        startSyncSetupOfferPolling()
     }
 
     /// Re-arming Observation: fires whenever the roster or account set changes,
@@ -365,6 +580,13 @@ extension AppState {
             Task { await cloudSync.activate() }
             armCloudConfigObservation()
             scheduleCloudPublish()
+            heartbeatHouseholdPresence()
+            startSyncSetupOfferPolling()
+        } else {
+            HouseholdDevicesStore().remove(deviceID: accountsProviders.accountStore.deviceID())
+            syncSetupOfferPollTask?.cancel()
+            syncSetupOfferPollTask = nil
+            cloudSyncUI.pendingSyncSetupOffer = nil
         }
     }
 }

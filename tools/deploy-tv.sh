@@ -35,13 +35,18 @@ SCHEME="Plozz"
 CONFIG="Debug"
 
 BUILD_ONLY=0
-REGEN=0
+# Regenerate (and re-bake the git-commit-count build number) by DEFAULT so every
+# deploy carries a distinct, verifiable CFBundleVersion. Without this the number
+# went stale across commits and the install verifier could false-positive (see
+# install-verified.sh). Pass --no-regen to skip (e.g. rapid same-commit rebuilds).
+REGEN=1
 SIM_BUILD=0
 CLEAN=0
 for arg in "$@"; do
   case "$arg" in
     --build-only) BUILD_ONLY=1 ;;
     --regen)      REGEN=1 ;;
+    --no-regen)   REGEN=0 ;;
     --sim-build)  SIM_BUILD=1 ;;
     --clean)      CLEAN=1 ;;
     -h|--help)    grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -62,7 +67,7 @@ if [[ "$CLEAN" == "1" ]]; then
 fi
 
 if [[ "$REGEN" == "1" ]]; then
-  echo "▸ Regenerating Xcode project (files added/removed)…"
+  echo "▸ Regenerating Xcode project + baking a fresh build number…"
   if [[ -x tools/generate-project.sh ]]; then tools/generate-project.sh; else xcodegen generate; fi
 fi
 

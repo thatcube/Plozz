@@ -174,7 +174,10 @@ struct SyncSetupSendView: View {
                         VStack(alignment: .leading, spacing: 18) {
                             ForEach(servers, id: \.id) { account in
                                 HStack(spacing: 18) {
-                                    ProviderBrandMark(provider: account.server.provider, size: 44)
+                                    ProviderBrandMark(
+                                        provider: account.server.provider, size: 44,
+                                        mediaShareTransport: MediaShareTransportKind(
+                                            mediaShareScheme: account.server.baseURL.scheme))
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(account.server.name).font(.title3.weight(.semibold))
                                             .foregroundStyle(palette.primaryText)

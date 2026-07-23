@@ -27,6 +27,20 @@ import LastFmService
 /// with its owning account so a tapped result routes to the correct provider.
 /// Settings exposes account management, the customizable Home-libraries
 /// checklist, and caption/spoiler/theme settings.
+/// Bundles the DEBUG-only Settings actions into one value so the (very large)
+/// `MainTabView` initializer takes a single argument for them rather than several
+/// — keeping the call site within the Swift type-checker's time budget.
+struct DebugSettingsActions {
+    let resetToFirstRun: () -> Void
+    /// `nil` where the "Erase Everything From iCloud" test action is unavailable.
+    let eraseICloud: (() -> Void)?
+
+    init(resetToFirstRun: @escaping () -> Void, eraseICloud: (() -> Void)? = nil) {
+        self.resetToFirstRun = resetToFirstRun
+        self.eraseICloud = eraseICloud
+    }
+}
+
 struct MainTabView: View {
     /// Stable identifiers for the root tabs, used to persist and restore the
     /// selected tab across MainTabView being rebuilt (see `selectedTab`).
@@ -159,10 +173,12 @@ struct MainTabView: View {
     let onDeleteProfile: (String) -> Void
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void
+    let onRemoveAccountEverywhere: (Account) -> Void
+    var offersRemoveEverywhere: Bool = false
     let onRescanShare: (String) -> Void
     let onSignOutAll: () -> Void
     let onSwitchProfile: () -> Void
-    let onResetToFirstRun: () -> Void
+    let debugActions: DebugSettingsActions
     let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
     /// Maps a household profile to a Seerr user (or clears it) — forwarded to the
@@ -395,9 +411,12 @@ struct MainTabView: View {
                 onDeleteProfile: onDeleteProfile,
                 onAddAccount: onAddAccount,
                 onRemoveAccount: onRemoveAccount,
+                onRemoveAccountEverywhere: onRemoveAccountEverywhere,
+                offersRemoveEverywhere: offersRemoveEverywhere,
                 onRescanShare: onRescanShare,
                 onSignOutAll: onSignOutAll,
-                onResetToFirstRun: onResetToFirstRun,
+                onResetToFirstRun: debugActions.resetToFirstRun,
+                onEraseICloud: debugActions.eraseICloud,
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
                 onSelectPlexHomeUser: onSelectPlexHomeUser,
                 onSetSeerrUser: onSetSeerrUser,

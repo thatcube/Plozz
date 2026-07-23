@@ -94,3 +94,21 @@ extension Account: CustomStringConvertible {
         "Account(id: \(id), server: \(server.name), user: \(userName))"
     }
 }
+
+public extension Account {
+    /// A STABLE, deterministic account id derived from the (provider + backend server
+    /// id + user) identity — so the SAME server+user always maps to the SAME account
+    /// id, on every device and on every sign-in. This is why media shares never
+    /// duplicated (they've always used a deterministic id); applying the same rule to
+    /// token providers (Plex/Jellyfin/Emby) is the holistic fix for cross-device
+    /// duplicate accounts: re-adding updates in place, sync joins on a matching id, and
+    /// a pairing transfer can't create a second copy.
+    ///
+    /// Media shares keep their existing deterministic id (`session.server.id`, which
+    /// already encodes host/path/user) so their persisted Keychain credentials aren't
+    /// orphaned by an id change.
+    static func stableID(for session: UserSession) -> String {
+        if session.server.provider == .mediaShare { return session.server.id }
+        return "\(session.server.provider.rawValue)|\(session.server.id)|\(session.userID)"
+    }
+}

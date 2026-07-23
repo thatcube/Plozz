@@ -505,6 +505,19 @@ public final class AppState {
     @ObservationIgnored
     var cloudPublishTask: Task<Void, Never>?
 
+    /// Guards against overlapping same-Apple-ID credential auto-adopt attempts.
+    @ObservationIgnored
+    var isAutoAdoptingSyncSetup = false
+
+    /// Rendezvous offers the user declined this session, so they aren't re-prompted.
+    @ObservationIgnored
+    var dismissedSyncSetupOfferKeys: Set<String> = []
+
+    /// Repeating check that surfaces a same-Apple-ID device asking to be set up, so the
+    /// TV prompts promptly while it's open (iCloud rendezvous delivery is best-effort).
+    @ObservationIgnored
+    var syncSetupOfferPollTask: Task<Void, Never>?
+
     /// Observable CloudKit sync status for the iCloud Sync settings page.
     public let cloudSyncStatus = CloudSyncStatus()
 
@@ -772,22 +785,14 @@ public final class AppState {
         self.syncSetup = SyncSetupService(
             deviceID: { syncStore.deviceID() },
             deviceName: {
-                // tvOS 16+ returns a generic UIDevice.name without a special
-                // entitlement, so derive the name from the Bonjour host name.
-                // Bonjour lowercases + hyphenates it ("Brando TV" -> "brando-tv"),
-                // so prettify: hyphens -> spaces, title-case, uppercase "TV".
-                let host = ProcessInfo.processInfo.hostName
-                if !host.isEmpty, host.lowercased() != "localhost" {
-                    let base = host.replacingOccurrences(of: ".local", with: "")
-                    let pretty = base.split(separator: "-").map { word -> String in
-                        let s = String(word)
-                        if s.lowercased() == "tv" { return "TV" }
-                        return s.prefix(1).uppercased() + s.dropFirst()
-                    }.joined(separator: " ")
-                    if !pretty.isEmpty { return pretty }
-                }
-                let name = UIDevice.current.name
-                return name.isEmpty ? "Apple TV" : name
+                // UIDevice.name is a generic model name on tvOS 16+ without a special
+                // entitlement, so recover the owner-given name from the host name
+                // ("Brando TV" → host "brando-tv") — shared with iOS. Non-blocking:
+                // never reads ProcessInfo.hostName on the main thread (see
+                // DeviceDisplayName — that reverse-DNS call hangs launch + prompts LAN).
+                DeviceDisplayName.current(
+                    fallback: UIDevice.current.name.isEmpty ? "Apple TV" : UIDevice.current.name
+                )
             },
             isConfigured: { !syncAccounts.accounts.isEmpty },
             configProvider: {
@@ -1166,14 +1171,13 @@ public final class AppState {
     /// otherwise it enters the app directly.
     public func didAuthenticate(_ session: UserSession) {
         let isFirstRun = accountsProviders.accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
-        // Media shares are identified by their share path (host/port/share), not a
-        // random UUID, so re-adding the same share — e.g. to fix its password —
-        // updates the existing account in place (new credential revision, old one
-        // retired) instead of forking a duplicate account. Other providers keep a
-        // freshly-minted UUID identity.
-        let account = session.server.provider == .mediaShare
-            ? Account(id: session.server.id, from: session)
-            : Account(from: session)
+        // Every provider now gets a STABLE, deterministic id derived from its
+        // (provider + server + user) identity — so re-adding the same server (e.g. to
+        // fix a password) updates the existing account in place instead of forking a
+        // duplicate, and the SAME server+user resolves to the SAME id on every device
+        // (so sync/pairing can't create cross-device duplicates). Media shares keep
+        // their existing deterministic id via the same helper.
+        let account = Account(id: Account.stableID(for: session), from: session)
         let previousAccount = accountsProviders.accounts.first { $0.id == account.id }
         do {
             try accountsProviders.accountStore.add(account, token: session.accessToken)
@@ -1209,6 +1213,9 @@ public final class AppState {
             mediaShare.accountService.retireCredential(for: previousAccount)
         }
         accountsProviders.reloadAccounts()
+        // A (re)added server clears any household-removal tombstone for it, so its
+        // descriptor syncs again and peers stop treating it as removed.
+        clearRemovalTombstone(for: account.id)
         // Flow finished — next add-account starts at the chooser.
         pendingOnboardingProvider = nil
         pendingLibrarySelectionAccountIDs = [account.id]
@@ -1226,7 +1233,7 @@ public final class AppState {
         let isFirstRun = accountsProviders.accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
         var addedIDs: [String] = []
         for session in sessions {
-            let account = Account(from: session)
+            let account = Account(id: Account.stableID(for: session), from: session)
             let previousAccount = accountsProviders.accounts.first { $0.id == account.id }
             do {
                 try accountsProviders.accountStore.add(account, token: session.accessToken)
@@ -1240,6 +1247,7 @@ public final class AppState {
             }
         }
         accountsProviders.reloadAccounts()
+        addedIDs.forEach(clearRemovalTombstone)   // (re)add clears removal tombstones
         pendingOnboardingProvider = nil
         guard !addedIDs.isEmpty else {
             apply(.authenticationFailed(.unknown("")))

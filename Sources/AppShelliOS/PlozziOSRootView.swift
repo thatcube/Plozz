@@ -18,6 +18,31 @@ public struct PlozziOSRootView: View {
     @State private var addServerPresentationColorScheme: ColorScheme = .dark
     @State private var showingSettings = false
     @State private var completedLaunchProfileSelection = false
+    /// A synced server the user tapped "Set Up" on, used to pre-fill the Add Server
+    /// sheet so they only have to sign in.
+    @State private var serverSetupSeed: SyncedAccountDescriptor?
+    /// Action chosen in the new-server prompt, run after the prompt sheet dismisses so
+    /// we never stack two sheets in the same runloop.
+    @State private var serverPromptFollowUp: ServerPromptFollowUp?
+    /// Drives the "set up from another device" pairing flow launched from the prompt,
+    /// carrying which server the user wants signed in (nil = not pairing).
+    @State private var pairingServer: SyncedAccountDescriptor?
+    /// Fresh-launch "we found your setup" full-page cover. Shown once per cold launch
+    /// when there are servers that need bringing over (`pendingServersNeedingSetup`),
+    /// regardless of whether accounts/profiles already exist — so the "open a device
+    /// and finish bringing over your Apple TV's servers" case works even on the 100th
+    /// open, not just a blank first run. Mid-session detections still use the smaller
+    /// drawer (`pendingSyncedServerPrompt`), so we don't hijack active use.
+    @State private var showDetectedCover = false
+    /// Set true once we've decided about the detected cover for this launch (shown it,
+    /// or the short cold-launch window elapsed), so it never re-pops mid-session.
+    @State private var coldLaunchDetectionHandled = false
+    /// Defer launching the receive/pairing flow until the detected cover has fully
+    /// dismissed, so two full-screen covers never race in the same runloop.
+    @State private var detectedFollowUpReceive = false
+    /// Drives the unrestricted receive/pairing flow launched from the detected-setup
+    /// page (brings the whole household over from the detected device).
+    @State private var showReceiveFromDetected = false
 
     public init() {}
 
@@ -45,11 +70,38 @@ public struct PlozziOSRootView: View {
             }
         }
         .scrollContentBackground(.hidden)
+        .task {
+            // Detect on cold launch: fire immediately if the pending set is already
+            // warm, and close the cold-launch window after a short grace period so a
+            // later (mid-session) detection uses the drawer instead of this cover.
+            considerColdLaunchDetection()
+            try? await Task.sleep(for: .seconds(8))
+            coldLaunchDetectionHandled = true
+        }
+        .onChange(of: appModel.pendingServersNeedingSetup.count) { _, _ in
+            considerColdLaunchDetection()
+        }
+        .fullScreenCover(isPresented: $showDetectedCover, onDismiss: {
+            if detectedFollowUpReceive {
+                detectedFollowUpReceive = false
+                showReceiveFromDetected = true
+            }
+        }) {
+            PlozziOSDetectedSetupView(
+                appModel: appModel,
+                onSetUpFromDevice: {
+                    detectedFollowUpReceive = true
+                    showDetectedCover = false
+                },
+                onSetUpManually: { showDetectedCover = false }
+            )
+            .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active { appModel.syncCloudOnForeground() }
         }
         .alert(
-            "Set up \(appModel.pendingSyncSetupOffer?.deviceName ?? "your device")?",
+            syncSetupOfferTitle,
             isPresented: Binding(
                 // Presentation is driven purely by pendingSyncSetupOffer; the two
                 // buttons own confirm/decline, so the setter must NOT have a side
@@ -62,7 +114,40 @@ public struct PlozziOSRootView: View {
             Button("Set Up") { appModel.confirmSyncSetupOffer() }
             Button("Not Now", role: .cancel) { appModel.declineSyncSetupOffer() }
         } message: { _ in
-            Text("Send your servers and sign-in so it's ready to watch — no typing needed.")
+            Text(syncSetupOfferServerName != nil
+                 ? "Sign this device in to “\(syncSetupOfferServerName!)”."
+                 : "Send your servers and sign-in so it’s ready to watch.")
+        }
+        .sheet(item: serverPromptBinding, onDismiss: consumeServerPromptFollowUp) { descriptor in
+            PlozziOSNewServerPromptView(
+                descriptor: descriptor,
+                accent: resolvedPalette.accent,
+                onSignIn: {
+                    serverPromptFollowUp = .signIn(descriptor)
+                    appModel.clearPendingSyncedServerPrompt()
+                },
+                onUseOtherDevice: {
+                    serverPromptFollowUp = .pairDevice(descriptor)
+                    appModel.clearPendingSyncedServerPrompt()
+                },
+                onNotNow: {
+                    serverPromptFollowUp = nil
+                    appModel.clearPendingSyncedServerPrompt()
+                }
+            )
+            .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
+        }
+        .fullScreenCover(item: $pairingServer) { descriptor in
+            PlozziOSSyncSetupReceiveView(appModel: appModel, requestedServer: descriptor) {
+                pairingServer = nil
+            }
+            .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
+        }
+        .fullScreenCover(isPresented: $showReceiveFromDetected) {
+            PlozziOSSyncSetupReceiveView(appModel: appModel) {
+                showReceiveFromDetected = false
+            }
+            .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
         }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
@@ -98,9 +183,16 @@ public struct PlozziOSRootView: View {
         }
         .sheet(
             isPresented: $showingAddServer,
-            onDismiss: appModel.finishManagedServerPresentation
+            onDismiss: {
+                serverSetupSeed = nil
+                appModel.finishManagedServerPresentation()
+            }
         ) {
-            AddServerView(appModel: appModel)
+            AddServerView(
+                appModel: appModel,
+                initialProvider: serverSetupSeed?.provider ?? .jellyfin,
+                initialAddress: serverSetupSeed?.candidateBaseURLs.first?.absoluteString ?? ""
+            )
                 .preferredColorScheme(addServerPresentationColorScheme)
                 .presentationSizing(.page)
         }
@@ -167,6 +259,24 @@ public struct PlozziOSRootView: View {
             for: appModel.settings.theme.theme,
             systemColorScheme: systemColorScheme
         )
+    }
+
+    /// The name THIS device holds for the offer's requested account (a per-server
+    /// offer is only surfaced when this device has the account), rather than trusting
+    /// the rendezvous-supplied string.
+    private var syncSetupOfferServerName: String? {
+        guard let requested = appModel.pendingSyncSetupOffer?.requestedAccountID else { return nil }
+        return appModel.accountsProviders.accounts.first(where: { $0.id == requested })?.server.name
+    }
+
+    /// Title for the same-Apple-ID setup offer alert. Names the specific server when
+    /// the offering device asked for just one, else the device-level framing.
+    private var syncSetupOfferTitle: String {
+        let device = appModel.pendingSyncSetupOffer?.deviceName ?? "your device"
+        if let server = syncSetupOfferServerName {
+            return "Set up “\(server)” on “\(device)”?"
+        }
+        return "Set up “\(device)”?"
     }
 
     private var shellIdentity: String {
@@ -248,11 +358,60 @@ public struct PlozziOSRootView: View {
         appModel.beginManagedServerPresentation()
         showingAddServer = true
     }
+
+    /// Adopt a server synced from another device: open the Add Server sheet pre-filled
+    /// with its provider + address, so the user only has to sign in.
+    private func setUpPendingSyncedServer(_ descriptor: SyncedAccountDescriptor) {
+        serverSetupSeed = descriptor
+        showAddServer()
+    }
+
+    /// Presentation binding for the one-time new-server prompt. Clearing it (a button
+    /// tap or a swipe-down) dismisses the sheet.
+    private var serverPromptBinding: Binding<SyncedAccountDescriptor?> {
+        Binding(
+            // Suppress the mid-session drawer while the full-page "we found your setup"
+            // cover is (or is about to be) presented at cold launch, so the two don't
+            // fight over the same server.
+            get: { (showDetectedCover || detectedFollowUpReceive) ? nil : appModel.pendingSyncedServerPrompt },
+            set: { if $0 == nil { appModel.clearPendingSyncedServerPrompt() } }
+        )
+    }
+
+    private func considerColdLaunchDetection() {
+        guard !coldLaunchDetectionHandled else { return }
+        guard !appModel.pendingServersNeedingSetup.isEmpty else { return }
+        coldLaunchDetectionHandled = true
+        // The cover supersedes the drawer for these servers this launch.
+        appModel.clearPendingSyncedServerPrompt()
+        showDetectedCover = true
+    }
+
+    /// Run the action chosen in the prompt once its sheet has fully dismissed. A
+    /// swipe-to-dismiss leaves `serverPromptFollowUp == nil`, which behaves like
+    /// "Not Now" (the server still lives under Settings ▸ iCloud Sync).
+    private func consumeServerPromptFollowUp() {
+        guard let follow = serverPromptFollowUp else { return }
+        serverPromptFollowUp = nil
+        switch follow {
+        case .signIn(let descriptor):
+            setUpPendingSyncedServer(descriptor)
+        case .pairDevice(let descriptor):
+            pairingServer = descriptor
+        }
+    }
 }
 
 private struct PendingPairing: Identifiable {
     let invite: String
     var id: String { invite }
+}
+
+/// The action a user chose in the new-server prompt, deferred until the prompt sheet
+/// dismisses so a follow-up sheet never races the dismissal.
+private enum ServerPromptFollowUp {
+    case signIn(SyncedAccountDescriptor)
+    case pairDevice(SyncedAccountDescriptor)
 }
 
 private enum PlozziOSDestination: String, CaseIterable, Identifiable, Hashable {

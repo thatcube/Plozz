@@ -3,6 +3,7 @@ import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureSettings
+import FeatureSyncSetup
 import SwiftUI
 import UIKit
 
@@ -165,6 +166,7 @@ private struct PlozziOSSettingsSplitView: View {
     @State private var selection: PlozziOSSettingsDestination?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var confirmSignOutAll = false
+    @State private var confirmEraseICloud = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -250,6 +252,22 @@ private struct PlozziOSSettingsSplitView: View {
                         Button("Reset to First Run") {
                             appModel.resetToFirstRunForDebugging()
                             onClose()
+                        }
+                        Button("Erase Everything From iCloud", role: .destructive) {
+                            confirmEraseICloud = true
+                        }
+                        .confirmationDialog(
+                            "Erase everything from iCloud?",
+                            isPresented: $confirmEraseICloud,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Erase Household From iCloud", role: .destructive) {
+                                appModel.eraseEverythingFromICloudForDebugging()
+                                onClose()
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("Deletes the whole household — every profile, server, and synced login — from iCloud (all your devices), wipes this device to first-run, and turns iCloud Sync OFF here. Use to test a clean cold start (e.g. set up only on the Apple TV, then fresh-install another device). Re-enable Sync when done.")
                         }
                     }
                     #endif
@@ -429,6 +447,7 @@ private struct PlozziOSSettingsCompactMenu: View {
     let onAddServer: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var confirmSignOutAll = false
+    @State private var confirmEraseICloud = false
     @State private var showMetadata = false
 
     var body: some View {
@@ -593,6 +612,22 @@ private struct PlozziOSSettingsCompactMenu: View {
                         appModel.resetToFirstRunForDebugging()
                         dismiss()
                     }
+                    Button("Erase Everything From iCloud", role: .destructive) {
+                        confirmEraseICloud = true
+                    }
+                    .confirmationDialog(
+                        "Erase everything from iCloud?",
+                        isPresented: $confirmEraseICloud,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Erase Household From iCloud", role: .destructive) {
+                            appModel.eraseEverythingFromICloudForDebugging()
+                            dismiss()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Deletes the whole household — every profile, server, and synced login — from iCloud (all your devices), wipes this device to first-run, and turns iCloud Sync OFF here. Use to test a clean cold start (e.g. set up only on the Apple TV, then fresh-install another device). Re-enable Sync when done.")
+                    }
                 }
                 #endif
 
@@ -746,8 +781,10 @@ struct PlozziOSAccountDetailView: View {
 
     let appModel: PlozziOSAppModel
     let account: Account
-    let onRemove: () -> Void
     @State private var confirmRemoval = false
+    @State private var confirmEverywhere = false
+
+    private var offerEverywhere: Bool { appModel.offersRemoveEverywhere }
 
     var body: some View {
         Form {
@@ -785,7 +822,7 @@ struct PlozziOSAccountDetailView: View {
             }
 
             SettingsSectionGroup {
-                Button("Remove Account", role: .destructive) {
+                Button("Remove Server", role: .destructive) {
                     confirmRemoval = true
                 }
             }
@@ -793,14 +830,37 @@ struct PlozziOSAccountDetailView: View {
         .settingsPageSurface()
         .navigationTitle(account.server.name)
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Remove \(account.server.name)?", isPresented: $confirmRemoval) {
+        .confirmationDialog(
+            "Remove \(account.server.name)?",
+            isPresented: $confirmRemoval,
+            titleVisibility: .visible
+        ) {
+            if offerEverywhere {
+                Button("Remove Everywhere", role: .destructive) { confirmEverywhere = true }
+                Button("Remove from This \(deviceName)", role: .destructive) {
+                    appModel.removeAccount(id: account.id)
+                    dismiss()
+                }
+            } else {
+                Button("Remove", role: .destructive) {
+                    appModel.removeAccount(id: account.id)
+                    dismiss()
+                }
+            }
             Button("Cancel", role: .cancel) {}
-            Button("Remove", role: .destructive) {
-                onRemove()
+        } message: {
+            Text(offerEverywhere
+                 ? "Remove it from all your devices, or just this \(deviceName)?"
+                 : "Signs out and removes this server.")
+        }
+        .alert("Remove from all devices?", isPresented: $confirmEverywhere) {
+            Button("Remove Everywhere", role: .destructive) {
+                appModel.removeAccountEverywhere(id: account.id)
                 dismiss()
             }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Credentials and locally cached data for this source will be removed.")
+            Text("“\(account.server.name)” will also be removed from your other devices signed in to iCloud.")
         }
     }
 }

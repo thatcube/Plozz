@@ -2,6 +2,7 @@
 import AppRuntime
 import CoreModels
 import CoreUI
+import FeatureSyncSetup
 import SwiftUI
 
 struct PlozziOSServersSettingsView: View {
@@ -101,7 +102,9 @@ struct PlozziOSServersSettingsView: View {
 private struct PlozziOSServerSettingsDetailView: View {
     let appModel: PlozziOSAppModel
     let serverKey: String
+    @Environment(\.dismiss) private var dismiss
     @State private var confirmRemoveServer = false
+    @State private var confirmRemoveEverywhere = false
     @State private var selectedAccountID: String?
 
     private var group: ServerAccountGroup? {
@@ -157,27 +160,54 @@ private struct PlozziOSServerSettingsDetailView: View {
         }
         .settingsPageSurface()
         .navigationTitle(group?.serverName ?? "Server")
+        // When the server is gone (removed here, or the last sign-in removed on the
+        // pushed account detail, or a remote "Remove Everywhere" landed), pop back to
+        // the Servers list instead of stranding the user on an empty detail.
+        .onChange(of: group == nil) { _, gone in
+            if gone { dismiss() }
+        }
         .navigationDestination(item: $selectedAccountID) { accountID in
             if let account = appModel.accounts.first(where: { $0.id == accountID }) {
                 PlozziOSAccountDetailView(
                     appModel: appModel,
-                    account: account,
-                    onRemove: { appModel.removeAccount(id: account.id) }
+                    account: account
                 )
             }
         }
-        .alert(
+        .confirmationDialog(
             "Remove \(group?.serverName ?? "server")?",
-            isPresented: $confirmRemoveServer
+            isPresented: $confirmRemoveServer,
+            titleVisibility: .visible
         ) {
-            Button("Cancel", role: .cancel) {}
-            Button("Remove Server", role: .destructive) {
-                for account in group?.accounts ?? [] {
-                    appModel.removeAccount(id: account.id)
+            if appModel.offersRemoveEverywhere {
+                Button("Remove Everywhere", role: .destructive) { confirmRemoveEverywhere = true }
+                Button("Remove from This \(deviceName)", role: .destructive) {
+                    for account in group?.accounts ?? [] {
+                        appModel.removeAccount(id: account.id)
+                    }
+                }
+            } else {
+                Button("Remove Server", role: .destructive) {
+                    for account in group?.accounts ?? [] {
+                        appModel.removeAccount(id: account.id)
+                    }
                 }
             }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This signs everyone out and removes the server from this \(deviceName).")
+            Text(appModel.offersRemoveEverywhere
+                 ? "Remove it from all your devices, or just this \(deviceName)?"
+                 : "Signs everyone out and removes this server.")
+        }
+        .alert("Remove from all devices?", isPresented: $confirmRemoveEverywhere) {
+            Button("Remove Everywhere", role: .destructive) {
+                for account in group?.accounts ?? [] {
+                    appModel.removeAccountEverywhere(id: account.id)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("“\(group?.serverName ?? "This server")” will also be removed from your other devices signed in to iCloud.")
         }
     }
 }

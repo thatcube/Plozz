@@ -119,26 +119,36 @@ struct SyncSetupReceiveView: View {
         let servers = received.config.accounts.filter { authIDs.contains($0.id) }
         let profiles = received.config.profiles.map(\.profile)
 
-        VStack(spacing: 44) {
-            VStack(spacing: 12) {
+        ScrollView {
+            VStack(spacing: 40) {
                 Text("You’re all set")
                     .font(.largeTitle.bold()).foregroundStyle(palette.primaryText)
-            }
+                    .padding(.top, 12)
 
-            HStack(alignment: .top, spacing: 56) {
+            // Stacked full-width cards so a long profiles list can't squeeze the
+            // servers card. Each card wraps its items into a grid so any count fits.
+            VStack(spacing: 28) {
                 if !servers.isEmpty {
                     summarySection(title: servers.count == 1 ? "Server" : "Servers") {
-                        VStack(alignment: .leading, spacing: 18) {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 300), spacing: 24, alignment: .leading)],
+                            alignment: .leading, spacing: 18
+                        ) {
                             ForEach(servers) { server in
-                                HStack(spacing: 18) {
-                                    ProviderBrandMark(provider: server.provider, size: 44)
+                                HStack(spacing: 16) {
+                                    ProviderBrandMark(
+                                        provider: server.provider, size: 44,
+                                        mediaShareTransport: MediaShareTransportKind(
+                                            mediaShareScheme: server.candidateBaseURLs.first?.scheme))
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(server.serverName)
                                             .font(.title3.weight(.semibold))
                                             .foregroundStyle(palette.primaryText)
+                                            .lineLimit(1).minimumScaleFactor(0.7)
                                         Text("Signed in")
                                             .font(.callout).foregroundStyle(palette.secondaryText)
                                     }
+                                    Spacer(minLength: 0)
                                 }
                             }
                         }
@@ -146,20 +156,24 @@ struct SyncSetupReceiveView: View {
                 }
                 if !profiles.isEmpty {
                     summarySection(title: profiles.count == 1 ? "Profile" : "Profiles") {
-                        HStack(alignment: .top, spacing: 28) {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 132), spacing: 24)],
+                            spacing: 22
+                        ) {
                             ForEach(profiles, id: \.id) { profile in
                                 VStack(spacing: 10) {
-                                    ProfileAvatarView(profile: profile, size: 96)
+                                    ProfileAvatarView(profile: profile, size: 92)
                                     Text(profile.name)
                                         .font(.callout).foregroundStyle(palette.primaryText)
-                                        .lineLimit(1)
+                                        .lineLimit(1).minimumScaleFactor(0.7)
+                                        .frame(maxWidth: 124)
                                 }
-                                .frame(maxWidth: 140)
                             }
                         }
                     }
                 }
             }
+            .frame(maxWidth: 1240)
 
             Button("Start Watching") {
                 guard !didApply else { return }
@@ -173,6 +187,8 @@ struct SyncSetupReceiveView: View {
                 }
             }
             .font(.title3.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity)
         }
     }
 

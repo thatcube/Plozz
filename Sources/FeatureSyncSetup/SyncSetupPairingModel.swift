@@ -50,6 +50,11 @@ public final class SyncSetupPairingModel {
     private var receiveGeneration = 0
     /// Continuation the sender awaits while the user confirms the SAS match.
     private var sasContinuation: CheckedContinuation<Bool, Never>?
+    /// When receiving for a SINGLE server (from the per-server "set up with other
+    /// device" entry), the account id + name to advertise so the source transfers only
+    /// that server and names it in its confirm prompt. nil = whole-device request.
+    private var requestedAccountID: String?
+    private var requestedServerName: String?
 
     public init(
         service: SyncSetupService,
@@ -74,7 +79,12 @@ public final class SyncSetupPairingModel {
     /// complete the handshake (aborted, dropped, or timed out), we tear that
     /// attempt down and show a fresh code again instead of dead-ending on a
     /// spinner. Call `stopReceiving()` when leaving the screen.
-    public func startReceiving() async {
+    public func startReceiving(
+        requestedAccountID: String? = nil,
+        requestedServerName: String? = nil
+    ) async {
+        self.requestedAccountID = requestedAccountID
+        self.requestedServerName = requestedServerName
         isReceiving = true
         receiveGeneration += 1
         let generation = receiveGeneration
@@ -87,7 +97,13 @@ public final class SyncSetupPairingModel {
             phase = .waitingForPeer(code: pairing.code, invite: pairing.invite)
             // Publish a same-Apple-ID rendezvous so the user's OTHER device can set
             // this one up with no scanned QR / typed code (the credential auto-skip).
-            service.publishRendezvous(for: pairing)
+            // Carry the requested server (if any) so the source transfers just that one
+            // and names it in its confirm prompt.
+            service.publishRendezvous(
+                for: pairing,
+                requestedAccountID: requestedAccountID,
+                requestedServerName: requestedServerName
+            )
             let host = makeHostLink(pairing)
             currentHost = host
             do {
@@ -157,9 +173,15 @@ public final class SyncSetupPairingModel {
     }
 
     /// Source role: push this device's config + credentials to a SPECIFIC offer the
-    /// user has confirmed. Pins the offer's public key ⇒ no SAS, no typing.
+    /// user has confirmed. Pins the offer's public key ⇒ no SAS, no typing. If the
+    /// offer requested a single server, only that account is transferred.
     public func adopt(_ rendezvous: SyncPairingRendezvous) async {
-        await send(serviceName: rendezvous.serviceName, expectedPublicKey: rendezvous.publicKeyData)
+        let restrict = rendezvous.requestedAccountID.map { Set([$0]) }
+        await send(
+            serviceName: rendezvous.serviceName,
+            expectedPublicKey: rendezvous.publicKeyData,
+            restrictToAccountIDs: restrict
+        )
     }
 
     /// Begin listing nearby devices waiting to be set up.
@@ -176,10 +198,14 @@ public final class SyncSetupPairingModel {
         nearbyDevices = []
     }
 
-    /// Pair with a discovered device (no code needed — same Wi-Fi, tap to confirm).
+    /// Pair with a discovered device. If that device published a rendezvous to THIS
+    /// iCloud account (same-Apple-ID), pin its authenticated public key so the transfer
+    /// skips the numeric SAS — just like the automatic offer path. Otherwise fall back
+    /// to SAS (a different Apple ID has no shared trust anchor).
     public func pair(with device: DiscoveredPairingDevice) async {
         stopDiscovery()
-        await send(serviceName: device.serviceName, expectedPublicKey: nil)
+        let key = service.rendezvousPublicKey(forServiceName: device.serviceName)
+        await send(serviceName: device.serviceName, expectedPublicKey: key)
     }
 
     /// Source role: send using a scanned QR invite string. The in-app camera scan
@@ -205,17 +231,25 @@ public final class SyncSetupPairingModel {
         await send(serviceName: decoded.serviceName, expectedPublicKey: nil)
     }
 
-    /// Source role: send using a typed short code (no out-of-band key to verify).
+    /// Source role: send using a typed short code. If a same-Apple-ID device published
+    /// a rendezvous for this code, pin its authenticated key and skip the numeric SAS
+    /// (the user read the code off their own device — in-person proof, like a QR).
+    /// Otherwise (different Apple ID) fall back to SAS.
     public func send(code: String) async {
         let normalized = SyncPairingCode.normalize(code)
         guard normalized.count >= 4 else {
             phase = .failed("Enter the code shown on your other device.")
             return
         }
-        await send(serviceName: normalized, expectedPublicKey: nil)
+        let key = service.rendezvousPublicKey(forServiceName: normalized)
+        await send(serviceName: normalized, expectedPublicKey: key)
     }
 
-    private func send(serviceName: String, expectedPublicKey: Data?) async {
+    private func send(
+        serviceName: String,
+        expectedPublicKey: Data?,
+        restrictToAccountIDs: Set<String>? = nil
+    ) async {
         phase = .connecting
         let guest = makeGuestLink(serviceName)
         do {
@@ -225,6 +259,7 @@ public final class SyncSetupPairingModel {
             try await service.sendSetup(
                 over: link,
                 expectedPublicKey: expectedPublicKey,
+                restrictToAccountIDs: restrictToAccountIDs,
                 confirmSAS: { [weak self] code in
                     await self?.awaitSASConfirmation(code: code) ?? false
                 }

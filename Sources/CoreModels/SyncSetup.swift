@@ -2,10 +2,12 @@ import Foundation
 
 // MARK: - Sync & Setup feature flag
 //
-// v1 cross-device Sync & Setup is OFF by default and gated by this flag. Nothing
-// user-visible or network-touching happens unless it is explicitly enabled. The
-// flag is a plain, household/device-wide `UserDefaults` bool (NOT per-profile):
-// syncing is a device capability, not a per-profile preference.
+// v1 cross-device Sync & Setup is ON by default: a fresh install participates in the
+// household so the "open a new device and your stuff is already there" experience
+// works without the user first hunting for a toggle. Turning it OFF is respected and
+// sticky (an explicit `false` is never overridden). The flag is a plain,
+// household/device-wide `UserDefaults` bool (NOT per-profile): syncing is a device
+// capability, not a per-profile preference.
 
 public struct SyncSetupFeatureFlag: Sendable {
     public static let storageKey = "com.plozz.syncSetup.enabled"
@@ -14,7 +16,13 @@ public struct SyncSetupFeatureFlag: Sendable {
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
     public var isEnabled: Bool {
-        get { defaults.bool(forKey: Self.storageKey) }
+        // Default ON: an unset flag (fresh install, or an existing user who never
+        // touched the toggle) reads as enabled. An explicit `false` the user chose
+        // is preserved — we only default when no value has been written.
+        get {
+            guard defaults.object(forKey: Self.storageKey) != nil else { return true }
+            return defaults.bool(forKey: Self.storageKey)
+        }
         nonmutating set { defaults.set(newValue, forKey: Self.storageKey) }
     }
 }
@@ -57,6 +65,13 @@ public struct SyncedAccountDescriptor: Codable, Hashable, Identifiable, Sendable
     public var recordVersion: Int
     /// Schema version so older clients can skip records they don't understand.
     public var schemaVersion: Int
+    /// Friendly name of the device that first published this server ("Brando's TV"),
+    /// for a "Set up with <device>" prompt. Non-secret; optional (older records + the
+    /// publisher-unknown case decode nil). Preserved across re-publish (not overwritten
+    /// per device), so it names the ORIGIN device.
+    public var originDeviceName: String?
+    /// Kind of the origin device ("tv" / "phone" / "pad" / "mac"), to pick an icon.
+    public var originDeviceKind: String?
 
     public static let currentSchemaVersion = 1
 
@@ -70,7 +85,9 @@ public struct SyncedAccountDescriptor: Codable, Hashable, Identifiable, Sendable
         avatarURL: URL? = nil,
         candidateBaseURLs: [URL] = [],
         recordVersion: Int = 1,
-        schemaVersion: Int = SyncedAccountDescriptor.currentSchemaVersion
+        schemaVersion: Int = SyncedAccountDescriptor.currentSchemaVersion,
+        originDeviceName: String? = nil,
+        originDeviceKind: String? = nil
     ) {
         self.id = id
         self.provider = provider
@@ -82,6 +99,19 @@ public struct SyncedAccountDescriptor: Codable, Hashable, Identifiable, Sendable
         self.candidateBaseURLs = candidateBaseURLs
         self.recordVersion = recordVersion
         self.schemaVersion = schemaVersion
+        self.originDeviceName = originDeviceName
+        self.originDeviceKind = originDeviceKind
+    }
+
+    /// A copy stamped with this device as the origin — used only when FIRST publishing a
+    /// locally-signed-in server (a fresh descriptor with no prior synced bytes to
+    /// preserve). Excluded from `semanticallyEqualForSync`, so a re-publish reuses the
+    /// original bytes and never overwrites the first publisher's name.
+    public func stampingOrigin(name: String, kind: String) -> SyncedAccountDescriptor {
+        var copy = self
+        copy.originDeviceName = name
+        copy.originDeviceKind = kind
+        return copy
     }
 }
 

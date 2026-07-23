@@ -5,6 +5,7 @@ import CoreModels
 import CoreNetworking
 import FeatureSyncSetup
 import FeatureSyncCloud
+import UIKit
 
 // MARK: - PlozziOSAppModel + CloudKit config auto-sync
 //
@@ -56,10 +57,19 @@ extension PlozziOSAppModel {
     func captureSyncRecords(fallback: [SyncRecordID: Data]) -> [SyncRecordID: Data] {
         var out: [SyncRecordID: Data] = [:]
         let localProfileIDs = Set(profiles.profiles.map(\.id))
-        for d in mergedAccountDescriptors() {
+        // Household-removed (tombstoned) accounts are excluded from descriptors and get
+        // a `.removal` record instead, so peers sign them out and stop re-publishing.
+        let removedStore = RemovedAccountsStore()
+        let removedIDs = removedStore.removedIDs
+        for d in mergedAccountDescriptors() where !removedIDs.contains(d.id) {
             let name = SyncRecordKey(kind: .descriptor, id: d.id).recordName
             if let bytes = Self.stableDescriptorBytes(d, fallback: fallback[name]) {
                 out[name] = bytes
+            }
+        }
+        for (id, epoch) in removedStore.all {
+            if let data = CanonicalJSON.encode(AccountRemovalDTO(accountID: id, removedAtEpoch: epoch)) {
+                out[SyncRecordKey(kind: .removal, id: id).recordName] = data
             }
         }
         for p in profiles.profiles {
@@ -88,8 +98,23 @@ extension PlozziOSAppModel {
             // candidateBaseURLs heals instead of being re-published.
             let cleanPrev = prev.sanitizingURLs()
             if cleanPrev.semanticallyEqualForSync(to: d) {
-                return CanonicalJSON.encode(cleanPrev)
+                // Preserve the original publisher's origin, but back-fill it once if the
+                // stored record predates origin stamping and this device knows it.
+                var merged = cleanPrev
+                if merged.originDeviceName == nil, d.originDeviceName != nil {
+                    merged.originDeviceName = d.originDeviceName
+                    merged.originDeviceKind = d.originDeviceKind
+                }
+                return CanonicalJSON.encode(merged)
             }
+            // Meaningful fields changed (e.g. a rename) → publish the new descriptor,
+            // but keep the ORIGINAL publisher's origin rather than the editing device.
+            var out = d
+            if cleanPrev.originDeviceName != nil {
+                out.originDeviceName = cleanPrev.originDeviceName
+                out.originDeviceKind = cleanPrev.originDeviceKind
+            }
+            return CanonicalJSON.encode(out)
         }
         return CanonicalJSON.encode(d)
     }
@@ -99,14 +124,23 @@ extension PlozziOSAppModel {
     func clearRemoteDerivedSyncState() {
         var store = PendingSyncedServersStore()
         store.removeAll()
+        var removed = RemovedAccountsStore()
+        removed.removeAll()
     }
 
     /// This device's signed-in accounts PLUS descriptors synced-but-not-signed-into,
-    /// so a device never deletes another's servers by omitting them.
+    /// so a device never deletes another's servers by omitting them. Local signed-in
+    /// accounts are stamped with THIS device as the origin (preserved across re-publish
+    /// via `semanticallyEqualForSync`, which ignores origin) so peers can show
+    /// "Set up with <this device>".
     private func mergedAccountDescriptors() -> [SyncedAccountDescriptor] {
         var byID: [String: SyncedAccountDescriptor] = [:]
         for d in PendingSyncedServersStore().all { byID[d.id] = d.sanitizingURLs() }
-        for a in accountsProviders.accounts { byID[a.id] = SyncedAccountDescriptor(account: a) }
+        let originName = DeviceDisplayName.current(fallback: UIDevice.current.name)
+        let originKind = UIDevice.current.userInterfaceIdiom == .pad ? "pad" : "phone"
+        for a in accountsProviders.accounts {
+            byID[a.id] = SyncedAccountDescriptor(account: a).stampingOrigin(name: originName, kind: originKind)
+        }
         return byID.values.sorted { $0.id < $1.id }
     }
 
@@ -121,6 +155,8 @@ extension PlozziOSAppModel {
         var settingRemoves: [(pid: String, key: String)] = []
         var descriptorsTouched = false
         var pendingStore = PendingSyncedServersStore()
+        var removalUpserts: [String: Int] = [:]
+        var removalClears: Set<String> = []
 
         for (name, value) in changes {
             guard let key = SyncRecordKey.parse(name) else { continue }
@@ -138,7 +174,28 @@ extension PlozziOSAppModel {
                 descriptorsTouched = true
                 if let value, let d = CanonicalJSON.decode(SyncedAccountDescriptor.self, from: value) { pendingStore.upsertSynced(d.sanitizingURLs()) }
                 else if value == nil { pendingStore.removeSynced(key.id) }
+            case .removal:
+                if let value, let dto = CanonicalJSON.decode(AccountRemovalDTO.self, from: value) { removalUpserts[key.id] = dto.removedAtEpoch }
+                else if value == nil { removalClears.insert(key.id) }
             }
+        }
+
+        // Household removals: record the tombstone, sign the account out here if this
+        // device holds it, and drop it from the pending list. A cleared removal (the
+        // server was re-added on a peer) lets its descriptor flow again.
+        if !removalUpserts.isEmpty || !removalClears.isEmpty {
+            descriptorsTouched = true   // re-add clears must refresh pending/auto-connect too
+            var removed = RemovedAccountsStore()
+            for (id, epoch) in removalUpserts {
+                removed.markRemoved(id, at: epoch)
+                pendingStore.removeSynced(id)
+                // A queued setup prompt for a now-removed server must not linger.
+                if pendingSyncedServerPrompt?.id == id { pendingSyncedServerPrompt = nil }
+                if accountsProviders.accounts.contains(where: { $0.id == id }) {
+                    removeAccount(id: id)
+                }
+            }
+            for id in removalClears { removed.clear(id) }
         }
 
         if !profileUpserts.isEmpty || !profileDeletes.isEmpty {
@@ -159,29 +216,145 @@ extension PlozziOSAppModel {
             for pid in membershipClear { profiles.clearActiveAccountIDs(for: pid) }
         }
         if descriptorsTouched {
-            refreshPendingSyncedServers()
-            // A newly-synced server descriptor may match a credential already in the
-            // iCloud-Keychain store → sign in automatically.
+            // Sign in first from any synced iCloud-Keychain credential, THEN recompute
+            // the pending list — so a just-synced server the user already signed into
+            // elsewhere connects silently instead of prompting for a manual sign-in.
             autoConnectFromSyncedCredentials()
+            refreshPendingSyncedServers()
         }
 
         // Rebuild the active profile's settings model so applied preferences take
         // effect immediately.
         selectProfile(profiles.activeProfileID)
+
+        // If synced profiles just established an already-set-up household, dismiss any
+        // first-run onboarding step that a race queued before they arrived — the user
+        // already has profiles, so "use profiles?"/theme prompts are wrong here.
+        clearFirstRunStepIfHouseholdSetUp()
     }
 
     /// Recompute the "servers from your other devices" list (synced descriptors this
-    /// device isn't signed into and hasn't ignored), for display on iOS.
+    /// device isn't signed into and hasn't ignored), for display on iOS — and queue a
+    /// one-time "set it up here?" prompt for any newly-detected media server. Mirrors
+    /// tvOS `AppState.refreshPendingSyncedServers()`.
     func refreshPendingSyncedServers() {
+        var store = PendingSyncedServersStore()
         let localIDs = Set(accountsProviders.accounts.map(\.id))
-        pendingSyncedServers = PendingSyncedServersStore().pending(excludingLocal: localIDs)
+        // Household-removed (tombstoned) servers are hidden and never prompted here.
+        let removedIDs = RemovedAccountsStore().removedIDs
+        // If the queued prompt's server has since been signed in here (e.g. a synced
+        // credential arrived and auto-connected) or was removed, drop the prompt.
+        if let prompt = pendingSyncedServerPrompt,
+           removedIDs.contains(prompt.id) || localIDs.contains(prompt.id) {
+            pendingSyncedServerPrompt = nil
+        }
+        pendingSyncedServers = store.pending(excludingLocal: localIDs)
+            .filter { !removedIDs.contains($0.id) }
+        guard SyncSetupFeatureFlag().isEnabled, pendingSyncedServerPrompt == nil else { return }
+        let newly = store.newlyPending(excludingLocal: localIDs)
+            .filter { !removedIDs.contains($0.id) }
+        // Only nudge for media servers we can sign into here (Jellyfin/Emby/Plex), AND
+        // only when there's no synced login already waiting — if this device already has
+        // the iCloud-Keychain credential (e.g. published by the user's iPhone),
+        // `autoConnectFromSyncedCredentials()` signs in silently, so a manual "add this
+        // server?" prompt would be redundant. Media shares are set up differently.
+        if let first = newly.first(where: { $0.provider != .mediaShare && !hasPortableCredential($0.id) }) {
+            pendingSyncedServerPrompt = first
+        }
+        // Mark every newly-pending id prompted (including skipped media shares and
+        // auto-connectable ones) so the one-time nudge never re-fires for them.
+        if !newly.isEmpty {
+            store.markPrompted(newly.map(\.id))
+        }
     }
 
     /// Stop surfacing a synced server the user doesn't want here.
     func ignorePendingSyncedServer(_ id: String) {
         var store = PendingSyncedServersStore()
         store.ignore(id)
+        if pendingSyncedServerPrompt?.id == id { pendingSyncedServerPrompt = nil }
         refreshPendingSyncedServers()
+    }
+
+    /// The user dismissed / handled the current one-time server prompt.
+    func clearPendingSyncedServerPrompt() { pendingSyncedServerPrompt = nil }
+
+    /// Whether the delete UI should offer the "Everywhere" vs "This device" choice.
+    /// Simply whether cross-device sync is on: enabling sync is the multi-device
+    /// intent, and the destructive "Everywhere" action has its own second confirm — so
+    /// we don't gate on live device detection (which lags iCloud propagation).
+    var offersRemoveEverywhere: Bool { SyncSetupFeatureFlag().isEnabled }
+
+    /// Whether the user has other devices on this iCloud account (a recently-seen
+    /// device other than this one in the presence registry).
+    var hasOtherHouseholdDevices: Bool {
+        !HouseholdDevicesStore().otherDevices(excluding: deviceID).isEmpty
+    }
+
+    /// Servers detected from another device that genuinely need the user to act to
+    /// bring them here — the trigger for the full-page "we found your setup" screen.
+    ///
+    /// PARAMOUNT: this must never include something the user already has, or the app
+    /// would falsely announce "we found X" for a server that's already present. So it
+    /// starts from `pendingSyncedServers` (already excludes the local roster and
+    /// removed tombstones) and additionally drops anything that will silently
+    /// auto-connect from an iCloud-Keychain credential (`hasPortableCredential` — the
+    /// iOS→iOS case, which needs no screen at all). What remains is servers whose only
+    /// login lives on a device that can't hand it over automatically — in practice the
+    /// Apple TV. Media shares (NFS/SMB/WebDAV/…) are INCLUDED: they're never published
+    /// to the synced credential store (so never auto-connect) but the pairing transfer
+    /// this page runs DOES bring them over, so listing them keeps the "we found" summary
+    /// honest — otherwise a share would appear only after setup, which is confusing.
+    var pendingServersNeedingSetup: [SyncedAccountDescriptor] {
+        pendingSyncedServers.filter { !hasPortableCredential($0.id) }
+    }
+
+    /// The friendly origin device name shared by the detected servers ("Brando TV"),
+    /// when the publisher stamped one — for the "Set Up from …" copy.
+    var pendingSetupOriginName: String? {
+        for d in pendingServersNeedingSetup {
+            let n = d.originDeviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let n, !n.isEmpty { return n }
+        }
+        return nil
+    }
+
+    /// The origin device kind ("tv"/"pad"/"phone"/"mac") shared by the detected
+    /// servers, for the inline device icon.
+    var pendingSetupOriginKind: String? {
+        for d in pendingServersNeedingSetup where d.originDeviceKind != nil {
+            return d.originDeviceKind
+        }
+        return nil
+    }
+
+    /// Record this device in the household presence registry (so peers know it exists).
+    func heartbeatHouseholdPresence() {
+        guard SyncSetupFeatureFlag().isEnabled else { return }
+        HouseholdDevicesStore().heartbeat(
+            deviceID: deviceID,
+            deviceName: DeviceDisplayName.current(fallback: UIDevice.current.name))
+    }
+
+    /// Remove a server from EVERY device on this iCloud account: publish a removal
+    /// tombstone so peers sign it out and stop re-publishing it, remove it here, and
+    /// push now. Reversible by re-adding the server anywhere.
+    func removeAccountEverywhere(id: String) {
+        var removed = RemovedAccountsStore()
+        removed.markRemoved(id, at: Int(Date().timeIntervalSince1970))
+        var pending = PendingSyncedServersStore()
+        pending.removeSynced(id)
+        removeAccount(id: id)   // local removal (also drops the portable credential)
+        refreshPendingSyncedServers()
+        scheduleCloudPublish()  // propagate the tombstone + delete the descriptor
+    }
+
+    /// Clear any household-removal tombstone for an account the user just (re)added.
+    func clearRemovalTombstone(for id: String) {
+        var removed = RemovedAccountsStore()
+        guard removed.isRemoved(id) else { return }
+        removed.clear(id)
+        scheduleCloudPublish()
     }
 
     private func namespace(forProfileID pid: String) -> String?? {
@@ -199,9 +372,10 @@ extension PlozziOSAppModel {
         guard SyncSetupFeatureFlag().isEnabled, let cloudSync else { return }
         Task { await cloudSync.activate() }
         armCloudConfigObservation()
-        refreshPendingSyncedServers()
+        heartbeatHouseholdPresence()          // register this device in the household
         publishPortableCredentials()          // share this device's logins via iCloud Keychain
         autoConnectFromSyncedCredentials()    // pick up other devices' logins automatically
+        refreshPendingSyncedServers()         // after auto-connect, so signed-in servers don't prompt
     }
 
     func armCloudConfigObservation() {
@@ -239,8 +413,11 @@ extension PlozziOSAppModel {
             Task { await cloudSync.activate() }
             armCloudConfigObservation()
             scheduleCloudPublish()
+            heartbeatHouseholdPresence()
             publishPortableCredentials()
             autoConnectFromSyncedCredentials()
+        } else {
+            HouseholdDevicesStore().remove(deviceID: deviceID)
         }
     }
 
@@ -248,10 +425,11 @@ extension PlozziOSAppModel {
     func syncCloudOnForeground() {
         guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
         Task { await cloudSync.fetchNow() }
+        heartbeatHouseholdPresence()
         checkForSyncSetupOffer()
-        refreshPendingSyncedServers()
         publishPortableCredentials()
-        autoConnectFromSyncedCredentials()
+        autoConnectFromSyncedCredentials()    // sign in from synced logins first…
+        refreshPendingSyncedServers()         // …so already-synced servers don't prompt
     }
 
     /// Same-Apple-ID credential auto-skip (SOURCE side). If another of the user's
@@ -263,11 +441,16 @@ extension PlozziOSAppModel {
     /// device" pattern, which also confirms on the source).
     func checkForSyncSetupOffer() {
         guard SyncSetupFeatureFlag().isEnabled, !isAutoAdoptingSyncSetup, pendingSyncSetupOffer == nil else { return }
-        guard !accountsProviders.accounts.isEmpty else { return }         // nothing to give
+        let localIDs = Set(accountsProviders.accounts.map(\.id))
+        guard !localIDs.isEmpty else { return }         // nothing to give
         // Surface the freshest offer the user hasn't already declined — so declining
-        // one device still lets another simultaneously-advertising device prompt.
-        guard let offer = syncSetup.discoverRendezvousTargets()
-            .first(where: { !dismissedSyncSetupOfferKeys.contains(Self.offerKey($0)) }) else { return }
+        // one device still lets another simultaneously-advertising device prompt. A
+        // per-server request is only fulfillable if THIS device holds that account.
+        guard let offer = syncSetup.discoverRendezvousTargets().first(where: { offer in
+            guard !dismissedSyncSetupOfferKeys.contains(Self.offerKey(offer)) else { return false }
+            if let requested = offer.requestedAccountID { return localIDs.contains(requested) }
+            return true
+        }) else { return }
         pendingSyncSetupOffer = offer
     }
 
@@ -308,6 +491,28 @@ extension PlozziOSAppModel {
     func redownloadCloudSync() {
         guard let cloudSync else { return }
         Task { await cloudSync.redownloadFromCloud() }
+    }
+
+    /// DEBUG: nuke the ENTIRE household from iCloud so you can test a true cold start
+    /// (e.g. "set up only on the Apple TV, then fresh-install the iPad"). Unlike
+    /// `resetCloudSync` (which deletes then immediately RE-uploads from this device),
+    /// this deletes and does NOT republish, then takes this device out of sync so it
+    /// can't refill iCloud. It:
+    ///   1. deletes every CloudKit config + removal-tombstone record (flushed to peers
+    ///      as normal deletions, so their synced view empties too);
+    ///   2. removes every synchronizable iCloud-Keychain login (propagates the deletion
+    ///      through iCloud Keychain so no device silently auto-reconnects);
+    ///   3. wipes this device's local roster/profiles/sync bookkeeping (first-run);
+    ///   4. turns iCloud Sync OFF here so this device stays out of the household until
+    ///      you re-enable it — leaving iCloud genuinely empty for the next publisher.
+    func eraseEverythingFromICloudForDebugging() {
+        let cloud = cloudSync
+        Task { @MainActor in
+            await cloud?.deleteAllServerData()   // step 1 (flushes deletes to peers)
+            removeAllPortableCredentials()        // step 2
+            resetToFirstRunForDebugging()         // step 3
+            setSyncSetupEnabled(false)            // step 4
+        }
     }
 }
 #endif

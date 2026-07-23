@@ -17,6 +17,7 @@ import CoreUI
 struct ServerDetailView: View {
     let context: SettingsContext
     let serverKey: String
+    @Environment(\.dismiss) private var dismiss
 
     /// Account the user has asked to sign out, captured at button-tap so the
     /// confirmation alert can show its name + recompute "is this the last
@@ -25,6 +26,16 @@ struct ServerDetailView: View {
 
     /// Drives the "Remove Server" confirmation (multi-account servers only).
     @State private var confirmRemoveServer = false
+
+    /// Drives the second "remove from all devices?" confirmation for the household
+    /// tombstone, captured so its accounts + name survive the first sheet dismissing.
+    @State private var everywhereRemoval: EverywhereRemoval?
+
+    private struct EverywhereRemoval: Identifiable {
+        let id = UUID()
+        let serverName: String
+        let accounts: [Account]
+    }
 
     private struct PendingSignOut: Identifiable {
         let id: String
@@ -54,13 +65,13 @@ struct ServerDetailView: View {
                             .tvOSFocusSection()
                     }
                 } else {
-                    // Focusable so Menu/Back can pop back to the Servers list
-                    // instead of falling through and quitting the app.
+                    // Safety net if the group vanishes while viewing (e.g. a remote
+                    // "Remove Everywhere" landed): offer a working way back.
                     VStack(alignment: .leading, spacing: 16) {
                         Text("This server is no longer signed in.")
                             .font(.headline)
                             .foregroundStyle(.secondary)
-                        Button { /* no-op — anchors focus */ } label: {
+                        Button { dismiss() } label: {
                             Label("Go back", systemImage: "chevron.backward")
                         }
                     }
@@ -72,21 +83,62 @@ struct ServerDetailView: View {
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .scrollClipDisabled()
-        .alert(item: $pendingSignOut) { pending in
-            let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
-            let isCredentialFree = transport == .nfs
-            let trimmedUser = pending.account.userName.trimmingCharacters(in: .whitespaces)
-            return Alert(
-                title: Text(isCredentialFree
-                    ? "Remove \(pending.serverName)?"
-                    : (trimmedUser.isEmpty ? "Remove \(pending.serverName)?" : "Sign out \(trimmedUser)?")),
-                message: Text(signOutMessage(for: pending)),
-                primaryButton: .destructive(Text(isCredentialFree ? "Remove" : "Sign Out")) {
+        .alert(
+            pendingSignOutTitle(pendingSignOut),
+            isPresented: Binding(
+                get: { pendingSignOut != nil },
+                set: { if !$0 { pendingSignOut = nil } }
+            ),
+            presenting: pendingSignOut
+        ) { pending in
+            if context.offersRemoveEverywhere {
+                Button("Remove Everywhere", role: .destructive) {
+                    everywhereRemoval = EverywhereRemoval(
+                        serverName: pending.serverName, accounts: [pending.account])
+                }
+                Button("Remove from This Apple TV", role: .destructive) {
                     context.onRemoveAccount(pending.account)
+                    if pending.isLastAccount { dismiss() }
+                }
+            } else {
+                Button(signOutPrimaryLabel(pending), role: .destructive) {
+                    context.onRemoveAccount(pending.account)
+                    if pending.isLastAccount { dismiss() }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            Text(context.offersRemoveEverywhere
+                 ? "Remove it from all your devices, or just this Apple TV?"
+                 : signOutMessage(for: pending))
+        }
+        .alert(item: $everywhereRemoval) { removal in
+            Alert(
+                title: Text("Remove from all devices?"),
+                message: Text("“\(removal.serverName)” will also be removed from your other devices signed in to iCloud."),
+                primaryButton: .destructive(Text("Remove Everywhere")) {
+                    for account in removal.accounts { context.onRemoveAccountEverywhere(account) }
+                    dismiss()   // the server is gone → return to the Servers list
                 },
                 secondaryButton: .cancel()
             )
         }
+    }
+
+    /// Title for the sign-out/remove confirmation, derived from the pending account.
+    private func pendingSignOutTitle(_ pending: PendingSignOut?) -> String {
+        guard let pending else { return "" }
+        let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
+        let isCredentialFree = transport == .nfs
+        let trimmedUser = pending.account.userName.trimmingCharacters(in: .whitespaces)
+        if isCredentialFree || trimmedUser.isEmpty { return "Remove \(pending.serverName)?" }
+        return "Sign out \(trimmedUser)?"
+    }
+
+    /// Primary button label when sync is off (a credential-free share reads "Remove").
+    private func signOutPrimaryLabel(_ pending: PendingSignOut) -> String {
+        let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
+        return transport == .nfs ? "Remove" : "Sign Out"
     }
 
     private func signOutMessage(for pending: PendingSignOut) -> String {
@@ -264,14 +316,26 @@ struct ServerDetailView: View {
                     .font(.callout.weight(.semibold))
             }
             .alert("Remove \(group.serverName)?", isPresented: $confirmRemoveServer) {
-                Button("Remove Server", role: .destructive) {
-                    for account in group.accounts {
-                        context.onRemoveAccount(account)
+                if context.offersRemoveEverywhere {
+                    Button("Remove Everywhere", role: .destructive) {
+                        everywhereRemoval = EverywhereRemoval(
+                            serverName: group.serverName, accounts: group.accounts)
+                    }
+                    Button("Remove from This Apple TV", role: .destructive) {
+                        for account in group.accounts { context.onRemoveAccount(account) }
+                        dismiss()   // server gone → back to the Servers list
+                    }
+                } else {
+                    Button("Remove Server", role: .destructive) {
+                        for account in group.accounts { context.onRemoveAccount(account) }
+                        dismiss()
                     }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This signs everyone out of \(group.serverName) on this Apple TV. Any profile will need to sign in again to use it.")
+                Text(context.offersRemoveEverywhere
+                     ? "Remove it from all your devices, or just this Apple TV?"
+                     : "This signs everyone out of \(group.serverName) on this Apple TV. Any profile will need to sign in again to use it.")
             }
         }
     }

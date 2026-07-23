@@ -27,7 +27,11 @@ DEPLOY_IPHONE=1
 DEPLOY_IPAD=1
 BUILD_ONLY=0
 NO_BUILD=0
-REGEN=0
+# Regenerate + re-bake the git-commit-count build number by DEFAULT so every deploy
+# carries a distinct, verifiable CFBundleVersion (a stale number lets the install
+# verifier false-positive; see install-verified.sh). --no-regen skips it; --no-build
+# implies it (nothing new is compiled).
+REGEN=1
 INCLUDE_METADATA_KEYS=0
 
 for arg in "$@"; do
@@ -35,8 +39,9 @@ for arg in "$@"; do
     --iphone) DEPLOY_IPHONE=1; DEPLOY_IPAD=0 ;;
     --ipad) DEPLOY_IPHONE=0; DEPLOY_IPAD=1 ;;
     --build-only) BUILD_ONLY=1 ;;
-    --no-build) NO_BUILD=1 ;;
+    --no-build) NO_BUILD=1; REGEN=0 ;;
     --regen) REGEN=1 ;;
+    --no-regen) REGEN=0 ;;
     --metadata-keys) INCLUDE_METADATA_KEYS=1 ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown flag: $arg (try --help)" >&2; exit 2 ;;

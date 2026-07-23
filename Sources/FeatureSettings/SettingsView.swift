@@ -42,6 +42,7 @@ public struct SettingsView: View {
     @State private var path: [SettingsRoute] = []
     @State private var confirmSignOutAll = false
     @State private var showResetSyncConfirm = false
+    @State private var confirmEraseICloud = false
     /// Presents the profile editor sheet for the active profile (Edit button in
     /// the profile header). Mirrors the editor flow in ``ProfileDetailView``.
     @State private var editingProfile: Profile?
@@ -118,9 +119,12 @@ public struct SettingsView: View {
     private let onDeleteProfile: (String) -> Void
     private let onAddAccount: () -> Void
     private let onRemoveAccount: (Account) -> Void
+    private let onRemoveAccountEverywhere: (Account) -> Void
+    private let offersRemoveEverywhere: Bool
     private let onRescanShare: (String) -> Void
     private let onSignOutAll: () -> Void
     private let onResetToFirstRun: () -> Void
+    private let onEraseICloud: (() -> Void)?
     private let onSetUpAnotherDevice: (() -> Void)?
     /// Current cross-device sync opt-in state, and the setter. When the setter is
     /// nil the row is hidden (e.g. a host that doesn't wire sync).
@@ -184,9 +188,12 @@ public struct SettingsView: View {
         onDeleteProfile: @escaping (String) -> Void,
         onAddAccount: @escaping () -> Void,
         onRemoveAccount: @escaping (Account) -> Void,
+        onRemoveAccountEverywhere: @escaping (Account) -> Void = { _ in },
+        offersRemoveEverywhere: Bool = false,
         onRescanShare: @escaping (String) -> Void,
         onSignOutAll: @escaping () -> Void,
         onResetToFirstRun: @escaping () -> Void,
+        onEraseICloud: (() -> Void)? = nil,
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void,
         onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in },
@@ -242,9 +249,12 @@ public struct SettingsView: View {
         self.onDeleteProfile = onDeleteProfile
         self.onAddAccount = onAddAccount
         self.onRemoveAccount = onRemoveAccount
+        self.onRemoveAccountEverywhere = onRemoveAccountEverywhere
+        self.offersRemoveEverywhere = offersRemoveEverywhere
         self.onRescanShare = onRescanShare
         self.onSignOutAll = onSignOutAll
         self.onResetToFirstRun = onResetToFirstRun
+        self.onEraseICloud = onEraseICloud
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
         self.onSetSeerrUser = onSetSeerrUser
@@ -297,6 +307,8 @@ public struct SettingsView: View {
             onDeleteProfile: onDeleteProfile,
             onAddAccount: onAddAccount,
             onRemoveAccount: onRemoveAccount,
+            onRemoveAccountEverywhere: onRemoveAccountEverywhere,
+            offersRemoveEverywhere: offersRemoveEverywhere,
             onRescanShare: onRescanShare,
             onSignOutAll: onSignOutAll,
             plexHomeUsersFetcher: plexHomeUsersFetcher,
@@ -359,6 +371,12 @@ public struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This removes every Plex and Jellyfin sign-in on this Apple TV. You'll need to sign in again.")
+        }
+        .alert("Erase everything from iCloud?", isPresented: $confirmEraseICloud) {
+            Button("Erase Household From iCloud", role: .destructive) { onEraseICloud?() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Deletes the whole household — every profile and server — from iCloud (all your devices), wipes this Apple TV to first-run, and turns iCloud Sync OFF here. Use to test a clean cold start (e.g. set up only on this Apple TV, then fresh-install another device). Re-enable Sync when done.")
         }
         .sheet(item: $editingProfile) { profile in
             ProfileEditorView(
@@ -602,6 +620,13 @@ public struct SettingsView: View {
             // flag so the next server add reproduces a genuine first run. Always
             // shown in Debug builds so it's reachable without a relaunch flag.
             debugResetFirstRunRow
+
+            // DEBUG-only: empty the shared iCloud copy AND this device's local copy
+            // and turn Sync off, so a true cold start can be tested (unlike Reset to
+            // First Run, which only clears local and leaves iCloud intact).
+            if onEraseICloud != nil {
+                debugEraseICloudRow
+            }
             #endif
         }
     }
@@ -657,6 +682,28 @@ public struct SettingsView: View {
                 Spacer()
             }
             .foregroundStyle(.orange)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsFocusButtonStyle())
+    }
+
+    /// DEBUG-only "Erase Everything From iCloud" row. Empties the shared iCloud
+    /// household copy, wipes this device to first-run, and turns Sync off — for
+    /// testing a genuine cold start.
+    private var debugEraseICloudRow: some View {
+        Button {
+            confirmEraseICloud = true
+        } label: {
+            HStack(spacing: 16) {
+                Image(systemName: "trash.slash")
+                    .font(.system(size: 22, weight: .regular))
+                    .frame(width: 30, height: 30)
+                Text("Erase Everything From iCloud (Debug)").font(.callout.weight(.medium))
+                Spacer()
+            }
+            .foregroundStyle(.red)
             .padding(.vertical, 12)
             .padding(.horizontal, 12)
             .contentShape(Rectangle())

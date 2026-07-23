@@ -103,6 +103,7 @@ private struct PlozziOSServerSettingsDetailView: View {
     let appModel: PlozziOSAppModel
     let serverKey: String
     @State private var confirmRemoveServer = false
+    @State private var confirmRemoveEverywhere = false
     @State private var selectedAccountID: String?
 
     private var group: ServerAccountGroup? {
@@ -172,11 +173,7 @@ private struct PlozziOSServerSettingsDetailView: View {
             titleVisibility: .visible
         ) {
             if appModel.offersRemoveEverywhere {
-                Button("Remove Everywhere", role: .destructive) {
-                    for account in group?.accounts ?? [] {
-                        appModel.removeAccountEverywhere(id: account.id)
-                    }
-                }
+                Button("Remove Everywhere", role: .destructive) { confirmRemoveEverywhere = true }
                 Button("Remove from This \(deviceName)", role: .destructive) {
                     for account in group?.accounts ?? [] {
                         appModel.removeAccount(id: account.id)
@@ -194,6 +191,16 @@ private struct PlozziOSServerSettingsDetailView: View {
             Text(appModel.offersRemoveEverywhere
                  ? "Remove it from all your devices, or just this \(deviceName)?"
                  : "Signs everyone out and removes this server.")
+        }
+        .alert("Remove from all devices?", isPresented: $confirmRemoveEverywhere) {
+            Button("Remove Everywhere", role: .destructive) {
+                for account in group?.accounts ?? [] {
+                    appModel.removeAccountEverywhere(id: account.id)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("“\(group?.serverName ?? "This server")” will also be removed from your other devices signed in to iCloud.")
         }
     }
 }

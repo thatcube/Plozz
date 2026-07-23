@@ -422,14 +422,14 @@ extension AppState {
         }
     }
 
+    /// Whether the delete UI should offer the "Everywhere" vs "This device" choice —
+    /// simply whether cross-device sync is on. The destructive "Everywhere" action has
+    /// its own second confirm, so we don't gate on live device detection (which lags).
+    public var offersRemoveEverywhere: Bool { SyncSetupFeatureFlag().isEnabled }
+
     /// Whether the user has other devices on this iCloud account.
     public var hasOtherHouseholdDevices: Bool {
         !HouseholdDevicesStore().otherDevices(excluding: accountsProviders.accountStore.deviceID()).isEmpty
-    }
-
-    /// Whether a "Remove Everywhere" choice is meaningful (sync on AND other devices).
-    public var offersRemoveEverywhere: Bool {
-        SyncSetupFeatureFlag().isEnabled && hasOtherHouseholdDevices
     }
 
     /// Register this Apple TV in the household presence registry.

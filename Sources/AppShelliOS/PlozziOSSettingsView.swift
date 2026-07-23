@@ -748,6 +748,7 @@ struct PlozziOSAccountDetailView: View {
     let appModel: PlozziOSAppModel
     let account: Account
     @State private var confirmRemoval = false
+    @State private var confirmEverywhere = false
 
     private var offerEverywhere: Bool { appModel.offersRemoveEverywhere }
 
@@ -801,10 +802,7 @@ struct PlozziOSAccountDetailView: View {
             titleVisibility: .visible
         ) {
             if offerEverywhere {
-                Button("Remove Everywhere", role: .destructive) {
-                    appModel.removeAccountEverywhere(id: account.id)
-                    dismiss()
-                }
+                Button("Remove Everywhere", role: .destructive) { confirmEverywhere = true }
                 Button("Remove from This \(deviceName)", role: .destructive) {
                     appModel.removeAccount(id: account.id)
                     dismiss()
@@ -820,6 +818,15 @@ struct PlozziOSAccountDetailView: View {
             Text(offerEverywhere
                  ? "Remove it from all your devices, or just this \(deviceName)?"
                  : "Signs out and removes this server.")
+        }
+        .alert("Remove from all devices?", isPresented: $confirmEverywhere) {
+            Button("Remove Everywhere", role: .destructive) {
+                appModel.removeAccountEverywhere(id: account.id)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("“\(account.server.name)” will also be removed from your other devices signed in to iCloud.")
         }
     }
 }

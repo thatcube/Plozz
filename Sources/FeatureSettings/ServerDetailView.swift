@@ -26,6 +26,16 @@ struct ServerDetailView: View {
     /// Drives the "Remove Server" confirmation (multi-account servers only).
     @State private var confirmRemoveServer = false
 
+    /// Drives the second "remove from all devices?" confirmation for the household
+    /// tombstone, captured so its accounts + name survive the first sheet dismissing.
+    @State private var everywhereRemoval: EverywhereRemoval?
+
+    private struct EverywhereRemoval: Identifiable {
+        let id = UUID()
+        let serverName: String
+        let accounts: [Account]
+    }
+
     private struct PendingSignOut: Identifiable {
         let id: String
         let account: Account
@@ -82,7 +92,8 @@ struct ServerDetailView: View {
         ) { pending in
             if context.offersRemoveEverywhere {
                 Button("Remove Everywhere", role: .destructive) {
-                    context.onRemoveAccountEverywhere(pending.account)
+                    everywhereRemoval = EverywhereRemoval(
+                        serverName: pending.serverName, accounts: [pending.account])
                 }
                 Button("Remove from This Apple TV", role: .destructive) {
                     context.onRemoveAccount(pending.account)
@@ -97,6 +108,16 @@ struct ServerDetailView: View {
             Text(context.offersRemoveEverywhere
                  ? "Remove it from all your devices, or just this Apple TV?"
                  : signOutMessage(for: pending))
+        }
+        .alert(item: $everywhereRemoval) { removal in
+            Alert(
+                title: Text("Remove from all devices?"),
+                message: Text("“\(removal.serverName)” will also be removed from your other devices signed in to iCloud."),
+                primaryButton: .destructive(Text("Remove Everywhere")) {
+                    for account in removal.accounts { context.onRemoveAccountEverywhere(account) }
+                },
+                secondaryButton: .cancel()
+            )
         }
     }
 
@@ -293,7 +314,8 @@ struct ServerDetailView: View {
             .alert("Remove \(group.serverName)?", isPresented: $confirmRemoveServer) {
                 if context.offersRemoveEverywhere {
                     Button("Remove Everywhere", role: .destructive) {
-                        for account in group.accounts { context.onRemoveAccountEverywhere(account) }
+                        everywhereRemoval = EverywhereRemoval(
+                            serverName: group.serverName, accounts: group.accounts)
                     }
                     Button("Remove from This Apple TV", role: .destructive) {
                         for account in group.accounts { context.onRemoveAccount(account) }

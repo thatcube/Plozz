@@ -243,16 +243,16 @@ extension PlozziOSAppModel {
     /// The user dismissed / handled the current one-time server prompt.
     func clearPendingSyncedServerPrompt() { pendingSyncedServerPrompt = nil }
 
+    /// Whether the delete UI should offer the "Everywhere" vs "This device" choice.
+    /// Simply whether cross-device sync is on: enabling sync is the multi-device
+    /// intent, and the destructive "Everywhere" action has its own second confirm — so
+    /// we don't gate on live device detection (which lags iCloud propagation).
+    var offersRemoveEverywhere: Bool { SyncSetupFeatureFlag().isEnabled }
+
     /// Whether the user has other devices on this iCloud account (a recently-seen
     /// device other than this one in the presence registry).
     var hasOtherHouseholdDevices: Bool {
         !HouseholdDevicesStore().otherDevices(excluding: deviceID).isEmpty
-    }
-
-    /// Whether a "Remove Everywhere" choice is meaningful: sync is on AND there's at
-    /// least one other device to remove it from.
-    var offersRemoveEverywhere: Bool {
-        SyncSetupFeatureFlag().isEnabled && hasOtherHouseholdDevices
     }
 
     /// Record this device in the household presence registry (so peers know it exists).

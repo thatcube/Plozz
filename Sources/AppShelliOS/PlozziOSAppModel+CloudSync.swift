@@ -194,10 +194,11 @@ extension PlozziOSAppModel {
             for pid in membershipClear { profiles.clearActiveAccountIDs(for: pid) }
         }
         if descriptorsTouched {
-            refreshPendingSyncedServers()
-            // A newly-synced server descriptor may match a credential already in the
-            // iCloud-Keychain store → sign in automatically.
+            // Sign in first from any synced iCloud-Keychain credential, THEN recompute
+            // the pending list — so a just-synced server the user already signed into
+            // elsewhere connects silently instead of prompting for a manual sign-in.
             autoConnectFromSyncedCredentials()
+            refreshPendingSyncedServers()
         }
 
         // Rebuild the active profile's settings model so applied preferences take
@@ -214,19 +215,25 @@ extension PlozziOSAppModel {
         let localIDs = Set(accountsProviders.accounts.map(\.id))
         // Household-removed (tombstoned) servers are hidden and never prompted here.
         let removedIDs = RemovedAccountsStore().removedIDs
-        if let prompt = pendingSyncedServerPrompt, removedIDs.contains(prompt.id) {
+        // If the queued prompt's server has since been signed in here (e.g. a synced
+        // credential arrived and auto-connected) or was removed, drop the prompt.
+        if let prompt = pendingSyncedServerPrompt,
+           removedIDs.contains(prompt.id) || localIDs.contains(prompt.id) {
             pendingSyncedServerPrompt = nil
         }
         pendingSyncedServers = store.pending(excludingLocal: localIDs).filter { !removedIDs.contains($0.id) }
         guard SyncSetupFeatureFlag().isEnabled, pendingSyncedServerPrompt == nil else { return }
         let newly = store.newlyPending(excludingLocal: localIDs).filter { !removedIDs.contains($0.id) }
-        // Only nudge for media servers we can sign into here (Jellyfin/Emby/Plex).
-        // Media shares are set up differently and aren't offered via this prompt.
-        if let first = newly.first(where: { $0.provider != .mediaShare }) {
+        // Only nudge for media servers we can sign into here (Jellyfin/Emby/Plex), AND
+        // only when there's no synced login already waiting — if this device already has
+        // the iCloud-Keychain credential (e.g. published by the user's iPhone),
+        // `autoConnectFromSyncedCredentials()` signs in silently, so a manual "add this
+        // server?" prompt would be redundant. Media shares are set up differently.
+        if let first = newly.first(where: { $0.provider != .mediaShare && !hasPortableCredential($0.id) }) {
             pendingSyncedServerPrompt = first
         }
-        // Mark every newly-pending id prompted (including any skipped media shares) so
-        // the one-time nudge never re-fires for them.
+        // Mark every newly-pending id prompted (including skipped media shares and
+        // auto-connectable ones) so the one-time nudge never re-fires for them.
         if !newly.isEmpty {
             store.markPrompted(newly.map(\.id))
         }
@@ -301,9 +308,9 @@ extension PlozziOSAppModel {
         Task { await cloudSync.activate() }
         armCloudConfigObservation()
         heartbeatHouseholdPresence()          // register this device in the household
-        refreshPendingSyncedServers()
         publishPortableCredentials()          // share this device's logins via iCloud Keychain
         autoConnectFromSyncedCredentials()    // pick up other devices' logins automatically
+        refreshPendingSyncedServers()         // after auto-connect, so signed-in servers don't prompt
     }
 
     func armCloudConfigObservation() {
@@ -355,9 +362,9 @@ extension PlozziOSAppModel {
         Task { await cloudSync.fetchNow() }
         heartbeatHouseholdPresence()
         checkForSyncSetupOffer()
-        refreshPendingSyncedServers()
         publishPortableCredentials()
-        autoConnectFromSyncedCredentials()
+        autoConnectFromSyncedCredentials()    // sign in from synced logins first…
+        refreshPendingSyncedServers()         // …so already-synced servers don't prompt
     }
 
     /// Same-Apple-ID credential auto-skip (SOURCE side). If another of the user's

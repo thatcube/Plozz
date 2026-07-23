@@ -83,6 +83,14 @@ extension PlozziOSAppModel {
         try? portableCredStore.removeValue(for: accountID)
     }
 
+    /// Whether this device already has a synced iCloud-Keychain login for `accountID`,
+    /// i.e. `autoConnectFromSyncedCredentials()` can sign it in with no user action. Used
+    /// to suppress the manual "add this server?" prompt when a silent auto-connect will
+    /// handle it (e.g. iPhone → iPad, where the login rides iCloud Keychain).
+    func hasPortableCredential(_ accountID: String) -> Bool {
+        portableCredStore.string(for: accountID) != nil
+    }
+
     /// AUTO-CONNECT (READ): for each server synced from another device but not signed in
     /// here (and not ignored), look for a matching credential in the iCloud-Keychain
     /// synced store and sign in automatically — no typing, no pairing. Safe + idempotent:

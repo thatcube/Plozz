@@ -195,6 +195,18 @@ public final class SyncSetupService {
         rendezvous.publicKeyData
     }
 
+    /// The iCloud-authenticated public key for a Bonjour-discovered / typed pairing
+    /// `serviceName`, IF a same-Apple-ID device published a rendezvous for it. Returns
+    /// nil when there's no matching rendezvous (a different Apple ID) — in which case
+    /// the caller must fall back to the numeric SAS confirmation. Lets the manual
+    /// "tap a nearby device" / typed-code paths skip the code when both devices share
+    /// this iCloud account, exactly like the automatic offer path.
+    public func rendezvousPublicKey(forServiceName serviceName: String, now: Date = Date()) -> Data? {
+        PairingRendezvousMatcher.targets(from: rendezvousStore.all(), thisDeviceID: deviceID(), now: now)
+            .first(where: { $0.serviceName == serviceName })?
+            .publicKeyData
+    }
+
     /// Everything a target device needs to persist a received setup: the config
     /// (descriptors + profiles), any transferred credentials, and the computed
     /// application (which accounts are authorized vs still pending sign-in).

@@ -198,10 +198,14 @@ public final class SyncSetupPairingModel {
         nearbyDevices = []
     }
 
-    /// Pair with a discovered device (no code needed — same Wi-Fi, tap to confirm).
+    /// Pair with a discovered device. If that device published a rendezvous to THIS
+    /// iCloud account (same-Apple-ID), pin its authenticated public key so the transfer
+    /// skips the numeric SAS — just like the automatic offer path. Otherwise fall back
+    /// to SAS (a different Apple ID has no shared trust anchor).
     public func pair(with device: DiscoveredPairingDevice) async {
         stopDiscovery()
-        await send(serviceName: device.serviceName, expectedPublicKey: nil)
+        let key = service.rendezvousPublicKey(forServiceName: device.serviceName)
+        await send(serviceName: device.serviceName, expectedPublicKey: key)
     }
 
     /// Source role: send using a scanned QR invite string. The in-app camera scan
@@ -227,14 +231,18 @@ public final class SyncSetupPairingModel {
         await send(serviceName: decoded.serviceName, expectedPublicKey: nil)
     }
 
-    /// Source role: send using a typed short code (no out-of-band key to verify).
+    /// Source role: send using a typed short code. If a same-Apple-ID device published
+    /// a rendezvous for this code, pin its authenticated key and skip the numeric SAS
+    /// (the user read the code off their own device — in-person proof, like a QR).
+    /// Otherwise (different Apple ID) fall back to SAS.
     public func send(code: String) async {
         let normalized = SyncPairingCode.normalize(code)
         guard normalized.count >= 4 else {
             phase = .failed("Enter the code shown on your other device.")
             return
         }
-        await send(serviceName: normalized, expectedPublicKey: nil)
+        let key = service.rendezvousPublicKey(forServiceName: normalized)
+        await send(serviceName: normalized, expectedPublicKey: key)
     }
 
     private func send(

@@ -127,4 +127,44 @@ private struct PillBackground: ViewModifier {
         }
     }
 }
+
+/// The shared resume/runtime chip overlay drawn on a landscape thumbnail — used
+/// identically by episode cards and immediate-play (Continue Watching / landscape
+/// library) cards so both read the same. A soft bottom-leading legibility scrim
+/// with the white play/progress/time chip (in progress) or plain runtime (not
+/// started), no solid capsule. Renders nothing when the item has no runtime to
+/// show. Callers gate it on artwork being visible (not blurred/hidden).
+public struct ResumeChipOverlay: View {
+    private let item: MediaItem
+
+    public init(item: MediaItem) {
+        self.item = item
+    }
+
+    public var body: some View {
+        if item.cardRuntimeText != nil {
+            GeometryReader { proxy in
+                RadialGradient(
+                    colors: [.black.opacity(0.55), .clear],
+                    center: .bottomLeading,
+                    startRadius: 0,
+                    endRadius: max(proxy.size.width, proxy.size.height) * 0.8
+                )
+            }
+            .allowsHitTesting(false)
+            .overlay(alignment: .bottomLeading) {
+                EpisodeWatchStatePill(
+                    item: item,
+                    showsRuntimeWhenIdle: true,
+                    showsWatched: false,
+                    showsBackground: false,
+                    barWidth: 80,
+                    barHeight: 6
+                )
+                .font(.system(size: 24, weight: .semibold))
+                .padding(18)
+            }
+        }
+    }
+}
 #endif

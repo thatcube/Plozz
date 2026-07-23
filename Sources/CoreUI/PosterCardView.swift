@@ -357,12 +357,15 @@ public struct PosterCardView: View {
     }
 
     /// Secondary line — subtitle facts plus card runtime/remaining when available.
+    /// The runtime/"… left" is dropped when the resume chip is shown, since the
+    /// chip already carries the time on the artwork (no need to repeat it here).
     private var subtitleText: String? {
         var parts: [String] = []
         if let subtitle = item.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !subtitle.isEmpty {
             parts.append(subtitle)
         }
-        if let runtime = item.cardRuntimeText?.trimmingCharacters(in: .whitespacesAndNewlines), !runtime.isEmpty {
+        if !showsResumeChip,
+           let runtime = item.cardRuntimeText?.trimmingCharacters(in: .whitespacesAndNewlines), !runtime.isEmpty {
             parts.append(runtime)
         }
         guard !parts.isEmpty else { return nil }
@@ -371,43 +374,22 @@ public struct PosterCardView: View {
 
     // MARK: Resume chip (immediate-play cards)
 
-    /// Whether to show the resume chip (play glyph + progress bar + time
-    /// remaining) over a soft bottom-leading scrim. Only immediate-play cards
-    /// (`playsOnSelect`) that are actually mid-watch qualify, so a series/movie
-    /// card that opens a detail page never grows a play button.
+    /// Whether to show the shared resume/runtime chip (the same overlay episode
+    /// cards use). Only immediate-play cards (`playsOnSelect`) with runtime to show
+    /// qualify, so a card that opens a detail page never grows a play button. Also
+    /// suppresses the plain full-width progress bar + the subtitle runtime, since
+    /// the chip carries that info on the artwork.
     private var showsResumeChip: Bool {
         playsOnSelect
             && !hideThumbnail
-            && item.resumeProgressFraction != nil
+            && item.cardRuntimeText != nil
     }
 
-    /// The resume affordance drawn on immediate-play cards: a subtle radial scrim
-    /// anchored at the bottom-leading corner so the white play/progress/time chip
-    /// reads cleanly without a solid capsule (mirrors the episode card).
+    /// The shared resume affordance — identical to the episode card's overlay.
     @ViewBuilder
     private var resumeChip: some View {
         if showsResumeChip {
-            GeometryReader { proxy in
-                RadialGradient(
-                    colors: [.black.opacity(0.55), .clear],
-                    center: .bottomLeading,
-                    startRadius: 0,
-                    endRadius: max(proxy.size.width, proxy.size.height) * 0.8
-                )
-            }
-            .allowsHitTesting(false)
-            .overlay(alignment: .bottomLeading) {
-                EpisodeWatchStatePill(
-                    item: item,
-                    showsRuntimeWhenIdle: false,
-                    showsWatched: false,
-                    showsBackground: false,
-                    barWidth: 80,
-                    barHeight: 6
-                )
-                .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                .padding(16)
-            }
+            ResumeChipOverlay(item: item)
         }
     }
 

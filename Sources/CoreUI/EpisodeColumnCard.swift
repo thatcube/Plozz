@@ -41,9 +41,12 @@ public struct EpisodeColumnCard: View {
         VStack(alignment: .leading, spacing: 0) {
             artwork
                 .frame(width: Self.artworkSize.width, height: Self.artworkSize.height)
-                .overlay { bottomLeadingScrim }
+                .overlay {
+                    if presentation.artworkTreatment != .blurred {
+                        ResumeChipOverlay(item: item)
+                    }
+                }
                 .overlay(alignment: .topTrailing) { statusIndicator }
-                .overlay(alignment: .bottomLeading) { progressBar }
                 .clipShape(RoundedRectangle(
                     cornerRadius: metrics.landscapeCardCornerRadius,
                     style: .continuous
@@ -215,42 +218,6 @@ public struct EpisodeColumnCard: View {
                         .frame(width: metrics.unwatchedFlagSize, height: metrics.unwatchedFlagSize)
                 }
             }
-        }
-    }
-
-    @ViewBuilder
-    private var progressBar: some View {
-        if presentation.artworkTreatment != .blurred {
-            EpisodeWatchStatePill(
-                item: item,
-                showsRuntimeWhenIdle: true,
-                showsWatched: false,
-                showsBackground: false,
-                barWidth: 80,
-                barHeight: 6
-            )
-            .font(.system(size: 24, weight: .semibold))
-            .padding(18)
-        }
-    }
-
-    /// A subtle corner-anchored legibility scrim behind the resume/runtime pill:
-    /// dark at the bottom-leading corner fading to clear, so the white
-    /// play/progress/time chip reads cleanly without a solid capsule (matches the
-    /// iOS/iPadOS episode card). Drawn whenever the pill has runtime/progress to
-    /// show (``metadataText`` mirrors the pill's own show/hide condition).
-    @ViewBuilder
-    private var bottomLeadingScrim: some View {
-        if presentation.artworkTreatment != .blurred, presentation.metadataText != nil {
-            GeometryReader { proxy in
-                RadialGradient(
-                    colors: [.black.opacity(0.55), .clear],
-                    center: .bottomLeading,
-                    startRadius: 0,
-                    endRadius: max(proxy.size.width, proxy.size.height) * 0.8
-                )
-            }
-            .allowsHitTesting(false)
         }
     }
 }

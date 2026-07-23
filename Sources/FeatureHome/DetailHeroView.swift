@@ -785,7 +785,7 @@ struct DetailHeroView: View {
                     remainingText: playRemainingText,
                     seasonEpisodeText: playSeasonEpisodeText,
                     onLight: playButtonHasFocus || colorScheme == .light,
-                    barHeight: 8
+                    barHeight: 10
                 )
             }
         }

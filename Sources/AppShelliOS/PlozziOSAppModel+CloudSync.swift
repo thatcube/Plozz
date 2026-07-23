@@ -285,6 +285,41 @@ extension PlozziOSAppModel {
         !HouseholdDevicesStore().otherDevices(excluding: deviceID).isEmpty
     }
 
+    /// Servers detected from another device that genuinely need the user to act to
+    /// bring them here — the trigger for the full-page "we found your setup" screen.
+    ///
+    /// PARAMOUNT: this must never include something the user already has, or the app
+    /// would falsely announce "we found X" for a server that's already present. So it
+    /// starts from `pendingSyncedServers` (already excludes the local roster and
+    /// removed tombstones) and additionally drops anything that will silently
+    /// auto-connect from an iCloud-Keychain credential (`hasPortableCredential` — the
+    /// iOS→iOS case, which needs no screen at all). What remains is servers whose only
+    /// login lives on a device that can't hand it over automatically — in practice the
+    /// Apple TV. Media shares are excluded (set up differently, not via pairing). This
+    /// is the SAME predicate that decides the mid-session drawer, so the two agree.
+    var pendingServersNeedingSetup: [SyncedAccountDescriptor] {
+        pendingSyncedServers.filter { $0.provider != .mediaShare && !hasPortableCredential($0.id) }
+    }
+
+    /// The friendly origin device name shared by the detected servers ("Brando TV"),
+    /// when the publisher stamped one — for the "Set Up from …" copy.
+    var pendingSetupOriginName: String? {
+        for d in pendingServersNeedingSetup {
+            let n = d.originDeviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let n, !n.isEmpty { return n }
+        }
+        return nil
+    }
+
+    /// The origin device kind ("tv"/"pad"/"phone"/"mac") shared by the detected
+    /// servers, for the inline device icon.
+    var pendingSetupOriginKind: String? {
+        for d in pendingServersNeedingSetup where d.originDeviceKind != nil {
+            return d.originDeviceKind
+        }
+        return nil
+    }
+
     /// Record this device in the household presence registry (so peers know it exists).
     func heartbeatHouseholdPresence() {
         guard SyncSetupFeatureFlag().isEnabled else { return }

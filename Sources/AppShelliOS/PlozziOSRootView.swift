@@ -27,13 +27,30 @@ public struct PlozziOSRootView: View {
     /// Drives the "set up from another device" pairing flow launched from the prompt,
     /// carrying which server the user wants signed in (nil = not pairing).
     @State private var pairingServer: SyncedAccountDescriptor?
+    /// Fresh-launch "we found your setup" page: the user tapped "Set up manually", so
+    /// fall through to the normal chooser for the rest of this launch. Resets on the
+    /// next cold launch (State is recreated), so a genuinely new detection can resurface.
+    @State private var dismissedDetectedSetup = false
+    /// Drives the unrestricted receive/pairing flow launched from the detected-setup
+    /// page (brings the whole household over from the detected device).
+    @State private var showReceiveFromDetected = false
 
     public init() {}
 
     public var body: some View {
         Group {
             if appModel.accounts.isEmpty {
-                PlozziOSOnboardingView(appModel: appModel)
+                if !dismissedDetectedSetup && !appModel.pendingServersNeedingSetup.isEmpty {
+                    // Fresh launch and we detected household servers that can't silently
+                    // auto-connect (in practice the Apple TV's) — lead with them.
+                    PlozziOSDetectedSetupView(
+                        appModel: appModel,
+                        onSetUpFromDevice: { showReceiveFromDetected = true },
+                        onSetUpManually: { dismissedDetectedSetup = true }
+                    )
+                } else {
+                    PlozziOSOnboardingView(appModel: appModel)
+                }
             } else if appModel.requiresLaunchProfileSelection
                 && !completedLaunchProfileSelection {
                 PlozziOSProfilePickerView(
@@ -97,6 +114,12 @@ public struct PlozziOSRootView: View {
         .fullScreenCover(item: $pairingServer) { descriptor in
             PlozziOSSyncSetupReceiveView(appModel: appModel, requestedServer: descriptor) {
                 pairingServer = nil
+            }
+            .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
+        }
+        .fullScreenCover(isPresented: $showReceiveFromDetected) {
+            PlozziOSSyncSetupReceiveView(appModel: appModel) {
+                showReceiveFromDetected = false
             }
             .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
         }

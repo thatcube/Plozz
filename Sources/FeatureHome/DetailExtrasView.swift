@@ -233,6 +233,7 @@ private struct StudioLogoChip: View {
     @State private var tileWidth: CGFloat = 180
     @State private var failed = false
     @State private var resolved = false
+    @Environment(\.themePalette) private var palette
 
     var body: some View {
         Group {
@@ -250,7 +251,7 @@ private struct StudioLogoChip: View {
                 StudioTextTile(name: name, width: tileWidth, height: tileHeight, corner: corner)
             } else {
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .fill(Color.primary.opacity(0.08))
+                    .fill(palette.fill)
                     .frame(width: tileWidth, height: tileHeight)
             }
         }

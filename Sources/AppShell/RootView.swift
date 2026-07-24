@@ -750,6 +750,7 @@ private struct PlexPINEntryView: View {
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.themePalette) private var palette
     @State private var pin: String = ""
     @State private var isSubmitting: Bool = false
 
@@ -826,7 +827,7 @@ private struct PlexPINEntryView: View {
         let url = avatarURLString.flatMap(URL.init(string:))
         return ZStack(alignment: .bottomTrailing) {
             ZStack {
-                Circle().fill(Color.secondary.opacity(0.18))
+                Circle().fill(palette.fillSubtle)
                 if let url {
                     AsyncImage(url: url) { phase in
                         switch phase {

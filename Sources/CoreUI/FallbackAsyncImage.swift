@@ -80,6 +80,7 @@ private struct SequentialAsyncImage<Placeholder: View>: View {
     let placeholder: () -> Placeholder
 
     @State private var index = 0
+    @Environment(\.themePalette) private var palette
 
     var body: some View {
         if index < urls.count {
@@ -88,7 +89,7 @@ private struct SequentialAsyncImage<Placeholder: View>: View {
                 case let .success(image):
                     image.resizable().aspectRatio(contentMode: .fill)
                 case .empty:
-                    Color.primary.opacity(0.06)
+                    palette.fill
                 case .failure:
                     Color.clear.onAppear(perform: advance)
                 @unknown default:
@@ -123,6 +124,7 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
 
     @State private var image: UIImage?
     @State private var resolved: Bool
+    @Environment(\.themePalette) private var palette
     /// The `.task` id the current `image`/`resolved` state was produced for. Lets
     /// `resolve()` tell "same inputs, keep the result" apart from "the urls
     /// changed (e.g. the player advanced to a new track), re-resolve" — the view
@@ -165,7 +167,7 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
             } else if resolved {
                 placeholder()
             } else {
-                Color.primary.opacity(0.06)
+                palette.fill
             }
         }
         .task(id: taskKey) {

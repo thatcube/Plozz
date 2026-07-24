@@ -26,6 +26,7 @@ struct MusicArtworkImage: View {
     /// `PlozzCardCaption.subtitleColor(...)` so it flips with focus + reduced
     /// transparency. Falls back to `.secondary` when nil.
     var placeholderColor: Color? = nil
+    @Environment(\.themePalette) private var palette
 
     init(
         url: URL?,
@@ -48,7 +49,7 @@ struct MusicArtworkImage: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(Color.primary.opacity(0.08))
+                .fill(palette.fill)
             FallbackAsyncImage(
                 urls: [url].compactMap { $0 },
                 variant: variant,

@@ -1504,6 +1504,7 @@ private struct PlozziOSInlineEpisodeEntry: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.plozzCardStyle) private var cardStyle
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.themePalette) private var palette
     @Environment(PlozziOSAppModel.self) private var appModel
     @State private var downloadRecord: DownloadedMediaRecord?
     @State private var downloadError: String?
@@ -1635,7 +1636,7 @@ private struct PlozziOSInlineEpisodeEntry: View {
                 .scaledToFill()
         } placeholder: {
             Rectangle()
-                .fill(.secondary.opacity(0.14))
+                .fill(palette.fill)
         }
         .frame(width: cardWidth, height: cardWidth * 9 / 16)
         .overlay {
@@ -1815,6 +1816,7 @@ private struct PlozziOSEpisodeDownloadIndicator: View {
 
 private struct PlozziOSCastSection: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.themePalette) private var palette
     // Scales the trailing whitespace with the OS text size so the space under the
     // (variably wrapped) cast names stays proportional at every Dynamic Type level,
     // mirroring the space above the About header rather than a fixed gap.
@@ -1838,7 +1840,7 @@ private struct PlozziOSCastSection: View {
                                     .scaledToFill()
                             } placeholder: {
                                 Circle()
-                                    .fill(.secondary.opacity(0.14))
+                                    .fill(palette.fill)
                                     .overlay {
                                         Image(systemName: "person.fill")
                                             .plozzForeground(.secondary)

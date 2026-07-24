@@ -1418,6 +1418,7 @@ private struct PlozziOSHomeMediaCard: View {
 private struct PlozziOSHomeLibraryCard: View {
     @Environment(\.plozzCardStyle) private var cardStyle
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.themePalette) private var palette
     let library: AggregatedLibrary
     let width: CGFloat
 
@@ -1447,7 +1448,7 @@ private struct PlozziOSHomeLibraryCard: View {
                 RoundedRectangle(
                     cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
                 )
-                    .fill(.secondary.opacity(0.14))
+                    .fill(palette.fill)
                     .overlay {
                         Image(systemName: library.library.kind == .series ? "tv" : "film")
                             .font(.title)

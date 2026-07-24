@@ -502,7 +502,7 @@ public struct SettingsView: View {
                     .font(.system(size: 40, weight: .regular))
                     .plozzForeground(.secondary)
                     .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
-                    .background(Circle().fill(Color.primary.opacity(0.06)))
+                    .background(Circle().fill(palette.fillSubtle))
                     .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -975,7 +975,7 @@ public struct SettingsView: View {
                 .font(.system(size: 40, weight: .regular))
                 .plozzForeground(.secondary)
                 .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
-                .background(Circle().fill(Color.primary.opacity(0.06)))
+                .background(Circle().fill(palette.fillSubtle))
                 .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
             Text("Settings").font(Self.identityTitleFont)
             Spacer()

@@ -147,6 +147,10 @@ struct InfoPanelView: View {
             .frame(width: height * 16.0 / 9.0, height: height)
             .overlay {
                 FallbackAsyncImage(urls: model.artworkURLs, variant: .landscapeCard) {
+                    // Fixed white, NOT palette.fill: this sits over the player's
+                    // variable video/artwork backdrop (always dark-scrimmed), so a
+                    // theme-tracking fill would be wrong here — it's a scrim-relative
+                    // placeholder, not a themed-page surface.
                     Rectangle().fill(Color.white.opacity(0.08))
                         .overlay(
                             Image(systemName: "photo")

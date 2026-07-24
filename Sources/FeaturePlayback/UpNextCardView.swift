@@ -127,6 +127,8 @@ struct UpNextCardView: View {
             .overlay {
                 FallbackAsyncImage(urls: info.thumbnailURLs, variant: .landscapeCard) {
                     ZStack {
+                        // Fixed white, NOT palette.fill: over the player's variable
+                        // video backdrop (scrim-relative), so it must not track theme.
                         Rectangle().fill(Color.white.opacity(0.08))
                         Image(systemName: "play.rectangle.fill")
                             .font(.title2)

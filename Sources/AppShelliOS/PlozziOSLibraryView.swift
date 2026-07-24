@@ -123,6 +123,7 @@ private struct PlozziOSLibraryList: View {
 private struct PlozziOSLibraryCard: View {
     @Environment(\.plozzCardStyle) private var cardStyle
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.themePalette) private var palette
     let library: MediaLibrary
 
     @ViewBuilder
@@ -149,7 +150,7 @@ private struct PlozziOSLibraryCard: View {
                     .scaledToFill()
             } placeholder: {
                 Rectangle()
-                    .fill(.secondary.opacity(0.15))
+                    .fill(palette.fill)
                     .overlay {
                         Image(systemName: library.kind == .series ? "tv" : "film")
                             .font(.largeTitle)

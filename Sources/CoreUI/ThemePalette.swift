@@ -149,6 +149,10 @@ public struct ThemePalette: Equatable, Sendable {
     /// tiers. Translucent so it composites over any background; tuned per theme so
     /// it reads on the OLED near-black as well as the dark/light pages.
     public let fill: Color
+    /// An even fainter neutral fill — one step below ``fill``. For decorative
+    /// backings that should barely lift off the surface: icon/avatar circles behind
+    /// a glyph, faint tracks. Apple's `quaternarySystemFill` tier.
+    public let fillSubtle: Color
     /// Whether this is a light-appearance palette. Drives the focused-Light
     /// opaque backing that stops the drop shadow bleeding through the glass.
     public let isLight: Bool
@@ -177,6 +181,7 @@ public struct ThemePalette: Equatable, Sendable {
         overlay: SurfaceStyle,
         separator: Color,
         fill: Color,
+        fillSubtle: Color,
         isLight: Bool
     ) {
         self.backgroundBase = backgroundBase
@@ -198,6 +203,7 @@ public struct ThemePalette: Equatable, Sendable {
         self.overlay = overlay
         self.separator = separator
         self.fill = fill
+        self.fillSubtle = fillSubtle
         self.isLight = isLight
     }
 
@@ -329,6 +335,7 @@ public extension ThemePalette {
         ),
         separator: ThemePalette.darkHairline.opacity(0.16),
         fill: Color.white.opacity(0.11),
+        fillSubtle: Color.white.opacity(0.06),
         isLight: false
     )
 
@@ -372,6 +379,7 @@ public extension ThemePalette {
         // Slightly stronger than Dark so placeholders/chips read on the near-black
         // OLED page instead of vanishing.
         fill: Color.white.opacity(0.13),
+        fillSubtle: Color.white.opacity(0.07),
         isLight: false
     )
 
@@ -406,6 +414,7 @@ public extension ThemePalette {
         ),
         separator: Color.black.opacity(0.08),
         fill: Color.black.opacity(0.11),
+        fillSubtle: Color.black.opacity(0.05),
         isLight: true
     )
 

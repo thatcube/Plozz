@@ -221,22 +221,15 @@ public struct RatingTile: View {
             .minimumScaleFactor(0.75)
     }
 
-    /// The cohort — Critics / Audience / Community — so each score is labelled with
-    /// *what kind* of rating it is (answering "is IMDb community? is RT critics?"),
-    /// with the vote count appended when the source reports one.
+    /// The rating's **source** — AniList / IMDb / TMDB / Community / Critics /
+    /// Audience — so you can tell each score apart even when two share a star icon
+    /// (e.g. AniList vs a server's generic Community score). Vote count appended
+    /// when the source reports one.
     private var subtitleText: String {
         if let count = rating.ratingCountText {
-            return "\(cohortLabel) · \(count)"
+            return "\(rating.source.shortLabel) · \(count)"
         }
-        return cohortLabel
-    }
-
-    private var cohortLabel: String {
-        switch rating.cohort {
-        case .critics: return "Critics"
-        case .audience: return "Audience"
-        case .community: return "Community"
-        }
+        return rating.source.shortLabel
     }
 
     private var iconSize: CGFloat {

@@ -14,29 +14,17 @@ public struct SettingsPageBackground: View {
 
 private struct SettingsGroupSurface: ViewModifier {
     @Environment(\.themePalette) private var palette
-    @Environment(\.displayScale) private var displayScale
     let cornerRadius: CGFloat
 
     func body(content: Content) -> some View {
         content
             .background(
-                palette.cardOpaqueSurface,
+                palette.elevatedSurface,
                 in: RoundedRectangle(
                     cornerRadius: cornerRadius,
                     style: .continuous
                 )
             )
-            .overlay {
-                RoundedRectangle(
-                    cornerRadius: cornerRadius,
-                    style: .continuous
-                )
-                .strokeBorder(
-                    palette.cardOpaqueBorder,
-                    lineWidth: 1 / max(displayScale, 1)
-                )
-                .allowsHitTesting(false)
-            }
     }
 }
 

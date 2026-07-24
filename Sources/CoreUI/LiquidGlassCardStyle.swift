@@ -294,11 +294,9 @@ public struct PlozzFocusableCardModifier: ViewModifier {
                 .padding(-focusPadding)
                 .shadow(color: .black.opacity(0.30), radius: 18, y: 9)
         } else if case .filled = variant {
-            shape
-                .fill(palette.isLight ? Color.black.opacity(0.065) : palette.cardSurface)
-                .overlay {
-                    shape.strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
-                }
+            // Standardized borderless elevated surface — matches settings section
+            // groups so every content card reads the same across the app.
+            shape.fill(palette.elevatedSurface)
         }
     }
 }

@@ -199,6 +199,10 @@ public struct RatingTile: View {
                 .font(valueFont)
                 .monospacedDigit()
                 .foregroundStyle(palette.primaryText)
+                // Never wrap the score (e.g. "95%" splitting to "95⏎%") when a tile
+                // is narrow; shrink to fit instead.
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             subtitle
                 .frame(height: subtitleRowHeight)
         }

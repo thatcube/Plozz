@@ -57,7 +57,16 @@ public struct ThemePalette: Equatable, Sendable {
     public let cardOpaqueSurface: Color
     /// Hairline border drawn around an unfocused opaque card so it reads against
     /// a same-coloured background (e.g. white card on a white light-mode page).
+    /// Reserved for surfaces that genuinely need a delineating line — modals and
+    /// drawers stacked on a same-colour backdrop. Ordinary content cards/sections
+    /// now use the borderless ``elevatedSurface`` instead.
     public let cardOpaqueBorder: Color
+    /// The single, standardized fill for elevated content surfaces — settings
+    /// section groups and detail cards (About / Ratings / info) alike. Tuned per
+    /// theme to read on the app backgrounds **without a border**, so surfaces look
+    /// consistent everywhere: a clear step above the page in dark, a slightly
+    /// lighter (but still near-black) step in OLED, and white on the light page.
+    public let elevatedSurface: Color
     /// Whether this is a light-appearance palette. Drives the focused-Light
     /// opaque backing that stops the drop shadow bleeding through the glass.
     public let isLight: Bool
@@ -81,6 +90,7 @@ public struct ThemePalette: Equatable, Sendable {
         liftSurface: Color,
         cardOpaqueSurface: Color,
         cardOpaqueBorder: Color,
+        elevatedSurface: Color,
         isLight: Bool
     ) {
         self.backgroundBase = backgroundBase
@@ -97,6 +107,7 @@ public struct ThemePalette: Equatable, Sendable {
         self.liftSurface = liftSurface
         self.cardOpaqueSurface = cardOpaqueSurface
         self.cardOpaqueBorder = cardOpaqueBorder
+        self.elevatedSurface = elevatedSurface
         self.isLight = isLight
     }
 }
@@ -155,9 +166,9 @@ public extension ThemePalette {
             )
         }
         // Lighten toward white; a near-black (OLED) base gets a smaller lift so it
-        // stays true-black-ish.
+        // stays true-black-ish. Kept small so the elevated cards clear it.
         let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
-        let lift: CGFloat = luminance < 0.05 ? 0.02 : 0.05
+        let lift: CGFloat = luminance < 0.05 ? 0.012 : 0.028
         return Color(
             red: Double(r + (1 - r) * lift),
             green: Double(g + (1 - g) * lift),
@@ -187,6 +198,7 @@ public extension ThemePalette {
         liftSurface: .white,
         cardOpaqueSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
         cardOpaqueBorder: Color.white.opacity(0.16),
+        elevatedSurface: Color(red: 0.185, green: 0.185, blue: 0.20),
         isLight: false
     )
 
@@ -207,6 +219,7 @@ public extension ThemePalette {
         liftSurface: .white,
         cardOpaqueSurface: Color(red: 0.045, green: 0.045, blue: 0.055),
         cardOpaqueBorder: Color.white.opacity(0.12),
+        elevatedSurface: Color(red: 0.085, green: 0.085, blue: 0.095),
         isLight: false
     )
 
@@ -227,6 +240,7 @@ public extension ThemePalette {
         liftSurface: .white,
         cardOpaqueSurface: .white,
         cardOpaqueBorder: Color.black.opacity(0.08),
+        elevatedSurface: .white,
         isLight: true
     )
 

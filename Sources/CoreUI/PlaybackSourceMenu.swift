@@ -37,6 +37,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     @State private var isPresented = false
     @State private var page = PlaybackSourceMenuButtonPage.root
     @State private var triggerFrame: CGRect = .zero
+    @Environment(\.themePalette) private var palette
     /// iOS only: the measured natural height of the panel content, used to size
     /// the sheet to its content (like the tvOS panel) instead of a fixed detent.
     @State private var iosSheetHeight: CGFloat = 220
@@ -92,10 +93,12 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                     // the tvOS expand/collapse behaviour instead of a half-screen
                     // detent that leaves the sheet mostly empty.
                     .presentationDetents([.height(iosSheetHeight)])
-                    // The popover/sheet chrome IS the menu surface — it draws the
-                    // rounded shape and (on iPad) the connected arrow. The panel
-                    // itself draws nothing, so there's exactly one background.
-                    .presentationBackground { PlaybackSourceMenuSurface() }
+                    // The popover/sheet chrome IS the menu surface. Use the
+                    // ShapeStyle overload, not a background *view*: a view is
+                    // clipped to the body rect, leaving the popover's arrow
+                    // filled with the system's default (lighter) material, while
+                    // a style colours the whole chrome including the arrow.
+                    .presentationBackground(palette.overlay.fill)
                     .presentationDragIndicator(.hidden)
             }
         #endif
@@ -223,11 +226,15 @@ private struct PlaybackSourceMenuPanel: View {
             // keeps a fixed popover width.
             .frame(maxWidth: hSizeClass == .compact ? .infinity : 390)
             .frame(height: iosContentHeight, alignment: .top)
-            .onPreferenceChange(PlaybackSourceMenuContentHeightKey.self) { measured in
+            .onPreferenceChange(PlaybackSourceMenuContentHeightKey.self) { measurements in
+                // Take only the page we're showing — the outgoing page is still
+                // reporting during the push and must not hold the panel open.
+                guard let measured = measurements.first(where: { $0.page == page })?.height,
+                      measured > 0 else { return }
                 let total = min(measured, panelMaxHeight)
                 // Animate both the panel's own frame and the sheet detent together
                 // so the container grows/shrinks smoothly instead of snapping.
-                withAnimation(.easeOut(duration: 0.28)) {
+                withAnimation(.easeInOut(duration: 0.28)) {
                     iosContentHeight = total
                     measuredHeight?.wrappedValue = total
                 }
@@ -247,10 +254,10 @@ private struct PlaybackSourceMenuPanel: View {
         #if os(tvOS)
         VStack(alignment: .leading, spacing: 12) {
             if page != .root {
-                header
+                header(for: page)
             }
             ScrollView {
-                LazyVStack(spacing: 8) { pageRows }
+                LazyVStack(spacing: 8) { rows(for: page) }
                     .padding(14)
             }
             .scrollIndicators(.hidden)
@@ -260,36 +267,51 @@ private struct PlaybackSourceMenuPanel: View {
         // sizes to it exactly, and slide pages horizontally as you drill in/out —
         // the container height morphs with the content, mirroring tvOS.
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if page != .root {
-                    header
-                }
-                // Deliberately NOT lazy: during the horizontal push the incoming
-                // page starts off-screen, so a LazyVStack only materialises the
-                // row the focus lands on and the rest pop in on arrival instead
-                // of travelling with the transition. A menu is a handful of rows,
-                // so eager layout costs nothing and animates as one page.
-                VStack(spacing: 0) { pageRows }
-            }
-            .padding(14)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: PlaybackSourceMenuContentHeightKey.self,
-                        value: proxy.size.height
-                    )
-                }
-            )
-            .transition(.push(from: navDirection))
-            .id(page)
+            pageColumn(for: page)
+                .transition(.push(from: navDirection))
+                .id(page)
         }
         .scrollIndicators(.hidden)
         #endif
     }
 
+    #if !os(tvOS)
+    /// One page of the menu, built for an explicit page value so the instance
+    /// left behind by the push transition keeps reporting *its own* height
+    /// rather than the incoming page's.
     @ViewBuilder
-    private var pageRows: some View {
-        switch page {
+    private func pageColumn(for pageValue: PlaybackSourceMenuButtonPage) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if pageValue != .root {
+                header(for: pageValue)
+            }
+            // Deliberately NOT lazy: during the horizontal push the incoming
+            // page starts off-screen, so a LazyVStack only materialises the
+            // row the focus lands on and the rest pop in on arrival instead
+            // of travelling with the transition. A menu is a handful of rows,
+            // so eager layout costs nothing and animates as one page.
+            VStack(spacing: 0) { rows(for: pageValue) }
+        }
+        .padding(14)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: PlaybackSourceMenuContentHeightKey.self,
+                    value: [
+                        PlaybackSourceMenuPageHeight(
+                            page: pageValue,
+                            height: proxy.size.height
+                        )
+                    ]
+                )
+            }
+        )
+    }
+    #endif
+
+    @ViewBuilder
+    private func rows(for pageValue: PlaybackSourceMenuButtonPage) -> some View {
+        switch pageValue {
         case .root:
             rootRows
         case .servers:
@@ -300,9 +322,9 @@ private struct PlaybackSourceMenuPanel: View {
     }
 
     @ViewBuilder
-    private var header: some View {
+    private func header(for pageValue: PlaybackSourceMenuButtonPage) -> some View {
         HStack(spacing: 12) {
-            if page != .root {
+            if pageValue != .root {
                 Button {
                     navigate(to: .root)
                 } label: {
@@ -313,7 +335,7 @@ private struct PlaybackSourceMenuPanel: View {
                 .focusEffectDisabled()
                 .focused($focusedRowID, equals: "header.back")
             }
-            Text(page == .servers ? "Servers" : "Versions")
+            Text(pageValue == .servers ? "Servers" : "Versions")
                 .font(.headline.weight(.semibold))
             Spacer()
         }
@@ -332,9 +354,23 @@ private struct PlaybackSourceMenuPanel: View {
                 id: "root.servers",
                 title: "Server",
                 detail: selectedSource?.displayName ?? "Choose a server",
-                systemImage: "server.rack",
                 destination: .servers
-            )
+            ) {
+                // Carry the active server's provider brand up to the summary row
+                // so the collapsed menu already says "this is a Jellyfin server"
+                // — the same mark you'd see one level deeper in the list.
+                if let provider = selectedSource?.providerKind {
+                    ProviderBrandMark(
+                        provider: provider,
+                        size: providerMarkSize,
+                        showsBackground: false
+                    )
+                } else {
+                    Image(systemName: "server.rack")
+                        .frame(width: providerMarkSize)
+                        .settingsRowIcon()
+                }
+            }
         }
         if hasVersion {
             #if !os(tvOS)
@@ -344,9 +380,12 @@ private struct PlaybackSourceMenuPanel: View {
                 id: "root.versions",
                 title: "Version",
                 detail: selectedVersion?.displayLabel ?? "Choose a version",
-                systemImage: "film.stack",
                 destination: .versions
-            )
+            ) {
+                Image(systemName: "film.stack")
+                    .frame(width: providerMarkSize)
+                    .settingsRowIcon()
+            }
         }
         if !actions.isEmpty, hasServer || hasVersion {
             Divider().padding(.vertical, 4)
@@ -480,20 +519,19 @@ private struct PlaybackSourceMenuPanel: View {
         }
     }
 
-    private func drillInRow(
+    private func drillInRow<Icon: View>(
         id: String,
         title: LocalizedStringKey,
         detail: String,
-        systemImage: String,
-        destination: PlaybackSourceMenuButtonPage
+        destination: PlaybackSourceMenuButtonPage,
+        @ViewBuilder icon: () -> Icon
     ) -> some View {
-        menuRowButton(id: id, fixedHeight: rootRowHeight) {
+        let iconView = icon()
+        return menuRowButton(id: id, fixedHeight: rootRowHeight) {
             navigate(to: destination)
         } label: {
             HStack(spacing: 14) {
-                Image(systemName: systemImage)
-                    .frame(width: providerMarkSize)
-                    .settingsRowIcon()
+                iconView
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
                        .font(rowCategoryFont)
@@ -709,34 +747,27 @@ private enum PlaybackSourceMenuButtonPage: Hashable {
 #if !os(tvOS)
 /// Reports the natural content height of the source-menu panel so the iOS sheet
 /// can size to its content instead of a fixed detent.
+/// Reports each rendered page's natural height *tagged with the page it belongs
+/// to*. During the push transition the outgoing and incoming pages are both on
+/// screen and both report; an untagged `max()` reduce would hold the taller of
+/// the two for the whole transition, so the panel snapped to its new height at
+/// one end of the animation instead of easing between them. Tagging lets the
+/// panel read only the page it's currently showing.
+private struct PlaybackSourceMenuPageHeight: Equatable {
+    let page: PlaybackSourceMenuButtonPage
+    let height: CGFloat
+}
+
 private struct PlaybackSourceMenuContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+    static let defaultValue: [PlaybackSourceMenuPageHeight] = []
+    static func reduce(
+        value: inout [PlaybackSourceMenuPageHeight],
+        nextValue: () -> [PlaybackSourceMenuPageHeight]
+    ) {
+        value.append(contentsOf: nextValue())
     }
 }
 
-/// The one and only surface behind the iOS/iPadOS source menu. Installed as the
-/// presentation background so the system chrome — including the popover's
-/// connected arrow — is filled with our themed overlay colour, instead of the
-/// panel drawing a second card inside the system's own background.
-private struct PlaybackSourceMenuSurface: View {
-    @Environment(\.themePalette) private var palette
-    @Environment(\.plozzReduceTransparency) private var reduceTransparency
-
-    var body: some View {
-        if reduceTransparency {
-            palette.overlay.fill
-        } else {
-            // Material keeps the live translucency of a system menu; the themed
-            // overlay tint on top pulls it to the right value per theme (near
-            // black in OLED, lifted grey in Dark, white in Light).
-            Rectangle()
-                .fill(.regularMaterial)
-                .overlay(palette.overlay.fill.opacity(0.55))
-        }
-    }
-}
 #endif
 
 private enum PlaybackSourceMenuMetrics {

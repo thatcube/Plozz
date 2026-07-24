@@ -198,6 +198,14 @@ public extension ThemePalette {
     /// through every theme.
     static var brandAccent: Color { .accentColor }
 
+    /// The hairline colour for dark-appearance surface edges and separators. A
+    /// faint cool blue-grey (essentially neutral — just off dead-grey so the line
+    /// doesn't read as muddy) that's brightened via opacity per rung. Brightness
+    /// is tuned to sit around Twitter's OLED border weight rather than the far
+    /// subtler ~8% white it started at. Used by the OLED palette; the soft-Dark
+    /// palette lifts its own surfaces lighter, so it needs edges far less.
+    static let darkHairline = Color(red: 0.62, green: 0.68, blue: 0.76)
+
     /// Plozz's brand blue — the Jellyfin blue (`#00A4DC`) the pixel logo is
     /// painted in. Used to give the app-wide background a gentle blue wash and
     /// top glow in every theme, mirroring how Twozz tints its backdrop with its
@@ -292,11 +300,11 @@ public extension ThemePalette {
         raised: SurfaceStyle(fill: Color(red: 0.16, green: 0.16, blue: 0.175)),
         overlay: SurfaceStyle(
             fill: Color(red: 0.18, green: 0.18, blue: 0.195),
-            border: Color.white.opacity(0.10),
+            border: ThemePalette.darkHairline.opacity(0.16),
             borderWidth: 1,
             shadow: SurfaceShadow(color: .black.opacity(0.5), radius: 26, y: 14)
         ),
-        separator: Color.white.opacity(0.10),
+        separator: ThemePalette.darkHairline.opacity(0.16),
         isLight: false
     )
 
@@ -320,21 +328,22 @@ public extension ThemePalette {
         // OLED never lifts (that defeats pixels-off black). A raised surface stays
         // the same near-black as the page and separates by a hairline border only.
         // Overlays get a brighter, mandatory hairline plus a shadow so a modal is
-        // unmistakably above two otherwise-identical black surfaces.
+        // unmistakably above two otherwise-identical black surfaces. Hairlines use
+        // the shared cool-neutral tint, brightened to ~Twitter's OLED border weight.
         raised: SurfaceStyle(
             fill: Color(red: 0.025, green: 0.025, blue: 0.03),
-            border: Color.white.opacity(0.08),
+            border: ThemePalette.darkHairline.opacity(0.26),
             borderWidth: 1
         ),
         overlay: SurfaceStyle(
             fill: Color(red: 0.025, green: 0.025, blue: 0.03),
-            border: Color.white.opacity(0.16),
+            border: ThemePalette.darkHairline.opacity(0.36),
             borderWidth: 1,
             shadow: SurfaceShadow(color: .black.opacity(0.6), radius: 28, y: 16)
         ),
-        // Match the OLED card edge (white 0.08) so inner dividers and outer
-        // hairlines read as one family instead of the brighter OS default.
-        separator: Color.white.opacity(0.08),
+        // Match the raised card edge so inner dividers and outer hairlines read as
+        // one family instead of the brighter OS default.
+        separator: ThemePalette.darkHairline.opacity(0.26),
         isLight: false
     )
 

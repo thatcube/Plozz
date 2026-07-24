@@ -205,14 +205,9 @@ public struct RatingTile: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, verticalPadding)
         .padding(.horizontal, horizontalPadding)
-        .background(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(palette.cardSurface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(palette.cardBorder, lineWidth: 1)
-                )
-        )
+        // Focusable on tvOS (D-pad reachable with the shared glass lift, matching
+        // the About/info cards); a plain filled surface on iOS/iPadOS.
+        .plozzFocusableCard(cornerRadius: cornerRadius)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(rating.source.displayName) \(rating.displayValue)")
     }

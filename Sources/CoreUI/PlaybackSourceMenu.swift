@@ -84,7 +84,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
             .popover(
                 isPresented: $isPresented,
                 attachmentAnchor: .rect(.bounds),
-                arrowEdge: .trailing
+                arrowEdge: .leading
             ) {
                 panel
                     // Size the sheet to the panel's own content — short when there's
@@ -197,17 +197,22 @@ private struct PlaybackSourceMenuPanel: View {
     #endif
     @FocusState private var focusedRowID: String?
     #if !os(tvOS)
+    @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var iosContentHeight: CGFloat = 220
     @State private var navDirection: Edge = .trailing
     #endif
     var body: some View {
         panelContent
-            .frame(width: panelWidth)
             #if os(tvOS)
+            .frame(width: 620)
             .frame(height: panelHeight, alignment: .top)
             // Page content swaps immediately; only the glass container morphs.
             .animation(nil, value: page)
             #else
+            // On iPhone (compact) the popover adapts to a sheet — fill its width
+            // so the panel isn't a narrow block floating inside a wider container.
+            // On iPad it's a real popover that sizes to a fixed width.
+            .frame(maxWidth: hSizeClass == .compact ? .infinity : 390)
             .frame(height: iosContentHeight, alignment: .top)
             .onPreferenceChange(PlaybackSourceMenuContentHeightKey.self) { measured in
                 let total = min(measured, panelMaxHeight)
@@ -220,6 +225,10 @@ private struct PlaybackSourceMenuPanel: View {
             }
             #endif
             .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
+            #if !os(tvOS)
+            // Small side gutters so the full-width sheet card doesn't touch the edges.
+            .padding(.horizontal, hSizeClass == .compact ? 12 : 0)
+            #endif
             #if os(tvOS)
             .focusScope(panelFocusScope)
             .focusSection()
@@ -251,7 +260,7 @@ private struct PlaybackSourceMenuPanel: View {
                 if page != .root {
                     header
                 }
-                LazyVStack(spacing: 8) { pageRows }
+                LazyVStack(spacing: 0) { pageRows }
             }
             .padding(14)
             .background(
@@ -307,7 +316,9 @@ private struct PlaybackSourceMenuPanel: View {
 
     @ViewBuilder
     private var rootRows: some View {
-        if sources.count > 1 {
+        let hasServer = sources.count > 1
+        let hasVersion = versions.count > 1
+        if hasServer {
             drillInRow(
                 id: "root.servers",
                 title: "Server",
@@ -316,7 +327,10 @@ private struct PlaybackSourceMenuPanel: View {
                 destination: .servers
             )
         }
-        if versions.count > 1 {
+        if hasVersion {
+            #if !os(tvOS)
+            if hasServer { rowSeparator }
+            #endif
             drillInRow(
                 id: "root.versions",
                 title: "Version",
@@ -325,10 +339,13 @@ private struct PlaybackSourceMenuPanel: View {
                 destination: .versions
             )
         }
-        if !actions.isEmpty, sources.count > 1 || versions.count > 1 {
+        if !actions.isEmpty, hasServer || hasVersion {
             Divider().padding(.vertical, 4)
         }
-        ForEach(actions) { action in
+        ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
+            #if !os(tvOS)
+            if index > 0 { rowSeparator }
+            #endif
             menuRowButton(id: "action.\(action.id)") {
                 onPerformAction(action.id)
             } label: {
@@ -341,7 +358,10 @@ private struct PlaybackSourceMenuPanel: View {
 
     @ViewBuilder
     private var serverRows: some View {
-        ForEach(sources) { source in
+        ForEach(Array(sources.enumerated()), id: \.element.accountID) { index, source in
+            #if !os(tvOS)
+            if index > 0 { rowSeparator }
+            #endif
             let isOffline = offlineSourceAccountIDs.contains(source.accountID)
             if isOffline {
                 offlineServerRow(source)
@@ -413,7 +433,10 @@ private struct PlaybackSourceMenuPanel: View {
 
     @ViewBuilder
     private var versionRows: some View {
-        ForEach(versions) { version in
+        ForEach(Array(versions.enumerated()), id: \.element.id) { index, version in
+            #if !os(tvOS)
+            if index > 0 { rowSeparator }
+            #endif
             let title = version.displayLabel
             let titleFacts = Set(title.components(separatedBy: " · "))
             let supplementalFacts = version.menuFacts.filter { !titleFacts.contains($0) }
@@ -500,12 +523,24 @@ private struct PlaybackSourceMenuPanel: View {
         .focused($focusedRowID, equals: id)
         #if os(tvOS)
         .prefersDefaultFocus(id == initialRowID, in: panelFocusScope)
-        #endif
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.primary.opacity(0.055))
         )
+        #endif
     }
+
+    #if !os(tvOS)
+    /// A hairline divider between flat rows on iOS/iPadOS. The rows sit directly
+    /// on the single glass panel (no per-row card), so a leading-inset separator
+    /// gives the grouped-list feel without nesting cards inside the panel.
+    private var rowSeparator: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.08))
+            .frame(height: 0.5)
+            .padding(.leading, 16)
+    }
+    #endif
 
     private var selectedSource: MediaSourceRef? {
         sources.first { $0.accountID == selectedSourceID } ?? sources.first
@@ -563,14 +598,6 @@ private struct PlaybackSourceMenuPanel: View {
             let version = versions.first { $0.id == selectedVersionID } ?? versions.first
             return version.map { "version.\($0.id)" }
         }
-    }
-
-    private var panelWidth: CGFloat {
-        #if os(tvOS)
-        620
-        #else
-        390
-        #endif
     }
 
     private var panelMaxHeight: CGFloat {

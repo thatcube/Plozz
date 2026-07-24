@@ -889,9 +889,15 @@ struct PlozziOSHomeHeroForeground: View {
                     .shouldHideRatings(for: item)
             )
 
+            // Keep the actions on a single row: try the full Play pill first, then
+            // shrink its resume trailing (drop "• 58m", then hide the text, keeping
+            // the progress bar) so the row fits instead of wrapping. A vertical
+            // stack is only the last resort (e.g. very large Dynamic Type).
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { actionButtons }
-                VStack(spacing: 12) { actionButtons }
+                HStack(spacing: 12) { actionButtons(resumeTrailingStyle: .full) }
+                HStack(spacing: 12) { actionButtons(resumeTrailingStyle: .seasonEpisodeOnly) }
+                HStack(spacing: 12) { actionButtons(resumeTrailingStyle: .hidden) }
+                VStack(spacing: 12) { actionButtons(resumeTrailingStyle: .full) }
             }
             .controlSize(.large)
         }
@@ -903,7 +909,9 @@ struct PlozziOSHomeHeroForeground: View {
     }
 
     @ViewBuilder
-    private var actionButtons: some View {
+    private func actionButtons(
+        resumeTrailingStyle: PlayResumeButtonLabel.ResumeTrailingStyle
+    ) -> some View {
         if hasPlayAction {
             Button {
                 onPlay(item)
@@ -915,7 +923,8 @@ struct PlozziOSHomeHeroForeground: View {
                     seasonEpisodeText: seasonEpisodeText,
                     onLight: colorScheme == .dark,
                     spacing: 10,
-                    capsuleWidth: 60
+                    capsuleWidth: 60,
+                    resumeTrailingStyle: resumeTrailingStyle
                 )
             }
             .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .primary))

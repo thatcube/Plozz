@@ -67,6 +67,16 @@ public struct ResumeProgressCapsule: View {
 /// inherit the ambient `.font`, so each caller keeps its own type scale; the
 /// progress bar is a fixed size.
 public struct PlayResumeButtonLabel: View {
+    /// How much of the resume trailing (`S5, E12 • 43m`) to show. Callers can offer
+    /// the same button in decreasing widths (inside a `ViewThatFits`) so the row
+    /// shrinks the Play pill before wrapping: full → season/episode only (drop the
+    /// remaining time) → hidden (progress bar only). The bar always stays.
+    public enum ResumeTrailingStyle: Sendable {
+        case full
+        case seasonEpisodeOnly
+        case hidden
+    }
+
     /// Plain-form label shown when the item has no resumable progress (e.g. "Play").
     public let title: String
     /// In-progress fraction; a value in `0..<1` (together with `remainingText`)
@@ -85,6 +95,9 @@ public struct PlayResumeButtonLabel: View {
     /// Height of the resume progress bar inside the button. Defaults to the
     /// compact 6pt used on iOS; tvOS heroes pass a taller bar.
     public var barHeight: CGFloat
+    /// How much of the resume trailing text to render. Defaults to `.full`; a
+    /// width-constrained caller can request a shorter form to avoid wrapping.
+    public var resumeTrailingStyle: ResumeTrailingStyle
 
     public init(
         title: String,
@@ -94,7 +107,8 @@ public struct PlayResumeButtonLabel: View {
         onLight: Bool,
         spacing: CGFloat = 16,
         capsuleWidth: CGFloat = 75,
-        barHeight: CGFloat = 6
+        barHeight: CGFloat = 6,
+        resumeTrailingStyle: ResumeTrailingStyle = .full
     ) {
         self.title = title
         self.progress = progress
@@ -104,15 +118,32 @@ public struct PlayResumeButtonLabel: View {
         self.spacing = spacing
         self.capsuleWidth = capsuleWidth
         self.barHeight = barHeight
+        self.resumeTrailingStyle = resumeTrailingStyle
     }
 
-    /// The resume form is used only for a genuinely in-progress item: a fraction
-    /// strictly between 0 and 1 with a remaining-time string to show.
-    private var resumeForm: (progress: Double, remaining: String)? {
-        guard let progress, progress > 0, progress < 1, let remainingText else { return nil }
-        // Prefix the season/episode when present: "S5, E12 • 43m".
-        let trailing = seasonEpisodeText.map { "\($0) • \(remainingText)" } ?? remainingText
-        return (progress, trailing)
+    /// The in-progress fraction that switches the label to the resume form: a
+    /// value strictly between 0 and 1, paired with a remaining-time string. (Even
+    /// when the trailing text is hidden for width, the presence of `remainingText`
+    /// is what marks the item as genuinely resumable.)
+    private var resumeProgress: Double? {
+        guard let progress, progress > 0, progress < 1, remainingText != nil else { return nil }
+        return progress
+    }
+
+    /// The resume trailing string for the current width style: `S5, E12 • 43m`,
+    /// `S5, E12`, or `nil` (bar only).
+    private var resumeTrailing: String? {
+        switch resumeTrailingStyle {
+        case .hidden:
+            return nil
+        case .seasonEpisodeOnly:
+            return seasonEpisodeText ?? remainingText
+        case .full:
+            if let seasonEpisodeText, let remainingText {
+                return "\(seasonEpisodeText) • \(remainingText)"
+            }
+            return remainingText ?? seasonEpisodeText
+        }
     }
 
     /// The plain (non-resume) label: the base title with the season/episode appended
@@ -124,10 +155,12 @@ public struct PlayResumeButtonLabel: View {
     public var body: some View {
         HStack(spacing: spacing) {
             Image(systemName: "play.fill")
-            if let resumeForm {
-                ResumeProgressCapsule(progress: resumeForm.progress, onLight: onLight, width: capsuleWidth, height: barHeight)
-                Text(resumeForm.remaining)
-                    .lineLimit(1)
+            if let resumeProgress {
+                ResumeProgressCapsule(progress: resumeProgress, onLight: onLight, width: capsuleWidth, height: barHeight)
+                if let resumeTrailing {
+                    Text(resumeTrailing)
+                        .lineLimit(1)
+                }
             } else {
                 Text(plainTitle)
                     .lineLimit(1)

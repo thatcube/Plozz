@@ -1084,9 +1084,16 @@ private struct PlozziOSDetailHeroForeground: View {
                     .shouldHideRatings(for: item)
             )
 
+            // Progressive overflow: try every inline layout from "all buttons
+            // inline" down to "everything in the … menu", collapsing ONE action
+            // at a time (least-important first). ViewThatFits picks the first
+            // candidate that fits the hero's width, so actions only fold into "…"
+            // when they'd otherwise wrap — and the same page always lays out the
+            // same way for a given width.
             ViewThatFits(in: .horizontal) {
-                fullActionRow
-                compactActionRow
+                ForEach(0...orderedInlineExtras.count, id: \.self) { collapseCount in
+                    actionRow(collapsing: collapseCount)
+                }
             }
             .controlSize(.large)
         }
@@ -1131,25 +1138,70 @@ private struct PlozziOSDetailHeroForeground: View {
         }
     }
 
-    private var fullActionRow: some View {
-        HStack(spacing: 12) {
-            playActionButton
-            heroRequestButton
-            primaryActionButtons
-            downloadActionButton
-            if hasSourceVersionOptions {
-                sourceVersionMenuButton()
+    /// A secondary hero action that can either sit inline as its own button or
+    /// fold into the "…" overflow menu. Ordered most-important-first in
+    /// `orderedInlineExtras`; the progressive layout collapses from the tail, so
+    /// the least-used action is the first to move into "…".
+    private enum InlineExtra: Identifiable {
+        case primary(ActionEntry)
+        case download
+
+        var id: String {
+            switch self {
+            case .primary(let entry): return "media.\(entry.action.rawValue)"
+            case .download: return "download"
             }
         }
     }
 
-    private var compactActionRow: some View {
-        HStack(spacing: 12) {
+    /// Collapsible inline actions in keep-inline priority order (index 0 collapses
+    /// last). Play + Request are structural and always stay inline, so they're not
+    /// listed here. Everyday actions (watchlist / mark-watched) outrank the
+    /// power-user Download, which folds into "…" first as width shrinks.
+    private var orderedInlineExtras: [InlineExtra] {
+        var extras = primaryActions.map { InlineExtra.primary($0) }
+        if downloadItem != nil {
+            extras.append(.download)
+        }
+        return extras
+    }
+
+    /// One candidate row that keeps the highest-priority extras inline and folds
+    /// the last `collapseCount` of them into the "…" menu. ViewThatFits chooses the
+    /// widest candidate (fewest collapsed) that still fits the hero width.
+    private func actionRow(collapsing collapseCount: Int) -> some View {
+        let extras = orderedInlineExtras
+        let keep = max(0, extras.count - collapseCount)
+        let inline = Array(extras.prefix(keep))
+        let collapsed = Array(extras.suffix(collapseCount))
+        let menu = menuActions(collapsing: collapsed)
+        return HStack(spacing: 12) {
             playActionButton
             heroRequestButton
-            if !compactPanelActions.isEmpty || hasSourceVersionOptions {
-                sourceVersionMenuButton(actions: compactPanelActions)
+            ForEach(inline) { extra in
+                inlineExtraButton(extra)
             }
+            if hasSourceVersionOptions || !menu.isEmpty {
+                sourceVersionMenuButton(actions: menu)
+            }
+        }
+    }
+
+    /// Overflow-menu entries for the collapsed extras, preserving the canonical
+    /// menu ordering (primary actions, then Download) regardless of which subset
+    /// happens to be collapsed at the current width.
+    private func menuActions(collapsing extras: [InlineExtra]) -> [PlaybackSourceMenuAction] {
+        let ids = Set(extras.map(\.id))
+        return compactPanelActions.filter { ids.contains($0.id) }
+    }
+
+    @ViewBuilder
+    private func inlineExtraButton(_ extra: InlineExtra) -> some View {
+        switch extra {
+        case .primary(let entry):
+            primaryActionButton(entry)
+        case .download:
+            downloadActionButton
         }
     }
 
@@ -1186,26 +1238,24 @@ private struct PlozziOSDetailHeroForeground: View {
     }
 
     @ViewBuilder
-    private var primaryActionButtons: some View {
-        ForEach(primaryActions) { entry in
-            Button {
-                actionHandler.perform(
-                    entry.action,
-                    on: entry.target,
-                    context: .none
-                )
-            } label: {
-                Image(systemName: primaryActionSymbol(for: entry))
-                    .font(.headline)
-            }
-            .buttonStyle(
-                PlozziOSHeroActionButtonStyle(
-                    kind: .secondary,
-                    circular: true
-                )
+    private func primaryActionButton(_ entry: ActionEntry) -> some View {
+        Button {
+            actionHandler.perform(
+                entry.action,
+                on: entry.target,
+                context: .none
             )
-            .accessibilityLabel(entry.action.title)
+        } label: {
+            Image(systemName: primaryActionSymbol(for: entry))
+                .font(.headline)
         }
+        .buttonStyle(
+            PlozziOSHeroActionButtonStyle(
+                kind: .secondary,
+                circular: true
+            )
+        )
+        .accessibilityLabel(entry.action.title)
     }
 
     @ViewBuilder

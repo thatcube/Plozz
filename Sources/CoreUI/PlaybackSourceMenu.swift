@@ -92,7 +92,10 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                     // the tvOS expand/collapse behaviour instead of a half-screen
                     // detent that leaves the sheet mostly empty.
                     .presentationDetents([.height(iosSheetHeight)])
-                    .presentationBackground(.clear)
+                    // The popover/sheet chrome IS the menu surface — it draws the
+                    // rounded shape and (on iPad) the connected arrow. The panel
+                    // itself draws nothing, so there's exactly one background.
+                    .presentationBackground { PlaybackSourceMenuSurface() }
                     .presentationDragIndicator(.hidden)
             }
         #endif
@@ -208,10 +211,16 @@ private struct PlaybackSourceMenuPanel: View {
             .frame(height: panelHeight, alignment: .top)
             // Page content swaps immediately; only the glass container morphs.
             .animation(nil, value: page)
+            // tvOS presents the panel bare inside a full-screen cover, so it has
+            // to draw its own glass surface.
+            .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
             #else
-            // On iPhone (compact) the popover adapts to a sheet — fill its width
-            // so the panel isn't a narrow block floating inside a wider container.
-            // On iPad it's a real popover that sizes to a fixed width.
+            // iOS/iPadOS deliberately draw NO surface here: the popover/sheet
+            // chrome is the surface (see `presentationBackground` on the
+            // presenter), which is what renders the connected popover arrow.
+            // Adding a panel here too is what produced the nested double
+            // background. Compact adapts to a full-width sheet; regular width
+            // keeps a fixed popover width.
             .frame(maxWidth: hSizeClass == .compact ? .infinity : 390)
             .frame(height: iosContentHeight, alignment: .top)
             .onPreferenceChange(PlaybackSourceMenuContentHeightKey.self) { measured in
@@ -223,11 +232,6 @@ private struct PlaybackSourceMenuPanel: View {
                     measuredHeight?.wrappedValue = total
                 }
             }
-            #endif
-            .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
-            #if !os(tvOS)
-            // Small side gutters so the full-width sheet card doesn't touch the edges.
-            .padding(.horizontal, hSizeClass == .compact ? 12 : 0)
             #endif
             #if os(tvOS)
             .focusScope(panelFocusScope)
@@ -701,6 +705,28 @@ private struct PlaybackSourceMenuContentHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+/// The one and only surface behind the iOS/iPadOS source menu. Installed as the
+/// presentation background so the system chrome — including the popover's
+/// connected arrow — is filled with our themed overlay colour, instead of the
+/// panel drawing a second card inside the system's own background.
+private struct PlaybackSourceMenuSurface: View {
+    @Environment(\.themePalette) private var palette
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        if reduceTransparency {
+            palette.overlay.fill
+        } else {
+            // Material keeps the live translucency of a system menu; the themed
+            // overlay tint on top pulls it to the right value per theme (near
+            // black in OLED, lifted grey in Dark, white in Light).
+            Rectangle()
+                .fill(.regularMaterial)
+                .overlay(palette.overlay.fill.opacity(0.55))
+        }
     }
 }
 #endif

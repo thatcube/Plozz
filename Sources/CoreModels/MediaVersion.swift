@@ -166,6 +166,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
             // playable backing item is carried by `sourceItemID`.
             id: "synth:\(item.id)",
             name: nil,
+            fileName: item.mediaInfo?.fileName,
             width: video?.width,
             height: video?.height,
             bitrate: video?.bitrate,

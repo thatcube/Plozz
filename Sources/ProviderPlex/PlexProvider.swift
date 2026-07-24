@@ -688,7 +688,8 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         streams: [PlexStream],
         mediaAudioProfile: String? = nil,
         mediaVideoDisplayTitle: String? = nil,
-        fileSizeBytes: Int64? = nil
+        fileSizeBytes: Int64? = nil,
+        fileName: String? = nil
     ) -> MediaSourceMetadata? {
         let video = streams.first { $0.streamType == 1 }
         let audio = streams.first { ($0.streamType == 2) && ($0.selected ?? $0.default ?? false) }
@@ -762,6 +763,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         let metadata = MediaSourceMetadata(
             container: container,
             fileSizeBytes: fileSizeBytes,
+            fileName: fileName,
             video: videoStream,
             audio: audioStream,
             subtitle: subtitleStream
@@ -1251,7 +1253,8 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
                 container: part?.container ?? media.container,
                 streams: streams,
                 mediaAudioProfile: media.audioProfile,
-                mediaVideoDisplayTitle: media.videoStreamDisplayTitle
+                mediaVideoDisplayTitle: media.videoStreamDisplayTitle,
+                fileName: Self.fileName(from: media)
             )
         }
         // List/children responses can omit the per-stream array; fall back to the
@@ -1368,6 +1371,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         let metadata = MediaSourceMetadata(
             container: media.container,
             fileSizeBytes: fileSizeBytes(from: media),
+            fileName: Self.fileName(from: media),
             video: video,
             audio: audio
         )

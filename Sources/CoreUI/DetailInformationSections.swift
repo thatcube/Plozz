@@ -175,7 +175,9 @@ public struct DetailInformationSections: View {
                 RatingTile(rating: rating)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Fill the row height so the ratings block and the About card stay the same
+        // height (the taller of the two drives the row); tiles stay pinned to the top.
+        .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
     }
 
     private var ratingsTileColumns: [GridItem] {
@@ -285,7 +287,7 @@ public struct DetailInformationSections: View {
                     .compositingGroup()
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
             .onPreferenceChange(OverviewFullHeightKey.self) { overviewFullHeight = $0 }
             .onPreferenceChange(OverviewLimitedHeightKey.self) { overviewLimitedHeight = $0 }
             .padding(cardPadding)

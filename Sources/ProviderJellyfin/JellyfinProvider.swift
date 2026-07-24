@@ -1018,7 +1018,8 @@ public struct JellyfinProvider: MediaProvider {
         container: String?,
         streams: [MediaStreamDto],
         sourceRevision: String? = nil,
-        fileSizeBytes: Int64? = nil
+        fileSizeBytes: Int64? = nil,
+        fileName: String? = nil
     ) -> MediaSourceMetadata? {
         let video = streams.first { $0.`Type` == "Video" }
         let audio = streams.first { ($0.`Type` == "Audio") && ($0.IsDefault ?? false) }
@@ -1069,6 +1070,7 @@ public struct JellyfinProvider: MediaProvider {
         let metadata = MediaSourceMetadata(
             container: container,
             fileSizeBytes: fileSizeBytes,
+            fileName: fileName,
             sourceRevision: sourceRevision,
             video: videoStream,
             audio: audioStream,
@@ -1358,7 +1360,8 @@ public struct JellyfinProvider: MediaProvider {
                 sourceRevision: dto.MediaSources?.first.map {
                     Self.sourceRevision(itemID: dto.Id, source: $0)
                 },
-                fileSizeBytes: dto.MediaSources?.first?.Size
+                fileSizeBytes: dto.MediaSources?.first?.Size,
+                fileName: dto.MediaSources?.first?.Path.flatMap(Self.fileName(fromPath:))
             ),
             versions: Self.versions(
                 from: dto.MediaSources,

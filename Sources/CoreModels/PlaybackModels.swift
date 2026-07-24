@@ -238,6 +238,10 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
     public var container: String?
     /// Total byte count of the original source file, when the provider reports it.
     public var fileSizeBytes: Int64?
+    /// Basename of the original media file (e.g. `Movie.2026.2160p.mkv`), when the
+    /// provider exposes a path. Lets a single-file item's detail show the filename
+    /// even without a multi-version `MediaVersion` list.
+    public var fileName: String?
     /// Provider source revision used to retain asynchronously-probed facts only
     /// while the underlying file is unchanged.
     public var sourceRevision: String?
@@ -248,6 +252,7 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
     public init(
         container: String? = nil,
         fileSizeBytes: Int64? = nil,
+        fileName: String? = nil,
         sourceRevision: String? = nil,
         video: VideoStream? = nil,
         audio: AudioStream? = nil,
@@ -255,6 +260,7 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
     ) {
         self.container = container
         self.fileSizeBytes = fileSizeBytes
+        self.fileName = fileName
         self.sourceRevision = sourceRevision
         self.video = video
         self.audio = audio
@@ -265,6 +271,7 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
     public var isEmpty: Bool {
         container == nil
             && fileSizeBytes == nil
+            && fileName == nil
             && sourceRevision == nil
             && video == nil
             && audio == nil

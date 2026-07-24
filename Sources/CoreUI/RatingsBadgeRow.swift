@@ -219,34 +219,28 @@ public struct RatingTile: View {
 
     @ViewBuilder
     private var subtitle: some View {
-        if let count = rating.ratingCountText {
-            HStack(spacing: 5) {
-                Image(systemName: "person.2.fill")
-                    .font(.system(size: subtitleFontSize * 0.85))
-                Text(count)
-                    .font(.system(size: subtitleFontSize, weight: .medium))
-                    .monospacedDigit()
-            }
+        Text(subtitleText)
+            .font(.system(size: subtitleFontSize, weight: .medium))
             .foregroundStyle(.secondary)
-        } else if let word = freshnessWord {
-            Text(word)
-                .font(.system(size: subtitleFontSize, weight: .medium))
-                .foregroundStyle(.secondary)
-        } else {
-            // Keep a consistent tile height across a mixed grid even when a source
-            // reports neither a count nor a freshness verdict.
-            Color.clear
-        }
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
     }
 
-    private var freshnessWord: String? {
-        switch rating.freshness {
-        case .fresh:
-            return rating.source == .rottenTomatoesAudience ? "Upright" : "Fresh"
-        case .rotten:
-            return rating.source == .rottenTomatoesAudience ? "Spilled" : "Rotten"
-        case .none:
-            return nil
+    /// The cohort — Critics / Audience / Community — so each score is labelled with
+    /// *what kind* of rating it is (answering "is IMDb community? is RT critics?"),
+    /// with the vote count appended when the source reports one.
+    private var subtitleText: String {
+        if let count = rating.ratingCountText {
+            return "\(cohortLabel) · \(count)"
+        }
+        return cohortLabel
+    }
+
+    private var cohortLabel: String {
+        switch rating.cohort {
+        case .critics: return "Critics"
+        case .audience: return "Audience"
+        case .community: return "Community"
         }
     }
 

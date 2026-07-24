@@ -75,22 +75,28 @@ let package = Package(
         // See AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
         // Pinned by exact commit to the annotated tag
-        //   `plozz-pin-5.6.1-seekfixes-atmos` → ffaac108507a533b7d09e484c0e1ec4b50c80e53
+        //   `plozz-pin-5.20.6-seekfixes-atmos` → 1a0e81bfbed667f1a51154397d2fdfee27b1bce5
         // on the thatcube fork. The tag keeps this commit permanently reachable
         // (a bare branch SHA could be force-pushed away; a tagged one cannot), so
         // pinning the SHA here is both immutable and human-traceable. The tagged
-        // stack, on the upstream 5.6.1 base, bundles:
-        //   611a8b5 opt-in bounded E-AC-3 JOC/Atmos decode-detection probe
-        //   b441b5a re-anchor producer on deadline when a forward-seek target is unbuffered
-        //   c5f3cd5 progress-aware deadline extend (don't tear down a slow-but-serving producer)
-        //   83e705e recovery hold-at-target (never revert the clock to the old position)
-        //   cd15bd0 forward-overshoot landing (a seek that lands past target is done, not re-sought)
-        //   e5333ff edge-triggered finalize (clear the loading state the instant playback resumes)
-        //   ffaac10 deactivate AVAudioSession on final teardown (stops looping Atmos passthrough on exit)
+        // stack, on the upstream 5.20.6 base, bundles:
+        //   64a3f16 opt-in bounded E-AC-3 JOC/Atmos decode-detection probe
+        //   2feb7d2 progress-aware deadline extend (don't tear down a slow-but-serving producer)
+        //   0c42bb5 recovery hold-at-target (never revert the clock to the old position)
+        //   1f35669 forward-overshoot landing (a seek that lands past target is done, not re-sought)
+        //   08c3ee3 edge-triggered finalize (clear the loading state the instant playback resumes)
+        //   1a0e81b deactivate AVAudioSession on final teardown (stops looping Atmos passthrough on exit)
+        //
+        // The previous stack's `b441b5a` (re-anchor the producer when a forward-seek
+        // target is unbuffered) was DROPPED here because upstream implemented the same
+        // fix independently as AE#141: `shouldReanchorProducerAfterSeekDeadline` now
+        // gates on `targetBeyondProducerCoverage` (real producer coverage) instead of
+        // our `bufferedEnd` heuristic, which is the stronger signal. The dependent
+        // patches above were rewired onto the upstream gate during the rebase.
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "ffaac108507a533b7d09e484c0e1ec4b50c80e53"),
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "1a0e81bfbed667f1a51154397d2fdfee27b1bce5"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

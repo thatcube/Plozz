@@ -614,6 +614,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     switch cue.body {
                     case .text(let string):
                         body = .text(CoreModels.SubtitleText(string))
+                    case .richText(let runs):
+                        // Plozz's cue model has no coloured-run case; flatten to plain text the
+                        // same way AetherEngine's own `SubtitleCue.text` accessor does, so
+                        // teletext/ASS colour-tagged cues still render instead of being dropped.
+                        body = .text(CoreModels.SubtitleText(runs.map(\.text).joined()))
                     case .image(let image):
                         body = .image(CoreModels.SubtitleImage(
                             cgImage: image.cgImage,
@@ -646,6 +651,9 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     switch cue.body {
                     case .text(let string):
                         body = .text(CoreModels.SubtitleText(string))
+                    case .richText(let runs):
+                        // See the primary channel above: flatten coloured runs to plain text.
+                        body = .text(CoreModels.SubtitleText(runs.map(\.text).joined()))
                     case .image(let image):
                         body = .image(CoreModels.SubtitleImage(
                             cgImage: image.cgImage,

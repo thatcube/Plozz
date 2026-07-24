@@ -65,7 +65,10 @@ public struct SpoilerSafeOverviewText: View {
         #if os(tvOS)
         Text(verbatim: overview.overviewPlainText)
         #else
-        Text(overview.overviewMarkdownWithLegibleLinks(color: palette.primaryText))
+        Text(overview.overviewMarkdownWithLegibleLinks(
+            textColor: palette.primaryText,
+            accent: palette.accent
+        ))
         #endif
     }
 

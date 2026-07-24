@@ -1649,7 +1649,8 @@ private struct PlozziOSHeroMetadata: View {
 
             if let descriptionText {
                 Text(descriptionText.overviewMarkdownWithLegibleLinks(
-                    color: palette.primaryText
+                    textColor: palette.primaryText,
+                    accent: palette.accent
                 ))
                     .font(.subheadline)
                     .foregroundStyle(palette.primaryText.opacity(0.82))

@@ -27,12 +27,20 @@ public extension AttributedString {
 }
 
 public extension String {
-    /// The overview parsed as inline markdown with links restyled for legibility
-    /// (`legibleLinks`), falling back to the plain string when parsing fails. The
-    /// single entry point iOS/iPadOS overview render sites use so links read the
-    /// same everywhere.
-    func overviewMarkdownWithLegibleLinks(color: Color) -> AttributedString {
-        (overviewMarkdown ?? AttributedString(self)).legibleLinks(color: color)
+    /// The overview parsed as inline markdown with links restyled for legibility,
+    /// falling back to the plain string when parsing fails. Links are blended a
+    /// little toward `accent` (so they read as tinted, not just underlined body
+    /// text) and softened slightly below full contrast — distinct without dropping
+    /// to the hard-to-read pure-accent blue. The single entry point iOS/iPadOS
+    /// overview render sites use so links read the same everywhere.
+    func overviewMarkdownWithLegibleLinks(
+        textColor: Color,
+        accent: Color
+    ) -> AttributedString {
+        let linkColor = textColor
+            .mix(with: accent, by: 0.38)
+            .opacity(0.9)
+        return (overviewMarkdown ?? AttributedString(self)).legibleLinks(color: linkColor)
     }
 }
 #endif

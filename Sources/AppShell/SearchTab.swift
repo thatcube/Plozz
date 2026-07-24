@@ -134,7 +134,11 @@ struct SearchTab: View {
                         discoveryStatusRefresh: { await seer.availability(for: $0) },
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: item.sourceAccountID,
-                        initialSources: item.sources,
+                        initialSources: detailInitialSources(
+                            for: item,
+                            isDiscovery: isDiscovery,
+                            identitySources: identitySources
+                        ),
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
                         snapshotCache: detailSnapshotCache

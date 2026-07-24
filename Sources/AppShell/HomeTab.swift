@@ -377,7 +377,11 @@ struct HomeTab: View {
                 ratingsProvider: ratingsProvider,
                 sourceAccountID: item.sourceAccountID,
                 originSourceAccountID: libraryOrigin,
-                initialSources: item.sources,
+                initialSources: detailInitialSources(
+                    for: item,
+                    isDiscovery: isDiscovery,
+                    identitySources: identitySources
+                ),
                 alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                 crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
                 snapshotCache: detailSnapshotCache

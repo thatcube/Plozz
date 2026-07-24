@@ -264,7 +264,12 @@ private struct PlaybackSourceMenuPanel: View {
                 if page != .root {
                     header
                 }
-                LazyVStack(spacing: 0) { pageRows }
+                // Deliberately NOT lazy: during the horizontal push the incoming
+                // page starts off-screen, so a LazyVStack only materialises the
+                // row the focus lands on and the rest pop in on arrival instead
+                // of travelling with the transition. A menu is a handful of rows,
+                // so eager layout costs nothing and animates as one page.
+                VStack(spacing: 0) { pageRows }
             }
             .padding(14)
             .background(
@@ -571,9 +576,12 @@ private struct PlaybackSourceMenuPanel: View {
     }
 
     private func focusFirstRow() {
-        let target = initialRowID
-        focusedRowID = target
+        // tvOS only: the focus engine needs an explicit landing row per page.
+        // On iOS/iPadOS programmatically focusing a row inside the ScrollView
+        // makes UIKit scroll that row into view mid-transition, which is what
+        // made the selected server behave differently from its siblings.
         #if os(tvOS)
+        focusedRowID = initialRowID
         resetFocus(in: panelFocusScope)
         #endif
     }

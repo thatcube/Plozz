@@ -202,7 +202,9 @@ public struct RatingTile: View {
             subtitle
                 .frame(height: subtitleRowHeight)
         }
-        .frame(maxWidth: .infinity)
+        // Fill and center vertically, so when a tile is stretched to match a taller
+        // About card its icon/score/subtitle stay centered rather than pinned top.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.vertical, verticalPadding)
         .padding(.horizontal, horizontalPadding)
         // Focusable on tvOS (D-pad reachable with the shared glass lift, matching

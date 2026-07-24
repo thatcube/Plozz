@@ -17,7 +17,6 @@ public struct DetailInformationSections: View {
     @State private var showsFullOverview = false
     @State private var overviewFullHeight: CGFloat = 0
     @State private var overviewVisibleHeight: CGFloat = 0
-    @State private var aboutHeight: CGFloat = 0
     @Environment(\.themePalette) private var palette
 
     public init(
@@ -170,20 +169,31 @@ public struct DetailInformationSections: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
+    @ViewBuilder
     private var ratingsTiles: some View {
-        LazyVGrid(columns: ratingsTileColumns, alignment: .leading, spacing: ratingsTileSpacing) {
-            ForEach(sortedRatings) { rating in
-                RatingTile(rating: rating)
+        if matchesRatingsHeight {
+            // Side-by-side with About: a single row of equal-width tiles that fill
+            // the grid row's height, so they bottom-align with the About card. The
+            // Grid row is sized to the taller of {About, tiles}, and both cells fill
+            // it — so About drives the height when the synopsis is long, and the
+            // tiles drive it when the synopsis is short. No manual measurement, and
+            // it stays bounded because it's inside a Grid (not a raw ScrollView).
+            HStack(spacing: ratingsTileSpacing) {
+                ForEach(sortedRatings) { rating in
+                    RatingTile(rating: rating)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            // Stacked (iPhone): wrap naturally, tiles keep their square height.
+            LazyVGrid(columns: ratingsTileColumns, alignment: .leading, spacing: ratingsTileSpacing) {
+                ForEach(sortedRatings) { rating in
+                    RatingTile(rating: rating)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        // The synopsis's line count drives About's height; the ratings column then
-        // grows to match it (tiles pinned to the top), so the two sit at equal
-        // height without stretching the tiles out of their square-ish shape.
-        .frame(
-            maxWidth: .infinity,
-            minHeight: matchedRatingsMinHeight,
-            alignment: .topLeading
-        )
     }
 
     /// Whether About and Ratings sit side-by-side and should be the same height
@@ -195,13 +205,6 @@ public struct DetailInformationSections: View {
         #else
         return horizontalSizeClass == .regular
         #endif
-    }
-
-    /// The min height applied to the ratings column so it matches the (line-count
-    /// driven) About card — `nil` when not matching or before About is measured.
-    private var matchedRatingsMinHeight: CGFloat? {
-        guard matchesRatingsHeight, aboutHeight > 0 else { return nil }
-        return aboutHeight
     }
 
     private var ratingsTileColumns: [GridItem] {
@@ -256,21 +259,20 @@ public struct DetailInformationSections: View {
                     aboutOverview(overview)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            // Fill the grid row height when side-by-side with Ratings, so a short
+            // synopsis's card still grows to match the tiles (content stays pinned
+            // to the top). Natural height when stacked on iPhone.
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: matchesRatingsHeight ? .infinity : nil,
+                alignment: .topLeading
+            )
             .onPreferenceChange(OverviewFullHeightKey.self) { overviewFullHeight = $0 }
             .onPreferenceChange(OverviewVisibleHeightKey.self) { overviewVisibleHeight = $0 }
             .padding(cardPadding)
         }
         .buttonStyle(.plain)
         .plozzFocusableCard(cornerRadius: cardCornerRadius)
-        // Publish the About card's natural (line-count driven) height so the
-        // ratings column can grow to match it.
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(key: AboutHeightKey.self, value: proxy.size.height)
-            }
-        }
-        .onPreferenceChange(AboutHeightKey.self) { aboutHeight = $0 }
         .sheet(isPresented: $showsFullOverview) {
             overviewSheet
         }
@@ -850,13 +852,6 @@ private struct OverviewFullHeightKey: PreferenceKey {
 }
 
 private struct OverviewVisibleHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-private struct AboutHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())

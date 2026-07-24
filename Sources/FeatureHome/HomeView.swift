@@ -107,6 +107,12 @@ public struct HomeView: View {
     /// One-tap request for a not-owned featured title (Seerr), threaded to the
     /// hero's Request button. Returns the new availability for an optimistic flip.
     private let onRequestItem: ((MediaItem) async -> MediaAvailabilityStatus?)?
+    /// Loads Seerr season-request availability for a featured series, so the home
+    /// hero's Request can present a season picker. `nil` disables the picker
+    /// (series then request as a whole, like movies).
+    private let onRequestAvailability: ((MediaItem) async -> MediaRequestAvailability?)?
+    /// Requests the chosen seasons of a featured series from the home hero picker.
+    private let onRequestSeasonsItem: ((MediaItem, [Int]) async -> MediaAvailabilityStatus?)?
     /// The app-wide navigation style, so the carousel's left-edge behaviour
     /// (escape to sidebar vs. wrap) matches the surrounding chrome.
     private let navigationStyle: NavigationStyle
@@ -178,6 +184,8 @@ public struct HomeView: View {
         homePerfOverlayEnabled: Bool = false,
         seerConnected: Bool = false,
         onRequestItem: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil,
+        onRequestAvailability: ((MediaItem) async -> MediaRequestAvailability?)? = nil,
+        onRequestSeasonsItem: ((MediaItem, [Int]) async -> MediaAvailabilityStatus?)? = nil,
         navigationStyle: NavigationStyle = .default,
         onSelectItem: @escaping (MediaItem) -> Void,
         onPlayItem: @escaping (MediaItem) -> Void,
@@ -212,6 +220,8 @@ public struct HomeView: View {
         self.homePerfOverlayEnabled = homePerfOverlayEnabled
         self.heroSeerConnected = seerConnected
         self.onRequestItem = onRequestItem
+        self.onRequestAvailability = onRequestAvailability
+        self.onRequestSeasonsItem = onRequestSeasonsItem
         self.navigationStyle = navigationStyle
         self.onSelectItem = onSelectItem
         self.onPlayItem = onPlayItem
@@ -327,6 +337,8 @@ public struct HomeView: View {
                                 onPlay: onPlayItem,
                                 seerConnected: heroSeerConnected,
                                 onRequest: onRequestItem,
+                                requestAvailability: onRequestAvailability,
+                                onRequestSeasons: onRequestSeasonsItem,
                                 // When focus returns to the hero from a row below,
                                 // un-recede: the content expands back to full-screen
                                 // and the backdrop settles back down. A SINGLE flag

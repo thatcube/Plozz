@@ -168,6 +168,12 @@ struct HomeTab: View {
                     if case let .success(status) = outcome { return status }
                     return nil
                 },
+                onRequestAvailability: { await seer.requestAvailability(for: $0) },
+                onRequestSeasonsItem: { item, seasons in
+                    let outcome = await seer.request(item, seasons: seasons, actingUserID: activeSeerrUserID)
+                    if case let .success(status) = outcome { return status }
+                    return nil
+                },
                 navigationStyle: navigationStyle,
                 onSelectItem: {
                     // "More Info" opens the detail for the item the user selected —

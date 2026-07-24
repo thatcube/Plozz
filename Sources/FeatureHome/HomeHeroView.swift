@@ -71,6 +71,13 @@ struct HomeHeroView: View {
     /// availability so the pill can flip to Requested/Downloading immediately, or
     /// `nil` if the request failed. `nil` closure disables requesting entirely.
     var onRequest: ((MediaItem) async -> MediaAvailabilityStatus?)? = nil
+    /// Loads Seerr season-request availability for a featured **series**, so
+    /// activating Request can present a season picker instead of requesting the
+    /// whole show. `nil` (or no season content) falls back to a whole-title request.
+    var requestAvailability: ((MediaItem) async -> MediaRequestAvailability?)? = nil
+    /// Requests the chosen `seasons` of a featured series; returns the title's new
+    /// availability (to flip the pill) or `nil` on failure.
+    var onRequestSeasons: ((MediaItem, [Int]) async -> MediaAvailabilityStatus?)? = nil
     /// Fired when the hero *gains* focus (the user moved focus back up onto it),
     /// so Home can restore the full-screen hero and replay the enter transition.
     /// Not fired for interior button-to-button moves.
@@ -134,6 +141,8 @@ struct HomeHeroView: View {
     /// for the next trending refresh. Keyed by `MediaItem.id`; reconciled with the
     /// server's returned status when the request completes.
     @State private var requestOverrides: [String: MediaAvailabilityStatus] = [:]
+    /// The featured series whose season picker sheet is presented (nil = hidden).
+    @State private var seasonPickerItem: MediaItem?
     /// Which of the hero's two focus targets holds focus: the pill `row`, or the
     /// invisible `leftGuard` that sits just left of it. The guard exists so a Left
     /// press has an *internal* target and is captured by the hero instead of
@@ -479,6 +488,18 @@ struct HomeHeroView: View {
             heroBackdrop(height: height)
         }
         .opacity(heroVisible ? 1 : 0)
+        .sheet(item: $seasonPickerItem) { item in
+            HeroSeasonRequestSheet(
+                item: item,
+                loadAvailability: { await requestAvailability?($0) },
+                onRequestSeasons: { requestedItem, seasons in
+                    await onRequestSeasons?(requestedItem, seasons)
+                },
+                onRequested: { status in
+                    if let status { requestOverrides[item.id] = status }
+                }
+            )
+        }
         #if DEBUG
         .overlay(alignment: .topTrailing) { heroModeBadge }
         #endif
@@ -1610,6 +1631,13 @@ struct HomeHeroView: View {
     /// reconciling with the server's returned availability. A failed request
     /// clears the override so the Request button returns for a retry.
     private func performRequest(for item: MediaItem) {
+        // A featured series opens the season picker so you choose which seasons to
+        // request; movies (and series with no picker wiring) request in one tap.
+        if item.kind == .series, requestAvailability != nil, onRequestSeasons != nil {
+            noteInteraction()
+            seasonPickerItem = item
+            return
+        }
         guard let onRequest else { return }
         noteInteraction()
         requestOverrides[item.id] = .pending
@@ -2137,6 +2165,136 @@ struct HomeHeroView: View {
     private struct ArtworkResolutionKey: Equatable {
         let slideToken: Int
         let index: Int
+    }
+}
+
+/// Full-screen season picker presented when Request is activated on a featured
+/// **series** in the tvOS home hero (which uses a custom single-focus row, so an
+/// inline `Menu` like the detail hero isn't available). Loads the title's Seerr
+/// season availability, then offers "Request All Seasons" plus a focusable row per
+/// season — requestable seasons are buttons; in-flight / failed ones show status.
+private struct HeroSeasonRequestSheet: View {
+    let item: MediaItem
+    let loadAvailability: (MediaItem) async -> MediaRequestAvailability?
+    let onRequestSeasons: (MediaItem, [Int]) async -> MediaAvailabilityStatus?
+    let onRequested: (MediaAvailabilityStatus?) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.themePalette) private var palette
+    @State private var availability: MediaRequestAvailability?
+    @State private var loading = true
+    @State private var submitting = false
+
+    private var seasons: [MediaSeasonRequestState] {
+        availability?.requestPickerSeasons ?? []
+    }
+
+    private var requestableSeasons: [MediaSeasonRequestState] {
+        seasons.filter(\.isRequestable)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                header
+                if loading {
+                    ProgressView()
+                        .padding(.vertical, 40)
+                        .frame(maxWidth: .infinity)
+                } else if seasons.isEmpty {
+                    Text("There are no seasons available to request right now.")
+                        .font(.title3)
+                        .foregroundStyle(palette.secondaryText)
+                } else {
+                    seasonList
+                }
+            }
+            .padding(72)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(palette.settingsBackground.ignoresSafeArea())
+        .task {
+            availability = await loadAvailability(item)
+            loading = false
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(item.title)
+                .font(.largeTitle.bold())
+                .foregroundStyle(palette.primaryText)
+            Text("Choose which seasons to request")
+                .font(.title3)
+                .foregroundStyle(palette.secondaryText)
+        }
+    }
+
+    private var seasonList: some View {
+        VStack(spacing: 16) {
+            if requestableSeasons.count > 1 {
+                Button {
+                    request(requestableSeasons.map(\.number))
+                } label: {
+                    Label("Request All Seasons", systemImage: "plus.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            ForEach(seasons) { season in
+                seasonRow(season)
+            }
+        }
+        .disabled(submitting)
+    }
+
+    @ViewBuilder
+    private func seasonRow(_ season: MediaSeasonRequestState) -> some View {
+        if season.isRequestable {
+            Button {
+                request([season.number])
+            } label: {
+                seasonRowLabel(season.title, systemImage: "plus.circle", detail: nil)
+            }
+            .buttonStyle(.bordered)
+        } else {
+            seasonRowLabel(
+                season.title,
+                systemImage: season.requestFailed
+                    ? "exclamationmark.circle"
+                    : (season.status == .processing ? "arrow.down.circle" : "clock"),
+                detail: season.requestFailed
+                    ? "Failed"
+                    : (season.status == .processing ? "Processing" : "Requested")
+            )
+            .padding(.vertical, 18)
+            .padding(.horizontal, 20)
+            .foregroundStyle(palette.secondaryText)
+        }
+    }
+
+    private func seasonRowLabel(_ title: String, systemImage: String, detail: String?) -> some View {
+        HStack {
+            Label(title, systemImage: systemImage)
+            Spacer(minLength: 24)
+            if let detail {
+                Text(detail)
+                    .foregroundStyle(palette.secondaryText)
+            }
+        }
+        .font(.title3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func request(_ seasonNumbers: [Int]) {
+        guard !submitting, !seasonNumbers.isEmpty else { return }
+        submitting = true
+        Task {
+            let status = await onRequestSeasons(item, seasonNumbers)
+            onRequested(status)
+            submitting = false
+            dismiss()
+        }
     }
 }
 

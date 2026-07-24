@@ -198,7 +198,29 @@ public struct JellyfinClient: Sendable {
             queryItems: [URLQueryItem(name: "IncludeExternalContent", value: "false")],
             headers: authHeaders
         )
+        if Self.jfDiagEnabled {
+            do {
+                let (data, resp) = try await http.send(endpoint, baseURL: baseURL)
+                let body = String(data: data.prefix(700), encoding: .utf8) ?? "<non-utf8 \(data.count)b>"
+                Self.jfDiag("userViews host=\(baseURL.host ?? "?") user=\(userID) status=\(resp.statusCode) bytes=\(data.count) body=\(body)")
+                return (try? JSONDecoder().decode(UserViewsResponse.self, from: data))?.Items ?? []
+            } catch {
+                Self.jfDiag("userViews host=\(baseURL.host ?? "?") user=\(userID) ERROR=\(error)")
+                throw error
+            }
+        }
         return try await http.decode(UserViewsResponse.self, from: endpoint, baseURL: baseURL).Items
+    }
+
+    /// Env-gated (`JELLYFIN_DIAG=1`) stdout tracing for the library/userViews
+    /// fetch, captured from the Apple TV via `devicectl … --console
+    /// -e '{"JELLYFIN_DIAG":"1"}'`. Temporary.
+    static let jfDiagEnabled: Bool = {
+        ProcessInfo.processInfo.environment["JELLYFIN_DIAG"] == "1"
+    }()
+    static func jfDiag(_ message: String) {
+        guard jfDiagEnabled else { return }
+        FileHandle.standardOutput.write(Data(("PLZJF " + message + "\n").utf8))
     }
 
     func resumeItems(userID: String, limit: Int, parentID: String? = nil) async throws -> [BaseItemDto] {

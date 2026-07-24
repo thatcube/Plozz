@@ -281,14 +281,21 @@ public struct DetailInformationSections: View {
     @ViewBuilder
     private func aboutOverview(_ overview: String) -> some View {
         ZStack(alignment: .bottomTrailing) {
+            // Visible copy. In forced-height mode it fills the allotted space and
+            // clips; in natural mode it uses the line cap. Crucially NO fixedSize
+            // here — otherwise it reports its full height and the truncation check
+            // (visible vs full) can never fire.
             overviewText(overview)
                 .font(bodyFont)
                 .foregroundStyle(.primary)
                 .lineLimit(aboutForcedHeight == nil ? aboutLineLimit : nil)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: aboutForcedHeight == nil ? nil : .infinity,
+                    alignment: .topLeading
+                )
                 .clipped()
-                // Measure the space actually granted to the overview…
+                // Measure the height actually granted to the visible synopsis.
                 .background {
                     GeometryReader { visible in
                         Color.clear.preference(
@@ -297,11 +304,12 @@ public struct DetailInformationSections: View {
                         )
                     }
                 }
-                // …and the height the full text wants, unconstrained.
+                // Measure the height the full text wants, unconstrained.
                 .background(alignment: .top) {
                     overviewText(overview)
                         .font(bodyFont)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                         .hidden()
                         .overlay {
                             GeometryReader { full in
@@ -331,7 +339,7 @@ public struct DetailInformationSections: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxHeight: aboutForcedHeight == nil ? nil : .infinity, alignment: .top)
         .compositingGroup()
     }
 

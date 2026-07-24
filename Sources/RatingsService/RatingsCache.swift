@@ -5,9 +5,19 @@ import CoreModels
 /// (typically the IMDb id). Keeps OMDb lookups well within the free-tier daily
 /// limit by serving repeat detail views from memory (and, optionally, disk).
 public actor RatingsCache {
+    /// Bump when the *fetch/validation logic* changes in a way that can make a
+    /// previously-cached result wrong (not just the data shape). Entries stamped
+    /// with an older version are treated as stale on read, so an app update that
+    /// tightens matching (e.g. the AniList year-corroboration that rejects an
+    /// anime score mis-stamped onto a live-action film) re-fetches instead of
+    /// serving the poisoned cache for up to the TTL.
+    static let currentSchemaVersion = 1
+
     struct Entry: Codable {
         var ratings: [ExternalRating]
         var storedAt: Date
+        /// Absent on entries written before versioning — treated as stale.
+        var version: Int?
     }
 
     private var entries: [String: Entry] = [:]
@@ -27,10 +37,14 @@ public actor RatingsCache {
     }
 
     /// Returns cached ratings for `key` when present and still fresh; otherwise
-    /// `nil`. Expired entries are evicted.
+    /// `nil`. Expired **or stale-schema** entries are evicted.
     public func ratings(forKey key: String) -> [ExternalRating]? {
         loadFromDiskIfNeeded()
         guard let entry = entries[key] else { return nil }
+        if entry.version != Self.currentSchemaVersion {
+            entries[key] = nil
+            return nil
+        }
         if now().timeIntervalSince(entry.storedAt) > ttl {
             entries[key] = nil
             return nil
@@ -38,10 +52,15 @@ public actor RatingsCache {
         return entry.ratings
     }
 
-    /// Stores `ratings` for `key`, stamping it with the current time.
+    /// Stores `ratings` for `key`, stamping it with the current time and schema
+    /// version.
     public func store(_ ratings: [ExternalRating], forKey key: String) {
         loadFromDiskIfNeeded()
-        entries[key] = Entry(ratings: ratings, storedAt: now())
+        entries[key] = Entry(
+            ratings: ratings,
+            storedAt: now(),
+            version: Self.currentSchemaVersion
+        )
         persistToDisk()
     }
 

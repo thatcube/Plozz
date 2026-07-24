@@ -16,16 +16,20 @@ public struct SettingsPageBackground: View {
 /// token instead of SwiftUI's default `Divider()` (whose OS separator colour is
 /// brighter than the app's surface hairlines, so it clashes with card edges —
 /// especially in OLED). Use this for dividers *inside* elevated surfaces.
+///
+/// Thickness is a fixed **1pt**, matching the `lineWidth: 1` used on the surface
+/// borders. A true `1/displayScale` hairline would antialias to a sub-point line
+/// that reads noticeably *dimmer* than the 1pt card edge even at the same colour,
+/// so the two are pinned to the same weight to look like one family.
 public struct PlozzDivider: View {
     @Environment(\.themePalette) private var palette
-    @Environment(\.displayScale) private var displayScale
 
     public init() {}
 
     public var body: some View {
         Rectangle()
             .fill(palette.separator)
-            .frame(height: 1 / max(displayScale, 1))
+            .frame(height: 1)
     }
 }
 

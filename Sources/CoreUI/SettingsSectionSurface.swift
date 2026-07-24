@@ -3,7 +3,6 @@ import SwiftUI
 
 public struct SettingsSectionGroup<Content: View, Footer: View>: View {
     @Environment(\.themePalette) private var palette
-    @Environment(\.displayScale) private var displayScale
     private let title: String?
     private let content: Content
     private let footer: Footer
@@ -39,7 +38,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
                         if subview.id != subviews.last?.id {
                             Rectangle()
                                 .fill(palette.separator)
-                                .frame(height: hairlineWidth)
+                                .frame(height: 1)
                                 .padding(.horizontal, 16)
                         }
                     }
@@ -64,10 +63,6 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
         #if !os(tvOS)
         .listRowSeparator(.hidden)
         #endif
-    }
-
-    private var hairlineWidth: CGFloat {
-        1 / max(displayScale, 1)
     }
 }
 

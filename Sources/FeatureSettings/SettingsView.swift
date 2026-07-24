@@ -289,6 +289,7 @@ public struct SettingsView: View {
             homeVisibility: homeVisibility,
             discoveredLibraries: librariesStore.state,
             refreshingLibraryAccountIDs: librariesStore.refreshingAccountIDs,
+            unreachableLibraryAccountIDs: librariesStore.unreachableAccountIDs,
             reloadLibraries: reloadLibraries,
             accounts: accounts,
             activeAccountID: activeAccountID,

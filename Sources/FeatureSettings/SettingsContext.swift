@@ -15,6 +15,10 @@ struct SettingsContext {
     let homeVisibility: HomeLibraryVisibilityModel
     let discoveredLibraries: LoadState<[AggregatedLibrary]>
     let refreshingLibraryAccountIDs: Set<String>
+    /// Accounts whose most-recent library fetch failed (server offline /
+    /// unreachable), so the My Libraries screen can distinguish "couldn't reach
+    /// this server" from a genuinely empty one.
+    let unreachableLibraryAccountIDs: Set<String>
     let reloadLibraries: () async -> Void
     let accounts: [Account]
     let activeAccountID: String?

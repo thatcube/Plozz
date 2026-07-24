@@ -564,9 +564,12 @@ struct MainTabView: View {
             accountIDs: Set(scopedAccounts.map(\.account.id))
         )
         await Task.yield()
-        let libraries = await discovery.libraries(from: scopedAccounts)
+        let discovered = await discovery.libraryDiscovery(from: scopedAccounts)
         guard revision == libraryReloadRevision else { return }
-        librariesStore.finishRefresh(with: libraries)
+        librariesStore.finishRefresh(
+            with: discovered.libraries,
+            unreachableAccountIDs: discovered.unreachableAccountIDs
+        )
     }
 
     @MainActor
@@ -576,9 +579,12 @@ struct MainTabView: View {
         librariesStore.beginRefresh(accountIDs: [changedAccountID])
         Task { @MainActor in
             await Task.yield()
-            let libraries = await discovery.libraries(from: currentAccounts())
+            let discovered = await discovery.libraryDiscovery(from: currentAccounts())
             guard revision == libraryReloadRevision else { return }
-            librariesStore.finishRefresh(with: libraries)
+            librariesStore.finishRefresh(
+                with: discovered.libraries,
+                unreachableAccountIDs: discovered.unreachableAccountIDs
+            )
         }
     }
 

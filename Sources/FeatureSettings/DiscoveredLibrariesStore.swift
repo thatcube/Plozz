@@ -28,6 +28,10 @@ public final class DiscoveredLibrariesStore {
     /// Existing loaded rows remain visible while this is non-empty so unrelated
     /// server cards do not collapse and disturb tvOS focus/scroll geometry.
     public var refreshingAccountIDs: Set<String> = []
+    /// Accounts whose most-recent library fetch FAILED (server offline /
+    /// unreachable). Lets the UI show "couldn't reach this server" instead of the
+    /// misleading "No libraries found on this server".
+    public var unreachableAccountIDs: Set<String> = []
 
     public init() {}
 
@@ -38,8 +42,12 @@ public final class DiscoveredLibrariesStore {
         }
     }
 
-    public func finishRefresh(with libraries: [AggregatedLibrary]) {
+    public func finishRefresh(
+        with libraries: [AggregatedLibrary],
+        unreachableAccountIDs: Set<String> = []
+    ) {
         state = libraries.isEmpty ? .empty : .loaded(libraries)
+        self.unreachableAccountIDs = unreachableAccountIDs
         refreshingAccountIDs.removeAll()
     }
 }

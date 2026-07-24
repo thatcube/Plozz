@@ -311,7 +311,7 @@ struct MyLibrariesDetailView: View {
                 Text("Discovering libraries…").font(.footnote).foregroundStyle(.secondary)
             }
         case .empty:
-            Text("No libraries found on this server.").font(.footnote).foregroundStyle(.secondary)
+            libraryStatusMessage(for: group)
         case .failed:
             HStack {
                 Text("Couldn't load libraries.").font(.footnote).foregroundStyle(.secondary)
@@ -326,7 +326,7 @@ struct MyLibrariesDetailView: View {
                 if isRefreshingLibraries(for: group) {
                     discoveringLibraries
                 } else {
-                    Text("No libraries found on this server.").font(.footnote).foregroundStyle(.secondary)
+                    libraryStatusMessage(for: group)
                 }
             } else {
                 // The shared multi-select checklist (same `SettingsCheckableRow` +
@@ -358,6 +358,41 @@ struct MyLibrariesDetailView: View {
     private func isRefreshingLibraries(for group: ServerAccountGroup) -> Bool {
         group.accounts.contains {
             context.refreshingLibraryAccountIDs.contains($0.id)
+        }
+    }
+
+    /// Whether every account backing this server card failed its last library
+    /// fetch (server offline / unreachable). Distinguishes a server we couldn't
+    /// reach from one that's reachable but genuinely has no libraries.
+    private func isUnreachable(_ group: ServerAccountGroup) -> Bool {
+        let ids = group.accounts.map(\.id)
+        return !ids.isEmpty && ids.allSatisfy {
+            context.unreachableLibraryAccountIDs.contains($0)
+        }
+    }
+
+    /// The status shown when a server card has no libraries to list: a clear
+    /// "can't reach this server" (with Retry) when it's offline/unreachable, or
+    /// the plain "no libraries" when the server is reachable but empty.
+    @ViewBuilder
+    private func libraryStatusMessage(for group: ServerAccountGroup) -> some View {
+        if isUnreachable(group) {
+            HStack(alignment: .firstTextBaseline) {
+                Label(
+                    "Can't reach this server — it may be offline.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                Spacer()
+                Button { Task { await context.reloadLibraries() } } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }
+            }
+        } else {
+            Text("No libraries found on this server.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 

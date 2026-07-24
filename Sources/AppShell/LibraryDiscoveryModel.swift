@@ -16,6 +16,13 @@ final class LibraryDiscoveryModel {
     private let aggregator = HomeAggregator()
 
     /// Discovers libraries across `accounts`, resiliently, WITHOUT publishing any
+    /// state, reporting which accounts were unreachable. The Settings path uses
+    /// this to write results into a `DiscoveredLibrariesStore`.
+    func libraryDiscovery(from accounts: [ResolvedAccount]) async -> HomeAggregator.LibraryDiscovery {
+        await aggregator.libraryDiscovery(from: accounts)
+    }
+
+    /// Discovers libraries across `accounts`, resiliently, WITHOUT publishing any
     /// state. The Settings path uses this to write results into a
     /// `DiscoveredLibrariesStore` instead — so a Settings-appearance reload never
     /// churns an observable the Settings ROOT list reads (which, mid tab

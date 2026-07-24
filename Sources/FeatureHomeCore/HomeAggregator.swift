@@ -118,10 +118,57 @@ public struct HomeAggregator: Sendable {
     /// Discovers every library across `accounts`, tagged with account/provider
     /// metadata — used by the Settings checklist. Resilient per account.
     public func libraries(from accounts: [ResolvedAccount]) async -> [AggregatedLibrary] {
-        let perAccount = await Self.loadPerAccount(accounts) { resolved in
-            await Self.libraries(from: resolved)
+        await libraryDiscovery(from: accounts).libraries
+    }
+
+    /// The result of a cross-account library discovery: the flattened library list
+    /// plus the set of accounts whose fetch **failed** (server offline /
+    /// unreachable). The failure set lets Settings tell a genuinely-empty server
+    /// ("no libraries") apart from one it simply couldn't reach ("offline"),
+    /// instead of showing both as "No libraries found".
+    public struct LibraryDiscovery: Sendable {
+        public let libraries: [AggregatedLibrary]
+        public let unreachableAccountIDs: Set<String>
+        public init(libraries: [AggregatedLibrary], unreachableAccountIDs: Set<String>) {
+            self.libraries = libraries
+            self.unreachableAccountIDs = unreachableAccountIDs
         }
-        return perAccount.flatMap { $0 }
+    }
+
+    /// Like ``libraries(from:)`` but also reports which accounts were unreachable,
+    /// so callers can surface a "server offline" state rather than folding a
+    /// connection failure into an empty library list.
+    public func libraryDiscovery(from accounts: [ResolvedAccount]) async -> LibraryDiscovery {
+        let outcomes = await Self.loadPerAccount(accounts) { resolved in
+            await Self.libraryOutcome(from: resolved)
+        }
+        var libraries: [AggregatedLibrary] = []
+        var unreachable: Set<String> = []
+        for outcome in outcomes {
+            switch outcome {
+            case let .libraries(libs): libraries.append(contentsOf: libs)
+            case let .unreachable(accountID): unreachable.insert(accountID)
+            }
+        }
+        return LibraryDiscovery(libraries: libraries, unreachableAccountIDs: unreachable)
+    }
+
+    private enum AccountLibraryOutcome: Sendable {
+        /// Reachable — carries this server's libraries (possibly empty).
+        case libraries([AggregatedLibrary])
+        /// The library fetch threw (server offline / unreachable). Carries the
+        /// account id so the UI can mark that server offline.
+        case unreachable(String)
+    }
+
+    private static func libraryOutcome(from resolved: ResolvedAccount) async -> AccountLibraryOutcome {
+        do {
+            let libs = try await resolved.provider.libraries()
+            return .libraries(libs.map { aggregated($0, from: resolved) })
+        } catch {
+            PlozzLog.app.error("Aggregation: failed to list libraries for account \(resolved.account.id)")
+            return .unreachable(resolved.account.id)
+        }
     }
 
     // MARK: - Unmerged (per-library) content
@@ -543,16 +590,6 @@ public struct HomeAggregator: Sendable {
     private static func watchlist(from provider: any MediaProvider) async -> [MediaItem] {
         guard let watchlistProvider = provider as? WatchlistProviding else { return [] }
         return (try? await watchlistProvider.watchlist()) ?? []
-    }
-
-    private static func libraries(from resolved: ResolvedAccount) async -> [AggregatedLibrary] {
-        do {
-            let libs = try await resolved.provider.libraries()
-            return libs.map { aggregated($0, from: resolved) }
-        } catch {
-            PlozzLog.app.error("Aggregation: failed to list libraries for account \(resolved.account.id)")
-            return []
-        }
     }
 
     private static func aggregated(_ library: MediaLibrary, from resolved: ResolvedAccount) -> AggregatedLibrary {

@@ -214,6 +214,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     @State private var libraries: [ProfileLibraryChoice] = []
+    @State private var unreachableAccountIDs: Set<String> = []
     @State private var isLoading = false
 
     private var groups: [ServerAccountGroup] {
@@ -275,8 +276,22 @@ struct PlozziOSMyLibrariesSettingsView: View {
                         Text("Loading libraries…")
                     }
                 } else if librariesForActiveIdentity(in: group).isEmpty {
-                    Text("No video libraries are available.")
-                        .foregroundStyle(.secondary)
+                    if isUnreachable(group) {
+                        HStack {
+                            Label(
+                                "Can't reach this server — it may be offline.",
+                                systemImage: "exclamationmark.triangle"
+                            )
+                            .foregroundStyle(.secondary)
+                            Spacer()
+                            Button { Task { await loadLibraries() } } label: {
+                                Label("Retry", systemImage: "arrow.clockwise")
+                            }
+                        }
+                    } else {
+                        Text("No video libraries are available.")
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     ForEach(librariesForActiveIdentity(in: group)) { library in
                         Toggle(
@@ -446,24 +461,37 @@ struct PlozziOSMyLibrariesSettingsView: View {
             withIDs: appModel.accounts.map(\.id)
         )
         var loaded: [ProfileLibraryChoice] = []
+        var unreachable: Set<String> = []
         for account in resolved {
-            guard let choices = try? await account.provider.libraries() else {
-                continue
+            do {
+                let choices = try await account.provider.libraries()
+                loaded.append(
+                    contentsOf: choices
+                        .filter { !$0.isMusic }
+                        .map {
+                            ProfileLibraryChoice(
+                                accountID: account.account.id,
+                                library: $0
+                            )
+                        }
+                )
+            } catch {
+                // A server we couldn't reach is marked unreachable (offline) so the
+                // card shows "can't reach this server", not "no libraries".
+                unreachable.insert(account.account.id)
             }
-            loaded.append(
-                contentsOf: choices
-                    .filter { !$0.isMusic }
-                    .map {
-                        ProfileLibraryChoice(
-                            accountID: account.account.id,
-                            library: $0
-                        )
-                    }
-            )
         }
         libraries = loaded.sorted {
             $0.title.localizedStandardCompare($1.title) == .orderedAscending
         }
+        unreachableAccountIDs = unreachable
+    }
+
+    /// Whether every account backing this server card failed its last library
+    /// fetch (offline / unreachable).
+    private func isUnreachable(_ group: ServerAccountGroup) -> Bool {
+        let ids = group.accounts.map(\.id)
+        return !ids.isEmpty && ids.allSatisfy { unreachableAccountIDs.contains($0) }
     }
 }
 

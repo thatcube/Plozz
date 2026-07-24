@@ -16,7 +16,8 @@ public struct DetailInformationSections: View {
 
     @State private var showsFullOverview = false
     @State private var overviewFullHeight: CGFloat = 0
-    @State private var overviewLimitedHeight: CGFloat = 0
+    @State private var overviewVisibleHeight: CGFloat = 0
+    @State private var ratingsHeight: CGFloat = 0
     @Environment(\.themePalette) private var palette
 
     public init(
@@ -175,9 +176,34 @@ public struct DetailInformationSections: View {
                 RatingTile(rating: rating)
             }
         }
-        // Fill the row height so the ratings block and the About card stay the same
-        // height (the taller of the two drives the row); tiles stay pinned to the top.
-        .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        // Publish the ratings grid's natural height so the side-by-side About card
+        // can match it (Ratings drives; About caps to it — see aboutForcedHeight).
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: RatingsHeightKey.self, value: proxy.size.height)
+            }
+        }
+        .onPreferenceChange(RatingsHeightKey.self) { ratingsHeight = $0 }
+    }
+
+    /// Whether About and Ratings sit side-by-side and should be the same height
+    /// (tvOS and regular-width iPad). iPhone stacks them, so no matching.
+    private var matchesRatingsHeight: Bool {
+        guard hasAbout, !item.ratings.isEmpty else { return false }
+        #if os(tvOS)
+        return true
+        #else
+        return horizontalSizeClass == .regular
+        #endif
+    }
+
+    /// The height to force the About card's inner content to so the card's outer
+    /// height equals the ratings grid — `nil` when not matching (iPhone / no
+    /// ratings), letting About keep its natural, content-hugging height.
+    private var aboutForcedHeight: CGFloat? {
+        guard matchesRatingsHeight, ratingsHeight > 0 else { return nil }
+        return max(0, ratingsHeight - cardPadding * 2)
     }
 
     private var ratingsTileColumns: [GridItem] {
@@ -229,80 +255,84 @@ public struct DetailInformationSections: View {
                     .font(aboutTitleFont)
                     .fixedSize(horizontal: false, vertical: true)
                 if let overview = nonempty(item.overview) {
-                    // ZStack wraps ONLY the line-limited text (natural height), so
-                    // MORE anchors to the end of the text — not the bottom of a
-                    // card that's been stretched to match a taller neighbour.
-                    ZStack(alignment: .bottomTrailing) {
-                        overviewText(overview)
-                            .font(bodyFont)
-                            .foregroundStyle(.primary)
-                            .lineLimit(aboutLineLimit)
-                            // Measure whether the line-limited text is actually
-                            // truncated by comparing it to the same text laid out
-                            // at the same width with no limit. Reliable at any
-                            // width, unlike a chars-per-line guess.
-                            .background(alignment: .top) {
-                                overviewText(overview)
-                                    .font(bodyFont)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .hidden()
-                                    .overlay {
-                                        GeometryReader { full in
-                                            Color.clear.preference(
-                                                key: OverviewFullHeightKey.self,
-                                                value: full.size.height
-                                            )
-                                        }
-                                    }
-                            }
-                            .background {
-                                GeometryReader { limited in
-                                    Color.clear.preference(
-                                        key: OverviewLimitedHeightKey.self,
-                                        value: limited.size.height
-                                    )
-                                }
-                            }
-
-                        if isOverviewTruncated {
-                            // Fade the last line into the background before MORE so
-                            // no glyphs bleed behind it.
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear, location: 0.0),
-                                    .init(color: .black, location: 0.45),
-                                    .init(color: .black, location: 1.0)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                            .frame(width: moreFadeWidth, height: moreFadeHeight)
-                            .blendMode(.destinationOut)
-
-                            Text("MORE")
-                                .font(moreLabelFont)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .compositingGroup()
+                    aboutOverview(overview)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            // When matching Ratings height, force the content to that height so the
+            // card's outer height equals the ratings grid; otherwise hug content.
+            .frame(height: aboutForcedHeight, alignment: .topLeading)
             .onPreferenceChange(OverviewFullHeightKey.self) { overviewFullHeight = $0 }
-            .onPreferenceChange(OverviewLimitedHeightKey.self) { overviewLimitedHeight = $0 }
+            .onPreferenceChange(OverviewVisibleHeightKey.self) { overviewVisibleHeight = $0 }
             .padding(cardPadding)
         }
         .buttonStyle(.plain)
         .plozzFocusableCard(cornerRadius: cardCornerRadius)
-        #if os(tvOS)
         .sheet(isPresented: $showsFullOverview) {
             overviewSheet
         }
-        #else
-        .sheet(isPresented: $showsFullOverview) {
-            overviewSheet
+    }
+
+    /// The synopsis, filling whatever vertical space the About card allows (the
+    /// leftover under the title). When it can't all fit — either because it exceeds
+    /// the natural line cap or the forced Ratings-matched height — the last line
+    /// fades into MORE. Truncation is measured (visible allotment vs full text
+    /// height), so it's exact at any width, height, or Dynamic Type size.
+    @ViewBuilder
+    private func aboutOverview(_ overview: String) -> some View {
+        ZStack(alignment: .bottomTrailing) {
+            overviewText(overview)
+                .font(bodyFont)
+                .foregroundStyle(.primary)
+                .lineLimit(aboutForcedHeight == nil ? aboutLineLimit : nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
+                // Measure the space actually granted to the overview…
+                .background {
+                    GeometryReader { visible in
+                        Color.clear.preference(
+                            key: OverviewVisibleHeightKey.self,
+                            value: visible.size.height
+                        )
+                    }
+                }
+                // …and the height the full text wants, unconstrained.
+                .background(alignment: .top) {
+                    overviewText(overview)
+                        .font(bodyFont)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .hidden()
+                        .overlay {
+                            GeometryReader { full in
+                                Color.clear.preference(
+                                    key: OverviewFullHeightKey.self,
+                                    value: full.size.height
+                                )
+                            }
+                        }
+                }
+
+            if isOverviewTruncated {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: .black, location: 0.45),
+                        .init(color: .black, location: 1.0)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: moreFadeWidth, height: moreFadeHeight)
+                .blendMode(.destinationOut)
+
+                Text("MORE")
+                    .font(moreLabelFont)
+                    .foregroundStyle(.secondary)
+            }
         }
-        #endif
+        .frame(maxHeight: .infinity, alignment: .top)
+        .compositingGroup()
     }
 
     private var overviewSheet: some View {
@@ -398,12 +428,11 @@ public struct DetailInformationSections: View {
     }
     #endif
 
-    /// Whether the line-limited synopsis is actually truncated — measured by
-    /// comparing the visible (line-limited) height against the full text laid
-    /// out at the same width. Reliable at any width, unlike a chars-per-line
-    /// estimate.
+    /// Whether the synopsis is actually clipped — the full text wants more height
+    /// than the space the card grants it (either the natural line cap or the forced
+    /// Ratings-matched height). Measured, so it's exact at any width/height/type size.
     private var isOverviewTruncated: Bool {
-        overviewFullHeight > overviewLimitedHeight + 1
+        overviewVisibleHeight > 1 && overviewFullHeight > overviewVisibleHeight + 1
     }
 
     /// Renders the synopsis with inline markdown resolved the same way the rest of
@@ -698,17 +727,6 @@ public struct DetailInformationSections: View {
         #endif
     }
 
-    private var cardFillHeight: CGFloat? {
-        #if os(tvOS)
-        .infinity
-        #else
-        // Regular width (iPad) uses the proportional grid where About and Ratings
-        // sit side by side and should be equal height; compact (iPhone) stacks
-        // them, so the cards keep their natural height.
-        horizontalSizeClass == .regular ? .infinity : nil
-        #endif
-    }
-
     private var factLabelFont: Font {
         #if os(tvOS)
         .system(size: 18, weight: .semibold)
@@ -824,7 +842,14 @@ private struct OverviewFullHeightKey: PreferenceKey {
     }
 }
 
-private struct OverviewLimitedHeightKey: PreferenceKey {
+private struct OverviewVisibleHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct RatingsHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())

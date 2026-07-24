@@ -28,10 +28,6 @@ public struct AniListRatingsProvider: ExternalRatingsProviding {
 
     public func ratings(for item: MediaItem) async -> [ExternalRating] {
         guard let (variableKey, variableValue) = Self.lookup(for: item) else { return [] }
-        // A title `search` match is fuzzy — AniList can return a same-named but
-        // unrelated title (the classic "Air" 2023 film → "Air" 2005 anime). An
-        // explicit AniList/MAL id is authoritative and needs no corroboration.
-        let isFuzzyMatch = (variableKey == "search")
 
         let document = """
         query ($id: Int, $idMal: Int, $search: String) {
@@ -61,12 +57,15 @@ public struct AniListRatingsProvider: ExternalRatingsProviding {
               let score = media.averageScore, score > 0
         else { return [] }
 
-        // Reject a fuzzy title match whose release year is clearly different from the
-        // item's — this is what stops a title collision (or a stray anime id that
-        // forces a title search) from stamping an unrelated anime's score onto a
-        // live-action film. A ±1 tolerance absorbs season/air-vs-release drift.
-        if isFuzzyMatch,
-           let itemYear = item.productionYear,
+        // Year corroboration applies to **every** match, not just fuzzy title
+        // searches: many libraries have real movies mis-stamped with anime AniDB/
+        // AniList ids (Jellyfin's anime metadata plugins do this), so even an
+        // "explicit id" lookup can return a wholly unrelated anime's score (the
+        // "Alien" 1979 film picking up AniList id 13087). When AniList reports a
+        // release year that differs from the item's by more than a year, it isn't
+        // this title — drop it. Missing years on either side skip the check so a
+        // legitimately-tagged anime is never lost to absent metadata.
+        if let itemYear = item.productionYear,
            let anilistYear = media.seasonYear ?? media.startDate?.year,
            abs(itemYear - anilistYear) > 1 {
             return []

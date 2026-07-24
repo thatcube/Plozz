@@ -1243,6 +1243,7 @@ private struct PlozziOSFeaturedRow: View {
                 PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass),
                 for: .scrollContent
             )
+            .contentMargins(.vertical, 10, for: .scrollContent)
             .scrollIndicators(.hidden)
         }
     }
@@ -1316,6 +1317,7 @@ private struct PlozziOSHomeRowView: View {
             PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass),
             for: .scrollContent
         )
+            .contentMargins(.vertical, 10, for: .scrollContent)
         .scrollIndicators(.hidden)
     }
 
@@ -1362,6 +1364,7 @@ private struct PlozziOSHomeMediaRail: View {
                 PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass),
                 for: .scrollContent
             )
+            .contentMargins(.vertical, 10, for: .scrollContent)
             .scrollIndicators(.hidden)
         }
     }

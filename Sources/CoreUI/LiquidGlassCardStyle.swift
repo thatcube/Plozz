@@ -86,21 +86,15 @@ public struct PlozzGlassCardModifier: ViewModifier {
                         shape.fill(.ultraThinMaterial)
                     }
                 }
-                // A hairline edge so a resting card reads on any theme: the frosted
-                // `.ultraThinMaterial` is translucent, so on a dark and Pure Black page it
-                // darkens to near-invisible and the card loses its edge. The
-                // theme-aware `cardOpaqueBorder` (light on dark and Pure Black, dark on light)
-                // defines that edge; drawn only at rest, since the focused glass
-                // brings its own tint + shadow. Skipped for `glassAtRest: false`.
+                // A hairline edge is only needed in LIGHT mode: there the frosted
+                // `.ultraThinMaterial` is near-white and would blend into the white
+                // page without an edge. On dark and OLED the same material reads as a
+                // distinctly lighter gray block that self-separates from the page, so
+                // a border there is redundant and — on OLED especially — just a faint,
+                // slightly-off line. Drop it on the dark themes; the fill carries it.
                 .overlay {
-                    if !isFocused && glassAtRest {
-                        // Soften the edge on dark and Pure Black — the light hairline reads
-                        // stronger against a near-black page than the same value does
-                        // on a light one, so trim it there while leaving Light as-is.
-                        shape.strokeBorder(
-                            palette.cardOpaqueBorder.opacity(palette.isLight ? 1 : 0.55),
-                            lineWidth: 1
-                        )
+                    if !isFocused && glassAtRest && palette.isLight {
+                        shape.strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
                     }
                 }
                 .clipShape(shape)

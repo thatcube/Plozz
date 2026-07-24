@@ -177,6 +177,7 @@ public struct PlozziOSRootView: View {
         .environment(appModel)
         .environment(heroTrailerController)
         .environment(sidebarGeometry)
+        .syncsWindowInterfaceStyle(isLight: resolvedPalette.isLight)
         .id(shellIdentity)
         .onChange(of: shellIdentity) {
             heroTrailerController.stop()

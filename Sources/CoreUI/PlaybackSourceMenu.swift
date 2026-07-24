@@ -199,61 +199,84 @@ private struct PlaybackSourceMenuPanel: View {
     @FocusState private var focusedRowID: String?
     #if !os(tvOS)
     @State private var iosContentHeight: CGFloat = 220
+    @State private var navDirection: Edge = .trailing
     #endif
     var body: some View {
+        panelContent
+            .frame(width: panelWidth)
+            #if os(tvOS)
+            .frame(height: panelHeight, alignment: .top)
+            // Page content swaps immediately; only the glass container morphs.
+            .animation(nil, value: page)
+            #else
+            .frame(height: iosContentHeight, alignment: .top)
+            .animation(.easeOut(duration: 0.26), value: iosContentHeight)
+            .onPreferenceChange(PlaybackSourceMenuContentHeightKey.self) { measured in
+                let total = min(measured, panelMaxHeight)
+                iosContentHeight = total
+                measuredHeight?.wrappedValue = total
+            }
+            #endif
+            .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
+            #if os(tvOS)
+            .focusScope(panelFocusScope)
+            .focusSection()
+            .defaultFocus($focusedRowID, initialRowID)
+            #endif
+            .onAppear { focusFirstRow() }
+            .onChange(of: page) { _, _ in focusFirstRow() }
+    }
+
+    @ViewBuilder
+    private var panelContent: some View {
+        #if os(tvOS)
         VStack(alignment: .leading, spacing: 12) {
             if page != .root {
                 header
             }
             ScrollView {
-                LazyVStack(spacing: 8) {
-                    switch page {
-                    case .root:
-                        rootRows
-                    case .servers:
-                        serverRows
-                    case .versions:
-                        versionRows
-                    }
-                }
-                .padding(14)
-                #if !os(tvOS)
-                // Measure the content's natural height so the sheet can size to it.
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: PlaybackSourceMenuContentHeightKey.self,
-                            value: proxy.size.height
-                        )
-                    }
-                )
-                #endif
+                LazyVStack(spacing: 8) { pageRows }
+                    .padding(14)
             }
             .scrollIndicators(.hidden)
         }
-        // Page content swaps immediately; only the glass container morphs.
-        .animation(nil, value: page)
-        .frame(width: panelWidth)
-        #if os(tvOS)
-        .frame(height: panelHeight, alignment: .top)
         #else
-        .frame(height: iosContentHeight, alignment: .top)
-        .onPreferenceChange(PlaybackSourceMenuContentHeightKey.self) { contentHeight in
-            // content + a header row (with its 12pt VStack spacing) when drilled in.
-            let chrome: CGFloat = page != .root ? 56 : 0
-            let total = min(contentHeight + chrome, panelMaxHeight)
-            iosContentHeight = total
-            measuredHeight?.wrappedValue = total
+        // iOS/iPadOS: measure the whole page column (header + rows) so the sheet
+        // sizes to it exactly, and slide pages horizontally as you drill in/out —
+        // the container height morphs with the content, mirroring tvOS.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if page != .root {
+                    header
+                }
+                LazyVStack(spacing: 8) { pageRows }
+            }
+            .padding(14)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: PlaybackSourceMenuContentHeightKey.self,
+                        value: proxy.size.height
+                    )
+                }
+            )
+            .transition(.push(from: navDirection))
+            .id(page)
         }
+        .scrollIndicators(.hidden)
         #endif
-        .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
-        #if os(tvOS)
-        .focusScope(panelFocusScope)
-        .focusSection()
-        .defaultFocus($focusedRowID, initialRowID)
-        #endif
-        .onAppear { focusFirstRow() }
-        .onChange(of: page) { _, _ in focusFirstRow() }
+    }
+
+    @ViewBuilder
+    private var pageRows: some View {
+        switch page {
+        case .root:
+            rootRows
+        case .servers:
+            serverRows
+        case .versions:
+            versionRows
+        }
     }
 
     @ViewBuilder
@@ -513,6 +536,11 @@ private struct PlaybackSourceMenuPanel: View {
     }
 
     private func navigate(to destination: PlaybackSourceMenuButtonPage) {
+        #if !os(tvOS)
+        // Deeper (root → servers/versions) slides in from the trailing edge; going
+        // back to root slides in from the leading edge.
+        navDirection = destination == .root ? .leading : .trailing
+        #endif
         withAnimation(.easeInOut(duration: 0.28)) {
             page = destination
         }

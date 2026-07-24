@@ -124,6 +124,13 @@ public struct ThemePalette: Equatable, Sendable {
     /// The highest elevation — modals, drawers, sheets. Resolved via
     /// ``surface(_:)`` with ``SurfaceLevel/overlay``.
     public let overlay: SurfaceStyle
+    /// The hairline used for *separators inside* an elevated surface — row and
+    /// header dividers within settings groups, detail cards, panels. Distinct
+    /// role from a surface *edge* (``raised``/``overlay`` borders), but tokenized
+    /// so it reads consistently instead of falling back to the brighter OS
+    /// `Divider()` default. Tuned to sit in the same family as the OLED card edge
+    /// so inner and outer hairlines don't clash.
+    public let separator: Color
     /// Whether this is a light-appearance palette. Drives the focused-Light
     /// opaque backing that stops the drop shadow bleeding through the glass.
     public let isLight: Bool
@@ -149,6 +156,7 @@ public struct ThemePalette: Equatable, Sendable {
         cardOpaqueBorder: Color,
         raised: SurfaceStyle,
         overlay: SurfaceStyle,
+        separator: Color,
         isLight: Bool
     ) {
         self.backgroundBase = backgroundBase
@@ -167,6 +175,7 @@ public struct ThemePalette: Equatable, Sendable {
         self.cardOpaqueBorder = cardOpaqueBorder
         self.raised = raised
         self.overlay = overlay
+        self.separator = separator
         self.isLight = isLight
     }
 
@@ -287,6 +296,7 @@ public extension ThemePalette {
             borderWidth: 1,
             shadow: SurfaceShadow(color: .black.opacity(0.5), radius: 26, y: 14)
         ),
+        separator: Color.white.opacity(0.10),
         isLight: false
     )
 
@@ -322,6 +332,9 @@ public extension ThemePalette {
             borderWidth: 1,
             shadow: SurfaceShadow(color: .black.opacity(0.6), radius: 28, y: 16)
         ),
+        // Match the OLED card edge (white 0.08) so inner dividers and outer
+        // hairlines read as one family instead of the brighter OS default.
+        separator: Color.white.opacity(0.08),
         isLight: false
     )
 
@@ -353,6 +366,7 @@ public extension ThemePalette {
             fill: .white,
             shadow: SurfaceShadow(color: .black.opacity(0.16), radius: 28, y: 16)
         ),
+        separator: Color.black.opacity(0.08),
         isLight: true
     )
 

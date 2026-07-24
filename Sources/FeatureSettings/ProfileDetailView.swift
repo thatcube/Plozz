@@ -93,7 +93,7 @@ struct ProfileDetailView: View {
                         set: { context.onSetAskProfileOnStartup($0) }
                     ))
                     .toggleStyle(SettingsSwitchToggleStyle())
-                    Divider()
+                    PlozzDivider()
                 }
                 ForEach(context.profiles) { profile in
                     profileRow(profile)

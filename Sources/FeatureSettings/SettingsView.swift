@@ -410,7 +410,7 @@ public struct SettingsView: View {
         if profilesEnabled {
             VStack(alignment: .leading, spacing: 0) {
                 profileHeaderInline
-                Divider()
+                PlozzDivider()
                     .padding(.horizontal, 28)
                 profileOwnedRows
                     .padding(.horizontal, 28)
@@ -424,7 +424,7 @@ public struct SettingsView: View {
             // entry point at the top.
             VStack(alignment: .leading, spacing: 0) {
                 soloHeader
-                Divider().padding(.horizontal, 28)
+                PlozzDivider().padding(.horizontal, 28)
                 profileOwnedRows
                     .padding(.horizontal, 28)
                     .padding(.top, 16)
@@ -516,7 +516,7 @@ public struct SettingsView: View {
             }
             .padding(28)
 
-            Divider().padding(.horizontal, 28)
+            PlozzDivider().padding(.horizontal, 28)
 
             VStack(spacing: 14) {
                 // Shared server sign-ins (the household's full inventory). The

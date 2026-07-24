@@ -121,11 +121,11 @@ struct MyLibrariesDetailView: View {
                     // A media share has no watcher identity, so it skips "Watching
                     // as" (and the divider that would head it) and shows libraries.
                     if group.providerKind != .mediaShare {
-                        Divider()
+                        PlozzDivider()
                         watchingAs(group)
                     }
 
-                    Divider()
+                    PlozzDivider()
 
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Libraries")

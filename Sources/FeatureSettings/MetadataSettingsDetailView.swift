@@ -746,7 +746,7 @@ private struct MetadataDiagnosticsOverviewPanel: View {
                     )
                 }
 
-                Divider()
+                PlozzDivider()
                 MetadataDiagnosticMetric(
                     title: "Provider health",
                     value: healthText
@@ -817,7 +817,7 @@ private struct MetadataDiagnosticsSourcesPanel: View {
             }
 
             if !unavailable.isEmpty {
-                Divider()
+                PlozzDivider()
                 VStack(spacing: 10) {
                     Text("Unavailable")
                         .font(.subheadline.weight(.semibold))

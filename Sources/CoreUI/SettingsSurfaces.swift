@@ -12,6 +12,23 @@ public struct SettingsPageBackground: View {
     }
 }
 
+/// A hairline separator that uses the palette's shared ``ThemePalette/separator``
+/// token instead of SwiftUI's default `Divider()` (whose OS separator colour is
+/// brighter than the app's surface hairlines, so it clashes with card edges —
+/// especially in OLED). Use this for dividers *inside* elevated surfaces.
+public struct PlozzDivider: View {
+    @Environment(\.themePalette) private var palette
+    @Environment(\.displayScale) private var displayScale
+
+    public init() {}
+
+    public var body: some View {
+        Rectangle()
+            .fill(palette.separator)
+            .frame(height: 1 / max(displayScale, 1))
+    }
+}
+
 /// Renders a surface at a given elevation rung using the palette's shared
 /// ``SurfaceStyle`` table — a fill, an optional hairline border (OLED), and an
 /// optional drop shadow (light / dark overlays). Every elevated surface in the

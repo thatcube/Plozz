@@ -38,7 +38,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
                             .contentShape(Rectangle())
                         if subview.id != subviews.last?.id {
                             Rectangle()
-                                .fill(palette.cardOpaqueBorder)
+                                .fill(palette.separator)
                                 .frame(height: hairlineWidth)
                                 .padding(.horizontal, 16)
                         }

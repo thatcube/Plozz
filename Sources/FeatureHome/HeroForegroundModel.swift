@@ -280,7 +280,7 @@ enum HeroForegroundModelBuilder {
                         artworkStyle: .landscape,
                         surface: .home
                     )
-                )
+                )?.overviewPlainText
                 : nil,
             ratings: ratingsVisible ? item.ratings : [],
             pills: pills,

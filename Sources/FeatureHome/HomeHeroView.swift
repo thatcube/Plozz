@@ -1831,7 +1831,10 @@ struct HomeHeroView: View {
         @ViewBuilder _ label: () -> Content
     ) -> some View {
         let shape = Capsule(style: .continuous)
-        let bright = selected || prominent
+        // tvOS: only the *focused* (selected) pill goes bright white — `prominent`
+        // no longer forces an always-lit fill, because focus alone marks the active
+        // button. The parameter is kept so callers still drive the More Info label.
+        let bright = selected
         // Glyph/label tint. When focused the pill is a bright WHITE platter, so the
         // glyph is black. When idle it sits on Liquid Glass — which renders LIGHT
         // (frosted) in light mode and dark in dark mode — so the glyph must follow

@@ -164,7 +164,11 @@ final class HeroForegroundPillView: UIView {
         self.pill = pill
         self.selected = selected
         prominent = pill.prominent
-        let bright = selected || prominent
+        // tvOS: focus alone marks the active button, so a pill is only bright (white
+        // fill + dark ink) when it's the *selected* one and the hero holds focus —
+        // never an always-lit "primary" fill. (iOS/iPadOS keep a real filled primary
+        // via PlozziOSHeroActionButtonStyle, since they can't focus a button.)
+        let bright = selected
 
         let tint: UIColor = bright ? .black : HeroForegroundGlass.primaryInk()
         if let symbol = pill.systemImage {
@@ -222,7 +226,7 @@ final class HeroForegroundPillView: UIView {
     ///   view's own layer (plus a hairline border, and a sheen for `.glassish`), which
     ///   never samples the moving backdrop so it stays on the ~17ms frame budget.
     private func applyBackgroundAppearance() {
-        if selected || prominent {
+        if selected {
             glassView.isHidden = true
             sheenLayer.isHidden = true
             layer.borderWidth = 0

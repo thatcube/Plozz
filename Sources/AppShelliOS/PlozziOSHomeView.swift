@@ -606,7 +606,12 @@ private struct PlozziOSHomeHeroCarousel: View {
         )
         let pullScale = 1 + (pullDistance / max(heroHeight, 1))
         let upwardScaleGrowth = (pullScale - 1) * heroHeight / 2
+        // The +2pt top over-scan while pulling guarantees the scaled backdrop
+        // covers the screen's top edge; without it subpixel rounding briefly
+        // exposes the window background (a white hairline in light mode). The
+        // matching bottom shift is hidden by the hero's fade mask.
         let pullOffset = max(pullDistance - upwardScaleGrowth, 0)
+            + (pullDistance > 0 ? 2 : 0)
         GeometryReader { proxy in
             let swipeDistance = max(proxy.size.width, 1)
             let progress = min(abs(dragOffset) / swipeDistance, 1)

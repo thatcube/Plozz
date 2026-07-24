@@ -130,6 +130,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
     @State private var sourceOverride: String?
     @State private var versionOverride: String?
     @State private var seriesPlayTarget: MediaItem?
+    @State private var heroPullDistance: CGFloat = 0
     private let seerService: SeerService?
     private let isDiscoveryItem: Bool
     private let initialSources: [MediaSourceRef]
@@ -318,7 +319,8 @@ private struct PlozziOSCanonicalItemDetailView: View {
                     },
                     actionHandler: appModel.mediaItemActionHandler,
                     onPlay: play,
-                    heroRequest: heroRequest(for: detail.item)
+                    heroRequest: heroRequest(for: detail.item),
+                    pullDistance: heroPullDistance
                 )
 
                 if detail.item.kind == .series {
@@ -378,6 +380,13 @@ private struct PlozziOSCanonicalItemDetailView: View {
             geometry.contentOffset.y > trailerPauseThreshold
         } action: { _, isPastHalfHero in
             trailerController.setPaused(isPastHalfHero)
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            let topOffset = geometry.contentOffset.y
+                + geometry.contentInsets.top
+            return max(0, -topOffset)
+        } action: { _, pullDistance in
+            heroPullDistance = pullDistance
         }
         .ignoresSafeArea(.container, edges: .top)
         .navigationTitle("")

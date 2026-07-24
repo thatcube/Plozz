@@ -1,6 +1,9 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Shared title-level detail sections. Platform shells keep their own Cast rail
 /// first, then place this view beneath it so content and ordering stay identical
@@ -12,6 +15,9 @@ public struct DetailInformationSections: View {
     private let selectedVersion: MediaVersion?
 
     @State private var showsFullOverview = false
+    @State private var overviewFullHeight: CGFloat = 0
+    @State private var overviewLimitedHeight: CGFloat = 0
+    @Environment(\.themePalette) private var palette
 
     public init(
         item: MediaItem,
@@ -79,9 +85,7 @@ public struct DetailInformationSections: View {
                 }
             }
             if !informationGroups.isEmpty {
-                detailSection(title: "Information", contentSpacing: informationHeaderSpacing) {
-                    informationGrid
-                }
+                informationGrid
             }
         }
     }
@@ -141,13 +145,6 @@ public struct DetailInformationSections: View {
             }
 
             if !informationGroups.isEmpty {
-                GridRow {
-                    Text("Information")
-                        .font(sectionTitleFont)
-                        .gridCellColumns(12)
-                }
-                .padding(.top, sectionSpacing)
-
                 GridRow(alignment: .top) {
                     ForEach(informationGroups) { group in
                         informationGroup(group)
@@ -163,7 +160,7 @@ public struct DetailInformationSections: View {
                             .gridCellColumns(12 - informationGroups.count * informationColumnSpan)
                     }
                 }
-                .padding(.top, informationHeaderSpacing)
+                .padding(.top, sectionSpacing)
             }
         }
     }
@@ -220,18 +217,53 @@ public struct DetailInformationSections: View {
                             .font(bodyFont)
                             .foregroundStyle(.primary)
                             .lineLimit(aboutLineLimit)
+                            // Measure whether the line-limited text is actually
+                            // truncated by comparing it to the same text laid out
+                            // at the same width with no limit. Reliable at any
+                            // width, unlike a chars-per-line guess (which never
+                            // fired on the narrow iPhone card).
+                            .background(alignment: .top) {
+                                overviewText(overview)
+                                    .font(bodyFont)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .hidden()
+                                    .overlay {
+                                        GeometryReader { full in
+                                            Color.clear.preference(
+                                                key: OverviewFullHeightKey.self,
+                                                value: full.size.height
+                                            )
+                                        }
+                                    }
+                            }
+                            .background {
+                                GeometryReader { limited in
+                                    Color.clear.preference(
+                                        key: OverviewLimitedHeightKey.self,
+                                        value: limited.size.height
+                                    )
+                                }
+                            }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
+                .onPreferenceChange(OverviewFullHeightKey.self) { overviewFullHeight = $0 }
+                .onPreferenceChange(OverviewLimitedHeightKey.self) { overviewLimitedHeight = $0 }
 
-                if overviewExceedsLimit {
-                    // Fade the text behind MORE so it doesn't collide
+                if isOverviewTruncated {
+                    // Fade the last line into the background before MORE: the
+                    // gradient reaches solid black well left of the label so no
+                    // glyphs bleed behind it.
                     LinearGradient(
-                        colors: [.clear, .black],
+                        stops: [
+                            .init(color: .clear, location: 0.0),
+                            .init(color: .black, location: 0.45),
+                            .init(color: .black, location: 1.0)
+                        ],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
-                    .frame(width: 120, height: moreFadeHeight)
+                    .frame(width: moreFadeWidth, height: moreFadeHeight)
                     .blendMode(.destinationOut)
 
                     Text("MORE")
@@ -262,32 +294,98 @@ public struct DetailInformationSections: View {
                     if let overview = nonempty(item.overview) {
                         overviewText(overview)
                             .font(bodyFont)
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(palette.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(sheetPadding)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            #if !os(tvOS)
+            .scrollContentBackground(.hidden)
+            #endif
+            .background(palette.settingsBackground)
             .navigationTitle(item.title)
             #if !os(tvOS)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { showsFullOverview = false } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+                        Image(systemName: "xmark")
+                            .foregroundStyle(palette.secondaryText)
                     }
                 }
             }
             #endif
         }
+        #if !os(tvOS)
+        .presentationBackground(palette.settingsBackground)
+        .presentationCornerRadius(overviewSheetCornerRadius)
+        .preferredColorScheme(palette.isLight ? .light : .dark)
+        // Elevation edge for dark themes, reusing the Settings sheet treatment:
+        // iPhone shows only the floating top rim (sides/bottom sit at the screen
+        // edge); iPad's centred card floats on all sides, so it gets a full
+        // border. Light themes already separate from the page behind them.
+        .overlay {
+            if !palette.isLight {
+                overviewSheetElevationBorder
+            }
+        }
+        #endif
     }
 
-    private var overviewExceedsLimit: Bool {
-        guard let overview = nonempty(item.overview) else { return false }
-        // Heuristic: more than ~aboutLineLimit lines of text at ~70 chars/line
-        return overview.count > aboutLineLimit * 70
+    #if !os(tvOS)
+    /// Corner radius pinned on the overview sheet so the elevation border traces
+    /// the card's rounded edge exactly. Matches the Settings sheet.
+    private var overviewSheetCornerRadius: CGFloat { 20 }
+
+    private var isPadIdiom: Bool {
+        #if canImport(UIKit)
+        UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        false
+        #endif
+    }
+
+    @ViewBuilder
+    private var overviewSheetElevationBorder: some View {
+        let stroke = RoundedRectangle(
+            cornerRadius: overviewSheetCornerRadius,
+            style: .continuous
+        )
+        .strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
+
+        if isPadIdiom {
+            // Full border: the whole card floats.
+            stroke
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+        } else {
+            // Top rim only: mask so just the floating top edge shows.
+            stroke
+                .mask {
+                    LinearGradient(
+                        stops: [
+                            .init(color: .white, location: 0),
+                            .init(color: .white, location: 0.04),
+                            .init(color: .clear, location: 0.12)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+        }
+    }
+    #endif
+
+    /// Whether the line-limited synopsis is actually truncated — measured by
+    /// comparing the visible (line-limited) height against the full text laid
+    /// out at the same width. Reliable at any width, unlike a chars-per-line
+    /// estimate.
+    private var isOverviewTruncated: Bool {
+        overviewFullHeight > overviewLimitedHeight + 1
     }
 
     /// Renders the synopsis with inline markdown resolved the same way the rest of
@@ -303,7 +401,7 @@ public struct DetailInformationSections: View {
     }
 
     private var informationGrid: some View {
-        LazyVGrid(columns: informationColumns, alignment: .leading, spacing: gridSpacing) {
+        LazyVGrid(columns: informationColumns, alignment: .leading, spacing: informationRowSpacing) {
             ForEach(informationGroups) { group in
                 informationGroup(group)
             }
@@ -552,6 +650,14 @@ public struct DetailInformationSections: View {
         #endif
     }
 
+    private var moreFadeWidth: CGFloat {
+        #if os(tvOS)
+        220
+        #else
+        150
+        #endif
+    }
+
     private var sheetPadding: CGFloat {
         #if os(tvOS)
         60
@@ -585,11 +691,10 @@ public struct DetailInformationSections: View {
     }
 
     private var informationGroupTitleFont: Font {
-        #if os(tvOS)
-        .system(size: 26, weight: .semibold)
-        #else
-        .headline
-        #endif
+        // Match the top-level section headers (About/Ratings) so Details, Playback
+        // and File each read as their own distinct section — the "Information"
+        // umbrella header is gone, so these carry the separation.
+        sectionTitleFont
     }
 
     private var sectionSpacing: CGFloat {
@@ -616,11 +721,15 @@ public struct DetailInformationSections: View {
         #endif
     }
 
-    private var informationHeaderSpacing: CGFloat {
+    /// Vertical gap between Information sections when they wrap to a new row
+    /// (File under Details on a 2-column iPad, or all stacked on iPhone). Larger
+    /// than the column gutter so a wrapped section's large header is clearly the
+    /// start of a new section, not a continuation of the column above.
+    private var informationRowSpacing: CGFloat {
         #if os(tvOS)
-        cardPadding + 4
+        36
         #else
-        14
+        28
         #endif
     }
 
@@ -670,6 +779,20 @@ public struct DetailInformationSections: View {
         #else
         280
         #endif
+    }
+}
+
+private struct OverviewFullHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct OverviewLimitedHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

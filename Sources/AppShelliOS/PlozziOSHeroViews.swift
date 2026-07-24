@@ -192,6 +192,7 @@ struct PlozziOSDetailHeroSection: View {
     let actionHandler: any MediaItemActionHandling
     let onPlay: (MediaItem, Bool) -> Void
     var heroRequest: PlozziOSHeroRequest?
+    var pullDistance: CGFloat = 0
 
     var body: some View {
         let style: HeroArtworkStyle = horizontalSizeClass == .compact
@@ -213,6 +214,7 @@ struct PlozziOSDetailHeroSection: View {
             style: style,
             surfaceRole: .detail,
             isActive: true,
+            pullDistance: pullDistance,
             trailerController: trailerController,
             backgroundSettings: appModel.settings.heroBackground,
             trailerResolver: appModel.heroTrailerResolver()
@@ -249,6 +251,9 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
     let isActive: Bool
     var showsBackdrop = true
     var showsScrim = true
+    /// Overscroll pull (points) from the enclosing scroll view. Stretches the
+    /// backdrop just like the Home hero; 0 leaves the hero at rest.
+    var pullDistance: CGFloat = 0
     let trailerController: HeroTrailerController
     let backgroundSettings: HeroBackgroundSettingsModel
     let trailerResolver: HeroTrailerResolving
@@ -277,9 +282,19 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
     }
 
     var body: some View {
-        ZStack {
+        // Overscroll stretch, mirroring the Home hero: grow the backdrop by the
+        // pull distance and pull it up so its top tracks the finger while the
+        // bottom stays put. `ancestorScale` keeps the reflection geometry correct.
+        // The extra 2pt top over-scan while pulling guarantees the scaled image
+        // covers the screen's top edge — without it, subpixel rounding briefly
+        // exposes the window background (a white hairline in light mode). The
+        // matching shift at the bottom is invisible: it's inside the fade mask.
+        let pullScale = 1 + (pullDistance / max(height, 1))
+        let pullOffset = max(pullDistance - (pullScale - 1) * height / 2, 0)
+            + (pullDistance > 0 ? 2 : 0)
+        return ZStack {
             if showsBackdrop {
-                PlozziOSReflectedHeroStage(height: height) { _ in
+                PlozziOSReflectedHeroStage(height: height, ancestorScale: pullScale) { _ in
                     PlozziOSHeroBackdrop(
                         presentation: presentation,
                         style: style,
@@ -300,6 +315,8 @@ private struct PlozziOSHeroStage<Foreground: View>: View {
                         trailerController: trailerController
                     )
                 }
+                .scaleEffect(pullScale, anchor: .center)
+                .offset(y: -pullOffset)
             } else {
                 Color.clear
             }

@@ -713,6 +713,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 if let accountError = appModel.accountError {
                     SettingsSectionGroup {
                         Label(accountError, systemImage: "exclamationmark.triangle.fill")
+                            .labelStyle(.titleAndIcon)
                             .foregroundStyle(.red)
                     }
                 }

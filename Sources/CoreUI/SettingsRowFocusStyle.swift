@@ -258,12 +258,15 @@ public struct SettingsRowSecondaryStyle: ViewModifier {
     }
 }
 
-/// Leading icon: tinted with the app accent when the row is idle, flipped
-/// to the focus foreground (black in dark mode focus, white in light mode
-/// focus) when focused — so a blue-on-white "blob" can't happen.
+/// Leading icon: rendered in the shared secondary text colour when the row is
+/// idle (so icons read as calm supporting glyphs, not bright accent blobs, and
+/// match the same tier on iOS), flipped to the focus foreground (black in dark
+/// mode focus, white in light mode focus) when focused so it stays legible on
+/// the inverted focus card.
 public struct SettingsRowIconStyle: ViewModifier {
     @Environment(\.settingsRowIsFocused) private var focused
     @Environment(\.settingsRowFocusForeground) private var focusFg
+    @Environment(\.themePalette) private var palette
 
     public init() {}
 
@@ -271,7 +274,7 @@ public struct SettingsRowIconStyle: ViewModifier {
         content.foregroundStyle(
             focused
             ? AnyShapeStyle(focusFg)
-            : AnyShapeStyle(.tint)
+            : AnyShapeStyle(palette.secondaryText)
         )
     }
 }
@@ -294,6 +297,27 @@ public struct SettingsRowGreenIndicatorStyle: ViewModifier {
                 : Color(red: 0.55, green: 0.95, blue: 0.65)  // lighter on black card
         }()
         return content.foregroundStyle(tint)
+    }
+}
+
+/// Label style for standard settings rows: the leading icon is rendered in the
+/// shared ``ThemePalette/secondaryText`` tier while the title keeps its inherited
+/// (primary) colour. Applied once at the group level so every plain
+/// `Label(title, systemImage:)` in a settings section gets calm, standardized
+/// icons on both platforms — no per-call-site styling. Rows that need a coloured
+/// icon (e.g. a destructive red row) opt out by setting their own `.labelStyle`.
+public struct SettingsIconLabelStyle: LabelStyle {
+    @Environment(\.themePalette) private var palette
+
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        Label {
+            configuration.title
+        } icon: {
+            configuration.icon
+                .foregroundStyle(palette.secondaryText)
+        }
     }
 }
 

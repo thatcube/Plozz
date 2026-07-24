@@ -45,6 +45,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
                 }
             }
             .buttonStyle(SettingsSectionButtonStyle())
+            .labelStyle(SettingsIconLabelStyle())
             #if os(tvOS)
             .toggleStyle(SettingsSwitchToggleStyle(flushLeading: false))
             #else

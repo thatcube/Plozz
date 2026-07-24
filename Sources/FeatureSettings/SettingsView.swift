@@ -58,6 +58,7 @@ public struct SettingsView: View {
     /// instead of tvOS picking an arbitrary row like Playback.
     @Namespace private var rootFocusScope
     @Environment(\.resetFocus) private var resetFocus
+    @Environment(\.themePalette) private var palette
 
     /// Shared sizing for the two identity headers (This Apple TV + the active
     /// profile) so their avatar/icon and title read as the same component. The
@@ -418,11 +419,7 @@ public struct SettingsView: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+                    .fill(palette.elevatedSurface)
             )
         } else {
             // Single-profile (solo) household: the same nested container,
@@ -438,11 +435,7 @@ public struct SettingsView: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+                    .fill(palette.elevatedSurface)
             )
         }
     }
@@ -579,11 +572,7 @@ public struct SettingsView: View {
         }
         .background(
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+                .fill(palette.elevatedSurface)
         )
     }
 

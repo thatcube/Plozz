@@ -95,6 +95,7 @@ extension EdgeInsets {
 /// A titled section rendered as a translucent panel. Reused by every Settings
 /// detail page so the visual treatment is consistent.
 struct SettingsPanel<Content: View>: View {
+    @Environment(\.themePalette) private var palette
     let title: String?
     var subtitle: String?
     var footer: String?
@@ -149,14 +150,10 @@ struct SettingsPanel<Content: View>: View {
         .padding(contentPadding)
         .background {
             if showsSurface {
+                // Standardized borderless elevated surface, matching detail cards
+                // and the About panel, so every Settings panel reads the same.
                 RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            }
-        }
-        .overlay {
-            if showsSurface {
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                    .fill(palette.elevatedSurface)
             }
         }
     }

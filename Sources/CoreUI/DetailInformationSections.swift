@@ -34,11 +34,17 @@ public struct DetailInformationSections: View {
     public var body: some View {
         if hasContent {
             #if os(tvOS)
-            tvGrid
+            proportionalGrid
                 .padding(.horizontal, horizontalInset)
             #else
-            iOSLayout
-                .padding(.horizontal, horizontalInset)
+            Group {
+                if horizontalSizeClass == .regular {
+                    proportionalGrid
+                } else {
+                    iPhoneStack
+                }
+            }
+            .padding(.horizontal, horizontalInset)
             #endif
         }
     }
@@ -46,73 +52,28 @@ public struct DetailInformationSections: View {
     #if !os(tvOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    private var iOSLayout: some View {
+    /// iPhone (compact width): a simple vertical stack. About, Ratings and each
+    /// Information group stack full-width with their own large headers.
+    private var iPhoneStack: some View {
         VStack(alignment: .leading, spacing: sectionSpacing) {
-            if horizontalSizeClass == .regular {
-                // iPad: side-by-side About + Ratings, matching tvOS spine
-                if hasAbout || !item.ratings.isEmpty {
-                    HStack(alignment: .top, spacing: gridSpacing) {
-                        if hasAbout {
-                            VStack(alignment: .leading, spacing: 14) {
-                                Text("About")
-                                    .font(sectionTitleFont)
-                                aboutContent
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        if !item.ratings.isEmpty {
-                            VStack(alignment: .leading, spacing: 14) {
-                                Text("Ratings")
-                                    .font(sectionTitleFont)
-                                compactRatingsCard
-                            }
-                            .frame(maxWidth: hasAbout ? nil : .infinity)
-                            .frame(width: hasAbout ? iPadRatingsWidth : nil)
-                        }
-                    }
-                }
-            } else {
-                // iPhone: vertical stack
-                if hasAbout {
-                    detailSection(title: "About") {
-                        aboutContent
-                    }
-                }
-                if !item.ratings.isEmpty {
-                    detailSection(title: "Ratings") {
-                        compactRatingsCard
-                    }
-                }
+            if hasAbout {
+                detailSection(title: "About") { aboutContent }
+            }
+            if !item.ratings.isEmpty {
+                detailSection(title: "Ratings") { ratingsCard }
             }
             if !informationGroups.isEmpty {
                 informationGrid
             }
         }
     }
-
-    private var iPadRatingsWidth: CGFloat { 320 }
-
-    private var compactRatingsCard: some View {
-        VStack(alignment: .leading, spacing: ratingRowSpacing) {
-            ForEach(sortedRatings) { rating in
-                HStack(spacing: 14) {
-                    Text(rating.source.displayName)
-                        .font(factValueFont)
-                        .lineLimit(1)
-                    Spacer(minLength: 12)
-                    RatingBadge(rating: rating)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(cardPadding)
-        .plozzFocusableCard(cornerRadius: cardCornerRadius)
-        .accessibilityElement(children: .contain)
-    }
     #endif
 
-    #if os(tvOS)
-    private var tvGrid: some View {
+    /// Shared proportional 12-track grid used on tvOS and regular-width iPad, so
+    /// both platforms subdivide the same spine: About (⅔) sits above
+    /// Details+Playback (⅔), and Ratings (⅓) sits above File (⅓) — every column
+    /// edge lines up.
+    private var proportionalGrid: some View {
         Grid(alignment: .topLeading, horizontalSpacing: gridSpacing, verticalSpacing: 0) {
             // Zero-height priming row: pins twelve equal tracks so every section
             // below subdivides the same spine (About ⅔ = Details+Playback,
@@ -148,11 +109,11 @@ public struct DetailInformationSections: View {
                 GridRow(alignment: .top) {
                     ForEach(informationGroups) { group in
                         informationGroup(group)
-                            // Reserve the borderless focus plate's outward growth
-                            // (cardPadding on each side) plus an extra 8pt so a
-                            // focused column's plate lands just inside its own
-                            // keyline with a clear gap to the neighbouring column.
-                            .padding(.trailing, cardPadding + 8)
+                            // tvOS reserves the borderless focus plate's outward
+                            // growth (cardPadding + 8pt) so a focused column's
+                            // plate lands inside its own keyline. iOS has no focus
+                            // plate, so the grid gutter alone spaces the columns.
+                            .padding(.trailing, infoColumnFocusInset)
                             .gridCellColumns(informationColumnSpan)
                     }
                     if informationGroups.count * informationColumnSpan < 12 {
@@ -163,6 +124,14 @@ public struct DetailInformationSections: View {
                 .padding(.top, sectionSpacing)
             }
         }
+    }
+
+    private var infoColumnFocusInset: CGFloat {
+        #if os(tvOS)
+        cardPadding + 8
+        #else
+        0
+        #endif
     }
 
     private func headedSection<Content: View>(
@@ -190,12 +159,11 @@ public struct DetailInformationSections: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
         .padding(cardPadding)
         .plozzFocusableCard(cornerRadius: cardCornerRadius)
         .accessibilityElement(children: .contain)
     }
-    #endif
 
     private var hasContent: Bool {
         hasAbout || !item.ratings.isEmpty || !informationGroups.isEmpty
@@ -670,7 +638,10 @@ public struct DetailInformationSections: View {
         #if os(tvOS)
         .infinity
         #else
-        nil
+        // Regular width (iPad) uses the proportional grid where About and Ratings
+        // sit side by side and should be equal height; compact (iPhone) stacks
+        // them, so the cards keep their natural height.
+        horizontalSizeClass == .regular ? .infinity : nil
         #endif
     }
 

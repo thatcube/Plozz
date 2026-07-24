@@ -5,6 +5,63 @@ import CoreModels
 import UIKit
 #endif
 
+/// One rung of the app's elevation ladder. Elevation is a *system*, not a single
+/// colour, because each appearance signals "this surface floats above the page"
+/// differently:
+///
+/// - **Light** raises by going lighter than the page (white cards on a soft grey
+///   page) plus a gentle drop shadow.
+/// - **Dark (soft)** raises by going *lighter* (Material's dark-elevation rule —
+///   a higher surface catches more light); shadows barely register on dark, so
+///   lightness carries the signal. Borderless.
+/// - **OLED / true black** deliberately does **not** lighten (that would defeat
+///   the pixels-off black and its infinite contrast). Instead a hairline border
+///   separates one black surface from another — so borders are the elevation
+///   signal here, and are mandatory on overlays.
+///
+/// Keeping the concrete fill/border/shadow for each rung *inside the palette*
+/// means both platforms resolve identical values, and adding or removing a theme
+/// stays in lockstep automatically.
+public enum SurfaceLevel: Sendable {
+    /// The default resting elevation: content cards, settings groups, detail
+    /// panels. Sits one step above the page.
+    case raised
+    /// The highest elevation: modals, drawers, sheets that float above the whole
+    /// UI. Always visibly separated (border on the dark themes, strong shadow on
+    /// light) so a same-colour backdrop can't swallow it.
+    case overlay
+}
+
+/// A soft drop shadow for an elevated surface. Kept as plain values so the whole
+/// elevation table lives in the palette literals.
+public struct SurfaceShadow: Equatable, Sendable {
+    public let color: Color
+    public let radius: CGFloat
+    public let y: CGFloat
+    public init(color: Color, radius: CGFloat, y: CGFloat) {
+        self.color = color
+        self.radius = radius
+        self.y = y
+    }
+}
+
+/// The resolved appearance of one elevation rung: a fill, an optional hairline
+/// border (nil = borderless), and an optional drop shadow. Both platforms render
+/// a surface by reading this — never by hard-coding a colour at the call site —
+/// so tvOS and iOS are guaranteed to match.
+public struct SurfaceStyle: Equatable, Sendable {
+    public let fill: Color
+    public let border: Color?
+    public let borderWidth: CGFloat
+    public let shadow: SurfaceShadow?
+    public init(fill: Color, border: Color? = nil, borderWidth: CGFloat = 1, shadow: SurfaceShadow? = nil) {
+        self.fill = fill
+        self.border = border
+        self.borderWidth = borderWidth
+        self.shadow = shadow
+    }
+}
+
 /// The concrete colours a resolved `AppTheme` paints with.
 ///
 /// Ported from my Twozz `ThemePalette` for structural parity, trimmed to the
@@ -59,14 +116,14 @@ public struct ThemePalette: Equatable, Sendable {
     /// a same-coloured background (e.g. white card on a white light-mode page).
     /// Reserved for surfaces that genuinely need a delineating line — modals and
     /// drawers stacked on a same-colour backdrop. Ordinary content cards/sections
-    /// now use the borderless ``elevatedSurface`` instead.
+    /// now use the shared elevation system (``surface(_:)`` / ``raised``).
     public let cardOpaqueBorder: Color
-    /// The single, standardized fill for elevated content surfaces — settings
-    /// section groups and detail cards (About / Ratings / info) alike. Tuned per
-    /// theme to read on the app backgrounds **without a border**, so surfaces look
-    /// consistent everywhere: a clear step above the page in dark, a slightly
-    /// lighter (but still near-black) step in OLED, and white on the light page.
-    public let elevatedSurface: Color
+    /// The default resting elevation — content cards, settings groups, detail
+    /// panels. Resolved via ``surface(_:)`` with ``SurfaceLevel/raised``.
+    public let raised: SurfaceStyle
+    /// The highest elevation — modals, drawers, sheets. Resolved via
+    /// ``surface(_:)`` with ``SurfaceLevel/overlay``.
+    public let overlay: SurfaceStyle
     /// Whether this is a light-appearance palette. Drives the focused-Light
     /// opaque backing that stops the drop shadow bleeding through the glass.
     public let isLight: Bool
@@ -90,7 +147,8 @@ public struct ThemePalette: Equatable, Sendable {
         liftSurface: Color,
         cardOpaqueSurface: Color,
         cardOpaqueBorder: Color,
-        elevatedSurface: Color,
+        raised: SurfaceStyle,
+        overlay: SurfaceStyle,
         isLight: Bool
     ) {
         self.backgroundBase = backgroundBase
@@ -107,8 +165,19 @@ public struct ThemePalette: Equatable, Sendable {
         self.liftSurface = liftSurface
         self.cardOpaqueSurface = cardOpaqueSurface
         self.cardOpaqueBorder = cardOpaqueBorder
-        self.elevatedSurface = elevatedSurface
+        self.raised = raised
+        self.overlay = overlay
         self.isLight = isLight
+    }
+
+    /// Resolves the appearance for an elevation rung. Call sites use the
+    /// ``SwiftUI/View/plozzSurface(_:cornerRadius:)`` modifier rather than reading
+    /// this directly.
+    public func surface(_ level: SurfaceLevel) -> SurfaceStyle {
+        switch level {
+        case .raised: return raised
+        case .overlay: return overlay
+        }
     }
 }
 
@@ -198,7 +267,16 @@ public extension ThemePalette {
         liftSurface: .white,
         cardOpaqueSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
         cardOpaqueBorder: Color.white.opacity(0.16),
-        elevatedSurface: Color(red: 0.185, green: 0.185, blue: 0.20),
+        // Dark raises by going lighter than the page (shadows don't read on dark);
+        // borderless. Overlays keep that lift but add a faint rim + shadow so a
+        // modal separates from the dark UI beneath it.
+        raised: SurfaceStyle(fill: Color(red: 0.185, green: 0.185, blue: 0.20)),
+        overlay: SurfaceStyle(
+            fill: Color(red: 0.205, green: 0.205, blue: 0.22),
+            border: Color.white.opacity(0.10),
+            borderWidth: 1,
+            shadow: SurfaceShadow(color: .black.opacity(0.5), radius: 26, y: 14)
+        ),
         isLight: false
     )
 
@@ -219,7 +297,21 @@ public extension ThemePalette {
         liftSurface: .white,
         cardOpaqueSurface: Color(red: 0.045, green: 0.045, blue: 0.055),
         cardOpaqueBorder: Color.white.opacity(0.12),
-        elevatedSurface: Color(red: 0.085, green: 0.085, blue: 0.095),
+        // OLED never lifts (that defeats pixels-off black). A raised surface stays
+        // the same near-black as the page and separates by a hairline border only.
+        // Overlays get a brighter, mandatory hairline plus a shadow so a modal is
+        // unmistakably above two otherwise-identical black surfaces.
+        raised: SurfaceStyle(
+            fill: Color(red: 0.025, green: 0.025, blue: 0.03),
+            border: Color.white.opacity(0.08),
+            borderWidth: 1
+        ),
+        overlay: SurfaceStyle(
+            fill: Color(red: 0.025, green: 0.025, blue: 0.03),
+            border: Color.white.opacity(0.16),
+            borderWidth: 1,
+            shadow: SurfaceShadow(color: .black.opacity(0.6), radius: 28, y: 16)
+        ),
         isLight: false
     )
 
@@ -240,7 +332,17 @@ public extension ThemePalette {
         liftSurface: .white,
         cardOpaqueSurface: .white,
         cardOpaqueBorder: Color.black.opacity(0.08),
-        elevatedSurface: .white,
+        // Light raises toward white above a soft grey page, with a gentle drop
+        // shadow doing the separation; borderless. Overlays float higher with a
+        // stronger shadow.
+        raised: SurfaceStyle(
+            fill: .white,
+            shadow: SurfaceShadow(color: .black.opacity(0.06), radius: 10, y: 3)
+        ),
+        overlay: SurfaceStyle(
+            fill: .white,
+            shadow: SurfaceShadow(color: .black.opacity(0.16), radius: 28, y: 16)
+        ),
         isLight: true
     )
 

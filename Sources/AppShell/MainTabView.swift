@@ -431,6 +431,7 @@ struct MainTabView: View {
                 onSetUpFromAnotherDevice: onSetUpFromAnotherDevice,
                 metadataSettings: metadataSettings
             )
+            .background { SettingsPageBackground() }
             }
         }
         .plozzTabStyle(navigationStyle)

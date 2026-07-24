@@ -148,13 +148,21 @@ struct SettingsPanel<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(contentPadding)
-        .background {
-            if showsSurface {
-                // Standardized borderless elevated surface, matching detail cards
-                // and the About panel, so every Settings panel reads the same.
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .fill(palette.elevatedSurface)
-            }
+        .modifier(ConditionalRaisedSurface(active: showsSurface, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius))
+    }
+}
+
+/// Applies the shared `.raised` elevation surface only when a Settings panel
+/// wants its own container, so plain inline panels stay transparent.
+private struct ConditionalRaisedSurface: ViewModifier {
+    let active: Bool
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        if active {
+            content.plozzSurface(.raised, cornerRadius: cornerRadius)
+        } else {
+            content
         }
     }
 }

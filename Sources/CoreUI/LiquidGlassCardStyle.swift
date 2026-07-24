@@ -293,11 +293,11 @@ public struct PlozzFocusableCardModifier: ViewModifier {
             if reduceTransparency {
                 // Reduce Transparency: the glass path falls back to a solid WHITE
                 // lift, which whites-out a text card (light content text becomes
-                // illegible). For these content cards, keep the card's own opaque
+                // illegible). For these content cards, keep the card's own raised
                 // surface on focus and indicate focus with a bright ring + shadow
                 // instead — so contrast never inverts and text stays readable.
                 shape
-                    .fill(palette.elevatedSurface)
+                    .fill(palette.raised.fill)
                     .overlay {
                         shape.strokeBorder(palette.primaryText.opacity(0.9), lineWidth: 4)
                     }
@@ -310,9 +310,18 @@ public struct PlozzFocusableCardModifier: ViewModifier {
                     .shadow(color: .black.opacity(0.30), radius: 18, y: 9)
             }
         } else if case .filled = variant {
-            // Standardized borderless elevated surface — matches settings section
-            // groups so every content card reads the same across the app.
-            shape.fill(palette.elevatedSurface)
+            // Standardized raised surface from the shared elevation table — matches
+            // settings groups everywhere. Dark lifts lighter (borderless), OLED
+            // stays black with a hairline, Light is white with a soft shadow.
+            let style = palette.raised
+            shape
+                .fill(style.fill)
+                .overlay {
+                    if let border = style.border {
+                        shape.strokeBorder(border, lineWidth: style.borderWidth)
+                    }
+                }
+                .modifier(OptionalSurfaceShadow(shadow: style.shadow))
         }
     }
 }

@@ -417,10 +417,7 @@ public struct SettingsView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 16)
             }
-            .background(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .fill(palette.elevatedSurface)
-            )
+            .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
         } else {
             // Single-profile (solo) household: the same nested container,
             // but framed as plain "Settings" with an explicit Enable Profiles
@@ -433,10 +430,7 @@ public struct SettingsView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 16)
             }
-            .background(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .fill(palette.elevatedSurface)
-            )
+            .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
         }
     }
 
@@ -570,10 +564,7 @@ public struct SettingsView: View {
             .padding(.top, 16)
             .padding(.bottom, 16)
         }
-        .background(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .fill(palette.elevatedSurface)
-        )
+        .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
     }
 
     /// About info + Attributions entry + Sign Out, rendered INLINE at the

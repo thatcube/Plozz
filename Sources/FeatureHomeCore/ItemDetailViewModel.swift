@@ -530,6 +530,13 @@ public final class ItemDetailViewModel {
         // A source-specific library is authoritative even when an aggregated or
         // cached grid item happens to carry another server as its merge primary.
         applyLibraryOriginPreferenceIfAvailable(in: initialSources)
+        // A Plex watchlist / Discover open loads with a global Discover id even
+        // though the identity index resolved the real library copy into
+        // initialSources; adopt that library id up front so the fetches below run
+        // against the real library item, not the Discover id (which has no
+        // children). Handles the single-library-copy case that the multi-source
+        // locality retarget below doesn't.
+        adoptLibraryItemIDForActiveAccountIfNeeded()
         // Before the very first fetch, retarget a cross-server-merged Home/Search
         // open onto its most-local copy (see doc on the method): a SERIES loads
         // its whole tree from ONE server and its per-server episodes can't
@@ -1175,6 +1182,25 @@ public final class ItemDetailViewModel {
         return true
     }
 
+    /// When a title is opened from a Plex watchlist / Discover row it loads with a
+    /// global Discover id as `activeItemID`, but the identity index has already
+    /// resolved the real library copy (with its server ratingKey) into
+    /// `initialSources`. Adopt that library id for the active account up front so
+    /// `item(id:)` / `children(of:)` run against the real library item. No-op on
+    /// the normal library/Home path, where `activeItemID` already matches a known
+    /// library source for the active account.
+    private func adoptLibraryItemIDForActiveAccountIfNeeded() {
+        guard let account = activeSourceAccountID,
+              !initialSources.contains(where: {
+                  $0.accountID == account && $0.itemID == activeItemID
+              }),
+              let librarySource = initialSources.first(where: {
+                  $0.accountID == account
+              })
+        else { return }
+        activeItemID = librarySource.itemID
+    }
+
     /// Retargets the initial active server to the most-local copy of a
     /// cross-server-merged title — **once**, before the first fetch.
     ///
@@ -1222,9 +1248,25 @@ public final class ItemDetailViewModel {
         guard let best = CrossSourceSelector.bestSelection(
                   from: liveRanked,
                   capabilities: .detected()
-              )?.source,
-              best.accountID != activeSourceAccountID,
-              let provider = alternateProviderResolver(best.accountID) else { return }
+              )?.source else { return }
+
+        // Adopt the best copy when it differs from the active target by EITHER
+        // account OR item id. The item-id check is what fixes a title opened from
+        // a Plex **watchlist** / Discover row: the active id is then a global
+        // Discover id, while the resolved library source on the SAME account
+        // carries the real library ratingKey. Without adopting that id,
+        // `children(of:)` runs on the Discover id and returns nothing (no
+        // episodes, no play target) even though the server is perfectly healthy.
+        guard best.accountID != activeSourceAccountID
+                || best.itemID != activeItemID else { return }
+
+        let bestProvider: (any MediaProvider)?
+        if best.accountID == activeSourceAccountID {
+            bestProvider = activeProvider
+        } else {
+            bestProvider = alternateProviderResolver(best.accountID)
+        }
+        guard let provider = bestProvider else { return }
 
         invalidateSourceOperations()
         activeProvider = provider

@@ -50,3 +50,6 @@ fastlane/README.md
 # TestFlight "What to Test" notes — local scratch the `beta` lane reads; recomposed per release
 WHAT_TO_TEST.txt
 Frameworks/
+
+# Local per-worktree dev build counter (generate-project.sh dirty-tree suffix)
+.plozz-dev-build

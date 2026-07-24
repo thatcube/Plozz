@@ -73,6 +73,29 @@ if [ -n "${PLOZZ_BUILD_NUMBER:-}" ]; then
   src="PLOZZ_BUILD_NUMBER override"
 elif build="$(git rev-list --count HEAD 2>/dev/null)" && [ -n "$build" ]; then
   src="git commit count"
+  # Committed builds get the clean integer commit count (2559). But an uncommitted
+  # working tree keeps the SAME commit count across rebuilds, and tvOS/devicectl
+  # silently dedups an install when CFBundleVersion is unchanged — so changed-but-
+  # uncommitted code never actually lands on the Apple TV. Fix: while the tree is
+  # dirty, append a monotonic ".N" dev suffix (2559.1, 2559.2, …) so every rebuild
+  # is a distinct, strictly-increasing CFBundleVersion the installer can't skip.
+  # A real commit bumps the base count and drops the suffix again.
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    counter_file=".plozz-dev-build"   # gitignored, per-worktree
+    dev_n=1
+    if [ -f "$counter_file" ]; then
+      # Stored as "<commitCount> <lastN>". Continue the sequence for the same
+      # commit count; restart at 1 whenever the base count has moved.
+      stored_base="$(awk '{print $1}' "$counter_file" 2>/dev/null || true)"
+      stored_n="$(awk '{print $2}' "$counter_file" 2>/dev/null || true)"
+      if [ "$stored_base" = "$build" ] && [ -n "$stored_n" ]; then
+        dev_n=$((stored_n + 1))
+      fi
+    fi
+    printf '%s %s\n' "$build" "$dev_n" > "$counter_file"
+    build="${build}.${dev_n}"
+    src="git commit count + dirty-tree dev suffix"
+  fi
 else
   echo "warning: could not determine a build number (no PLOZZ_BUILD_NUMBER and git unavailable); leaving CFBundleVersion at the project.yml default"
   exit 0

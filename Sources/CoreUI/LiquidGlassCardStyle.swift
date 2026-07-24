@@ -256,6 +256,7 @@ public struct PlozzFocusableCardModifier: ViewModifier {
     private let variant: PlozzFocusableCardVariant
     @FocusState private var focused: Bool
     @Environment(\.themePalette) private var palette
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
 
     public init(
         cornerRadius: CGFloat,
@@ -289,10 +290,25 @@ public struct PlozzFocusableCardModifier: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: surfaceCorner, style: .continuous)
 
         if focused {
-            Color.clear
-                .plozzGlassCard(cornerRadius: surfaceCorner, isFocused: true)
-                .padding(-focusPadding)
-                .shadow(color: .black.opacity(0.30), radius: 18, y: 9)
+            if reduceTransparency {
+                // Reduce Transparency: the glass path falls back to a solid WHITE
+                // lift, which whites-out a text card (light content text becomes
+                // illegible). For these content cards, keep the card's own opaque
+                // surface on focus and indicate focus with a bright ring + shadow
+                // instead — so contrast never inverts and text stays readable.
+                shape
+                    .fill(palette.elevatedSurface)
+                    .overlay {
+                        shape.strokeBorder(palette.primaryText.opacity(0.9), lineWidth: 4)
+                    }
+                    .padding(-focusPadding)
+                    .shadow(color: .black.opacity(0.30), radius: 14, y: 7)
+            } else {
+                Color.clear
+                    .plozzGlassCard(cornerRadius: surfaceCorner, isFocused: true)
+                    .padding(-focusPadding)
+                    .shadow(color: .black.opacity(0.30), radius: 18, y: 9)
+            }
         } else if case .filled = variant {
             // Standardized borderless elevated surface — matches settings section
             // groups so every content card reads the same across the app.

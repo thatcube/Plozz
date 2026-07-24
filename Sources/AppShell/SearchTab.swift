@@ -126,23 +126,7 @@ struct SearchTab: View {
                 // such titles (owned ones are filtered out).
                 let isDiscovery = item.isNotInLibraryDiscovery
                 ItemDetailView(
-                    viewModel: ItemDetailViewModel(
-                        provider: resolveProvider(item.sourceAccountID, in: accounts),
-                        itemID: item.id,
-                        initialItem: item,
-                        isDiscoveryItem: isDiscovery,
-                        discoveryStatusRefresh: { await seer.availability(for: $0) },
-                        ratingsProvider: ratingsProvider,
-                        sourceAccountID: item.sourceAccountID,
-                        initialSources: detailInitialSources(
-                            for: item,
-                            isDiscovery: isDiscovery,
-                            identitySources: identitySources
-                        ),
-                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
-                        crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
-                        snapshotCache: detailSnapshotCache
-                    ),
+                    viewModel: detailEnvironment.makeViewModel(for: item, libraryOrigin: nil),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
@@ -248,6 +232,24 @@ struct SearchTab: View {
     /// Selecting a search result always opens its detail page rather than
     /// playing immediately; episodes/seasons route through their series context
     /// so the detail page has the surrounding show, mirroring `mediaItemNavigator`.
+    /// The shared detail-open environment built from this tab's app model, so
+    /// every detail destination constructs its view model through the one factory
+    /// (see ``DetailOpenEnvironment``) rather than hand-rolling it.
+    private var detailEnvironment: DetailOpenEnvironment {
+        let accounts = self.accounts
+        let identitySources = self.identitySources
+        let seer = self.seer
+        return DetailOpenEnvironment(
+            resolveProvider: { resolveProvider($0, in: accounts) },
+            resolveOptionalProvider: { resolveOptionalProvider($0, in: accounts) },
+            identitySources: identitySources,
+            crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
+            ratingsProvider: ratingsProvider,
+            discoveryStatusRefresh: { await seer.availability(for: $0) },
+            snapshotCache: detailSnapshotCache
+        )
+    }
+
     private func open(_ item: MediaItem) {
         switch item.kind {
         case .episode where item.seriesID != nil:

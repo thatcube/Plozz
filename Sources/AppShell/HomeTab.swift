@@ -359,6 +359,25 @@ struct HomeTab: View {
     /// navigation so a movie/collection opened deeper inside a library stays
     /// pinned to its library's server.
     @ViewBuilder
+    /// The shared detail-open environment built from this tab's app model. Every
+    /// detail-open destination constructs its view model through this one factory
+    /// (see ``DetailOpenEnvironment``) instead of hand-rolling
+    /// `ItemDetailViewModel(...)`, so the item→viewModel glue can't drift.
+    private var detailEnvironment: DetailOpenEnvironment {
+        let accounts = self.accounts
+        let identitySources = self.identitySources
+        let seer = self.seer
+        return DetailOpenEnvironment(
+            resolveProvider: { resolveProvider($0, in: accounts) },
+            resolveOptionalProvider: { resolveOptionalProvider($0, in: accounts) },
+            identitySources: identitySources,
+            crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
+            ratingsProvider: ratingsProvider,
+            discoveryStatusRefresh: { await seer.availability(for: $0) },
+            snapshotCache: detailSnapshotCache
+        )
+    }
+
     private func itemDetail(for item: MediaItem, libraryOrigin: String?) -> some View {
         // A discovery (Seerr) title that isn't in the library — e.g. a "More Info"
         // tap on a *not-owned* featured hero slide — routes to the request-focused
@@ -367,25 +386,8 @@ struct HomeTab: View {
         // a real library copy via the identity index, so they keep the normal
         // playable detail page.
         let isDiscovery = item.isNotInLibraryDiscovery
-        ItemDetailView(
-            viewModel: ItemDetailViewModel(
-                provider: resolveProvider(item.sourceAccountID, in: accounts),
-                itemID: item.id,
-                initialItem: item,
-                isDiscoveryItem: isDiscovery,
-                discoveryStatusRefresh: { await seer.availability(for: $0) },
-                ratingsProvider: ratingsProvider,
-                sourceAccountID: item.sourceAccountID,
-                originSourceAccountID: libraryOrigin,
-                initialSources: detailInitialSources(
-                    for: item,
-                    isDiscovery: isDiscovery,
-                    identitySources: identitySources
-                ),
-                alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
-                crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
-                snapshotCache: detailSnapshotCache
-            ),
+        return ItemDetailView(
+            viewModel: detailEnvironment.makeViewModel(for: item, libraryOrigin: libraryOrigin),
             spoilerSettings: spoilerSettings,
             onPlay: { requestPlay($0) },
             onSelectChild: { navigate($0, libraryOrigin: libraryOrigin) },

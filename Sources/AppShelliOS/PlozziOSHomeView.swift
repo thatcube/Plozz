@@ -1445,10 +1445,10 @@ private struct PlozziOSHomeLibraryCard: View {
                     .resizable()
                     .scaledToFill()
             } placeholder: {
-                RoundedRectangle(
-                    cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
-                )
-                    .fill(palette.fill)
+                // Transparent: the card's own rest surface (raised) shows through
+                // and defines the look per theme — gray lift on Dark, white on Light,
+                // page-black + hairline (no fill) on OLED — matching the tvOS tile.
+                Color.clear
                     .overlay {
                         Image(systemName: library.library.kind == .series ? "tv" : "film")
                             .font(.title)

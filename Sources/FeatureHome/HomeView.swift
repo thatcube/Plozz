@@ -1204,20 +1204,20 @@ private struct LibraryCardView: View {
         .animation(.easeInOut(duration: 0.25), value: isUpdating)
     }
 
-    /// Themed empty-state for an imageless library. A subtle vertical gradient
-    /// between the page's `backgroundBase` (top) and the opaque `cardOpaqueSurface`
-    /// (bottom): close in value so the fill reads a touch brighter than the page
-    /// yet never as a heavy gradient, and — because both stops come straight from
-    /// the palette — it tracks light / dark and collapses to pure black in Pure Black
-    /// (both stops are black there). Opaque, so the focus glass halo behind the
-    /// card can't bleed through, and focus-independent so nothing jumps on focus.
+    /// Themed empty-state for an imageless library: the shared ``ThemePalette/fill``
+    /// so it reads as a visible card on every theme, matching the iOS/iPadOS library
+    /// tile exactly (same token) and the media-card frame's own rest surface. Opaque
+    /// enough that the focus glass halo behind the card can't bleed through, and
+    /// focus-independent so nothing jumps on focus.
+    /// Empty-state for an imageless library: transparent, so the card's own rest
+    /// surface (the shared ``PlozzGlassCardModifier`` `raised` treatment) shows
+    /// through and defines the look per theme — a gray lift on Dark, white on Light,
+    /// and on OLED/Pure Black just the page-black with a hairline border (no fill).
+    /// Only the glyph is drawn on top, so an imageless tile matches the surface
+    /// system and the iOS/iPadOS tile exactly.
     private var placeholder: some View {
         ZStack {
-            LinearGradient(
-                colors: [palette.backgroundBase, palette.cardOpaqueSurface],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            Color.clear
             // The centered updating spinner takes the glyph's place, so hide the
             // glyph while a share is updating (see `artwork`'s centered overlay).
             if !isUpdating {

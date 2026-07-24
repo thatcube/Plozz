@@ -54,18 +54,22 @@ public struct PlozzGlassCardModifier: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
         if reduceTransparency {
-            // Reduce Transparency on: never lean on translucency. Paint an opaque
-            // surface — a strong white "lift" on focus, the theme's card colour at
-            // rest — exactly like Twozz's glass-disabled card path.
+            // Reduce Transparency on: never lean on translucency. At REST use the
+            // shared elevation surface (identical to the glass branch below and to
+            // every other card), so a card looks the same regardless of this
+            // setting. Focus keeps the strong opaque white "lift".
             content
                 .background {
-                    shape.fill(isFocused ? palette.liftSurface : palette.cardOpaqueSurface)
+                    if isFocused {
+                        shape.fill(palette.liftSurface)
+                    } else if glassAtRest {
+                        shape.fill(palette.raised.fill)
+                    }
                 }
                 .overlay {
-                    shape.strokeBorder(
-                        isFocused ? Color.clear : palette.cardOpaqueBorder,
-                        lineWidth: 1
-                    )
+                    if !isFocused && glassAtRest, let border = palette.raised.border {
+                        shape.strokeBorder(border, lineWidth: palette.raised.borderWidth)
+                    }
                 }
                 .clipShape(shape)
         } else if #available(iOS 26.0, tvOS 26.0, *) {
@@ -73,28 +77,25 @@ public struct PlozzGlassCardModifier: ViewModifier {
             // wrapped around the content — the latter hangs on tvOS 27 focus.
             //
             // Focus → real refractive Liquid Glass (one card at a time, tinted).
-            // At rest → the cheaper frosted `.ultraThinMaterial`: it gives a glassy
-            // surface without a live `.glassEffect`'s per-frame backdrop sampling,
-            // so a dense resting grid stays lag-free while still reading as glass.
-            // `glassAtRest: false` opts a card out of even the frosted rest surface
-            // (bare artwork at rest) for the very densest grids.
+            // At rest → the shared *opaque* elevation surface (``raised``), NOT a
+            // frosted `.ultraThinMaterial`. Material composites differently per
+            // platform (gray on iPad, near-black on tvOS) and differently again
+            // under Reduce Transparency, which made the same card look inconsistent
+            // across devices. Using the deterministic `raised` fill + border makes a
+            // resting card pixel-consistent everywhere and ties media cards into the
+            // same surface system as content cards. `glassAtRest: false` opts the
+            // densest grids out entirely (bare artwork at rest).
             content
                 .background {
                     if isFocused {
                         glassUnderlay()
                     } else if glassAtRest {
-                        shape.fill(.ultraThinMaterial)
+                        shape.fill(palette.raised.fill)
                     }
                 }
-                // A hairline edge is only needed in LIGHT mode: there the frosted
-                // `.ultraThinMaterial` is near-white and would blend into the white
-                // page without an edge. On dark and OLED the same material reads as a
-                // distinctly lighter gray block that self-separates from the page, so
-                // a border there is redundant and — on OLED especially — just a faint,
-                // slightly-off line. Drop it on the dark themes; the fill carries it.
                 .overlay {
-                    if !isFocused && glassAtRest && palette.isLight {
-                        shape.strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
+                    if !isFocused && glassAtRest, let border = palette.raised.border {
+                        shape.strokeBorder(border, lineWidth: palette.raised.borderWidth)
                     }
                 }
                 .clipShape(shape)

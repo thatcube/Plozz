@@ -881,7 +881,7 @@ struct PlayerControls: View {
                 } label: {
                     Image(systemName: "chevron.backward")
                 }
-                .buttonStyle(PanelHeaderButtonStyle())
+                .buttonStyle(PlozzPanelHeaderButtonStyle())
                 .focusEffectDisabled()
                 .focused($focus, equals: .subBack)
                 // Pull the chip past the header gutter so it hugs the panel's
@@ -904,7 +904,7 @@ struct PlayerControls: View {
                         Image(systemName: "clock")
                             .accessibilityLabel("Subtitle Sync")
                     }
-                    .buttonStyle(PanelHeaderButtonStyle())
+                    .buttonStyle(PlozzPanelHeaderButtonStyle())
                     .focusEffectDisabled()
                     .focused($focus, equals: .subSync)
                 }
@@ -913,7 +913,7 @@ struct PlayerControls: View {
                 } label: {
                     Label("Style", systemImage: "paintpalette")
                 }
-                .buttonStyle(PanelHeaderButtonStyle())
+                .buttonStyle(PlozzPanelHeaderButtonStyle())
                 .focusEffectDisabled()
                 .focused($focus, equals: .edit)
                 // Mirror the back chip: hug the trailing edge, ignoring the gutter.

@@ -519,7 +519,13 @@ public struct ItemDetailView: View {
                             onSelect: onSelectChild
                         )
                     }
-                    DetailExtrasView(item: detail.item, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
+                    DetailExtrasView(
+                        item: detail.item,
+                        selectedSource: effectiveSource,
+                        selectedVersion: effectiveVersions.first { $0.id == effectiveVersionID }
+                            ?? MediaVersion.synthesized(from: detail.item),
+                        leadingInset: PlozzTheme.Metrics.heroLeadingPadding
+                    )
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                 // Cap the whole scroll column to the proposed (safe viewport)

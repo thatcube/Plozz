@@ -28,10 +28,12 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     private let onSelectSource: (String) -> Void
     private let onSelectVersion: (String) -> Void
     private let onPerformAction: (String) -> Void
+    private let onDismiss: () -> Void
     private let label: Label
 
     @State private var isPresented = false
     @State private var page = PlaybackSourceMenuButtonPage.root
+    @State private var triggerFrame: CGRect = .zero
 
     public init(
         sources: [MediaSourceRef],
@@ -42,6 +44,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
         onSelectSource: @escaping (String) -> Void,
         onSelectVersion: @escaping (String) -> Void,
         onPerformAction: @escaping (String) -> Void = { _ in },
+        onDismiss: @escaping () -> Void = {},
         @ViewBuilder label: () -> Label
     ) {
         self.sources = sources
@@ -52,6 +55,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
         self.onSelectSource = onSelectSource
         self.onSelectVersion = onSelectVersion
         self.onPerformAction = onPerformAction
+        self.onDismiss = onDismiss
         self.label = label()
     }
 
@@ -59,22 +63,14 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     public var body: some View {
         #if os(tvOS)
         trigger
-            .overlay(alignment: .topTrailing) {
-                if isPresented {
-                    panel
-                        .background {
-                            Color.black.opacity(0.001)
-                                .frame(width: 2_200, height: 1_300)
-                                .contentShape(Rectangle())
-                                .onTapGesture { isPresented = false }
-                        }
-                        .offset(x: -80, y: -250)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .trailing)))
-                        .zIndex(100)
-                }
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .global)
+            } action: { frame in
+                triggerFrame = frame
             }
-            .zIndex(isPresented ? 100 : 0)
-            .animation(.easeOut(duration: 0.16), value: isPresented)
+            .fullScreenCover(isPresented: $isPresented, onDismiss: onDismiss) {
+                tvOSPresentation
+            }
         #else
         trigger
             .popover(
@@ -87,6 +83,25 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
             }
         #endif
     }
+
+    #if os(tvOS)
+    private var tvOSPresentation: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.opacity(0.001)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { isPresented = false }
+
+            panel
+                .offset(
+                    x: triggerFrame.minX,
+                    y: triggerFrame.minY - panelHeight - 12
+                )
+        }
+        .ignoresSafeArea()
+        .presentationBackground(.clear)
+    }
+    #endif
 
     private var trigger: some View {
         Button {
@@ -116,14 +131,32 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
             onPerformAction: { id in
                 onPerformAction(id)
                 isPresented = false
-            },
-            onDismiss: { isPresented = false }
+            }
         )
         #if os(tvOS)
         .onExitCommand {
-            isPresented = false
+            handleExit()
         }
         #endif
+    }
+
+    private var panelHeight: CGFloat {
+        PlaybackSourceMenuMetrics.panelHeight(
+            page: page,
+            sourceCount: sources.count,
+            versionCount: versions.count,
+            actionCount: actions.count
+        )
+    }
+
+    private func handleExit() {
+        if page != .root {
+            withAnimation(.easeInOut(duration: 0.28)) {
+                page = .root
+            }
+        } else {
+            isPresented = false
+        }
     }
 }
 
@@ -137,11 +170,12 @@ private struct PlaybackSourceMenuPanel: View {
     let onSelectSource: (String) -> Void
     let onSelectVersion: (String) -> Void
     let onPerformAction: (String) -> Void
-    let onDismiss: () -> Void
 
+    @Namespace private var panelFocusScope
+    #if os(tvOS)
+    @Environment(\.resetFocus) private var resetFocus
+    #endif
     @FocusState private var focusedRowID: String?
-    @State private var didReceiveFocus = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if page != .root {
@@ -158,36 +192,22 @@ private struct PlaybackSourceMenuPanel: View {
                         versionRows
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 16)
+                .padding(14)
             }
             .scrollIndicators(.hidden)
         }
+        // Page content swaps immediately; only the glass container morphs.
+        .animation(nil, value: page)
         .frame(width: panelWidth)
-        .frame(height: panelHeight)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.12))
-                }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: .black.opacity(0.32), radius: 28, y: 16)
+        .frame(height: panelHeight, alignment: .top)
+        .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
         #if os(tvOS)
+        .focusScope(panelFocusScope)
         .focusSection()
         .defaultFocus($focusedRowID, initialRowID)
         #endif
         .onAppear { focusFirstRow() }
         .onChange(of: page) { _, _ in focusFirstRow() }
-        .onChange(of: focusedRowID) { _, newValue in
-            if newValue != nil {
-                didReceiveFocus = true
-            } else if didReceiveFocus {
-                onDismiss()
-            }
-        }
     }
 
     @ViewBuilder
@@ -198,14 +218,14 @@ private struct PlaybackSourceMenuPanel: View {
                     navigate(to: .root)
                 } label: {
                     Image(systemName: "chevron.backward")
-                        .font(.headline.weight(.bold))
-                        .frame(width: 34, height: 34)
+                        .accessibilityLabel("Back")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Back")
+                .buttonStyle(PlozzPanelHeaderButtonStyle())
+                .focusEffectDisabled()
+                .focused($focusedRowID, equals: "header.back")
             }
-            Text(pageTitle)
-                .font(sectionTitleFont)
+            Text(page == .servers ? "Servers" : "Versions")
+                .font(.headline.weight(.semibold))
             Spacer()
         }
         .padding(.horizontal, 20)
@@ -269,7 +289,7 @@ private struct PlaybackSourceMenuPanel: View {
                         if let subtitle = sourceSubtitle(source) {
                             Text(subtitle)
                                 .font(rowDetailFont)
-                                .foregroundStyle(.secondary)
+                                .settingsRowSecondary()
                         }
                     }
                     Spacer(minLength: 12)
@@ -285,23 +305,26 @@ private struct PlaybackSourceMenuPanel: View {
     @ViewBuilder
     private var versionRows: some View {
         ForEach(versions) { version in
+            let title = version.displayLabel
+            let titleFacts = Set(title.components(separatedBy: " · "))
+            let supplementalFacts = version.menuFacts.filter { !titleFacts.contains($0) }
             menuRowButton(id: "version.\(version.id)") {
                 onSelectVersion(version.id)
             } label: {
                 HStack(alignment: .top, spacing: 14) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(version.menuTitle)
+                        Text(title)
                             .font(rowTitleFont)
-                        if !version.menuFacts.isEmpty {
-                            Text(version.menuFacts.joined(separator: " · "))
+                        if !supplementalFacts.isEmpty {
+                            Text(supplementalFacts.joined(separator: " · "))
                                 .font(rowDetailFont)
-                                .foregroundStyle(.secondary)
+                                .settingsRowSecondary()
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         if let fileName = version.fileName {
                             Text(fileName)
                                 .font(fileNameFont)
-                                .foregroundStyle(.tertiary)
+                                .settingsRowSecondary()
                                 .lineLimit(2)
                                 .truncationMode(.middle)
                         }
@@ -323,46 +346,56 @@ private struct PlaybackSourceMenuPanel: View {
         systemImage: String,
         destination: PlaybackSourceMenuButtonPage
     ) -> some View {
-        menuRowButton(id: id) {
+        menuRowButton(id: id, fixedHeight: rootRowHeight) {
             navigate(to: destination)
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: systemImage)
                     .frame(width: providerMarkSize)
+                    .settingsRowIcon()
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(rowTitleFont)
+                       .font(rowCategoryFont)
+                       .textCase(.uppercase)
+                       .tracking(0.8)
+                       .settingsRowSecondary()
                     Text(detail)
-                        .font(rowDetailFont)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                       .font(rowTitleFont)
+                       .lineLimit(2)
                 }
                 Spacer(minLength: 12)
                 Image(systemName: "chevron.forward")
-                    .foregroundStyle(.tertiary)
+                    .settingsRowSecondary()
             }
         }
     }
 
     private func menuRowButton<Content: View>(
         id: String,
+        fixedHeight: CGFloat? = nil,
         action: @escaping () -> Void,
         @ViewBuilder label: () -> Content
     ) -> some View {
         Button(action: action) {
             label()
                 .padding(.horizontal, 16)
-                .padding(.vertical, rowVerticalPadding)
+                .modifier(
+                    PlaybackSourceMenuRowHeight(
+                       fixedHeight: fixedHeight,
+                       verticalPadding: rowVerticalPadding
+                    )
+                )
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsFocusButtonStyle(size: .contained))
         .focused($focusedRowID, equals: id)
+        #if os(tvOS)
+        .prefersDefaultFocus(id == initialRowID, in: panelFocusScope)
+        #endif
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(focusedRowID == id ? Color.primary.opacity(0.16) : Color.primary.opacity(0.055))
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.primary.opacity(0.055))
         )
-        .scaleEffect(focusedRowID == id ? 1.018 : 1)
-        .animation(.easeOut(duration: 0.12), value: focusedRowID == id)
     }
 
     private var selectedSource: MediaSourceRef? {
@@ -389,36 +422,18 @@ private struct PlaybackSourceMenuPanel: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    private var pageTitle: LocalizedStringKey {
-        switch page {
-        case .root: return "Play Options"
-        case .servers: return "Server"
-        case .versions: return "Version"
-        }
-    }
-
     private func focusFirstRow() {
-        Task { @MainActor in
-            await Task.yield()
-            switch page {
-            case .root:
-                if sources.count > 1 { focusedRowID = "root.servers" }
-                else if versions.count > 1 { focusedRowID = "root.versions" }
-                else { focusedRowID = actions.first.map { "action.\($0.id)" } }
-            case .servers:
-                focusedRowID = sources.first.map { "server.\($0.accountID)" }
-            case .versions:
-                focusedRowID = versions.first.map { "version.\($0.id)" }
-            }
-        }
+        let target = initialRowID
+        focusedRowID = target
+        #if os(tvOS)
+        resetFocus(in: panelFocusScope)
+        #endif
     }
 
     private func navigate(to destination: PlaybackSourceMenuButtonPage) {
-        // The currently focused row disappears during a drill-in transition.
-        // Reset this guard so that transient nil focus does not dismiss the panel
-        // before the destination's default row can take focus.
-        didReceiveFocus = false
-        page = destination
+        withAnimation(.easeInOut(duration: 0.28)) {
+            page = destination
+        }
     }
 
     private var initialRowID: String? {
@@ -428,9 +443,11 @@ private struct PlaybackSourceMenuPanel: View {
             if versions.count > 1 { return "root.versions" }
             return actions.first.map { "action.\($0.id)" }
         case .servers:
-            return sources.first.map { "server.\($0.accountID)" }
+            let source = sources.first { $0.accountID == selectedSourceID } ?? sources.first
+            return source.map { "server.\($0.accountID)" }
         case .versions:
-            return versions.first.map { "version.\($0.id)" }
+            let version = versions.first { $0.id == selectedVersionID } ?? versions.first
+            return version.map { "version.\($0.id)" }
         }
     }
 
@@ -451,21 +468,12 @@ private struct PlaybackSourceMenuPanel: View {
     }
 
     private var panelHeight: CGFloat {
-        #if os(tvOS)
-        switch page {
-        case .root:
-            let optionCount = (sources.count > 1 ? 1 : 0)
-                + (versions.count > 1 ? 1 : 0)
-                + actions.count
-            return min(max(CGFloat(optionCount) * 104 + 32, 136), panelMaxHeight)
-        case .servers:
-            return min(max(CGFloat(sources.count) * 104 + 94, 250), panelMaxHeight)
-        case .versions:
-            return min(max(CGFloat(versions.count) * 142 + 94, 300), panelMaxHeight)
-        }
-        #else
-        return panelMaxHeight
-        #endif
+        PlaybackSourceMenuMetrics.panelHeight(
+            page: page,
+            sourceCount: sources.count,
+            versionCount: versions.count,
+            actionCount: actions.count
+        )
     }
 
     private var providerMarkSize: CGFloat {
@@ -484,11 +492,11 @@ private struct PlaybackSourceMenuPanel: View {
         #endif
     }
 
-    private var sectionTitleFont: Font {
+    private var rootRowHeight: CGFloat? {
         #if os(tvOS)
-        .title2.bold()
+        82
         #else
-        .headline
+        nil
         #endif
     }
 
@@ -508,6 +516,14 @@ private struct PlaybackSourceMenuPanel: View {
         #endif
     }
 
+    private var rowCategoryFont: Font {
+        #if os(tvOS)
+        .system(size: 14, weight: .semibold)
+        #else
+        .caption2.weight(.semibold)
+        #endif
+    }
+
     private var fileNameFont: Font {
         #if os(tvOS)
         .system(size: 17)
@@ -517,11 +533,54 @@ private struct PlaybackSourceMenuPanel: View {
     }
 }
 
+private struct PlaybackSourceMenuRowHeight: ViewModifier {
+    let fixedHeight: CGFloat?
+    let verticalPadding: CGFloat
+
+    func body(content: Content) -> some View {
+        if let fixedHeight {
+            content.frame(height: fixedHeight)
+        } else {
+            content.padding(.vertical, verticalPadding)
+        }
+    }
+}
+
 // The generic button's nested type cannot be named in a non-generic panel.
 private enum PlaybackSourceMenuButtonPage: Hashable {
     case root
     case servers
     case versions
+}
+
+private enum PlaybackSourceMenuMetrics {
+    static func panelHeight(
+        page: PlaybackSourceMenuButtonPage,
+        sourceCount: Int,
+        versionCount: Int,
+        actionCount: Int
+    ) -> CGFloat {
+        #if os(tvOS)
+        switch page {
+        case .root:
+            let optionCount = (sourceCount > 1 ? 1 : 0) + (versionCount > 1 ? 1 : 0)
+            let rowCount = optionCount + actionCount
+            let rowSpacing = CGFloat(max(rowCount - 1, 0)) * 8
+            let dividerHeight: CGFloat = optionCount > 0 && actionCount > 0 ? 17 : 0
+            let contentHeight = CGFloat(optionCount) * 82
+                + CGFloat(actionCount) * 67
+                + rowSpacing
+                + dividerHeight
+            return min(max(contentHeight + 28, 110), 700)
+        case .servers:
+            return min(max(CGFloat(sourceCount) * 104 + 94, 250), 700)
+        case .versions:
+            return min(max(CGFloat(versionCount) * 142 + 94, 300), 700)
+        }
+        #else
+        return 620
+        #endif
+    }
 }
 
 #endif

@@ -13,6 +13,8 @@ import UIKit
 /// tags are the defining metadata.
 struct DetailExtrasView: View {
     let item: MediaItem
+    var selectedSource: MediaSourceRef? = nil
+    var selectedVersion: MediaVersion? = nil
     /// Leading inset so the cast row and chip strips align with the hero text
     /// above. Defaults to the standard screen padding.
     var leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding
@@ -24,9 +26,18 @@ struct DetailExtrasView: View {
     var revealsSeriesCastWithoutBrowser = false
     var onCastFocusEntered: (() -> Void)? = nil
 
+    /// Extra gap below the cast row on tvOS so a 3-line name wrapping out
+    /// of its circle doesn't overlap the About header below.
+    private var castBottomSpacing: CGFloat {
+        #if os(tvOS)
+        48
+        #else
+        28
+        #endif
+    }
+
     private var hasContent: Bool {
         !item.cast.isEmpty
-            || item.tagline != nil
             || item.overview != nil
             || !item.ratings.isEmpty
             || item.productionYear != nil
@@ -37,11 +48,13 @@ struct DetailExtrasView: View {
             || !item.studios.isEmpty
             || !item.tags.isEmpty
             || item.people.contains { !$0.isCast }
+            || selectedSource != nil
+            || selectedVersion != nil
     }
 
     var body: some View {
         if hasContent {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: castBottomSpacing) {
                 if !item.cast.isEmpty {
                     CastRowView(
                         people: item.cast,
@@ -56,7 +69,12 @@ struct DetailExtrasView: View {
                             revealsWithoutBrowser: revealsSeriesCastWithoutBrowser
                         ))
                 }
-                DetailInformationSections(item: item, horizontalInset: leadingInset)
+                DetailInformationSections(
+                    item: item,
+                    horizontalInset: leadingInset,
+                    selectedSource: selectedSource,
+                    selectedVersion: selectedVersion
+                )
             }
         }
     }

@@ -91,6 +91,54 @@ public struct SettingsFocusButtonStyle: ButtonStyle {
     }
 }
 
+/// Compact, theme-aware chip used for Back/Edit controls in floating glass
+/// panel headers. Player submenus and detail-page menus share this treatment.
+public struct PlozzPanelHeaderButtonStyle: ButtonStyle {
+    private let cornerRadius: CGFloat
+
+    public init(cornerRadius: CGFloat = 14) {
+        self.cornerRadius = cornerRadius
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        PlozzPanelHeaderButtonBody(
+            configuration: configuration,
+            cornerRadius: cornerRadius
+        )
+    }
+}
+
+private struct PlozzPanelHeaderButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    let cornerRadius: CGFloat
+
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let foreground = colorScheme == .dark ? Color.white : Color.black
+        let focusForeground = colorScheme == .dark ? Color.black : Color.white
+
+        configuration.label
+            .font(.body.weight(.semibold))
+            .foregroundStyle(isFocused ? focusForeground : foreground)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(
+                shape.fill(
+                    isFocused
+                    ? foreground
+                    : foreground.opacity(colorScheme == .dark ? 0.12 : 0.08)
+                )
+            )
+            .overlay(shape.stroke(foreground.opacity(isFocused ? 0 : 0.18), lineWidth: 1))
+            .contentShape(shape)
+            .opacity(configuration.isPressed ? 0.9 : 1)
+            .animation(nil, value: isFocused)
+    }
+}
+
 private struct SettingsFocusBody: View {
     let configuration: ButtonStyle.Configuration
     let size: SettingsRowSize

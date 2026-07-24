@@ -95,6 +95,7 @@ struct SettingsPanel<Content: View>: View {
     var subtitle: String?
     var footer: String?
     var contentPadding: EdgeInsets
+    var showsSurface: Bool
     @ViewBuilder let content: Content
 
     init(
@@ -102,12 +103,14 @@ struct SettingsPanel<Content: View>: View {
         subtitle: String? = nil,
         footer: String? = nil,
         contentPadding: EdgeInsets = .settingsPanelDefault,
+        showsSurface: Bool = true,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
         self.footer = footer
         self.contentPadding = contentPadding
+        self.showsSurface = showsSurface
         self.content = content()
     }
 
@@ -140,14 +143,18 @@ struct SettingsPanel<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(contentPadding)
-        .background(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .background {
+            if showsSurface {
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            }
+        }
+        .overlay {
+            if showsSurface {
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            }
+        }
     }
 }
 
@@ -201,9 +208,6 @@ struct FocusableSettingsPanel<Content: View>: View {
     var onActivate: (() -> Void)?
     @ViewBuilder let content: Content
 
-    @FocusState private var isFocused: Bool
-    @Environment(\.themePalette) private var palette
-
     init(
         title: String? = nil,
         footer: String? = nil,
@@ -217,24 +221,8 @@ struct FocusableSettingsPanel<Content: View>: View {
     }
 
     var body: some View {
-        SettingsPanel(title: title, footer: footer) { content }
-            .overlay {
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .strokeBorder(palette.accent, lineWidth: 4)
-                    .opacity(isFocused ? 1 : 0)
-            }
-            // Flatten the panel (card fill + logo + QR + text) into one layer
-            // BEFORE the drop shadow so the shadow is cast by the card's outer
-            // silhouette only. Without this, `.shadow` applies per opaque subview,
-            // so the QR code and inner content each drop their own shadow on
-            // focus instead of just the whole card.
-            .compositingGroup()
-            .shadow(color: .black.opacity(isFocused ? 0.28 : 0), radius: isFocused ? 14 : 0, y: isFocused ? 6 : 0)
-            .scaleEffect(isFocused ? 1.01 : 1)
-            .focusable()
-            .focused($isFocused)
-            .focusEffectDisabled()
-            .animation(.easeOut(duration: 0.16), value: isFocused)
+        SettingsPanel(title: title, footer: footer, showsSurface: false) { content }
+            .plozzFocusableCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
             .accessibilityElement(children: .combine)
             .onTapGesture { onActivate?() }
     }

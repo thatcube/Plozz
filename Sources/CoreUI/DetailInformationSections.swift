@@ -8,15 +8,65 @@ import CoreModels
 public struct DetailInformationSections: View {
     private let item: MediaItem
     private let horizontalInset: CGFloat
+    private let selectedSource: MediaSourceRef?
+    private let selectedVersion: MediaVersion?
 
-    public init(item: MediaItem, horizontalInset: CGFloat) {
+    @State private var showsFullOverview = false
+
+    public init(
+        item: MediaItem,
+        horizontalInset: CGFloat,
+        selectedSource: MediaSourceRef? = nil,
+        selectedVersion: MediaVersion? = nil
+    ) {
         self.item = item
         self.horizontalInset = horizontalInset
+        self.selectedSource = selectedSource
+        self.selectedVersion = selectedVersion
     }
 
     public var body: some View {
         if hasContent {
-            VStack(alignment: .leading, spacing: sectionSpacing) {
+            #if os(tvOS)
+            tvGrid
+                .padding(.horizontal, horizontalInset)
+            #else
+            iOSLayout
+                .padding(.horizontal, horizontalInset)
+            #endif
+        }
+    }
+
+    #if !os(tvOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var iOSLayout: some View {
+        VStack(alignment: .leading, spacing: sectionSpacing) {
+            if horizontalSizeClass == .regular {
+                // iPad: side-by-side About + Ratings, matching tvOS spine
+                if hasAbout || !item.ratings.isEmpty {
+                    HStack(alignment: .top, spacing: gridSpacing) {
+                        if hasAbout {
+                            VStack(alignment: .leading, spacing: 14) {
+                                Text("About")
+                                    .font(sectionTitleFont)
+                                aboutContent
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        if !item.ratings.isEmpty {
+                            VStack(alignment: .leading, spacing: 14) {
+                                Text("Ratings")
+                                    .font(sectionTitleFont)
+                                compactRatingsCard
+                            }
+                            .frame(maxWidth: hasAbout ? nil : .infinity)
+                            .frame(width: hasAbout ? iPadRatingsWidth : nil)
+                        }
+                    }
+                }
+            } else {
+                // iPhone: vertical stack
                 if hasAbout {
                     detailSection(title: "About") {
                         aboutContent
@@ -24,74 +74,101 @@ public struct DetailInformationSections: View {
                 }
                 if !item.ratings.isEmpty {
                     detailSection(title: "Ratings") {
-                        ratingsGrid
-                    }
-                }
-                if !informationFacts.isEmpty {
-                    detailSection(title: "Information") {
-                        informationGrid
+                        compactRatingsCard
                     }
                 }
             }
-            .padding(.horizontal, horizontalInset)
+            if !informationGroups.isEmpty {
+                detailSection(title: "Information", contentSpacing: informationHeaderSpacing) {
+                    informationGrid
+                }
+            }
         }
     }
 
-    private var hasContent: Bool {
-        hasAbout || !item.ratings.isEmpty || !informationFacts.isEmpty
-    }
+    private var iPadRatingsWidth: CGFloat { 320 }
 
-    private var hasAbout: Bool {
-        item.tagline != nil || nonempty(item.overview) != nil
-    }
-
-    private var aboutContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if let tagline = item.tagline {
-                Text(tagline)
-                    .font(taglineFont)
-                    .italic()
-                    .foregroundStyle(.secondary)
-            }
-            if let overview = nonempty(item.overview) {
-                Text(overview)
-                    .font(bodyFont)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+    private var compactRatingsCard: some View {
+        VStack(alignment: .leading, spacing: ratingRowSpacing) {
+            ForEach(sortedRatings) { rating in
+                HStack(spacing: 14) {
+                    Text(rating.source.displayName)
+                        .font(factValueFont)
+                        .lineLimit(1)
+                    Spacer(minLength: 12)
+                    RatingBadge(rating: rating)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(cardPadding)
-        .background(cardBackground)
+        .plozzFocusableCard(cornerRadius: cardCornerRadius)
+        .accessibilityElement(children: .contain)
     }
+    #endif
 
-    private var ratingsGrid: some View {
-        LazyVGrid(columns: ratingColumns, alignment: .leading, spacing: gridSpacing) {
-            ForEach(item.ratings.sorted { $0.source.sortRank < $1.source.sortRank }) { rating in
-                DetailedRatingCard(rating: rating)
-            }
-        }
-    }
-
-    private var informationGrid: some View {
-        LazyVGrid(columns: informationColumns, alignment: .leading, spacing: gridSpacing) {
-            ForEach(informationFacts) { fact in
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(fact.label)
-                        .font(factLabelFont)
-                        .foregroundStyle(.secondary)
-                    Text(fact.value)
-                        .font(factValueFont)
-                        .fixedSize(horizontal: false, vertical: true)
+    #if os(tvOS)
+    private var tvGrid: some View {
+        Grid(alignment: .topLeading, horizontalSpacing: gridSpacing, verticalSpacing: 0) {
+            // Zero-height priming row: pins twelve equal tracks so every section
+            // below subdivides the same spine (About ⅔ = Details+Playback,
+            // Ratings ⅓ = File).
+            GridRow {
+                ForEach(0..<12, id: \.self) { _ in
+                    Color.clear
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 0)
                 }
-                .frame(maxWidth: .infinity, minHeight: factMinimumHeight, alignment: .topLeading)
-                .padding(cardPadding)
-                .background(cardBackground)
+            }
+
+            if hasAbout || !item.ratings.isEmpty {
+                GridRow(alignment: .top) {
+                    if hasAbout {
+                        headedSection(title: "About") { aboutContent }
+                            .gridCellColumns(8)
+                        if !item.ratings.isEmpty {
+                            headedSection(title: "Ratings") { ratingsCard }
+                                .gridCellColumns(4)
+                        } else {
+                            Color.clear.gridCellColumns(4)
+                        }
+                    } else {
+                        headedSection(title: "Ratings") { ratingsCard }
+                            .gridCellColumns(4)
+                        Color.clear.gridCellColumns(8)
+                    }
+                }
+            }
+
+            if !informationGroups.isEmpty {
+                GridRow {
+                    Text("Information")
+                        .font(sectionTitleFont)
+                        .gridCellColumns(12)
+                }
+                .padding(.top, sectionSpacing)
+
+                GridRow(alignment: .top) {
+                    ForEach(informationGroups) { group in
+                        informationGroup(group)
+                            // Reserve the borderless focus plate's outward growth
+                            // (cardPadding on each side) plus an extra 8pt so a
+                            // focused column's plate lands just inside its own
+                            // keyline with a clear gap to the neighbouring column.
+                            .padding(.trailing, cardPadding + 8)
+                            .gridCellColumns(informationColumnSpan)
+                    }
+                    if informationGroups.count * informationColumnSpan < 12 {
+                        Color.clear
+                            .gridCellColumns(12 - informationGroups.count * informationColumnSpan)
+                    }
+                }
+                .padding(.top, informationHeaderSpacing)
             }
         }
     }
 
-    private func detailSection<Content: View>(
+    private func headedSection<Content: View>(
         title: LocalizedStringKey,
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -100,9 +177,199 @@ public struct DetailInformationSections: View {
                 .font(sectionTitleFont)
             content()
         }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    private var informationFacts: [InformationFact] {
+    private var ratingsCard: some View {
+        VStack(alignment: .leading, spacing: ratingRowSpacing) {
+            ForEach(sortedRatings) { rating in
+                HStack(spacing: 14) {
+                    Text(rating.source.displayName)
+                        .font(factValueFont)
+                        .lineLimit(1)
+                    Spacer(minLength: 12)
+                    RatingBadge(rating: rating)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(cardPadding)
+        .plozzFocusableCard(cornerRadius: cardCornerRadius)
+        .accessibilityElement(children: .contain)
+    }
+    #endif
+
+    private var hasContent: Bool {
+        hasAbout || !item.ratings.isEmpty || !informationGroups.isEmpty
+    }
+
+    private var hasAbout: Bool {
+        nonempty(item.overview) != nil
+    }
+
+    private var aboutContent: some View {
+        Button { showsFullOverview = true } label: {
+            ZStack(alignment: .bottomTrailing) {
+                VStack(alignment: .leading, spacing: aboutContentSpacing) {
+                    Text(item.title)
+                        .font(aboutTitleFont)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let overview = nonempty(item.overview) {
+                        overviewText(overview)
+                            .font(bodyFont)
+                            .foregroundStyle(.primary)
+                            .lineLimit(aboutLineLimit)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
+
+                if overviewExceedsLimit {
+                    // Fade the text behind MORE so it doesn't collide
+                    LinearGradient(
+                        colors: [.clear, .black],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 120, height: moreFadeHeight)
+                    .blendMode(.destinationOut)
+
+                    Text("MORE")
+                        .font(moreLabelFont)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .compositingGroup()
+            .padding(cardPadding)
+        }
+        .buttonStyle(.plain)
+        .plozzFocusableCard(cornerRadius: cardCornerRadius)
+        #if os(tvOS)
+        .sheet(isPresented: $showsFullOverview) {
+            overviewSheet
+        }
+        #else
+        .sheet(isPresented: $showsFullOverview) {
+            overviewSheet
+        }
+        #endif
+    }
+
+    private var overviewSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let overview = nonempty(item.overview) {
+                        overviewText(overview)
+                            .font(bodyFont)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(sheetPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .navigationTitle(item.title)
+            #if !os(tvOS)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { showsFullOverview = false } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            #endif
+        }
+    }
+
+    private var overviewExceedsLimit: Bool {
+        guard let overview = nonempty(item.overview) else { return false }
+        // Heuristic: more than ~aboutLineLimit lines of text at ~70 chars/line
+        return overview.count > aboutLineLimit * 70
+    }
+
+    /// Renders the synopsis with inline markdown resolved the same way the rest of
+    /// the app does: tvOS flattens `[label](url)` links to plain label text (no
+    /// pointer to tap them); iOS/iPadOS renders them as tappable links.
+    @ViewBuilder
+    private func overviewText(_ overview: String) -> some View {
+        #if os(tvOS)
+        Text(verbatim: overview.overviewPlainText)
+        #else
+        Text(overview.overviewMarkdown ?? AttributedString(overview))
+        #endif
+    }
+
+    private var informationGrid: some View {
+        LazyVGrid(columns: informationColumns, alignment: .leading, spacing: gridSpacing) {
+            ForEach(informationGroups) { group in
+                informationGroup(group)
+            }
+        }
+    }
+
+    private func informationGroup(_ group: InformationGroup) -> some View {
+        VStack(alignment: .leading, spacing: informationGroupSpacing) {
+            Text(group.title)
+                .font(informationGroupTitleFont)
+
+            VStack(alignment: .leading, spacing: informationFactSpacing) {
+                ForEach(group.facts) { fact in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(fact.label)
+                            .font(factLabelFont)
+                            .foregroundStyle(.secondary)
+                        Text(fact.value)
+                            .font(factValueFont)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .plozzFocusableCard(
+            cornerRadius: cardCornerRadius,
+            variant: .borderless(focusPadding: cardPadding)
+        )
+        .accessibilityElement(children: .contain)
+    }
+
+    private func detailSection<Content: View>(
+        title: LocalizedStringKey,
+        contentSpacing: CGFloat = 14,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: contentSpacing) {
+            Text(title)
+                .font(sectionTitleFont)
+            content()
+        }
+    }
+
+    private var informationGroups: [InformationGroup] {
+        [
+            InformationGroup(id: "details", title: "Details", facts: detailFacts),
+            InformationGroup(id: "playback", title: "Playback", facts: playbackFacts),
+            InformationGroup(id: "file", title: "File", facts: fileFacts)
+        ]
+        .filter { !$0.facts.isEmpty }
+    }
+
+    private var sortedRatings: [ExternalRating] {
+        item.ratings.sorted { $0.source.sortRank < $1.source.sortRank }
+    }
+
+    private var informationColumnSpan: Int {
+        switch informationGroups.count {
+        case 1: 8
+        case 2: 6
+        default: 4
+        }
+    }
+
+    private var detailFacts: [InformationFact] {
         var facts: [InformationFact] = []
         if let year = item.productionYear {
             facts.append(InformationFact(id: "year", label: "Year", value: String(year)))
@@ -122,6 +389,64 @@ public struct DetailInformationSections: View {
         appendListFact(id: "writers", label: "Written By", values: crew(kind: "writer"), to: &facts)
         appendListFact(id: "tags", label: "Tags", values: Array(item.tags.prefix(16)), to: &facts)
         return facts
+    }
+
+    private var playbackFacts: [InformationFact] {
+        var facts: [InformationFact] = []
+        if let selectedSource {
+            facts.append(InformationFact(id: "server", label: "Server", value: selectedSource.displayName))
+            if let provider = selectedSource.providerKind?.displayName,
+               !selectedSource.displayName.localizedCaseInsensitiveContains(provider) {
+                facts.append(InformationFact(id: "provider", label: "Provider", value: provider))
+            }
+            if let account = nonempty(selectedSource.accountName),
+               !selectedSource.displayName.localizedCaseInsensitiveContains(account) {
+                facts.append(InformationFact(id: "account", label: "Account", value: account))
+            }
+            if let locality = localityLabel(selectedSource.locality) {
+                facts.append(InformationFact(id: "connection", label: "Connection", value: locality))
+            }
+        }
+        if let selectedVersion, selectedVersion.displayLabel != "Version" {
+            facts.append(InformationFact(id: "version", label: "Version", value: selectedVersion.displayLabel))
+        }
+        return facts
+    }
+
+    private var fileFacts: [InformationFact] {
+        guard let selectedVersion else { return [] }
+        var facts: [InformationFact] = []
+        appendVersionFact(id: "filename", label: "Filename", value: selectedVersion.fileName, alwaysInclude: true, to: &facts)
+        appendVersionFact(id: "resolution", label: "Resolution", value: selectedVersion.resolutionLabel, to: &facts)
+        appendVersionFact(id: "dynamic-range", label: "Dynamic Range", value: selectedVersion.hdrLabel, to: &facts)
+        appendVersionFact(id: "source-quality", label: "Source", value: selectedVersion.sourceQualityLabel, to: &facts)
+        appendVersionFact(id: "audio", label: "Audio", value: selectedVersion.audioLabel, to: &facts)
+        appendVersionFact(id: "bitrate", label: "Bitrate", value: selectedVersion.bitrateLabel, to: &facts)
+        appendVersionFact(id: "size", label: "Size", value: selectedVersion.sizeLabel, to: &facts)
+        appendVersionFact(id: "file-duration", label: "Duration", value: selectedVersion.durationLabel, to: &facts)
+        return facts
+    }
+
+    private func appendVersionFact(
+        id: String,
+        label: LocalizedStringKey,
+        value: String?,
+        alwaysInclude: Bool = false,
+        to facts: inout [InformationFact]
+    ) {
+        guard let value = nonempty(value) else { return }
+        if !alwaysInclude, selectedVersion?.displayLabel.localizedCaseInsensitiveContains(value) == true {
+            return
+        }
+        facts.append(InformationFact(id: id, label: label, value: value))
+    }
+
+    private func localityLabel(_ locality: SourceLocality?) -> String? {
+        switch locality {
+        case .local: return "Local network"
+        case .remote: return "Remote"
+        case .unknown, nil: return nil
+        }
     }
 
     private func appendListFact(
@@ -161,21 +486,14 @@ public struct DetailInformationSections: View {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private var ratingColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: ratingCardMinimumWidth), spacing: gridSpacing)]
-    }
-
     private var informationColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: informationCardMinimumWidth), spacing: gridSpacing)]
-    }
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .overlay {
-                RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08))
-            }
+        [
+            GridItem(
+                .adaptive(minimum: informationColumnMinimumWidth),
+                spacing: informationColumnSpacing,
+                alignment: .top
+            )
+        ]
     }
 
     private var sectionTitleFont: Font {
@@ -186,19 +504,67 @@ public struct DetailInformationSections: View {
         #endif
     }
 
-    private var taglineFont: Font {
-        #if os(tvOS)
-        .system(size: 25, weight: .medium)
-        #else
-        .title3.weight(.medium)
-        #endif
-    }
-
     private var bodyFont: Font {
         #if os(tvOS)
         .system(size: 24)
         #else
         .body
+        #endif
+    }
+
+    private var aboutTitleFont: Font {
+        #if os(tvOS)
+        .system(size: 28, weight: .semibold)
+        #else
+        .title3.weight(.semibold)
+        #endif
+    }
+
+    private var aboutContentSpacing: CGFloat {
+        #if os(tvOS)
+        12
+        #else
+        10
+        #endif
+    }
+
+    private var aboutLineLimit: Int {
+        #if os(tvOS)
+        5
+        #else
+        4
+        #endif
+    }
+
+    private var moreLabelFont: Font {
+        #if os(tvOS)
+        .system(size: 20, weight: .semibold)
+        #else
+        .footnote.weight(.semibold)
+        #endif
+    }
+
+    private var moreFadeHeight: CGFloat {
+        #if os(tvOS)
+        34
+        #else
+        22
+        #endif
+    }
+
+    private var sheetPadding: CGFloat {
+        #if os(tvOS)
+        60
+        #else
+        24
+        #endif
+    }
+
+    private var cardFillHeight: CGFloat? {
+        #if os(tvOS)
+        .infinity
+        #else
+        nil
         #endif
     }
 
@@ -218,6 +584,14 @@ public struct DetailInformationSections: View {
         #endif
     }
 
+    private var informationGroupTitleFont: Font {
+        #if os(tvOS)
+        .system(size: 26, weight: .semibold)
+        #else
+        .headline
+        #endif
+    }
+
     private var sectionSpacing: CGFloat {
         #if os(tvOS)
         36
@@ -229,6 +603,46 @@ public struct DetailInformationSections: View {
     private var gridSpacing: CGFloat {
         #if os(tvOS)
         18
+        #else
+        12
+        #endif
+    }
+
+    private var informationColumnSpacing: CGFloat {
+        #if os(tvOS)
+        54
+        #else
+        24
+        #endif
+    }
+
+    private var informationHeaderSpacing: CGFloat {
+        #if os(tvOS)
+        cardPadding + 4
+        #else
+        14
+        #endif
+    }
+
+    private var informationGroupSpacing: CGFloat {
+        #if os(tvOS)
+        22
+        #else
+        16
+        #endif
+    }
+
+    private var informationFactSpacing: CGFloat {
+        #if os(tvOS)
+        18
+        #else
+        14
+        #endif
+    }
+
+    private var ratingRowSpacing: CGFloat {
+        #if os(tvOS)
+        16
         #else
         12
         #endif
@@ -250,127 +664,25 @@ public struct DetailInformationSections: View {
         #endif
     }
 
-    private var ratingCardMinimumWidth: CGFloat {
+    private var informationColumnMinimumWidth: CGFloat {
         #if os(tvOS)
-        330
+        400
         #else
-        250
+        280
         #endif
     }
+}
 
-    private var informationCardMinimumWidth: CGFloat {
-        #if os(tvOS)
-        320
-        #else
-        250
-        #endif
-    }
-
-    private var factMinimumHeight: CGFloat {
-        #if os(tvOS)
-        80
-        #else
-        56
-        #endif
-    }
+private struct InformationGroup: Identifiable {
+    let id: String
+    let title: LocalizedStringKey
+    let facts: [InformationFact]
 }
 
 private struct InformationFact: Identifiable {
     let id: String
     let label: LocalizedStringKey
     let value: String
-}
-
-private struct DetailedRatingCard: View {
-    let rating: ExternalRating
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(rating.source.displayName)
-                    .font(titleFont)
-                Spacer()
-                RatingBadge(rating: rating)
-            }
-            HStack(spacing: 12) {
-                Text(cohortLabel)
-                if let count = rating.ratingCount, count > 0 {
-                    Text("\(count.formatted()) ratings")
-                }
-                if let verdict = rating.verdict {
-                    Label(verdict.displayName, systemImage: verdictSymbol(verdict))
-                }
-            }
-            .font(detailFont)
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .topLeading)
-        .padding(cardPadding)
-        .background(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08))
-                }
-        )
-        .accessibilityElement(children: .combine)
-    }
-
-    private var cohortLabel: LocalizedStringKey {
-        switch rating.cohort {
-        case .critics: return "Critics"
-        case .audience: return "Audience"
-        case .community: return "Community"
-        }
-    }
-
-    private func verdictSymbol(_ verdict: RatingVerdict) -> String {
-        switch verdict {
-        case .fresh, .hot, .positive: return "hand.thumbsup.fill"
-        case .rotten, .stale, .negative: return "hand.thumbsdown.fill"
-        }
-    }
-
-    private var titleFont: Font {
-        #if os(tvOS)
-        .system(size: 24, weight: .semibold)
-        #else
-        .headline
-        #endif
-    }
-
-    private var detailFont: Font {
-        #if os(tvOS)
-        .system(size: 18)
-        #else
-        .caption
-        #endif
-    }
-
-    private var minimumHeight: CGFloat {
-        #if os(tvOS)
-        92
-        #else
-        68
-        #endif
-    }
-
-    private var cardPadding: CGFloat {
-        #if os(tvOS)
-        22
-        #else
-        16
-        #endif
-    }
-
-    private var cornerRadius: CGFloat {
-        #if os(tvOS)
-        20
-        #else
-        16
-        #endif
-    }
 }
 
 #endif

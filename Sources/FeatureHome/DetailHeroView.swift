@@ -960,6 +960,9 @@ struct DetailHeroView: View {
             },
             onSelectVersion: { versionID in
                 onSelectVersion?(versionID)
+            },
+            onDismiss: {
+                heroActionRowFocus = .more
             }
         ) {
             Image(systemName: "ellipsis")

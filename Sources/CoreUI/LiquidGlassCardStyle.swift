@@ -187,6 +187,16 @@ public extension View {
         modifier(PlozzGlassCardModifier(cornerRadius: cornerRadius, isFocused: isFocused, glassAtRest: glassAtRest))
     }
 
+    /// Makes a read-only card reachable on tvOS and gives it the same Liquid
+    /// Glass lift used by detail metadata. Reduce Transparency automatically
+    /// switches the surface to the opaque fallback in `PlozzGlassCardModifier`.
+    func plozzFocusableCard(
+        cornerRadius: CGFloat,
+        variant: PlozzFocusableCardVariant = .filled
+    ) -> some View {
+        modifier(PlozzFocusableCardModifier(cornerRadius: cornerRadius, variant: variant))
+    }
+
     /// Draws Twozz's hairline "inner glass" rim around a clipped media thumbnail:
     /// a 1.5pt frosted-glass stroke (the theme's `mediaEdgeColor`) inset half a
     /// point outside the artwork's rounded rect. Apply it **after** the artwork's
@@ -233,6 +243,63 @@ public extension View {
     /// legibility over bright video. Respects Reduce Transparency.
     func plozzGlassPanel(cornerRadius: CGFloat, scrimOpacity: Double = 0.1, refractEdgesOnly: Bool = false) -> some View {
         modifier(PlozzGlassPanelModifier(cornerRadius: cornerRadius, scrimOpacity: scrimOpacity, refractEdgesOnly: refractEdgesOnly))
+    }
+}
+
+public enum PlozzFocusableCardVariant: Sendable {
+    case filled
+    case borderless(focusPadding: CGFloat = 18)
+}
+
+public struct PlozzFocusableCardModifier: ViewModifier {
+    private let cornerRadius: CGFloat
+    private let variant: PlozzFocusableCardVariant
+    @FocusState private var focused: Bool
+    @Environment(\.themePalette) private var palette
+
+    public init(
+        cornerRadius: CGFloat,
+        variant: PlozzFocusableCardVariant = .filled
+    ) {
+        self.cornerRadius = cornerRadius
+        self.variant = variant
+    }
+
+    public func body(content: Content) -> some View {
+        #if os(tvOS)
+        content
+            .background { surface }
+            .focusable(true)
+            .focused($focused)
+            .focusEffectDisabled()
+            .zIndex(focused ? 1 : 0)
+            .animation(.easeOut(duration: 0.18), value: focused)
+        #else
+        content.background { surface }
+        #endif
+    }
+
+    @ViewBuilder
+    private var surface: some View {
+        let focusPadding = switch variant {
+        case .filled: CGFloat.zero
+        case .borderless(let padding): padding
+        }
+        let surfaceCorner = cornerRadius
+        let shape = RoundedRectangle(cornerRadius: surfaceCorner, style: .continuous)
+
+        if focused {
+            Color.clear
+                .plozzGlassCard(cornerRadius: surfaceCorner, isFocused: true)
+                .padding(-focusPadding)
+                .shadow(color: .black.opacity(0.30), radius: 18, y: 9)
+        } else if case .filled = variant {
+            shape
+                .fill(palette.isLight ? Color.black.opacity(0.065) : palette.cardSurface)
+                .overlay {
+                    shape.strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
+                }
+        }
     }
 }
 

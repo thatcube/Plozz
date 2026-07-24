@@ -360,7 +360,13 @@ private struct PlozziOSCanonicalItemDetailView: View {
 
                 DetailInformationSections(
                     item: detail.item,
-                    horizontalInset: pageInset
+                    horizontalInset: pageInset,
+                    selectedSource: options.sources.first {
+                        $0.accountID == options.selectedSourceAccountID
+                    },
+                    selectedVersion: options.versions.first {
+                        $0.id == options.selectedVersionID
+                    } ?? MediaVersion.synthesized(from: heroTarget)
                 )
             }
             .padding(.bottom, 32)

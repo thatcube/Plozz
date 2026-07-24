@@ -50,43 +50,6 @@ private struct PlayerMenuRowBody: View {
     }
 }
 
-/// Compact rounded-chip style for the panel header's Edit / Back controls.
-///
-/// Sized to match the menu rows (`.body`, low height) rather than the taller
-/// system glass button, with a nested corner radius that reads as concentric
-/// with the panel's rounded edge. Idle shows a faint translucent fill + hairline
-/// stroke; focus flips to a solid white card with black content, mirroring
-/// `PlayerMenuRowButtonStyle`. Deliberately *no* drop shadow (same HDR frame-drop
-/// reason as the rows). Pair with `.focusEffectDisabled()`.
-struct PanelHeaderButtonStyle: ButtonStyle {
-    var cornerRadius: CGFloat = 14
-    func makeBody(configuration: Configuration) -> some View {
-        PanelHeaderButtonBody(configuration: configuration, cornerRadius: cornerRadius)
-    }
-}
-
-private struct PanelHeaderButtonBody: View {
-    let configuration: ButtonStyle.Configuration
-    let cornerRadius: CGFloat
-    @Environment(\.isFocused) private var isFocused
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        configuration.label
-            .font(.body.weight(.semibold))
-            .foregroundStyle(isFocused ? AnyShapeStyle(Color.black) : AnyShapeStyle(Color.white))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(shape.fill(isFocused ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.white.opacity(0.12))))
-            .overlay(shape.stroke(.white.opacity(isFocused ? 0 : 0.18), lineWidth: 1))
-            .contentShape(shape)
-            .opacity(configuration.isPressed ? 0.9 : 1)
-            // Instant focus flip (no lingering ghost card over moving HDR video),
-            // matching PlayerMenuRowButtonStyle.
-            .animation(nil, value: isFocused)
-    }
-}
-
 // MARK: - Focus-aware leaf helpers
 
 private struct PlayerMenuRowIsFocusedKey: EnvironmentKey {

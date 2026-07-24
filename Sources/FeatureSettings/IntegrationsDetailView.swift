@@ -528,12 +528,6 @@ private struct AttributionCard: View {
     let text: String
     var licenses: [PlozzAttributionLicense] = []
 
-    @FocusState private var isFocused: Bool
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var focusFill: Color { colorScheme == .dark ? .white : .black }
-    private var focusForeground: Color { colorScheme == .dark ? .black : .white }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
@@ -545,24 +539,12 @@ private struct AttributionCard: View {
             }
             Text(text)
                 .font(.callout)
-                .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.78)) : AnyShapeStyle(.secondary))
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(24)
-        .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground) : AnyShapeStyle(.primary))
-        .background(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .fill(isFocused ? AnyShapeStyle(focusFill) : AnyShapeStyle(.ultraThinMaterial))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(isFocused ? 0 : 0.08), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(isFocused ? 0.28 : 0), radius: isFocused ? 14 : 0, y: isFocused ? 6 : 0)
-        .focusable()
-        .focused($isFocused)
-        .animation(.easeOut(duration: 0.16), value: isFocused)
+        .plozzFocusableCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(title). \(licenses.map(\.label).joined(separator: ", ")). \(text)")
     }
@@ -570,13 +552,11 @@ private struct AttributionCard: View {
     private func licenseBadge(_ license: PlozzAttributionLicense) -> some View {
         Text(license.label)
             .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .foregroundStyle(isFocused ? Color.black : .white)
+            .foregroundStyle(.white)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(
-                Capsule().fill(
-                    licenseTint(license.family).opacity(isFocused ? 0.85 : 0.7)
-                )
+                Capsule().fill(licenseTint(license.family).opacity(0.7))
             )
     }
 

@@ -108,6 +108,13 @@ struct PlozziOSHeroRequest {
     var isRequesting: Bool
     var actingName: String?
     var onRequest: (MediaItem) -> Void
+    /// For a **series**: the loaded Seerr season-request availability (nil while it
+    /// loads), plus a per-season request callback. When both are present and there
+    /// is season content, the Request CTA becomes a season-picker menu ("Request
+    /// All Seasons" + per-season) instead of a one-tap whole-title request. Movies
+    /// (and series whose availability hasn't loaded yet) keep the one-tap button.
+    var seasonAvailability: MediaRequestAvailability? = nil
+    var onRequestSeasons: (([Int]) -> Void)? = nil
 }
 
 /// The shared Seerr request / download-status CTA for both the Home and detail
@@ -123,20 +130,36 @@ struct PlozziOSHeroRequestButton: View {
     var body: some View {
         switch request.cta {
         case .request:
-            Button {
-                request.onRequest(item)
-            } label: {
-                if request.isRequesting {
-                    ProgressView()
-                } else {
-                    Label("Request", systemImage: "plus.circle")
+            if item.kind == .series,
+               let onRequestSeasons = request.onRequestSeasons,
+               let availability = request.seasonAvailability,
+               availability.hasSeasonRequestContent {
+                Menu {
+                    SeasonRequestMenuContent(
+                        availability: availability,
+                        onRequest: onRequestSeasons
+                    )
+                } label: {
+                    requestLabel
                 }
+                .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .primary))
+                .disabled(request.isRequesting)
+                .accessibilityLabel(
+                    request.actingName.map { "Request seasons as \($0)" }
+                        ?? "Request seasons"
+                )
+            } else {
+                Button {
+                    request.onRequest(item)
+                } label: {
+                    requestLabel
+                }
+                .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .primary))
+                .disabled(request.isRequesting)
+                .accessibilityLabel(
+                    request.actingName.map { "Request as \($0)" } ?? "Request"
+                )
             }
-            .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .primary))
-            .disabled(request.isRequesting)
-            .accessibilityLabel(
-                request.actingName.map { "Request as \($0)" } ?? "Request"
-            )
         case .requested:
             statusPill {
                 Label("Requested", systemImage: "clock")
@@ -171,6 +194,15 @@ struct PlozziOSHeroRequestButton: View {
         Button {} label: { label() }
             .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .secondary))
             .disabled(true)
+    }
+
+    @ViewBuilder
+    private var requestLabel: some View {
+        if request.isRequesting {
+            ProgressView()
+        } else {
+            Label("Request", systemImage: "plus.circle")
+        }
     }
 }
 

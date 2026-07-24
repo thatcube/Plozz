@@ -24,6 +24,7 @@ struct PlozziOSHomeView: View {
     /// stuck on "Requested" forever.
     @State private var heroRequestStatusSetAt: [String: Date] = [:]
     @State private var heroRequestConfirmItem: MediaItem?
+    @State private var heroRequestConfirmSeasons: [Int]?
     @State private var heroRequestError: String?
     private let appModel: PlozziOSAppModel
     private let onAddServer: () -> Void
@@ -156,10 +157,15 @@ struct PlozziOSHomeView: View {
         ) {
             Button("Request as Administrator") {
                 guard let item = heroRequestConfirmItem else { return }
+                let seasons = heroRequestConfirmSeasons
                 heroRequestConfirmItem = nil
-                Task { await requestFromHero(item) }
+                heroRequestConfirmSeasons = nil
+                Task { await requestFromHero(item, seasons: seasons) }
             }
-            Button("Cancel", role: .cancel) { heroRequestConfirmItem = nil }
+            Button("Cancel", role: .cancel) {
+                heroRequestConfirmItem = nil
+                heroRequestConfirmSeasons = nil
+            }
         } message: {
             Text(
                 "This profile isn’t linked to a Seerr user. "
@@ -211,6 +217,7 @@ struct PlozziOSHomeView: View {
                         isRequesting: isRequestingHero,
                         requestStatus: { heroRequestStatuses[$0.id] },
                         onRequest: beginHeroRequest,
+                        onRequestSeasons: beginHeroSeasonRequest,
                         pullDistance: heroPullDistance
                     )
                 }
@@ -440,13 +447,29 @@ struct PlozziOSHomeView: View {
     private func beginHeroRequest(_ item: MediaItem) {
         if appModel.activeSeerrUserID == nil,
            appModel.profiles.profiles.count > 1 {
+            heroRequestConfirmSeasons = nil
             heroRequestConfirmItem = item
         } else {
             Task { await requestFromHero(item) }
         }
     }
 
-    private func requestFromHero(_ item: MediaItem) async {
+    /// Season-scoped counterpart to `beginHeroRequest` for a featured series: the
+    /// hero's season picker has already chosen `seasons`, so request exactly those
+    /// (still routing through the admin-fallback confirm when the active profile
+    /// isn't linked to a Seerr user).
+    private func beginHeroSeasonRequest(_ item: MediaItem, _ seasons: [Int]) {
+        guard !seasons.isEmpty else { return }
+        if appModel.activeSeerrUserID == nil,
+           appModel.profiles.profiles.count > 1 {
+            heroRequestConfirmSeasons = seasons
+            heroRequestConfirmItem = item
+        } else {
+            Task { await requestFromHero(item, seasons: seasons) }
+        }
+    }
+
+    private func requestFromHero(_ item: MediaItem, seasons: [Int]? = nil) async {
         guard appModel.seerService.isConfigured else {
             heroRequestError = "Connect Overseerr or Jellyseerr in Settings first."
             return
@@ -456,7 +479,7 @@ struct PlozziOSHomeView: View {
         defer { isRequestingHero = false }
         let outcome = await appModel.seerService.request(
             item,
-            seasons: nil,
+            seasons: seasons,
             actingUserID: appModel.activeSeerrUserID
         )
         switch outcome {
@@ -593,7 +616,14 @@ private struct PlozziOSHomeHeroCarousel: View {
     var isRequesting: Bool = false
     var requestStatus: (MediaItem) -> MediaAvailabilityStatus? = { _ in nil }
     var onRequest: ((MediaItem) -> Void)?
+    /// Per-season request handler for a featured **series** (item, chosen season
+    /// numbers). When set, the series Request CTA becomes a season-picker menu.
+    var onRequestSeasons: ((MediaItem, [Int]) -> Void)?
     var pullDistance: CGFloat = 0
+
+    /// Loaded Seerr season-request availability for featured discovery series,
+    /// keyed by item id, so the hero's Request menu can list per-season options.
+    @State private var heroSeasonAvailability: [String: MediaRequestAvailability] = [:]
 
     var body: some View {
         let style: HeroArtworkStyle = horizontalSizeClass == .compact
@@ -815,9 +845,29 @@ private struct PlozziOSHomeHeroCarousel: View {
         .onDisappear {
             trailerController.clearEndHandler(ownerID: endHandlerOwnerID)
         }
+        .task(id: currentItem?.id) {
+            await loadHeroSeasonAvailabilityIfNeeded()
+        }
     }
 
     @Environment(PlozziOSAppModel.self) private var appModel
+
+    /// Lazily fetches Seerr season-request availability for the focused featured
+    /// series so the hero's Request CTA can offer a season picker. No-op for
+    /// movies, in-library items, when Seerr isn't configured, or when already
+    /// loaded for this item.
+    private func loadHeroSeasonAvailabilityIfNeeded() async {
+        guard let item = currentItem,
+              item.isNotInLibraryDiscovery,
+              item.kind == .series,
+              appModel.seerService.isConfigured,
+              heroSeasonAvailability[item.id] == nil else {
+            return
+        }
+        if let availability = await appModel.seerService.requestAvailability(for: item) {
+            heroSeasonAvailability[item.id] = availability
+        }
+    }
 
     private var currentItem: MediaItem? {
         guard let selectedItemID else { return items.first }
@@ -843,11 +893,10 @@ private struct PlozziOSHomeHeroCarousel: View {
         rootItems[item.id] ?? item
     }
 
-    /// Request CTA descriptor for a discovery **movie or series** hero (one-tap
-    /// request of the whole title, like tvOS — `seasons: nil`). `nil` for in-library
-    /// items and other kinds, so those keep the normal Play / More Info actions.
-    /// Granular season-level requests still live in the series detail's season
-    /// browser; this is the quick "request everything" primary the hero surfaces.
+    /// Request CTA descriptor for a discovery **movie or series** hero. Movies get
+    /// a one-tap whole-title Request; series get a season-picker menu (once their
+    /// availability has loaded) so you choose which seasons to request. `nil` for
+    /// in-library items and other kinds, so those keep the normal Play / More Info.
     private func heroRequest(for item: MediaItem) -> PlozziOSHeroRequest? {
         guard let onRequest,
               item.isNotInLibraryDiscovery,
@@ -855,6 +904,7 @@ private struct PlozziOSHomeHeroCarousel: View {
             return nil
         }
         let availability = requestStatus(item) ?? item.availability
+        let isSeries = item.kind == .series
         return PlozziOSHeroRequest(
             cta: MediaItem.heroCTA(
                 availability: availability,
@@ -863,7 +913,18 @@ private struct PlozziOSHomeHeroCarousel: View {
             ),
             isRequesting: isRequesting,
             actingName: appModel.activeSeerrUserName,
-            onRequest: onRequest
+            onRequest: onRequest,
+            seasonAvailability: isSeries ? heroSeasonAvailability[item.id] : nil,
+            onRequestSeasons: (isSeries ? onRequestSeasons : nil).map { handler in
+                { seasons in
+                    // Optimistically reflect the picked seasons in the menu so the
+                    // rows flip to "Requested" immediately, then dispatch.
+                    if let current = heroSeasonAvailability[item.id] {
+                        heroSeasonAvailability[item.id] = current.markingRequested(seasons)
+                    }
+                    handler(item, seasons)
+                }
+            }
         )
     }
 

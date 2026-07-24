@@ -344,7 +344,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
                     )
                 }
 
-                if isDiscoveryItem, detail.item.kind != .movie {
+                if isDiscoveryItem, detail.item.kind != .movie, detail.item.kind != .series {
                     PlozziOSRequestAction(
                         item: detail.item,
                         availability: requestStatusOverride ?? detail.item.availability ?? .unknown,
@@ -428,13 +428,14 @@ private struct PlozziOSCanonicalItemDetailView: View {
         PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass)
     }
 
-    /// The Seerr request CTA shown in the hero for a discovery **movie or series**
-    /// (one-tap request of the whole title — `seasons: nil` — matching tvOS and the
-    /// home hero). `nil` for in-library items and other kinds. Granular per-season
-    /// requests still live in the season browser below.
+    /// The Seerr request CTA shown in the hero for a discovery **movie or series**.
+    /// Movies get a one-tap request; series get a season-picker menu (once the
+    /// season availability has loaded) so you choose which seasons to request.
+    /// `nil` for in-library items and other kinds.
     private func heroRequest(for item: MediaItem) -> PlozziOSHeroRequest? {
         guard isDiscoveryItem, item.kind == .movie || item.kind == .series else { return nil }
         let availability = requestStatusOverride ?? item.availability
+        let isSeries = item.kind == .series
         return PlozziOSHeroRequest(
             cta: MediaItem.heroCTA(
                 availability: availability,
@@ -443,7 +444,9 @@ private struct PlozziOSCanonicalItemDetailView: View {
             ),
             isRequesting: isRequesting,
             actingName: appModel.activeSeerrUserName,
-            onRequest: { beginRequest($0) }
+            onRequest: { beginRequest($0) },
+            seasonAvailability: isSeries ? seasonRequestAvailability : nil,
+            onRequestSeasons: isSeries ? { beginRequest(item, seasons: $0) } : nil
         )
     }
 

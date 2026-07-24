@@ -59,6 +59,9 @@ public struct DetailInformationSections: View {
             if hasAbout {
                 detailSection(title: "About") { aboutContent }
             }
+            if hasTopPlayback {
+                detailSection(title: "Playback") { playbackHighlightsCard }
+            }
             if !item.ratings.isEmpty {
                 detailSection(title: "Ratings") { ratingsCard }
             }
@@ -86,21 +89,25 @@ public struct DetailInformationSections: View {
                 }
             }
 
-            if hasAbout || !item.ratings.isEmpty {
+            if hasAbout || hasTopPlayback || !item.ratings.isEmpty {
                 GridRow(alignment: .top) {
                     if hasAbout {
                         headedSection(title: "About") { aboutContent }
-                            .gridCellColumns(8)
-                        if !item.ratings.isEmpty {
-                            headedSection(title: "Ratings") { ratingsCard }
-                                .gridCellColumns(4)
-                        } else {
-                            Color.clear.gridCellColumns(4)
-                        }
+                            .gridCellColumns(4)
                     } else {
+                        Color.clear.gridCellColumns(4)
+                    }
+                    if hasTopPlayback {
+                        headedSection(title: "Playback") { playbackHighlightsCard }
+                            .gridCellColumns(4)
+                    } else {
+                        Color.clear.gridCellColumns(4)
+                    }
+                    if !item.ratings.isEmpty {
                         headedSection(title: "Ratings") { ratingsCard }
                             .gridCellColumns(4)
-                        Color.clear.gridCellColumns(8)
+                    } else {
+                        Color.clear.gridCellColumns(4)
                     }
                 }
             }
@@ -165,8 +172,31 @@ public struct DetailInformationSections: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// The top-row "Playback" highlight card: server, connection, quality and
+    /// size — the glanceable answer to "where's this coming from and how good is
+    /// this copy?".
+    private var playbackHighlightsCard: some View {
+        VStack(alignment: .leading, spacing: informationFactSpacing) {
+            ForEach(topPlaybackFacts) { fact in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(fact.label)
+                        .font(factLabelFont)
+                        .foregroundStyle(.secondary)
+                    Text(fact.value)
+                        .font(factValueFont)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
+        .padding(cardPadding)
+        .plozzFocusableCard(cornerRadius: cardCornerRadius)
+        .accessibilityElement(children: .contain)
+    }
+
     private var hasContent: Bool {
-        hasAbout || !item.ratings.isEmpty || !informationGroups.isEmpty
+        hasAbout || hasTopPlayback || !item.ratings.isEmpty || !informationGroups.isEmpty
     }
 
     private var hasAbout: Bool {
@@ -417,7 +447,7 @@ public struct DetailInformationSections: View {
     private var informationGroups: [InformationGroup] {
         [
             InformationGroup(id: "details", title: "Details", facts: detailFacts),
-            InformationGroup(id: "playback", title: "Playback", facts: playbackFacts),
+            InformationGroup(id: "source", title: "Source", facts: sourceFacts),
             InformationGroup(id: "file", title: "File", facts: fileFacts)
         ]
         .filter { !$0.facts.isEmpty }
@@ -427,13 +457,41 @@ public struct DetailInformationSections: View {
         item.ratings.sorted { $0.source.sortRank < $1.source.sortRank }
     }
 
-    private var informationColumnSpan: Int {
-        switch informationGroups.count {
-        case 1: 8
-        case 2: 6
-        default: 4
+    /// Every Information column occupies one third of the spine so the lower row
+    /// always lines up with the top row (About · Playback · Ratings), regardless
+    /// of how many groups have content.
+    private var informationColumnSpan: Int { 4 }
+
+    /// The glanceable "Playback" card in the top row — the self-hoster's key
+    /// decision facts: where it streams from, how it connects, and how good this
+    /// copy is. Condensed one-liners; the lower Source/File groups carry the full
+    /// breakdown.
+    private var topPlaybackFacts: [InformationFact] {
+        var facts: [InformationFact] = []
+        if let selectedSource {
+            facts.append(InformationFact(id: "server", label: "Server", value: selectedSource.displayName))
+            if let locality = localityLabel(selectedSource.locality) {
+                facts.append(InformationFact(id: "connection", label: "Connection", value: locality))
+            }
         }
+        if let selectedVersion {
+            let quality = [selectedVersion.resolutionLabel, selectedVersion.hdrLabel, selectedVersion.audioLabel]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+            if !quality.isEmpty {
+                facts.append(InformationFact(id: "quality", label: "Quality", value: quality))
+            }
+            let size = [selectedVersion.sizeLabel, selectedVersion.bitrateLabel]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+            if !size.isEmpty {
+                facts.append(InformationFact(id: "size", label: "Size", value: size))
+            }
+        }
+        return facts
     }
+
+    private var hasTopPlayback: Bool { !topPlaybackFacts.isEmpty }
 
     private var detailFacts: [InformationFact] {
         var facts: [InformationFact] = []
@@ -457,10 +515,11 @@ public struct DetailInformationSections: View {
         return facts
     }
 
-    private var playbackFacts: [InformationFact] {
+    /// The lower "Source" group — provenance of this copy that isn't already in
+    /// the top Playback highlight (server/connection live up there).
+    private var sourceFacts: [InformationFact] {
         var facts: [InformationFact] = []
         if let selectedSource {
-            facts.append(InformationFact(id: "server", label: "Server", value: selectedSource.displayName))
             if let provider = selectedSource.providerKind?.displayName,
                !selectedSource.displayName.localizedCaseInsensitiveContains(provider) {
                 facts.append(InformationFact(id: "provider", label: "Provider", value: provider))
@@ -468,9 +527,6 @@ public struct DetailInformationSections: View {
             if let account = nonempty(selectedSource.accountName),
                !selectedSource.displayName.localizedCaseInsensitiveContains(account) {
                 facts.append(InformationFact(id: "account", label: "Account", value: account))
-            }
-            if let locality = localityLabel(selectedSource.locality) {
-                facts.append(InformationFact(id: "connection", label: "Connection", value: locality))
             }
         }
         if let selectedVersion, selectedVersion.displayLabel != "Version" {
@@ -483,12 +539,9 @@ public struct DetailInformationSections: View {
         guard let selectedVersion else { return [] }
         var facts: [InformationFact] = []
         appendVersionFact(id: "filename", label: "Filename", value: selectedVersion.fileName, alwaysInclude: true, to: &facts)
-        appendVersionFact(id: "resolution", label: "Resolution", value: selectedVersion.resolutionLabel, to: &facts)
-        appendVersionFact(id: "dynamic-range", label: "Dynamic Range", value: selectedVersion.hdrLabel, to: &facts)
+        // Resolution / HDR / audio / size / bitrate are summarised in the top
+        // Playback card, so File carries only what isn't up there.
         appendVersionFact(id: "source-quality", label: "Source", value: selectedVersion.sourceQualityLabel, to: &facts)
-        appendVersionFact(id: "audio", label: "Audio", value: selectedVersion.audioLabel, to: &facts)
-        appendVersionFact(id: "bitrate", label: "Bitrate", value: selectedVersion.bitrateLabel, to: &facts)
-        appendVersionFact(id: "size", label: "Size", value: selectedVersion.sizeLabel, to: &facts)
         appendVersionFact(id: "file-duration", label: "Duration", value: selectedVersion.durationLabel, to: &facts)
         return facts
     }

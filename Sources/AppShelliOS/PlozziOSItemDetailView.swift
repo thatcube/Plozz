@@ -365,10 +365,12 @@ private struct PlozziOSCanonicalItemDetailView: View {
                     horizontalInset: pageInset,
                     selectedSource: options.sources.first {
                         $0.accountID == options.selectedSourceAccountID
-                    } ?? viewModel.currentSourceForDisplay,
-                    selectedVersion: options.versions.first {
-                        $0.id == options.selectedVersionID
-                    } ?? MediaVersion.synthesized(from: heroTarget)
+                    } ?? (isDiscoveryItem ? nil : viewModel.currentSourceForDisplay),
+                    selectedVersion: isDiscoveryItem
+                        ? nil
+                        : options.versions.first {
+                            $0.id == options.selectedVersionID
+                        } ?? MediaVersion.synthesized(from: heroTarget)
                 )
             }
             .padding(.bottom, 32)

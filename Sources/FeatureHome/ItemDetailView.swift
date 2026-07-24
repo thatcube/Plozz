@@ -522,9 +522,12 @@ public struct ItemDetailView: View {
                     }
                     DetailExtrasView(
                         item: detail.item,
-                        selectedSource: effectiveSource ?? viewModel.currentSourceForDisplay,
-                        selectedVersion: effectiveVersions.first { $0.id == effectiveVersionID }
-                            ?? MediaVersion.synthesized(from: detail.item),
+                        selectedSource: effectiveSource
+                            ?? (isDiscoveryItem ? nil : viewModel.currentSourceForDisplay),
+                        selectedVersion: isDiscoveryItem
+                            ? nil
+                            : effectiveVersions.first { $0.id == effectiveVersionID }
+                                ?? MediaVersion.synthesized(from: detail.item),
                         leadingInset: PlozzTheme.Metrics.heroLeadingPadding
                     )
                 }

@@ -491,6 +491,7 @@ public struct ItemDetailView: View {
                         selectedVersionID: effectiveVersionID,
                         onSelectVersion: { id in selectVersion(id, for: detail.item) },
                         sources: serverChoices,
+                        offlineSourceAccountIDs: viewModel.unreachableSourceAccountIDs,
                         selectedSourceAccountID: effectiveSource?.accountID,
                         onSelectSource: serverChoices.count > 1 ? { id in selectSource(id) } : nil,
                         fallbackTechnicalBadges: detail.children.representativeTechnicalBadges,

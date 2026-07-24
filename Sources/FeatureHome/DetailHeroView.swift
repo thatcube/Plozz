@@ -71,6 +71,9 @@ struct DetailHeroView: View {
     /// version picker) so the user can choose which server `Play` targets. Empty
     /// or single-server titles show no server picker.
     var sources: [MediaSourceRef] = []
+    /// Accounts currently offline / unreachable — greyed and unselectable in the
+    /// server picker.
+    var offlineSourceAccountIDs: Set<String> = []
     /// The currently-effective selected source's account id (drives the server
     /// picker's label and the menu checkmark). `nil` falls back to the primary.
     var selectedSourceAccountID: String? = nil
@@ -952,6 +955,7 @@ struct DetailHeroView: View {
         PlaybackSourceMenuButton(
             sources: serverChoices,
             selectedSourceID: selectedSourceAccountID,
+            offlineSourceAccountIDs: offlineSourceAccountIDs,
             versions: versions,
             selectedVersionID: selectedVersionID,
             onSelectSource: { accountID in

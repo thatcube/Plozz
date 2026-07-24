@@ -250,6 +250,13 @@ public final class ItemDetailViewModel {
     /// resolve. Empty for a single-server title (no picker shown).
     public private(set) var sources: [MediaSourceRef] = []
 
+    /// Accounts whose alternate-source enrichment fetch **failed** (server offline
+    /// / unreachable), so the server picker can grey them out as "Offline" and
+    /// block selecting a copy that can't load. Populated off the critical path as
+    /// alternate sources are probed; the active source is never listed here (it
+    /// loaded, so it's reachable).
+    public private(set) var unreachableSourceAccountIDs: Set<String> = []
+
     /// The current server described as a ``MediaSourceRef`` **for display**, built
     /// from the active provider. Unlike ``sources`` (deliberately empty for a
     /// single-server title so no picker shows), this is always populated, so the
@@ -2059,15 +2066,26 @@ public final class ItemDetailViewModel {
         alternateSourceEnrichmentTask = Task(priority: .utility) { [weak self] in
             // Gate behind the shared scheduler so a superseded page's alternate
             // fetches are skipped and total background concurrency stays bounded.
-            let updates = await EnrichmentScheduler.shared.run(token: token) {
+            let result = await EnrichmentScheduler.shared.run(token: token) {
                 await Self.fetchAlternateSourceUpdates(
                     requests,
                     maxConcurrent: Self.alternateSourceFanoutLimit
                 )
             }
-            guard let updates, !Task.isCancelled, !updates.isEmpty else { return }
-            await self?.applyAlternateSourceUpdates(updates, primaryID: primaryID)
+            guard let result, !Task.isCancelled else { return }
+            await self?.applyAlternateSourceUpdates(
+                result.updates,
+                unreachableAccountIDs: result.unreachableAccountIDs,
+                primaryID: primaryID
+            )
         }
+    }
+
+    /// A batch of resolved alternate-source metadata plus the set of accounts whose
+    /// fetch failed (offline / unreachable).
+    private struct AlternateSourceEnrichmentResult: Sendable {
+        var updates: [AlternateSourceUpdate]
+        var unreachableAccountIDs: Set<String>
     }
 
     /// Fetches alternate-server copies concurrently (bounded), preserving
@@ -2079,8 +2097,10 @@ public final class ItemDetailViewModel {
     private nonisolated static func fetchAlternateSourceUpdates(
         _ requests: [AlternateSourceRequest],
         maxConcurrent: Int
-    ) async -> [AlternateSourceUpdate] {
-        guard !requests.isEmpty else { return [] }
+    ) async -> AlternateSourceEnrichmentResult {
+        guard !requests.isEmpty else {
+            return AlternateSourceEnrichmentResult(updates: [], unreachableAccountIDs: [])
+        }
         let concurrency = max(1, min(maxConcurrent, requests.count))
         return await withTaskGroup(of: (Int, AlternateSourceUpdate?).self) { group in
             var nextIndex = 0
@@ -2111,22 +2131,49 @@ public final class ItemDetailViewModel {
             }
 
             var byIndex: [Int: AlternateSourceUpdate] = [:]
+            var unreachable: Set<String> = []
             while let (index, update) = await group.next() {
-                if let update { byIndex[index] = update }
+                if let update {
+                    byIndex[index] = update
+                } else {
+                    // A nil result means item(id:) threw — that server is offline /
+                    // unreachable. Flag its account so the picker can grey it out.
+                    unreachable.insert(requests[index].accountID)
+                }
                 if nextIndex < requests.count {
                     let queuedIndex = nextIndex
                     nextIndex += 1
                     makeTask(index: queuedIndex, request: requests[queuedIndex])
                 }
             }
-            return requests.indices.compactMap { byIndex[$0] }
+            return AlternateSourceEnrichmentResult(
+                updates: requests.indices.compactMap { byIndex[$0] },
+                unreachableAccountIDs: unreachable
+            )
         }
     }
 
     /// Applies alternate-source metadata updates in one publish to minimise
     /// repeated main-actor churn while preserving unified watch-state behaviour.
-    private func applyAlternateSourceUpdates(_ updates: [AlternateSourceUpdate], primaryID: String) {
+    /// Also records which alternate servers were unreachable so the picker greys
+    /// them out.
+    private func applyAlternateSourceUpdates(
+        _ updates: [AlternateSourceUpdate],
+        unreachableAccountIDs: Set<String>,
+        primaryID: String
+    ) {
         guard case let .loaded(detail) = state, detail.item.id == primaryID else { return }
+        // A previously-offline server that now resolves drops out of the set; a
+        // newly-failed one is added. Never flag the active source (it loaded).
+        var offline = unreachableSourceAccountIDs
+        offline.subtract(updates.compactMap { update in
+            sources.first(where: { $0.id == update.sourceID })?.accountID
+        })
+        offline.formUnion(unreachableAccountIDs)
+        offline.remove(activeSourceAccountID ?? "")
+        if offline != unreachableSourceAccountIDs {
+            unreachableSourceAccountIDs = offline
+        }
         var updatedSources = sources
         var changed = false
         for update in updates {

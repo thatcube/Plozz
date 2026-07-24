@@ -22,6 +22,9 @@ public struct PlaybackSourceMenuAction: Identifiable, Hashable, Sendable {
 public struct PlaybackSourceMenuButton<Label: View>: View {
     private let sources: [MediaSourceRef]
     private let selectedSourceID: String?
+    /// Accounts that are currently offline / unreachable — shown greyed with an
+    /// "Offline" tag and not selectable.
+    private let offlineSourceAccountIDs: Set<String>
     private let versions: [MediaVersion]
     private let selectedVersionID: String?
     private let actions: [PlaybackSourceMenuAction]
@@ -38,6 +41,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     public init(
         sources: [MediaSourceRef],
         selectedSourceID: String?,
+        offlineSourceAccountIDs: Set<String> = [],
         versions: [MediaVersion],
         selectedVersionID: String?,
         actions: [PlaybackSourceMenuAction] = [],
@@ -49,6 +53,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     ) {
         self.sources = sources
         self.selectedSourceID = selectedSourceID
+        self.offlineSourceAccountIDs = offlineSourceAccountIDs
         self.versions = versions
         self.selectedVersionID = selectedVersionID
         self.actions = actions
@@ -117,6 +122,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
             page: $page,
             sources: sources,
             selectedSourceID: selectedSourceID,
+            offlineSourceAccountIDs: offlineSourceAccountIDs,
             versions: versions.sortedForPicker(),
             selectedVersionID: selectedVersionID,
             actions: actions,
@@ -164,6 +170,7 @@ private struct PlaybackSourceMenuPanel: View {
     @Binding var page: PlaybackSourceMenuButtonPage
     let sources: [MediaSourceRef]
     let selectedSourceID: String?
+    var offlineSourceAccountIDs: Set<String> = []
     let versions: [MediaVersion]
     let selectedVersionID: String?
     let actions: [PlaybackSourceMenuAction]
@@ -269,35 +276,71 @@ private struct PlaybackSourceMenuPanel: View {
     @ViewBuilder
     private var serverRows: some View {
         ForEach(sources) { source in
-            menuRowButton(id: "server.\(source.accountID)") {
-                onSelectSource(source.accountID)
-            } label: {
-                HStack(spacing: 14) {
-                    if let provider = source.providerKind {
-                        ProviderBrandMark(
-                            provider: provider,
-                            size: providerMarkSize,
-                            showsBackground: false
-                        )
-                    } else {
-                        Image(systemName: "server.rack")
-                            .frame(width: providerMarkSize, height: providerMarkSize)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(source.displayName)
-                            .font(rowTitleFont)
-                        if let subtitle = sourceSubtitle(source) {
-                            Text(subtitle)
-                                .font(rowDetailFont)
-                                .settingsRowSecondary()
-                        }
-                    }
-                    Spacer(minLength: 12)
-                    if source.accountID == selectedSourceID {
-                        Image(systemName: "checkmark")
-                            .font(.headline.weight(.bold))
-                    }
+            let isOffline = offlineSourceAccountIDs.contains(source.accountID)
+            if isOffline {
+                offlineServerRow(source)
+            } else {
+                menuRowButton(id: "server.\(source.accountID)") {
+                    onSelectSource(source.accountID)
+                } label: {
+                    serverRowLabel(source, isOffline: false)
                 }
+            }
+        }
+    }
+
+    /// A non-selectable, greyed server row with an "Offline" tag, shown for a
+    /// server whose alternate-source fetch failed (unreachable). It's rendered as
+    /// plain (non-button) content so the tvOS focus engine skips it entirely — you
+    /// can't land on or pick a server that can't load.
+    @ViewBuilder
+    private func offlineServerRow(_ source: MediaSourceRef) -> some View {
+        serverRowLabel(source, isOffline: true)
+            .padding(.horizontal, 16)
+            .modifier(
+                PlaybackSourceMenuRowHeight(
+                    fixedHeight: nil,
+                    verticalPadding: rowVerticalPadding
+                )
+            )
+            .opacity(0.45)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(source.displayName), offline")
+    }
+
+    @ViewBuilder
+    private func serverRowLabel(_ source: MediaSourceRef, isOffline: Bool) -> some View {
+        HStack(spacing: 14) {
+            if let provider = source.providerKind {
+                ProviderBrandMark(
+                    provider: provider,
+                    size: providerMarkSize,
+                    showsBackground: false
+                )
+            } else {
+                Image(systemName: "server.rack")
+                    .frame(width: providerMarkSize, height: providerMarkSize)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(source.displayName)
+                    .font(rowTitleFont)
+                if isOffline {
+                    Text("Offline")
+                        .font(rowDetailFont)
+                        .settingsRowSecondary()
+                } else if let subtitle = sourceSubtitle(source) {
+                    Text(subtitle)
+                        .font(rowDetailFont)
+                        .settingsRowSecondary()
+                }
+            }
+            Spacer(minLength: 12)
+            if isOffline {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.headline)
+            } else if source.accountID == selectedSourceID {
+                Image(systemName: "checkmark")
+                    .font(.headline.weight(.bold))
             }
         }
     }

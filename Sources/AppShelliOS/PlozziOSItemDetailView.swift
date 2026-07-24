@@ -426,12 +426,12 @@ private struct PlozziOSCanonicalItemDetailView: View {
         PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass)
     }
 
-    /// The Seerr request CTA shown in the hero for a discovery **movie** (series
-    /// requests are season-level, handled by the season browser). `nil` for
-    /// in-library items and non-movie discovery, so the hero keeps its normal
-    /// Play / More Info actions.
+    /// The Seerr request CTA shown in the hero for a discovery **movie or series**
+    /// (one-tap request of the whole title — `seasons: nil` — matching tvOS and the
+    /// home hero). `nil` for in-library items and other kinds. Granular per-season
+    /// requests still live in the season browser below.
     private func heroRequest(for item: MediaItem) -> PlozziOSHeroRequest? {
-        guard isDiscoveryItem, item.kind == .movie else { return nil }
+        guard isDiscoveryItem, item.kind == .movie || item.kind == .series else { return nil }
         let availability = requestStatusOverride ?? item.availability
         return PlozziOSHeroRequest(
             cta: MediaItem.heroCTA(

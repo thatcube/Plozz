@@ -843,13 +843,15 @@ private struct PlozziOSHomeHeroCarousel: View {
         rootItems[item.id] ?? item
     }
 
-    /// Request CTA descriptor for a discovery **movie** hero (one-tap request,
-    /// like the detail hero). `nil` for in-library items or non-movie discovery,
-    /// so those keep the normal Play / More Info actions.
+    /// Request CTA descriptor for a discovery **movie or series** hero (one-tap
+    /// request of the whole title, like tvOS — `seasons: nil`). `nil` for in-library
+    /// items and other kinds, so those keep the normal Play / More Info actions.
+    /// Granular season-level requests still live in the series detail's season
+    /// browser; this is the quick "request everything" primary the hero surfaces.
     private func heroRequest(for item: MediaItem) -> PlozziOSHeroRequest? {
         guard let onRequest,
               item.isNotInLibraryDiscovery,
-              item.kind == .movie else {
+              item.kind == .movie || item.kind == .series else {
             return nil
         }
         let availability = requestStatus(item) ?? item.availability

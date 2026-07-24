@@ -196,7 +196,8 @@ enum HeroForegroundModelBuilder {
             )
         case .request:
             return HeroForegroundModel.Pill(
-                kind: .request, text: "Request", systemImage: "plus.circle", progress: nil
+                kind: .request, text: "Request", systemImage: "plus.circle",
+                progress: nil, prominent: input.prominent
             )
         case .downloadStatus:
             if let progress = input.downloadProgress {
@@ -205,11 +206,13 @@ enum HeroForegroundModelBuilder {
                     kind: .downloadStatus,
                     text: "\(pct)%",
                     systemImage: "arrow.down.circle",
-                    progress: progress
+                    progress: progress,
+                    prominent: input.prominent
                 )
             }
             return HeroForegroundModel.Pill(
-                kind: .downloadStatus, text: "Requested", systemImage: "clock", progress: nil
+                kind: .downloadStatus, text: "Requested", systemImage: "clock",
+                progress: nil, prominent: input.prominent
             )
         case .moreInfo:
             return HeroForegroundModel.Pill(

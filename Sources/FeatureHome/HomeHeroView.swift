@@ -293,14 +293,22 @@ struct HomeHeroView: View {
                 result.append(.watchlist)
             }
             result.append(.moreInfo)
+        } else if let primary {
+            // A requestable / in-flight title: the Request (or download-status) pill
+            // is the leading, bright primary CTA; More Info steps down to a plain
+            // info icon after it — matching the detail hero and the iOS hero.
+            result.append(primary)
+            if watchlistAction(for: item) != nil {
+                result.append(.watchlist)
+            }
+            result.append(.moreInfo)
         } else {
-            // No playable target: More Info becomes the labelled, white primary
-            // action. Request/status remains available immediately after it.
+            // Nothing actionable (unavailable / Seerr disconnected): More Info is the
+            // only thing to do, so it stays the labelled, white primary action.
             result.append(.moreInfo)
             if watchlistAction(for: item) != nil {
                 result.append(.watchlist)
             }
-            if let primary { result.append(primary) }
         }
         // A right-hand chevron on a multi-slide carousel — an affordance that
         // there's more to page through (matching the Apple TV app) and the
@@ -342,6 +350,22 @@ struct HomeHeroView: View {
         case .request: return .request
         case .downloading, .requested: return .downloadStatus
         case .unavailable: return nil
+        }
+    }
+
+    /// Whether `button` is the slide's bright (always-lit, even unfocused) primary.
+    /// Exactly one pill is prominent: the leading actionable CTA — Request or a
+    /// download/request **status** pill — or **More Info** only when nothing else is
+    /// actionable (`primaryButton == nil`). Play stays glass-until-focused as before.
+    /// Shared by both hero render paths (UIKit model + SwiftUI pills) so they agree.
+    private func isProminentPrimary(_ button: HeroButton, for item: MediaItem) -> Bool {
+        switch button {
+        case .request, .downloadStatus:
+            return true
+        case .moreInfo:
+            return primaryButton(for: item) == nil
+        case .play, .watchlist, .next:
+            return false
         }
     }
 
@@ -1065,16 +1089,23 @@ struct HomeHeroView: View {
                     seasonEpisodeText: HeroForegroundModelBuilder.seasonEpisodeButtonText(for: item)
                 )
             case .request:
-                return .init(kind: .request)
+                return .init(kind: .request, prominent: isProminentPrimary(.request, for: item))
             case .downloadStatus:
                 if case let .downloading(progress) = heroCTA(for: item) {
-                    return .init(kind: .downloadStatus, downloadProgress: progress)
+                    return .init(
+                        kind: .downloadStatus,
+                        downloadProgress: progress,
+                        prominent: isProminentPrimary(.downloadStatus, for: item)
+                    )
                 }
-                return .init(kind: .downloadStatus)
+                return .init(
+                    kind: .downloadStatus,
+                    prominent: isProminentPrimary(.downloadStatus, for: item)
+                )
             case .moreInfo:
                 return .init(
                     kind: .moreInfo,
-                    prominent: primaryButton(for: item) != .play
+                    prominent: isProminentPrimary(.moreInfo, for: item)
                 )
             case .watchlist:
                 return .init(kind: .watchlist, isFavorite: watchlistTarget(for: item).isFavorite)
@@ -1669,16 +1700,16 @@ struct HomeHeroView: View {
                 .font(.system(size: 28, weight: .semibold))
             }
         case .request:
-            heroPill(selected: selected) {
+            heroPill(selected: selected, prominent: isProminentPrimary(.request, for: item)) {
                 Label("Request", systemImage: "plus.circle")
                     .font(.system(size: 28, weight: .semibold))
             }
         case .downloadStatus:
-            heroPill(selected: selected) {
+            heroPill(selected: selected, prominent: isProminentPrimary(.downloadStatus, for: item)) {
                 downloadStatusLabel(for: item, selected: selected)
             }
         case .moreInfo:
-            let prominent = primaryButton(for: item) != .play
+            let prominent = isProminentPrimary(.moreInfo, for: item)
             heroPill(selected: selected, prominent: prominent) {
                 if prominent {
                     Label("More Info", systemImage: "info.circle")

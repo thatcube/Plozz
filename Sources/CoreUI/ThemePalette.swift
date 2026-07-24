@@ -136,6 +136,38 @@ public extension ThemePalette {
         #endif
     }
 
+    /// A subtle full-width tint for the lower "information" band on the detail
+    /// page — nudged a touch away from `backgroundBase` so the section reads as its
+    /// own zone without competing with the cards inside it (which sit on their own
+    /// `cardSurface`). Kept deliberately quiet: ~5% lighter on Dark, ~2% on the
+    /// near-black OLED theme, ~5% darker on Light.
+    var informationSurface: Color {
+        #if canImport(UIKit)
+        let base = UIColor(backgroundBase)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        base.getRed(&r, green: &g, blue: &b, alpha: &a)
+        if isLight {
+            let darken: CGFloat = 0.045
+            return Color(
+                red: Double(r * (1 - darken)),
+                green: Double(g * (1 - darken)),
+                blue: Double(b * (1 - darken))
+            )
+        }
+        // Lighten toward white; a near-black (OLED) base gets a smaller lift so it
+        // stays true-black-ish.
+        let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        let lift: CGFloat = luminance < 0.05 ? 0.02 : 0.05
+        return Color(
+            red: Double(r + (1 - r) * lift),
+            green: Double(g + (1 - g) * lift),
+            blue: Double(b + (1 - b) * lift)
+        )
+        #else
+        return backgroundSecondary
+        #endif
+    }
+
     /// Soft dark theme. Uses the exact two-stop background gradient from my
     /// Twozz `ThemePalette.dark`, with the top glow recoloured to Plozz's brand
     /// blue (Twozz uses purple). The stops stay close in value so the backdrop

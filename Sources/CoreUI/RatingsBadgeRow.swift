@@ -97,15 +97,40 @@ public struct RatingBadge: View {
 
     @ViewBuilder
     private var icon: some View {
+        RatingSourceIcon(rating: rating, size: iconSize)
+    }
+}
+
+/// The branded icon for a rating source, extracted so both the inline
+/// ``RatingBadge`` and the larger ``RatingTile`` render an identical logo (a
+/// filled star for user/community scores, the IMDb / TMDB logo chips, a
+/// tomato/popcorn for Rotten Tomatoes, or a coloured Metacritic chip). `size` is
+/// the shared cap height the glyph is laid out against.
+public struct RatingSourceIcon: View {
+    private let rating: ExternalRating
+    private let size: CGFloat
+
+    public init(rating: ExternalRating, size: CGFloat) {
+        self.rating = rating
+        self.size = size
+    }
+
+    public var body: some View {
         switch rating.source.icon {
         case .star:
             Image(systemName: "star.fill")
-                .font(.system(size: iconSize * 0.8, weight: .semibold))
+                .font(.system(size: size * 0.8, weight: .semibold))
                 .foregroundStyle(starColor)
         case .imdb:
-            imdbBadge
+            Image("IMDbLogo", bundle: .module)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size * 1.83, height: size * 0.92)
         case .tmdb:
-            tmdbBadge
+            Image("TMDBPrimaryShortBlue", bundle: .module)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size * 1.75, height: size * 0.75)
         case .tomato:
             emoji("🍅")
         case .popcorn:
@@ -114,53 +139,29 @@ public struct RatingBadge: View {
             metacriticChip
         case .critic:
             Image(systemName: "quote.bubble.fill")
-                .font(.system(size: iconSize * 0.78, weight: .semibold))
+                .font(.system(size: size * 0.78, weight: .semibold))
                 .foregroundStyle(.secondary)
         }
     }
 
-    /// Tint for star-based sources: AniList in its signature blue so it reads as
-    /// distinct from a gold IMDb/user star sitting beside it.
     private var starColor: Color {
         rating.source == .anilist ? Self.anilistBlue : Self.starGold
     }
 
-    /// An emoji icon sized to sit on the shared cap height. Emoji ignore
-    /// `foregroundStyle`, so they're only scaled, not tinted.
     private func emoji(_ value: String) -> some View {
         Text(value)
-            .font(.system(size: iconSize * 0.82))
+            .font(.system(size: size * 0.82))
     }
 
-    /// Metacritic's signature coloured square: green for favourable scores,
-    /// yellow for mixed, red for unfavourable.
     private var metacriticChip: some View {
         Text(String(Int(rating.value.rounded())))
-            .font(.system(size: iconSize * 0.75, weight: .bold))
+            .font(.system(size: size * 0.75, weight: .bold))
             .monospacedDigit()
             .foregroundStyle(.white)
-            .frame(width: iconSize * 1.42, height: iconSize * 1.42)
+            .frame(width: size * 1.42, height: size * 1.42)
             .background(metacriticColor, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
-    private var tmdbBadge: some View {
-        Image("TMDBPrimaryShortBlue", bundle: .module)
-            .resizable()
-            .scaledToFit()
-            .frame(width: iconSize * 1.75, height: iconSize * 0.75)
-    }
-
-    /// IMDb's signature yellow "IMDb" pill (a self-contained logo, so it's not
-    /// tinted). Sized to the ~2:1 logo aspect ratio at the shared cap height.
-    private var imdbBadge: some View {
-        Image("IMDbLogo", bundle: .module)
-            .resizable()
-            .scaledToFit()
-            .frame(width: iconSize * 1.83, height: iconSize * 0.92)
-    }
-
-    /// Metacritic's coloured square tint: green for favourable scores, yellow
-    /// for mixed, red for unfavourable.
     private var metacriticColor: Color {
         let score = rating.value
         if score >= 61 { return Self.metacriticGreen }
@@ -168,12 +169,148 @@ public struct RatingBadge: View {
         return Self.metacriticRed
     }
 
-    // Brand-ish colours.
-    private static let starGold = Color(red: 0.96, green: 0.77, blue: 0.13)
-    private static let anilistBlue = Color(red: 0.13, green: 0.62, blue: 1.0)
-    private static let metacriticGreen = Color(red: 0.40, green: 0.73, blue: 0.27)
-    private static let metacriticYellow = Color(red: 1.0, green: 0.80, blue: 0.0)
-    private static let metacriticRed = Color(red: 0.98, green: 0.27, blue: 0.20)
+    static let starGold = Color(red: 0.96, green: 0.77, blue: 0.13)
+    static let anilistBlue = Color(red: 0.13, green: 0.62, blue: 1.0)
+    static let metacriticGreen = Color(red: 0.40, green: 0.73, blue: 0.27)
+    static let metacriticYellow = Color(red: 1.0, green: 0.80, blue: 0.0)
+    static let metacriticRed = Color(red: 0.98, green: 0.27, blue: 0.20)
+}
+
+/// A single rating presented as a filled tile — a large branded icon, the score
+/// at display size, and a quiet subtitle (vote count, or a Rotten-Tomatoes
+/// freshness word). Used in the detail page's ratings grid so one or many ratings
+/// fill the space legibly instead of a cramped inline row.
+public struct RatingTile: View {
+    @Environment(\.themePalette) private var palette
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+    private let rating: ExternalRating
+
+    public init(rating: ExternalRating) {
+        self.rating = rating
+    }
+
+    public var body: some View {
+        VStack(spacing: valueSpacing) {
+            RatingSourceIcon(rating: rating, size: iconSize)
+                .frame(height: iconRowHeight)
+            Text(rating.displayValue)
+                .font(valueFont)
+                .monospacedDigit()
+                .foregroundStyle(palette.primaryText)
+            subtitle
+                .frame(height: subtitleRowHeight)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, verticalPadding)
+        .padding(.horizontal, horizontalPadding)
+        .background(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(palette.cardSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(palette.cardBorder, lineWidth: 1)
+                )
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(rating.source.displayName) \(rating.displayValue)")
+    }
+
+    @ViewBuilder
+    private var subtitle: some View {
+        if let count = rating.ratingCountText {
+            HStack(spacing: 5) {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: subtitleFontSize * 0.85))
+                Text(count)
+                    .font(.system(size: subtitleFontSize, weight: .medium))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(.secondary)
+        } else if let word = freshnessWord {
+            Text(word)
+                .font(.system(size: subtitleFontSize, weight: .medium))
+                .foregroundStyle(.secondary)
+        } else {
+            // Keep a consistent tile height across a mixed grid even when a source
+            // reports neither a count nor a freshness verdict.
+            Color.clear
+        }
+    }
+
+    private var freshnessWord: String? {
+        switch rating.freshness {
+        case .fresh:
+            return rating.source == .rottenTomatoesAudience ? "Upright" : "Fresh"
+        case .rotten:
+            return rating.source == .rottenTomatoesAudience ? "Spilled" : "Rotten"
+        case .none:
+            return nil
+        }
+    }
+
+    private var iconSize: CGFloat {
+        #if os(tvOS)
+        return 38
+        #else
+        return horizontalSizeClass == .compact ? 24 : 28
+        #endif
+    }
+
+    private var iconRowHeight: CGFloat { iconSize * 1.5 }
+
+    private var valueFont: Font {
+        #if os(tvOS)
+        return .system(size: 40, weight: .semibold)
+        #else
+        return horizontalSizeClass == .compact
+            ? .title2.weight(.semibold)
+            : .system(size: 30, weight: .semibold)
+        #endif
+    }
+
+    private var subtitleFontSize: CGFloat {
+        #if os(tvOS)
+        return 18
+        #else
+        return horizontalSizeClass == .compact ? 12 : 14
+        #endif
+    }
+
+    private var subtitleRowHeight: CGFloat { subtitleFontSize * 1.4 }
+
+    private var valueSpacing: CGFloat {
+        #if os(tvOS)
+        return 10
+        #else
+        return 6
+        #endif
+    }
+
+    private var verticalPadding: CGFloat {
+        #if os(tvOS)
+        return 26
+        #else
+        return horizontalSizeClass == .compact ? 16 : 20
+        #endif
+    }
+
+    private var horizontalPadding: CGFloat {
+        #if os(tvOS)
+        return 20
+        #else
+        return 14
+        #endif
+    }
+
+    private var cornerRadius: CGFloat {
+        #if os(tvOS)
+        return 18
+        #else
+        return 14
+        #endif
+    }
 }
 
 #endif

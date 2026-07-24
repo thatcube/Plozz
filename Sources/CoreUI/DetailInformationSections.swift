@@ -33,20 +33,45 @@ public struct DetailInformationSections: View {
 
     public var body: some View {
         if hasContent {
-            #if os(tvOS)
-            proportionalGrid
+            sectionBody
                 .padding(.horizontal, horizontalInset)
-            #else
-            Group {
-                if horizontalSizeClass == .regular {
-                    proportionalGrid
-                } else {
-                    iPhoneStack
-                }
-            }
-            .padding(.horizontal, horizontalInset)
-            #endif
+                .padding(.top, bandTopPadding)
+                .padding(.bottom, bandBottomPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // A subtle full-bleed tint marks the lower "info" band as its own
+                // zone. Deliberately quiet, and distinct from the cards inside it
+                // (which sit on their own surface).
+                .background(palette.informationSurface)
         }
+    }
+
+    @ViewBuilder
+    private var sectionBody: some View {
+        #if os(tvOS)
+        proportionalGrid
+        #else
+        if horizontalSizeClass == .regular {
+            proportionalGrid
+        } else {
+            iPhoneStack
+        }
+        #endif
+    }
+
+    private var bandTopPadding: CGFloat {
+        #if os(tvOS)
+        44
+        #else
+        horizontalSizeClass == .regular ? 32 : 24
+        #endif
+    }
+
+    private var bandBottomPadding: CGFloat {
+        #if os(tvOS)
+        60
+        #else
+        horizontalSizeClass == .regular ? 44 : 32
+        #endif
     }
 
     #if !os(tvOS)
@@ -59,11 +84,8 @@ public struct DetailInformationSections: View {
             if hasAbout {
                 detailSection(title: "About") { aboutContent }
             }
-            if hasTopPlayback {
-                detailSection(title: "Playback") { playbackHighlightsCard }
-            }
             if !item.ratings.isEmpty {
-                detailSection(title: "Ratings") { ratingsCard }
+                detailSection(title: "Ratings") { ratingsTiles }
             }
             if !informationGroups.isEmpty {
                 informationGrid
@@ -89,7 +111,7 @@ public struct DetailInformationSections: View {
                 }
             }
 
-            if hasAbout || hasTopPlayback || !item.ratings.isEmpty {
+            if hasAbout || !item.ratings.isEmpty {
                 GridRow(alignment: .top) {
                     if hasAbout {
                         headedSection(title: "About") { aboutContent }
@@ -97,17 +119,11 @@ public struct DetailInformationSections: View {
                     } else {
                         Color.clear.gridCellColumns(4)
                     }
-                    if hasTopPlayback {
-                        headedSection(title: "Playback") { playbackHighlightsCard }
-                            .gridCellColumns(4)
-                    } else {
-                        Color.clear.gridCellColumns(4)
-                    }
                     if !item.ratings.isEmpty {
-                        headedSection(title: "Ratings") { ratingsCard }
-                            .gridCellColumns(4)
+                        headedSection(title: "Ratings") { ratingsTiles }
+                            .gridCellColumns(8)
                     } else {
-                        Color.clear.gridCellColumns(4)
+                        Color.clear.gridCellColumns(8)
                     }
                 }
             }
@@ -153,50 +169,51 @@ public struct DetailInformationSections: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    private var ratingsCard: some View {
-        VStack(alignment: .leading, spacing: ratingRowSpacing) {
+    private var ratingsTiles: some View {
+        LazyVGrid(columns: ratingsTileColumns, alignment: .leading, spacing: ratingsTileSpacing) {
             ForEach(sortedRatings) { rating in
-                HStack(spacing: 14) {
-                    Text(rating.source.displayName)
-                        .font(factValueFont)
-                        .lineLimit(1)
-                    Spacer(minLength: 12)
-                    RatingBadge(rating: rating)
-                }
+                RatingTile(rating: rating)
             }
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
-        .padding(cardPadding)
-        .plozzFocusableCard(cornerRadius: cardCornerRadius)
-        .accessibilityElement(children: .contain)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The top-row "Playback" highlight card: server, connection, quality and
-    /// size — the glanceable answer to "where's this coming from and how good is
-    /// this copy?".
-    private var playbackHighlightsCard: some View {
-        VStack(alignment: .leading, spacing: informationFactSpacing) {
-            ForEach(topPlaybackFacts) { fact in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(fact.label)
-                        .font(factLabelFont)
-                        .foregroundStyle(.secondary)
-                    Text(fact.value)
-                        .font(factValueFont)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
-        .padding(cardPadding)
-        .plozzFocusableCard(cornerRadius: cardCornerRadius)
-        .accessibilityElement(children: .contain)
+    private var ratingsTileColumns: [GridItem] {
+        [
+            GridItem(
+                .adaptive(minimum: ratingsTileMinWidth, maximum: ratingsTileMaxWidth),
+                spacing: ratingsTileSpacing,
+                alignment: .top
+            )
+        ]
+    }
+
+    private var ratingsTileMinWidth: CGFloat {
+        #if os(tvOS)
+        210
+        #else
+        horizontalSizeClass == .compact ? 130 : 150
+        #endif
+    }
+
+    private var ratingsTileMaxWidth: CGFloat {
+        #if os(tvOS)
+        300
+        #else
+        horizontalSizeClass == .compact ? 200 : 230
+        #endif
+    }
+
+    private var ratingsTileSpacing: CGFloat {
+        #if os(tvOS)
+        18
+        #else
+        12
+        #endif
     }
 
     private var hasContent: Bool {
-        hasAbout || hasTopPlayback || !item.ratings.isEmpty || !informationGroups.isEmpty
+        hasAbout || !item.ratings.isEmpty || !informationGroups.isEmpty
     }
 
     private var hasAbout: Bool {
@@ -268,7 +285,7 @@ public struct DetailInformationSections: View {
                     .compositingGroup()
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .onPreferenceChange(OverviewFullHeightKey.self) { overviewFullHeight = $0 }
             .onPreferenceChange(OverviewLimitedHeightKey.self) { overviewLimitedHeight = $0 }
             .padding(cardPadding)
@@ -451,8 +468,8 @@ public struct DetailInformationSections: View {
     private var informationGroups: [InformationGroup] {
         [
             InformationGroup(id: "details", title: "Details", facts: detailFacts),
-            InformationGroup(id: "source", title: "Source", facts: sourceFacts),
-            InformationGroup(id: "file", title: "File", facts: fileFacts)
+            InformationGroup(id: "crew", title: "Crew", facts: crewFacts),
+            InformationGroup(id: "playback", title: "Playback", facts: playbackFacts)
         ]
         .filter { !$0.facts.isEmpty }
     }
@@ -462,41 +479,11 @@ public struct DetailInformationSections: View {
     }
 
     /// Every Information column occupies one third of the spine so the lower row
-    /// always lines up with the top row (About · Playback · Ratings), regardless
-    /// of how many groups have content.
+    /// always lines up with the top row (About · Ratings), regardless of how many
+    /// groups have content.
     private var informationColumnSpan: Int { 4 }
 
-    /// The glanceable "Playback" card in the top row — the self-hoster's key
-    /// decision facts: where it streams from, how it connects, and how good this
-    /// copy is. Condensed one-liners; the lower Source/File groups carry the full
-    /// breakdown.
-    private var topPlaybackFacts: [InformationFact] {
-        var facts: [InformationFact] = []
-        if let selectedSource {
-            facts.append(InformationFact(id: "server", label: "Server", value: selectedSource.displayName))
-            if let locality = localityLabel(selectedSource.locality) {
-                facts.append(InformationFact(id: "connection", label: "Connection", value: locality))
-            }
-        }
-        if let selectedVersion {
-            let quality = [selectedVersion.resolutionLabel, selectedVersion.hdrLabel, selectedVersion.audioLabel]
-                .compactMap { $0 }
-                .joined(separator: " · ")
-            if !quality.isEmpty {
-                facts.append(InformationFact(id: "quality", label: "Quality", value: quality))
-            }
-            let size = [selectedVersion.sizeLabel, selectedVersion.bitrateLabel]
-                .compactMap { $0 }
-                .joined(separator: " · ")
-            if !size.isEmpty {
-                facts.append(InformationFact(id: "size", label: "Size", value: size))
-            }
-        }
-        return facts
-    }
-
-    private var hasTopPlayback: Bool { !topPlaybackFacts.isEmpty }
-
+    /// "Details" — the editorial facts about the *title* itself.
     private var detailFacts: [InformationFact] {
         var facts: [InformationFact] = []
         if let year = item.productionYear {
@@ -512,41 +499,59 @@ public struct DetailInformationSections: View {
             facts.append(InformationFact(id: "original-title", label: "Original Title", value: originalTitle))
         }
         appendListFact(id: "genres", label: "Genres", values: item.genres, to: &facts)
-        appendListFact(id: "studios", label: "Studios", values: item.studios, to: &facts)
-        appendListFact(id: "directors", label: "Directed By", values: crew(kind: "director"), to: &facts)
-        appendListFact(id: "writers", label: "Written By", values: crew(kind: "writer"), to: &facts)
         appendListFact(id: "tags", label: "Tags", values: Array(item.tags.prefix(16)), to: &facts)
         return facts
     }
 
-    /// The lower "Source" group — provenance of this copy that isn't already in
-    /// the top Playback highlight (server/connection live up there).
-    private var sourceFacts: [InformationFact] {
+    /// "Crew" — the people and studios behind the title (the photo cast rail above
+    /// covers the on-screen cast; this carries the crew the rail doesn't).
+    private var crewFacts: [InformationFact] {
+        var facts: [InformationFact] = []
+        appendListFact(id: "directors", label: "Directed By", values: crew(kind: "director"), to: &facts)
+        appendListFact(id: "writers", label: "Written By", values: crew(kind: "writer"), to: &facts)
+        appendListFact(id: "studios", label: "Studios", values: item.studios, to: &facts)
+        return facts
+    }
+
+    /// "Playback" — everything about *this copy* in one place: where it streams
+    /// from, and the selected version's quality + file facts. Replaces the old
+    /// overlapping Playback/Source/File split (Quality vs Version vs Source, Runtime
+    /// vs Duration, a "Size" that was really the bitrate).
+    private var playbackFacts: [InformationFact] {
         var facts: [InformationFact] = []
         if let selectedSource {
-            if let provider = selectedSource.providerKind?.displayName,
-               !selectedSource.displayName.localizedCaseInsensitiveContains(provider) {
-                facts.append(InformationFact(id: "provider", label: "Provider", value: provider))
+            facts.append(InformationFact(id: "server", label: "Server", value: selectedSource.displayName))
+            if let locality = localityLabel(selectedSource.locality) {
+                facts.append(InformationFact(id: "connection", label: "Connection", value: locality))
             }
             if let account = nonempty(selectedSource.accountName),
                !selectedSource.displayName.localizedCaseInsensitiveContains(account) {
                 facts.append(InformationFact(id: "account", label: "Account", value: account))
             }
         }
-        if let selectedVersion, selectedVersion.displayLabel != "Version" {
-            facts.append(InformationFact(id: "version", label: "Version", value: selectedVersion.displayLabel))
+        if let selectedVersion {
+            if let edition = nonempty(selectedVersion.editionLabel) {
+                facts.append(InformationFact(id: "edition", label: "Edition", value: edition))
+            }
+            let quality = [selectedVersion.resolutionLabel, selectedVersion.hdrLabel, selectedVersion.audioLabel]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+            if !quality.isEmpty {
+                facts.append(InformationFact(id: "quality", label: "Quality", value: quality))
+            }
+            if let source = nonempty(selectedVersion.sourceQualityLabel) {
+                facts.append(InformationFact(id: "source", label: "Source", value: source))
+            }
+            if let bitrate = nonempty(selectedVersion.bitrateLabel) {
+                facts.append(InformationFact(id: "bitrate", label: "Bitrate", value: bitrate))
+            }
+            if let size = nonempty(selectedVersion.sizeLabel) {
+                facts.append(InformationFact(id: "size", label: "Size", value: size))
+            }
+            if let filename = nonempty(selectedVersion.fileName) {
+                facts.append(InformationFact(id: "filename", label: "File", value: filename))
+            }
         }
-        return facts
-    }
-
-    private var fileFacts: [InformationFact] {
-        guard let selectedVersion else { return [] }
-        var facts: [InformationFact] = []
-        appendVersionFact(id: "filename", label: "Filename", value: selectedVersion.fileName, alwaysInclude: true, to: &facts)
-        // Resolution / HDR / audio / size / bitrate are summarised in the top
-        // Playback card, so File carries only what isn't up there.
-        appendVersionFact(id: "source-quality", label: "Source", value: selectedVersion.sourceQualityLabel, to: &facts)
-        appendVersionFact(id: "file-duration", label: "Duration", value: selectedVersion.durationLabel, to: &facts)
         return facts
     }
 
@@ -653,9 +658,9 @@ public struct DetailInformationSections: View {
 
     private var aboutLineLimit: Int {
         #if os(tvOS)
-        5
+        8
         #else
-        4
+        7
         #endif
     }
 

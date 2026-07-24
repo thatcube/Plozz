@@ -1815,6 +1815,11 @@ private struct PlozziOSEpisodeDownloadIndicator: View {
 
 private struct PlozziOSCastSection: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    // Scales the trailing whitespace with the OS text size so the space under the
+    // (variably wrapped) cast names stays proportional at every Dynamic Type level,
+    // mirroring the space above the About header rather than a fixed gap.
+    @ScaledMetric(relativeTo: .subheadline) private var regularBottomPadding: CGFloat = 32
+    @ScaledMetric(relativeTo: .subheadline) private var compactBottomPadding: CGFloat = 24
     let people: [MediaPerson]
 
     var body: some View {
@@ -1876,6 +1881,14 @@ private struct PlozziOSCastSection: View {
             )
             .scrollIndicators(.hidden)
         }
+        // Symmetric scaled whitespace above and below the cast rail so it sits with
+        // balanced breathing room between the hero and the info band — and the gap
+        // under the (variably wrapped) names mirrors the gap over the About header.
+        .padding(.vertical, verticalPadding)
+    }
+
+    private var verticalPadding: CGFloat {
+        horizontalSizeClass == .compact ? compactBottomPadding : regularBottomPadding
     }
 
     private var pageInset: CGFloat {

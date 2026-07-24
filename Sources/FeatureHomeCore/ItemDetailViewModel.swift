@@ -319,6 +319,12 @@ public final class ItemDetailViewModel {
     /// automatic post-discovery locality retarget (``retargetToMostLocalSourceAfterDiscovery``)
     /// can never override their choice.
     private var userDidSwitchSource = false
+    /// Accounts already tried for the automatic "the selected server returned no
+    /// children — fail over to another server that hosts this title" recovery, so
+    /// a title present on two degraded servers can't ping-pong between them. Reset
+    /// on each fresh ``load`` (new open). Never engaged after an explicit
+    /// ``switchToSource`` (`userDidSwitchSource`), so it can't override a user pick.
+    private var childrenFailoverTriedAccounts: Set<String> = []
     /// Coalesces snapshot writes to AT MOST one in flight per view model: a burst
     /// of state changes (children arrive, episodes prewarm, cross-server discovery,
     /// alternate-source updates) used to each fire a full-snapshot encode+write,
@@ -504,6 +510,8 @@ public final class ItemDetailViewModel {
         enrichmentTask = nil
         crossServerDiscoveryTask?.cancel()
         crossServerDiscoveryTask = nil
+        // Fresh open: let the children-empty failover try each server once again.
+        childrenFailoverTriedAccounts = []
         hasPaintedFreshDetail = false
 
         // A source-specific library is authoritative even when an aggregated or
@@ -613,9 +621,16 @@ public final class ItemDetailViewModel {
                 startSpeculativeEnrichment(for: item)
                 // Children fill in off the critical path of first paint; merge them
                 // in (same item identity ⇒ no hero flicker) when they arrive.
-                let fetchedChildren = (try? await loadProvider.children(of: item.id)) ?? []
+                let fetchedChildren = await fetchChildren(loadProvider, of: item.id)
                 guard !Task.isCancelled, isCurrent() else { return }
                 state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged), childrenLoaded: true))
+                // The selected server returned nothing for a container title. If
+                // another known server hosts it, switch to that one in place (its
+                // reload takes over) rather than stranding an empty episode browser.
+                if fetchedChildren.isEmpty,
+                   await failoverIfChildrenMissing(currentAccount: loadAccountID) {
+                    return
+                }
                 persistSnapshot()
                 // Trailers + ratings ARE awaited: opening a detail deterministically
                 // populates its Trailer button and rating badges. Cancelled with
@@ -1098,12 +1113,18 @@ public final class ItemDetailViewModel {
         let children: [MediaItem]
         switch item.kind {
         case .series, .season, .folder, .collection:
-            children = (try? await provider.children(of: item.id)) ?? []
+            children = await fetchChildren(provider, of: item.id)
         default:
             children = []
         }
         guard !Task.isCancelled, isCurrent() else { return }
         state = .loaded(Detail(item: tagged(item), children: children.map(tagged), childrenLoaded: true))
+        // Same failover as `load()`: if this (possibly just-switched) server also
+        // returned nothing for a container, try the next untried server in place.
+        if children.isEmpty,
+           await failoverIfChildrenMissing(currentAccount: account) {
+            return
+        }
         startStreamProbeEnrichment(
             for: item,
             provider: provider,
@@ -1333,6 +1354,61 @@ public final class ItemDetailViewModel {
         // Reload the new server's detail + children in place over the existing
         // hero (no spinner). reload() now reads activeProvider/activeItemID.
         await reload()
+    }
+
+    /// Fetches a container's children (seasons/episodes) but never waits forever:
+    /// a server that is up but degraded (e.g. a Jellyfin returning no libraries, or
+    /// a stale cross-server id) can leave `children(of:)` hanging, which is what
+    /// stranded the episode browser on "loading… forever". If the fetch doesn't
+    /// finish within `timeout`, it's abandoned (cancelled) and an empty list is
+    /// returned, so the caller can publish "no episodes" and/or fail over.
+    private func fetchChildren(
+        _ provider: any MediaProvider,
+        of itemID: String,
+        timeout: Duration = .seconds(20)
+    ) async -> [MediaItem] {
+        await withTaskGroup(of: [MediaItem]?.self) { group in
+            group.addTask { (try? await provider.children(of: itemID)) ?? [] }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return nil
+            }
+            defer { group.cancelAll() }
+            for await result in group {
+                // First task to finish wins: the children fetch (even an empty
+                // list) → use it; the timeout (`nil`) → give up with [].
+                return result ?? []
+            }
+            return []
+        }
+    }
+
+    /// When the automatically-selected server returns NO children for a container
+    /// title that other servers also host, that server is almost certainly
+    /// degraded (offline library, stale id). Probe the other known sources and, if
+    /// one actually has children, switch to it in place so episodes load from a
+    /// working server instead of stranding the page. Returns `true` when it
+    /// switched (the caller should stop — ``switchToSource``'s reload takes over).
+    ///
+    /// Never runs after an explicit user pick (`userDidSwitchSource`) — the user's
+    /// choice is authoritative even if it's the empty one — and each server is
+    /// tried at most once per open, so two degraded servers can't ping-pong.
+    private func failoverIfChildrenMissing(currentAccount: String?) async -> Bool {
+        guard !userDidSwitchSource else { return false }
+        if let currentAccount { childrenFailoverTriedAccounts.insert(currentAccount) }
+        let candidates = sources.filter {
+            $0.accountID != currentAccount
+                && !childrenFailoverTriedAccounts.contains($0.accountID)
+        }
+        for candidate in candidates {
+            childrenFailoverTriedAccounts.insert(candidate.accountID)
+            guard let provider = alternateProviderResolver(candidate.accountID) else { continue }
+            let probe = await fetchChildren(provider, of: candidate.itemID)
+            guard !probe.isEmpty else { continue }
+            await switchToSource(accountID: candidate.accountID)
+            return true
+        }
+        return false
     }
 
     /// Lazily fetches and caches the episodes of one season. Concurrent callers

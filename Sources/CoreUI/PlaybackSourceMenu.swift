@@ -37,10 +37,6 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     @State private var isPresented = false
     @State private var page = PlaybackSourceMenuButtonPage.root
     @State private var triggerFrame: CGRect = .zero
-    @Environment(\.themePalette) private var palette
-    /// iOS only: the measured natural height of the panel content, used to size
-    /// the sheet to its content (like the tvOS panel) instead of a fixed detent.
-    @State private var iosSheetHeight: CGFloat = 220
 
     public init(
         sources: [MediaSourceRef],
@@ -87,19 +83,13 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                 attachmentAnchor: .rect(.bounds),
                 arrowEdge: .leading
             ) {
+                // No background of any kind here: the system popover chrome IS
+                // the surface, so the panel and its arrow are automatically the
+                // same material. Compact adaptation is forced to `.popover` so
+                // iPhone gets the same balloon as iPad instead of adapting into
+                // a sheet. (Matches the ratings popover in Mozz.)
                 panel
-                    // Size the sheet to the panel's own content — short when there's
-                    // one row, taller as you drill into servers/versions — mirroring
-                    // the tvOS expand/collapse behaviour instead of a half-screen
-                    // detent that leaves the sheet mostly empty.
-                    .presentationDetents([.height(iosSheetHeight)])
-                    // The popover/sheet chrome IS the menu surface. Use the
-                    // ShapeStyle overload, not a background *view*: a view is
-                    // clipped to the body rect, leaving the popover's arrow
-                    // filled with the system's default (lighter) material, while
-                    // a style colours the whole chrome including the arrow.
-                    .presentationBackground(palette.overlay.fill)
-                    .presentationDragIndicator(.hidden)
+                    .presentationCompactAdaptation(.popover)
             }
         #endif
     }
@@ -135,7 +125,6 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     private var panel: some View {
         PlaybackSourceMenuPanel(
             page: $page,
-            measuredHeight: $iosSheetHeight,
             sources: sources,
             selectedSourceID: selectedSourceID,
             offlineSourceAccountIDs: offlineSourceAccountIDs,
@@ -184,9 +173,6 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
 
 private struct PlaybackSourceMenuPanel: View {
     @Binding var page: PlaybackSourceMenuButtonPage
-    /// iOS only: reports the panel's measured natural content height back to the
-    /// presenter so the sheet can size to it. Ignored on tvOS.
-    var measuredHeight: Binding<CGFloat>? = nil
     let sources: [MediaSourceRef]
     let selectedSourceID: String?
     var offlineSourceAccountIDs: Set<String> = []
@@ -203,8 +189,6 @@ private struct PlaybackSourceMenuPanel: View {
     #endif
     @FocusState private var focusedRowID: String?
     #if !os(tvOS)
-    @Environment(\.horizontalSizeClass) private var hSizeClass
-    @State private var iosContentHeight: CGFloat = 220
     @State private var navDirection: Edge = .trailing
     #endif
     var body: some View {
@@ -218,27 +202,10 @@ private struct PlaybackSourceMenuPanel: View {
             // to draw its own glass surface.
             .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
             #else
-            // iOS/iPadOS deliberately draw NO surface here: the popover/sheet
-            // chrome is the surface (see `presentationBackground` on the
-            // presenter), which is what renders the connected popover arrow.
-            // Adding a panel here too is what produced the nested double
-            // background. Compact adapts to a full-width sheet; regular width
-            // keeps a fixed popover width.
-            .frame(maxWidth: hSizeClass == .compact ? .infinity : 390)
-            .frame(height: iosContentHeight, alignment: .top)
-            .onPreferenceChange(PlaybackSourceMenuContentHeightKey.self) { measurements in
-                // Take only the page we're showing — the outgoing page is still
-                // reporting during the push and must not hold the panel open.
-                guard let measured = measurements.first(where: { $0.page == page })?.height,
-                      measured > 0 else { return }
-                let total = min(measured, panelMaxHeight)
-                // Animate both the panel's own frame and the sheet detent together
-                // so the container grows/shrinks smoothly instead of snapping.
-                withAnimation(.easeInOut(duration: 0.28)) {
-                    iosContentHeight = total
-                    measuredHeight?.wrappedValue = total
-                }
-            }
+            // iOS/iPadOS draw NO surface and set NO explicit size: the system
+            // popover is the surface and sizes itself to this content, so there
+            // is exactly one background and the arrow always matches it.
+            .frame(maxWidth: 390)
             #endif
             #if os(tvOS)
             .focusScope(panelFocusScope)
@@ -263,22 +230,17 @@ private struct PlaybackSourceMenuPanel: View {
             .scrollIndicators(.hidden)
         }
         #else
-        // iOS/iPadOS: measure the whole page column (header + rows) so the sheet
-        // sizes to it exactly, and slide pages horizontally as you drill in/out —
-        // the container height morphs with the content, mirroring tvOS.
-        ScrollView {
-            pageColumn(for: page)
-                .transition(.push(from: navDirection))
-                .id(page)
-        }
-        .scrollIndicators(.hidden)
+        // iOS/iPadOS: the popover sizes itself to this content. Pages slide
+        // horizontally as you drill in/out.
+        pageColumn(for: page)
+            .transition(.push(from: navDirection))
+            .id(page)
         #endif
     }
 
     #if !os(tvOS)
     /// One page of the menu, built for an explicit page value so the instance
-    /// left behind by the push transition keeps reporting *its own* height
-    /// rather than the incoming page's.
+    /// left behind by the push transition keeps rendering *its own* content.
     @ViewBuilder
     private func pageColumn(for pageValue: PlaybackSourceMenuButtonPage) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -293,19 +255,6 @@ private struct PlaybackSourceMenuPanel: View {
             VStack(spacing: 0) { rows(for: pageValue) }
         }
         .padding(14)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: PlaybackSourceMenuContentHeightKey.self,
-                    value: [
-                        PlaybackSourceMenuPageHeight(
-                            page: pageValue,
-                            height: proxy.size.height
-                        )
-                    ]
-                )
-            }
-        )
     }
     #endif
 
@@ -650,14 +599,6 @@ private struct PlaybackSourceMenuPanel: View {
         }
     }
 
-    private var panelMaxHeight: CGFloat {
-        #if os(tvOS)
-        700
-        #else
-        620
-        #endif
-    }
-
     private var panelHeight: CGFloat {
         PlaybackSourceMenuMetrics.panelHeight(
             page: page,
@@ -747,27 +688,6 @@ private enum PlaybackSourceMenuButtonPage: Hashable {
 #if !os(tvOS)
 /// Reports the natural content height of the source-menu panel so the iOS sheet
 /// can size to its content instead of a fixed detent.
-/// Reports each rendered page's natural height *tagged with the page it belongs
-/// to*. During the push transition the outgoing and incoming pages are both on
-/// screen and both report; an untagged `max()` reduce would hold the taller of
-/// the two for the whole transition, so the panel snapped to its new height at
-/// one end of the animation instead of easing between them. Tagging lets the
-/// panel read only the page it's currently showing.
-private struct PlaybackSourceMenuPageHeight: Equatable {
-    let page: PlaybackSourceMenuButtonPage
-    let height: CGFloat
-}
-
-private struct PlaybackSourceMenuContentHeightKey: PreferenceKey {
-    static let defaultValue: [PlaybackSourceMenuPageHeight] = []
-    static func reduce(
-        value: inout [PlaybackSourceMenuPageHeight],
-        nextValue: () -> [PlaybackSourceMenuPageHeight]
-    ) {
-        value.append(contentsOf: nextValue())
-    }
-}
-
 #endif
 
 private enum PlaybackSourceMenuMetrics {

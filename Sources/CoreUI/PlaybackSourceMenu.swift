@@ -37,6 +37,9 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     @State private var isPresented = false
     @State private var page = PlaybackSourceMenuButtonPage.root
     @State private var triggerFrame: CGRect = .zero
+    /// iOS only: the measured natural height of the panel content, used to size
+    /// the sheet to its content (like the tvOS panel) instead of a fixed detent.
+    @State private var iosSheetHeight: CGFloat = 220
 
     public init(
         sources: [MediaSourceRef],
@@ -84,7 +87,14 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                 arrowEdge: .trailing
             ) {
                 panel
-                    .presentationDetents([.medium, .large])
+                    // Size the sheet to the panel's own content — short when there's
+                    // one row, taller as you drill into servers/versions — mirroring
+                    // the tvOS expand/collapse behaviour instead of a half-screen
+                    // detent that leaves the sheet mostly empty.
+                    .presentationDetents([.height(iosSheetHeight)])
+                    .presentationBackground(.clear)
+                    .presentationDragIndicator(.hidden)
+                    .animation(.easeOut(duration: 0.24), value: iosSheetHeight)
             }
         #endif
     }
@@ -120,6 +130,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     private var panel: some View {
         PlaybackSourceMenuPanel(
             page: $page,
+            measuredHeight: $iosSheetHeight,
             sources: sources,
             selectedSourceID: selectedSourceID,
             offlineSourceAccountIDs: offlineSourceAccountIDs,
@@ -168,6 +179,9 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
 
 private struct PlaybackSourceMenuPanel: View {
     @Binding var page: PlaybackSourceMenuButtonPage
+    /// iOS only: reports the panel's measured natural content height back to the
+    /// presenter so the sheet can size to it. Ignored on tvOS.
+    var measuredHeight: Binding<CGFloat>? = nil
     let sources: [MediaSourceRef]
     let selectedSourceID: String?
     var offlineSourceAccountIDs: Set<String> = []
@@ -183,6 +197,9 @@ private struct PlaybackSourceMenuPanel: View {
     @Environment(\.resetFocus) private var resetFocus
     #endif
     @FocusState private var focusedRowID: String?
+    #if !os(tvOS)
+    @State private var iosContentHeight: CGFloat = 220
+    #endif
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if page != .root {
@@ -200,13 +217,35 @@ private struct PlaybackSourceMenuPanel: View {
                     }
                 }
                 .padding(14)
+                #if !os(tvOS)
+                // Measure the content's natural height so the sheet can size to it.
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: PlaybackSourceMenuContentHeightKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                )
+                #endif
             }
             .scrollIndicators(.hidden)
         }
         // Page content swaps immediately; only the glass container morphs.
         .animation(nil, value: page)
         .frame(width: panelWidth)
+        #if os(tvOS)
         .frame(height: panelHeight, alignment: .top)
+        #else
+        .frame(height: iosContentHeight, alignment: .top)
+        .onPreferenceChange(PlaybackSourceMenuContentHeightKey.self) { contentHeight in
+            // content + a header row (with its 12pt VStack spacing) when drilled in.
+            let chrome: CGFloat = page != .root ? 56 : 0
+            let total = min(contentHeight + chrome, panelMaxHeight)
+            iosContentHeight = total
+            measuredHeight?.wrappedValue = total
+        }
+        #endif
         .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
         #if os(tvOS)
         .focusScope(panelFocusScope)
@@ -595,6 +634,17 @@ private enum PlaybackSourceMenuButtonPage: Hashable {
     case servers
     case versions
 }
+
+#if !os(tvOS)
+/// Reports the natural content height of the source-menu panel so the iOS sheet
+/// can size to its content instead of a fixed detent.
+private struct PlaybackSourceMenuContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+#endif
 
 private enum PlaybackSourceMenuMetrics {
     static func panelHeight(

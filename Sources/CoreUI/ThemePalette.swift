@@ -86,11 +86,17 @@ public struct ThemePalette: Equatable, Sendable {
     /// Primary text colour for the theme — titles and key values.
     public let primaryText: Color
     /// Secondary / de-emphasised text colour — subtitles, supporting copy, and
-    /// standard row icons. One tier below ``primaryText``.
+    /// standard row icons. One tier below ``primaryText``. Held at 60% (the Apple
+    /// HIG + Material 3 standard), which clears WCAG AA for body text (≈5.7–7.3:1)
+    /// on every app background.
     public let secondaryText: Color
-    /// Tertiary text colour — the faintest legible tier, for captions, hints and
-    /// disabled/placeholder states. One tier below ``secondaryText``. Shared so
-    /// the primary → secondary → tertiary hierarchy is identical on every platform.
+    /// Tertiary text colour — the faintest tier, for captions, hints and
+    /// disabled/placeholder states. Tuned **per appearance** (dark 36%, light 45%)
+    /// rather than a single opacity, because black loses contrast faster than
+    /// white at low alpha; both values clear WCAG AA for *large* text (≈3:1) so
+    /// tertiary stays legible for captions, while true body copy always uses
+    /// secondary or above. Shared so the primary → secondary → tertiary hierarchy
+    /// is consistent on every platform.
     public let tertiaryText: Color
     /// Accent / tint colour (Plozz's `AccentColor`).
     public let accent: Color
@@ -293,8 +299,8 @@ public extension ThemePalette {
         cardSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
         cardBorder: Color.white.opacity(0.16),
         primaryText: .white,
-        secondaryText: Color.white.opacity(0.62),
-        tertiaryText: Color.white.opacity(0.40),
+        secondaryText: Color.white.opacity(0.60),
+        tertiaryText: Color.white.opacity(0.36),
         accent: ThemePalette.brandAccent,
         errorText: Color(red: 1.0, green: 0.42, blue: 0.40),
         topGlow: ThemePalette.brandBlue.opacity(0.075),
@@ -325,8 +331,8 @@ public extension ThemePalette {
         cardSurface: Color(red: 0.045, green: 0.045, blue: 0.055),
         cardBorder: Color.white.opacity(0.16),
         primaryText: .white,
-        secondaryText: Color.white.opacity(0.62),
-        tertiaryText: Color.white.opacity(0.40),
+        secondaryText: Color.white.opacity(0.60),
+        tertiaryText: Color.white.opacity(0.36),
         accent: ThemePalette.brandAccent,
         errorText: Color(red: 1.0, green: 0.42, blue: 0.40),
         topGlow: nil,
@@ -366,7 +372,7 @@ public extension ThemePalette {
         cardBorder: Color.black.opacity(0.08),
         primaryText: Color.black.opacity(0.90),
         secondaryText: Color.black.opacity(0.60),
-        tertiaryText: Color.black.opacity(0.40),
+        tertiaryText: Color.black.opacity(0.45),
         accent: ThemePalette.brandAccent,
         errorText: Color(red: 0.78, green: 0.11, blue: 0.09),
         topGlow: ThemePalette.brandBlue.opacity(0.14),

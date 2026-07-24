@@ -536,7 +536,7 @@ private struct PlozziOSTabShell: View {
                         cornerRadius: Self.settingsSheetCornerRadius,
                         style: .continuous
                     )
-                    .strokeBorder(settingsPalette.cardOpaqueBorder, lineWidth: 1)
+                    .strokeBorder(settingsPalette.overlay.border ?? .clear, lineWidth: settingsPalette.overlay.borderWidth)
                     .mask {
                         LinearGradient(
                             stops: [

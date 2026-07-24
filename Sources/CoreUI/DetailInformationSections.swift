@@ -406,7 +406,7 @@ public struct DetailInformationSections: View {
             cornerRadius: overviewSheetCornerRadius,
             style: .continuous
         )
-        .strokeBorder(palette.cardOpaqueBorder, lineWidth: 1)
+        .strokeBorder(palette.overlay.border ?? .clear, lineWidth: palette.overlay.borderWidth)
 
         if isPadIdiom {
             // Full border: the whole card floats.

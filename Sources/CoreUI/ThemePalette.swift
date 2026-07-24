@@ -234,10 +234,20 @@ public extension ThemePalette {
                 blue: Double(b * (1 - darken))
             )
         }
-        // Lighten toward white; a near-black (OLED) base gets a smaller lift so it
-        // stays true-black-ish. Kept small so the elevated cards clear it.
+        // Lighten toward white to mark the zone; a near-black (OLED) base can't be
+        // lifted (that would defeat pixels-off black), so it recesses by going
+        // slightly DARKER instead. Kept small either way so the raised cards on top
+        // — which lift lighter on Dark, or hold a hairline on OLED — always clear it.
         let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
-        let lift: CGFloat = luminance < 0.05 ? 0.012 : 0.028
+        if luminance < 0.05 {
+            let darken: CGFloat = 0.30
+            return Color(
+                red: Double(r * (1 - darken)),
+                green: Double(g * (1 - darken)),
+                blue: Double(b * (1 - darken))
+            )
+        }
+        let lift: CGFloat = 0.014
         return Color(
             red: Double(r + (1 - r) * lift),
             green: Double(g + (1 - g) * lift),
@@ -270,9 +280,9 @@ public extension ThemePalette {
         // Dark raises by going lighter than the page (shadows don't read on dark);
         // borderless. Overlays keep that lift but add a faint rim + shadow so a
         // modal separates from the dark UI beneath it.
-        raised: SurfaceStyle(fill: Color(red: 0.185, green: 0.185, blue: 0.20)),
+        raised: SurfaceStyle(fill: Color(red: 0.16, green: 0.16, blue: 0.175)),
         overlay: SurfaceStyle(
-            fill: Color(red: 0.205, green: 0.205, blue: 0.22),
+            fill: Color(red: 0.18, green: 0.18, blue: 0.195),
             border: Color.white.opacity(0.10),
             borderWidth: 1,
             shadow: SurfaceShadow(color: .black.opacity(0.5), radius: 26, y: 14)

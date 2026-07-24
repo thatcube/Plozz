@@ -28,11 +28,17 @@ public struct AniListRatingsProvider: ExternalRatingsProviding {
 
     public func ratings(for item: MediaItem) async -> [ExternalRating] {
         guard let (variableKey, variableValue) = Self.lookup(for: item) else { return [] }
+        // A title `search` match is fuzzy — AniList can return a same-named but
+        // unrelated title (the classic "Air" 2023 film → "Air" 2005 anime). An
+        // explicit AniList/MAL id is authoritative and needs no corroboration.
+        let isFuzzyMatch = (variableKey == "search")
 
         let document = """
         query ($id: Int, $idMal: Int, $search: String) {
           Media(id: $id, idMal: $idMal, search: $search, type: ANIME) {
             averageScore
+            seasonYear
+            startDate { year }
             stats { scoreDistribution { amount } }
           }
         }
@@ -51,11 +57,23 @@ public struct AniListRatingsProvider: ExternalRatingsProviding {
         guard let (responseData, response) = try? await session.data(for: request),
               let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
               let decoded = try? JSONDecoder().decode(GraphQLResponse.self, from: responseData),
-              let score = decoded.data?.Media?.averageScore, score > 0
+              let media = decoded.data?.Media,
+              let score = media.averageScore, score > 0
         else { return [] }
 
+        // Reject a fuzzy title match whose release year is clearly different from the
+        // item's — this is what stops a title collision (or a stray anime id that
+        // forces a title search) from stamping an unrelated anime's score onto a
+        // live-action film. A ±1 tolerance absorbs season/air-vs-release drift.
+        if isFuzzyMatch,
+           let itemYear = item.productionYear,
+           let anilistYear = media.seasonYear ?? media.startDate?.year,
+           abs(itemYear - anilistYear) > 1 {
+            return []
+        }
+
         // AniList's weighted mean is on 0–100 and shown by AniList as a percentage.
-        let count = decoded.data?.Media?.stats?.scoreDistribution?
+        let count = media.stats?.scoreDistribution?
             .compactMap(\.amount)
             .reduce(0, +)
         return [ExternalRating(
@@ -103,7 +121,12 @@ public struct AniListRatingsProvider: ExternalRatingsProviding {
         struct DataField: Decodable { let Media: Media? }
         struct Media: Decodable {
             let averageScore: Int?
+            let seasonYear: Int?
+            let startDate: FuzzyDate?
             let stats: Stats?
+        }
+        struct FuzzyDate: Decodable {
+            let year: Int?
         }
         struct Stats: Decodable {
             let scoreDistribution: [ScoreBucket]?

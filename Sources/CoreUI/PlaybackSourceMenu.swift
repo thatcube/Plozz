@@ -94,7 +94,6 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                     .presentationDetents([.height(iosSheetHeight)])
                     .presentationBackground(.clear)
                     .presentationDragIndicator(.hidden)
-                    .animation(.easeOut(duration: 0.24), value: iosSheetHeight)
             }
         #endif
     }
@@ -210,11 +209,14 @@ private struct PlaybackSourceMenuPanel: View {
             .animation(nil, value: page)
             #else
             .frame(height: iosContentHeight, alignment: .top)
-            .animation(.easeOut(duration: 0.26), value: iosContentHeight)
             .onPreferenceChange(PlaybackSourceMenuContentHeightKey.self) { measured in
                 let total = min(measured, panelMaxHeight)
-                iosContentHeight = total
-                measuredHeight?.wrappedValue = total
+                // Animate both the panel's own frame and the sheet detent together
+                // so the container grows/shrinks smoothly instead of snapping.
+                withAnimation(.easeOut(duration: 0.28)) {
+                    iosContentHeight = total
+                    measuredHeight?.wrappedValue = total
+                }
             }
             #endif
             .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
@@ -297,8 +299,10 @@ private struct PlaybackSourceMenuPanel: View {
                 .font(.headline.weight(.semibold))
             Spacer()
         }
+        #if os(tvOS)
         .padding(.horizontal, 20)
         .padding(.top, 18)
+        #endif
     }
 
     @ViewBuilder

@@ -286,29 +286,11 @@ public struct AppBackground: View {
     }
 
     public var body: some View {
-        #if os(iOS)
-        // iOS/iPadOS: a clean, flat themed fill (no gradient or glow), which
-        // reads better in both light and dark mode. tvOS keeps the gradient.
+        // A clean, flat themed fill on every platform (no gradient or glow), so the
+        // page background is consistent and the standardized elevated surfaces read
+        // the same everywhere. (tvOS previously used a gradient + brand-blue glow.)
         palette.backgroundBase
             .ignoresSafeArea()
-        #else
-        LinearGradient(
-            colors: [palette.backgroundBase, palette.backgroundSecondary],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .overlay(alignment: .top) {
-            if let glow = palette.topGlow {
-                RadialGradient(
-                    gradient: Gradient(colors: [glow, .clear]),
-                    center: .top,
-                    startRadius: 0,
-                    endRadius: 820
-                )
-            }
-        }
-        .ignoresSafeArea()
-        #endif
     }
 }
 

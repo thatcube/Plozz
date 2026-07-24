@@ -169,12 +169,12 @@ struct IntegrationsDetailView: View {
                 ProgressView().controlSize(.small)
                 Text("Checking status…")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
         case .unavailable:
             Text("This tracker isn't configured in this build.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
         case .disconnected:
             Button(action: onConnect) {
                 Label("Connect", systemImage: "link")
@@ -286,7 +286,7 @@ struct AniListTokenEntryView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Scan the QR code or visit the URL on your phone, sign in to AniList, then enter the code shown:")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
 
             if case let .awaitingToken(authorizationURL) = anilist.phase {
                 HStack(alignment: .center, spacing: 32) {
@@ -323,7 +323,7 @@ struct MALAuthorizationCodeEntryView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Scan the QR code or visit the URL on your phone, sign in to MyAnimeList, then enter the code shown:")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
 
             if case let .awaitingAuthorizationCode(authorizationURL) = mal.phase {
                 HStack(alignment: .center, spacing: 32) {
@@ -373,13 +373,13 @@ struct LastFmConnectingView: View {
                     .font(.title2.weight(.semibold))
                 Text("Scan the code with your phone and approve access on Last.fm. There's no code to type — this screen updates automatically once you approve.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .frame(maxWidth: 460, alignment: .leading)
                 HStack(spacing: 14) {
                     ProgressView().controlSize(.small)
                     Text("Waiting for approval…")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
                 .padding(.top, 4)
                 Button(role: .cancel, action: onCancel) {
@@ -411,7 +411,7 @@ struct DeviceCodeConnectingView: View {
 
             Text("OR")
                 .font(.title3.weight(.bold))
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
 
             VStack(alignment: .leading, spacing: 12) {
                 Text(displayURL)
@@ -427,7 +427,7 @@ struct DeviceCodeConnectingView: View {
                         .frame(width: 64, height: 64)
                     Text("Waiting for approval…")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
                 Button(role: .cancel, action: onCancel) {
                     Text("Cancel")
@@ -501,7 +501,7 @@ struct AttributionsDetailView: View {
             VStack(alignment: .leading, spacing: 24) {
                 Text(PlozzAttributions.introduction)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 ForEach(PlozzAttributions.entries) { entry in
@@ -539,7 +539,7 @@ private struct AttributionCard: View {
             }
             Text(text)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

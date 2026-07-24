@@ -1,5 +1,6 @@
 #if os(iOS)
 import SwiftUI
+import CoreUI
 import FeatureSyncSetup
 
 /// Focused pairing send flow presented when the app is opened from a Sync & Setup
@@ -60,7 +61,7 @@ struct PlozziOSSyncSetupDeepLinkView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 60)).foregroundStyle(.orange)
                 Text("Setup didn’t finish").font(.title3.bold())
-                Text(message).foregroundStyle(.secondary)
+                Text(message).plozzForeground(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal)
                 Spacer()
                 Button("Try Again") {
@@ -76,7 +77,7 @@ struct PlozziOSSyncSetupDeepLinkView: View {
             VStack(spacing: 16) {
                 ProgressView().controlSize(.large)
                 Text("Setting up the other device…")
-                    .font(.headline).foregroundStyle(.secondary)
+                    .font(.headline).plozzForeground(.secondary)
             }
         }
     }

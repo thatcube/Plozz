@@ -16,7 +16,7 @@ struct PlozziOSTrackerSettingsView: View {
                     + "Playback progress is sent to every connected tracker."
             )
             .font(.footnote)
-            .foregroundStyle(.secondary)
+            .plozzForeground(.secondary)
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -63,7 +63,7 @@ private struct TraktSettingsContent: View {
             connectButton
         case let .connecting(userCode, verificationURL, _):
             Text("Enter this code on Trakt:")
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
             Text(userCode)
                 .font(.title2.monospaced().weight(.semibold))
                 .textSelection(.enabled)
@@ -107,7 +107,7 @@ private struct SimklSettingsContent: View {
             connectButton
         case let .connecting(userCode, verificationURL, _):
             Text("Enter this code on Simkl:")
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
             Text(userCode)
                 .font(.title2.monospaced().weight(.semibold))
                 .textSelection(.enabled)
@@ -184,7 +184,7 @@ private struct AniListSettingsContent: View {
         submit: @escaping () -> Void
     ) -> some View {
         Text("Authorize in your browser, then enter the short code shown there.")
-            .foregroundStyle(.secondary)
+            .plozzForeground(.secondary)
         if let url = URL(string: authorizationURL) {
             Button(openButtonTitle) {
                 openURL(url)
@@ -216,7 +216,7 @@ private struct MALSettingsContent: View {
             connectButton
         case let .awaitingAuthorizationCode(authorizationURL):
             Text("Authorize in your browser, then enter the short code shown there.")
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
             if let url = URL(string: authorizationURL) {
                 Button("Open MyAnimeList") {
                     openURL(url)
@@ -255,13 +255,13 @@ private var loadingStatus: some View {
     HStack {
         ProgressView()
         Text("Checking connection…")
-            .foregroundStyle(.secondary)
+            .plozzForeground(.secondary)
     }
 }
 
 private var unavailableStatus: some View {
     Label("Unavailable in this build", systemImage: "exclamationmark.triangle")
-        .foregroundStyle(.secondary)
+        .plozzForeground(.secondary)
 }
 
 private func connectedStatus(username: String) -> some View {

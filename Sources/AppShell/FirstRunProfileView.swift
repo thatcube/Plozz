@@ -41,7 +41,7 @@ struct FirstRunProfileView: View {
 
                     Text("We created this profile from your \(providerName) account. You can rename it or change the photo here, or any time in Settings.")
                         .font(.body)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 760)
                         .fixedSize(horizontal: false, vertical: true)

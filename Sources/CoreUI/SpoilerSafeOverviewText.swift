@@ -51,7 +51,7 @@ public struct SpoilerSafeOverviewText: View {
             }
         }
         .font(.system(size: fontSize))
-        .foregroundStyle(.secondary)
+        .plozzForeground(.secondary)
         .lineSpacing(2)
         .lineLimit(lineCount)
         .frame(maxWidth: maxWidth, alignment: .topLeading)

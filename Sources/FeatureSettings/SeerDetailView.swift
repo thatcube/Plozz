@@ -107,7 +107,7 @@ struct SeerDetailView: View {
                         ProgressView().controlSize(.small)
                         Text("Connecting…")
                             .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                 } else {
                     Button(action: connect) {
@@ -137,7 +137,7 @@ struct SeerDetailView: View {
                 HStack(spacing: 8) {
                     Text("On your network")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                     if discoveryScanning {
                         ProgressView().controlSize(.small)
                     }
@@ -152,7 +152,7 @@ struct SeerDetailView: View {
                             if let version = server.version {
                                 Text("v\(version)")
                                     .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                                    .plozzForeground(.secondary)
                             }
                         }
                     }
@@ -182,12 +182,12 @@ struct SeerDetailView: View {
                 if !summary.isEmpty {
                     Text(summary)
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
                 if let host = seer.savedBaseURLString {
                     Text(host)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
 
                 Button(role: .destructive) {
@@ -215,7 +215,7 @@ struct SeerDetailView: View {
                 case .loading, .idle:
                     HStack(spacing: 12) {
                         ProgressView().controlSize(.small)
-                        Text("Loading Seerr users…").font(.callout).foregroundStyle(.secondary)
+                        Text("Loading Seerr users…").font(.callout).plozzForeground(.secondary)
                     }
                 case .failed:
                     VStack(alignment: .leading, spacing: 8) {
@@ -236,7 +236,7 @@ struct SeerDetailView: View {
                         }
                     }
                 case .empty:
-                    Text("No Seerr users found.").font(.callout).foregroundStyle(.secondary)
+                    Text("No Seerr users found.").font(.callout).plozzForeground(.secondary)
                 }
             }
             .task { await loadUsersIfNeeded() }
@@ -257,7 +257,7 @@ struct SeerDetailView: View {
             Spacer()
             Text(mappedName ?? "Admin — unrestricted")
                 .foregroundStyle(mappedName == nil ? .secondary : .primary)
-            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            Image(systemName: "chevron.right").font(.caption).plozzForeground(.tertiary)
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 14)
@@ -334,7 +334,7 @@ struct SeerUserPickerView: View {
                         case .idle, .loading:
                             HStack(spacing: 12) {
                                 ProgressView().controlSize(.small)
-                                Text("Loading Seerr users…").font(.callout).foregroundStyle(.secondary)
+                                Text("Loading Seerr users…").font(.callout).plozzForeground(.secondary)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.top, 6)
@@ -353,7 +353,7 @@ struct SeerUserPickerView: View {
                             Text("Seerr users")
                                 .font(.caption.weight(.semibold))
                                 .textCase(.uppercase)
-                                .foregroundStyle(.secondary)
+                                .plozzForeground(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.top, 6)
                             ForEach(list) { user in
@@ -369,7 +369,7 @@ struct SeerUserPickerView: View {
                         case .empty:
                             Text("No Seerr users found.")
                                 .font(.callout)
-                                .foregroundStyle(.secondary)
+                                .plozzForeground(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.top, 6)
                         }
@@ -405,7 +405,7 @@ struct SeerUserPickerView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                     if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                        Text(subtitle).font(.caption).plozzForeground(.secondary)
                     }
                 }
                 Spacer()

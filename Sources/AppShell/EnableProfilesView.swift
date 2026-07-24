@@ -94,7 +94,7 @@ struct EnableProfilesView: View {
 
             Text("You can enable Profiles later in Settings.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
 
             Spacer(minLength: 0)
         }

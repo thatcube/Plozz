@@ -190,10 +190,10 @@ public struct ServerPickerView: View {
         Group {
             if case .scanning = viewModel.phase {
                 Label("Searching for servers…", systemImage: "antenna.radiowaves.left.and.right")
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             } else {
                 Label("No servers found yet. Make sure your server is on and that Plozz is allowed Local Network access (tvOS Settings ▸ General ▸ Privacy), then rescan — or enter an address below.", systemImage: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
         }
     }
@@ -211,7 +211,7 @@ public struct ServerPickerView: View {
                     .font(.headline)
                 Text("Tailscale servers can't be found automatically. Manually type your Tailscale IP or MagicDNS name below.")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
         }
     }
@@ -353,7 +353,7 @@ private struct PickerPanel<Content: View, Accessory: View>: View {
                             .font(.subheadline.weight(.semibold))
                             .textCase(.uppercase)
                             .tracking(1.0)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                     Spacer()
                     titleAccessory()
@@ -363,7 +363,7 @@ private struct PickerPanel<Content: View, Accessory: View>: View {
             if let footer {
                 Text(footer)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

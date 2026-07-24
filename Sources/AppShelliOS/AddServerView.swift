@@ -185,14 +185,14 @@ private struct ManagedServerDiscoverySection: View {
                                     .foregroundStyle(.primary)
                                 Text(server.baseURL.absoluteString)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .plozzForeground(.secondary)
                                     .lineLimit(1)
                             }
 
                             Spacer()
 
                             Image(systemName: "arrow.up.left")
-                                .foregroundStyle(.tertiary)
+                                .plozzForeground(.tertiary)
                         }
                     }
                     .buttonStyle(.plain)
@@ -279,10 +279,10 @@ private struct QuickConnectServerSignInView: View {
                     "Open Jellyfin on another device, choose Quick Connect, "
                         + "and enter this code."
                 )
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 Text(server.baseURL.absoluteString)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
 
             Section {
@@ -322,7 +322,7 @@ private struct QuickConnectServerSignInView: View {
                 )
                 Text("Waiting for approval…")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
             .padding(.vertical, 12)
         case .success:
@@ -513,7 +513,7 @@ private struct PlexServerSignInView: View {
                                 Text(server.name)
                                 Text(server.baseURL.host() ?? server.baseURL.absoluteString)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .plozzForeground(.secondary)
                             }
                         }
                     }

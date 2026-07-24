@@ -39,7 +39,7 @@ struct SettingsAboutSection: View {
 
                     Text("Bring all of your media together into one unified experience. Free forever and open source.")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -51,7 +51,7 @@ struct SettingsAboutSection: View {
                     Text("Scan to view the\nGitHub repo")
                         .font(.caption)
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
             }
             .accessibilityElement(children: .ignore)

@@ -76,7 +76,7 @@ struct HelpDiagnosticsDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Scan the code or go to the link to submit a GitHub issue.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(alignment: .top, spacing: 36) {
@@ -97,7 +97,7 @@ struct HelpDiagnosticsDetailView: View {
                         Text("Scan to report\na bug")
                             .font(.caption)
                             .multilineTextAlignment(.center)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                 }
             }
@@ -199,7 +199,7 @@ struct HelpDiagnosticsDetailView: View {
     private func infoRow(_ label: String, _ value: String) -> some View {
         HStack(spacing: 16) {
             Text(label)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(width: 150, alignment: .leading)

@@ -130,7 +130,7 @@ struct MyLibrariesDetailView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Libraries")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                         librarySection(for: group)
                     }
                 }
@@ -167,7 +167,7 @@ struct MyLibrariesDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Watching as")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
             if group.providerKind == .plex {
                 ForEach(group.accounts) { plexIdentityLink($0) }
             } else {
@@ -308,13 +308,13 @@ struct MyLibrariesDetailView: View {
         case .idle, .loading:
             HStack(spacing: 12) {
                 ProgressView()
-                Text("Discovering libraries…").font(.footnote).foregroundStyle(.secondary)
+                Text("Discovering libraries…").font(.footnote).plozzForeground(.secondary)
             }
         case .empty:
             libraryStatusMessage(for: group)
         case .failed:
             HStack {
-                Text("Couldn't load libraries.").font(.footnote).foregroundStyle(.secondary)
+                Text("Couldn't load libraries.").font(.footnote).plozzForeground(.secondary)
                 Spacer()
                 Button { Task { await context.reloadLibraries() } } label: {
                     Label("Retry", systemImage: "arrow.clockwise")
@@ -351,7 +351,7 @@ struct MyLibrariesDetailView: View {
     private var discoveringLibraries: some View {
         HStack(spacing: 12) {
             ProgressView()
-            Text("Discovering libraries…").font(.footnote).foregroundStyle(.secondary)
+            Text("Discovering libraries…").font(.footnote).plozzForeground(.secondary)
         }
     }
 
@@ -383,7 +383,7 @@ struct MyLibrariesDetailView: View {
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 Spacer()
                 Button { Task { await context.reloadLibraries() } } label: {
                     Label("Retry", systemImage: "arrow.clockwise")
@@ -392,7 +392,7 @@ struct MyLibrariesDetailView: View {
         } else {
             Text("No libraries found on this server.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
         }
     }
 

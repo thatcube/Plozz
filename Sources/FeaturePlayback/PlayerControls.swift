@@ -1074,7 +1074,7 @@ struct PlayerControls: View {
     private func emptyRow(_ text: String) -> some View {
         Text(text)
             .font(.title3)
-            .foregroundStyle(.secondary)
+            .plozzForeground(.secondary)
             .padding(.horizontal, 28)
             .padding(.vertical, 16)
     }

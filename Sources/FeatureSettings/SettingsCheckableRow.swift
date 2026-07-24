@@ -60,7 +60,7 @@ struct SettingsCheckableRow: View {
                     if let subtitle {
                         Text(subtitle)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                             .lineLimit(2)
                     }
                 }

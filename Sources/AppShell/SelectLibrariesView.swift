@@ -90,14 +90,14 @@ struct SelectLibrariesView: View {
                 ProgressView()
                 Text("Finding your libraries…")
                     .font(.title3)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case .empty:
             Text("No libraries were found on the servers you added.")
                 .font(.title3)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -105,7 +105,7 @@ struct SelectLibrariesView: View {
             VStack(spacing: 16) {
                 Text("Couldn't load your libraries.")
                     .font(.title3)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 Button {
                     Task { await discovery.load(from: appState.accountsProviders.resolvedAccounts(withIDs: appState.pendingLibrarySelectionAccountIDs)) }
                 } label: {

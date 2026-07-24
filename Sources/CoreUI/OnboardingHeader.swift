@@ -55,7 +55,7 @@ public struct OnboardingHeader: View {
             if let subtitle {
                 Text(subtitle)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 720)
             }

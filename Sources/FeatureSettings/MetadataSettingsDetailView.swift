@@ -510,7 +510,7 @@ public struct MetadataSettingsDetailView: View {
                 if let index = split.enabled.firstIndex(of: source) {
                     Text(index + 1, format: .number)
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
                 Text(displayName(source))
                     .foregroundStyle(split.enabled.contains(source) ? .primary : .secondary)
@@ -518,12 +518,12 @@ public struct MetadataSettingsDetailView: View {
         case .divider:
             Text("Disabled")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .textCase(.uppercase)
         case .disabledPlaceholder:
             Text("Drag a provider here to turn it off")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
         }
     }
     #endif
@@ -552,7 +552,7 @@ public struct MetadataSettingsDetailView: View {
                 if tmdbKey.isConfigured {
                     Label("A TMDB key is saved on this Apple TV.", systemImage: "checkmark.seal")
                         .font(.callout.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
 
                 SecureField("TMDB v4 API Read Access Token", text: draftKeyBinding)
@@ -603,7 +603,7 @@ public struct MetadataSettingsDetailView: View {
             EmptyView()
         case .verifying:
             Label("Checking…", systemImage: "hourglass")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).plozzForeground(.secondary)
         case .valid:
             Label("Key verified — TMDB authenticated successfully.", systemImage: "checkmark.circle.fill")
                 .font(.callout.weight(.medium)).foregroundStyle(.green)
@@ -713,11 +713,11 @@ private struct MetadataDiagnosticsOverviewPanel: View {
                     if let capturedAt = snapshot?.capturedAt {
                         Text("Updated \(capturedAt, format: .dateTime.hour().minute().second())")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     } else {
                         Text("Loading…")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                     Spacer()
                     Button(action: onRefresh) {
@@ -781,7 +781,7 @@ private struct MetadataDiagnosticMetric: View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
             Text(title)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
             Spacer(minLength: 12)
             Text(value)
                 .font(.callout.weight(.medium).monospacedDigit())
@@ -804,7 +804,7 @@ private struct MetadataDiagnosticsSourcesPanel: View {
             if counts.isEmpty {
                 Text("None yet")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             } else {
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                     ForEach(counts, id: \.source) { item in
@@ -1020,7 +1020,7 @@ private struct MetadataDisabledDivider: View {
         HStack(spacing: 12) {
             Text("Disabled")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .textCase(.uppercase)
             Rectangle()
                 .fill(Color.secondary.opacity(isDropTarget ? 0.6 : 0.3))

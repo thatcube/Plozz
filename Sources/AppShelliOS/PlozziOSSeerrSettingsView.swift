@@ -27,7 +27,7 @@ struct PlozziOSSeerrSettingsView: View {
                     + "Each Plozz profile can make requests as a different user."
             )
             .font(.footnote)
-            .foregroundStyle(.secondary)
+            .plozzForeground(.secondary)
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -70,7 +70,7 @@ struct PlozziOSSeerrSettingsView: View {
             HStack {
                 ProgressView()
                 Text("Checking connection…")
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
         case .unconfigured:
             connectionFields
@@ -80,7 +80,7 @@ struct PlozziOSSeerrSettingsView: View {
             if let savedURL = appModel.seerService.savedBaseURLString {
                 Text(savedURL)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
             Button("Test Connection") {
                 Task { await appModel.seerService.refreshStatus() }
@@ -113,7 +113,7 @@ struct PlozziOSSeerrSettingsView: View {
                 HStack(spacing: 8) {
                     Text("On your network")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                     if isScanning {
                         ProgressView()
                             .controlSize(.small)
@@ -133,7 +133,7 @@ struct PlozziOSSeerrSettingsView: View {
                             if let version = server.version {
                                 Text("v\(version)")
                                     .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                                    .plozzForeground(.secondary)
                             }
                         }
                     }
@@ -163,7 +163,7 @@ struct PlozziOSSeerrSettingsView: View {
             HStack {
                 ProgressView()
                 Text("Loading users…")
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
         } else if let usersError {
             Label(usersError, systemImage: "exclamationmark.triangle")
@@ -173,7 +173,7 @@ struct PlozziOSSeerrSettingsView: View {
             }
         } else if users.isEmpty {
             Text("No users found.")
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
         } else {
             ForEach(appModel.profiles.profiles) { profile in
                 Picker(

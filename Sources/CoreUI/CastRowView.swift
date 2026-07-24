@@ -93,7 +93,7 @@ private struct CastMemberCard: View {
                     if let role = person.role {
                         Text(role)
                             .font(.system(size: 19 * Self.scale))
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -117,7 +117,7 @@ private struct CastMemberCard: View {
             Circle().fill(Color.primary.opacity(0.12))
             Text(initials)
                 .font(.system(size: 48 * Self.scale, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
         }
     }
 

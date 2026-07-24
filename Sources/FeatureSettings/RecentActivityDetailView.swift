@@ -46,7 +46,7 @@ struct RecentActivityDetailView: View {
                 if filtered.isEmpty {
                     Text(entries.isEmpty ? "No activity recorded yet." : "No entries in this category.")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(filtered) { entry in
@@ -87,7 +87,7 @@ struct RecentActivityDetailView: View {
                 .font(.largeTitle.weight(.semibold))
             Text("The most recent app log lines, kept only on this Apple TV and already stripped of tokens and secrets. Newest first — a maintainer may ask what Plozz was doing when a bug happened.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -132,11 +132,11 @@ private struct RecentActivityRow: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 10) {
                 Text(Self.timeFormatter.string(from: entry.date))
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 Text(entry.level.rawValue.uppercased())
                     .foregroundStyle(levelColor)
                 Text(entry.category)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
             .font(.system(size: 14, design: .monospaced))
 

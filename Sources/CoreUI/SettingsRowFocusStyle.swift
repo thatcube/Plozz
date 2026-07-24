@@ -359,13 +359,13 @@ public extension View {
         font(.subheadline.weight(.bold))
             .textCase(.uppercase)
             .tracking(1.8)
-            .foregroundStyle(.secondary)
+            .plozzForeground(.secondary)
     }
 
     /// L3 — a **feature** description: the intro sentence under the pane's feature
     /// title (e.g. under "Hero"). Readable but secondary.
     func settingsHelperText() -> some View {
-        font(.callout).foregroundStyle(.secondary)
+        font(.callout).plozzForeground(.secondary)
     }
 
     /// L4 — a **section** description: a small, dim note under a section header.
@@ -373,7 +373,7 @@ public extension View {
     /// so it reads as a footnote and never competes with the header. Use sparingly
     /// (only when the header + control aren't self-explanatory).
     func settingsSectionDescription() -> some View {
-        font(.footnote).foregroundStyle(.tertiary)
+        font(.footnote).plozzForeground(.tertiary)
     }
 }
 #endif

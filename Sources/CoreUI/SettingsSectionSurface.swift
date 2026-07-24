@@ -22,7 +22,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
             if let title {
                 Text(title)
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .textCase(.uppercase)
                     .padding(.top, 8)
             }
@@ -55,7 +55,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
 
             footer
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .padding(.horizontal, 16)
         }
         .padding(.top, 8)

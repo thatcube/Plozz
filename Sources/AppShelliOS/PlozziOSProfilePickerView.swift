@@ -3,6 +3,7 @@ import CoreModels
 import FeatureProfiles
 import Foundation
 import SwiftUI
+import CoreUI
 
 struct PlozziOSProfilePickerView: View {
     let profiles: [Profile]
@@ -21,7 +22,7 @@ struct PlozziOSProfilePickerView: View {
                         Text("Who’s watching?")
                             .font(.largeTitle.bold())
                         Text("Choose a profile to continue.")
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                     .multilineTextAlignment(.center)
 

@@ -352,11 +352,11 @@ struct AddShareView: View {
             Image(systemName: icon)
                 .font(.system(size: 34))
                 .frame(width: 44, height: 44)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
             VStack(alignment: .leading, spacing: 6) {
                 Text(name).font(.headline)
                 if let host, host != name {
-                    Text(host).font(.subheadline).foregroundStyle(.secondary)
+                    Text(host).font(.subheadline).plozzForeground(.secondary)
                 }
             }
             Spacer(minLength: 12)
@@ -369,7 +369,7 @@ struct AddShareView: View {
 
     private func placeholder(_ text: LocalizedStringKey, systemImage: String) -> some View {
         Label(text, systemImage: systemImage)
-            .foregroundStyle(.secondary)
+            .plozzForeground(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
@@ -406,7 +406,7 @@ private struct SharePanel<Content: View, Accessory: View>: View {
                             .font(.subheadline.weight(.semibold))
                             .textCase(.uppercase)
                             .tracking(1.0)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                     Spacer()
                     titleAccessory()
@@ -416,7 +416,7 @@ private struct SharePanel<Content: View, Accessory: View>: View {
             if let footer {
                 Text(footer)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

@@ -940,7 +940,7 @@ private struct PlozziOSRequestAction: View {
                 if let actingName {
                     Text("Request as \(actingName)")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
             case .pending:
                 Label("Requested — awaiting approval", systemImage: "clock")
@@ -1583,7 +1583,7 @@ private struct PlozziOSInlineEpisodeEntry: View {
                     Text("Episode \(number)")
                         .font(.caption2.weight(.semibold))
                         .textCase(.uppercase)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
                 Text(episode.title)
                     .font(.headline)
@@ -1591,7 +1591,7 @@ private struct PlozziOSInlineEpisodeEntry: View {
                 if let overview = episode.overview, !overview.isEmpty {
                     Text(overview.overviewMarkdown ?? AttributedString(overview))
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .lineLimit(2)
                         .frame(
                             maxWidth: .infinity,
@@ -1841,7 +1841,7 @@ private struct PlozziOSCastSection: View {
                                     .fill(.secondary.opacity(0.14))
                                     .overlay {
                                         Image(systemName: "person.fill")
-                                            .foregroundStyle(.secondary)
+                                            .plozzForeground(.secondary)
                                     }
                             }
                             .frame(width: 164, height: 164)
@@ -1858,7 +1858,7 @@ private struct PlozziOSCastSection: View {
                             if let role = person.role {
                                 Text(role)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .plozzForeground(.secondary)
                                     .fixedSize(
                                         horizontal: false,
                                         vertical: true

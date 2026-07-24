@@ -2,6 +2,7 @@
 import CoreModels
 import MediaDownloads
 import SwiftUI
+import CoreUI
 
 /// The drill-in page for a single downloaded show: seasons as sections, each
 /// with its own episode count, size, and a "Remove Season" action, plus a
@@ -147,7 +148,7 @@ struct PlozziOSDownloadedShowView: View {
                 )
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .plozzForeground(.tertiary)
             }
         }
         .buttonStyle(.plain)

@@ -95,7 +95,7 @@ struct AudioPaneView: View {
         if rows.isEmpty {
             Text("No alternate audio")
                 .font(.title3)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .padding(.horizontal, 28)
                 .padding(.vertical, 16)
         } else {
@@ -229,7 +229,7 @@ struct SyncPaneView: View {
                 Spacer()
                 Text(PlayerControls.delayLabel(value))
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
             HStack(spacing: 12) {
                 stepButton("−500 ms", slot: firstSlot + 0) { onAdjust(-0.5) }

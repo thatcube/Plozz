@@ -252,12 +252,12 @@ struct PlozziOSDownloadsStorageBar: View {
                     Spacer(minLength: 0)
                     Text("\(DownloadFormatting.byteText(capacity.free)) free")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
             } else {
                 Text("\(DownloadFormatting.byteText(downloadsBytes)) used by downloads")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
         }
         .padding(.vertical, 6)
@@ -274,7 +274,7 @@ struct PlozziOSDownloadsStorageBar: View {
             Circle().fill(color).frame(width: 8, height: 8)
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
         }
     }
 
@@ -492,7 +492,7 @@ struct DownloadTileContent: View {
                 Color.secondary.opacity(0.12)
                 Image(systemName: fallbackSymbol)
                     .font(.largeTitle)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
         }
     }
@@ -637,7 +637,7 @@ struct DownloadArtwork: View {
                 Color.secondary.opacity(0.12)
                 Image(systemName: fallbackSymbol)
                     .font(.title2)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
         }
         .frame(width: 104, height: 60)

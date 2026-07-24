@@ -312,7 +312,7 @@ public struct PreviewCard<Swatch: View>: View {
                     if !compact, let detail {
                         Text(detail)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                             .multilineTextAlignment(.center)
                             .lineLimit(2, reservesSpace: true)
                     }

@@ -85,7 +85,7 @@ public struct RatingBadge: View {
             Text(rating.displayValue)
                 .font(valueFont)
                 .monospacedDigit()
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
         }
         // Preserve each icon + score as one indivisible badge. Without this,
         // SwiftUI compresses the numeric text first when several ratings share a
@@ -140,7 +140,7 @@ public struct RatingSourceIcon: View {
         case .critic:
             Image(systemName: "quote.bubble.fill")
                 .font(.system(size: size * 0.78, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
         }
     }
 
@@ -222,7 +222,7 @@ public struct RatingTile: View {
     private var subtitle: some View {
         Text(subtitleText)
             .font(.system(size: subtitleFontSize, weight: .medium))
-            .foregroundStyle(.secondary)
+            .plozzForeground(.secondary)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
     }

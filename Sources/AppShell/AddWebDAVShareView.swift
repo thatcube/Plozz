@@ -118,7 +118,7 @@ struct AddWebDAVShareView: View {
                     switch viewModel.authMode {
                     case .anonymous:
                         Text("No sign-in — for public/read-only shares.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).plozzForeground(.secondary)
                     case .usernamePassword:
                         TextField("Username", text: $viewModel.username)
                             .textContentType(.username).autocorrectionDisabled()
@@ -216,7 +216,7 @@ struct AddWebDAVShareView: View {
                         viewModel.isWorking ? "Loading…" : "No sub-folders here.",
                         systemImage: viewModel.isWorking ? "hourglass" : "folder"
                     )
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 } else {
                     VStack(spacing: 12) {
                         ForEach(viewModel.folders) { folder in
@@ -224,10 +224,10 @@ struct AddWebDAVShareView: View {
                                 Task { await viewModel.loadFolders(at: folder.path) }
                             } label: {
                                 HStack(spacing: 16) {
-                                    Image(systemName: "folder.fill").foregroundStyle(.secondary)
+                                    Image(systemName: "folder.fill").plozzForeground(.secondary)
                                     Text(folder.name).font(.headline)
                                     Spacer(minLength: 12)
-                                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                                    Image(systemName: "chevron.right").plozzForeground(.tertiary)
                                 }
                                 .contentShape(Rectangle())
                                 .padding(.vertical, 12)
@@ -319,7 +319,7 @@ private struct WebDAVPanel<Content: View, Accessory: View>: View {
                     .font(.subheadline.weight(.semibold))
                     .textCase(.uppercase)
                     .tracking(1.0)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 Spacer()
                 titleAccessory()
             }
@@ -327,7 +327,7 @@ private struct WebDAVPanel<Content: View, Accessory: View>: View {
             if let footer {
                 Text(footer)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

@@ -835,13 +835,13 @@ private struct PlexPINEntryView: View {
                         default:
                             Image(systemName: "person.fill")
                                 .font(.system(size: 72))
-                                .foregroundStyle(.secondary)
+                                .plozzForeground(.secondary)
                         }
                     }
                 } else {
                     Image(systemName: "person.fill")
                         .font(.system(size: 72))
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
             }
             .frame(width: 180, height: 180)

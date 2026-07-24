@@ -119,7 +119,7 @@ private struct InfoChipsRow: View {
                 ForEach(values, id: \.self) { value in
                     Text(value)
                         .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .padding(.vertical, 8)
                         .padding(.horizontal, 18)
                         .background(
@@ -391,7 +391,7 @@ private struct StudioTextTile: View {
     var body: some View {
         Text(name)
             .font(.system(size: 24, weight: .semibold))
-            .foregroundStyle(.secondary)
+            .plozzForeground(.secondary)
             .multilineTextAlignment(.center)
             .minimumScaleFactor(0.7)
             .padding(18)
@@ -410,7 +410,7 @@ private struct StudioTextChip: View {
     var body: some View {
         Text(name)
             .font(.system(size: 22, weight: .medium))
-            .foregroundStyle(.secondary)
+            .plozzForeground(.secondary)
             .padding(.vertical, 8)
             .padding(.horizontal, 18)
             .background(Capsule().fill(Color.primary.opacity(0.10)))

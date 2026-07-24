@@ -536,7 +536,7 @@ struct PlaybackDetailView: View {
                     )
                     Text(playback.settings.resumeRewindInterval.effectDescription)
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -608,7 +608,7 @@ private struct DescribedSegmentedPicker<Option: Hashable>: View {
             )
             Text(detail(describedOption))
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .contentTransition(.opacity)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -680,7 +680,7 @@ private struct SubtitleModeControl: View {
 
             Text(describedMode.detail)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .contentTransition(.opacity)
                 .frame(maxWidth: .infinity, alignment: .leading)

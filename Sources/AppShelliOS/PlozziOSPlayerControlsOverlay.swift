@@ -3,6 +3,7 @@ import CoreGraphics
 import CoreModels
 import FeaturePlayback
 import SwiftUI
+import CoreUI
 
 private enum PlozziOSPlayerSheet: String, Identifiable {
     case info
@@ -237,7 +238,7 @@ private struct PlozziOSPlayerTopBar: View {
                 if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .lineLimit(1)
                 }
             }
@@ -489,7 +490,7 @@ private struct PlozziOSSubtitleOptionsSheet: View {
         if let format = viewModel.controls.secondarySubtitleImagePrimaryFormat {
             Section("Second Track") {
                 Text("Unavailable with \(format) image subtitles.")
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
         } else if !viewModel.controls.secondarySubtitleOptions.isEmpty {
             Section("Second Track") {
@@ -510,7 +511,7 @@ private struct PlozziOSSubtitleOptionsSheet: View {
                 if let statusText = secondaryStatusText {
                     Text(statusText)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
             }
         }
@@ -525,7 +526,7 @@ private struct PlozziOSSubtitleOptionsSheet: View {
                     "\(format) subtitles are rendered as images and can’t be restyled.",
                     systemImage: "photo"
                 )
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
             } else {
                 NavigationLink {
                     PlozziOSSubtitleAppearanceView(viewModel: viewModel)
@@ -560,14 +561,14 @@ private struct PlozziOSSubtitleOptionsSheet: View {
                                 Text(subtitle.name)
                                 Text(remoteSubtitleDetails(subtitle))
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .plozzForeground(.secondary)
                             }
                         }
                     }
                     searchButton
                 case .empty:
                     Text("No matching subtitles were found.")
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                     searchButton
                 case .downloading:
                     HStack {
@@ -943,10 +944,10 @@ private struct PlozziOSSubtitleDualView: View {
                 if let format =
                     viewModel.controls.secondarySubtitleImagePrimaryFormat {
                     Text("Unavailable with \(format) image subtitles.")
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 } else if viewModel.controls.secondarySubtitleOptions.isEmpty {
                     Text("No additional text tracks are available.")
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 } else {
                     ForEach(
                         viewModel.controls.secondarySubtitleOptions
@@ -1044,7 +1045,7 @@ private struct PlozziOSSubtitleSliderRow: View {
                 Text(title)
                 Spacer()
                 Text(formattedValue(value))
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .monospacedDigit()
             }
             Slider(value: $value, in: range, step: step)
@@ -1229,7 +1230,7 @@ private struct PlozziOSPlaybackInfoSheet: View {
                         .font(.headline)
                     if !viewModel.controls.overview.isEmpty {
                         Text(verbatim: viewModel.controls.overview.overviewPlainText)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                 }
 
@@ -1294,7 +1295,7 @@ private struct PlozziOSPlaybackSyncSheet: View {
                             viewModel.controls.audioDelaySeconds,
                             format: .number.precision(.fractionLength(2))
                         )
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                     }
                 }
 
@@ -1312,7 +1313,7 @@ private struct PlozziOSPlaybackSyncSheet: View {
                             viewModel.controls.subtitleDelaySeconds,
                             format: .number.precision(.fractionLength(2))
                         )
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                     }
                 }
             }
@@ -1339,14 +1340,14 @@ private struct PlozziOSUpNextCard: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(info.eyebrow)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 Text(info.showName)
                     .font(.headline)
                     .lineLimit(1)
                 if let metaLine = info.metaLine {
                     Text(metaLine)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
             }
 

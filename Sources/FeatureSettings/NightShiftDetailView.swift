@@ -181,7 +181,7 @@ private struct NightShiftScheduleControl: View {
 
             Text(describedMode.detail)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .contentTransition(.opacity)
                 .frame(maxWidth: .infinity, alignment: .leading)

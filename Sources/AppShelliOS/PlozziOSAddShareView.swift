@@ -47,7 +47,7 @@ struct PlozziOSAddShareView: View {
                             Spacer(minLength: 0)
                             Image(systemName: "chevron.right")
                                 .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.tertiary)
+                                .plozzForeground(.tertiary)
                         }
                         .contentShape(Rectangle())
                     }

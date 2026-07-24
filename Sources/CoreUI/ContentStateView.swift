@@ -79,11 +79,11 @@ public struct ContentStateView<Value: Sendable, Content: View>: View {
         VStack(spacing: 24) {
             Image(systemName: icon)
                 .font(.system(size: 72))
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
             Text(title)
                 .font(.title2)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .frame(maxWidth: 800)
             if showRetry {
                 Button("Try Again", action: onRetry)

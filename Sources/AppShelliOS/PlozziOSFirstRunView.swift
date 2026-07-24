@@ -54,7 +54,7 @@ private struct PlozziOSProfilesWelcomeView: View {
                     Text("Who’s watching?")
                         .font(.largeTitle.bold())
                     Text("Profiles keep each person’s Home, watch history, settings, and downloads separate.")
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .multilineTextAlignment(.center)
                 }
 
@@ -91,7 +91,7 @@ private struct PlozziOSProfilesWelcomeView: View {
 
                 Text("You can enable profiles later in Settings.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
             .frame(maxWidth: 640)
             .padding(.horizontal, 24)
@@ -118,7 +118,7 @@ private struct PlozziOSFirstProfileView: View {
                     Text(profile.name)
                         .font(.largeTitle.bold())
                     Text("We created this profile from your first media account.")
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .multilineTextAlignment(.center)
                 }
 
@@ -168,7 +168,7 @@ private struct PlozziOSThemeWelcomeView: View {
                     Text("Choose Your Look")
                         .font(.largeTitle.bold())
                     Text("Pick a theme for this profile. You can change it any time.")
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .multilineTextAlignment(.center)
                 }
 

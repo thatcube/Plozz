@@ -311,7 +311,7 @@ private struct FirstRunBranding: View {
 
             Text("Free forever and open source.")
                 .font(.system(size: 22, weight: .medium))
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
         }
         .frame(width: 480)
     }

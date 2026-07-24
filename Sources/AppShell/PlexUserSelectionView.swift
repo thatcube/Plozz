@@ -61,7 +61,7 @@ struct PlexUserSelectionView: View {
 
             Text("You can change this any time in Settings.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .padding(.top, 20)
         }
         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)

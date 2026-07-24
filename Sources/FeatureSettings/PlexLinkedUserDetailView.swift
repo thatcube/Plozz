@@ -44,14 +44,14 @@ struct PlexLinkedUserDetailView: View {
                                 HStack(spacing: 12) {
                                     ProgressView()
                                     Text("Loading Plex users…")
-                                        .foregroundStyle(.secondary)
+                                        .plozzForeground(.secondary)
                                 }
                                 .padding(.vertical, 16)
                             } else if managed.isEmpty {
                                 Text(users.isEmpty
                                      ? "No Plex Home users found for this account."
                                      : "No managed users on this Plex account.")
-                                    .foregroundStyle(.secondary)
+                                    .plozzForeground(.secondary)
                                     .padding(.vertical, 12)
                             } else {
                                 ForEach(managed) { user in
@@ -64,7 +64,7 @@ struct PlexLinkedUserDetailView: View {
                     SettingsPanel(title: "No Plex Account") {
                         VStack(alignment: .leading, spacing: 16) {
                             Text("Sign in to a Plex account under This Apple TV › Servers to pick a Plex Home user.")
-                                .foregroundStyle(.secondary)
+                                .plozzForeground(.secondary)
                             // tvOS: at least one focusable element so Menu pops.
                             Button { /* no-op — anchors focus */ } label: {
                                 Label("No Plex account", systemImage: "person.crop.circle.badge.xmark")

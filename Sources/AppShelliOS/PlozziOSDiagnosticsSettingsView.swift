@@ -88,7 +88,7 @@ struct PlozziOSDiagnosticsSettingsView: View {
 
                 if let sendStatus {
                     Text(sendStatus)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
             }
 
@@ -160,7 +160,7 @@ private struct PlozziOSRecentActivityView: View {
                             Spacer()
                             Text(entry.date, format: .dateTime.hour().minute().second())
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .plozzForeground(.secondary)
                         }
                         Text(entry.message)
                             .font(.system(.caption, design: .monospaced))

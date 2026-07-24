@@ -51,7 +51,7 @@ struct PlozziOSPlexUserSelectionView: View {
             } placeholder: {
                 Image(systemName: "person.crop.circle.fill")
                     .resizable()
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
             .frame(width: 48, height: 48)
             .clipShape(Circle())
@@ -62,7 +62,7 @@ struct PlozziOSPlexUserSelectionView: View {
                 if user.isAdmin {
                     Text("Account Owner")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
             }
 
@@ -71,7 +71,7 @@ struct PlozziOSPlexUserSelectionView: View {
             if user.requiresPIN {
                 Image(systemName: "lock.fill")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .accessibilityLabel("Requires PIN")
             }
         }

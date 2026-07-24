@@ -67,7 +67,7 @@ struct SendDiagnosticsCard: View {
             ) {
                 Label("Send Recent Activity to Developer", systemImage: "paperplane")
                     .font(.headline)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .opacity(0.5)
             }
         }

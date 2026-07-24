@@ -80,7 +80,7 @@ struct PlozziOSMetadataDiagnosticsView: View {
         SettingsSectionGroup("Stored Fields") {
             if counts.isEmpty {
                 Text("None yet")
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             } else {
                 ForEach(counts, id: \.source) { item in
                     metricRow(displayName(item.source), item.count.formatted())
@@ -129,7 +129,7 @@ struct PlozziOSMetadataDiagnosticsView: View {
     private func metricRow(_ title: String, _ value: String, valueColor: Color = .primary) -> some View {
         HStack {
             Text(title)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
             Spacer(minLength: 12)
             Text(value)
                 .font(.callout.weight(.medium).monospacedDigit())

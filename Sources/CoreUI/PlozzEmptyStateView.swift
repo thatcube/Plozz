@@ -35,7 +35,7 @@ public struct PlozzEmptyStateView: View {
                 // ~30% smaller than the old .title2 empty-state text.
                 .font(.system(size: 27, weight: .regular))
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .frame(maxWidth: 800)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

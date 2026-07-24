@@ -589,7 +589,7 @@ public struct HomeView: View {
                         Text(detail)
                             .font(.caption2)
                             .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                 }
                 // The subtitle is padded to a fixed width per pass, so leading-align

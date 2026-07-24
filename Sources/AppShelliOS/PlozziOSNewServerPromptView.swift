@@ -48,7 +48,7 @@ struct PlozziOSNewServerPromptView: View {
             Text(originName.map { "You’re already signed in on \($0). Add it here?" }
                  ?? "You’re already signed in on another device. Add it here?")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.top, 6)
                 .padding(.horizontal, 28)
@@ -79,7 +79,7 @@ struct PlozziOSNewServerPromptView: View {
 
                 Button("Not Now", action: onNotNow)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .padding(.top, 4)
             }
             .controlSize(.large)

@@ -19,7 +19,7 @@ struct PlozziOSServersSettingsView: View {
             SettingsSectionGroup("Servers") {
                 if groups.isEmpty {
                     Text("You’re not signed in to any servers yet.")
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 } else {
                     ForEach(groups, id: \.serverKey) { group in
                         // A plain Button (not NavigationLink) because SettingsSectionGroup
@@ -73,13 +73,13 @@ struct PlozziOSServersSettingsView: View {
                 if let summary = summary(for: group) {
                     Text(summary)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
+                .plozzForeground(.tertiary)
         }
         .contentShape(Rectangle())
     }
@@ -125,12 +125,12 @@ private struct PlozziOSServerSettingsDetailView: View {
                                     Text(account.userName.isEmpty ? "Guest" : account.userName)
                                     Text(account.server.baseURL.host() ?? account.server.baseURL.absoluteString)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .plozzForeground(.secondary)
                                 }
                                 Spacer(minLength: 0)
                                 Image(systemName: "chevron.right")
                                     .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
+                                    .plozzForeground(.tertiary)
                             }
                             .contentShape(Rectangle())
                         }
@@ -230,7 +230,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
             if groups.isEmpty {
                 SettingsSectionGroup {
                     Text("No servers are available on this \(deviceName).")
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                     Button("Add Server", systemImage: "plus", action: onAddServer)
                 }
             } else {
@@ -282,7 +282,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
                                 "Can't reach this server — it may be offline.",
                                 systemImage: "exclamationmark.triangle"
                             )
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                             Spacer()
                             Button { Task { await loadLibraries() } } label: {
                                 Label("Retry", systemImage: "arrow.clockwise")
@@ -290,7 +290,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
                         }
                     } else {
                         Text("No video libraries are available.")
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                 } else {
                     ForEach(librariesForActiveIdentity(in: group)) { library in

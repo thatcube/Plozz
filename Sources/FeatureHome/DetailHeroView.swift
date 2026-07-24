@@ -470,7 +470,7 @@ struct DetailHeroView: View {
                    item.kind != .episode {
                     Text(subtitle)
                         .font(.system(size: 26, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .lineLimit(1)
                         .contentTransition(.opacity)
                 }
@@ -1335,6 +1335,7 @@ private struct CheckmarkShape: Shape {
 private struct DetailHeroCreditLine: View {
     let label: String
     let values: [String]
+    @Environment(\.themePalette) private var palette
 
     var body: some View {
         let capped = Array(values.prefix(3))
@@ -1343,9 +1344,9 @@ private struct DetailHeroCreditLine: View {
 
     private func text(_ values: [String]) -> some View {
         (
-            Text("\(label) ").foregroundStyle(.tertiary)
+            Text("\(label) ").foregroundStyle(palette.tertiaryText)
             + Text(values.joined(separator: ", "))
-                .foregroundStyle(.primary)
+                .foregroundStyle(palette.primaryText)
         )
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -1365,7 +1366,7 @@ private struct DetailHeroFactsRow: View {
             if !facts.isEmpty {
                 Text(facts.joined(separator: "  ·  "))
                     .font(.system(size: 23, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                     .contentTransition(.opacity)

@@ -131,7 +131,7 @@ struct CustomizeHomeDetailView: View {
                     ) {
                         Text("Enable a library on Your Libraries to give it its own rows.")
                             .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 4)
                     }
@@ -338,7 +338,7 @@ struct CustomizeHomeDetailView: View {
         if libraries.isEmpty {
             Text("No movie or TV libraries are shown on this profile's Home yet.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             SettingsCheckList(
@@ -410,7 +410,7 @@ private struct HomeRowsGroupCard<Content: View>: View {
                     } else if let systemIcon {
                         Image(systemName: systemIcon)
                             .font(.system(size: 34, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                 }
                 .frame(width: 56, height: 56)
@@ -423,10 +423,10 @@ private struct HomeRowsGroupCard<Content: View>: View {
                     if let subtitle {
                         Text("·")
                             .font(.subheadline)
-                            .foregroundStyle(.tertiary)
+                            .plozzForeground(.tertiary)
                         Text(subtitle)
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                 }
                 .lineLimit(1)

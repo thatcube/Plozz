@@ -70,7 +70,7 @@ struct ServerDetailView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("This server is no longer signed in.")
                             .font(.headline)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                         Button { dismiss() } label: {
                             Label("Go back", systemImage: "chevron.backward")
                         }
@@ -192,7 +192,7 @@ struct ServerDetailView: View {
                 Text(group.serverName).font(.largeTitle.bold())
                 Text(headerSubtitle(for: group))
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
             Spacer()
         }
@@ -230,13 +230,13 @@ struct ServerDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text(isCredentialFree ? "Connection" : "Signed in as")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 if group.accounts.isEmpty {
                     Text(isCredentialFree
                          ? "This share isn’t connected yet."
                          : "No one in this household is signed in to this server yet.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 } else {
                     ForEach(group.accounts) { account in
                         accountRow(account)
@@ -261,7 +261,7 @@ struct ServerDetailView: View {
                 Text(displayName).font(.headline)
                 Text(account.server.baseURL.host ?? account.server.baseURL.absoluteString)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -361,7 +361,7 @@ private struct ShareLibraryStatusPanel: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Library")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 HStack(spacing: 12) {
                     if let state, state.isBusy {
                         if let fraction = state.enrichFraction {
@@ -375,12 +375,12 @@ private struct ShareLibraryStatusPanel: View {
                         }
                         Text(Self.busyStatusText(state))
                             .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     } else {
                         Image(systemName: "checkmark.circle")
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                         Text(Self.lastScannedText(state?.lastScanAt))
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                     Spacer()
                 }

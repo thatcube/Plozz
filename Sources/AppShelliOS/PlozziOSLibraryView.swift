@@ -153,7 +153,7 @@ private struct PlozziOSLibraryCard: View {
                     .overlay {
                         Image(systemName: library.kind == .series ? "tv" : "film")
                             .font(.largeTitle)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
             }
             .frame(maxWidth: .infinity)

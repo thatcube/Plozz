@@ -334,7 +334,7 @@ public struct DetailInformationSections: View {
 
                 Text("MORE")
                     .font(moreLabelFont)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
         }
         .compositingGroup()
@@ -473,7 +473,7 @@ public struct DetailInformationSections: View {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(fact.label)
                             .font(factLabelFont)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                         Text(fact.value)
                             .font(factValueFont)
                             .fixedSize(horizontal: false, vertical: true)

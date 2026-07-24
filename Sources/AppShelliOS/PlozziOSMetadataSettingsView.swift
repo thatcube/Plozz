@@ -21,7 +21,7 @@ struct PlozziOSMetadataSettingsView: View {
         Form {
             Text("Metadata providers, artwork, and caches are shared by every profile on this device.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -141,12 +141,12 @@ struct PlozziOSMetadataSettingsView: View {
                 if let index = split.enabled.firstIndex(of: source) {
                     Text(index + 1, format: .number)
                         .font(.callout.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .frame(minWidth: 22, alignment: .trailing)
                 } else {
                     Image(systemName: "slash.circle")
                         .font(.callout)
-                        .foregroundStyle(.tertiary)
+                        .plozzForeground(.tertiary)
                         .frame(minWidth: 22)
                 }
                 Text(displayName(source))
@@ -158,7 +158,7 @@ struct PlozziOSMetadataSettingsView: View {
                 Text("Disabled")
                     .font(.caption.weight(.bold))
                     .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 Rectangle()
                     .fill(.secondary.opacity(0.4))
                     .frame(height: 1)
@@ -166,7 +166,7 @@ struct PlozziOSMetadataSettingsView: View {
         case .disabledPlaceholder:
             Text("Drag a provider here to turn it off")
                 .font(.callout)
-                .foregroundStyle(.tertiary)
+                .plozzForeground(.tertiary)
                 .frame(maxWidth: .infinity, minHeight: 40, alignment: .center)
                 .frame(maxWidth: .infinity)
                 .background(
@@ -196,7 +196,7 @@ struct PlozziOSMetadataSettingsView: View {
             if tmdbKey.isConfigured {
                 Label("A TMDB key is saved on this device.", systemImage: "checkmark.seal")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
 
             SecureField("TMDB v4 API Read Access Token", text: draftKeyBinding)
@@ -244,7 +244,7 @@ struct PlozziOSMetadataSettingsView: View {
             EmptyView()
         case .verifying:
             Label("Checking…", systemImage: "hourglass")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).plozzForeground(.secondary)
         case .valid:
             Label("Key verified — TMDB authenticated successfully.", systemImage: "checkmark.circle.fill")
                 .font(.callout).foregroundStyle(.green)
@@ -270,10 +270,10 @@ struct PlozziOSMetadataSettingsView: View {
                     Spacer()
                     Text("Cache and provider health")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+                        .plozzForeground(.tertiary)
                 }
                 .contentShape(Rectangle())
             }

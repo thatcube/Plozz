@@ -165,7 +165,7 @@ public struct EpisodeColumnCard: View {
             VStack(spacing: 10) {
                 Image(systemName: "play.rectangle")
                     .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 Text(item.parentTitle ?? "Episode")
                     .font(.headline)
                     .foregroundStyle(.primary)

@@ -28,7 +28,7 @@ struct PlozziOSSyncSetupSettingsView: View {
             case .connecting, .sending:
                 centered {
                     ProgressView().controlSize(.large)
-                    Text("Setting up your device…").font(.headline).foregroundStyle(.secondary)
+                    Text("Setting up your device…").font(.headline).plozzForeground(.secondary)
                 }
             case .sent:
                 successView
@@ -39,7 +39,7 @@ struct PlozziOSSyncSetupSettingsView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 60)).foregroundStyle(.orange)
                     Text("Setup didn’t finish").font(.title3.bold())
-                    Text(message).foregroundStyle(.secondary)
+                    Text(message).plozzForeground(.secondary)
                         .multilineTextAlignment(.center).padding(.horizontal)
                     Button("Try Again") { handled = false; model.reset(); model.startDiscovery() }
                         .syncPrimaryButtonStyle()
@@ -119,7 +119,7 @@ struct PlozziOSSyncSetupSettingsView: View {
                     HStack {
                         Text(appModel.cloudSyncStatus.summary)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                         Spacer()
                         Button("Sync Now") { appModel.syncCloudNow() }
                             .font(.footnote.weight(.semibold))
@@ -132,12 +132,12 @@ struct PlozziOSSyncSetupSettingsView: View {
                     if let tag = appModel.cloudSyncStatus.accountTag {
                         Text("iCloud identity: \(tag)…  (must match on every device)")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                     if let n = appModel.cloudSyncStatus.syncedRecordCount {
                         Text("\(n) item\(n == 1 ? "" : "s") in iCloud  (should match your other devices)")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                     Button {
                         appModel.redownloadCloudSync()
@@ -174,11 +174,11 @@ struct PlozziOSSyncSetupSettingsView: View {
                         HStack(spacing: 12) {
                             Image(systemName: "externaldrive.badge.person.crop")
                                 .font(.title3)
-                                .foregroundStyle(.secondary)
+                                .plozzForeground(.secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(server.serverName).fontWeight(.medium)
                                 Text("Set up on another device — sign in to watch here")
-                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .font(.footnote).plozzForeground(.secondary)
                             }
                             Spacer()
                             Button("Ignore") { appModel.ignorePendingSyncedServer(server.id) }
@@ -195,7 +195,7 @@ struct PlozziOSSyncSetupSettingsView: View {
                 if model.nearbyDevices.isEmpty {
                     HStack(spacing: 12) {
                         ProgressView()
-                        Text("Looking for a device to set up…").foregroundStyle(.secondary)
+                        Text("Looking for a device to set up…").plozzForeground(.secondary)
                     }
                 } else {
                     ForEach(model.nearbyDevices) { device in
@@ -209,10 +209,10 @@ struct PlozziOSSyncSetupSettingsView: View {
                                 VStack(alignment: .leading) {
                                     Text(device.displayName).fontWeight(.semibold)
                                     Text("Code \(SyncPairingCode.grouped(device.serviceName))")
-                                        .font(.footnote).foregroundStyle(.secondary)
+                                        .font(.footnote).plozzForeground(.secondary)
                                 }
                                 Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                Image(systemName: "chevron.right").plozzForeground(.secondary)
                             }
                             .contentShape(Rectangle())
                         }

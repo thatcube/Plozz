@@ -82,7 +82,7 @@ struct PlozziOSLibrarySelectionView: View {
                         "Some servers could not be reached. Their libraries can be configured later in Settings.",
                         systemImage: "exclamationmark.triangle"
                     )
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 }
             }
         }

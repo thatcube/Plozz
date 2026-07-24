@@ -500,7 +500,7 @@ public struct SettingsView: View {
             HStack(spacing: 20) {
                 Image(systemName: "appletv")
                     .font(.system(size: 40, weight: .regular))
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
                     .background(Circle().fill(Color.primary.opacity(0.06)))
                     .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
@@ -510,7 +510,7 @@ public struct SettingsView: View {
                         .font(Self.identityTitleFont)
                     Text("Shared across every profile on this Apple TV.")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
                 Spacer()
             }
@@ -672,7 +672,7 @@ public struct SettingsView: View {
                 ForEach(DeveloperInfo.snapshot()) { item in
                     HStack(alignment: .top, spacing: 16) {
                         Text(item.label)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                         Spacer(minLength: 24)
                         Text(item.value)
                             .multilineTextAlignment(.trailing)
@@ -680,7 +680,7 @@ public struct SettingsView: View {
                     .font(.callout)
                 }
                 HStack(alignment: .top, spacing: 16) {
-                    Text("OS").foregroundStyle(.secondary)
+                    Text("OS").plozzForeground(.secondary)
                     Spacer(minLength: 24)
                     Text(ProcessInfo.processInfo.operatingSystemVersionString)
                         .multilineTextAlignment(.trailing)
@@ -705,7 +705,7 @@ public struct SettingsView: View {
                 Spacer()
                 Text(heroForegroundModeLabel)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
             .foregroundStyle(.orange)
             .padding(.vertical, 12)
@@ -887,7 +887,7 @@ public struct SettingsView: View {
                         .minimumScaleFactor(0.6)
                     Text("Settings below are saved on this profile.")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
                 Spacer()
                 HStack(spacing: 12) {
@@ -973,7 +973,7 @@ public struct SettingsView: View {
         HStack(spacing: 20) {
             Image(systemName: "gearshape.fill")
                 .font(.system(size: 40, weight: .regular))
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
                 .background(Circle().fill(Color.primary.opacity(0.06)))
                 .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
@@ -1006,7 +1006,7 @@ public struct SettingsView: View {
                                 HStack(spacing: 16) {
                                     Text(syncStatusSummary)
                                         .font(.callout)
-                                        .foregroundStyle(.secondary)
+                                        .plozzForeground(.secondary)
                                     Spacer(minLength: 0)
                                     if let onSyncNow {
                                         Button("Sync Now", action: onSyncNow)
@@ -1023,7 +1023,7 @@ public struct SettingsView: View {
                                     HStack(spacing: 16) {
                                         Text("Not seeing changes from your other devices? Pull a fresh copy from iCloud.")
                                             .font(.footnote)
-                                            .foregroundStyle(.secondary)
+                                            .plozzForeground(.secondary)
                                             .fixedSize(horizontal: false, vertical: true)
                                         Spacer(minLength: 0)
                                         Button("Re-download From iCloud", action: syncRepair.redownload)
@@ -1032,7 +1032,7 @@ public struct SettingsView: View {
                                     HStack(spacing: 16) {
                                         Text("Still wrong? Wipe the iCloud copy and re-upload from this Apple TV.")
                                             .font(.footnote)
-                                            .foregroundStyle(.secondary)
+                                            .plozzForeground(.secondary)
                                             .fixedSize(horizontal: false, vertical: true)
                                         Spacer(minLength: 0)
                                         Button("Reset Sync") { showResetSyncConfirm = true }

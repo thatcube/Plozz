@@ -384,7 +384,7 @@ private struct PlaybackErrorView: View {
                 .foregroundStyle(.white)
             Text(message)
                 .font(.title3)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 800)
             Button("Back", action: onDismiss)

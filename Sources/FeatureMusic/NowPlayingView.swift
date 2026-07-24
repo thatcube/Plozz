@@ -653,7 +653,7 @@ public struct NowPlayingView: View {
             if let artist = controller.currentTrack?.artistName, !artist.isEmpty {
                 Text(artist)
                     .font(.system(size: 26, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .multilineTextAlignment(.center)
                     .lineLimit(1)
                     .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.35), radius: 6, y: 2)
@@ -662,7 +662,7 @@ public struct NowPlayingView: View {
                 let album = controller.currentTrack?.albumTitle ?? ""
                 Text(album.isEmpty ? " " : album)
                     .font(.system(size: 18))
-                    .foregroundStyle(.tertiary)
+                    .plozzForeground(.tertiary)
                     .lineLimit(1)
                     .opacity(album.isEmpty ? 0 : 1)
                     .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.3), radius: 5, y: 2)
@@ -758,7 +758,7 @@ public struct NowPlayingView: View {
                     if let detail = quality.detail {
                         Text(detail)
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                 }
                 .padding(.horizontal, 10)
@@ -794,7 +794,7 @@ public struct NowPlayingView: View {
                 Text(MusicFormat.duration(controller.duration))
             }
             .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
+            .plozzForeground(.secondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -1101,7 +1101,7 @@ struct NowPlayingLyricsView: View {
                     ProgressView()
                     Text("Searching for lyrics…")
                         .font(.system(size: 28, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
                 Spacer()
             }
@@ -1113,7 +1113,7 @@ struct NowPlayingLyricsView: View {
                 Spacer()
                 Text("No lyrics found")
                     .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1246,7 +1246,7 @@ struct LyricsSourceBadge: View {
             Text(source.displayName)
                 .font(.caption.weight(.semibold))
         }
-        .foregroundStyle(.tertiary)
+        .plozzForeground(.tertiary)
     }
 
     @ViewBuilder

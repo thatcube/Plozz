@@ -463,7 +463,7 @@ struct ArtistDetailView: View {
                                 .joined(separator: " · ")
                             )
                                 .font(.title3)
-                                .foregroundStyle(.secondary)
+                                .plozzForeground(.secondary)
                         }
                     }
                     Spacer()
@@ -544,11 +544,11 @@ struct AlbumDetailView: View {
             )
                 .frame(width: columnWidth, height: columnWidth)
             Text(viewModel.album.title).font(.system(size: 40, weight: .bold)).lineLimit(3)
-            Text(viewModel.album.subtitleLine).font(.body).foregroundStyle(.secondary).lineLimit(2)
+            Text(viewModel.album.subtitleLine).font(.body).plozzForeground(.secondary).lineLimit(2)
             if let count = viewModel.album.trackCount {
                 Text("\(count) tracks · \(MusicFormat.duration(viewModel.album.totalDuration))")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
             PlayShuffleButtons(
                 isEmpty: viewModel.tracks.isEmpty,
@@ -642,7 +642,7 @@ struct PlaylistDetailView: View {
             MusicArtworkImage(url: viewModel.playlist.artworkURL, systemPlaceholder: "music.note.list")
                 .frame(width: columnWidth, height: columnWidth)
             Text(viewModel.playlist.title).font(.system(size: 40, weight: .bold)).lineLimit(3)
-            Text("\(viewModel.tracks.count) tracks").font(.body).foregroundStyle(.secondary)
+            Text("\(viewModel.tracks.count) tracks").font(.body).plozzForeground(.secondary)
             PlayShuffleButtons(
                 isEmpty: viewModel.tracks.isEmpty,
                 onPlay: { play(from: nil) },
@@ -894,13 +894,13 @@ struct TrackListView: View {
                                 .foregroundStyle(isCurrent ? Color.accentColor : .primary)
                                 .lineLimit(1)
                             if showArtist, let artist = track.artistName {
-                                Text(artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                                Text(artist).font(.subheadline).plozzForeground(.secondary).lineLimit(1)
                             }
                         }
                         Spacer()
                         Text(MusicFormat.duration(track.duration))
                             .font(.subheadline.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                     .padding(.vertical, 14)
                     .padding(.horizontal, 22)
@@ -962,7 +962,7 @@ struct TrackListView: View {
                 } else {
                     Text(track.trackNumber.map(String.init) ?? "\(index + 1)")
                         .font(.headline.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                 }

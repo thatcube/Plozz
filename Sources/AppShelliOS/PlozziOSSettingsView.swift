@@ -819,7 +819,7 @@ private struct PlozziOSProfilesView: View {
                                         .foregroundStyle(.tint)
                                 }
                                 Image(systemName: "pencil")
-                                    .foregroundStyle(.secondary)
+                                    .plozzForeground(.secondary)
                             }
                         }
                         .swipeActions {
@@ -1011,7 +1011,7 @@ struct PlozziOSPlexHomeUserSettingsView: View {
                     }
                 } else if users.isEmpty {
                     Text("No additional Plex Home users were found.")
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 } else {
                     ForEach(users.filter { !$0.isAdmin }) { user in
                         userButton(
@@ -1056,7 +1056,7 @@ struct PlozziOSPlexHomeUserSettingsView: View {
                 } placeholder: {
                     Image(systemName: "person.crop.circle.fill")
                         .resizable()
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
                 .frame(width: 40, height: 40)
                 .clipShape(Circle())
@@ -1066,7 +1066,7 @@ struct PlozziOSPlexHomeUserSettingsView: View {
                 if requiresPIN {
                     Image(systemName: "lock.fill")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
                 Spacer()
                 if isSelected(user) {
@@ -1194,7 +1194,7 @@ private struct PlozziOSHomeSettingsView: View {
                     }
                 } else if libraries.isEmpty {
                     Text("No video libraries are available.")
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 } else {
                     ForEach(libraries) { library in
                         Button {
@@ -1205,12 +1205,12 @@ private struct PlozziOSHomeSettingsView: View {
                                     Text(library.title)
                                     Text(library.serverName)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .plozzForeground(.secondary)
                                 }
                                 Spacer(minLength: 0)
                                 Image(systemName: "chevron.right")
                                     .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
+                                    .plozzForeground(.tertiary)
                             }
                             .contentShape(Rectangle())
                         }
@@ -1261,7 +1261,7 @@ private struct PlozziOSHomeSettingsView: View {
                     SettingsSectionGroup("Random libraries") {
                         if randomEligibleLibraries.isEmpty {
                             Text("No movie or TV libraries are enabled on Home.")
-                                .foregroundStyle(.secondary)
+                                .plozzForeground(.secondary)
                         } else {
                             ForEach(randomEligibleLibraries) { library in
                                 Toggle(
@@ -1893,7 +1893,7 @@ private struct PlozziOSAttributionsView: View {
         List {
             Text(PlozzAttributions.introduction)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)

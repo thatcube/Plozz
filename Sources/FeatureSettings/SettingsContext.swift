@@ -128,12 +128,12 @@ struct SettingsPanel<Content: View>: View {
                             .font(.subheadline.weight(.semibold))
                             .textCase(.uppercase)
                             .tracking(1.0)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
                     if let subtitle {
                         Text(subtitle)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -142,7 +142,7 @@ struct SettingsPanel<Content: View>: View {
             if let footer {
                 Text(footer)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -190,7 +190,7 @@ struct SettingsPageHeader: View {
             if let subtitle {
                 Text(subtitle)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -306,7 +306,7 @@ struct AccountAvatar: View {
             Circle().fill(Color.primary.opacity(0.10))
             Text(String(name.prefix(1)).uppercased())
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
         }
     }
 }

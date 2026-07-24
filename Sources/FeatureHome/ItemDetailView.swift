@@ -609,12 +609,12 @@ public struct ItemDetailView: View {
         VStack(spacing: 24) {
             Image(systemName: "folder")
                 .font(.system(size: 64))
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
             Text(item.title)
                 .font(.title2.weight(.semibold))
             Text("No playable media in this folder.")
                 .font(.title3)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .multilineTextAlignment(.center)
             Button {
                 dismiss()
@@ -643,7 +643,7 @@ public struct ItemDetailView: View {
                 .font(.title2.weight(.semibold))
             Text("Loading…")
                 .font(.title3)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
             Button {
                 dismiss()
             } label: {

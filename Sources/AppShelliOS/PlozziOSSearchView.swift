@@ -2,6 +2,7 @@
 import CoreModels
 import FeatureSearchCore
 import SwiftUI
+import CoreUI
 
 struct PlozziOSSearchView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -143,7 +144,7 @@ private struct PlozziOSSearchHeader: View {
         HStack(spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 TextField(
                     "Movies, shows, and episodes",
                     text: $query
@@ -157,7 +158,7 @@ private struct PlozziOSSearchHeader: View {
                         query = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }

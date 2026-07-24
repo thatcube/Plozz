@@ -54,7 +54,7 @@ public struct LabeledSettingRow<Trailing: View>: View {
                 if let subtitle {
                     Text(subtitle)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

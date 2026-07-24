@@ -1451,7 +1451,7 @@ private struct PlozziOSHomeLibraryCard: View {
                     .overlay {
                         Image(systemName: library.library.kind == .series ? "tv" : "film")
                             .font(.title)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                     }
             }
             .frame(width: width, height: width * 0.6)
@@ -1471,7 +1471,7 @@ private struct PlozziOSHomeLibraryCard: View {
                     .lineLimit(1)
                 Text(library.serverName)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                     .lineLimit(1)
             }
             .padding(.horizontal, metrics.landscapeCaptionInset)

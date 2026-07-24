@@ -129,10 +129,10 @@ struct UnifiedAddShareView: View {
                 Image(systemName: "keyboard")
                     .font(.system(size: 30))
                     .frame(width: 44, height: 44)
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
                 Text("Enter an address manually").font(.headline)
                 Spacer(minLength: 12)
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right").plozzForeground(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 14)
@@ -156,10 +156,10 @@ struct UnifiedAddShareView: View {
         let protocols = box.doors.map { $0.transport.badgeLabel }.joined(separator: " · ")
         return HStack(alignment: .top, spacing: 20) {
             Image(systemName: "externaldrive.connected.to.line.below.fill")
-                .font(.system(size: 32)).frame(width: 44, height: 44).foregroundStyle(.secondary)
+                .font(.system(size: 32)).frame(width: 44, height: 44).plozzForeground(.secondary)
             VStack(alignment: .leading, spacing: 6) {
                 Text(box.displayName).font(.headline)
-                Text("\(box.host) · \(protocols) detected").font(.subheadline).foregroundStyle(.secondary)
+                Text("\(box.host) · \(protocols) detected").font(.subheadline).plozzForeground(.secondary)
             }
             Spacer(minLength: 12)
         }
@@ -198,7 +198,7 @@ struct UnifiedAddShareView: View {
                             HStack {
                                 Text(protocolLabel(viewModel.selectedTransport))
                                 Spacer()
-                                Image(systemName: "chevron.up.chevron.down").font(.footnote).foregroundStyle(.secondary)
+                                Image(systemName: "chevron.up.chevron.down").font(.footnote).plozzForeground(.secondary)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -292,7 +292,7 @@ struct UnifiedAddShareView: View {
                     if let warning = viewModel.plaintextWarning {
                         Label(warning, systemImage: "info.circle")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .plozzForeground(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -307,7 +307,7 @@ struct UnifiedAddShareView: View {
         let ports = viewModel.detectedPorts(for: kind)
         if ports.count > 1 {
             HStack(spacing: 10) {
-                Text("Detected:").font(.footnote).foregroundStyle(.secondary)
+                Text("Detected:").font(.footnote).plozzForeground(.secondary)
                 ForEach(ports, id: \.self) { p in
                     Button {
                         viewModel.portText = String(p)
@@ -343,7 +343,7 @@ struct UnifiedAddShareView: View {
             Text(isHostKey
                 ? "Only approve if this matches your server’s SSH host key. Approving pins this exact key; a change requires re-approval."
                 : "Only approve if this matches your server. Approving pins this exact certificate; a change requires re-approval.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).plozzForeground(.secondary)
             HStack(spacing: 20) {
                 Button("Approve & Continue") { viewModel.approveTrust() }
                     .buttonStyle(.borderedProminent)
@@ -366,13 +366,13 @@ struct UnifiedAddShareView: View {
             case .needsAuth, .badCredentials:
                 Panel(title: "Sign in") {
                     Text("This server needs a username and password. Go back and enter them.")
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                 }
                 manualSharePanel
             case .unreachable:
                 Panel(title: "Can’t connect") {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text("Couldn’t connect. Check the address and network.").foregroundStyle(.secondary)
+                        Text("Couldn’t connect. Check the address and network.").plozzForeground(.secondary)
                         Button("Try again") { retryLocation() }.buttonStyle(.borderedProminent)
                     }
                 }
@@ -380,7 +380,7 @@ struct UnifiedAddShareView: View {
             case .failed(let message):
                 Panel(title: "Something went wrong") {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(LocalizedStringKey(message)).foregroundStyle(.secondary)
+                        Text(LocalizedStringKey(message)).plozzForeground(.secondary)
                         Button("Try again") { retryLocation() }.buttonStyle(.borderedProminent)
                     }
                 }
@@ -422,7 +422,7 @@ struct UnifiedAddShareView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(viewModel.currentPath)
                         .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .plozzForeground(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button("Use This Folder") { useCurrentFolder() }
@@ -441,10 +441,10 @@ struct UnifiedAddShareView: View {
                             Button { selectLocation(item) } label: {
                                 HStack(spacing: 16) {
                                     Image(systemName: item.isBrowsable ? "folder.fill" : "externaldrive.fill")
-                                        .foregroundStyle(.secondary)
+                                        .plozzForeground(.secondary)
                                     Text(item.name).font(.headline)
                                     Spacer(minLength: 12)
-                                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                                    Image(systemName: "chevron.right").plozzForeground(.tertiary)
                                 }
                                 .contentShape(Rectangle()).padding(.vertical, 10).padding(.horizontal, 12)
                             }
@@ -538,7 +538,7 @@ struct UnifiedAddShareView: View {
             headerRow(title: LocalizedStringKey("\(kind.badgeLabel) coming soon"), back: { viewModel.backToConnect() }) { EmptyView() }
             Panel(title: kind.badgeLabel) {
                 Text("\(kind.badgeLabel) support is on the way. This device was detected, but Plozz can’t connect over \(kind.badgeLabel) just yet.")
-                    .foregroundStyle(.secondary)
+                    .plozzForeground(.secondary)
             }
             Button("Back") { viewModel.backToConnect() }
                 .buttonStyle(.bordered)
@@ -570,7 +570,7 @@ struct UnifiedAddShareView: View {
     }
 
     private func placeholder(_ text: LocalizedStringKey) -> some View {
-        Text(text).foregroundStyle(.secondary)
+        Text(text).plozzForeground(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8).padding(.horizontal, 12)
     }
@@ -608,7 +608,7 @@ private struct Panel<Content: View, Accessory: View>: View {
             if !title.isEmpty {
                 HStack {
                     Text(title).font(.subheadline.weight(.semibold)).textCase(.uppercase)
-                        .tracking(1.0).foregroundStyle(.secondary)
+                        .tracking(1.0).plozzForeground(.secondary)
                     Spacer()
                     accessory()
                 }
@@ -638,7 +638,7 @@ private struct LabeledFormRow<Control: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: 20) {
             Text(label)
-                .foregroundStyle(.secondary)
+                .plozzForeground(.secondary)
                 .frame(width: 150, alignment: .leading)
             control()
                 .frame(maxWidth: .infinity, alignment: .leading)

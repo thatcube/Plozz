@@ -205,12 +205,15 @@ public struct DetailInformationSections: View {
 
     private var aboutContent: some View {
         Button { showsFullOverview = true } label: {
-            ZStack(alignment: .bottomTrailing) {
-                VStack(alignment: .leading, spacing: aboutContentSpacing) {
-                    Text(item.title)
-                        .font(aboutTitleFont)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let overview = nonempty(item.overview) {
+            VStack(alignment: .leading, spacing: aboutContentSpacing) {
+                Text(item.title)
+                    .font(aboutTitleFont)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let overview = nonempty(item.overview) {
+                    // ZStack wraps ONLY the line-limited text (natural height), so
+                    // MORE anchors to the end of the text — not the bottom of a
+                    // card that's been stretched to match a taller neighbour.
+                    ZStack(alignment: .bottomTrailing) {
                         overviewText(overview)
                             .font(bodyFont)
                             .foregroundStyle(.primary)
@@ -218,8 +221,7 @@ public struct DetailInformationSections: View {
                             // Measure whether the line-limited text is actually
                             // truncated by comparing it to the same text laid out
                             // at the same width with no limit. Reliable at any
-                            // width, unlike a chars-per-line guess (which never
-                            // fired on the narrow iPhone card).
+                            // width, unlike a chars-per-line guess.
                             .background(alignment: .top) {
                                 overviewText(overview)
                                     .font(bodyFont)
@@ -242,34 +244,33 @@ public struct DetailInformationSections: View {
                                     )
                                 }
                             }
+
+                        if isOverviewTruncated {
+                            // Fade the last line into the background before MORE so
+                            // no glyphs bleed behind it.
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .clear, location: 0.0),
+                                    .init(color: .black, location: 0.45),
+                                    .init(color: .black, location: 1.0)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: moreFadeWidth, height: moreFadeHeight)
+                            .blendMode(.destinationOut)
+
+                            Text("MORE")
+                                .font(moreLabelFont)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                }
-                .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
-                .onPreferenceChange(OverviewFullHeightKey.self) { overviewFullHeight = $0 }
-                .onPreferenceChange(OverviewLimitedHeightKey.self) { overviewLimitedHeight = $0 }
-
-                if isOverviewTruncated {
-                    // Fade the last line into the background before MORE: the
-                    // gradient reaches solid black well left of the label so no
-                    // glyphs bleed behind it.
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0.0),
-                            .init(color: .black, location: 0.45),
-                            .init(color: .black, location: 1.0)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: moreFadeWidth, height: moreFadeHeight)
-                    .blendMode(.destinationOut)
-
-                    Text("MORE")
-                        .font(moreLabelFont)
-                        .foregroundStyle(.secondary)
+                    .compositingGroup()
                 }
             }
-            .compositingGroup()
+            .frame(maxWidth: .infinity, maxHeight: cardFillHeight, alignment: .topLeading)
+            .onPreferenceChange(OverviewFullHeightKey.self) { overviewFullHeight = $0 }
+            .onPreferenceChange(OverviewLimitedHeightKey.self) { overviewLimitedHeight = $0 }
             .padding(cardPadding)
         }
         .buttonStyle(.plain)

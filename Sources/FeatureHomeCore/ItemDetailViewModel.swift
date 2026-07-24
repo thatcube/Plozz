@@ -250,6 +250,27 @@ public final class ItemDetailViewModel {
     /// resolve. Empty for a single-server title (no picker shown).
     public private(set) var sources: [MediaSourceRef] = []
 
+    /// The current server described as a ``MediaSourceRef`` **for display**, built
+    /// from the active provider. Unlike ``sources`` (deliberately empty for a
+    /// single-server title so no picker shows), this is always populated, so the
+    /// detail "Playback" card can show the server + connection even for the common
+    /// one-server case. Prefers the matching enriched source when the multi-server
+    /// picker is populated so its richer metadata (e.g. resolved locality) wins.
+    public var currentSourceForDisplay: MediaSourceRef {
+        if let match = sources.first(where: { $0.accountID == activeSourceAccountID && $0.itemID == activeItemID })
+            ?? sources.first(where: { $0.accountID == activeSourceAccountID }) {
+            return match
+        }
+        return MediaSourceRef(
+            accountID: activeSourceAccountID ?? activeProvider.session.server.id,
+            itemID: activeItemID,
+            providerKind: activeProvider.kind,
+            serverName: activeProvider.session.server.name,
+            accountName: activeProvider.session.userName,
+            locality: activeProvider.connectionLocality
+        )
+    }
+
     /// Numbered seasons owned across every currently-known server copy of this
     /// series. Seerr may be connected to only one library server; reconciling all
     /// Plozz sources prevents offering a season that is already playable elsewhere.

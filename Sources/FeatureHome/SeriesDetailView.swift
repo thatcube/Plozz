@@ -322,8 +322,11 @@ struct SeriesDetailView: View {
 
                     DetailExtrasView(
                         item: series,
-                        selectedSource: distinctServerChoices.first { $0.accountID == series.sourceAccountID },
-                        selectedVersion: playVersions.first { $0.id == effectivePlayVersionID },
+                        selectedSource: distinctServerChoices.first { $0.accountID == series.sourceAccountID }
+                            ?? viewModel.currentSourceForDisplay,
+                        selectedVersion: playVersions.first { $0.id == effectivePlayVersionID }
+                            ?? playVersions.first
+                            ?? playTarget.map { MediaVersion.synthesized(from: $0) },
                         leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
                         seriesRecedeModel: recedeModel,
                         revealsSeriesCastWithoutBrowser: revealsCastWithoutBrowser,

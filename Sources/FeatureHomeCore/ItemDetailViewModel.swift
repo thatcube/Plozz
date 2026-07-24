@@ -477,6 +477,17 @@ public final class ItemDetailViewModel {
         FileHandle.standardOutput.write(Data(("PLZTRAIL " + message + "\n").utf8))
     }
 
+    /// Env-gated (`DETAIL_DIAG=1`) stdout tracing for the detail load / source
+    /// selection / children failover path — captured from the Apple TV via
+    /// `devicectl … process launch --console -e '{"DETAIL_DIAG":"1"}'`.
+    private static let detailDiagEnabled: Bool = {
+        ProcessInfo.processInfo.environment["DETAIL_DIAG"] == "1"
+    }()
+    private static func detailDiag(_ message: String) {
+        guard detailDiagEnabled else { return }
+        FileHandle.standardOutput.write(Data(("PLZDETAIL " + message + "\n").utf8))
+    }
+
     /// Cancels every piece of owned background work so no detached/async task can
     /// outlive the view model. The view's `onDisappear` already calls
     /// ``suspendEnrichment()``, but a view model torn down without that hook
@@ -512,6 +523,8 @@ public final class ItemDetailViewModel {
         crossServerDiscoveryTask = nil
         // Fresh open: let the children-empty failover try each server once again.
         childrenFailoverTriedAccounts = []
+
+        Self.detailDiag("load start item=\(itemID) active=\(activeSourceAccountID ?? "nil"):\(activeItemID) isDiscovery=\(isDiscoveryItem) origin=\(originSourceAccountID ?? "nil") initialSources=[\(initialSources.map { "\($0.accountID):\($0.itemID)#\($0.serverName ?? "?")@\(String(describing: $0.locality))" }.joined(separator: ", "))]")
         hasPaintedFreshDetail = false
 
         // A source-specific library is authoritative even when an aggregated or
@@ -526,6 +539,7 @@ public final class ItemDetailViewModel {
         let loadProvider = activeProvider
         let loadItemID = activeItemID
         let loadAccountID = activeSourceAccountID
+        Self.detailDiag("after locality-pref active=\(loadAccountID ?? "nil"):\(loadItemID) provider=\(loadProvider.kind.rawValue)")
         let loadSourceGeneration = sourceGeneration
         func isCurrent() -> Bool {
             isCurrentSource(
@@ -623,6 +637,7 @@ public final class ItemDetailViewModel {
                 // in (same item identity ⇒ no hero flicker) when they arrive.
                 let fetchedChildren = await fetchChildren(loadProvider, of: item.id)
                 guard !Task.isCancelled, isCurrent() else { return }
+                Self.detailDiag("children fetched item=\(item.id) kind=\(String(describing: item.kind)) count=\(fetchedChildren.count) sources=[\(sources.map { "\($0.accountID):\($0.itemID)" }.joined(separator: ", "))]")
                 state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged), childrenLoaded: true))
                 // The selected server returned nothing for a container title. If
                 // another known server hosts it, switch to that one in place (its
@@ -1400,10 +1415,12 @@ public final class ItemDetailViewModel {
             $0.accountID != currentAccount
                 && !childrenFailoverTriedAccounts.contains($0.accountID)
         }
+        Self.detailDiag("failover check current=\(currentAccount ?? "nil") candidates=[\(candidates.map { "\($0.accountID):\($0.itemID)" }.joined(separator: ", "))]")
         for candidate in candidates {
             childrenFailoverTriedAccounts.insert(candidate.accountID)
             guard let provider = alternateProviderResolver(candidate.accountID) else { continue }
             let probe = await fetchChildren(provider, of: candidate.itemID)
+            Self.detailDiag("failover probe account=\(candidate.accountID) item=\(candidate.itemID) count=\(probe.count)")
             guard !probe.isEmpty else { continue }
             await switchToSource(accountID: candidate.accountID)
             return true

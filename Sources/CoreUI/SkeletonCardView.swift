@@ -28,6 +28,7 @@ public struct SkeletonCardView: View {
     private let style: Style
 
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.themePalette) private var palette
     /// Per-profile card presentation (framed glass card vs borderless artwork),
     /// mirrored from `PosterCardView` so the placeholder matches whichever look the
     /// real cards will render in.
@@ -58,7 +59,7 @@ public struct SkeletonCardView: View {
                 .frame(maxWidth: .infinity)
                 .overlay {
                     RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous)
-                        .fill(Color.plozzSkeletonFill)
+                        .fill(palette.fill)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius)
@@ -80,7 +81,7 @@ public struct SkeletonCardView: View {
     private var landscapeCard: some View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous)
-                .fill(Color.plozzSkeletonFill)
+                .fill(palette.fill)
                 .frame(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
@@ -129,7 +130,7 @@ public struct SkeletonCardView: View {
             .frame(maxWidth: .infinity)
             .overlay {
                 RoundedRectangle(cornerRadius: borderlessCornerRadius, style: .continuous)
-                    .fill(Color.plozzSkeletonFill)
+                    .fill(palette.fill)
             }
             .clipShape(RoundedRectangle(cornerRadius: borderlessCornerRadius, style: .continuous))
             .plozzMediaEdge(cornerRadius: borderlessCornerRadius)
@@ -208,27 +209,9 @@ public struct SkeletonCardView: View {
             .hidden()
             .overlay(alignment: .leading) {
                 Capsule(style: .continuous)
-                    .fill(Color.plozzSkeletonFill)
+                    .fill(palette.fill)
                     .frame(width: width, height: height)
             }
-    }
-}
-
-public extension Color {
-    /// Adaptive neutral fill for skeleton placeholders: a light gray on dark and Pure Black
-    /// backgrounds (so cards read clearly against pure black) and a darker gray in
-    /// light mode. Kept low-opacity so it stays a quiet placeholder, not a solid
-    /// block.
-    static var plozzSkeletonFill: Color {
-        #if canImport(UIKit)
-        return Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(white: 1.0, alpha: 0.11)
-                : UIColor(white: 0.0, alpha: 0.12)
-        })
-        #else
-        return Color.gray.opacity(0.12)
-        #endif
     }
 }
 

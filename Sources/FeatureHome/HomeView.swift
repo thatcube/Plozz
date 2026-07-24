@@ -1223,7 +1223,7 @@ private struct LibraryCardView: View {
             if !isUpdating {
                 Image(systemName: librarySymbol)
                     .font(.system(size: 64, weight: .semibold))
-                    .foregroundStyle(palette.secondaryText.opacity(0.4))
+                    .foregroundStyle(palette.tertiaryText)
             }
         }
     }

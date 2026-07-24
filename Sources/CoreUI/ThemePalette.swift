@@ -142,6 +142,13 @@ public struct ThemePalette: Equatable, Sendable {
     /// `Divider()` default. Tuned to sit in the same family as the OLED card edge
     /// so inner and outer hairlines don't clash.
     public let separator: Color
+    /// A subtle translucent neutral fill for *filled shapes* that aren't elevated
+    /// surfaces — skeleton/loading placeholders, imageless artwork stand-ins, chips
+    /// and pills, progress tracks. Apple's `systemFill` concept: distinct from the
+    /// `raised`/`overlay` surface tokens (which imply elevation) and from text
+    /// tiers. Translucent so it composites over any background; tuned per theme so
+    /// it reads on the OLED near-black as well as the dark/light pages.
+    public let fill: Color
     /// Whether this is a light-appearance palette. Drives the focused-Light
     /// opaque backing that stops the drop shadow bleeding through the glass.
     public let isLight: Bool
@@ -169,6 +176,7 @@ public struct ThemePalette: Equatable, Sendable {
         raised: SurfaceStyle,
         overlay: SurfaceStyle,
         separator: Color,
+        fill: Color,
         isLight: Bool
     ) {
         self.backgroundBase = backgroundBase
@@ -189,6 +197,7 @@ public struct ThemePalette: Equatable, Sendable {
         self.raised = raised
         self.overlay = overlay
         self.separator = separator
+        self.fill = fill
         self.isLight = isLight
     }
 
@@ -319,6 +328,7 @@ public extension ThemePalette {
             shadow: SurfaceShadow(color: .black.opacity(0.5), radius: 26, y: 14)
         ),
         separator: ThemePalette.darkHairline.opacity(0.16),
+        fill: Color.white.opacity(0.11),
         isLight: false
     )
 
@@ -359,6 +369,9 @@ public extension ThemePalette {
         // Match the raised card edge so inner dividers and outer hairlines read as
         // one family instead of the brighter OS default.
         separator: ThemePalette.darkHairline.opacity(0.26),
+        // Slightly stronger than Dark so placeholders/chips read on the near-black
+        // OLED page instead of vanishing.
+        fill: Color.white.opacity(0.13),
         isLight: false
     )
 
@@ -392,6 +405,7 @@ public extension ThemePalette {
             shadow: SurfaceShadow(color: .black.opacity(0.16), radius: 28, y: 16)
         ),
         separator: Color.black.opacity(0.08),
+        fill: Color.black.opacity(0.11),
         isLight: true
     )
 

@@ -37,6 +37,7 @@ struct HomeSkeletonView: View {
     @State private var availableWidth: CGFloat = 0
 
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.themePalette) private var palette
 
     /// tvOS full-screen width, used only as a first-frame fallback before the
     /// real viewport width is measured — so the very first render still shows a
@@ -134,7 +135,7 @@ struct HomeSkeletonView: View {
                 .hidden()
                 .overlay(alignment: .leading) {
                     Capsule(style: .continuous)
-                        .fill(Color.plozzSkeletonFill)
+                        .fill(palette.fill)
                         .frame(width: 220, height: 26)
                         .padding(.leading, PlozzTheme.Metrics.screenPadding)
                 }
@@ -222,6 +223,7 @@ struct HomeSkeletonView: View {
 /// title exists as a logo image or as text, and once Home has loaded once the real
 /// hero paints instantly from cache (see `HomeContentStore`) so this is never seen.
 struct HomeHeroSkeletonView: View {
+    @Environment(\.themePalette) private var palette
     /// Button pill footprint — mirrors `HomeHeroView.heroPill` (28pt label +
     /// 18pt vertical / 30pt horizontal padding, ~34pt icon box).
     private static let pillHeight: CGFloat = 70
@@ -269,7 +271,7 @@ struct HomeHeroSkeletonView: View {
 
     private func capsule(width: CGFloat, height: CGFloat) -> some View {
         Capsule(style: .continuous)
-            .fill(Color.plozzSkeletonFill)
+            .fill(palette.fill)
             .frame(width: width, height: height)
     }
 }

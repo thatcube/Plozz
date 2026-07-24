@@ -319,10 +319,12 @@ private struct LibraryGridCell: View {
 /// match `PosterCardView`'s `.poster` artwork so columns stay aligned while a page
 /// is in flight. Inert (non-focusable) so focus skips over it.
 private struct PosterPlaceholderView: View {
+    @Environment(\.themePalette) private var palette
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous)
-                .fill(Color.primary.opacity(0.08))
+                .fill(palette.fill)
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
             VStack(alignment: .leading, spacing: 2) {

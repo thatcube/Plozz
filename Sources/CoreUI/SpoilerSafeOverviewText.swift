@@ -5,6 +5,7 @@ import CoreModels
 /// Fixed-footprint overview text shared by heroes and episode columns.
 /// Placeholder mode never inserts hidden source text into the view hierarchy.
 public struct SpoilerSafeOverviewText: View {
+    @Environment(\.themePalette) private var palette
     private let overview: String?
     private let hidesSpoilers: Bool
     private let mode: SpoilerSettings.Mode
@@ -64,7 +65,7 @@ public struct SpoilerSafeOverviewText: View {
         #if os(tvOS)
         Text(verbatim: overview.overviewPlainText)
         #else
-        Text(overview.overviewMarkdown ?? AttributedString(overview))
+        Text(overview.overviewMarkdownWithLegibleLinks(color: palette.primaryText))
         #endif
     }
 

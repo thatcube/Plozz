@@ -395,7 +395,7 @@ public struct DetailInformationSections: View {
         #if os(tvOS)
         Text(verbatim: overview.overviewPlainText)
         #else
-        Text(overview.overviewMarkdown ?? AttributedString(overview))
+        Text(overview.overviewMarkdownWithLegibleLinks(color: palette.primaryText))
         #endif
     }
 

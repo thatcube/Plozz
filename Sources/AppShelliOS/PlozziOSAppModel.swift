@@ -497,6 +497,9 @@ final class PlozziOSAppModel {
             self?.plexHomeUsers.resolvedToken(for: accountID)
                 ?? accountStore.token(for: accountID)
         }
+        accountsProviders.onAccountsInvalidated = { [weak self] in
+            self?.mediaItemActionHandler.invalidateAccountCaches()
+        }
         accountsProviders.credentialRevision = { [weak self] account in
             self?.plexHomeUsers.effectiveCredentialRevision(for: account)
                 ?? account.credentialRevision

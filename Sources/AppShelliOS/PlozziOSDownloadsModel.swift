@@ -8,7 +8,14 @@ import Observation
 @MainActor
 @Observable
 final class PlozziOSDownloadsModel {
-    private(set) var records: [DownloadedMediaRecord] = []
+    private(set) var records: [DownloadedMediaRecord] = [] {
+        didSet { recordsByKey = Dictionary(records.map { ($0.identityKey, $0) }, uniquingKeysWith: { a, _ in a }) }
+    }
+    /// `records` indexed by identity key. `cachedRecord(forSelectedVersionOf:)` is
+    /// called from SwiftUI `body` (menus are built as cards render), so the linear
+    /// scan it replaces ran per card per frame during a scroll.
+    @ObservationIgnored
+    private var recordsByKey: [String: DownloadedMediaRecord] = [:]
     private(set) var initializationError: String?
     var allowsCellular: Bool {
         didSet { updatePolicy() }
@@ -127,12 +134,13 @@ final class PlozziOSDownloadsModel {
         // single key — otherwise a download made from one server is invisible to
         // a card resolved through another.
         let versionID = item.selectedVersionID
-        let keys = Set(MediaItemIdentity.identities(for: item).map { identity in
-            versionID.flatMap { $0.isEmpty ? nil : $0 }
+        for identity in MediaItemIdentity.identities(for: item) {
+            let key = versionID.flatMap { $0.isEmpty ? nil : $0 }
                 .map { MediaIdentityKey.string(for: identity, versionID: $0) }
                 ?? MediaIdentityKey.string(for: identity)
-        })
-        return records.first { keys.contains($0.identityKey) }
+            if let record = recordsByKey[key] { return record }
+        }
+        return nil
     }
 
     @discardableResult

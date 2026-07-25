@@ -62,6 +62,12 @@ public final class AccountsProvidersModel {
     /// its preferred-account keys without the hub knowing about media shares.
     @ObservationIgnored
     public var onActiveAccountsChanged: @MainActor (Set<String>, [Account]) -> Void = { _, _ in }
+    /// Fired at the START of every `reloadAccounts`, before anything is
+    /// recomputed, so caches keyed on the account set are dropped rather than
+    /// serving a stale answer. Separate from `onActiveAccountsChanged` (which
+    /// fires at the end, after the new set is known) because an invalidation must
+    /// happen even if the recompute below returns early.
+    public var onAccountsInvalidated: @MainActor () -> Void = {}
 
     public init(
         accountStore: AccountPersisting,
@@ -195,6 +201,7 @@ public final class AccountsProvidersModel {
     /// preferred-account keys.
     public func reloadAccounts() {
         registry.invalidateCache()
+        onAccountsInvalidated()
         accounts = accountStore.loadAccounts()
         let known = Set(accounts.map(\.id))
         // The household-global active set is the fallback for a profile that has

@@ -17,6 +17,18 @@ public protocol MediaItemActionHandling: AnyObject {
     /// refresh from the source of truth. Fire-and-forget: the menu has already
     /// dismissed by the time the network call completes.
     func perform(_ action: MediaItemAction, on item: MediaItem, context: MediaItemActionContext)
+
+    /// Drop anything cached per account (e.g. resolved provider capabilities).
+    /// Called when the account set changes so a new or removed account is
+    /// re-evaluated rather than serving a stale answer.
+    ///
+    /// Defaulted so implementations that cache nothing — tests, previews — need
+    /// not care.
+    func invalidateAccountCaches()
+}
+
+public extension MediaItemActionHandling {
+    func invalidateAccountCaches() {}
 }
 
 public extension Notification.Name {

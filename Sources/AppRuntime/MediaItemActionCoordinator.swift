@@ -22,6 +22,27 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// Current offline state for an item, or `nil` on a surface without download
     /// capability. Injected as a closure so AppRuntime needn't depend on
     /// MediaDownloads — and so tvOS, which has no downloads, simply omits it.
+    /// Cached provider CAPABILITIES per account id.
+    ///
+    /// Building a menu needs only three `is` checks, but `providerResolver`
+    /// constructs a live provider — which reads the Keychain, JSON-decodes the
+    /// persisted account list, and loads credential-journal state. SwiftUI calls
+    /// `actions(for:)` from every card's `body`, so during a scroll that ran per
+    /// card per frame: a Time Profiler capture on iPad put
+    /// `MediaItemActionCoordinator.actions(for:context:)` in 27% of all samples,
+    /// with `AccountPersisting.token(for:)` alone at 24.6%.
+    ///
+    /// Capabilities are a property of the account's provider TYPE, so they can't
+    /// change without the account set changing — `invalidateCapabilityCache()`
+    /// covers that.
+    private var capabilityCache: [String: ProviderCapabilities] = [:]
+
+    private struct ProviderCapabilities {
+        let supportsWatchState: Bool
+        let supportsWatchlist: Bool
+        let supportsMetadataRefresh: Bool
+    }
+
     private let downloadState: (MediaItem) -> MediaItemDownloadState??
     private let performDownloadAction: (MediaItemAction, MediaItem) -> Void
 
@@ -51,12 +72,12 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         // *owned* featured titles (available/partiallyAvailable), which resolve to a
         // real library copy via the identity index and keep their working actions.
         guard !item.isNotInLibraryDiscovery else { return [] }
-        let provider = provider(for: item)
+        let capabilities = capabilities(for: item)
         return MediaItemActionCatalog.actions(
             for: item,
-            supportsWatchState: provider is WatchStateProviding,
-            supportsWatchlist: provider is WatchlistProviding,
-            supportsMetadataRefresh: provider is MetadataRefreshing,
+            supportsWatchState: capabilities.supportsWatchState,
+            supportsWatchlist: capabilities.supportsWatchlist,
+            supportsMetadataRefresh: capabilities.supportsMetadataRefresh,
             downloadState: downloadState(item),
             context: context
         )
@@ -265,5 +286,31 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// primary provider for untagged (single-account) items.
     private func provider(for item: MediaItem) -> (any MediaProvider)? {
         providerResolver(item.sourceAccountID)
+    }
+
+    /// Capabilities for the item's owning account, resolving the provider at most
+    /// once per account rather than once per menu build.
+    private func capabilities(for item: MediaItem) -> ProviderCapabilities {
+        // Untagged items fall back to the primary provider; key them separately so
+        // they don't collide with a real account id.
+        let key = item.sourceAccountID ?? "\u{0}primary"
+        if let cached = capabilityCache[key] { return cached }
+        let provider = provider(for: item)
+        let resolved = ProviderCapabilities(
+            supportsWatchState: provider is WatchStateProviding,
+            supportsWatchlist: provider is WatchlistProviding,
+            supportsMetadataRefresh: provider is MetadataRefreshing
+        )
+        // Don't cache a miss: a provider that isn't resolvable yet (still signing
+        // in, token not loaded) would otherwise be pinned as "no capabilities" for
+        // the process lifetime.
+        if provider != nil { capabilityCache[key] = resolved }
+        return resolved
+    }
+
+    /// Drop cached capabilities. Called when the account set changes (sign-in/out,
+    /// profile switch) so a new or removed account is re-evaluated.
+    public func invalidateAccountCaches() {
+        capabilityCache.removeAll()
     }
 }

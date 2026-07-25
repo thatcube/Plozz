@@ -956,6 +956,9 @@ public final class AppState {
         accountsProviders.credentialRevision = { [weak self] account in
             self?.plexHomeUsers.effectiveCredentialRevision(for: account) ?? account.credentialRevision
         }
+        accountsProviders.onAccountsInvalidated = { [weak self] in
+            self?.mediaItemActionHandler.invalidateAccountCaches()
+        }
         accountsProviders.onActiveAccountsChanged = { [weak self] resolved, accounts in
             self?.mediaShare.setActiveShareAccounts(resolved, accounts: accounts)
         }

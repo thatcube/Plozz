@@ -40,9 +40,6 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     #if !os(tvOS)
     @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var appeared = false
-    /// Which side of the trigger the panel sits on, locked for the duration of
-    /// one presentation so a growing page can't make it jump sides.
-    @State private var placement: PlaybackSourceMenuSide?
     #endif
 
     public init(
@@ -110,10 +107,13 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
             let margin: CGFloat = 16
             let gap: CGFloat = 12
             let width = min(390, screen.width - margin * 2)
-            // The side is chosen ONCE per presentation and then locked:
-            // recomputing it as the panel grows makes a page that no longer fits
-            // on the current side jump to another mid-animation.
-            let side = placement ?? PlaybackSourceMenuSide.choose(
+            // Computed fresh every layout pass, NOT captured once on appear:
+            // the first pass inside a freshly presented cover can report
+            // incomplete geometry, and freezing that snapshot left the panel
+            // mispositioned until it was reopened. Safe to recompute because the
+            // placement depends only on the trigger and the window — never on
+            // the panel's height — so a growing page can't move it.
+            let side = PlaybackSourceMenuSide.choose(
                 trigger: trigger,
                 screen: screen,
                 width: width,
@@ -140,19 +140,20 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                     .frame(width: width)
                     .padding(.leading, layout.x)
                     .padding(layout.pinsBottom ? .bottom : .top, layout.inset)
+                    // Placement must never interpolate. The first layout pass in
+                    // a freshly presented cover can report incomplete geometry,
+                    // and the corrected position lands around the same time as
+                    // the fade-in's transaction — which would otherwise animate
+                    // it, so the panel appeared to fly in from somewhere else on
+                    // the first open. Only the height animates.
+                    .animation(nil, value: layout.x)
+                    .animation(nil, value: layout.inset)
+                    .animation(nil, value: layout.pinsBottom)
                     .scaleEffect(appeared ? 1 : 0.94, anchor: side.growthAnchor)
                     .opacity(appeared ? 1 : 0)
             }
             .frame(width: screen.width, height: screen.height)
             .onAppear {
-                // Lock the side for as long as the menu stays open.
-                placement = PlaybackSourceMenuSide.choose(
-                    trigger: trigger,
-                    screen: screen,
-                    width: width,
-                    gap: gap,
-                    margin: margin
-                )
                 // Let the panel measure and snap to its natural size before it
                 // becomes visible, so the fade-in never shows the placeholder
                 // size (or the position derived from it).
@@ -160,10 +161,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                     withAnimation(.easeOut(duration: 0.18)) { appeared = true }
                 }
             }
-            .onDisappear {
-                appeared = false
-                placement = nil
-            }
+            .onDisappear { appeared = false }
         }
         .presentationBackground(.clear)
     }
@@ -814,9 +812,10 @@ private enum PlaybackSourceMenuButtonPage: Hashable {
 }
 
 #if !os(tvOS)
-/// Where the menu panel sits relative to its trigger. Picked once when the menu
-/// opens — never recomputed while it's open, or a growing page would make it hop
-/// around — and used for placement, the height cap, and the growth anchor.
+/// Where the menu panel sits relative to its trigger. Derived from the trigger
+/// and the window only — deliberately NOT from the panel's height — so it stays
+/// put as the panel grows and can be recomputed on any layout pass. Drives
+/// placement, the height cap, and the growth anchor.
 struct PlaybackSourceMenuSide: Equatable {
     enum Side { case trailing, leading, above, below }
     let side: Side

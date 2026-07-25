@@ -2331,3 +2331,161 @@ actor ShareCatalogStore {
         return "\(mapped.prefix(80))-\(String(hash, radix: 16))"
     }
 }
+
+
+// MARK: - Incremental scan support (directory state)
+//
+// A full share walk lists every directory over the network. On a large library
+// that is minutes of work and, measured on an iPad, ~1.7 CPU cores — repeated on
+// every scan even when nothing on the share changed. A profile of an idle app
+// showed the walk was essentially all of the app's power draw (the app is
+// otherwise ~0.01 cores at rest).
+//
+// Directory mtime is the standard way out, and is what Plex/Jellyfin call a
+// "fast scan": a directory's modification time changes when its DIRECT children
+// are added, removed or renamed, so a folder whose mtime is unchanged does not
+// need to be listed again.
+//
+// Two properties this deliberately preserves:
+//
+//  * **Depth.** A directory's mtime says nothing about changes deeper in the
+//    tree, so an unchanged folder is NOT skipped wholesale — we skip its listing
+//    and still descend into the subdirectories we already know about. The saving
+//    is the network round trip, which is the expensive part.
+//  * **Prune safety.** `pruneNotSeen` deletes anything whose `last_scan` isn't
+//    the current scan id, so a skipped directory's rows must still be stamped or
+//    the walk would delete content that is present. `touchDirectoryContents`
+//    does exactly that, in SQL, without touching the network.
+extension ShareCatalogStore {
+
+    /// Every directory's last-recorded mtime, loaded once per scan.
+    ///
+    /// Returned as a dictionary rather than queried per directory so a walk pays
+    /// one query instead of one per folder.
+    func directoryModifiedTimes() -> [String: Date] {
+        ensureOpen()
+        guard db != nil else { return [:] }
+        var out: [String: Date] = [:]
+        query("SELECT rel_path, modified_at FROM dir_state;") { stmt in
+            guard let path = self.columnText(stmt, 0) else { return }
+            out[path] = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 1))
+        }
+        return out
+    }
+
+    /// The subdirectories of `relPath` recorded by an earlier scan.
+    ///
+    /// Used when a directory's listing is skipped: its children are already known,
+    /// so the walk can continue downward without a network round trip.
+    func recordedSubdirectories(of relPath: String) -> [String] {
+        ensureOpen()
+        guard db != nil else { return [] }
+        var out: [String] = []
+        // Direct children only: a path under `relPath` with no further separator.
+        let sql: String
+        if relPath.isEmpty {
+            sql = "SELECT rel_path FROM dir_state WHERE rel_path <> '' AND instr(rel_path, '/') = 0;"
+        } else {
+            sql = """
+            SELECT rel_path FROM dir_state
+            WHERE rel_path LIKE ? AND instr(substr(rel_path, ?), '/') = 0;
+            """
+        }
+        query(sql, bind: { stmt in
+            guard !relPath.isEmpty else { return }
+            self.bindText(stmt, 1, "\(relPath)/%")
+            // 1-based offset of the character after "relPath/".
+            sqlite3_bind_int(stmt, 2, Int32(relPath.utf8.count + 2))
+        }) { stmt in
+            if let path = self.columnText(stmt, 0) { out.append(path) }
+        }
+        return out
+    }
+
+    /// Record a directory's mtime after a successful listing.
+    func recordDirectory(
+        relPath: String,
+        modifiedAt: Date?,
+        scanID: Int64,
+        scanGeneration: UUID? = nil
+    ) {
+        ensureOpen()
+        guard admits(scanGeneration), db != nil else { return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, """
+        INSERT INTO dir_state(rel_path, modified_at, last_scan) VALUES(?,?,?)
+        ON CONFLICT(rel_path) DO UPDATE SET
+            modified_at=excluded.modified_at, last_scan=excluded.last_scan;
+        """, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, relPath)
+        // `nil` (a server that doesn't report directory mtimes) is stored as 0, a
+        // value no real mtime matches — so such a share simply never takes the
+        // skip path and keeps scanning exactly as it does today.
+        sqlite3_bind_double(stmt, 2, modifiedAt?.timeIntervalSince1970 ?? 0)
+        sqlite3_bind_int64(stmt, 3, scanID)
+        _ = sqlite3_step(stmt)
+    }
+
+    /// Stamp `scanID` onto everything recorded directly inside `relPath`, for a
+    /// directory whose listing was skipped.
+    ///
+    /// Without this the subsequent `pruneNotSeen` — `DELETE ... WHERE last_scan
+    /// <> ?` — would delete every file in the skipped folder, i.e. the
+    /// optimization would silently erase the library.
+    func touchDirectoryContents(
+        relPath: String,
+        scanID: Int64,
+        scanGeneration: UUID? = nil
+    ) {
+        ensureOpen()
+        guard admits(scanGeneration), db != nil else { return }
+        // Every table pruned by `last_scan`, kept together so a future scan-scoped
+        // table can't be forgotten here (which would delete its rows).
+        for table in ["assets", "local_metadata_files", "local_artwork_files"] {
+            touchDirectChildren(table: table, relPath: relPath, scanID: scanID)
+        }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "UPDATE dir_state SET last_scan=? WHERE rel_path=?;", -1, &stmt, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, scanID)
+        bindText(stmt, 2, relPath)
+        _ = sqlite3_step(stmt)
+    }
+
+    private func touchDirectChildren(table: String, relPath: String, scanID: Int64) {
+        var stmt: OpaquePointer?
+        let sql: String
+        if relPath.isEmpty {
+            sql = "UPDATE \(table) SET last_scan=? WHERE instr(rel_path, '/') = 0;"
+        } else {
+            sql = """
+            UPDATE \(table) SET last_scan=?
+            WHERE rel_path LIKE ? AND instr(substr(rel_path, ?), '/') = 0;
+            """
+        }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, scanID)
+        if !relPath.isEmpty {
+            bindText(stmt, 2, "\(relPath)/%")
+            sqlite3_bind_int(stmt, 3, Int32(relPath.utf8.count + 2))
+        }
+        _ = sqlite3_step(stmt)
+    }
+
+    /// Drop directory rows not seen by a clean pass, mirroring `pruneNotSeen`.
+    func pruneDirectoryStateNotSeen(inScan scanID: Int64, scanGeneration: UUID? = nil) {
+        ensureOpen()
+        guard admits(scanGeneration), db != nil else { return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "DELETE FROM dir_state WHERE last_scan <> ?;", -1, &stmt, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, scanID)
+        _ = sqlite3_step(stmt)
+    }
+}

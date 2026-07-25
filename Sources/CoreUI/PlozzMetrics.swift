@@ -280,18 +280,29 @@ public struct PlozzMetrics: Equatable, Sendable {
 
         self.posterGridColumns = density.posterGridColumns
 
-        // Caption fonts scale with density too. The title's base is the live
-        // platform `.subheadline` size so standard density is unchanged; the
-        // subtitle's base is the shared `cardSubtitleFontSize` constant.
+        // Caption fonts scale with density AND with the reader's text size.
+        //
+        // The title's base is the live platform `.subheadline` size, so it has
+        // always tracked Dynamic Type. The subtitle multiplied a hard-coded
+        // constant instead, so a card's metadata line ("2022 · 45m left") stayed
+        // the same size no matter how large the reader set their text — the title
+        // above it grew and the line under it didn't.
+        //
+        // `UIFontMetrics.scaledValue(for:)` fixes that without changing how
+        // anything looks today: at the default content size it returns the base
+        // unchanged, so standard density on both platforms is byte-identical, and
+        // it grows on the `.subheadline` curve from there — the same curve the
+        // title already follows.
         #if canImport(UIKit)
         let baseTitleFontSize = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
+        let baseSubtitleFontSize = UIFontMetrics(forTextStyle: .subheadline)
+            .scaledValue(for: PlozzTheme.Metrics.cardSubtitleFontSize)
         #else
         let baseTitleFontSize = PlozzTheme.Metrics.cardTitleFontSizeFallback
+        let baseSubtitleFontSize = PlozzTheme.Metrics.cardSubtitleFontSize
         #endif
         self.cardTitleFontSize = (baseTitleFontSize * densityScale).rounded()
-        self.cardSubtitleFontSize = (
-            PlozzTheme.Metrics.cardSubtitleFontSize * densityScale
-        ).rounded()
+        self.cardSubtitleFontSize = (baseSubtitleFontSize * densityScale).rounded()
         self.cardStatusCueFontSize = max(
             (PlozzTheme.Metrics.cardStatusCueFontSize * densityScale).rounded(),
             PlozzTheme.Metrics.cardStatusCueMinFontSize

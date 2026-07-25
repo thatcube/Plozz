@@ -456,35 +456,14 @@ struct HomeTab: View {
         }
     }
 
-    /// Resolves a series to the episode Play should start: the next-up / resume
-    /// episode of its next-up season. Mirrors the detail page's selection
-    /// (``SeriesResume/nextUp(in:)``) so the hero's Play matches what the show page
-    /// would front. Returns `nil` when no episode can be resolved (the caller then
-    /// opens the show detail instead). The episode is stamped with the series'
-    /// account so best-source routing and playback address the right server.
+    /// Resolves a series to the episode Play should start, via the shared
+    /// resolver both shells use, so tvOS and iOS front the same episode and a
+    /// series can never reach the player on either platform.
     private func resolveSeriesNextUpEpisode(_ series: MediaItem) async -> MediaItem? {
-        let provider = resolveProvider(series.sourceAccountID, in: accounts)
-        let topChildren = (try? await provider.children(of: series.id)) ?? []
-        guard !topChildren.isEmpty else { return nil }
-
-        // A show's children are usually seasons, but some libraries expose episodes
-        // directly. Pick the pool of episodes accordingly.
-        let episodes: [MediaItem]
-        if topChildren.contains(where: { $0.kind == .episode }) {
-            episodes = topChildren.filter { $0.kind == .episode }
-        } else if let season = SeriesResume.nextUp(in: topChildren) {
-            episodes = ((try? await provider.children(of: season.id)) ?? [])
-                .filter { $0.kind == .episode }
-        } else {
-            episodes = []
-        }
-
-        guard let episode = SeriesResume.nextUp(in: episodes) else { return nil }
-        // Raw provider children may not carry the owning account; stamp it so
-        // `bestSourcePlayItem` and the player target the correct server.
-        var stamped = episode
-        if stamped.sourceAccountID == nil { stamped.sourceAccountID = series.sourceAccountID }
-        return stamped
+        await HeroPlayTargetResolver.playbackTarget(
+            for: series,
+            provider: resolveProvider(series.sourceAccountID, in: accounts)
+        )
     }
 }
 #endif

@@ -580,10 +580,26 @@ private struct PlozziOSCanonicalItemDetailView: View {
 
     private func play(_ item: MediaItem, fromBeginning: Bool = false) {
         trailerController.stop()
-        playbackRequest = PlozziOSPlaybackRequest(
-            item: item,
-            startPosition: fromBeginning ? 0 : (item.resumePosition ?? 0)
-        )
+        // A series can't be played directly (see `playbackTarget`), so resolve
+        // its next-up episode first. Every other kind plays as-is.
+        guard item.kind == .series else {
+            playbackRequest = PlozziOSPlaybackRequest(
+                item: item,
+                startPosition: fromBeginning ? 0 : (item.resumePosition ?? 0)
+            )
+            return
+        }
+        guard let provider = appModel.provider(for: item) else { return }
+        Task { @MainActor in
+            guard let episode = await HeroPlayTargetResolver.playbackTarget(
+                for: item,
+                provider: provider
+            ) else { return }
+            playbackRequest = PlozziOSPlaybackRequest(
+                item: episode,
+                startPosition: fromBeginning ? 0 : (episode.resumePosition ?? 0)
+            )
+        }
     }
 
     private var availableSources: [MediaSourceRef] {

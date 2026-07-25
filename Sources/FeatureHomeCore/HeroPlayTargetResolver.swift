@@ -2,6 +2,32 @@ import CoreModels
 import Foundation
 
 public enum HeroPlayTargetResolver {
+    /// What a "Play" tap should actually start for `item`.
+    ///
+    /// A whole series can never be played: its container holds no media, so
+    /// Jellyfin answers `PlaybackInfo` with a 500 and Plex reports `notFound` —
+    /// both surfacing to the viewer as a generic playback error. Every platform
+    /// must therefore resolve a series to its next-up/resume EPISODE before
+    /// handing it to the player, which is what this does. Returns `nil` when no
+    /// episode can be resolved (the caller should open the show instead of
+    /// starting playback).
+    ///
+    /// Unlike ``resolve(item:provider:)`` this also stamps the resolved episode
+    /// with the original item's account, so best-source routing and playback
+    /// address the server the show actually came from. Prefer this at Play sites.
+    public static func playbackTarget(
+        for item: MediaItem,
+        provider: any MediaProvider
+    ) async -> MediaItem? {
+        guard var target = await resolve(item: item, provider: provider) else {
+            return nil
+        }
+        if target.sourceAccountID == nil, let accountID = item.sourceAccountID {
+            target = target.taggingSource(accountID)
+        }
+        return target
+    }
+
     public static func resolve(
         item: MediaItem,
         provider: any MediaProvider

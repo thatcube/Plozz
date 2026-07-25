@@ -57,6 +57,18 @@ struct PlozziOSPlayerView: View {
             isPresented = false
             handoffTask?.cancel()
             handoffTask = nil
+            // Explicitly drop the player once the cover is gone. A
+            // `PlayerViewModel` owns an engine, decoders and buffers, so leaving
+            // it to whenever SwiftUI decides to release the view's `@State` is
+            // not good enough: device logs showed eight presentations produce
+            // eight inits and zero deinits, so every player ever opened was
+            // still resident. Releasing our reference here makes the lifetime
+            // match the presentation.
+            let outgoing = viewModel
+            viewModel = nil
+            if let outgoing {
+                Task { @MainActor in await outgoing.stop() }
+            }
         }
         .task {
             guard viewModel == nil else { return }

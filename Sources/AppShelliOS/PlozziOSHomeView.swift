@@ -209,7 +209,15 @@ struct PlozziOSHomeView: View {
             dynamicTypeSize: dynamicTypeSize
         ) / 2
         let scroll = ScrollView {
-            LazyVStack(alignment: .leading, spacing: 30) {
+            // NOT lazy, deliberately. Each row is itself a horizontal ScrollView
+            // containing a LazyHStack, and when the outer stack was lazy it
+            // materialised a row before that row had real geometry — so the inner
+            // lazy stack computed an empty viewport and built no cells. The row
+            // rendered as a title over blank space until a scroll invalidated the
+            // layout and the cards appeared. Home has a handful of rows, and the
+            // per-card laziness that actually matters (artwork loading) lives in
+            // the inner LazyHStacks, which are untouched.
+            VStack(alignment: .leading, spacing: 30) {
                 if !heroItems.isEmpty {
                     PlozziOSHomeHeroCarousel(
                         items: heroItems,
@@ -248,16 +256,37 @@ struct PlozziOSHomeView: View {
                             appModel: appModel
                         )
                     }
-                    ForEach(content.librarySections) { group in
-                        ForEach(group.sections) { section in
-                            PlozziOSHomeMediaRail(
-                                title: section.title,
-                                items: section.items,
-                                style: section.style == .landscape
-                                    ? .landscape
-                                    : .poster,
-                                appModel: appModel
+                    if content.librarySections.isEmpty {
+                        // The per-library blocks arrive after the global rows (a
+                        // cached snapshot paints the top of Home first, then the
+                        // full load fills in the libraries). Reserving their space
+                        // with placeholders stops the page from growing underneath
+                        // the viewer — which moved the scroll position and made the
+                        // whole page appear to jump when the libraries landed.
+                        // Keyed off `libraries`, which is known before the sections
+                        // are, so we know how many blocks to expect.
+                        ForEach(
+                            content.libraries.filter {
+                                visibility.isVisibleOnHome($0.key)
+                            }
+                        ) { library in
+                            PlozziOSHomeSkeletonRail(
+                                title: library.library.title,
+                                style: .poster
                             )
+                        }
+                    } else {
+                        ForEach(content.librarySections) { group in
+                            ForEach(group.sections) { section in
+                                PlozziOSHomeMediaRail(
+                                    title: section.title,
+                                    items: section.items,
+                                    style: section.style == .landscape
+                                        ? .landscape
+                                        : .poster,
+                                    appModel: appModel
+                                )
+                            }
                         }
                     }
                     if let libraries = rows.first(where: {

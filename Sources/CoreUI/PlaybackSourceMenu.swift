@@ -268,9 +268,10 @@ private struct PlaybackSourceMenuPanel: View {
     #if !os(tvOS)
     @State private var navDirection: Edge = .trailing
     @State private var contentHeight: CGFloat = 220
-    /// False until the panel has measured itself once in this presentation, so
-    /// the initial size correction can snap instead of animating.
-    @State private var hasMeasured = false
+    /// The page the current `contentHeight` was measured for. Height changes
+    /// only animate when this differs from the page on screen (a real drill-in);
+    /// a re-measure of the same page is a geometry correction and snaps.
+    @State private var measuredPage: PlaybackSourceMenuButtonPage?
     #endif
     var body: some View {
         panelContent
@@ -296,17 +297,21 @@ private struct PlaybackSourceMenuPanel: View {
                       measured > 0 else { return }
                 let total = min(measured, maxHeight)
                 guard abs(total - contentHeight) > 0.5 else { return }
-                if hasMeasured {
-                    // A page changed → morph the container.
+                if let measuredPage, measuredPage != page {
+                    // The page changed → this is a real drill-in, so morph the
+                    // container.
+                    self.measuredPage = page
                     withAnimation(.easeInOut(duration: 0.3)) {
                         contentHeight = total
                     }
                 } else {
-                    // First measurement of this presentation: snap to the natural
-                    // size. The panel starts at a placeholder height, so animating
-                    // this correction makes it visibly fly in from the wrong size
-                    // and (when anchored above the trigger) the wrong place.
-                    hasMeasured = true
+                    // Either the first measurement of this presentation, or the
+                    // SAME page re-measuring because the available height
+                    // changed — which happens when the cover's first layout pass
+                    // reported incomplete geometry and the corrected pass lands
+                    // afterwards. Neither is a content change, so snap: animating
+                    // them moves the free edge and the panel appears to fly in.
+                    measuredPage = page
                     var snap = Transaction()
                     snap.disablesAnimations = true
                     withTransaction(snap) { contentHeight = total }

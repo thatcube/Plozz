@@ -10,6 +10,8 @@ struct PlozziOSPosterCard: View {
     /// artwork, with an optional download badge — the same treatment tvOS uses.
     var showsResumeChip: Bool = false
     var downloadState: MediaDownloadBadgeState?
+    /// Visible "…" menu. Touch cards need it: press-and-hold is undiscoverable.
+    var showsActionsMenu: Bool = false
 
     var body: some View {
         PosterCardView(
@@ -18,6 +20,7 @@ struct PlozziOSPosterCard: View {
             reservesSubtitleSpace: false,
             showsResumeChip: showsResumeChip,
             downloadState: downloadState,
+            showsActionsMenu: showsActionsMenu,
             action: {}
         )
         .redacted(reason: item == nil ? .placeholder : [])

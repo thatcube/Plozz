@@ -37,9 +37,9 @@ public struct MediaDownloadBadge: View {
     }
 
     public var body: some View {
+        // Flat: the artwork scrim carries legibility for every control on a card.
         content
             .frame(width: size, height: size)
-            .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
     }
 
     @ViewBuilder

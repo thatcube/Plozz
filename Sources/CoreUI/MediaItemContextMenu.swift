@@ -154,7 +154,7 @@ public struct MediaItemContextMenu: ViewModifier {
     }
 }
 
-private extension MediaItem {
+extension MediaItem {
     /// The destination for "Go to Season". Preferred: the full **series** detail
     /// page (rich hero, badges, season tabs, episode rail) with this episode's
     /// season pre-selected, carried in `seasonID`. Falls back to a bare season

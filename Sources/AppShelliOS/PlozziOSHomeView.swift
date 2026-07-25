@@ -1469,7 +1469,8 @@ private struct PlozziOSHomeMediaCard: View {
             // detail page rather than playing on tap, so the chip is requested
             // explicitly instead of riding `playsOnSelect`.
             showsResumeChip: isLandscape,
-            downloadState: liveDownloadRecord?.badgeState
+            downloadState: liveDownloadRecord?.badgeState,
+            showsActionsMenu: isLandscape
         )
         .task(id: "\(item.id)|\(item.selectedVersionID ?? "")") {
             downloadRecord = await appModel.downloads.record(forSelectedVersionOf: item)

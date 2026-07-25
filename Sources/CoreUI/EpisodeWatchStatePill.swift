@@ -66,7 +66,9 @@ public struct EpisodeWatchStatePill: View {
             content(for: state)
                 .foregroundStyle(.white)
                 .lineLimit(1)
-                .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
+                // Flat. Legibility is the scrim's job (`MediaArtworkChromeScrim`);
+                // a shadow here made the chip read as a sticker on the artwork
+                // rather than part of it.
                 .modifier(
                     PillBackground(enabled: showsBackground)
                 )
@@ -137,30 +139,47 @@ private struct PillBackground: ViewModifier {
 public struct ResumeChipOverlay: View {
     private let item: MediaItem
     private let downloadState: MediaDownloadBadgeState?
+    private let showsMenu: Bool
 
     @Environment(\.plozzMetrics) private var metrics
 
-    /// - Parameter downloadState: optional trailing download affordance. Passing
-    ///   `nil` (the default) renders the chip exactly as before, so surfaces with
-    ///   no download concept are unaffected.
-    public init(item: MediaItem, downloadState: MediaDownloadBadgeState? = nil) {
+    /// - Parameters:
+    ///   - downloadState: optional trailing download affordance. `nil` renders the
+    ///     chip as before, so surfaces with no download concept are unaffected.
+    ///   - showsMenu: draws the visible "…" actions menu. A press-and-hold menu is
+    ///     discoverable on tvOS (cards focus before they're chosen) but hidden on a
+    ///     touch card, so touch surfaces opt in.
+    public init(
+        item: MediaItem,
+        downloadState: MediaDownloadBadgeState? = nil,
+        showsMenu: Bool = false
+    ) {
         self.item = item
         self.downloadState = downloadState
+        self.showsMenu = showsMenu
     }
 
     public var body: some View {
-        // The scrim exists for the chip's legibility, so with nothing to show
+        // The scrim exists for the chrome's legibility, so with nothing to show
         // there's nothing to darken — a card with no runtime stays clean.
-        if item.cardRuntimeText != nil || downloadState != nil {
-            GeometryReader { proxy in
-                RadialGradient(
-                    colors: [.black.opacity(0.55), .clear],
-                    center: .bottomLeading,
-                    startRadius: 0,
-                    endRadius: max(proxy.size.width, proxy.size.height) * 0.8
-                )
-            }
-            .allowsHitTesting(false)
+        if hasBottomChrome || showsMenu {
+            Color.clear
+                .overlay {
+                    if hasBottomChrome { MediaArtworkChromeScrim(.bottomLeading) }
+                }
+                .overlay(alignment: .top) {
+                    if showsMenu {
+                        MediaArtworkChromeScrim(.top)
+                            .frame(height: menuDiameter + metrics.resumeChipInset)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if showsMenu {
+                        MediaItemEllipsisMenu(item: item, diameter: menuDiameter)
+                            .padding(metrics.resumeChipInset * 0.25)
+                    }
+                }
+            .allowsHitTesting(showsMenu)
             .overlay(alignment: .bottom) {
                 HStack(alignment: .center, spacing: metrics.resumeChipInset * 0.5) {
                     if item.cardRuntimeText != nil {
@@ -185,8 +204,16 @@ public struct ResumeChipOverlay: View {
                     }
                 }
                 .padding(metrics.resumeChipInset)
+                .allowsHitTesting(false)
             }
         }
     }
+
+    private var hasBottomChrome: Bool {
+        item.cardRuntimeText != nil || downloadState != nil
+    }
+
+    /// Matches the chip's accessory so the two corners read at the same weight.
+    private var menuDiameter: CGFloat { metrics.resumeChipAccessorySize }
 }
 #endif

@@ -35,6 +35,9 @@ public struct PosterCardView: View {
     /// is exactly why that treatment was missing on iOS while tvOS had it.
     private let showsResumeChipOverride: Bool
     private let downloadState: MediaDownloadBadgeState?
+    /// Draws the visible "…" actions menu on the artwork. Touch surfaces opt in;
+    /// tvOS leaves it off because press-and-hold is already discoverable there.
+    private let showsActionsMenu: Bool
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -53,6 +56,7 @@ public struct PosterCardView: View {
         playsOnSelect: Bool = false,
         showsResumeChip: Bool = false,
         downloadState: MediaDownloadBadgeState? = nil,
+        showsActionsMenu: Bool = false,
         action: @escaping () -> Void
     ) {
         self.item = item
@@ -64,6 +68,7 @@ public struct PosterCardView: View {
         self.playsOnSelect = playsOnSelect
         self.showsResumeChipOverride = showsResumeChip
         self.downloadState = downloadState
+        self.showsActionsMenu = showsActionsMenu
         self.action = action
     }
 
@@ -393,14 +398,18 @@ public struct PosterCardView: View {
     private var showsResumeChip: Bool {
         (playsOnSelect || showsResumeChipOverride)
             && !hideThumbnail
-            && (item.cardRuntimeText != nil || downloadState != nil)
+            && (item.cardRuntimeText != nil || downloadState != nil || showsActionsMenu)
     }
 
     /// The shared resume affordance — identical to the episode card's overlay.
     @ViewBuilder
     private var resumeChip: some View {
         if showsResumeChip {
-            ResumeChipOverlay(item: item, downloadState: downloadState)
+            ResumeChipOverlay(
+                item: item,
+                downloadState: downloadState,
+                showsMenu: showsActionsMenu
+            )
         }
     }
 

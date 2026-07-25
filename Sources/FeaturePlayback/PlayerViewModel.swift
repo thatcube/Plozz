@@ -1,5 +1,6 @@
 #if canImport(AVFoundation)
 import Foundation
+import CoreFoundation
 import AVFoundation
 import Observation
 import CoreModels
@@ -461,6 +462,7 @@ public final class PlayerViewModel {
             adoptedResolved?.inheritedPreservedDynamicRange
         // The adopted-prefetch engine boot (skip the native→Plozzigen swap) lives
         // in ``EngineHandoffCoordinator``'s init, built at the end of this init.
+        HandoffDiagnostics.emit("vm REFPROBE 1-early-init refs=\(CFGetRetainCount(self))")
         PlaybackInstrumentation.increment(.viewModel)
         // Pair every construction with its deinit in the log. The live-instance
         // counter tells us models are leaking but not which construction never
@@ -482,6 +484,7 @@ public final class PlayerViewModel {
         self.controls.subtitleStyle = style
         // Gate the "Search for subtitles…" row on server-proxied support.
         self.controls.canSearchRemoteSubtitles = (provider as? CapabilityReporting)?.capabilities.contains(.remoteSubtitles) ?? false
+        HandoffDiagnostics.emit("vm REFPROBE 2-before-collaborators refs=\(CFGetRetainCount(self))")
         self.subtitleAcquisition = RemoteSubtitleAcquisition(provider: provider, itemID: itemID, host: self)
         self.subtitleOverlay = SubtitleOverlayLoader(host: self)
         self.subtitleController = SubtitleTrackController(host: self)
@@ -507,13 +510,16 @@ public final class PlayerViewModel {
         // engine before it even starts" path — no mid-bring-up native→Plozzigen
         // swap, one loading indicator — alongside the swap/watchdog/fallback it
         // drives later.
+        HandoffDiagnostics.emit("vm REFPROBE 3-before-engineHandoff refs=\(CFGetRetainCount(self))")
         self.engineHandoff = EngineHandoffCoordinator(
             host: self,
             engineFactory: engineFactory,
             adopted: adoptedResolved,
             initialStyle: style
         )
+        HandoffDiagnostics.emit("vm REFPROBE 4-after-engineHandoff refs=\(CFGetRetainCount(self))")
         configureEngineCallbacks()
+        HandoffDiagnostics.emit("vm REFPROBE 5-after-callbacks refs=\(CFGetRetainCount(self))")
 
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
         // navigation transition. `load()` (from the view's `.task`) adopts this
@@ -525,6 +531,7 @@ public final class PlayerViewModel {
             "viewModel INIT item=\(itemID) provider=\(provider.kind.rawValue) "
                 + "itemKind=\(offlineItem?.kind.rawValue ?? "unknown")"
         )
+        HandoffDiagnostics.emit("vm REFPROBE 6-end-of-init refs=\(CFGetRetainCount(self))")
         prefetchTask = Task { @MainActor [weak self] in
             await self?.startPlayback(forceTranscode: false, resumeOverride: nil)
         }
@@ -554,8 +561,16 @@ public final class PlayerViewModel {
         }
         engine.onFailure = { [weak self] error in
             guard let self, self.engineToken == callbackEngineToken else { return }
-            Task {
-                await self.engineHandoff.handleEngineFailure(
+            // Re-weaken for the Task. The enclosing closure is [weak self], but
+            // `guard let self` makes it strong again, and a bare `Task { self }`
+            // then keeps the whole player alive for as long as the task lives —
+            // which, if the failure handling awaits something that never
+            // completes, is forever. This is the only strongly-captured task in
+            // the model, and engine failures are routine (a codec the engine
+            // can't read, a cancelled connection), so it fires on ordinary
+            // playback rather than only in exotic cases.
+            Task { [weak self] in
+                await self?.engineHandoff.handleEngineFailure(
                     error,
                     sourceEngineToken: callbackEngineToken
                 )
@@ -1408,6 +1423,27 @@ public final class PlayerViewModel {
     /// resume point, then tear the engine down.
     public func stop(preserveDisplayMode: Bool = false) async {
         guard !didStop else { return }
+        // How many references are outstanding as the player shuts down. 1 means
+        // only the caller holds it (it will deallocate); a higher number counts
+        // the extra owners keeping it alive, which is what the lifecycle log
+        // shows happening on iOS.
+        HandoffDiagnostics.emit(
+            "vm LIFECYCLE stop id=\(instanceID) refs=\(CFGetRetainCount(self))"
+        )
+        // Steady-state probe: once every in-flight caller has unwound, report
+        // whether this model is still alive and how many owners remain. A weak
+        // capture, so the probe itself never keeps it alive.
+        let probeID = instanceID
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self else {
+                HandoffDiagnostics.emit("vm LIFECYCLE settled id=\(probeID) RELEASED")
+                return
+            }
+            HandoffDiagnostics.emit(
+                "vm LIFECYCLE settled id=\(probeID) ALIVE refs=\(CFGetRetainCount(self))"
+            )
+        }
         HandoffDiagnostics.emit("stop preserveDisplayMode=\(preserveDisplayMode) contentRange=\(String(describing: effectiveDynamicRange.bestAvailable)) (false ⇒ panel should reset to SDR)")
         PlaybackTrace.note("stop() teardown curr=\(String(format: "%.2f", engine.currentTime)) shouldDismiss=\(shouldDismiss) pendingNext=\(pendingNextEpisode != nil) isSeeking=\(controls.isSeeking)")
         didStop = true

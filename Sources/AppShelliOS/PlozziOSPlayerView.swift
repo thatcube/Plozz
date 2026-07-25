@@ -18,6 +18,14 @@ struct PlozziOSPlayerView: View {
     @State private var playerIdentity = UUID()
     @State private var handoffTask: Task<Void, Never>?
     @State private var isPresented = false
+    /// See the bisect note in `body`.
+    /// 0 = off, 1 = drop the shared PlayerView, 2 = also drop the controls
+    /// overlay, 3 = additionally read NO observed property of the model (level 2
+    /// still evaluates `viewModel.phase`, which registers SwiftUI observation
+    /// tracking; a tracking registration that never fires again retains its
+    /// object). Each level eliminates one more consumer.
+    private static let leakBisect =
+        Int(ProcessInfo.processInfo.environment["PLZ_LEAK_BISECT"] ?? "") ?? 0
 
     let request: PlozziOSPlaybackRequest
     let provider: any MediaProvider
@@ -27,13 +35,21 @@ struct PlozziOSPlayerView: View {
             Color.black.ignoresSafeArea()
 
             if let viewModel {
+                // Diagnostic bisect (launch with PLZ_LEAK_BISECT=1): render the
+                // player WITHOUT the shared PlayerView. If the live-model count
+                // stops climbing in that mode, PlayerView's own non-optional
+                // @State is what keeps every dismissed player alive; if it still
+                // climbs, the owner is elsewhere. Off by default, so a normal
+                // launch is completely unaffected.
+                if Self.leakBisect < 1 {
                 PlayerView(
                     viewModel: viewModel,
                     showDiagnostics: appModel.settings.diagnostics.settings.isEnabled,
                     showsSharedControls: false
                 )
                 .id(playerIdentity)
-                if viewModel.phase == .ready {
+                }
+                if Self.leakBisect < 3, viewModel.phase == .ready, Self.leakBisect < 2 {
                     PlozziOSPlayerControlsOverlay(
                         viewModel: viewModel,
                         onClose: { dismiss() }
@@ -77,7 +93,9 @@ struct PlozziOSPlayerView: View {
                 startPosition: request.startPosition
             )
         }
-        .onChange(of: viewModel?.pendingNextEpisode?.id) { _, nextID in
+        // Level 4 also drops this observed read, isolating whether the episode
+        // hand-off observation is what keeps the model alive.
+        .onChange(of: Self.leakBisect >= 4 ? nil : viewModel?.pendingNextEpisode?.id) { _, nextID in
             guard nextID != nil,
                   let outgoing = viewModel,
                   let next = outgoing.pendingNextEpisode,

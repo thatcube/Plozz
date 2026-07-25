@@ -37,6 +37,13 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     @State private var isPresented = false
     @State private var page = PlaybackSourceMenuButtonPage.root
     @State private var triggerFrame: CGRect = .zero
+    /// The trigger's frame FROZEN at the moment the menu was opened. The live
+    /// frame keeps moving while the detail page animates in, and anchoring to a
+    /// moving target let the placement flip mid-presentation — which is what
+    /// made the panel fly in when the button was tapped straight after arriving
+    /// on the page. The user tapped the button where they saw it, so that
+    /// position is the authoritative anchor for this presentation.
+    @State private var openTriggerFrame: CGRect = .zero
     #if !os(tvOS)
     @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var appeared = false
@@ -103,7 +110,8 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
             // this safe-area-relative space before using it.
             let insets = proxy.safeAreaInsets
             let screen = proxy.size
-            let trigger = triggerFrame.offsetBy(dx: -insets.leading, dy: -insets.top)
+            let anchor = openTriggerFrame == .zero ? triggerFrame : openTriggerFrame
+            let trigger = anchor.offsetBy(dx: -insets.leading, dy: -insets.top)
             let margin: CGFloat = 16
             let gap: CGFloat = 12
             let width = min(390, screen.width - margin * 2)
@@ -153,6 +161,14 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                     .opacity(appeared ? 1 : 0)
             }
             .frame(width: screen.width, height: screen.height)
+            // Placement changes must never interpolate — including the ZStack's
+            // alignment, which is a PARENT property that a child's
+            // .animation(nil:) can't cover. Flipping it under an ambient
+            // transaction slides the panel between the top- and bottom-pinned
+            // positions, which reads as the panel flying in.
+            .animation(nil, value: layout.pinsBottom)
+            .animation(nil, value: layout.inset)
+            .animation(nil, value: layout.x)
             .onAppear {
                 // Let the panel measure and snap to its natural size before it
                 // becomes visible, so the fade-in never shows the placeholder
@@ -189,6 +205,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     private var trigger: some View {
         Button {
             page = .root
+            if !isPresented { openTriggerFrame = triggerFrame }
             isPresented.toggle()
         } label: {
             label

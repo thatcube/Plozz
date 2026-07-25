@@ -43,11 +43,15 @@ public enum MediaItemActionCatalog {
     ///     `MetadataRefreshing`. When `true` a "Refresh Metadata" action is
     ///     offered for refreshable items.
     ///   - context: any surrounding-list context (see `MediaItemActionContext`).
+    ///   - downloadState: the item's current offline-download state, or `nil` on
+    ///     a surface with no download capability (tvOS today). `.some(nil)` means
+    ///     downloads ARE available and this item has none yet.
     public static func actions(
         for item: MediaItem,
         supportsWatchState: Bool,
         supportsWatchlist: Bool = false,
         supportsMetadataRefresh: Bool = false,
+        downloadState: MediaItemDownloadState?? = nil,
         context: MediaItemActionContext = .none
     ) -> [MediaItemAction] {
         var actions: [MediaItemAction] = []
@@ -87,7 +91,29 @@ public enum MediaItemActionCatalog {
             actions.append(.refreshMetadata)
         }
 
+        // Download actions: only on a surface that has the capability, and only
+        // for a kind that is individually downloadable (a series/folder has no
+        // single file to fetch).
+        if let downloadState, isDownloadEligible(item) {
+            switch downloadState {
+            case nil:
+                actions.append(.startDownload)
+            case .inFlight:
+                actions.append(.pauseDownload)
+            case .interrupted:
+                actions.append(.resumeDownload)
+            case .downloaded:
+                actions.append(.removeDownload)
+            }
+        }
+
         return actions
+    }
+
+    /// Downloadable kinds: a single playable file. A series or folder resolves to
+    /// many files, so it has no one download to start, pause or remove.
+    private static func isDownloadEligible(_ item: MediaItem) -> Bool {
+        item.kind == .movie || item.kind == .episode
     }
 
     /// Whether "Go to Season" applies: an episode that knows its season id and is

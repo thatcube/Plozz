@@ -1685,19 +1685,20 @@ private struct PlozziOSInlineEpisodeEntry: View {
 
     @ViewBuilder
     private var episodeMenuActions: some View {
+        // Download actions now come from the shared catalog like every other
+        // action, so this no longer appends its own — which is what kept them
+        // exclusive to this one surface.
         ForEach(mediaActions) { action in
-            Button(action.title, systemImage: action.systemImage) {
+            Button(role: action.isDestructive ? .destructive : nil) {
                 appModel.mediaItemActionHandler.perform(
                     action,
                     on: episode,
                     context: MediaItemActionContext(orderedSiblings: episodes)
                 )
+            } label: {
+                Label(action.title, systemImage: action.systemImage)
             }
         }
-        if !mediaActions.isEmpty {
-            Divider()
-        }
-        downloadMenuAction
     }
 
     @ViewBuilder

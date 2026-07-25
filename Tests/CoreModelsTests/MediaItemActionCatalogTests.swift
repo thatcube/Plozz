@@ -20,6 +20,59 @@ final class MediaItemActionCatalogTests: XCTestCase {
         )
     }
 
+    // MARK: - Download actions
+
+    /// The gap this closes: downloads were only ever offered by the episode rows'
+    /// own hand-rolled menu, so no other surface — Continue Watching included —
+    /// could show them. They're catalog actions now.
+    func testDownloadActionFollowsCurrentState() {
+        let movie = item(id: "m", kind: .movie)
+        func actions(_ state: MediaItemDownloadState?) -> [MediaItemAction] {
+            MediaItemActionCatalog.actions(
+                for: movie, supportsWatchState: false, downloadState: .some(state)
+            )
+        }
+        XCTAssertTrue(actions(nil).contains(.startDownload))
+        XCTAssertTrue(actions(.inFlight).contains(.pauseDownload))
+        XCTAssertTrue(actions(.interrupted).contains(.resumeDownload))
+        XCTAssertTrue(actions(.downloaded).contains(.removeDownload))
+    }
+
+    /// A surface with no download capability (tvOS) passes `nil` and must be
+    /// offered nothing — the outer optional is the capability, the inner one is
+    /// "nothing downloaded yet".
+    func testNoDownloadActionsWhenCapabilityAbsent() {
+        let movie = item(id: "m", kind: .movie)
+        let actions = MediaItemActionCatalog.actions(
+            for: movie, supportsWatchState: true, downloadState: nil
+        )
+        XCTAssertFalse(actions.contains { $0.isDownload })
+    }
+
+    /// A series resolves to many files, so there's no single download to act on.
+    func testNoDownloadActionsForNonDownloadableKinds() {
+        for kind in [MediaItemKind.series, .season, .folder] {
+            let actions = MediaItemActionCatalog.actions(
+                for: item(id: "x", kind: kind),
+                supportsWatchState: true,
+                downloadState: .some(nil)
+            )
+            XCTAssertFalse(
+                actions.contains { $0.isDownload },
+                "\(kind) must not offer download actions"
+            )
+        }
+    }
+
+    /// Removing a download destroys local bytes, so it must be styled destructive
+    /// while the other three stay neutral.
+    func testOnlyRemoveDownloadIsDestructive() {
+        XCTAssertTrue(MediaItemAction.removeDownload.isDestructive)
+        for action in [MediaItemAction.startDownload, .pauseDownload, .resumeDownload] {
+            XCTAssertFalse(action.isDestructive)
+        }
+    }
+
     // MARK: - Capability gating
 
     func testNoWatchActionsWhenWatchStateUnsupported() {

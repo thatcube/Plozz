@@ -19,19 +19,28 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     private let primaryAccountID: () -> String?
     private let crossServerWatchSyncEnabled: () -> Bool
     private let enqueueWatchMutation: (WatchMutation) -> Void
+    /// Current offline state for an item, or `nil` on a surface without download
+    /// capability. Injected as a closure so AppRuntime needn't depend on
+    /// MediaDownloads — and so tvOS, which has no downloads, simply omits it.
+    private let downloadState: (MediaItem) -> MediaItemDownloadState??
+    private let performDownloadAction: (MediaItemAction, MediaItem) -> Void
 
     public init(
         providerResolver: @escaping (String?) -> (any MediaProvider)?,
         additionalSources: @escaping (MediaItem) -> [MediaSourceRef] = { _ in [] },
         primaryAccountID: @escaping () -> String?,
         crossServerWatchSyncEnabled: @escaping () -> Bool,
-        enqueueWatchMutation: @escaping (WatchMutation) -> Void
+        enqueueWatchMutation: @escaping (WatchMutation) -> Void,
+        downloadState: @escaping (MediaItem) -> MediaItemDownloadState?? = { _ in nil },
+        performDownloadAction: @escaping (MediaItemAction, MediaItem) -> Void = { _, _ in }
     ) {
         self.providerResolver = providerResolver
         self.additionalSources = additionalSources
         self.primaryAccountID = primaryAccountID
         self.crossServerWatchSyncEnabled = crossServerWatchSyncEnabled
         self.enqueueWatchMutation = enqueueWatchMutation
+        self.downloadState = downloadState
+        self.performDownloadAction = performDownloadAction
     }
 
     public func actions(for item: MediaItem, context: MediaItemActionContext) -> [MediaItemAction] {
@@ -48,6 +57,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             supportsWatchState: provider is WatchStateProviding,
             supportsWatchlist: provider is WatchlistProviding,
             supportsMetadataRefresh: provider is MetadataRefreshing,
+            downloadState: downloadState(item),
             context: context
         )
     }
@@ -60,6 +70,8 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             performWatchlist(adding: action == .addToWatchlist, on: item)
         case .refreshMetadata:
             performRefresh(on: item)
+        case .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
+            performDownloadAction(action, item)
         case .goToSeason, .goToMovie:
             // Navigation is handled in the view layer, never here.
             break

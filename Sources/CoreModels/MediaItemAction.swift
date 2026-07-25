@@ -46,6 +46,17 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     /// server task; offered only when the provider conforms to
     /// `MetadataRefreshing`.
     case refreshMetadata
+    /// Start an offline download of this item. Offered only when the surface
+    /// supplies download capability (iOS/iPadOS today) and nothing is downloaded
+    /// or in flight for the item's SELECTED version.
+    case startDownload
+    /// Pause an in-flight download (queued or transferring).
+    case pauseDownload
+    /// Resume a paused or failed download.
+    case resumeDownload
+    /// Delete the on-device copy. Destructive: the bytes are gone and must be
+    /// re-fetched over the network.
+    case removeDownload
 
     public var id: String { rawValue }
 
@@ -60,6 +71,10 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .addToWatchlist: return "Add to Watchlist"
         case .removeFromWatchlist: return "Remove from Watchlist"
         case .refreshMetadata: return "Refresh Metadata"
+        case .startDownload: return "Download"
+        case .pauseDownload: return "Pause Download"
+        case .resumeDownload: return "Resume Download"
+        case .removeDownload: return "Remove Download"
         }
     }
 
@@ -74,6 +89,10 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .addToWatchlist: return "bookmark"
         case .removeFromWatchlist: return "bookmark.slash"
         case .refreshMetadata: return "arrow.clockwise"
+        case .startDownload: return "arrow.down.circle"
+        case .pauseDownload: return "pause.circle"
+        case .resumeDownload: return "arrow.clockwise.circle"
+        case .removeDownload: return "trash"
         }
     }
 
@@ -84,14 +103,28 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .goToSeason, .goToMovie: return true
         case .markWatched, .markUnwatched, .markWatchedUpToHere,
-             .addToWatchlist, .removeFromWatchlist, .refreshMetadata: return false
+             .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
+             .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
+            return false
         }
     }
 
     /// Whether the platform should style the action as destructive (red). No
     /// current watched-state action loses data irreversibly; this exists so a
     /// future `delete` action can opt in without reworking the menu.
-    public var isDestructive: Bool { false }
+    public var isDestructive: Bool { self == .removeDownload }
+
+    /// Whether this action is served by the download stack rather than a provider.
+    /// The coordinator routes these to an injected download service instead of
+    /// attempting a provider mutation.
+    public var isDownload: Bool {
+        switch self {
+        case .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
+            return true
+        default:
+            return false
+        }
+    }
 
     /// Actions intentionally promoted into a detail hero's visible More menu.
     /// Navigation and server-maintenance actions remain in the context menu.
@@ -101,7 +134,8 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
              .addToWatchlist, .removeFromWatchlist:
             return true
         case .markWatchedUpToHere, .goToSeason, .goToMovie,
-             .refreshMetadata:
+             .refreshMetadata, .startDownload, .pauseDownload,
+             .resumeDownload, .removeDownload:
             return false
         }
     }

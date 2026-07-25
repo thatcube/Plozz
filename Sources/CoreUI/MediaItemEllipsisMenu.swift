@@ -83,7 +83,8 @@ public struct MediaItemEllipsisMenu: View {
         case .goToMovie:
             navigate(item)
         case .markWatched, .markUnwatched, .markWatchedUpToHere,
-             .addToWatchlist, .removeFromWatchlist, .refreshMetadata:
+             .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
+             .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
             break
         }
     }

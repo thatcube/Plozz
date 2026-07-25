@@ -148,7 +148,8 @@ public struct MediaItemContextMenu: ViewModifier {
         case .goToMovie:
             pendingNavigationTarget = item
         case .markWatched, .markUnwatched, .markWatchedUpToHere,
-             .addToWatchlist, .removeFromWatchlist, .refreshMetadata:
+             .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
+             .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
             break
         }
     }

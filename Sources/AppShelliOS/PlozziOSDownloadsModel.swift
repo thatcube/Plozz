@@ -118,6 +118,23 @@ final class PlozziOSDownloadsModel {
         await registry?.record(for: item, versionID: item.selectedVersionID)
     }
 
+    /// Synchronous in-memory lookup for the item's SELECTED version, for callers
+    /// that must answer without awaiting (building a menu as it opens). `records`
+    /// is the already-loaded published snapshot, so this needs no actor hop.
+    func cachedRecord(forSelectedVersionOf item: MediaItem) -> DownloadedMediaRecord? {
+        // An item can carry SEVERAL identities (the same title on more than one
+        // server), so match the registry's own resolution rather than assuming a
+        // single key — otherwise a download made from one server is invisible to
+        // a card resolved through another.
+        let versionID = item.selectedVersionID
+        let keys = Set(MediaItemIdentity.identities(for: item).map { identity in
+            versionID.flatMap { $0.isEmpty ? nil : $0 }
+                .map { MediaIdentityKey.string(for: identity, versionID: $0) }
+                ?? MediaIdentityKey.string(for: identity)
+        })
+        return records.first { keys.contains($0.identityKey) }
+    }
+
     @discardableResult
     func enqueue(
         item: MediaItem,

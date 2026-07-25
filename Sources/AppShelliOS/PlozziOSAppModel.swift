@@ -277,6 +277,16 @@ final class PlozziOSAppModel {
             },
             enqueueWatchMutation: { [unowned self] mutation in
                 self.applyWatchMutation(mutation)
+            },
+            // Downloads are an iOS/iPadOS capability, so only this shell supplies
+            // them; tvOS omits both closures and the catalog offers no download
+            // actions there. Reads the registry synchronously (it's already loaded
+            // in memory) so the menu can be built without awaiting.
+            downloadState: { [unowned self] item in
+                .some(self.downloads.cachedRecord(forSelectedVersionOf: item)?.menuState)
+            },
+            performDownloadAction: { [unowned self] action, item in
+                Task { await self.performDownloadMenuAction(action, on: item) }
             }
         )
 

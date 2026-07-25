@@ -1,5 +1,6 @@
 #if os(iOS)
 import CoreUI
+import FeatureHomeCore
 import SwiftUI
 
 /// Placeholder rail shown while a Home row's items are still loading.
@@ -70,17 +71,75 @@ struct PlozziOSHomeSkeletonRail: View {
 /// restructure when content lands. A spinner was previously shown here, which
 /// gave no sense of the layout and left the screen blank-feeling on a cold load.
 struct PlozziOSHomeSkeletonScreen: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
+                PlozziOSHomeHeroSkeleton(
+                    style: horizontalSizeClass == .compact
+                        ? .compactPortrait
+                        : .landscape
+                )
                 PlozziOSHomeSkeletonRail(title: " ", style: .landscape)
                 PlozziOSHomeSkeletonRail(title: " ", style: .poster)
                 PlozziOSHomeSkeletonRail(title: " ", style: .poster)
             }
-            .padding(.top, 12)
         }
         .scrollDisabled(true)
         .accessibilityLabel("Loading Home")
+    }
+}
+
+/// Placeholder for the Home hero, mirroring tvOS's `HomeHeroSkeletonView`.
+///
+/// Reserves the hero's real height (`PlozziOSHeroMetrics.height`) so the rows
+/// below don't get pushed down when the hero resolves, and pins soft capsules to
+/// the bottom where the metadata line and action buttons will be — the same
+/// shape tvOS uses. No backdrop: the artwork area stays empty while loading
+/// rather than flashing a placeholder colour behind the whole screen.
+struct PlozziOSHomeHeroSkeleton: View {
+    @Environment(\.themePalette) private var palette
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    let style: HeroArtworkStyle
+
+    var body: some View {
+        VStack(alignment: style == .compactPortrait ? .center : .leading, spacing: 12) {
+            // Metadata line (year · rating · runtime).
+            capsule(width: 190, height: 22)
+            // Two overview lines.
+            capsule(width: style == .compactPortrait ? 260 : 460, height: 16)
+            capsule(width: style == .compactPortrait ? 200 : 360, height: 16)
+            // Action row: the Play pill plus the icon buttons beside it.
+            HStack(spacing: 12) {
+                capsule(width: 150, height: 50)
+                capsule(width: 50, height: 50)
+                capsule(width: 50, height: 50)
+                capsule(width: 50, height: 50)
+            }
+            .padding(.top, 4)
+        }
+        .frame(
+            maxWidth: .infinity,
+            minHeight: PlozziOSHeroMetrics.height(
+                style: style,
+                surfaceRole: .home,
+                dynamicTypeSize: dynamicTypeSize
+            ),
+            alignment: style == .compactPortrait ? .bottom : .bottomLeading
+        )
+        .padding(.horizontal, PlozziOSPageLayout.horizontalInset(for: style))
+        .padding(.bottom, 28)
+        // Shimmer only the placeholder shapes, never a full-bleed backdrop.
+        .shimmering()
+        .accessibilityHidden(true)
+    }
+
+    private func capsule(width: CGFloat, height: CGFloat) -> some View {
+        Capsule(style: .continuous)
+            .fill(palette.fill)
+            .frame(width: width, height: height)
     }
 }
 #endif

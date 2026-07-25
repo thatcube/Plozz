@@ -218,7 +218,12 @@ struct PlozziOSHomeView: View {
             // per-card laziness that actually matters (artwork loading) lives in
             // the inner LazyHStacks, which are untouched.
             VStack(alignment: .leading, spacing: 30) {
-                if !heroItems.isEmpty {
+                if heroItems.isEmpty {
+                    // Reserve the hero's height while it resolves, so the rows
+                    // below don't get shoved down when it lands (tvOS has had
+                    // HomeHeroSkeletonView for this).
+                    PlozziOSHomeHeroSkeleton(style: heroStyle)
+                } else {
                     PlozziOSHomeHeroCarousel(
                         items: heroItems,
                         autoAdvance: appModel.settings.hero.settings.autoAdvance,

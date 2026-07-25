@@ -6,6 +6,12 @@ import Foundation
 /// the queue owns everything after that.
 public struct DownloadRequest: Sendable {
     public var identity: MediaIdentity
+    /// The specific version (file) being downloaded, so two versions of one
+    /// title are stored as separate records rather than one overwriting the
+    /// other. See ``MediaIdentityKey/string(for:versionID:)``.
+    public var versionID: String?
+    /// Pinned human-readable version label for the downloads list.
+    public var versionLabel: String?
     public var groupID: String?
     public var sourceKind: DownloadSourceKind
     public var quality: DownloadQuality
@@ -19,6 +25,8 @@ public struct DownloadRequest: Sendable {
 
     public init(
         identity: MediaIdentity,
+        versionID: String? = nil,
+        versionLabel: String? = nil,
         groupID: String? = nil,
         sourceKind: DownloadSourceKind,
         quality: DownloadQuality = .original,
@@ -29,6 +37,8 @@ public struct DownloadRequest: Sendable {
         snapshot: PinnedMediaSnapshot
     ) {
         self.identity = identity
+        self.versionID = versionID
+        self.versionLabel = versionLabel
         self.groupID = groupID
         self.sourceKind = sourceKind
         self.quality = quality
@@ -43,6 +53,8 @@ public struct DownloadRequest: Sendable {
         identity: MediaIdentity,
         source: ManagedHTTPDownloadSource,
         snapshot: PinnedMediaSnapshot,
+        versionID: String? = nil,
+        versionLabel: String? = nil,
         groupID: String? = nil,
         contentType: String? = nil,
         fileExtension: String? = nil,
@@ -50,6 +62,8 @@ public struct DownloadRequest: Sendable {
     ) -> DownloadRequest {
         DownloadRequest(
             identity: identity,
+            versionID: versionID,
+            versionLabel: versionLabel,
             groupID: groupID,
             sourceKind: .managedHTTP,
             quality: quality,
@@ -65,6 +79,8 @@ public struct DownloadRequest: Sendable {
         identity: MediaIdentity,
         locator: NetworkFileLocator,
         snapshot: PinnedMediaSnapshot,
+        versionID: String? = nil,
+        versionLabel: String? = nil,
         groupID: String? = nil,
         contentType: String? = nil,
         container: String? = nil,
@@ -72,6 +88,8 @@ public struct DownloadRequest: Sendable {
     ) -> DownloadRequest {
         DownloadRequest(
             identity: identity,
+            versionID: versionID,
+            versionLabel: versionLabel,
             groupID: groupID,
             sourceKind: .directShare,
             quality: quality,

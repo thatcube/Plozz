@@ -22,8 +22,8 @@ public struct RegistryOfflinePlaybackResolver:
         self.fileManager = fileManager
     }
 
-    public func localPlaybackURL(for item: MediaItem) async -> URL? {
-        guard let record = await registry.record(for: item),
+    public func localPlaybackURL(for item: MediaItem, versionID: String?) async -> URL? {
+        guard let record = await registry.record(for: item, versionID: versionID),
               record.status == .completed,
               let url = try? storage.pinnedFileURL(for: record),
               fileManager.fileExists(atPath: url.path) else {

@@ -297,15 +297,24 @@ struct PlozziOSDownloadsStorageBar: View {
 /// and show rows read identically.
 enum DownloadFormatting {
     static func status(for record: DownloadedMediaRecord) -> String {
+        let base: String
         switch record.status {
-        case .queued: "Queued"
+        case .queued: base = "Queued"
         case .downloading:
-            "\(Int((record.fractionCompleted ?? 0) * 100))%"
-        case .paused: "Paused"
+            base = "\(Int((record.fractionCompleted ?? 0) * 100))%"
+        case .paused: base = "Paused"
         case .completed:
-            "Available offline • \(byteText(record.bytesDownloaded))"
-        case .failed: "Failed"
+            base = "Available offline • \(byteText(record.bytesDownloaded))"
+        case .failed: base = "Failed"
         }
+        // Several versions of one title can now be downloaded side by side, so
+        // the row has to say WHICH file it is or two entries look identical.
+        // The label is pinned at download time because the server's version list
+        // isn't reachable offline.
+        guard let version = record.versionLabel, !version.isEmpty else {
+            return base
+        }
+        return "\(version) • \(base)"
     }
 
     static func statusColor(for record: DownloadedMediaRecord) -> Color {

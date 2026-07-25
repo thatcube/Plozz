@@ -53,9 +53,48 @@ public actor DownloadedMediaRegistry {
         state.records[identityKey]
     }
 
-    /// The record satisfying any of an item's cross-server identities, if present.
-    public func record(for item: MediaItem) -> DownloadedMediaRecord? {
+    /// The record for a specific **version** of an item, if that exact version
+    /// has been downloaded.
+    ///
+    /// Playback must use this, not ``record(for:)``: a title can have several
+    /// downloaded versions (or one downloaded version among many streamable
+    /// ones), and matching on the title alone plays whichever copy happens to be
+    /// on disk regardless of the version the user picked.
+    ///
+    /// A `nil` `versionID` means "the caller has no particular version in mind",
+    /// which falls back to the any-version lookup.
+    public func record(for item: MediaItem, versionID: String?) -> DownloadedMediaRecord? {
+        guard let versionID, !versionID.isEmpty else { return record(for: item) }
         for identity in MediaItemIdentity.identities(for: item) {
+            if let record = state.records[
+                MediaIdentityKey.string(for: identity, versionID: versionID)
+            ] {
+                return record
+            }
+        }
+        if let identity = DownloadMediaIdentity.primary(for: item),
+           let record = state.records[
+               MediaIdentityKey.string(for: identity, versionID: versionID)
+           ] {
+            return record
+        }
+        // Fall back to scanning by version: an item reached from a different
+        // server resolves to a different identity, but a downloaded copy still
+        // carries the version id the picker is showing.
+        return state.records.values.first {
+            $0.versionID == versionID && $0.snapshot.sourceItemID == item.id
+        }
+    }
+
+    /// The record satisfying any of an item's cross-server identities, if present.
+    /// Version-agnostic: use it for "does a download exist for this title?" (the
+    /// downloads list, a card badge), never to choose what to play.
+    public func record(for item: MediaItem) -> DownloadedMediaRecord? {
+        // Records are keyed by identity AND version, so an exact-key hit only
+        // finds version-less copies; a version-scoped copy has to be matched on
+        // its `identity` field instead.
+        let identities = MediaItemIdentity.identities(for: item)
+        for identity in identities {
             if let record = state.records[MediaIdentityKey.string(for: identity)] {
                 return record
             }
@@ -64,6 +103,14 @@ public actor DownloadedMediaRegistry {
             if let record = state.records[MediaIdentityKey.string(for: identity)] {
                 return record
             }
+        }
+        let identitySet = Set(identities.map(MediaIdentityKey.string(for:)))
+        if !identitySet.isEmpty {
+            let versioned = state.records.values
+                .filter { identitySet.contains(MediaIdentityKey.string(for: $0.identity)) }
+                // Deterministic pick when several versions are downloaded.
+                .sorted { $0.identityKey < $1.identityKey }
+            if let first = versioned.first { return first }
         }
         let expectedAccountSource = item.sourceAccountID.map {
             "\(DownloadMediaIdentity.accountSourcePrefix)\($0)"

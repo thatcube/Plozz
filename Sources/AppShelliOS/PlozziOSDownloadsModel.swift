@@ -104,8 +104,18 @@ final class PlozziOSDownloadsModel {
         eventsTask?.cancel()
     }
 
+    /// Any downloaded copy of this title, regardless of version. For "does this
+    /// title exist offline?" questions.
     func record(for item: MediaItem) async -> DownloadedMediaRecord? {
         await registry?.record(for: item)
+    }
+
+    /// The downloaded copy of the item's **selected version**, so a download
+    /// button reflects the version actually chosen: with 4K selected and only
+    /// 1080p on disk this correctly reports "not downloaded" and lets the 4K be
+    /// fetched alongside it.
+    func record(forSelectedVersionOf item: MediaItem) async -> DownloadedMediaRecord? {
+        await registry?.record(for: item, versionID: item.selectedVersionID)
     }
 
     @discardableResult
@@ -282,6 +292,13 @@ final class PlozziOSDownloadsModel {
             mediaSourceID: item.selectedVersionID,
             forceTranscode: false
         )
+        // Scope the download to the version being downloaded so a title's 4K and
+        // 1080p copies are separate records — and so playback can tell which one
+        // is actually on disk instead of playing whichever exists.
+        let versionID = item.selectedVersionID
+        let versionLabel = item.versions
+            .first { $0.id == versionID }?
+            .displayLabel
         let request: DownloadRequest
         switch playback.downloadableOriginalSource {
         case .networkFile(let locator):
@@ -289,6 +306,8 @@ final class PlozziOSDownloadsModel {
                 identity: identity,
                 locator: locator,
                 snapshot: PinnedMediaSnapshot(item: item),
+                versionID: versionID,
+                versionLabel: versionLabel,
                 groupID: groupID
             )
         case .authenticatedHTTP(let locator):
@@ -313,6 +332,8 @@ final class PlozziOSDownloadsModel {
                 identity: identity,
                 source: source,
                 snapshot: PinnedMediaSnapshot(item: item),
+                versionID: versionID,
+                versionLabel: versionLabel,
                 groupID: groupID,
                 fileExtension: fileExtension
             )

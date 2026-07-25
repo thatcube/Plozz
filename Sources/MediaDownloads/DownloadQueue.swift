@@ -89,6 +89,8 @@ public actor DownloadQueue {
     ) -> DownloadedMediaRecord {
         DownloadedMediaRecord(
             identity: request.identity,
+            versionID: request.versionID,
+            versionLabel: request.versionLabel,
             groupID: request.groupID,
             sourceKind: request.sourceKind,
             quality: request.quality,

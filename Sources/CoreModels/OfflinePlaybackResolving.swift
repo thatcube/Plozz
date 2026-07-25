@@ -15,8 +15,25 @@ import Foundation
 /// present. Implementations must only return a URL for a **completed** download
 /// whose file actually exists on disk.
 public protocol OfflinePlaybackResolving: Sendable {
-    /// The `file://` URL of a completed, on-disk offline download for `item`, or
-    /// `nil` when none exists. Keyed by cross-server ``MediaIdentity`` so a title
-    /// downloaded from one server plays offline even when opened from another.
-    func localPlaybackURL(for item: MediaItem) async -> URL?
+    /// The `file://` URL of a completed, on-disk offline download of a
+    /// **specific version** of `item`, or `nil` when that version isn't
+    /// downloaded. Keyed by cross-server ``MediaIdentity`` so a title downloaded
+    /// from one server plays offline even when opened from another.
+    ///
+    /// The version must be honoured: a title can have a 4K and a 1080p file, and
+    /// only one of them may be on disk. Ignoring it makes every version the user
+    /// picks play whichever copy was downloaded — silently, since playback
+    /// "works", just not with the file they chose.
+    ///
+    /// `nil` `versionID` means "no particular version", which matches any
+    /// downloaded copy (used by callers that only ask "is this available
+    /// offline?").
+    func localPlaybackURL(for item: MediaItem, versionID: String?) async -> URL?
+}
+
+public extension OfflinePlaybackResolving {
+    /// Version-agnostic convenience for availability checks.
+    func localPlaybackURL(for item: MediaItem) async -> URL? {
+        await localPlaybackURL(for: item, versionID: nil)
+    }
 }

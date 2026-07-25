@@ -1159,12 +1159,15 @@ private struct PlozziOSDetailHeroForeground: View {
         .contextMenu {
             detailContextMenu
         }
-        .task(id: downloadItem?.id) {
+        // Keyed on version too: switching version must re-check whether THAT
+        // file is downloaded, not leave the button showing the old answer.
+        .task(id: "\(downloadItem?.id ?? "")|\(downloadItem?.selectedVersionID ?? "")") {
             guard let downloadItem else {
                 downloadRecord = nil
                 return
             }
-            downloadRecord = await appModel.downloads.record(for: downloadItem)
+            downloadRecord = await appModel.downloads
+                .record(forSelectedVersionOf: downloadItem)
         }
         .alert(
             "Download Failed",

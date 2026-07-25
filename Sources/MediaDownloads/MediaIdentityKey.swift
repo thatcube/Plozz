@@ -8,6 +8,24 @@ import Foundation
 /// file), so it is derived structurally from the identity's cases — never from a
 /// Swift type name or a non-deterministic hash.
 public enum MediaIdentityKey {
+    /// The canonical key string for an identity, optionally scoped to one
+    /// **version** (a specific file of a title).
+    ///
+    /// A title can exist as several files — 4K, 1080p, a remux — and each is a
+    /// separately downloadable thing. Keying on the identity alone means one
+    /// record per title, so a second version can't be stored and, worse,
+    /// whichever version happened to be downloaded gets played back for every
+    /// version the user picks. Appending the version id keeps each file its own
+    /// record and its own on-disk folder.
+    ///
+    /// A `nil`/empty version keeps the historic un-suffixed key, so records that
+    /// genuinely have no version concept are unchanged.
+    public static func string(for identity: MediaIdentity, versionID: String?) -> String {
+        let base = string(for: identity)
+        guard let versionID, !versionID.isEmpty else { return base }
+        return "\(base)\u{1}ver\u{1}\(versionID)"
+    }
+
     /// The canonical key string for an identity.
     public static func string(for identity: MediaIdentity) -> String {
         switch identity {

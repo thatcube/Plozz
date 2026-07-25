@@ -12,6 +12,15 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
     public var identityKey: String
     /// The cross-server identity this download satisfies.
     public var identity: MediaIdentity
+    /// The specific **version** (file) of the title this copy is, when the title
+    /// has more than one. Part of ``identityKey``, so 4K and 1080p are separate
+    /// records with separate folders rather than one overwriting the other.
+    /// `nil` for sources with no version concept.
+    public var versionID: String?
+    /// Human-readable version label (e.g. `4K · BluRay · 5.5 GB`) pinned at
+    /// download time so the downloads list can tell two copies apart offline,
+    /// where the server's version list isn't reachable.
+    public var versionLabel: String?
     /// Optional grouping (e.g. a whole season enqueued together).
     public var groupID: String?
 
@@ -43,6 +52,8 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
 
     public init(
         identity: MediaIdentity,
+        versionID: String? = nil,
+        versionLabel: String? = nil,
         groupID: String? = nil,
         sourceKind: DownloadSourceKind,
         quality: DownloadQuality = .original,
@@ -58,8 +69,10 @@ public struct DownloadedMediaRecord: Codable, Sendable, Hashable, Identifiable {
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
-        self.identityKey = MediaIdentityKey.string(for: identity)
+        self.identityKey = MediaIdentityKey.string(for: identity, versionID: versionID)
         self.identity = identity
+        self.versionID = versionID
+        self.versionLabel = versionLabel
         self.groupID = groupID
         self.sourceKind = sourceKind
         self.quality = quality

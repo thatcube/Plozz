@@ -176,6 +176,9 @@ public final class PlayerViewModel {
     /// The item already selected by the UI. When it has a completed local copy,
     /// playback can start without first contacting the provider.
     private let offlineItem: MediaItem?
+    /// Short id used only to pair a construction with its deallocation in the
+    /// lifecycle log.
+    private let instanceID = String(UUID().uuidString.prefix(4))
     /// The chosen `MediaVersion.id` (Jellyfin `MediaSourceId` / Plex `Media` id)
     /// to play when the title has multiple versions; `nil` plays the default.
     private let mediaSourceID: String?
@@ -459,6 +462,12 @@ public final class PlayerViewModel {
         // The adopted-prefetch engine boot (skip the native→Plozzigen swap) lives
         // in ``EngineHandoffCoordinator``'s init, built at the end of this init.
         PlaybackInstrumentation.increment(.viewModel)
+        // Pair every construction with its deinit in the log. The live-instance
+        // counter tells us models are leaking but not which construction never
+        // died; matching INIT/DEINIT ids does.
+        HandoffDiagnostics.emit(
+            "vm LIFECYCLE init id=\(instanceID) live=\(PlaybackInstrumentation.count(.viewModel))"
+        )
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
         self.controls.playbackSpeed = preferencesStore.loadPlaybackSpeed()
         self.controls.skipBackwardInterval = playbackSettings.skipBackwardInterval
@@ -528,6 +537,9 @@ public final class PlayerViewModel {
 
     deinit {
         PlaybackInstrumentation.decrement(.viewModel)
+        HandoffDiagnostics.emit(
+            "vm LIFECYCLE deinit id=\(instanceID) live=\(PlaybackInstrumentation.count(.viewModel))"
+        )
     }
 
     private func configureEngineCallbacks() {
@@ -857,8 +869,12 @@ public final class PlayerViewModel {
                requestedItemID: itemID,
                forceTranscode: forceTranscode
            ),
+           // Ask for the VERSION being played, not just the title: with a 4K and
+           // a 1080p file behind one title, a title-only lookup returns whichever
+           // copy is on disk and silently plays it for every version the user
+           // picks.
            let localURL = await offlinePlaybackResolver?
-               .localPlaybackURL(for: offlineItem) {
+               .localPlaybackURL(for: offlineItem, versionID: mediaSourceID) {
             var request = PlaybackRequest(
                 item: offlineItem,
                 streamURL: localURL,
@@ -882,7 +898,8 @@ public final class PlayerViewModel {
         // play it with zero engine changes. Strictly additive — a no-op when no
         // resolver is injected or no local copy exists (proven byte-identical by
         // `OfflineRequestRewriteTests`).
-        let localURL = await offlinePlaybackResolver?.localPlaybackURL(for: request.item)
+        let localURL = await offlinePlaybackResolver?
+            .localPlaybackURL(for: request.item, versionID: mediaSourceID)
         request = Self.applyingOfflineRewrite(to: request, localURL: localURL)
         // Steer the engine's INITIAL active audio track by language (no reload)
         // from the prefer-original-language policy. Computed here so every

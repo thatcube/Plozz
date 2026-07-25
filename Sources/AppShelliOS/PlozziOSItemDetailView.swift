@@ -795,7 +795,8 @@ private struct PlozziOSCanonicalItemDetailView: View {
     private func removeDownload(_ item: MediaItem) async {
         guard let downloadRecord else { return }
         await appModel.downloads.remove(downloadRecord)
-        self.downloadRecord = await appModel.downloads.record(for: item)
+        self.downloadRecord = await appModel.downloads
+            .record(forSelectedVersionOf: item)
     }
 }
 
@@ -1635,8 +1636,9 @@ private struct PlozziOSInlineEpisodeEntry: View {
         .frame(width: cardWidth, alignment: .leading)
         .padding(cardStyle == .framed ? 10 : 0)
         .contextMenu { episodeMenuActions }
-        .task(id: episode.id) {
-            downloadRecord = await appModel.downloads.record(for: episode)
+        .task(id: "\(episode.id)|\(episode.selectedVersionID ?? "")") {
+            downloadRecord = await appModel.downloads
+                .record(forSelectedVersionOf: episode)
         }
         .alert(
             "Download Failed",

@@ -159,6 +159,8 @@ enum DownloadTestFactory {
 
     static func record(
         identity: MediaIdentity? = nil,
+        versionID: String? = nil,
+        versionLabel: String? = nil,
         status: DownloadStatus = .queued,
         bytesDownloaded: Int64 = 0,
         totalBytes: Int64? = nil,
@@ -167,6 +169,8 @@ enum DownloadTestFactory {
     ) throws -> DownloadedMediaRecord {
         DownloadedMediaRecord(
             identity: identity ?? imdbIdentity(),
+            versionID: versionID,
+            versionLabel: versionLabel,
             groupID: groupID,
             sourceKind: .directShare,
             status: status,

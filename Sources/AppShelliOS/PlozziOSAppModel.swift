@@ -121,6 +121,9 @@ final class PlozziOSAppModel {
         let descByID = Dictionary(received.config.accounts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let secretByID = Dictionary((received.secrets?.accounts ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
         let shareByID = Dictionary((received.secrets?.shares ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
+        // Household-wide, so not gated on any per-account authorization — it rides
+        // the bundle the user already approved.
+        if let seerr = received.secrets?.seerr { Self.installSeerrSecretIfAbsent(seerr) }
         // Track credentialed accounts we ATTEMPT (expected to sign in without a tap)
         // vs those that actually persisted, so the caller can gate success and
         // surface any that failed. Intentional skips (device-local SSH key, no URL)

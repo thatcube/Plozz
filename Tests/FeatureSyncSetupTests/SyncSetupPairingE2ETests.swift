@@ -112,6 +112,51 @@ final class SyncSetupPairingE2ETests: XCTestCase {
         XCTAssertEqual(received.secrets?.accounts.first?.token, "TOK")
     }
 
+    /// The household Seerr connection (URL + admin API key) must survive the sealed
+    /// pairing channel — that channel is the ONLY way it can reach an Apple TV, which
+    /// can't participate in iCloud Keychain.
+    func testPairingTransfersHouseholdSeerrConnection() async throws {
+        let (hostLink, guestLink) = await InMemoryPairingLink.makePair()
+        let phone = service(
+            accounts: [account("a1")], profiles: [Profile(id: "p1", name: "Brandon")],
+            secrets: SyncSecretsBundle(
+                accounts: [AccountSecret(accountID: "a1", provider: .jellyfin,
+                                         token: "TOK", deviceID: "phone",
+                                         trustedOrigin: "https://h.example.com")],
+                seerr: SeerrSecret(baseURL: "https://seerr.example.com", apiKey: "SEERR-KEY")
+            ),
+            configured: true, id: "phone")
+        let tv = service(configured: false, id: "tv")
+
+        let tvModel = SyncSetupPairingModel(service: tv, makeHostLink: { _ in StaticHost(link: hostLink) })
+        let phoneModel = SyncSetupPairingModel(service: phone, makeGuestLink: { _ in StaticGuest(link: guestLink) })
+
+        async let hosting: Void = tvModel.startReceiving()
+        var inviteString: String?
+        for _ in 0..<2000 {
+            if case .waitingForPeer(_, let invite) = tvModel.phase { inviteString = invite.encoded(); break }
+            await Task.yield()
+        }
+        let qr = try XCTUnwrap(inviteString)
+        await phoneModel.send(inviteString: qr)
+        await hosting
+
+        guard case .applied(let received) = tvModel.phase else { return XCTFail("phase \(tvModel.phase)") }
+        XCTAssertEqual(received.secrets?.seerr?.baseURL, "https://seerr.example.com")
+        XCTAssertEqual(received.secrets?.seerr?.apiKey, "SEERR-KEY")
+    }
+
+    /// A device whose ONLY credential is the Seerr connection must still transfer it.
+    /// `SyncSetupService` skips the secrets payload entirely when the bundle reports
+    /// itself empty, so `isEmpty` has to account for Seerr or this silently no-ops.
+    func testSeerrOnlyBundleIsNotConsideredEmpty() {
+        let bundle = SyncSecretsBundle(
+            seerr: SeerrSecret(baseURL: "https://seerr.example.com", apiKey: "K")
+        )
+        XCTAssertFalse(bundle.isEmpty)
+        XCTAssertTrue(SyncSecretsBundle().isEmpty)
+    }
+
     func testShortCodePathRunsSASAndTransfers() async throws {
         let (hostLink, guestLink) = await InMemoryPairingLink.makePair()
         let phone = service(accounts: [account("a1")], configured: true, id: "phone")

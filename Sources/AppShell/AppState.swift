@@ -559,6 +559,9 @@ public final class AppState {
         let descByID = Dictionary(received.config.accounts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let secretByID = Dictionary((received.secrets?.accounts ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
         let shareByID = Dictionary((received.secrets?.shares ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
+        // The household Seerr connection isn't tied to any one account, so it isn't
+        // gated on an authorization — it travels with the bundle the user approved.
+        if let seerr = received.secrets?.seerr { Self.installSeerrSecretIfAbsent(seerr) }
         var expected = 0, added = 0
         var failedAccountIDs: [String] = []
         for auth in received.application.authorizedAuthorizations {
@@ -842,7 +845,11 @@ public final class AppState {
                         trustedOrigin: LocalAuthorization.origin(of: account.server.baseURL)
                     ))
                 }
-                return SyncSecretsBundle(accounts: accts, shares: shares)
+                return SyncSecretsBundle(
+                    accounts: accts,
+                    shares: shares,
+                    seerr: Self.currentSeerrSecret()
+                )
             }
         )
 
@@ -958,6 +965,38 @@ public final class AppState {
                 operation: "credential-infrastructure-init"
             )
             return DefaultAccountStoreFactory.makeCredentialOnlyFallback()
+        }
+    }
+
+    /// The household Keychain store backing the shared Seerr connection. One
+    /// definition so the read/write/transfer paths can't drift on service or key.
+    @MainActor
+    private static func seerrConnectionStore() -> HouseholdSeerConnectionStore {
+        HouseholdSeerConnectionStore(secureStore: KeychainStore(service: "com.plozz.app.household"))
+    }
+
+    /// This device's Seerr connection as a transferable secret, or nil if Seerr
+    /// isn't set up here. The API key is a credential, so it rides ONLY the sealed
+    /// pairing channel — never a CloudKit record.
+    @MainActor
+    static func currentSeerrSecret() -> SeerrSecret? {
+        guard let connection = seerrConnectionStore().load() else { return nil }
+        return SeerrSecret(baseURL: connection.baseURL.absoluteString, apiKey: connection.apiKey)
+    }
+
+    /// Install a Seerr connection received from a paired device. Never clobbers a
+    /// connection this device already has — the local one may be the reachable URL
+    /// for this network, and a pairing shouldn't silently repoint it.
+    @MainActor
+    static func installSeerrSecretIfAbsent(_ secret: SeerrSecret) {
+        let store = seerrConnectionStore()
+        guard store.load() == nil else { return }
+        guard let url = URL(string: secret.baseURL) else { return }
+        do {
+            try store.save(SeerConnection(baseURL: url, apiKey: secret.apiKey))
+            PlozzLog.auth.info("Sync setup: installed shared Seerr connection from pairing")
+        } catch {
+            PlozzLog.auth.error("Sync setup: Seerr install failed: \(error.localizedDescription)")
         }
     }
 

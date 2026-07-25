@@ -4,6 +4,7 @@ import CoreModels
 import CoreNetworking
 import FeatureAuthCore
 import FeatureSyncSetup
+import SeerService
 
 // MARK: - PlozziOSAppModel + iCloud Keychain credential auto-connect
 //
@@ -58,7 +59,42 @@ extension PlozziOSAppModel {
                 deviceID: account.deviceID,
                 trustedOrigin: LocalAuthorization.origin(of: account.server.baseURL)))
         }
-        return SyncSecretsBundle(accounts: accts, shares: shares)
+        return SyncSecretsBundle(accounts: accts, shares: shares, seerr: currentSeerrSecret())
+    }
+
+    // MARK: - Shared household Seerr connection
+
+    /// Fixed key for the household Seerr connection in the portable-credential
+    /// store. Not an account id (Seerr is one household-wide connection, not a
+    /// per-account login), so it's namespaced to avoid ever colliding with one.
+    private static let portableSeerrKey = "household.seerr.connection.v1"
+
+    /// The household Keychain store backing the Seerr connection. One definition so
+    /// the app's read path and these transfer paths can't drift on service or key.
+    static func seerrConnectionStore() -> HouseholdSeerConnectionStore {
+        HouseholdSeerConnectionStore(secureStore: KeychainStore(service: "com.plozz.app.household"))
+    }
+
+    /// This device's Seerr connection as a transferable secret, or nil if unset.
+    static func currentSeerrSecret() -> SeerrSecret? {
+        guard let connection = seerrConnectionStore().load() else { return nil }
+        return SeerrSecret(baseURL: connection.baseURL.absoluteString, apiKey: connection.apiKey)
+    }
+
+    /// Install a received Seerr connection, unless this device already has one.
+    /// Never clobbers: the local connection may hold the URL reachable on THIS
+    /// network, and arriving credentials shouldn't silently repoint it.
+    @discardableResult
+    static func installSeerrSecretIfAbsent(_ secret: SeerrSecret) -> Bool {
+        let store = seerrConnectionStore()
+        guard store.load() == nil, let url = URL(string: secret.baseURL) else { return false }
+        do {
+            try store.save(SeerConnection(baseURL: url, apiKey: secret.apiKey))
+            return true
+        } catch {
+            PlozzLog.auth.error("KeychainSync: Seerr install failed: \(error.localizedDescription)")
+            return false
+        }
     }
 
     /// WRITE: publish this device's transferable credentials to the iCloud-Keychain-
@@ -86,7 +122,27 @@ extension PlozziOSAppModel {
             do { try store.setString(json, for: share.accountID); published += 1 }
             catch { PlozzLog.auth.error("KeychainSync: publish failed for share \(share.accountID): \(error.localizedDescription)") }
         }
+        // The household Seerr connection (URL + admin API key). Same rationale as the
+        // bearer tokens above: end-to-end encrypted iCloud Keychain, never CloudKit.
+        if let seerr = bundle.seerr,
+           let data = try? JSONEncoder().encode(seerr),
+           let json = String(data: data, encoding: .utf8) {
+            do { try store.setString(json, for: Self.portableSeerrKey); published += 1 }
+            catch { PlozzLog.auth.error("KeychainSync: publish failed for Seerr: \(error.localizedDescription)") }
+        }
         if published > 0 { PlozzLog.auth.info("KeychainSync: published \(published) portable credential(s)") }
+    }
+
+    /// Adopt a Seerr connection published by another of the user's devices. Runs
+    /// independently of the pending-server loop below: Seerr is household-wide and
+    /// has no descriptor, so it isn't gated on any server being pending.
+    private func adoptSyncedSeerrConnection(from store: KeychainStore) {
+        guard let json = store.string(for: Self.portableSeerrKey),
+              let data = json.data(using: .utf8),
+              let secret = try? JSONDecoder().decode(SeerrSecret.self, from: data) else { return }
+        if Self.installSeerrSecretIfAbsent(secret) {
+            PlozzLog.auth.info("KeychainSync: adopted shared Seerr connection from iCloud Keychain")
+        }
     }
 
     /// Remove a portable credential (an account was signed out on this device), so it
@@ -121,6 +177,7 @@ extension PlozziOSAppModel {
     func autoConnectFromSyncedCredentials() {
         guard SyncSetupFeatureFlag().isEnabled else { return }
         let store = portableCredStore
+        adoptSyncedSeerrConnection(from: store)
         let localIDs = Set(accountsProviders.accounts.map(\.id))
         let removedIDs = RemovedAccountsStore().removedIDs
         // Don't auto-resurrect a server the user removed household-wide. (Deterministic

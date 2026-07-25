@@ -48,17 +48,40 @@ public struct ShareSecret: Codable, Hashable, Sendable {
     }
 }
 
+/// The household's shared Seerr (Overseerr/Jellyseerr) connection.
+///
+/// One server URL plus one admin API key that the whole household requests
+/// against; profiles differ only by which Seerr *user* they act as. It is a
+/// credential, so it travels here and via iCloud Keychain — never in a CloudKit
+/// record.
+public struct SeerrSecret: Codable, Hashable, Sendable {
+    public var baseURL: String
+    public var apiKey: String
+
+    public init(baseURL: String, apiKey: String) {
+        self.baseURL = baseURL
+        self.apiKey = apiKey
+    }
+}
+
 /// The bundle of credentials transferred so the new device is signed in with no taps.
 public struct SyncSecretsBundle: Codable, Hashable, Sendable {
     public var accounts: [AccountSecret]
     public var shares: [ShareSecret]
+    /// Optional so an older peer's payload (which has no such field) still decodes.
+    public var seerr: SeerrSecret?
 
-    public init(accounts: [AccountSecret] = [], shares: [ShareSecret] = []) {
+    public init(
+        accounts: [AccountSecret] = [],
+        shares: [ShareSecret] = [],
+        seerr: SeerrSecret? = nil
+    ) {
         self.accounts = accounts
         self.shares = shares
+        self.seerr = seerr
     }
 
-    public var isEmpty: Bool { accounts.isEmpty && shares.isEmpty }
+    public var isEmpty: Bool { accounts.isEmpty && shares.isEmpty && seerr == nil }
 
     /// The set of account ids this bundle can sign in on the target device.
     public var authorizedAccountIDs: Set<String> {

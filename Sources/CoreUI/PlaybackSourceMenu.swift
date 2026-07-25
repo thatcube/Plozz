@@ -45,7 +45,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     @State private var appeared = false
     /// Which side of the trigger the panel sits on, locked for the duration of
     /// one presentation so a growing page can't make it jump sides.
-    @State private var placement: Bool?
+    @State private var placement: PlaybackSourceMenuSide?
     #endif
 
     public init(
@@ -104,26 +104,26 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     private var iosPresentation: some View {
         GeometryReader { proxy in
             let screen = proxy.size
-            let width = min(390, screen.width - 32)
             let margin: CGFloat = 16
             let gap: CGFloat = 12
-            // Room on each side of the trigger. The side is chosen ONCE per
-            // presentation (below) and then locked: recomputing it as the panel
-            // grows makes a page that no longer fits above jump to the other
-            // side of the button mid-animation.
-            let roomAbove = triggerFrame.minY - gap - margin
-            let roomBelow = screen.height - triggerFrame.maxY - gap - margin
-            let placeAbove = placement ?? (roomAbove >= roomBelow)
-            // Cap to the chosen side's room so the panel can never grow off
-            // screen; past the cap the rows scroll instead.
-            let available = max(160, placeAbove ? roomAbove : roomBelow)
-            let height = min(iosSheetHeight, available)
-            let y = placeAbove
-                ? triggerFrame.minY - gap - height
-                : triggerFrame.maxY + gap
-            let x = min(
-                max(margin, triggerFrame.midX - width / 2),
-                max(margin, screen.width - width - margin)
+            let width = min(390, screen.width - margin * 2)
+            // The side is chosen ONCE per presentation and then locked:
+            // recomputing it as the panel grows makes a page that no longer fits
+            // on the current side jump to another mid-animation.
+            let side = placement ?? PlaybackSourceMenuSide.choose(
+                trigger: triggerFrame,
+                screen: screen,
+                width: width,
+                gap: gap,
+                margin: margin
+            )
+            let layout = side.layout(
+                trigger: triggerFrame,
+                screen: screen,
+                width: width,
+                height: iosSheetHeight,
+                gap: gap,
+                margin: margin
             )
             ZStack(alignment: .topLeading) {
                 Color.black.opacity(0.001)
@@ -131,20 +131,26 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                     .contentShape(Rectangle())
                     .onTapGesture { isPresented = false }
 
-                panel(maxHeight: available)
+                panel(maxHeight: layout.available)
                     .frame(width: width)
-                    .offset(x: x, y: y)
+                    .offset(x: layout.x, y: layout.y)
                     // Height is animated by the panel itself; animating the
                     // offset with the same curve keeps the edge that's pinned to
                     // the button steady while the far edge travels.
                     .animation(.easeInOut(duration: 0.3), value: iosSheetHeight)
-                    .scaleEffect(appeared ? 1 : 0.94, anchor: placeAbove ? .bottom : .top)
+                    .scaleEffect(appeared ? 1 : 0.94, anchor: side.growthAnchor)
                     .opacity(appeared ? 1 : 0)
             }
             .ignoresSafeArea()
             .onAppear {
                 // Lock the side for as long as the menu stays open.
-                placement = roomAbove >= roomBelow
+                placement = PlaybackSourceMenuSide.choose(
+                    trigger: triggerFrame,
+                    screen: screen,
+                    width: width,
+                    gap: gap,
+                    margin: margin
+                )
                 withAnimation(.easeOut(duration: 0.18)) { appeared = true }
             }
             .onDisappear {
@@ -798,6 +804,86 @@ private enum PlaybackSourceMenuButtonPage: Hashable {
     case servers
     case versions
 }
+
+#if !os(tvOS)
+/// Which side of the trigger the menu panel sits on. Picked once when the menu
+/// opens (never recomputed while it's open, or a growing page would make it hop
+/// between sides) and used for both placement and the growth anchor.
+enum PlaybackSourceMenuSide {
+    case trailing
+    case leading
+    case above
+    case below
+
+    /// Prefer sitting beside the button — that's where a menu reads as attached
+    /// to its trigger and where the most vertical room usually is. Fall back to
+    /// above/below, picking whichever has more room, only when neither side can
+    /// fit the panel's width.
+    static func choose(
+        trigger: CGRect,
+        screen: CGSize,
+        width: CGFloat,
+        gap: CGFloat,
+        margin: CGFloat
+    ) -> PlaybackSourceMenuSide {
+        let roomTrailing = screen.width - trigger.maxX - gap - margin
+        let roomLeading = trigger.minX - gap - margin
+        if roomTrailing >= width { return .trailing }
+        if roomLeading >= width { return .leading }
+        let roomAbove = trigger.minY - gap - margin
+        let roomBelow = screen.height - trigger.maxY - gap - margin
+        return roomAbove >= roomBelow ? .above : .below
+    }
+
+    /// Where the panel goes, and how tall it may grow before its rows scroll.
+    /// `available` is always the room on this side, so the panel can never grow
+    /// off screen and never has to move to stay on it.
+    func layout(
+        trigger: CGRect,
+        screen: CGSize,
+        width: CGFloat,
+        height: CGFloat,
+        gap: CGFloat,
+        margin: CGFloat
+    ) -> (x: CGFloat, y: CGFloat, available: CGFloat) {
+        switch self {
+        case .trailing, .leading:
+            let x = self == .trailing
+                ? trigger.maxX + gap
+                : trigger.minX - gap - width
+            // Start level with the button and grow downward. Clamp the top so a
+            // panel that's already at full height still fits, which means the
+            // top never has to move once it's placed.
+            let maxTop = max(margin, screen.height - margin - height)
+            let top = min(max(margin, trigger.minY), maxTop)
+            return (x, top, max(160, screen.height - margin - top))
+        case .above, .below:
+            let available = self == .above
+                ? trigger.minY - gap - margin
+                : screen.height - trigger.maxY - gap - margin
+            let capped = max(160, available)
+            let y = self == .above
+                ? trigger.minY - gap - min(height, capped)
+                : trigger.maxY + gap
+            let x = min(
+                max(margin, trigger.midX - width / 2),
+                max(margin, screen.width - width - margin)
+            )
+            return (x, y, capped)
+        }
+    }
+
+    /// Scale the opening panel out of the edge that's pinned to the button.
+    var growthAnchor: UnitPoint {
+        switch self {
+        case .trailing: .leading
+        case .leading: .trailing
+        case .above: .bottom
+        case .below: .top
+        }
+    }
+}
+#endif
 
 #if !os(tvOS)
 /// Each rendered page's natural height, tagged with the page it belongs to.

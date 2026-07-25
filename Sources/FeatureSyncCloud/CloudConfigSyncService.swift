@@ -376,9 +376,24 @@ public actor CloudConfigSyncService {
             engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
             try await engine.fetchChanges()
             markServerStateConfirmed()
-            // Only NOW — after a confirmed complete fetch — is it safe to finalize
-            // unseen previously-synced records as deletions.
-            let finalized = ledger.endFullResync()
+            // A fetch that omitted a record is NOT proof the record is gone: CloudKit
+            // reads are eventually consistent, so a record a peer saved moments ago
+            // can be missing from an otherwise-successful complete fetch. Ask the
+            // server directly about each candidate before deleting anything. Records
+            // that still exist are folded back in; only `unknownItem` counts as gone.
+            let candidates = ledger.resyncDeletionCandidates()
+            var confirmedDeleted: Set<SyncRecordID> = []
+            if !candidates.isEmpty {
+                let verdict = await verifyDeletionCandidates(candidates)
+                confirmedDeleted = verdict.confirmedDeleted
+                if !verdict.stillPresent.isEmpty {
+                    _ = ledger.applyFetched(saved: verdict.stillPresent, deleted: [], now: nowMillis())
+                    PlozzLog.sync.info(
+                        "CloudSync: redownload — \(verdict.stillPresent.count) record(s) missing from the fetch still exist on the server; kept"
+                    )
+                }
+            }
+            let finalized = ledger.endFullResync(confirmedDeleted: confirmedDeleted)
             isFullResyncing = false
             persist(); reportRecordCount()
             if !finalized.isEmpty { await config.applyRecords(finalized) }
@@ -445,6 +460,50 @@ public actor CloudConfigSyncService {
     private static func loadPersisted(from url: URL) -> Persisted? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(Persisted.self, from: data)
+    }
+
+    /// Ask the server directly whether each candidate record still exists.
+    ///
+    /// `records(for:)` answers per-record, so a record that comes back is proof it is
+    /// still there (the resync fetch simply hadn't converged), and only an explicit
+    /// `unknownItem` is proof of deletion. Any OTHER error (network, throttle, auth)
+    /// is inconclusive and deliberately counts as "not confirmed", so a transient
+    /// failure can never destroy a record.
+    private func verifyDeletionCandidates(
+        _ names: [SyncRecordID]
+    ) async -> (confirmedDeleted: Set<SyncRecordID>, stillPresent: [SyncRemoteRecord]) {
+        var confirmed: Set<SyncRecordID> = []
+        var present: [SyncRemoteRecord] = []
+        let database = container.privateCloudDatabase
+        // Chunked so a large candidate set can't exceed CloudKit's per-request limits.
+        for chunk in stride(from: 0, to: names.count, by: 200).map({
+            Array(names[$0..<min($0 + 200, names.count)])
+        }) {
+            let ids = chunk.map { CloudSyncSchema.recordID(forRecordName: $0) }
+            do {
+                let results = try await database.records(for: ids)
+                for (id, result) in results {
+                    switch result {
+                    case .success(let record):
+                        if let decoded = SyncRemoteRecord(ckRecord: record) { present.append(decoded) }
+                    case .failure(let error):
+                        if let ckError = error as? CKError, ckError.code == .unknownItem {
+                            confirmed.insert(id.recordName)
+                        } else {
+                            PlozzLog.sync.info(
+                                "CloudSync: redownload — inconclusive existence check for \(id.recordName): \(Self.describe(error)); keeping"
+                            )
+                        }
+                    }
+                }
+            } catch {
+                // Whole-request failure proves nothing about any record in it.
+                PlozzLog.sync.info(
+                    "CloudSync: redownload — existence check failed for \(chunk.count) record(s): \(Self.describe(error)); keeping"
+                )
+            }
+        }
+        return (confirmed, present)
     }
 
     private func persist() {

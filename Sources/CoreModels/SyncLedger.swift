@@ -430,17 +430,46 @@ public struct SyncLedger: Codable, Hashable, Sendable {
         }
     }
 
-    /// Finish a full resync. A record that HAD a server baseline but was not delivered
-    /// by the complete resync, and has no pending local change, was deleted on the
-    /// server → delete it locally. Dirty/never-synced local records survive and
-    /// re-upload. Returns the exact local deletions to apply.
-    public mutating func endFullResync() -> SyncLocalChanges {
+    /// Records a full resync did NOT re-deliver even though they had a server
+    /// baseline. These are only *candidates* for deletion — absence from a fetch is
+    /// NOT proof of deletion, because CloudKit reads are eventually consistent and a
+    /// record a peer wrote moments earlier can legitimately be omitted. The caller
+    /// must confirm each is genuinely gone (an explicit per-record existence check)
+    /// before handing it to `endFullResync(confirmedDeleted:)`.
+    public func resyncDeletionCandidates() -> [SyncRecordID] {
+        entries.compactMap { name, entry in
+            (entry.wasSynced && !entry.resyncSeen && !entry.dirty && !entry.pendingDelete)
+                ? name : nil
+        }
+    }
+
+    /// Finish a full resync. A record that had a server baseline and was not
+    /// re-delivered is deleted locally ONLY when the caller has CONFIRMED the server
+    /// no longer has it. Dirty/never-synced local records survive and re-upload.
+    /// Returns the exact local deletions to apply.
+    ///
+    /// An unseen record that was NOT confirmed deleted is re-asserted (marked dirty)
+    /// rather than dropped — the same safety choice `abortFullResync` makes. Inferring
+    /// deletion from absence silently destroyed records here: a resync run shortly
+    /// after another device saved a setting would not be shown that record, delete it
+    /// locally, and — because the resync also installs a fresh change token — never
+    /// re-fetch it. The divergence was permanent and invisible, and "Re-download From
+    /// iCloud" (the button meant to REPAIR divergence) was what caused it.
+    public mutating func endFullResync(confirmedDeleted: Set<SyncRecordID> = []) -> SyncLocalChanges {
         var changes: SyncLocalChanges = [:]
         bumpRemoteRevision()
         for (name, var entry) in entries {
             if entry.wasSynced && !entry.resyncSeen && !entry.dirty && !entry.pendingDelete {
-                entries[name] = nil
-                changes.updateValue(nil, forKey: name)
+                if confirmedDeleted.contains(name) {
+                    entries[name] = nil
+                    changes.updateValue(nil, forKey: name)
+                    continue
+                }
+                // Unconfirmed absence: keep the record and re-upload our known-good
+                // value, restoring what we couldn't confirm.
+                entry.dirty = true
+                entry.wasSynced = false; entry.resyncSeen = false
+                entries[name] = entry
             } else {
                 entry.wasSynced = false; entry.resyncSeen = false
                 entries[name] = entry

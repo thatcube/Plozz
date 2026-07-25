@@ -68,9 +68,22 @@ private final class FakeCloudServer {
     /// A FULL resync after a token reset: real CloudKit returns LIVE records only —
     /// NO tombstones for already-deleted records. This is exactly what let deleted
     /// records resurrect in V3's first draft.
+    /// Records that exist but which the next `fetchLive` will NOT return — models
+    /// CloudKit's eventual consistency, where a record a peer just wrote can be
+    /// missing from an otherwise-successful complete fetch.
+    var hiddenFromFetch: Set<String> = []
+
+    /// Authoritative per-record existence, i.e. what `CKDatabase.records(for:)`
+    /// answers. Unaffected by `hiddenFromFetch` — that's the whole point: a direct
+    /// lookup sees a record the bulk fetch missed.
+    func exists(_ name: String) -> Bool {
+        guard let stored = records[name] else { return false }
+        return !stored.deleted
+    }
+
     func fetchLive() -> (saved: [SyncRemoteRecord], token: Int) {
         let saved = records
-            .filter { !$0.value.deleted }
+            .filter { !$0.value.deleted && !hiddenFromFetch.contains($0.key) }
             .map { SyncRemoteRecord(recordName: $0.key, value: $0.value.value,
                                     editedAt: $0.value.editedAt, systemFields: Self.tagData($0.value.tag)) }
             .sorted { $0.recordName < $1.recordName }
@@ -155,7 +168,20 @@ private final class FakeDevice {
         else { let r = server.fetch(since: 0); saved = r.saved; token = r.token; deleted = r.deleted }
         let changes = ledger.applyFetched(saved: saved, deleted: deleted, now: advance())
         for (rec, val) in changes { applyLocal(rec, val) }
-        let finalized = ledger.endFullResync()
+        // Mirror the real service: absence from the fetch is only a CANDIDATE for
+        // deletion; ask the server per-record before destroying anything.
+        let candidates = ledger.resyncDeletionCandidates()
+        let confirmedDeleted = Set(candidates.filter { !server.exists($0) })
+        let stillThere = candidates.filter { server.exists($0) }.compactMap { name -> SyncRemoteRecord? in
+            guard let stored = server.records[name], !stored.deleted else { return nil }
+            return SyncRemoteRecord(recordName: name, value: stored.value, editedAt: stored.editedAt,
+                                    systemFields: FakeCloudServer.tagData(stored.tag))
+        }
+        if !stillThere.isEmpty {
+            let recovered = ledger.applyFetched(saved: stillThere, deleted: [], now: advance())
+            for (rec, val) in recovered { applyLocal(rec, val) }
+        }
+        let finalized = ledger.endFullResync(confirmedDeleted: confirmedDeleted)
         for (rec, val) in finalized { applyLocal(rec, val) }
         fetchToken = token
         for up in ledger.pendingUploads() { send(up) }
@@ -481,6 +507,67 @@ final class SyncLedgerTests: XCTestCase {
         XCTAssertTrue(plan.deletes.isEmpty, "no deletions after an aborted resync")
     }
 
+    /// END-TO-END reproduction of the real-world data loss (Apple TV, 2026-07-25).
+    ///
+    /// B taps "Re-download From iCloud" shortly after A saved a setting. CloudKit's
+    /// complete fetch is eventually consistent, so it doesn't return A's brand-new
+    /// record. The old code read that absence as "deleted on the server" and dropped
+    /// the record — permanently, because the resync also installs a fresh change
+    /// token, so it was never re-fetched. Four settings vanished from one device and
+    /// the ONLY recovery was the very button that destroyed them.
+    func testResyncKeepsRecordTheFetchMissedButServerStillHas() {
+        let s = FakeCloudServer()
+        let a = FakeDevice("A", server: s, startClock: 1000), b = FakeDevice("B", server: s, startClock: 2000)
+        a.edit("setting:p1:cardStyle", "grid"); drain([a, b])
+        XCTAssertEqual(b.value("setting:p1:cardStyle"), "grid")
+
+        // A saves a new value; the record is on the server but not yet visible to a
+        // bulk fetch (eventual consistency).
+        a.edit("setting:p1:cardStyle", "list"); a.sync()
+        s.hiddenFromFetch = ["setting:p1:cardStyle"]
+
+        b.redownload(tombstoneless: true)
+
+        XCTAssertNotNil(b.value("setting:p1:cardStyle"),
+                        "a record missing from the fetch but present on the server must NOT be deleted")
+        s.hiddenFromFetch = []
+        drain([a, b])
+        XCTAssertEqual(a.value("setting:p1:cardStyle"), "list", "A's value must survive on the server")
+        assertConverged([a, b], "resync during eventual consistency")
+    }
+
+    /// The regression this guards: a record the resync fetch didn't deliver but which
+    /// STILL EXISTS on the server must never be deleted. CloudKit reads are eventually
+    /// consistent, so a setting another device saved moments earlier can be absent from
+    /// an otherwise-successful complete fetch. Inferring deletion from that absence
+    /// silently destroyed 4 real records on an Apple TV — permanently, because the
+    /// resync also installs a fresh change token, so they were never re-fetched.
+    func testEndFullResyncKeepsUnconfirmedUnseenRecord() {
+        let s = FakeCloudServer(); let a = FakeDevice("A", server: s, startClock: 1000)
+        a.edit("profile:1", "Alice"); a.edit("profile:2", "Bob"); a.sync()
+        a.ledger.beginFullResync()
+        // The resync delivers only p1 — but p2 was NOT confirmed deleted.
+        let live = SyncRemoteRecord(recordName: "profile:1", value: Data("Alice".utf8), editedAt: 2000, systemFields: Data())
+        _ = a.ledger.applyFetched(saved: [live], deleted: [], now: 2001)
+        let finalized = a.ledger.endFullResync(confirmedDeleted: [])
+
+        XCTAssertFalse(finalized.keys.contains("profile:2"), "an unconfirmed absence must not delete")
+        XCTAssertNotNil(a.ledger.entries["profile:2"], "the record must survive")
+        XCTAssertTrue(a.ledger.entries["profile:2"]?.dirty ?? false,
+                      "it should re-upload to restore what we couldn't confirm")
+    }
+
+    /// The candidate list is what the service runs its existence check against, so it
+    /// must contain exactly the records at risk — not dirty or pending-delete ones.
+    func testResyncDeletionCandidatesListsOnlyUnseenSyncedRecords() {
+        let s = FakeCloudServer(); let a = FakeDevice("A", server: s, startClock: 1000)
+        a.edit("profile:1", "Alice"); a.edit("profile:2", "Bob"); a.sync()
+        a.ledger.beginFullResync()
+        let live = SyncRemoteRecord(recordName: "profile:1", value: Data("Alice".utf8), editedAt: 2000, systemFields: Data())
+        _ = a.ledger.applyFetched(saved: [live], deleted: [], now: 2001)
+        XCTAssertEqual(a.ledger.resyncDeletionCandidates(), ["profile:2"])
+    }
+
     /// C3 contrast: a COMPLETE resync (endFullResync) still finalizes a peer's
     /// deletion of an unseen record.
     func testEndFullResyncFinalizesUnseenDeletion() {
@@ -490,7 +577,7 @@ final class SyncLedgerTests: XCTestCase {
         a.ledger.beginFullResync()
         let live = SyncRemoteRecord(recordName: "profile:1", value: Data("Alice".utf8), editedAt: 2000, systemFields: Data())
         _ = a.ledger.applyFetched(saved: [live], deleted: [], now: 2001)
-        let finalized = a.ledger.endFullResync()
+        let finalized = a.ledger.endFullResync(confirmedDeleted: ["profile:2"])
         if let deletion = finalized["profile:2"] {
             XCTAssertNil(deletion, "unseen previously-synced record must finalize as a deletion")
         } else {

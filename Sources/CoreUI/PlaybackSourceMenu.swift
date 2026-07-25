@@ -37,6 +37,13 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     @State private var isPresented = false
     @State private var page = PlaybackSourceMenuButtonPage.root
     @State private var triggerFrame: CGRect = .zero
+    #if !os(tvOS)
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+    /// iPhone only: the panel's measured natural height, driving the sheet
+    /// detent so the sheet grows/shrinks with the page instead of sitting at a
+    /// fixed half-screen height.
+    @State private var iosSheetHeight: CGFloat = 220
+    #endif
 
     public init(
         sources: [MediaSourceRef],
@@ -77,20 +84,31 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                 tvOSPresentation
             }
         #else
-        trigger
-            .popover(
-                isPresented: $isPresented,
-                attachmentAnchor: .rect(.bounds),
-                arrowEdge: .leading
-            ) {
-                // No background of any kind here: the system popover chrome IS
-                // the surface, so the panel and its arrow are automatically the
-                // same material. Compact adaptation is forced to `.popover` so
-                // iPhone gets the same balloon as iPad instead of adapting into
-                // a sheet. (Matches the ratings popover in Mozz.)
-                panel
-                    .presentationCompactAdaptation(.popover)
-            }
+        // iPhone gets a real sheet — a popover balloon is too cramped to read on
+        // a phone — and iPad gets the native popover. The two differ in who owns
+        // the surface: the sheet is presented on a clear background so the panel
+        // draws the single glass surface (and can animate its own height); the
+        // popover's system chrome IS the surface, so the panel draws nothing and
+        // its arrow matches by construction.
+        if hSizeClass == .compact {
+            trigger
+                .sheet(isPresented: $isPresented, onDismiss: onDismiss) {
+                    panel
+                        .presentationDetents([.height(iosSheetHeight)])
+                        .presentationBackground(.clear)
+                        .presentationDragIndicator(.hidden)
+                }
+        } else {
+            trigger
+                .popover(
+                    isPresented: $isPresented,
+                    attachmentAnchor: .rect(.bounds),
+                    arrowEdge: .leading
+                ) {
+                    panel
+                        .presentationCompactAdaptation(.popover)
+                }
+        }
         #endif
     }
 
@@ -122,9 +140,18 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
         }
     }
 
+    private var sheetHeightBinding: Binding<CGFloat>? {
+        #if os(tvOS)
+        nil
+        #else
+        $iosSheetHeight
+        #endif
+    }
+
     private var panel: some View {
         PlaybackSourceMenuPanel(
             page: $page,
+            measuredHeight: sheetHeightBinding,
             sources: sources,
             selectedSourceID: selectedSourceID,
             offlineSourceAccountIDs: offlineSourceAccountIDs,
@@ -173,6 +200,9 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
 
 private struct PlaybackSourceMenuPanel: View {
     @Binding var page: PlaybackSourceMenuButtonPage
+    /// iPhone only: reports the panel's natural content height to the presenter
+    /// so the sheet detent can track it. Unused on tvOS/iPad.
+    var measuredHeight: Binding<CGFloat>? = nil
     let sources: [MediaSourceRef]
     let selectedSourceID: String?
     var offlineSourceAccountIDs: Set<String> = []
@@ -189,7 +219,10 @@ private struct PlaybackSourceMenuPanel: View {
     #endif
     @FocusState private var focusedRowID: String?
     #if !os(tvOS)
+    @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var navDirection: Edge = .trailing
+    @State private var contentHeight: CGFloat = 220
+    private var isSheet: Bool { hSizeClass == .compact }
     #endif
     var body: some View {
         panelContent
@@ -202,10 +235,30 @@ private struct PlaybackSourceMenuPanel: View {
             // to draw its own glass surface.
             .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
             #else
-            // iOS/iPadOS draw NO surface and set NO explicit size: the system
-            // popover is the surface and sizes itself to this content, so there
-            // is exactly one background and the arrow always matches it.
-            .frame(maxWidth: 390)
+            // Sheet (iPhone): the panel owns an explicit, animatable height and
+            // draws the single glass surface, because the sheet is presented on
+            // a clear background. Popover (iPad): no size and no surface — the
+            // system chrome sizes itself and IS the surface, so its arrow always
+            // matches. A popover can't animate its own bounds, which is the
+            // other reason the phone gets a sheet.
+            .frame(maxWidth: isSheet ? .infinity : 390)
+            .frame(height: isSheet ? contentHeight : nil, alignment: .top)
+            .onPreferenceChange(PlaybackSourceMenuContentHeightKey.self) { measurements in
+                // Read only the page being shown: during the push the outgoing
+                // page is still reporting, and letting it win pins the panel at
+                // the wrong height for the whole transition (which is what made
+                // the height look like it wasn't animating at all).
+                guard isSheet,
+                      let measured = measurements.first(where: { $0.page == page })?.height,
+                      measured > 0 else { return }
+                let total = min(measured, panelMaxHeight)
+                guard abs(total - contentHeight) > 0.5 else { return }
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    contentHeight = total
+                    measuredHeight?.wrappedValue = total
+                }
+            }
+            .modifier(PlaybackSourceMenuSheetSurface(enabled: isSheet))
             #endif
             #if os(tvOS)
             .focusScope(panelFocusScope)
@@ -230,17 +283,28 @@ private struct PlaybackSourceMenuPanel: View {
             .scrollIndicators(.hidden)
         }
         #else
-        // iOS/iPadOS: the popover sizes itself to this content. Pages slide
-        // horizontally as you drill in/out.
-        pageColumn(for: page)
-            .transition(.push(from: navDirection))
-            .id(page)
+        // Pages slide horizontally as you drill in/out. On the sheet the column
+        // scrolls (it has a fixed, animating height); in the popover the system
+        // sizes itself to the column, so no scroll container is needed.
+        if isSheet {
+            ScrollView {
+                pageColumn(for: page)
+                    .transition(.push(from: navDirection))
+                    .id(page)
+            }
+            .scrollIndicators(.hidden)
+        } else {
+            pageColumn(for: page)
+                .transition(.push(from: navDirection))
+                .id(page)
+        }
         #endif
     }
 
     #if !os(tvOS)
     /// One page of the menu, built for an explicit page value so the instance
-    /// left behind by the push transition keeps rendering *its own* content.
+    /// left behind by the push transition keeps rendering — and reporting the
+    /// height of — *its own* content.
     @ViewBuilder
     private func pageColumn(for pageValue: PlaybackSourceMenuButtonPage) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -255,6 +319,19 @@ private struct PlaybackSourceMenuPanel: View {
             VStack(spacing: 0) { rows(for: pageValue) }
         }
         .padding(14)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: PlaybackSourceMenuContentHeightKey.self,
+                    value: [
+                        PlaybackSourceMenuPageHeight(
+                            page: pageValue,
+                            height: proxy.size.height
+                        )
+                    ]
+                )
+            }
+        )
     }
     #endif
 
@@ -616,6 +693,11 @@ private struct PlaybackSourceMenuPanel: View {
         #endif
     }
 
+    #if !os(tvOS)
+    /// Ceiling for the sheet: past this the column scrolls instead of growing.
+    private var panelMaxHeight: CGFloat { 620 }
+    #endif
+
     private var rowVerticalPadding: CGFloat {
         #if os(tvOS)
         18
@@ -686,8 +768,44 @@ private enum PlaybackSourceMenuButtonPage: Hashable {
 }
 
 #if !os(tvOS)
-/// Reports the natural content height of the source-menu panel so the iOS sheet
-/// can size to its content instead of a fixed detent.
+/// Each rendered page's natural height, tagged with the page it belongs to.
+/// During the push transition the outgoing and incoming pages are both on
+/// screen and both report; an untagged `max()` reduce would hold the taller of
+/// the two for the whole transition, so the sheet jumped to its new height at
+/// one end instead of easing. Tagging lets the panel read only the page it is
+/// currently showing.
+private struct PlaybackSourceMenuPageHeight: Equatable {
+    let page: PlaybackSourceMenuButtonPage
+    let height: CGFloat
+}
+
+private struct PlaybackSourceMenuContentHeightKey: PreferenceKey {
+    static let defaultValue: [PlaybackSourceMenuPageHeight] = []
+    static func reduce(
+        value: inout [PlaybackSourceMenuPageHeight],
+        nextValue: () -> [PlaybackSourceMenuPageHeight]
+    ) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+/// The sheet is presented on a clear background, so on iPhone the panel draws
+/// the one and only surface. In the popover the system chrome is already the
+/// surface, so this draws nothing — adding a second one there is what produced
+/// the card-inside-a-balloon look.
+private struct PlaybackSourceMenuSheetSurface: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
+                .padding(.horizontal, 12)
+        } else {
+            content
+        }
+    }
+}
 #endif
 
 private enum PlaybackSourceMenuMetrics {

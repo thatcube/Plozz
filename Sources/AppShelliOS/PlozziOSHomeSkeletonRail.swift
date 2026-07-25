@@ -111,32 +111,41 @@ struct PlozziOSHomeHeroSkeleton: View {
     private var isCompact: Bool { style == .compactPortrait }
 
     var body: some View {
-        VStack(alignment: isCompact ? .center : .leading, spacing: 12) {
-            // Metadata line (year · rating · runtime).
-            capsule(width: 190, height: 22)
-            // Overview lines.
-            capsule(width: isCompact ? 300 : 420, height: 16)
-            capsule(width: isCompact ? 220 : 320, height: 16)
-            // Action row: Play pill + the icon buttons, `controlSize(.large)`.
-            HStack(spacing: 12) {
-                capsule(width: 150, height: 50)
-                capsule(width: 50, height: 50)
-                capsule(width: 50, height: 50)
-                capsule(width: 50, height: 50)
-            }
-        }
-        // The SAME placement the real foreground uses — not a copy of its
-        // numbers. See `PlozziOSHeroForegroundPlacement`.
-        .plozziOSHeroForegroundPlacement(style: style)
-        .frame(
-            height: PlozziOSHeroMetrics.height(
-                style: style,
-                surfaceRole: .home,
-                dynamicTypeSize: dynamicTypeSize
+        // Establish the stage FIRST, then place the column inside it — mirroring
+        // the real carousel, where the ZStack holding the foreground is what
+        // carries `.frame(height: heroHeight)`. Applying the height *after* the
+        // placement instead left the placement's `maxHeight: .infinity` resolving
+        // against an unbounded scroll proposal, so the column was sized to its
+        // content and then re-centred rather than pinned to the hero's bottom.
+        Color.clear
+            .frame(
+                height: PlozziOSHeroMetrics.height(
+                    style: style,
+                    surfaceRole: .home,
+                    dynamicTypeSize: dynamicTypeSize
+                )
             )
-        )
-        .shimmering()
-        .accessibilityHidden(true)
+            .overlay {
+                VStack(alignment: isCompact ? .center : .leading, spacing: 12) {
+                    // Metadata line (year · rating · runtime).
+                    capsule(width: 190, height: 22)
+                    // Overview lines.
+                    capsule(width: isCompact ? 300 : 420, height: 16)
+                    capsule(width: isCompact ? 220 : 320, height: 16)
+                    // Action row: Play pill + icon buttons, `controlSize(.large)`.
+                    HStack(spacing: 12) {
+                        capsule(width: 150, height: 50)
+                        capsule(width: 50, height: 50)
+                        capsule(width: 50, height: 50)
+                        capsule(width: 50, height: 50)
+                    }
+                }
+                // The SAME placement the real foreground uses — not a copy of its
+                // numbers. See `PlozziOSHeroForegroundPlacement`.
+                .plozziOSHeroForegroundPlacement(style: style)
+            }
+            .shimmering()
+            .accessibilityHidden(true)
     }
 
     private func capsule(width: CGFloat, height: CGFloat) -> some View {

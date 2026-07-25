@@ -65,6 +65,12 @@ struct PlozziOSHeroForegroundPlacement: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // The column fills its capped width and aligns inside it. Part of the
+            // shared placement so the placeholder gets it too.
+            .frame(
+                maxWidth: .infinity,
+                alignment: style == .compactPortrait ? .center : .leading
+            )
             .frame(maxWidth: PlozziOSPageLayout.heroTextMaxWidth(for: style))
             .frame(
                 maxWidth: .infinity,
@@ -964,10 +970,7 @@ struct PlozziOSHomeHeroForeground: View {
             }
             .controlSize(.large)
         }
-        .frame(
-            maxWidth: .infinity,
-            alignment: style == .compactPortrait ? .center : .leading
-        )
+        // Width fill / alignment now come from the shared placement modifier.
         .multilineTextAlignment(style == .compactPortrait ? .center : .leading)
     }
 

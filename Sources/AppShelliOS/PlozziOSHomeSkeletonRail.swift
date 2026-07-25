@@ -93,45 +93,62 @@ struct PlozziOSHomeSkeletonScreen: View {
 
 /// Placeholder for the Home hero, mirroring tvOS's `HomeHeroSkeletonView`.
 ///
-/// Reserves the hero's real height (`PlozziOSHeroMetrics.height`) so the rows
-/// below don't get pushed down when the hero resolves, and pins soft capsules to
-/// the bottom where the metadata line and action buttons will be — the same
-/// shape tvOS uses. No backdrop: the artwork area stays empty while loading
-/// rather than flashing a placeholder colour behind the whole screen.
+/// The geometry is copied from the real hero's foreground placement in
+/// `PlozziOSHomeHeroCarousel` rather than approximated — the first version
+/// eyeballed the insets and the placeholder sat visibly lower than the content it
+/// was standing in for. Anything changed there must be changed here too:
+///
+///   * container `.frame(height:)` = `PlozziOSHeroMetrics.height(...)`
+///   * content `.frame(maxWidth: PlozziOSPageLayout.heroTextMaxWidth(for:))`
+///   * `.frame(maxHeight: .infinity, alignment: .bottom / .bottomLeading)`
+///   * `.padding(.horizontal, PlozziOSPageLayout.horizontalInset(for:))`
+///   * `.padding(.bottom, compactPortrait ? 30 : 42)`
+///   * column spacing 12, matching `PlozziOSHomeHeroForeground`'s VStack
+///
+/// No backdrop: the artwork area stays empty while loading rather than flashing
+/// a placeholder colour across the screen, and the shimmer is confined to the
+/// small shapes — both as tvOS does it.
 struct PlozziOSHomeHeroSkeleton: View {
     @Environment(\.themePalette) private var palette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let style: HeroArtworkStyle
 
+    private var isCompact: Bool { style == .compactPortrait }
+
     var body: some View {
-        VStack(alignment: style == .compactPortrait ? .center : .leading, spacing: 12) {
+        VStack(alignment: isCompact ? .center : .leading, spacing: 12) {
             // Metadata line (year · rating · runtime).
             capsule(width: 190, height: 22)
-            // Two overview lines.
-            capsule(width: style == .compactPortrait ? 260 : 460, height: 16)
-            capsule(width: style == .compactPortrait ? 200 : 360, height: 16)
-            // Action row: the Play pill plus the icon buttons beside it.
+            // Overview lines.
+            capsule(width: isCompact ? 300 : 420, height: 16)
+            capsule(width: isCompact ? 220 : 320, height: 16)
+            // Action row: Play pill + the icon buttons, `controlSize(.large)`.
             HStack(spacing: 12) {
                 capsule(width: 150, height: 50)
                 capsule(width: 50, height: 50)
                 capsule(width: 50, height: 50)
                 capsule(width: 50, height: 50)
             }
-            .padding(.top, 4)
         }
+        // Same width cap the real foreground gets.
+        .frame(maxWidth: PlozziOSPageLayout.heroTextMaxWidth(for: style))
+        // Then pinned to the bottom of the full-width stage, exactly like the
+        // real foreground's two stacked frames.
         .frame(
             maxWidth: .infinity,
-            minHeight: PlozziOSHeroMetrics.height(
+            maxHeight: .infinity,
+            alignment: isCompact ? .bottom : .bottomLeading
+        )
+        .padding(.horizontal, PlozziOSPageLayout.horizontalInset(for: style))
+        .padding(.bottom, isCompact ? 30 : 42)
+        .frame(
+            height: PlozziOSHeroMetrics.height(
                 style: style,
                 surfaceRole: .home,
                 dynamicTypeSize: dynamicTypeSize
-            ),
-            alignment: style == .compactPortrait ? .bottom : .bottomLeading
+            )
         )
-        .padding(.horizontal, PlozziOSPageLayout.horizontalInset(for: style))
-        .padding(.bottom, 28)
-        // Shimmer only the placeholder shapes, never a full-bleed backdrop.
         .shimmering()
         .accessibilityHidden(true)
     }

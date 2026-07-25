@@ -526,3 +526,167 @@ final class NFSHardeningTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Reconnecting channel
+
+/// A factory whose connections die on demand, counting how many sockets were
+/// dialed. Models the real failure: iOS suspends the app, the OS tears the
+/// socket down, and every later `send` returns `ENOTCONN`.
+final class FlakyRPCFactory: RPCConnectionFactory, @unchecked Sendable {
+    private let lock = NSLock()
+    private var dialCount = 0
+    /// Connections dialed at an index in `deadDials` fail every exchange.
+    private let deadDials: Set<Int>
+    private let reply: @Sendable (Data) -> Data
+
+    init(deadDials: Set<Int>, reply: @escaping @Sendable (Data) -> Data) {
+        self.deadDials = deadDials
+        self.reply = reply
+    }
+
+    var dials: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return dialCount
+    }
+
+    func connect(host: String, port: UInt16, timeout: Duration) async throws -> any RPCConnection {
+        lock.lock()
+        let index = dialCount
+        dialCount += 1
+        lock.unlock()
+        let isDead = deadDials.contains(index)
+        let reply = self.reply
+        return StubThrowingRPCConnection { message in
+            if isDead { throw NFSError.connectionFailed(detail: "test ENOTCONN dial \(index)") }
+            return reply(message)
+        }
+    }
+}
+
+/// Like `StubRPCConnection`, but its handler may throw — needed to model a
+/// socket that is dialed successfully and then dies.
+final class StubThrowingRPCConnection: RPCConnection, @unchecked Sendable {
+    private let handler: @Sendable (Data) throws -> Data
+    private(set) var closed = false
+
+    init(handler: @escaping @Sendable (Data) throws -> Data) {
+        self.handler = handler
+    }
+
+    func exchange(_ message: Data) async throws -> Data { try handler(message) }
+    func close() async { closed = true }
+}
+
+/// A connection that throws `.connectionFailed` on every exchange, standing in
+/// for a socket the OS already tore down.
+final class DeadRPCConnection: RPCConnection, @unchecked Sendable {
+    private(set) var closed = false
+    func exchange(_ message: Data) async throws -> Data {
+        throw NFSError.connectionFailed(detail: "test ENOTCONN")
+    }
+    func close() async { closed = true }
+}
+
+final class ReconnectingRPCConnectionTests: XCTestCase {
+    /// A GETATTR that always succeeds, so the only variable is the socket.
+    private func attributesReply(_ message: Data) -> Data {
+        let call = ParsedRPCCall(message: message)
+        var results = XDREncoder()
+        results.encode(UInt32(0))
+        results.data.append(Wire.fattr3(type: 2, size: 0, fileID: 1, mtimeSeconds: 1))
+        return Wire.acceptedReply(xid: call.xid, results: results.data)
+    }
+
+    /// The regression this exists for: a dead socket must not poison the channel
+    /// forever. Before the fix, `NFSMountSession`/`NFSFileReader` bound an
+    /// `RPCClient` to one connection for life, so every call after a suspend
+    /// failed instantly with ENOTCONN until the app relaunched.
+    func testExchangeRedialsAfterTheSocketDies() async throws {
+        let factory = FlakyRPCFactory(deadDials: []) { [self] in attributesReply($0) }
+        let channel = ReconnectingRPCConnection(
+            factory: factory,
+            host: "nas.local",
+            port: 2049,
+            timeout: .seconds(5),
+            initial: DeadRPCConnection()
+        )
+        let client = RPCClient(connection: channel)
+
+        let attributes = try await NFSProcedures.getAttributes(
+            client: client,
+            credential: .unix(.default),
+            handle: NFSFileHandle(bytes: Data([0x01]))
+        )
+
+        XCTAssertTrue(attributes.isDirectory)
+        XCTAssertEqual(factory.dials, 1, "should have redialed exactly once")
+    }
+
+    /// Reconnection is bounded: a server that is genuinely gone surfaces the
+    /// failure rather than looping.
+    func testRetryIsBoundedToOneRedial() async throws {
+        // Every dialed socket is dead, so no attempt can succeed.
+        let factory = FlakyRPCFactory(deadDials: [0, 1, 2, 3]) { $0 }
+        let channel = ReconnectingRPCConnection(
+            factory: factory,
+            host: "nas.local",
+            port: 2049,
+            timeout: .seconds(5),
+            initial: DeadRPCConnection()
+        )
+
+        do {
+            _ = try await channel.exchange(Data([0x00]))
+            XCTFail("expected the exchange to fail")
+        } catch {
+            guard case .connectionFailed = (error as? NFSError) ?? .invalidArgument else {
+                return XCTFail("expected connectionFailed, got \(error)")
+            }
+        }
+        XCTAssertLessThanOrEqual(factory.dials, 1, "must not redial without bound")
+    }
+
+    /// A healthy socket is reused — reconnection must not cost a dial per call.
+    func testHealthyConnectionIsReusedWithoutRedialing() async throws {
+        let factory = FlakyRPCFactory(deadDials: []) { [self] in attributesReply($0) }
+        let channel = ReconnectingRPCConnection(
+            factory: factory,
+            host: "nas.local",
+            port: 2049,
+            timeout: .seconds(5),
+            initial: StubRPCConnection { [self] in attributesReply($0) }
+        )
+        let client = RPCClient(connection: channel)
+
+        for _ in 0..<5 {
+            _ = try await NFSProcedures.getAttributes(
+                client: client,
+                credential: .unix(.default),
+                handle: NFSFileHandle(bytes: Data([0x01]))
+            )
+        }
+        XCTAssertEqual(factory.dials, 0, "a live socket must not be redialed")
+    }
+
+    /// A closed channel stays closed — no zombie redial after shutdown.
+    func testClosedChannelRefusesToRedial() async throws {
+        let factory = FlakyRPCFactory(deadDials: []) { [self] in attributesReply($0) }
+        let channel = ReconnectingRPCConnection(
+            factory: factory,
+            host: "nas.local",
+            port: 2049,
+            timeout: .seconds(5),
+            initial: DeadRPCConnection()
+        )
+        await channel.close()
+
+        do {
+            _ = try await channel.exchange(Data([0x00]))
+            XCTFail("expected cancellation")
+        } catch {
+            XCTAssertEqual(error as? NFSError, .cancelled)
+        }
+        XCTAssertEqual(factory.dials, 0)
+    }
+}

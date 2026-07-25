@@ -40,7 +40,13 @@ public actor NFSMountSession {
         self.credential = credential
         self.timeout = timeout
         self.connectionFactory = connectionFactory
-        self.nfsClient = RPCClient(connection: nfsConnection)
+        self.nfsClient = RPCClient(connection: ReconnectingRPCConnection(
+            factory: connectionFactory,
+            host: host,
+            port: nfsPort,
+            timeout: timeout,
+            initial: nfsConnection
+        ))
     }
 
     /// Attributes of the export root — used to prove the mount is browsable.
@@ -161,14 +167,23 @@ public actor NFSMountSession {
 
     /// Opens a byte-source reader on its OWN dedicated NFS connection so
     /// playback reads never contend with scanner metadata (or with sibling
-    /// cursors) on a shared channel. The reader revalidates the file's
-    /// size/mtime on every read against `expectedModifiedAt`/`byteSize`.
+    /// cursors) on a shared channel. The connection redials on its own if the
+    /// socket dies mid-playback (app suspend, server/NAT idle timeout); NFSv3
+    /// handles survive that, and the reader revalidates the file's size/mtime on
+    /// every read against `expectedModifiedAt`/`byteSize`, so a resumed stream is
+    /// proven to be the same bytes rather than assumed.
     public func openReader(
         handle: NFSFileHandle,
         byteSize: Int64,
         expectedModifiedAt: Date
     ) async throws -> NFSFileReader {
-        let connection = try await connectionFactory.connect(host: host, port: nfsPort, timeout: timeout)
+        let connection = ReconnectingRPCConnection(
+            factory: connectionFactory,
+            host: host,
+            port: nfsPort,
+            timeout: timeout,
+            initial: try await connectionFactory.connect(host: host, port: nfsPort, timeout: timeout)
+        )
         return NFSFileReader(
             connection: connection,
             handle: handle,

@@ -96,6 +96,22 @@ final class NFSMediaTransportSession: MediaTransportSession, @unchecked Sendable
     func shutdown() async {
         await backend.shutdown()
     }
+
+    /// Root GETATTR over the (self-healing) NFS channel. A merely dropped socket
+    /// redials transparently inside `ReconnectingRPCConnection`, so a failure here
+    /// means the mount itself is dead — typically a rebooted server whose root
+    /// handle is now stale — and must be re-mounted rather than handed back.
+    ///
+    /// Without this override the protocol's default `true` silently disabled the
+    /// registry's dead-session eviction for NFS.
+    func isHealthy() async -> Bool {
+        do {
+            try await backend.validate()
+            return true
+        } catch {
+            return false
+        }
+    }
 }
 
 final class NFSMediaTransportFileSystem: MediaTransportFileSystem, @unchecked Sendable {

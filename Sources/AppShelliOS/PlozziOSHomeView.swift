@@ -62,7 +62,10 @@ struct PlozziOSHomeView: View {
         Group {
             switch viewModel.state {
             case .idle, .loading:
-                ProgressView("Loading Home…")
+                // Skeleton rails rather than a bare spinner, matching tvOS: the
+                // placeholders occupy the same geometry the real rows will, so
+                // content swaps in without the page reflowing.
+                PlozziOSHomeSkeletonScreen()
             case .empty:
                 ContentUnavailableView {
                     Label("Your Home is empty", systemImage: "house")
@@ -222,12 +225,14 @@ struct PlozziOSHomeView: View {
                     )
                 }
 
-                if !featuredItems.isEmpty {
-                    PlozziOSFeaturedRow(
-                        items: featuredItems,
-                        appModel: appModel
-                    )
-                }
+                // Trending row intentionally NOT shown on iOS/iPadOS (2026-07-25).
+                // It came from Seerr (`seerService.trending`) and had no tvOS
+                // counterpart, so the two platforms disagreed about what Home
+                // contains. `featuredItems` is still loaded because the hero
+                // carousel consumes it via its `.featured` source; only the
+                // standalone row is gone. Restore by re-adding
+                // `PlozziOSFeaturedRow(items: featuredItems, appModel: appModel)`
+                // here — the view itself is left in place.
 
                 if content.mergeLibraries {
                     ForEach(rows) { row in
@@ -1284,6 +1289,15 @@ private struct PlozziOSHomeRowView: View {
                         )
                     libraryRow
                 }
+            } else if row.items.isEmpty {
+                // A row that exists but hasn't resolved its items yet: show the
+                // placeholder rail rather than a title over empty space. Same
+                // geometry as the real rail, so the cards swap in without the
+                // page shifting.
+                PlozziOSHomeSkeletonRail(
+                    title: row.title,
+                    style: row.style == .landscape ? .landscape : .poster
+                )
             } else {
                 PlozziOSHomeMediaRail(
                     title: row.title,

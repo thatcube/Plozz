@@ -196,6 +196,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
         authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? = nil
     ) throws {
         self.engine = try AEEngine()
+        // Plozz owns its audio session, and on an E-AC-3/Atmos bitstream-passthrough route the HDMI sink
+        // otherwise keeps looping the last MAT frame after we leave playback. The engine defaults this off
+        // because it never activates the session itself (AVKit does, per playback), so deactivating is only
+        // safe for a host that owns it — which we do.
+        engine.deactivatesAudioSessionOnStop = true
         self.networkFileResolver = networkFileResolver
         self.authenticatedHTTPResolver = authenticatedHTTPResolver
         #if canImport(UIKit)

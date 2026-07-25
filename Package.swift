@@ -75,7 +75,7 @@ let package = Package(
         // See AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
         // Pinned by exact commit to the annotated tag
-        //   `plozz-pin-5.20.6-seekfixes-atmos` → 1a0e81bfbed667f1a51154397d2fdfee27b1bce5
+        //   `plozz-pin-5.20.6-seekfixes-atmos-r2` → 2387dc4d9352e52d25a9fb72c8fc0578c77b04ba
         // on the thatcube fork. The tag keeps this commit permanently reachable
         // (a bare branch SHA could be force-pushed away; a tagged one cannot), so
         // pinning the SHA here is both immutable and human-traceable. The tagged
@@ -86,6 +86,8 @@ let package = Package(
         //   1f35669 forward-overshoot landing (a seek that lands past target is done, not re-sought)
         //   08c3ee3 edge-triggered finalize (clear the loading state the instant playback resumes)
         //   1a0e81b deactivate AVAudioSession on final teardown (stops looping Atmos passthrough on exit)
+        //   2387dc4 review hardening: stuck-spinner + re-anchor-at-old-position fixes, cancellation
+        //           busy-spin, Atmos decode-budget starvation, opt-in audio-session deactivation
         //
         // The previous stack's `b441b5a` (re-anchor the producer when a forward-seek
         // target is unbuffered) was DROPPED here because upstream implemented the same
@@ -96,7 +98,7 @@ let package = Package(
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked.
-        .package(url: "https://github.com/thatcube/AetherEngine", revision: "1a0e81bfbed667f1a51154397d2fdfee27b1bce5"),
+        .package(url: "https://github.com/thatcube/AetherEngine", revision: "2387dc4d9352e52d25a9fb72c8fc0578c77b04ba"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

@@ -205,9 +205,18 @@ struct CatalogReadQueries {
             row.record.map { (row.enrichmentID, $0) }
         })
         let hydrated = hydratedEnrichmentRecords(records)
-        return withLocalOverlay(rows.map { row in
-            hydrated[row.enrichmentID].map { ShareCatalogReadProjection.applyEnrichment(row.item, $0) } ?? row.item
-        })
+        // `rep_id` from the grouped query above IS the group-representative id the
+        // overlay would otherwise re-derive per card with its own SQLite lookups.
+        let artworkKeys = Dictionary(
+            rows.map { ($0.item.id, $0.enrichmentID) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return withLocalOverlay(
+            rows.map { row in
+                hydrated[row.enrichmentID].map { ShareCatalogReadProjection.applyEnrichment(row.item, $0) } ?? row.item
+            },
+            artworkKeys: artworkKeys
+        )
     }
 
     /// Distinct series items for a TV/Anime library, alphabetical.
@@ -886,24 +895,44 @@ struct CatalogReadQueries {
     /// episode's local NFO is never superseded by its show's `tvshow.nfo` (which
     /// only ever targets the series-level id). `sourceURL` is always nil for
     /// these sources — the local-provenance-privacy invariant.
-    private func withLocalOverlay(_ items: [MediaItem]) -> [MediaItem] {
-        guard normalizedMetadataReady, hasAnyLocalMetadata() else { return withLocalArtwork(items) }
-        let keyed = items.map { item in (item, localMetadataKey(for: item)) }
+    /// - Parameter artworkKeys: optional `item.id → group-representative id` map a
+    ///   caller has ALREADY resolved. For movies that mapping otherwise costs 1-2
+    ///   SQLite round trips per card (`movieEnrichmentKey`), but the grid/search
+    ///   queries compute the very same value as `rep_id` and used to discard it.
+    ///   Passing it makes a page's overlay pure in-memory work.
+    private func withLocalOverlay(
+        _ items: [MediaItem],
+        artworkKeys: [String: String]? = nil
+    ) -> [MediaItem] {
+        guard normalizedMetadataReady, hasAnyLocalMetadata() else {
+            return withLocalArtwork(items, artworkKeys: artworkKeys)
+        }
+        let keyed = items.map { item in (item, localMetadataKey(for: item, precomputed: artworkKeys)) }
         let itemIDs = Array(Set(keyed.compactMap { $0.1 })).sorted()
-        guard !itemIDs.isEmpty else { return withLocalArtwork(items) }
+        guard !itemIDs.isEmpty else { return withLocalArtwork(items, artworkKeys: artworkKeys) }
         let rows = localMetadataRows(itemIDs: itemIDs)
-        guard !rows.isEmpty else { return withLocalArtwork(items) }
+        guard !rows.isEmpty else { return withLocalArtwork(items, artworkKeys: artworkKeys) }
         return withLocalArtwork(keyed.map { item, key in
             guard let key, let fields = rows[key], !fields.isEmpty else { return item }
             return ShareCatalogReadProjection.applyLocalMetadata(item, fields)
-        })
+        }, artworkKeys: artworkKeys)
     }
 
-    private func withLocalArtwork(_ items: [MediaItem]) -> [MediaItem] {
+    private func withLocalArtwork(
+        _ items: [MediaItem],
+        artworkKeys: [String: String]? = nil
+    ) -> [MediaItem] {
         guard normalizedMetadataReady, !items.isEmpty else { return items }
-        let keys = Array(Set(items.flatMap { item -> [String] in
-            var keys = localArtworkKey(for: item).map { [$0] } ?? []
-            if item.kind == .episode, let seriesID = item.seriesID {
+        // Resolve each item's artwork key ONCE. For a movie this is not a pure
+        // function of the item — `localArtworkKey` runs 1-2 SQLite round trips to
+        // map the card to its group's representative file — and it used to be
+        // called a second time in the projection map below. That doubled the
+        // lookups for every rendered card: measured on a 60-card page over a 15k
+        // -file catalog, ~100ms each pass, i.e. the entire cost of the page.
+        let keyed = items.map { (item: $0, key: localArtworkKey(for: $0, precomputed: artworkKeys)) }
+        let keys = Array(Set(keyed.flatMap { entry -> [String] in
+            var keys = entry.key.map { [$0] } ?? []
+            if entry.item.kind == .episode, let seriesID = entry.item.seriesID {
                 keys.append(seriesID)
             }
             return keys
@@ -923,8 +952,8 @@ struct CatalogReadQueries {
                   let selection = CatalogJSON.decode(ArtworkSelection.self, json) else { return }
             selections[itemID, default: []].append(selection)
         }
-        return items.map { item in
-            var values = localArtworkKey(for: item).flatMap { selections[$0] } ?? []
+        return keyed.map { item, key in
+            var values = key.flatMap { selections[$0] } ?? []
             if item.kind == .episode,
                let seriesID = item.seriesID,
                let seriesPoster = selections[seriesID]?.first(where: { $0.placement == .poster }) {
@@ -944,8 +973,12 @@ struct CatalogReadQueries {
         }
     }
 
-    private func localArtworkKey(for item: MediaItem) -> String? {
-        item.kind == .movie ? movieEnrichmentKey(forID: item.id) : item.id
+    private func localArtworkKey(
+        for item: MediaItem,
+        precomputed: [String: String]? = nil
+    ) -> String? {
+        guard item.kind == .movie else { return item.id }
+        return precomputed?[item.id] ?? movieEnrichmentKey(forID: item.id)
     }
 
     /// Cheap, cached "does this catalog have ANY local metadata at all" check —
@@ -959,10 +992,15 @@ struct CatalogReadQueries {
         return found
     }
 
-    private func localMetadataKey(for item: MediaItem) -> String? {
+    private func localMetadataKey(
+        for item: MediaItem,
+        precomputed: [String: String]? = nil
+    ) -> String? {
         switch item.kind {
         case .movie:
-            return movieEnrichmentKey(forID: item.id)
+            // Same group-representative id as `localArtworkKey` — reuse a caller's
+            // resolved value rather than paying the lookup again.
+            return precomputed?[item.id] ?? movieEnrichmentKey(forID: item.id)
         case .series, .episode:
             return item.id
         case .season:

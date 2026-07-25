@@ -72,7 +72,13 @@ public actor CloudConfigSyncService {
     }
 
     private let config: Configuration
-    private let container: CKContainer
+    /// Built lazily so merely CONSTRUCTING the service can't touch CloudKit.
+    /// `CKContainer(identifier:)` traps (SIGTRAP) in any process whose entitlements
+    /// don't carry that container — which is every unit-test host. It used to be
+    /// built in `init`, so a test that reached `AppState.bootstrap()` killed the
+    /// whole xctest process, and the remaining tests in the bundle silently never
+    /// ran (the suite still reported "Executed 0 tests, with 0 failures").
+    private lazy var container: CKContainer = CKContainer(identifier: config.containerIdentifier)
     private var engine: CKSyncEngine?
     /// Bumped every time the engine is rebuilt; events from an older engine are
     /// ignored (generation fencing).
@@ -97,7 +103,6 @@ public actor CloudConfigSyncService {
 
     public init(_ configuration: Configuration) {
         self.config = configuration
-        self.container = CKContainer(identifier: configuration.containerIdentifier)
         let loaded = Self.loadPersisted(from: configuration.stateFileURL)
         self.ledger = loaded?.ledger ?? SyncLedger()
         self.engineState = loaded?.engineState

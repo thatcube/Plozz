@@ -529,6 +529,13 @@ extension AppState {
     /// Activate the engine (if enabled) and start observing local config changes.
     func startCloudSyncIfEnabled() {
         guard SyncSetupFeatureFlag().isEnabled else { return }
+        // Never start a real CloudKit engine inside a unit-test host. xctest runs
+        // without the app's iCloud entitlement, so CloudKit traps (SIGTRAP) the
+        // moment the container is touched — which kills the whole test process and
+        // silently drops every remaining test in the bundle. The flag defaults ON
+        // when unset, and a test host's UserDefaults is always unset, so every test
+        // that reached `bootstrap()` hit this.
+        guard !Self.isRunningUnitTests else { return }
         guard let cloudSync else {
             PlozzLog.sync.error("CloudSync: no writable state dir — sync unavailable")
             return
@@ -538,6 +545,13 @@ extension AppState {
         heartbeatHouseholdPresence()
         checkForSyncSetupOffer()
         startSyncSetupOfferPolling()
+    }
+
+    /// True when this process is an XCTest host. `XCTestConfigurationFilePath` is
+    /// set by the test runner for both app-hosted and library tests, and is absent
+    /// in the shipping app.
+    static var isRunningUnitTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
     /// Re-arming Observation: fires whenever the roster or account set changes,

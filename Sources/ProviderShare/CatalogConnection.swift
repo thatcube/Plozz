@@ -161,6 +161,23 @@ final class CatalogConnection {
         apply("CREATE INDEX IF NOT EXISTS idx_assets_movie_group ON assets(library, kind, movie_group_key);")
         apply("CREATE INDEX IF NOT EXISTS idx_assets_movie_key_direct ON assets(movie_key);")
         apply("CREATE INDEX IF NOT EXISTS idx_assets_movie_group_direct ON assets(movie_group_key);")
+        // `movieEnrichmentKey` — run once per rendered movie card — resolves a
+        // group's representative file with
+        //   WHERE COALESCE(movie_group_key, movie_key)=? AND library=? AND kind=?
+        // Applying COALESCE to the columns makes every plain column index above
+        // unusable, so that lookup fell back to (library, kind), which for a movie
+        // library selects EVERY row. A 60-card page therefore scanned the whole
+        // catalog 60 times: measured at 15k files, 69.7ms of the page's ~200ms went
+        // here versus 7ms in the grid query itself. This EXPRESSION index makes it
+        // 0.26ms.
+        //
+        // It must stay spelled EXACTLY as the query spells it — SQLite matches an
+        // expression index by comparing the expression text, so reordering the
+        // COALESCE arguments silently stops it being used.
+        apply("""
+        CREATE INDEX IF NOT EXISTS idx_assets_movie_group_resolved
+        ON assets(COALESCE(movie_group_key, movie_key));
+        """)
         apply("""
         CREATE TABLE IF NOT EXISTS movie_alias(
             alias_id  TEXT PRIMARY KEY,

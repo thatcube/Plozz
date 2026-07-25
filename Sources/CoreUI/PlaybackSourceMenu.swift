@@ -829,19 +829,22 @@ private enum PlaybackSourceMenuButtonPage: Hashable {
 }
 
 #if !os(tvOS)
-/// Which side of the trigger the menu panel sits on. Picked once when the menu
-/// opens (never recomputed while it's open, or a growing page would make it hop
-/// between sides) and used for both placement and the growth anchor.
-enum PlaybackSourceMenuSide {
-    case trailing
-    case leading
-    case above
-    case below
+/// Where the menu panel sits relative to its trigger. Picked once when the menu
+/// opens — never recomputed while it's open, or a growing page would make it hop
+/// around — and used for placement, the height cap, and the growth anchor.
+struct PlaybackSourceMenuSide: Equatable {
+    enum Side { case trailing, leading, above, below }
+    let side: Side
+    /// For a side placement: whether the panel hangs upward from the trigger's
+    /// bottom edge rather than downward from its top edge. Chosen from where the
+    /// room actually is, so a button near the bottom of the window opens into the
+    /// space above it instead of being squeezed against the bottom edge.
+    let growsUp: Bool
 
     /// Prefer sitting beside the button — that's where a menu reads as attached
-    /// to its trigger and where the most vertical room usually is. Fall back to
-    /// above/below, picking whichever has more room, only when neither side can
-    /// fit the panel's width.
+    /// to its trigger, and beside it the panel can use the window's full height
+    /// because it doesn't have to clear the button. Fall back to above/below,
+    /// whichever has more room, only when neither side fits the panel's width.
     static func choose(
         trigger: CGRect,
         screen: CGSize,
@@ -849,18 +852,28 @@ enum PlaybackSourceMenuSide {
         gap: CGFloat,
         margin: CGFloat
     ) -> PlaybackSourceMenuSide {
+        // Beside the trigger, the usable column runs from the trigger's top edge
+        // down, or from its bottom edge up. Take whichever is taller.
+        let roomDown = screen.height - margin - trigger.minY
+        let roomUp = trigger.maxY - margin
+        let growsUp = roomUp > roomDown
+
         let roomTrailing = screen.width - trigger.maxX - gap - margin
+        if roomTrailing >= width {
+            return .init(side: .trailing, growsUp: growsUp)
+        }
         let roomLeading = trigger.minX - gap - margin
-        if roomTrailing >= width { return .trailing }
-        if roomLeading >= width { return .leading }
+        if roomLeading >= width {
+            return .init(side: .leading, growsUp: growsUp)
+        }
         let roomAbove = trigger.minY - gap - margin
         let roomBelow = screen.height - trigger.maxY - gap - margin
-        return roomAbove >= roomBelow ? .above : .below
+        return .init(side: roomAbove >= roomBelow ? .above : .below, growsUp: false)
     }
 
     /// Where the panel goes, and how tall it may grow before its rows scroll.
-    /// `available` is always the room on this side, so the panel can never grow
-    /// off screen and never has to move to stay on it.
+    /// `available` is always the room in the chosen direction, so the panel can
+    /// never grow off screen and never has to move to stay on it.
     func layout(
         trigger: CGRect,
         screen: CGSize,
@@ -869,23 +882,27 @@ enum PlaybackSourceMenuSide {
         gap: CGFloat,
         margin: CGFloat
     ) -> (x: CGFloat, y: CGFloat, available: CGFloat) {
-        switch self {
+        switch side {
         case .trailing, .leading:
-            let x = self == .trailing
+            let x = side == .trailing
                 ? trigger.maxX + gap
                 : trigger.minX - gap - width
-            // Start level with the button and grow downward. Clamp the top so a
-            // panel that's already at full height still fits, which means the
-            // top never has to move once it's placed.
-            let maxTop = max(margin, screen.height - margin - height)
-            let top = min(max(margin, trigger.minY), maxTop)
-            return (x, top, max(160, screen.height - margin - top))
+            if growsUp {
+                // Bottom edge level with the button; the top travels as it grows.
+                let bottom = min(screen.height - margin, max(margin + 160, trigger.maxY))
+                let available = max(160, bottom - margin)
+                return (x, bottom - min(height, available), available)
+            } else {
+                // Top edge level with the button; the bottom travels as it grows.
+                let top = max(margin, min(trigger.minY, screen.height - margin - 160))
+                return (x, top, max(160, screen.height - margin - top))
+            }
         case .above, .below:
-            let available = self == .above
+            let available = side == .above
                 ? trigger.minY - gap - margin
                 : screen.height - trigger.maxY - gap - margin
             let capped = max(160, available)
-            let y = self == .above
+            let y = side == .above
                 ? trigger.minY - gap - min(height, capped)
                 : trigger.maxY + gap
             let x = min(
@@ -896,11 +913,11 @@ enum PlaybackSourceMenuSide {
         }
     }
 
-    /// Scale the opening panel out of the edge that's pinned to the button.
+    /// Scale the opening panel out of the corner/edge pinned to the button.
     var growthAnchor: UnitPoint {
-        switch self {
-        case .trailing: .leading
-        case .leading: .trailing
+        switch side {
+        case .trailing: growsUp ? .bottomLeading : .topLeading
+        case .leading: growsUp ? .bottomTrailing : .topTrailing
         case .above: .bottom
         case .below: .top
         }

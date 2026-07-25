@@ -516,6 +516,13 @@ final class ShareCatalogStoreTests: XCTestCase {
     /// A large first-time regroup may take a few hundred milliseconds overall,
     /// but must yield the catalog actor so a Movies-grid page can complete without
     /// waiting for the whole regroup.
+    ///
+    /// Measures the CONTENTION the regroup adds, not the browse's absolute wall
+    /// time. The query itself costs ~200ms against a synthetic 15k-file catalog
+    /// on an Apple TV simulator, so the original absolute 100ms bound could never
+    /// pass no matter how well the actor interleaved — it was measuring query
+    /// cost, not blocking. Comparing against a baseline taken on the same store
+    /// isolates the thing the test is named for and makes it machine-independent.
     func testLargeMovieRegroupDoesNotBlockBrowseReads() async {
         let store = ShareCatalogStore(accountKey: "perf", directory: tempDir())
         let assets: [CatalogAsset] = (0..<15_000).map { index in
@@ -534,6 +541,12 @@ final class ShareCatalogStoreTests: XCTestCase {
         await store.upsert(assets, scanID: 1)
 
         let clock = ContinuousClock()
+
+        // Baseline: the same page, with nothing else touching the actor.
+        let baselineStart = clock.now
+        _ = await store.movies(offset: 0, limit: 60)
+        let baseline = baselineStart.duration(to: clock.now)
+
         let rebuildStart = clock.now
         let rebuild = Task { await store.rebuildMovieGroups() }
         await Task.yield()
@@ -542,10 +555,22 @@ final class ShareCatalogStoreTests: XCTestCase {
         let browseDuration = browseStart.duration(to: clock.now)
         await rebuild.value
         let rebuildDuration = rebuildStart.duration(to: clock.now)
-        XCTAssertLessThan(
+
+        // The regroup must be long enough for the browse to land inside it,
+        // otherwise this proves nothing.
+        XCTAssertGreaterThan(
+            rebuildDuration,
             browseDuration,
+            "regroup finished too quickly to prove interleaving"
+        )
+        XCTAssertLessThan(
+            browseDuration - baseline,
             .milliseconds(100),
-            "browse reads must interleave with a large end-of-scan regroup (regroup: \(rebuildDuration))"
+            """
+            a browse read must interleave with a large end-of-scan regroup rather \
+            than queue behind it (baseline: \(baseline), during regroup: \
+            \(browseDuration), regroup total: \(rebuildDuration))
+            """
         )
     }
 
@@ -909,4 +934,5 @@ final class ShareCatalogStoreTests: XCTestCase {
         let avatarAlts = await store.seriesSearchTitleAlternates(seriesKey: avatar, storedTitle: "Avatar")
         XCTAssertTrue(avatarAlts.contains("Avatar The Last Airbender"), "richer filename title kept")
     }
+
 }

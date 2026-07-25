@@ -56,6 +56,34 @@ whenever a change could invalidate the map itself or is otherwise unmappable —
 a test target. Pure docs/asset changes select nothing. Every run prints the chosen
 suites and the reason each was selected.
 
+### 3. Fail fast — you learn a result in seconds, not minutes
+
+Tests *execute* in ~6s, but `xcodebuild` on this Mac routinely stalls for minutes
+in teardown (result bundle + simulator shutdown) after the tests have already
+finished. Two things used to turn that into a ~7-minute wait for an answer that
+existed at second six:
+
+- The stall looked identical to a wedged build, so the no-progress watchdog
+  (`PLOZZ_HANG_SECS`, 180s) killed it…
+- …and a watchdog kill triggered the from-clean self-heal, which wiped
+  DerivedData and **recompiled everything to reprint the same failures**.
+
+`run-tests.sh` now tracks how many test bundles have reported a bundle-level
+result (`Test Suite 'X.xctest' passed|failed`). Those lines are flushed as each
+bundle finishes — unlike the final `** TEST FAILED **` banner, which is
+block-buffered and often only reaches the log once the process is killed. Once
+every expected bundle has reported, the run is logically over, so the script
+waits `PLOZZ_VERDICT_GRACE` (default 20s) for a clean exit and then reaps
+xcodebuild and reports the results it already has. A from-clean retry is now only
+attempted when the run produced **no** results at all — the case it was actually
+meant for.
+
+Measured on `ProviderShareTests` (416 tests): a failing suite went 6m53s → 1m12s
+(including the isolation retry), a passing suite ~10min → **29s**.
+
+Set `PLOZZ_VERDICT_GRACE=0` to reap as soon as the bundles report, or raise it if
+you need the real result bundle written out.
+
 ## SOURCE → TEST map (illustrative — computed live, do not hand-maintain)
 
 Each `Sources/<Module>` is covered by `Tests/<Module>Tests` when that test target

@@ -86,6 +86,10 @@ fi
 #      DerivedData is cleared, and the invocation is retried ONCE from clean.
 PLOZZ_DERIVED_DATA="${PLOZZ_DERIVED_DATA:-$PWD/.build/test-derived-data}"
 PLOZZ_HANG_SECS="${PLOZZ_HANG_SECS:-180}"
+# How long to let xcodebuild wind down AFTER it has printed its final verdict.
+# Past that point the run is logically over and everything else is teardown, so
+# waiting out the full hang watchdog just delays a result we already have.
+PLOZZ_VERDICT_GRACE="${PLOZZ_VERDICT_GRACE:-20}"
 
 # Recursively kill a process and all its descendants (xcodebuild's swift-frontend
 # children don't die with the parent otherwise).
@@ -269,6 +273,23 @@ failed_bundles_from_log() {
     | sed -E "s/Test Suite '([A-Za-z0-9_]+)\.xctest' failed/\1/" | sort -u
 }
 
+# Count the distinct test bundles that have reported a bundle-level result.
+# Unlike xcodebuild's final "** TEST FAILED **" banner — which is block-buffered
+# and often only reaches the log when the process is killed — these lines are
+# flushed as each bundle finishes, so they are a signal we can act on live.
+reported_bundles_count() {
+  grep -Eo "Test Suite '[A-Za-z0-9_]+\.xctest' (passed|failed)" "$1" 2>/dev/null \
+    | sed -E "s/Test Suite '([A-Za-z0-9_]+)\.xctest'.*/\1/" | sort -u | grep -c . || true
+}
+
+# True when xcodebuild has printed its terminal verdict for this run, i.e. the
+# tests actually executed and produced an answer. Used to distinguish "wedged
+# before producing a result" (a from-clean rebuild may genuinely help) from
+# "answered, then stalled in teardown" (a rebuild cannot change the answer).
+has_verdict() {
+  grep -qE '^[[:space:]]*\*\* TEST[A-Z ]* (SUCCEEDED|FAILED) \*\*' "$1" 2>/dev/null
+}
+
 # _xcb_once <log> <xcb-arg>...  -> runs one xcodebuild test invocation with a
 # no-progress watchdog. Returns xcodebuild's exit status, or 124 if the watchdog
 # killed it for making no progress for PLOZZ_HANG_SECS.
@@ -291,9 +312,27 @@ _xcb_once() {
 
   # Watchdog: poll the log size; if it doesn't grow for PLOZZ_HANG_SECS, the
   # build is wedged — kill the tree and report a hang (124).
-  local last_size=-1 stalled=0 hung=0 size
+  #
+  # Separately: once xcodebuild has printed its final verdict the run is
+  # logically DONE, and anything after it is teardown (result bundle, simulator
+  # shutdown) that regularly stalls on this Mac. Waiting out the full hang
+  # watchdog there turns an answer we already have into a 3-minute delay — and,
+  # because the stall reports as 124, it used to trigger a from-clean rebuild
+  # and pay the whole cost a second time. Reap it after a short grace instead.
+  local last_size=-1 stalled=0 hung=0 size verdict_wait=0 reaped_after_verdict=0
   while kill -0 "$xcb_pid" 2>/dev/null; do
     sleep 10
+    if [[ ${EXPECTED_BUNDLES:-0} -gt 0 ]] \
+       && [[ $(reported_bundles_count "$log") -ge ${EXPECTED_BUNDLES} ]]; then
+      verdict_wait=$(( verdict_wait + 10 ))
+      if [[ $verdict_wait -ge $PLOZZ_VERDICT_GRACE ]]; then
+        echo "" >&2
+        echo "run-tests.sh: all ${EXPECTED_BUNDLES} test bundle(s) reported; xcodebuild is still winding down after ${PLOZZ_VERDICT_GRACE}s — reaping it and using the reported results." >&2
+        kill_tree "$xcb_pid"
+        reaped_after_verdict=1
+        break
+      fi
+    fi
     size=$(stat -f%z "$log" 2>/dev/null || echo 0)
     if [[ "$size" == "$last_size" ]]; then
       stalled=$(( stalled + 10 ))
@@ -318,6 +357,12 @@ _xcb_once() {
   # long after the build actually finished. kill_tree reaps tail -F + grep too.
   kill_tree "$tail_pid"
   wait "$tail_pid" 2>/dev/null || true
+  if [[ $reaped_after_verdict -eq 1 ]]; then
+    # We killed it, so `wait` reports the signal, not the outcome. Every bundle
+    # already reported, so the bundle results are the truth.
+    [[ -n "$(failed_bundles_from_log "$log")" ]] && return 1
+    return 0
+  fi
   [[ $hung -eq 1 ]] && return 124
   return $status
 }
@@ -334,6 +379,15 @@ xcodebuild_test() {
     status=$?
     set -e
     if [[ $status -eq 124 && $attempt -eq 1 ]]; then
+      # Only a wedge that produced NO verdict is worth a from-clean retry. If the
+      # tests already ran and reported, rebuilding cannot change the outcome — it
+      # just pays the full compile cost again to reprint the same failures.
+      if has_verdict "$log" || [[ $(reported_bundles_count "$log") -gt 0 ]]; then
+        echo "run-tests.sh: xcodebuild stalled after reporting results — using them instead of rebuilding from clean." >&2
+        [[ -n "$(failed_bundles_from_log "$log")" ]] && return 1
+        grep -qE '^[[:space:]]*\*\* TEST[A-Z ]* SUCCEEDED \*\*' "$log" && return 0
+        return 1
+      fi
       echo "run-tests.sh: clearing DerivedData ($PLOZZ_DERIVED_DATA) and retrying the build once from clean." >&2
       rm -rf "$PLOZZ_DERIVED_DATA"
       continue
@@ -364,6 +418,7 @@ if is_full_set; then
     exit 1
   fi
   echo "=== FULL matrix via Plozz-Package (build once, ${#ALL_TESTS[@]} suites) ==="
+  EXPECTED_BUNDLES=${#ALL_TESTS[@]}
   xcodebuild_test "$MAIN_LOG" -scheme "Plozz-Package" || STATUS=$?
 elif all_are_test_targets "${SCHEMES[@]}"; then
   # Subset: build ONLY the requested suites' dependency subtrees via an
@@ -378,6 +433,7 @@ elif all_are_test_targets "${SCHEMES[@]}"; then
   SCOPED_SCHEME="_PlozzScoped_$$"
   make_scoped_scheme "$SCOPED_SCHEME" "${SCHEMES[@]}"
   echo "=== ${#SCHEMES[@]} suite(s) via scoped scheme (build only their subtrees): ${SCHEMES[*]} ==="
+  EXPECTED_BUNDLES=${#SCHEMES[@]}
   xcodebuild_test "$MAIN_LOG" -scheme "$SCOPED_SCHEME" || STATUS=$?
 else
   # At least one requested name isn't a known test target — fall back to the
@@ -389,6 +445,7 @@ else
   XCB=(-scheme "Plozz-Package")
   echo "=== ${#SCHEMES[@]} suite(s) via Plozz-Package (build once): ${SCHEMES[*]} ==="
   for S in "${SCHEMES[@]}"; do XCB+=(-only-testing:"$S"); done
+  EXPECTED_BUNDLES=${#SCHEMES[@]}
   xcodebuild_test "$MAIN_LOG" "${XCB[@]}" || STATUS=$?
 fi
 
@@ -422,6 +479,7 @@ if [[ $STATUS -ne 0 ]]; then
     else
       RETRY_ARGS=(-scheme "Plozz-Package" -only-testing:"$S")
     fi
+    EXPECTED_BUNDLES=1
     if xcodebuild_test "$RETRY_LOG" "${RETRY_ARGS[@]}"; then
       echo "  -> $S PASSED on retry (flake)."
     else

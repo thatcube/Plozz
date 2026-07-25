@@ -176,7 +176,14 @@ func mapNFSError(_ error: Error) -> MediaTransportError {
         return .transport(code: (error as NSError).code)
     }
     switch nfsError {
-    case .connectionFailed:
+    case .connectionFailed(let detail):
+        // Journal the underlying NWError: "Connection refused", "Operation not
+        // permitted" (iOS Local Network privacy denied), and "No route to host"
+        // (VPN/routing) all collapse to transport(-1) otherwise, which makes a
+        // field failure unattributable.
+        HandoffDiagnostics.emit(
+            "nfs CONNECT_FAILED \(HandoffDiagnostics.redactedDetail(detail))"
+        )
         return .transport(code: -1)
     case .timeout:
         return .timeout

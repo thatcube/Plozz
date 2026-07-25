@@ -5,7 +5,11 @@ import Foundation
 /// rest of Plozz never sees NFS-specific error types.
 public enum NFSError: Error, Equatable, Sendable {
     /// The socket could not connect, was reset, or dropped mid-exchange.
-    case connectionFailed
+    /// `detail` carries the underlying `NWError`/stage verbatim so a field
+    /// failure is attributable — "connection refused" (server not listening),
+    /// "Operation not permitted" (iOS Local Network privacy denied), and
+    /// "no route to host" (VPN/routing) are indistinguishable otherwise.
+    case connectionFailed(detail: String)
     /// A request exceeded its deadline.
     case timeout
     /// The operation was cancelled (structured concurrency / shutdown).

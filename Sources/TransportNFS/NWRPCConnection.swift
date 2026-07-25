@@ -28,6 +28,8 @@ final class NWRPCConnection: RPCConnection, @unchecked Sendable {
     private let connection: NWConnection
     private let queue = DispatchQueue(label: "com.plozz.nfs.rpc")
     private let timeout: Duration
+    private let host: String
+    private let port: UInt16
 
     /// Guards `pending` so a late callback after a timeout can't double-resume,
     /// and serializes `exchange`es (see `exchangeBusy`).
@@ -39,6 +41,10 @@ final class NWRPCConnection: RPCConnection, @unchecked Sendable {
     /// record stream. Callers that need parallelism use separate connections.
     private var exchangeBusy = false
     private var exchangeWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Last `.waiting` reason seen during connect, so a subsequent cancel/timeout
+    /// can name the underlying `NWError` instead of a bare "connection failed".
+    /// Written and read only on `queue` (the connection's callback queue).
+    private var lastWaitingReason: String?
 
     init(host: String, port: UInt16, timeout: Duration) {
         let endpointHost = NWEndpoint.Host(host)
@@ -47,6 +53,8 @@ final class NWRPCConnection: RPCConnection, @unchecked Sendable {
         parameters.prohibitedInterfaceTypes = [.cellular]
         self.connection = NWConnection(host: endpointHost, port: endpointPort, using: parameters)
         self.timeout = timeout
+        self.host = host
+        self.port = port
     }
 
     func start() async throws {
@@ -57,12 +65,20 @@ final class NWRPCConnection: RPCConnection, @unchecked Sendable {
                     switch state {
                     case .ready:
                         box.resume(returning: ())
-                    case .failed, .cancelled:
-                        box.resume(throwing: NFSError.connectionFailed)
-                    case .waiting:
+                    case .failed(let error):
+                        box.resume(throwing: NFSError.connectionFailed(
+                            detail: "start.failed \(self.host):\(self.port) \(error)"
+                        ))
+                    case .cancelled:
+                        box.resume(throwing: NFSError.connectionFailed(
+                            detail: "start.cancelled \(self.host):\(self.port)"
+                                + (self.lastWaitingReason.map { " lastWaiting=\($0)" } ?? "")
+                        ))
+                    case .waiting(let error):
                         // A NAT/firewall path that never becomes ready; the
-                        // outer deadline turns this into a timeout.
-                        break
+                        // outer deadline turns this into a timeout. Record why so
+                        // the eventual failure names the cause.
+                        self.lastWaitingReason = "\(error)"
                     default:
                         break
                     }
@@ -123,8 +139,10 @@ final class NWRPCConnection: RPCConnection, @unchecked Sendable {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let box = ContinuationBox(continuation)
             connection.send(content: data, completion: .contentProcessed { error in
-                if error != nil {
-                    box.resume(throwing: NFSError.connectionFailed)
+                if let error {
+                    box.resume(throwing: NFSError.connectionFailed(
+                        detail: "send \(self.host):\(self.port) \(error)"
+                    ))
                 } else {
                     box.resume(returning: ())
                 }
@@ -180,12 +198,22 @@ final class NWRPCConnection: RPCConnection, @unchecked Sendable {
                     box.resume(returning: data)
                     return
                 }
-                if error != nil || isComplete {
-                    box.resume(throwing: NFSError.connectionFailed)
+                if let error {
+                    box.resume(throwing: NFSError.connectionFailed(
+                        detail: "receive \(self.host):\(self.port) \(error)"
+                    ))
+                    return
+                }
+                if isComplete {
+                    box.resume(throwing: NFSError.connectionFailed(
+                        detail: "receive \(self.host):\(self.port) peer closed"
+                    ))
                     return
                 }
                 // No data, no error, not complete: an empty keep-alive delivery.
-                box.resume(throwing: NFSError.connectionFailed)
+                box.resume(throwing: NFSError.connectionFailed(
+                    detail: "receive \(self.host):\(self.port) empty delivery"
+                ))
             }
         }
     }

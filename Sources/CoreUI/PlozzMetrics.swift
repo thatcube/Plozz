@@ -124,6 +124,16 @@ public struct PlozzMetrics: Equatable, Sendable {
     public let cardStatusCueFontSize: CGFloat
     public let cardStatusCueHorizontalPadding: CGFloat
     public let cardStatusCueVerticalPadding: CGFloat
+    /// Resume-chip metrics — the play glyph + progress bar + "… left" line drawn
+    /// on landscape artwork (Continue Watching cards and episode cards on every
+    /// platform). Sized per-platform: tvOS uses its tuned 10-foot constants, iOS
+    /// derives from real text styles so it tracks Dynamic Type natively.
+    public let resumeChipFontSize: CGFloat
+    public let resumeChipInset: CGFloat
+    public let resumeChipBarWidth: CGFloat
+    public let resumeChipBarHeight: CGFloat
+    /// Edge length of the trailing accessory (download state) on a resume chip.
+    public let resumeChipAccessorySize: CGFloat
     /// Point size for a section/row header, scaled with density but *dampened*
     /// (see `PlozzTheme.Metrics.headerScaleDamping`) so headers stay anchored.
     public let sectionHeaderFontSize: CGFloat
@@ -314,6 +324,37 @@ public struct PlozzMetrics: Equatable, Sendable {
         #endif
         self.cardTitleFontSize = (baseTitleFontSize * densityScale).rounded()
         self.cardSubtitleFontSize = (baseSubtitleFontSize * densityScale).rounded()
+
+        // Resume chip. tvOS keeps its tuned 10-foot constants; iOS/iPadOS derives
+        // from `.subheadline` so the chip sits with the card's own typography and
+        // tracks Dynamic Type, rather than inheriting tvOS point sizes (which read
+        // as enormous on a handset — the same trap the card caption fell into).
+        #if os(tvOS)
+        let baseChipFont = PlozzTheme.Metrics.resumeChipFontSize
+        let baseChipInset = PlozzTheme.Metrics.resumeChipInset
+        let baseChipBarWidth = PlozzTheme.Metrics.resumeChipBarWidth
+        let baseChipBarHeight = PlozzTheme.Metrics.resumeChipBarHeight
+        let baseChipAccessory = PlozzTheme.Metrics.resumeChipAccessorySize
+        #elseif canImport(UIKit)
+        let baseChipFont = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
+        let baseChipInset: CGFloat = 12
+        let baseChipBarWidth: CGFloat = 54
+        let baseChipBarHeight: CGFloat = 4
+        // Matches the chip's cap height closely enough to sit on the same baseline.
+        let baseChipAccessory = UIFont.preferredFont(forTextStyle: .subheadline).pointSize + 6
+        #else
+        let baseChipFont = PlozzTheme.Metrics.resumeChipFontSize
+        let baseChipInset = PlozzTheme.Metrics.resumeChipInset
+        let baseChipBarWidth = PlozzTheme.Metrics.resumeChipBarWidth
+        let baseChipBarHeight = PlozzTheme.Metrics.resumeChipBarHeight
+        let baseChipAccessory = PlozzTheme.Metrics.resumeChipAccessorySize
+        #endif
+        self.resumeChipFontSize = (baseChipFont * densityScale).rounded()
+        self.resumeChipInset = (baseChipInset * densityScale).rounded()
+        self.resumeChipBarWidth = (baseChipBarWidth * densityScale).rounded()
+        // Floored: a sub-pixel bar disappears entirely at micro density.
+        self.resumeChipBarHeight = max((baseChipBarHeight * densityScale).rounded(), 3)
+        self.resumeChipAccessorySize = (baseChipAccessory * densityScale).rounded()
         self.cardStatusCueFontSize = max(
             (PlozzTheme.Metrics.cardStatusCueFontSize * densityScale).rounded(),
             PlozzTheme.Metrics.cardStatusCueMinFontSize

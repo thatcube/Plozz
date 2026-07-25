@@ -28,6 +28,13 @@ public struct PosterCardView: View {
     /// cards show the resume chip — play glyph + progress bar + time-remaining —
     /// over a soft bottom-leading scrim, matching the episode card.
     private let playsOnSelect: Bool
+    /// Forces the resume chip on regardless of `playsOnSelect`, and supplies the
+    /// download affordance. Needed because the chip and the tap behaviour are
+    /// separate concerns: iOS/iPadOS Continue Watching cards open a detail page
+    /// (so `playsOnSelect` is false) but must still SHOW resume progress — which
+    /// is exactly why that treatment was missing on iOS while tvOS had it.
+    private let showsResumeChipOverride: Bool
+    private let downloadState: MediaDownloadBadgeState?
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -44,6 +51,8 @@ public struct PosterCardView: View {
         reservesSubtitleSpace: Bool = true,
         statusCue: String? = nil,
         playsOnSelect: Bool = false,
+        showsResumeChip: Bool = false,
+        downloadState: MediaDownloadBadgeState? = nil,
         action: @escaping () -> Void
     ) {
         self.item = item
@@ -53,6 +62,8 @@ public struct PosterCardView: View {
         self.reservesSubtitleSpace = reservesSubtitleSpace
         self.statusCueText = statusCue
         self.playsOnSelect = playsOnSelect
+        self.showsResumeChipOverride = showsResumeChip
+        self.downloadState = downloadState
         self.action = action
     }
 
@@ -380,16 +391,16 @@ public struct PosterCardView: View {
     /// suppresses the plain full-width progress bar + the subtitle runtime, since
     /// the chip carries that info on the artwork.
     private var showsResumeChip: Bool {
-        playsOnSelect
+        (playsOnSelect || showsResumeChipOverride)
             && !hideThumbnail
-            && item.cardRuntimeText != nil
+            && (item.cardRuntimeText != nil || downloadState != nil)
     }
 
     /// The shared resume affordance — identical to the episode card's overlay.
     @ViewBuilder
     private var resumeChip: some View {
         if showsResumeChip {
-            ResumeChipOverlay(item: item)
+            ResumeChipOverlay(item: item, downloadState: downloadState)
         }
     }
 

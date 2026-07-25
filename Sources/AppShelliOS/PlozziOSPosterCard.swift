@@ -6,12 +6,18 @@ import SwiftUI
 struct PlozziOSPosterCard: View {
     let item: MediaItem?
     var style: PosterCardView.Style = .poster
+    /// Draws the resume chip (play glyph + progress + time remaining) over the
+    /// artwork, with an optional download badge — the same treatment tvOS uses.
+    var showsResumeChip: Bool = false
+    var downloadState: MediaDownloadBadgeState?
 
     var body: some View {
         PosterCardView(
             item: item ?? placeholderItem,
             style: style,
             reservesSubtitleSpace: false,
+            showsResumeChip: showsResumeChip,
+            downloadState: downloadState,
             action: {}
         )
         .redacted(reason: item == nil ? .placeholder : [])

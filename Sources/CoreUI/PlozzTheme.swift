@@ -226,6 +226,17 @@ public enum PlozzTheme {
         public static let cardStatusCueMinHorizontalPadding: CGFloat = 8
         public static let cardStatusCueVerticalPadding: CGFloat = 6
         public static let cardStatusCueMinVerticalPadding: CGFloat = 5
+        /// Resume-chip (play glyph + progress bar + "… left") drawn on landscape
+        /// artwork. tvOS's tuned constants: read from ~10ft, so the glyph is large
+        /// and the bar is long. iOS derives its own from real text styles in
+        /// `PlozzMetrics` — applying these there would reproduce the caption bug
+        /// (a tvOS constant that reads as secondary on a 29pt title but is larger
+        /// than iOS's 15pt title).
+        public static let resumeChipFontSize: CGFloat = 24
+        public static let resumeChipInset: CGFloat = 18
+        public static let resumeChipBarWidth: CGFloat = 80
+        public static let resumeChipBarHeight: CGFloat = 6
+        public static let resumeChipAccessorySize: CGFloat = 30
         /// Fallback base point size for a card's title when the platform's live
         /// `.subheadline` metric is unavailable (non-UIKit builds). On tvOS the
         /// real `.subheadline` size is used so standard density is unchanged.

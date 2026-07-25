@@ -136,13 +136,22 @@ private struct PillBackground: ViewModifier {
 /// show. Callers gate it on artwork being visible (not blurred/hidden).
 public struct ResumeChipOverlay: View {
     private let item: MediaItem
+    private let downloadState: MediaDownloadBadgeState?
 
-    public init(item: MediaItem) {
+    @Environment(\.plozzMetrics) private var metrics
+
+    /// - Parameter downloadState: optional trailing download affordance. Passing
+    ///   `nil` (the default) renders the chip exactly as before, so surfaces with
+    ///   no download concept are unaffected.
+    public init(item: MediaItem, downloadState: MediaDownloadBadgeState? = nil) {
         self.item = item
+        self.downloadState = downloadState
     }
 
     public var body: some View {
-        if item.cardRuntimeText != nil {
+        // The scrim exists for the chip's legibility, so with nothing to show
+        // there's nothing to darken — a card with no runtime stays clean.
+        if item.cardRuntimeText != nil || downloadState != nil {
             GeometryReader { proxy in
                 RadialGradient(
                     colors: [.black.opacity(0.55), .clear],
@@ -152,17 +161,30 @@ public struct ResumeChipOverlay: View {
                 )
             }
             .allowsHitTesting(false)
-            .overlay(alignment: .bottomLeading) {
-                EpisodeWatchStatePill(
-                    item: item,
-                    showsRuntimeWhenIdle: true,
-                    showsWatched: false,
-                    showsBackground: false,
-                    barWidth: 80,
-                    barHeight: 6
-                )
-                .font(.system(size: 24, weight: .semibold))
-                .padding(18)
+            .overlay(alignment: .bottom) {
+                HStack(alignment: .center, spacing: metrics.resumeChipInset * 0.5) {
+                    if item.cardRuntimeText != nil {
+                        EpisodeWatchStatePill(
+                            item: item,
+                            showsRuntimeWhenIdle: true,
+                            showsWatched: false,
+                            showsBackground: false,
+                            barWidth: metrics.resumeChipBarWidth,
+                            barHeight: metrics.resumeChipBarHeight
+                        )
+                        .font(.system(size: metrics.resumeChipFontSize, weight: .semibold))
+                    }
+                    // Keeps the download badge pinned trailing whether or not the
+                    // pill is present, so it never drifts to the leading edge.
+                    Spacer(minLength: metrics.resumeChipInset * 0.5)
+                    if let downloadState {
+                        MediaDownloadBadge(
+                            state: downloadState,
+                            size: metrics.resumeChipAccessorySize
+                        )
+                    }
+                }
+                .padding(metrics.resumeChipInset)
             }
         }
     }

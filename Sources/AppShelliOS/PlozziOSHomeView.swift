@@ -3,6 +3,7 @@ import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureHomeCore
+import MediaDownloads
 import SwiftUI
 import UIKit
 
@@ -1430,6 +1431,7 @@ private struct PlozziOSHomeMediaCard: View {
     let item: MediaItem
     let isLandscape: Bool
     let provider: (any MediaProvider)?
+    @State private var downloadRecord: DownloadedMediaRecord?
 
     var body: some View {
         let detailItem = PlaybackSourceSelection.bestPlayItem(
@@ -1461,8 +1463,27 @@ private struct PlozziOSHomeMediaCard: View {
     private var card: some View {
         PlozziOSPosterCard(
             item: item,
-            style: isLandscape ? .landscape : .poster
+            style: isLandscape ? .landscape : .poster,
+            // Mirrors tvOS, which shows the chip on landscape rows
+            // (`playsOnSelect: section.style == .landscape`). iOS cards open a
+            // detail page rather than playing on tap, so the chip is requested
+            // explicitly instead of riding `playsOnSelect`.
+            showsResumeChip: isLandscape,
+            downloadState: liveDownloadRecord?.badgeState
         )
+        .task(id: "\(item.id)|\(item.selectedVersionID ?? "")") {
+            downloadRecord = await appModel.downloads.record(forSelectedVersionOf: item)
+        }
+    }
+
+    /// Re-read from the live registry so an in-flight transfer's progress updates,
+    /// falling back to the value the task fetched. Same pattern the episode rows
+    /// on the detail page use.
+    private var liveDownloadRecord: DownloadedMediaRecord? {
+        guard let downloadRecord else { return nil }
+        return appModel.downloads.records.first {
+            $0.identityKey == downloadRecord.identityKey
+        } ?? downloadRecord
     }
 }
 

@@ -25,6 +25,22 @@ public enum PlaybackSourceSelection {
         for ref in identitySources(item) where seen.insert(ref.id).inserted {
             unioned.append(ref)
         }
+        // Enforce the cross-kind boundary before anything can be selected. The
+        // identity index matches on title/provider ids, so a show and its
+        // episodes can resolve to each other's refs — and `selectingSource`
+        // rewrites `id` while KEEPING `kind`, which is how an item ends up
+        // labelled `episode` while carrying the series' ratingKey. Playback then
+        // asks the provider for a container id and gets notFound (Plex) or a 500
+        // (Jellyfin), surfacing as "Can't play this right now" for a title the
+        // user owns. `MediaItemMerger` already applies this same filter; the
+        // playback path has to as well, since it unions in fresh identity refs.
+        unioned = MediaSourceRef.retainingKindCompatible(
+            unioned,
+            itemKind: item.kind,
+            // The item's own physical identity, in the merger's `account:item`
+            // ref-id form, so a legacy untyped self-ref is still trusted.
+            selfIDs: Set([item.sourceAccountID.map { "\($0):\(item.id)" }].compactMap { $0 })
+        )
 
         if let guidTail = item.providerIDs["PlexGuid"]?
             .split(separator: "/").last.map(String.init) {

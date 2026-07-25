@@ -509,8 +509,12 @@ public final class PlayerViewModel {
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
         // navigation transition. `load()` (from the view's `.task`) adopts this
         // task; `stop()` cancels it on an early Back.
+        // `itemKind` is worth its width: a mismatch between it and `item` (an
+        // "episode" carrying a series id) is unplayable, and is invisible from
+        // the id alone.
         HandoffDiagnostics.emit(
-            "viewModel INIT item=\(itemID) provider=\(provider.kind.rawValue)"
+            "viewModel INIT item=\(itemID) provider=\(provider.kind.rawValue) "
+                + "itemKind=\(offlineItem?.kind.rawValue ?? "unknown")"
         )
         prefetchTask = Task { @MainActor [weak self] in
             await self?.startPlayback(forceTranscode: false, resumeOverride: nil)

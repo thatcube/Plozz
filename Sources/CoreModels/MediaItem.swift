@@ -619,6 +619,14 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// `sources`/identity are preserved for further switching. A no-op-safe
     /// `versionID` that isn't on the target server is dropped (server default).
     public func selectingSource(_ source: MediaSourceRef, versionID: String? = nil, explicit: Bool = false) -> MediaItem {
+        // Never adopt a ref of a different kind: this rewrites `id` but keeps
+        // `kind`, so retargeting an episode onto (say) its series' ref would
+        // produce an "episode" holding a container id that no provider can play.
+        // A `nil` kind is a legacy ref from a pre-`kind` cache — treated as
+        // untyped and allowed, matching `isKindCompatible`.
+        if let sourceKind = source.kind, sourceKind != kind {
+            return self
+        }
         var copy = self
         copy.id = source.itemID
         copy.sourceAccountID = source.accountID

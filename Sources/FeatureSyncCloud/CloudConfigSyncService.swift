@@ -517,7 +517,13 @@ public actor CloudConfigSyncService {
         let key = "com.plozz.cloudSync.lastInventoryReconcile.\(config.containerIdentifier)"
         let last = UserDefaults.standard.double(forKey: key)
         let now = Date().timeIntervalSince1970
-        guard last <= 0 || now - last >= Self.inventoryReconcileInterval else { return }
+        guard last <= 0 || now - last >= Self.inventoryReconcileInterval else {
+            // Say so rather than returning silently: otherwise "throttled" and
+            // "never wired up" look identical in a device log.
+            let mins = Int((Self.inventoryReconcileInterval - (now - last)) / 60)
+            PlozzLog.sync.info("CloudSync: inventory check throttled (next in ~\(mins)m)")
+            return
+        }
         await reconcileServerInventory()
         UserDefaults.standard.set(now, forKey: key)
     }
@@ -561,13 +567,15 @@ public actor CloudConfigSyncService {
         let missingLocally = serverNames.subtracting(localNames)
         let onlyLocal = localNames.subtracting(serverNames)
 
-        guard !missingLocally.isEmpty else {
-            if !onlyLocal.isEmpty {
-                // Expected while uploads/deletes are still in flight; never acted on.
-                PlozzLog.sync.info("CloudSync: inventory OK — \(serverNames.count) on server, \(onlyLocal.count) local-only (pending upload)")
-            }
-            return
-        }
+        // Always report the outcome, including the clean one. A check that only
+        // speaks up when it finds something is indistinguishable from a check that
+        // never ran — which is precisely how the original divergence stayed hidden.
+        // `onlyLocal` is expected while an upload is in flight; it is never acted on.
+        PlozzLog.sync.info(
+            "CloudSync: inventory — server=\(serverNames.count) local=\(localNames.count) "
+                + "missingLocally=\(missingLocally.count) localOnly=\(onlyLocal.count)"
+        )
+        guard !missingLocally.isEmpty else { return }
 
         PlozzLog.sync.error("CloudSync: inventory GAP — \(missingLocally.count) record(s) on the server are missing locally; repairing")
         let recovered = await fetchRecords(Array(missingLocally))

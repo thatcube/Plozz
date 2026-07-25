@@ -126,26 +126,83 @@ struct PlozziOSHomeHeroSkeleton: View {
                 )
             )
             .overlay {
-                VStack(alignment: isCompact ? .center : .leading, spacing: 12) {
-                    // Metadata line (year · rating · runtime).
-                    capsule(width: 190, height: 22)
-                    // Overview lines.
-                    capsule(width: isCompact ? 300 : 420, height: 16)
-                    capsule(width: isCompact ? 220 : 320, height: 16)
-                    // Action row: Play pill + icon buttons, `controlSize(.large)`.
-                    HStack(spacing: 12) {
-                        capsule(width: 150, height: 50)
-                        capsule(width: 50, height: 50)
-                        capsule(width: 50, height: 50)
-                        capsule(width: 50, height: 50)
-                    }
-                }
-                // The SAME placement the real foreground uses — not a copy of its
-                // numbers. See `PlozziOSHeroForegroundPlacement`.
-                .plozziOSHeroForegroundPlacement(style: style)
+                column
+                    // The SAME placement the real foreground uses — not a copy of
+                    // its numbers. See `PlozziOSHeroForegroundPlacement`.
+                    .plozziOSHeroForegroundPlacement(style: style)
             }
             .shimmering()
             .accessibilityHidden(true)
+    }
+
+    /// Mirrors `PlozziOSHomeHeroForeground`: the metadata block, then the action
+    /// row, in a 12pt VStack.
+    private var column: some View {
+        VStack(alignment: isCompact ? .center : .leading, spacing: 12) {
+            metadataBlock
+            actionRow
+        }
+    }
+
+    /// Mirrors `PlozziOSHeroMetadata`'s 9pt VStack: title/logo, genres line,
+    /// overview.
+    private var metadataBlock: some View {
+        VStack(alignment: isCompact ? .center : .leading, spacing: 9) {
+            // Title block — the real hero shows a logo capped at this height, or
+            // a two-line .largeTitle. Reserve the same box.
+            bar(width: isCompact ? 260 : 380, height: isCompact ? 95 : 130)
+            // Genres — .subheadline, one line.
+            textBar(font: .subheadline, width: isCompact ? 220 : 300)
+            // Overview — .subheadline, up to three lines.
+            textBar(font: .subheadline, width: isCompact ? 300 : 460)
+            textBar(font: .subheadline, width: isCompact ? 280 : 430)
+            textBar(font: .subheadline, width: isCompact ? 200 : 320)
+        }
+    }
+
+    /// Mirrors the action row: pills whose height is driven by the same
+    /// `.headline` label plus `PlozziOSHeroActionButtonStyle`'s 12pt vertical
+    /// padding and 48pt floor, so the row grows with Dynamic Type exactly as the
+    /// real buttons do.
+    private var actionRow: some View {
+        HStack(spacing: 12) {
+            pill(width: 150)
+            pill(width: 48)
+            pill(width: 48)
+            pill(width: 48)
+        }
+    }
+
+    /// A bar sized to a real font's line height, so Dynamic Type scales the
+    /// placeholder exactly like the text it stands in for. Fixed point heights
+    /// were what made the content jump when the real hero replaced it — they
+    /// only matched at the smallest text size.
+    private func textBar(font: Font, width: CGFloat) -> some View {
+        Text(" ")
+            .font(font)
+            .hidden()
+            .frame(width: width)
+            .background {
+                Capsule(style: .continuous).fill(palette.fill)
+            }
+    }
+
+    private func pill(width: CGFloat) -> some View {
+        Text(" ")
+            .font(.headline.weight(.semibold))
+            .hidden()
+            .padding(.vertical, 12)
+            .frame(width: width)
+            .frame(minHeight: 48)
+            .background {
+                Capsule(style: .continuous).fill(palette.fill)
+            }
+    }
+
+    private func bar(width: CGFloat, height: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(palette.fill)
+            .frame(width: width, height: height)
     }
 
     private func capsule(width: CGFloat, height: CGFloat) -> some View {

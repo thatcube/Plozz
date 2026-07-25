@@ -293,10 +293,21 @@ public struct PlozzMetrics: Equatable, Sendable {
         // unchanged, so standard density on both platforms is byte-identical, and
         // it grows on the `.subheadline` curve from there — the same curve the
         // title already follows.
-        #if canImport(UIKit)
+        #if os(tvOS)
         let baseTitleFontSize = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
+        // tvOS keeps its own tuned constant (20 against a 29pt title), scaled on
+        // the same curve as the title so it tracks the reader's text size.
         let baseSubtitleFontSize = UIFontMetrics(forTextStyle: .subheadline)
             .scaledValue(for: PlozzTheme.Metrics.cardSubtitleFontSize)
+        #elseif canImport(UIKit)
+        let baseTitleFontSize = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
+        // iOS/iPadOS: one step BELOW the title. `cardSubtitleFontSize` is a tvOS
+        // value (20 reads as secondary against a 29pt title) and applying it here
+        // made the metadata line 20pt against a 15pt title — the caption was
+        // literally larger than the title it described. `.footnote` sits directly
+        // under `.subheadline`, restoring the hierarchy, and being a real text
+        // style it tracks Dynamic Type natively.
+        let baseSubtitleFontSize = UIFont.preferredFont(forTextStyle: .footnote).pointSize
         #else
         let baseTitleFontSize = PlozzTheme.Metrics.cardTitleFontSizeFallback
         let baseSubtitleFontSize = PlozzTheme.Metrics.cardSubtitleFontSize

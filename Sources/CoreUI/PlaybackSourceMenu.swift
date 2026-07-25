@@ -151,7 +151,12 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                     gap: gap,
                     margin: margin
                 )
-                withAnimation(.easeOut(duration: 0.18)) { appeared = true }
+                // Let the panel measure and snap to its natural size before it
+                // becomes visible, so the fade-in never shows the placeholder
+                // size (or the position derived from it).
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.18)) { appeared = true }
+                }
             }
             .onDisappear {
                 appeared = false
@@ -276,6 +281,9 @@ private struct PlaybackSourceMenuPanel: View {
     #if !os(tvOS)
     @State private var navDirection: Edge = .trailing
     @State private var contentHeight: CGFloat = 220
+    /// False until the panel has measured itself once in this presentation, so
+    /// the initial size correction can snap instead of animating.
+    @State private var hasMeasured = false
     #endif
     var body: some View {
         panelContent
@@ -301,9 +309,24 @@ private struct PlaybackSourceMenuPanel: View {
                       measured > 0 else { return }
                 let total = min(measured, maxHeight)
                 guard abs(total - contentHeight) > 0.5 else { return }
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    contentHeight = total
-                    measuredHeight?.wrappedValue = total
+                if hasMeasured {
+                    // A page changed → morph the container.
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        contentHeight = total
+                        measuredHeight?.wrappedValue = total
+                    }
+                } else {
+                    // First measurement of this presentation: snap to the natural
+                    // size. The panel starts at a placeholder height, so animating
+                    // this correction makes it visibly fly in from the wrong size
+                    // and (when anchored above the trigger) the wrong place.
+                    hasMeasured = true
+                    var snap = Transaction()
+                    snap.disablesAnimations = true
+                    withTransaction(snap) {
+                        contentHeight = total
+                        measuredHeight?.wrappedValue = total
+                    }
                 }
             }
             .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)

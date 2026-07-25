@@ -154,7 +154,11 @@ final class ShareScanLifecycleTests: XCTestCase {
         }
 
         func shutdown() async { controller.noteShutdown() }
-    }
+            /// Always healthy: this fake models a stateless session, so the registry
+        /// reuses it while idle. Health-driven eviction is covered by
+        /// `ResolverStaleSessionTests`.
+        func isHealthy() async -> Bool { true }
+}
 
     // MARK: - Harness
 

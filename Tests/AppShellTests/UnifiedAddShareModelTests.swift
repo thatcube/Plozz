@@ -5,6 +5,7 @@ import ProviderShare
 import MediaTransportSFTP
 import MediaTransportFTP
 import MediaTransportNFS
+@testable import FeatureShareOnboarding
 @testable import AppShell
 
 @MainActor

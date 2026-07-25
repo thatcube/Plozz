@@ -81,7 +81,12 @@ public struct SFTPMediaTransportAdapter: MediaTransportAdapter, Sendable {
             credentialRevision: key.credentialRevision,
             revalidationInterval: revalidationInterval
         )
-        return SFTPMediaTransportSession(key: key, fileSystem: fileSystem, backend: backend)
+        return SFTPMediaTransportSession(
+            key: key,
+            fileSystem: fileSystem,
+            backend: backend,
+            rootPath: resolvedRoot
+        )
     }
 }
 
@@ -108,19 +113,37 @@ final class SFTPMediaTransportSession: MediaTransportSession, @unchecked Sendabl
     let fileSystem: any MediaTransportFileSystem
 
     private let backend: any SFTPTransportBackend
+    private let rootPath: String
 
     init(
         key: MediaTransportSessionKey,
         fileSystem: any MediaTransportFileSystem,
-        backend: any SFTPTransportBackend
+        backend: any SFTPTransportBackend,
+        rootPath: String
     ) {
         self.key = key
         self.fileSystem = fileSystem
         self.backend = backend
+        self.rootPath = rootPath
     }
 
     func shutdown() async {
         await backend.shutdown()
+    }
+
+    /// A root `stat` over the live SSH channel. SFTP is stateful — the sftp
+    /// subsystem, its negotiated version and every open file handle live on one
+    /// authenticated SSH connection, and `connect` refuses to run twice — so a
+    /// dropped socket can NOT be healed in place the way NFS's stateless handles
+    /// allow. Reporting the death here is the recovery: the registry evicts this
+    /// session and the adapter builds a fresh, re-authenticated one.
+    func isHealthy() async -> Bool {
+        do {
+            _ = try await backend.stat(path: rootPath)
+            return true
+        } catch {
+            return false
+        }
     }
 }
 

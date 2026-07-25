@@ -123,6 +123,14 @@ final class WebDAVMediaTransportSession: MediaTransportSession, @unchecked Senda
         // their own registries.
         await registry.drainAll()
     }
+
+    /// Always healthy: there is no persistent socket to go stale. WebDAV is
+    /// stateless HTTP and every request is issued through URLSession, which owns
+    /// its own connection pool and transparently opens a new socket when a
+    /// pooled one has been closed (by the server, a NAT, or an app suspend).
+    /// Authentication is per-request, so nothing survives a reconnect that would
+    /// need re-establishing.
+    func isHealthy() async -> Bool { true }
 }
 
 final class WebDAVMediaTransportFileSystem: MediaTransportFileSystem, @unchecked Sendable {

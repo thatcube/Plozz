@@ -131,7 +131,8 @@ public struct SMBMediaTransportAdapter: MediaTransportAdapter, Sendable {
         return SMBMediaTransportSession(
             key: key,
             fileSystem: fileSystem,
-            backend: backend
+            backend: backend,
+            rootPath: target.rootPath
         )
     }
 }
@@ -199,19 +200,37 @@ private final class SMBMediaTransportSession: MediaTransportSession, @unchecked 
     let fileSystem: any MediaTransportFileSystem
 
     private let backend: any SMBTransportBackend
+    private let rootPath: String
 
     init(
         key: MediaTransportSessionKey,
         fileSystem: any MediaTransportFileSystem,
-        backend: any SMBTransportBackend
+        backend: any SMBTransportBackend,
+        rootPath: String
     ) {
         self.key = key
         self.fileSystem = fileSystem
         self.backend = backend
+        self.rootPath = rootPath
     }
 
     func shutdown() async {
         await backend.shutdown()
+    }
+
+    /// A root `stat` over the live SMB session. SMB is stateful — session id,
+    /// tree id, signing keys and file ids are all bound to the TCP session, and
+    /// `SMBClientBackend.connect` refuses to run twice — so a dropped socket can
+    /// NOT be healed in place the way NFS's stateless handles allow. Reporting
+    /// the death here is the recovery: the registry evicts this session and the
+    /// adapter builds a fresh, fully re-authenticated one.
+    func isHealthy() async -> Bool {
+        do {
+            _ = try await backend.stat(path: rootPath)
+            return true
+        } catch {
+            return false
+        }
     }
 }
 

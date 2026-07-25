@@ -673,7 +673,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AppShellTests",
-            dependencies: ["AppRuntime", "AppShell", "CoreModels", "FeatureHomeCore", "MediaTransportSFTP", "MediaTransportFTP", "MediaTransportNFS", "MediaTransportWebDAV"]
+            dependencies: ["AppRuntime", "AppShell", "CoreModels", "FeatureHomeCore", "FeatureShareOnboarding", "MediaTransportSFTP", "MediaTransportFTP", "MediaTransportNFS", "MediaTransportWebDAV"]
         ),
         .testTarget(
             name: "CoreUITests",

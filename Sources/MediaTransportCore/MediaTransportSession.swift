@@ -101,25 +101,25 @@ public protocol MediaTransportConnection: AnyObject, Sendable {
     ///
     /// The resolver registry caches one session per key and reuses it while it
     /// sits idle (no active leases). For stateful-connection transports
-    /// (SMB / SFTP / NFS) a server or NAT idle-timeout can silently drop that
-    /// connection during a long pause (e.g. a paused movie); the next lease
-    /// would otherwise hand back a DEAD session that never reconnects and whose
-    /// socket/event-loop leaks until `retire`. Such transports override this to
-    /// report their observed connection state — ideally a cheap cached liveness
-    /// flag updated by their connection-closed handler — so the registry can
-    /// evict + reconnect on the next lease.
+    /// (SMB / SFTP / FTP / NFS) a server or NAT idle-timeout — or, on iOS, the
+    /// system tearing down sockets when the app suspends — can silently drop
+    /// that connection. The next lease would otherwise hand back a DEAD session
+    /// that never reconnects and whose socket/event-loop leaks until `retire`.
+    /// Such transports report their observed connection state here so the
+    /// registry can evict + reconnect on the next lease.
     ///
-    /// Stateless transports (WebDAV/HTTP) reconnect per request and keep the
-    /// default `true`. The registry only calls this on an IDLE session (no
-    /// active leases), so an in-use session is never torn down under its
-    /// consumer.
+    /// Stateless transports (WebDAV/HTTP) reconnect per request and answer
+    /// `true`. The registry only calls this on an IDLE session (no active
+    /// leases), so an in-use session is never torn down under its consumer —
+    /// meaning this is a safety net, NOT a substitute for a transport that can
+    /// recover its own connection mid-use.
+    ///
+    /// Deliberately has NO default implementation. It used to default to `true`,
+    /// which read as "implemented" while silently disabling the registry's
+    /// eviction path for every transport that forgot to override it — which was
+    /// all of them, including the three this comment already claimed did. A
+    /// required witness makes each transport state its answer at compile time.
     func isHealthy() async -> Bool
-}
-
-public extension MediaTransportConnection {
-    /// Default: assume healthy. Stateless transports keep this; stateful ones
-    /// override to report a dropped connection so the registry evicts + reconnects.
-    func isHealthy() async -> Bool { true }
 }
 
 public protocol MediaTransportSession: MediaTransportConnection {

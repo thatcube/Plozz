@@ -772,6 +772,10 @@ private final class LocalMetaFakeSession: MediaTransportSession, @unchecked Send
     }
 
     func shutdown() async {}
+    /// Always healthy: this fake models a stateless session, so the registry
+    /// reuses it while idle. Health-driven eviction is covered by
+    /// `ResolverStaleSessionTests`.
+    func isHealthy() async -> Bool { true }
 }
 
 private final class LocalMetaFakeFileSystem: MediaTransportFileSystem, @unchecked Sendable {

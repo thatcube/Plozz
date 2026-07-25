@@ -42,7 +42,11 @@ final class ShareProviderWatchTests: XCTestCase {
         }
 
         func shutdown() async {}
-    }
+            /// Always healthy: this fake models a stateless session, so the registry
+        /// reuses it while idle. Health-driven eviction is covered by
+        /// `ResolverStaleSessionTests`.
+        func isHealthy() async -> Bool { true }
+}
 
     private struct LocatorFakeFileSystem: MediaTransportFileSystem {
         func validate() async throws {}

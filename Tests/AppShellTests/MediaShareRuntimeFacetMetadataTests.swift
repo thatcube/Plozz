@@ -3,6 +3,8 @@ import CoreModels
 import FeatureAuth
 import MediaTransportCore
 import MetadataKit
+@testable import AppRuntime
+@testable import FeatureShareOnboarding
 @testable import AppShell
 
 /// Locks the Step 6 facet forwarding: the metadata settings surface delegates

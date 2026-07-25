@@ -1,6 +1,7 @@
 import XCTest
 import CoreModels
 import FeatureAuth
+@testable import FeatureShareOnboarding
 @testable import AppShell
 
 /// Drift guard: the unified onboarding descriptors (`MediaShareTransportCatalog`)

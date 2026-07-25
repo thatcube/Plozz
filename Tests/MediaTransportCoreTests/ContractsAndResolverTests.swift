@@ -106,6 +106,10 @@ private final class RacingSession: MediaTransportSession, @unchecked Sendable {
         lock.withLock { shutdownCountStorage += 1 }
         await shutdownGate?.wait()
     }
+    /// Always healthy: this fake models a stateless session, so the registry
+    /// reuses it while idle. Health-driven eviction is covered by
+    /// `ResolverStaleSessionTests`.
+    func isHealthy() async -> Bool { true }
 }
 
 private final class RacingAdapter: MediaTransportAdapter, @unchecked Sendable {
@@ -187,6 +191,10 @@ private final class ResolvedSourceSession: MediaTransportSession, @unchecked Sen
     func shutdown() async {
         lock.withLock { shutdownCountStorage += 1 }
     }
+    /// Always healthy: this fake models a stateless session, so the registry
+    /// reuses it while idle. Health-driven eviction is covered by
+    /// `ResolverStaleSessionTests`.
+    func isHealthy() async -> Bool { true }
 }
 
 final class ContractsAndResolverTests: XCTestCase {

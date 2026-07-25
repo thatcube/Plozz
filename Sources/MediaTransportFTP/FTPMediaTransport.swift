@@ -91,7 +91,12 @@ public struct FTPMediaTransportAdapter: MediaTransportAdapter, Sendable {
             accountID: key.accountID,
             credentialRevision: key.credentialRevision
         )
-        return FTPMediaTransportSession(key: key, fileSystem: fileSystem, primary: primary)
+        return FTPMediaTransportSession(
+            key: key,
+            fileSystem: fileSystem,
+            primary: primary,
+            rootPath: target.rootPath
+        )
     }
 }
 
@@ -100,21 +105,43 @@ final class FTPMediaTransportSession: MediaTransportSession, @unchecked Sendable
     let fileSystem: any MediaTransportFileSystem
 
     private let primary: any FTPBackend
+    private let rootPath: String
 
     init(
         key: MediaTransportSessionKey,
         fileSystem: any MediaTransportFileSystem,
-        primary: any FTPBackend
+        primary: any FTPBackend,
+        rootPath: String
     ) {
         self.key = key
         self.fileSystem = fileSystem
         self.primary = primary
+        self.rootPath = rootPath
     }
 
     func shutdown() async {
         // Closes the primary browse/scan control channel. Per-cursor playback
         // backends are owned + drained by their source leases independently.
         await primary.shutdown()
+    }
+
+    /// A root `stat` over the primary control channel. FTP is stateful — login,
+    /// `TYPE I`, UTF-8 and the working directory all live on that one control
+    /// connection, and `connect` refuses to run twice — so a dropped socket can
+    /// NOT be healed in place the way NFS's stateless handles allow. Reporting
+    /// the death here is the recovery: the registry evicts this session and the
+    /// adapter builds a fresh, re-authenticated one.
+    ///
+    /// Only the primary is probed. Per-cursor playback backends are owned and
+    /// drained by their own source leases, so a session with active leases is
+    /// never probed at all (see `MediaTransportConnection.isHealthy`).
+    func isHealthy() async -> Bool {
+        do {
+            _ = try await primary.stat(path: rootPath)
+            return true
+        } catch {
+            return false
+        }
     }
 }
 

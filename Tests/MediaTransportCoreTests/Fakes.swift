@@ -118,6 +118,10 @@ final class FakeSession: MediaTransportSession, @unchecked Sendable {
     func shutdown() async {
         lock.withLock { shutdownCountStorage += 1 }
     }
+    /// Always healthy: this fake models a stateless session, so the registry
+    /// reuses it while idle. Health-driven eviction is covered by
+    /// `ResolverStaleSessionTests`.
+    func isHealthy() async -> Bool { true }
 }
 
 final class FakeAdapter: MediaTransportAdapter, @unchecked Sendable {

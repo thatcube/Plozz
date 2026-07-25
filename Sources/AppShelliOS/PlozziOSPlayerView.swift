@@ -19,13 +19,6 @@ struct PlozziOSPlayerView: View {
     @State private var handoffTask: Task<Void, Never>?
     @State private var isPresented = false
     /// See the bisect note in `body`.
-    /// 0 = off, 1 = drop the shared PlayerView, 2 = also drop the controls
-    /// overlay, 3 = additionally read NO observed property of the model (level 2
-    /// still evaluates `viewModel.phase`, which registers SwiftUI observation
-    /// tracking; a tracking registration that never fires again retains its
-    /// object). Each level eliminates one more consumer.
-    private static let leakBisect =
-        Int(ProcessInfo.processInfo.environment["PLZ_LEAK_BISECT"] ?? "") ?? 0
 
     let request: PlozziOSPlaybackRequest
     let provider: any MediaProvider
@@ -35,21 +28,13 @@ struct PlozziOSPlayerView: View {
             Color.black.ignoresSafeArea()
 
             if let viewModel {
-                // Diagnostic bisect (launch with PLZ_LEAK_BISECT=1): render the
-                // player WITHOUT the shared PlayerView. If the live-model count
-                // stops climbing in that mode, PlayerView's own non-optional
-                // @State is what keeps every dismissed player alive; if it still
-                // climbs, the owner is elsewhere. Off by default, so a normal
-                // launch is completely unaffected.
-                if Self.leakBisect < 1 {
                 PlayerView(
                     viewModel: viewModel,
                     showDiagnostics: appModel.settings.diagnostics.settings.isEnabled,
                     showsSharedControls: false
                 )
                 .id(playerIdentity)
-                }
-                if Self.leakBisect < 3, viewModel.phase == .ready, Self.leakBisect < 2 {
+                if viewModel.phase == .ready {
                     PlozziOSPlayerControlsOverlay(
                         viewModel: viewModel,
                         onClose: { dismiss() }
@@ -93,9 +78,7 @@ struct PlozziOSPlayerView: View {
                 startPosition: request.startPosition
             )
         }
-        // Level 4 also drops this observed read, isolating whether the episode
-        // hand-off observation is what keeps the model alive.
-        .onChange(of: Self.leakBisect >= 4 ? nil : viewModel?.pendingNextEpisode?.id) { _, nextID in
+        .onChange(of: viewModel?.pendingNextEpisode?.id) { _, nextID in
             guard nextID != nil,
                   let outgoing = viewModel,
                   let next = outgoing.pendingNextEpisode,
@@ -203,8 +186,17 @@ struct PlozziOSPlayerView: View {
             },
             adoptedResolved: adoptedResolved
         )
-        viewModel.onSubtitleStyleChanged = {
-            appModel.settings.subtitleStyle.style = $0
+        // Capture the settings store itself, NOT `appModel`. Reading `appModel`
+        // inside the closure would capture `self` — the view struct — and this
+        // view holds the player in `@State`, so the model would own a closure
+        // that owns the view that owns the model. That cycle is unbreakable, and
+        // it leaked every player ever opened (confirmed in the memory graph:
+        // PlayerViewModel → _onSubtitleStyleChanged.context →
+        // SwiftUI.StoredLocation<PlayerViewModel> → PlayerViewModel).
+        // The other callbacks above already hoist `model` for this reason.
+        let settings = appModel.settings
+        viewModel.onSubtitleStyleChanged = { style in
+            settings.subtitleStyle.style = style
         }
         return viewModel
     }

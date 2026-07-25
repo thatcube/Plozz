@@ -1,4 +1,4 @@
-# Performance Debugging Playbook (tvOS)
+# Performance Debugging Playbook (tvOS + iOS/iPadOS)
 
 A field guide for diagnosing **slowness, freezes, blank/no-artwork hangs, memory
 crashes, UI jank, and focus-navigation lag** in Plozz on a real Apple TV. Written
@@ -18,7 +18,14 @@ storm) that this process actually solved.
 Reach for this document the moment anyone reports — or you observe — any of:
 **"laggy", "janky", "stutters", "slow", "freezes", "hangs", "navigation lag",
 "focus feels heavy", "blank/no artwork", "memory crash", "gets killed", "fan
-spins", "drops frames".** The drill is always the same: **reproduce on the
+spins", "drops frames"** — or any **live-instance count that climbs and never
+falls** (the diagnostics overlay's `Players N · AVPlayer M`), which is a retain
+cycle: jump straight to §10.
+
+Most of this playbook was written against the Apple TV, and §0 still holds there
+(the TV is the honest signal for *performance*). But it applies to **iPhone and
+iPad too** — the July 2026 leak in §10 was iOS-only, and treating this as a
+tvOS-only document is exactly why it went unread for two hours. The drill is always the same: **reproduce on the
 device → measure with the watchdog and/or `xctrace` → aggregate the trace →
 name the subsystem → fix at the source → re-measure.** Do not change code on a
 hunch before a measurement names the culprit.
@@ -136,7 +143,12 @@ Read it like this — it names a whole class of bug in seconds, no trace needed:
   `Players 1 · AVPlayer 1` for an AVPlayer direct-play or a Plozzigen session
   (Plozzigen feeds a local AVPlayer, so it also shows on the AVPlayer count).
 - **Counts climb and never fall** as you leave/re-enter the player → a true
-  **leak** (a retain cycle). Capture **Leaks**/**Allocations** to name the retainer.
+  **leak** (a retain cycle). **Go straight to Xcode's Memory Graph Debugger —
+  it names the retainer in one click. Do not start by reading code, and do not
+  start with `xctrace`:** the Allocations/Leaks *detail* tables are not
+  exportable from the command line, so a CLI trace cannot tell you WHO retains
+  the object (it only confirms the leak you already know about). See
+  §10 for the procedure and the SwiftUI bug class it catches.
 - **Counts climb, then "correct down," then climb again** → **reachable
   throwaways**, not a leak: something is *constructing* these objects faster than
   ARC reaps them. This is almost always objects built **in a SwiftUI view body**
@@ -524,3 +536,75 @@ pointed straight at view-model construction. The fix was a one-view structural
 change (build the model once, off the render path), echoing §8's theme — most
 "playback/whole-app is slow" bugs are SwiftUI doing work it shouldn't, in the
 wrong place or too often.
+
+---
+
+## 10. Case study: the player view-model retain cycle (July 2026, iOS)
+
+**Symptom.** `Players` climbed by one per player presentation and never fell —
+9 after a few opens. `AVPlayer` stayed at 0 (Plozzigen was driving playback), so
+the engines *were* being released; only the view-models survived. tvOS was
+unaffected.
+
+**How it was found (and how long it wasted).** Roughly two hours went into
+reading code first: every collaborator's `weak var host`, all seven engine
+callbacks, notification observers, display links, the diagnostics sampler, every
+`Task` capture — all correct. Then four rounds of on-device bisecting that
+stripped the player's views one at a time (no `PlayerView`, no controls overlay,
+no observed property reads, no `onChange`) — it still leaked, which proved no
+view was responsible but did not say what was.
+
+**The Memory Graph Debugger named it in one screenshot:**
+
+```
+PlayerViewModel → _onSubtitleStyleChanged.context
+                → SwiftUI.StoredLocation<PlayerViewModel>
+                → PlayerViewModel
+```
+
+**Root cause — a bug class worth memorising.** A closure stored ON a model that
+reads a property of the **view struct** captures `self`. If that view holds the
+model in `@State`, the model owns a closure that owns the view that owns the
+model. Nothing is declared wrong, so no amount of auditing `weak` finds it.
+
+```swift
+// LEAKS: `appModel` is a view property, so this captures the whole view struct,
+// including its @State box holding `viewModel`.
+viewModel.onSubtitleStyleChanged = { appModel.settings.subtitleStyle.style = $0 }
+
+// CORRECT: hoist what the closure needs, so it captures only that.
+let settings = appModel.settings
+viewModel.onSubtitleStyleChanged = { settings.subtitleStyle.style = $0 }
+```
+
+tvOS was immune because `PlayerPresentation` receives that callback as a
+parameter from `MainTabViewSupport` rather than building it from its own state.
+**"Does the other platform leak?" is a high-value early question** — a clean
+platform means the shared code is fine and the shell is at fault.
+
+### The procedure (2 minutes)
+
+1. Xcode → select the **`PlozziOS`** scheme for iPhone/iPad (NOT `Plozz`, which
+   is tvOS — the device shows "mismatched platform" if you forget) → Run.
+2. Reproduce: open and close the player 2–3 times.
+3. Debug bar → **Memory Graph** icon (three connected nodes).
+4. Filter the left panel for the leaked type (e.g. `PlayerViewModel`).
+5. Select a leaked instance: the graph draws every object still pointing at it,
+   **with the owning property named on each edge**. That label is the bug.
+
+### Supporting instrumentation (in the tree)
+
+`PlayerViewModel` emits `vm LIFECYCLE init/deinit id=… live=N` through
+`HandoffDiagnostics`. Matching ids prove whether `deinit` ever runs — the counter
+alone doesn't say which instance survived. Pull the journal off-device without
+Xcode (it survives relaunch):
+
+```bash
+xcrun devicectl device copy from --device <UDID> \
+  --domain-type appDataContainer --domain-identifier com.thatcube.Plozz \
+  --source Library/Caches/Plozz/playback-trace.log --destination /tmp/trace.log
+grep "vm LIFECYCLE" /tmp/trace.log     # healthy: every init has a deinit, ends live=0
+```
+
+`CFGetRetainCount(self)` at teardown tells you HOW MANY owners remain (one
+stubborn owner vs a race) but never WHO. Only the memory graph answers who.

@@ -164,6 +164,7 @@ public actor CloudConfigSyncService {
         // a fresh device whose fetch failed simply no-ops instead of clobbering.
         await publishLocalChanges()
         reportRecordCount()
+        await reconcileServerInventoryIfDue()
     }
 
     /// One-time: delete the dead V1/V2 CloudKit zones so their stale records stop being
@@ -504,6 +505,100 @@ public actor CloudConfigSyncService {
             }
         }
         return (confirmed, present)
+    }
+
+    // MARK: Convergence check
+
+    /// Minimum spacing between inventory reconciles. The check is cheap (record ids
+    /// only) but it's a safety net, not a sync path — once a launch is plenty.
+    private static let inventoryReconcileInterval: TimeInterval = 6 * 60 * 60
+
+    private func reconcileServerInventoryIfDue() async {
+        let key = "com.plozz.cloudSync.lastInventoryReconcile.\(config.containerIdentifier)"
+        let last = UserDefaults.standard.double(forKey: key)
+        let now = Date().timeIntervalSince1970
+        guard last <= 0 || now - last >= Self.inventoryReconcileInterval else { return }
+        await reconcileServerInventory()
+        UserDefaults.standard.set(now, forKey: key)
+    }
+
+    /// Detect and repair a device that is missing records the server has.
+    ///
+    /// The incremental change token can leave a device permanently behind: once it
+    /// advances past a record the device never ledgered, nothing re-delivers it, and
+    /// the gap is invisible — you'd only notice by comparing item counts across two
+    /// devices by eye. This compares the server's full inventory against the ledger
+    /// and pulls back anything absent.
+    ///
+    /// STRICTLY ADDITIVE. It never deletes: a record present locally but not on the
+    /// server is only logged. Inferring deletion from absence is precisely the bug
+    /// that destroyed records here (see `endFullResync`), and a safety net must not
+    /// be able to cause the harm it exists to catch.
+    public func reconcileServerInventory() async {
+        guard config.isEnabled(), await accountIsAvailable() else { return }
+        let database = container.privateCloudDatabase
+        var serverNames: Set<SyncRecordID> = []
+        var token: CKServerChangeToken?
+        do {
+            // A throwaway token walk (`since: nil`, ids only) — authoritative, and it
+            // does NOT disturb the sync engine's own token.
+            while true {
+                let batch = try await database.recordZoneChanges(
+                    inZoneWith: CloudSyncSchema.zoneID, since: token, desiredKeys: []
+                )
+                for (id, result) in batch.modificationResultsByID {
+                    if case .success = result { serverNames.insert(id.recordName) }
+                }
+                token = batch.changeToken
+                if !batch.moreComing { break }
+            }
+        } catch {
+            PlozzLog.sync.info("CloudSync: inventory check skipped — \(Self.describe(error))")
+            return
+        }
+
+        let localNames = Set(ledger.entries.keys)
+        let missingLocally = serverNames.subtracting(localNames)
+        let onlyLocal = localNames.subtracting(serverNames)
+
+        guard !missingLocally.isEmpty else {
+            if !onlyLocal.isEmpty {
+                // Expected while uploads/deletes are still in flight; never acted on.
+                PlozzLog.sync.info("CloudSync: inventory OK — \(serverNames.count) on server, \(onlyLocal.count) local-only (pending upload)")
+            }
+            return
+        }
+
+        PlozzLog.sync.error("CloudSync: inventory GAP — \(missingLocally.count) record(s) on the server are missing locally; repairing")
+        let recovered = await fetchRecords(Array(missingLocally))
+        guard !recovered.isEmpty else {
+            setDiagnostic("inventory gap of \(missingLocally.count) record(s) — could not fetch them")
+            return
+        }
+        let changes = ledger.applyFetched(saved: recovered, deleted: [], now: nowMillis())
+        persist(); reportRecordCount()
+        if !changes.isEmpty { await config.applyRecords(changes) }
+        PlozzLog.sync.info("CloudSync: inventory repaired — recovered \(recovered.count) record(s)")
+    }
+
+    /// Fetch specific records by name, skipping any that fail. Chunked for CloudKit's
+    /// per-request limits.
+    private func fetchRecords(_ names: [SyncRecordID]) async -> [SyncRemoteRecord] {
+        var out: [SyncRemoteRecord] = []
+        let database = container.privateCloudDatabase
+        for start in stride(from: 0, to: names.count, by: 200) {
+            let chunk = Array(names[start..<min(start + 200, names.count)])
+            let ids = chunk.map { CloudSyncSchema.recordID(forRecordName: $0) }
+            do {
+                for (_, result) in try await database.records(for: ids) {
+                    if case .success(let record) = result,
+                       let decoded = SyncRemoteRecord(ckRecord: record) { out.append(decoded) }
+                }
+            } catch {
+                PlozzLog.sync.info("CloudSync: inventory fetch failed for \(chunk.count) record(s): \(Self.describe(error))")
+            }
+        }
+        return out
     }
 
     private func persist() {

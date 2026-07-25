@@ -100,7 +100,13 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     /// the one and only surface and its height is an ordinary animatable frame.
     private var iosPresentation: some View {
         GeometryReader { proxy in
+            // Lay the menu out inside the SAFE AREA, not the raw screen, so it
+            // can never reach into the status bar / notch or the home indicator.
+            // The trigger frame is captured in global space, so shift it into
+            // this safe-area-relative space before using it.
+            let insets = proxy.safeAreaInsets
             let screen = proxy.size
+            let trigger = triggerFrame.offsetBy(dx: -insets.leading, dy: -insets.top)
             let margin: CGFloat = 16
             let gap: CGFloat = 12
             let width = min(390, screen.width - margin * 2)
@@ -108,14 +114,14 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
             // recomputing it as the panel grows makes a page that no longer fits
             // on the current side jump to another mid-animation.
             let side = placement ?? PlaybackSourceMenuSide.choose(
-                trigger: triggerFrame,
+                trigger: trigger,
                 screen: screen,
                 width: width,
                 gap: gap,
                 margin: margin
             )
             let layout = side.layout(
-                trigger: triggerFrame,
+                trigger: trigger,
                 screen: screen,
                 width: width,
                 gap: gap,
@@ -138,11 +144,10 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                     .opacity(appeared ? 1 : 0)
             }
             .frame(width: screen.width, height: screen.height)
-            .ignoresSafeArea()
             .onAppear {
                 // Lock the side for as long as the menu stays open.
                 placement = PlaybackSourceMenuSide.choose(
-                    trigger: triggerFrame,
+                    trigger: trigger,
                     screen: screen,
                     width: width,
                     gap: gap,
@@ -160,7 +165,6 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                 placement = nil
             }
         }
-        .ignoresSafeArea()
         .presentationBackground(.clear)
     }
     #endif

@@ -34,7 +34,7 @@ public final class ItemDetailViewModel {
     /// Seasons painted from the stale-while-revalidate snapshot. They render
     /// instantly, but the first `loadEpisodes` must still fetch live provider state
     /// so watched/resume changes made since the snapshot are not frozen on revisit.
-    private var snapshotRestoredSeasonIDs: Set<String> = []
+    @ObservationIgnored private var snapshotRestoredSeasonIDs: Set<String> = []
     private final class SeasonLoad: @unchecked Sendable {
         enum WaitResult: Sendable {
             case completed
@@ -316,12 +316,12 @@ public final class ItemDetailViewModel {
     private nonisolated(unsafe) var snapshotRestoreTask: Task<Void, Never>?
     /// Set once the live fetch publishes fresh detail, so a late snapshot restore
     /// never clobbers a fresher hero.
-    private var hasPaintedFreshDetail = false
+    @ObservationIgnored private var hasPaintedFreshDetail = false
     /// Guards the one-time initial locality retarget in ``load()`` so it runs at
     /// most once and can never override a later user server switch. Set the first
     /// time `load()` evaluates the preference, and eagerly by ``switchToSource``
     /// so an explicit pick is always authoritative.
-    private var didApplyInitialLocalityPreference = false
+    @ObservationIgnored private var didApplyInitialLocalityPreference = false
     /// Set once the user explicitly picks a server via ``switchToSource`` so the
     /// automatic post-discovery locality retarget (``retargetToMostLocalSourceAfterDiscovery``)
     /// can never override their choice.
@@ -378,14 +378,14 @@ public final class ItemDetailViewModel {
     /// awaited on the `load()` path (see ``runTrailersAndRatings(for:)``).
     private nonisolated(unsafe) var enrichmentTask: Task<Void, Never>?
     private nonisolated(unsafe) var streamProbeTask: Task<Void, Never>?
-    private var completedStreamProbeKey: String?
+    @ObservationIgnored private var completedStreamProbeKey: String?
     /// The fully-loaded item enrichment is keyed to, so a page returned to (popped
     /// back onto) can resume the speculative discovery that was suspended on
     /// disappear.
     private var enrichmentItem: MediaItem?
     /// Set once speculative discovery (alternate sources + cross-server) has been
     /// kicked off, so resuming on reappear doesn't restart already-running work.
-    private var enrichmentComplete = false
+    @ObservationIgnored private var enrichmentComplete = false
     /// This page's ``EnrichmentScheduler`` generation token. Stamped when the page
     /// becomes the active detail; the scheduler drops any background work tagged
     /// with an older token before it hits the network, so tapping quickly through

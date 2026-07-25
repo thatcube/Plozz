@@ -142,7 +142,7 @@ TRACKED_MUTABLE_ALLOWLIST = {
     "AudioPlaybackController": 42,
     "UnifiedAddShareModel": 36,
     "PlayerViewModel": 28,
-    "ItemDetailViewModel": 23,
+    "ItemDetailViewModel": 20,
 }
 
 # Soft, INFORMATIONAL thresholds (never fail CI) — used only to surface smells in

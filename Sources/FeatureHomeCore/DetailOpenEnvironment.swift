@@ -65,10 +65,26 @@ public struct DetailOpenEnvironment {
     /// item's own sources merged (deduped) with the identity index's resolved
     /// library copies. Discovery (not-in-library Seerr) items get no enrichment —
     /// they intentionally have no library source.
-    public func initialSources(for item: MediaItem, isDiscovery: Bool) -> [MediaSourceRef] {
+    ///
+    /// Static so shells that build `ItemDetailViewModel` directly (iOS) share the
+    /// exact merge rule rather than hand-rolling it, which would silently drift
+    /// if the dedupe or ordering ever changed.
+    public static func initialSources(
+        for item: MediaItem,
+        isDiscovery: Bool,
+        identitySources: (MediaItem) -> [MediaSourceRef]
+    ) -> [MediaSourceRef] {
         let indexed = isDiscovery ? [] : identitySources(item)
         var seen = Set<String>()
         return (item.sources + indexed).filter { seen.insert($0.id).inserted }
+    }
+
+    public func initialSources(for item: MediaItem, isDiscovery: Bool) -> [MediaSourceRef] {
+        Self.initialSources(
+            for: item,
+            isDiscovery: isDiscovery,
+            identitySources: identitySources
+        )
     }
 
     /// Build the detail view model for a tapped movie or series — including a Plex

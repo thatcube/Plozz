@@ -755,6 +755,7 @@ final class PlozziOSAppModel {
             position: position,
             watchedPercent: watchedPercent,
             primaryAccountID: accountsProviders.primaryActiveAccount?.id,
+            additionalSources: identityIndex.identitySourcesProvider(item),
             crossServerSync: settings.playback.settings.syncWatchAcrossServers
         ) else {
             return
@@ -778,6 +779,12 @@ final class PlozziOSAppModel {
             position: position,
             watchedPercent: watchedPercent,
             primaryAccountID: accountsProviders.primaryActiveAccount?.id,
+            // The eager identity index's known servers for this title. Without
+            // it the fan-out only covers the item's own `sources`, so a title
+            // reached from a Home row that only one server populated never gets
+            // marked played on the OTHER servers that also have it — silent,
+            // invisible data loss. tvOS has always passed this.
+            additionalSources: identityIndex.identitySourcesProvider(item),
             crossServerSync: settings.playback.settings.syncWatchAcrossServers
         )
         publishPlaybackMutation(

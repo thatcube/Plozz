@@ -162,13 +162,11 @@ private struct PlozziOSCanonicalItemDetailView: View {
         } else {
             discoveryStatusRefresh = nil
         }
-        let indexedSources = isDiscoveryItem
-            ? []
-            : appModel.identityIndex.identitySourcesProvider(item)
-        var seenSources = Set<String>()
-        let initialSources = (item.sources + indexedSources).filter {
-            seenSources.insert($0.id).inserted
-        }
+        let initialSources = DetailOpenEnvironment.initialSources(
+            for: item,
+            isDiscovery: isDiscoveryItem,
+            identitySources: appModel.identityIndex.identitySourcesProvider
+        )
         self.initialSources = initialSources
         let accounts = appModel.accountsProviders.homeAccounts
         let identitySources = appModel.identityIndex.identitySourcesProvider
@@ -318,7 +316,19 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         selectVersion($0, for: heroTarget)
                     },
                     actionHandler: appModel.mediaItemActionHandler,
-                    onPlay: play,
+                    // Re-resolve the play target at FIRE time rather than using
+                    // the one captured when the body was evaluated. A tap that
+                    // races a discovery/snapshot update would otherwise fire the
+                    // stale capture: the picker has already moved on to a richer
+                    // version set, so it highlights 4K while the play target
+                    // still points at the originally-opened 720p. Reading the
+                    // live state here guarantees playback derives from the same
+                    // source of truth the UI most recently showed. (tvOS's
+                    // ItemDetailView does this and documents it as CRITICAL.)
+                    onPlay: { _, fromBeginning in
+                        let liveTarget = seriesPlayTarget ?? detail.item
+                        play(playbackItem(for: liveTarget), fromBeginning: fromBeginning)
+                    },
                     heroRequest: heroRequest(for: detail.item),
                     pullDistance: heroPullDistance
                 )

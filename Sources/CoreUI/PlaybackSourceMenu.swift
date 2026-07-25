@@ -39,10 +39,10 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     @State private var triggerFrame: CGRect = .zero
     #if !os(tvOS)
     @Environment(\.horizontalSizeClass) private var hSizeClass
-    /// iPhone only: the panel's measured natural height, driving the sheet
-    /// detent so the sheet grows/shrinks with the page instead of sitting at a
-    /// fixed half-screen height.
+    /// The panel's measured natural height, used to anchor it above the trigger
+    /// so it grows upward.
     @State private var iosSheetHeight: CGFloat = 220
+    @State private var appeared = false
     #endif
 
     public init(
@@ -73,7 +73,6 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
 
     @ViewBuilder
     public var body: some View {
-        #if os(tvOS)
         trigger
             .onGeometryChange(for: CGRect.self) { proxy in
                 proxy.frame(in: .global)
@@ -81,36 +80,66 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                 triggerFrame = frame
             }
             .fullScreenCover(isPresented: $isPresented, onDismiss: onDismiss) {
+                #if os(tvOS)
                 tvOSPresentation
+                #else
+                iosPresentation
+                #endif
             }
-        #else
-        // iPhone gets a real sheet — a popover balloon is too cramped to read on
-        // a phone — and iPad gets the native popover. The two differ in who owns
-        // the surface: the sheet is presented on a clear background so the panel
-        // draws the single glass surface (and can animate its own height); the
-        // popover's system chrome IS the surface, so the panel draws nothing and
-        // its arrow matches by construction.
-        if hSizeClass == .compact {
-            trigger
-                .sheet(isPresented: $isPresented, onDismiss: onDismiss) {
-                    panel
-                        .presentationDetents([.height(iosSheetHeight)])
-                        .presentationBackground(.clear)
-                        .presentationDragIndicator(.hidden)
-                }
-        } else {
-            trigger
-                .popover(
-                    isPresented: $isPresented,
-                    attachmentAnchor: .rect(.bounds),
-                    arrowEdge: .leading
-                ) {
-                    panel
-                        .presentationCompactAdaptation(.popover)
-                }
-        }
-        #endif
+            // Kill the cover's own bottom-up slide: this is a menu anchored to a
+            // button, not a drawer. The panel fades/scales in from the trigger
+            // instead (see `iosPresentation`).
+            .transaction { $0.disablesAnimations = true }
     }
+
+    #if !os(tvOS)
+    /// iOS/iPadOS presentation. Deliberately NOT `.sheet` or `.popover`: both
+    /// own a surface of their own (so our panel nests inside a second one), and
+    /// neither can animate its own height. This mirrors the tvOS player's
+    /// subtitle panel — a plain overlay anchored to the trigger, so the panel is
+    /// the one and only surface and its height is an ordinary animatable frame.
+    private var iosPresentation: some View {
+        GeometryReader { proxy in
+            let screen = proxy.size
+            let width = min(390, screen.width - 32)
+            let height = min(iosSheetHeight, screen.height - 120)
+            // Prefer sitting above the trigger so the panel grows UPWARD as you
+            // drill in: the bottom edge is pinned just above the button, so an
+            // increase in height moves only the top edge. Flip below only when
+            // there isn't room above.
+            let above = triggerFrame.minY - height - 12
+            let below = triggerFrame.maxY + 12
+            let y = above >= 12 ? above : min(below, screen.height - height - 12)
+            let x = min(
+                max(16, triggerFrame.midX - width / 2),
+                max(16, screen.width - width - 16)
+            )
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { isPresented = false }
+
+                panel
+                    .frame(width: width)
+                    .offset(x: x, y: y)
+                    // Height is animated by the panel itself; animating the
+                    // offset with the same curve keeps the pinned bottom edge
+                    // steady while the top edge travels.
+                    .animation(.easeInOut(duration: 0.3), value: iosSheetHeight)
+                    .scaleEffect(appeared ? 1 : 0.94, anchor: .bottom)
+                    .opacity(appeared ? 1 : 0)
+            }
+            .ignoresSafeArea()
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.18)) { appeared = true }
+            }
+            .onDisappear { appeared = false }
+        }
+        .ignoresSafeArea()
+        .presentationBackground(.clear)
+    }
+    #endif
 
     #if os(tvOS)
     private var tvOSPresentation: some View {
@@ -219,10 +248,8 @@ private struct PlaybackSourceMenuPanel: View {
     #endif
     @FocusState private var focusedRowID: String?
     #if !os(tvOS)
-    @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var navDirection: Edge = .trailing
     @State private var contentHeight: CGFloat = 220
-    private var isSheet: Bool { hSizeClass == .compact }
     #endif
     var body: some View {
         panelContent
@@ -235,21 +262,16 @@ private struct PlaybackSourceMenuPanel: View {
             // to draw its own glass surface.
             .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
             #else
-            // Sheet (iPhone): the panel owns an explicit, animatable height and
-            // draws the single glass surface, because the sheet is presented on
-            // a clear background. Popover (iPad): no size and no surface — the
-            // system chrome sizes itself and IS the surface, so its arrow always
-            // matches. A popover can't animate its own bounds, which is the
-            // other reason the phone gets a sheet.
-            .frame(maxWidth: isSheet ? .infinity : 390)
-            .frame(height: isSheet ? contentHeight : nil, alignment: .top)
+            // The panel is presented as a bare overlay (no sheet, no popover), so
+            // it owns the ONE surface and an explicit, animatable height. Width
+            // comes from the presenter.
+            .frame(height: contentHeight, alignment: .top)
             .onPreferenceChange(PlaybackSourceMenuContentHeightKey.self) { measurements in
                 // Read only the page being shown: during the push the outgoing
                 // page is still reporting, and letting it win pins the panel at
                 // the wrong height for the whole transition (which is what made
                 // the height look like it wasn't animating at all).
-                guard isSheet,
-                      let measured = measurements.first(where: { $0.page == page })?.height,
+                guard let measured = measurements.first(where: { $0.page == page })?.height,
                       measured > 0 else { return }
                 let total = min(measured, panelMaxHeight)
                 guard abs(total - contentHeight) > 0.5 else { return }
@@ -258,7 +280,7 @@ private struct PlaybackSourceMenuPanel: View {
                     measuredHeight?.wrappedValue = total
                 }
             }
-            .modifier(PlaybackSourceMenuSheetSurface(enabled: isSheet))
+            .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
             #endif
             #if os(tvOS)
             .focusScope(panelFocusScope)
@@ -283,21 +305,15 @@ private struct PlaybackSourceMenuPanel: View {
             .scrollIndicators(.hidden)
         }
         #else
-        // Pages slide horizontally as you drill in/out. On the sheet the column
-        // scrolls (it has a fixed, animating height); in the popover the system
-        // sizes itself to the column, so no scroll container is needed.
-        if isSheet {
-            ScrollView {
-                pageColumn(for: page)
-                    .transition(.push(from: navDirection))
-                    .id(page)
-            }
-            .scrollIndicators(.hidden)
-        } else {
+        // Pages slide horizontally as you drill in/out. The column scrolls
+        // because the panel has an explicit (animating) height, so a page taller
+        // than the cap stays reachable.
+        ScrollView {
             pageColumn(for: page)
                 .transition(.push(from: navDirection))
                 .id(page)
         }
+        .scrollIndicators(.hidden)
         #endif
     }
 
@@ -789,23 +805,6 @@ private struct PlaybackSourceMenuContentHeightKey: PreferenceKey {
     }
 }
 
-/// The sheet is presented on a clear background, so on iPhone the panel draws
-/// the one and only surface. In the popover the system chrome is already the
-/// surface, so this draws nothing — adding a second one there is what produced
-/// the card-inside-a-balloon look.
-private struct PlaybackSourceMenuSheetSurface: ViewModifier {
-    let enabled: Bool
-
-    func body(content: Content) -> some View {
-        if enabled {
-            content
-                .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
-                .padding(.horizontal, 12)
-        } else {
-            content
-        }
-    }
-}
 #endif
 
 private enum PlaybackSourceMenuMetrics {

@@ -93,17 +93,11 @@ struct PlozziOSHomeSkeletonScreen: View {
 
 /// Placeholder for the Home hero, mirroring tvOS's `HomeHeroSkeletonView`.
 ///
-/// The geometry is copied from the real hero's foreground placement in
-/// `PlozziOSHomeHeroCarousel` rather than approximated — the first version
-/// eyeballed the insets and the placeholder sat visibly lower than the content it
-/// was standing in for. Anything changed there must be changed here too:
-///
-///   * container `.frame(height:)` = `PlozziOSHeroMetrics.height(...)`
-///   * content `.frame(maxWidth: PlozziOSPageLayout.heroTextMaxWidth(for:))`
-///   * `.frame(maxHeight: .infinity, alignment: .bottom / .bottomLeading)`
-///   * `.padding(.horizontal, PlozziOSPageLayout.horizontalInset(for:))`
-///   * `.padding(.bottom, compactPortrait ? 30 : 42)`
-///   * column spacing 12, matching `PlozziOSHomeHeroForeground`'s VStack
+/// Placement comes from `PlozziOSHeroForegroundPlacement`, the same modifier the
+/// real foreground uses, so the two cannot drift as screen sizes change — an
+/// earlier version copied the constants by hand and sat visibly lower and
+/// further indented than the content it stood in for. Only the hero's height is
+/// applied here, from the same `PlozziOSHeroMetrics.height` the carousel uses.
 ///
 /// No backdrop: the artwork area stays empty while loading rather than flashing
 /// a placeholder colour across the screen, and the shimmer is confined to the
@@ -131,17 +125,9 @@ struct PlozziOSHomeHeroSkeleton: View {
                 capsule(width: 50, height: 50)
             }
         }
-        // Same width cap the real foreground gets.
-        .frame(maxWidth: PlozziOSPageLayout.heroTextMaxWidth(for: style))
-        // Then pinned to the bottom of the full-width stage, exactly like the
-        // real foreground's two stacked frames.
-        .frame(
-            maxWidth: .infinity,
-            maxHeight: .infinity,
-            alignment: isCompact ? .bottom : .bottomLeading
-        )
-        .padding(.horizontal, PlozziOSPageLayout.horizontalInset(for: style))
-        .padding(.bottom, isCompact ? 30 : 42)
+        // The SAME placement the real foreground uses — not a copy of its
+        // numbers. See `PlozziOSHeroForegroundPlacement`.
+        .plozziOSHeroForegroundPlacement(style: style)
         .frame(
             height: PlozziOSHeroMetrics.height(
                 style: style,

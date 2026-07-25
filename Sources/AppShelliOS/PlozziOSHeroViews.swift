@@ -52,6 +52,37 @@ enum PlozziOSPageLayout {
     }
 }
 
+/// The one definition of where Home's hero foreground sits inside the hero
+/// stage: width cap, bottom-leading pin, horizontal inset and bottom padding.
+///
+/// Applied by BOTH the real foreground (`PlozziOSHomeHeroCarousel`) and its
+/// loading placeholder (`PlozziOSHomeHeroSkeleton`). It exists because the
+/// placeholder originally copied these constants by hand and drifted from the
+/// real hero — wrong indent, wrong vertical position. Screen sizes vary, so the
+/// two must derive from the same code, not from matching numbers.
+struct PlozziOSHeroForegroundPlacement: ViewModifier {
+    let style: HeroArtworkStyle
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: PlozziOSPageLayout.heroTextMaxWidth(for: style))
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: style == .compactPortrait ? .bottom : .bottomLeading
+            )
+            .padding(.horizontal, PlozziOSPageLayout.horizontalInset(for: style))
+            .padding(.bottom, style == .compactPortrait ? 30 : 42)
+    }
+}
+
+extension View {
+    /// See ``PlozziOSHeroForegroundPlacement``.
+    func plozziOSHeroForegroundPlacement(style: HeroArtworkStyle) -> some View {
+        modifier(PlozziOSHeroForegroundPlacement(style: style))
+    }
+}
+
 @MainActor
 @Observable
 final class PlozziOSSidebarGeometryModel {

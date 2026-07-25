@@ -306,13 +306,11 @@ struct PlozziOSHomeView: View {
             }
             .padding(.bottom)
         }
-        return Group {
-            if heroItems.isEmpty {
-                scroll
-            } else {
-                scroll.ignoresSafeArea(.container, edges: .top)
-            }
-        }
+        // The hero — real OR its placeholder — is a full-bleed surface that runs
+        // up under the status bar. Gating this on `heroItems.isEmpty` predated
+        // the placeholder and left it starting below the safe area, so it
+        // rendered lower AND pushed every row down by the inset.
+        return scroll.ignoresSafeArea(.container, edges: .top)
         .scrollClipDisabled()
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentOffset.y > trailerPauseThreshold
@@ -784,23 +782,9 @@ private struct PlozziOSHomeHeroCarousel: View {
                         max(1 - (progress * 2), 0)
                             * (foregroundVisible ? 1 : 0)
                     )
-                    .frame(
-                        maxWidth: PlozziOSPageLayout.heroTextMaxWidth(
-                            for: style
-                        )
-                    )
-                    .frame(
-                        maxWidth: .infinity,
-                        maxHeight: .infinity,
-                        alignment: style == .compactPortrait
-                            ? .bottom
-                            : .bottomLeading
-                    )
-                    .padding(
-                        .horizontal,
-                        PlozziOSPageLayout.horizontalInset(for: style)
-                    )
-                    .padding(.bottom, style == .compactPortrait ? 30 : 42)
+                    // Shared with the loading placeholder — see
+                    // `PlozziOSHeroForegroundPlacement`.
+                    .plozziOSHeroForegroundPlacement(style: style)
                     .animation(
                         .easeInOut(duration: 0.24),
                         value: currentItem.id

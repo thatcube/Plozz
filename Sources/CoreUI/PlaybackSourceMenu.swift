@@ -43,6 +43,9 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     /// so it grows upward.
     @State private var iosSheetHeight: CGFloat = 220
     @State private var appeared = false
+    /// Which side of the trigger the panel sits on, locked for the duration of
+    /// one presentation so a growing page can't make it jump sides.
+    @State private var placement: Bool?
     #endif
 
     public init(
@@ -102,17 +105,25 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
         GeometryReader { proxy in
             let screen = proxy.size
             let width = min(390, screen.width - 32)
-            let height = min(iosSheetHeight, screen.height - 120)
-            // Prefer sitting above the trigger so the panel grows UPWARD as you
-            // drill in: the bottom edge is pinned just above the button, so an
-            // increase in height moves only the top edge. Flip below only when
-            // there isn't room above.
-            let above = triggerFrame.minY - height - 12
-            let below = triggerFrame.maxY + 12
-            let y = above >= 12 ? above : min(below, screen.height - height - 12)
+            let margin: CGFloat = 16
+            let gap: CGFloat = 12
+            // Room on each side of the trigger. The side is chosen ONCE per
+            // presentation (below) and then locked: recomputing it as the panel
+            // grows makes a page that no longer fits above jump to the other
+            // side of the button mid-animation.
+            let roomAbove = triggerFrame.minY - gap - margin
+            let roomBelow = screen.height - triggerFrame.maxY - gap - margin
+            let placeAbove = placement ?? (roomAbove >= roomBelow)
+            // Cap to the chosen side's room so the panel can never grow off
+            // screen; past the cap the rows scroll instead.
+            let available = max(160, placeAbove ? roomAbove : roomBelow)
+            let height = min(iosSheetHeight, available)
+            let y = placeAbove
+                ? triggerFrame.minY - gap - height
+                : triggerFrame.maxY + gap
             let x = min(
-                max(16, triggerFrame.midX - width / 2),
-                max(16, screen.width - width - 16)
+                max(margin, triggerFrame.midX - width / 2),
+                max(margin, screen.width - width - margin)
             )
             ZStack(alignment: .topLeading) {
                 Color.black.opacity(0.001)
@@ -120,21 +131,26 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                     .contentShape(Rectangle())
                     .onTapGesture { isPresented = false }
 
-                panel
+                panel(maxHeight: available)
                     .frame(width: width)
                     .offset(x: x, y: y)
                     // Height is animated by the panel itself; animating the
-                    // offset with the same curve keeps the pinned bottom edge
-                    // steady while the top edge travels.
+                    // offset with the same curve keeps the edge that's pinned to
+                    // the button steady while the far edge travels.
                     .animation(.easeInOut(duration: 0.3), value: iosSheetHeight)
-                    .scaleEffect(appeared ? 1 : 0.94, anchor: .bottom)
+                    .scaleEffect(appeared ? 1 : 0.94, anchor: placeAbove ? .bottom : .top)
                     .opacity(appeared ? 1 : 0)
             }
             .ignoresSafeArea()
             .onAppear {
+                // Lock the side for as long as the menu stays open.
+                placement = roomAbove >= roomBelow
                 withAnimation(.easeOut(duration: 0.18)) { appeared = true }
             }
-            .onDisappear { appeared = false }
+            .onDisappear {
+                appeared = false
+                placement = nil
+            }
         }
         .ignoresSafeArea()
         .presentationBackground(.clear)
@@ -149,7 +165,7 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                 .contentShape(Rectangle())
                 .onTapGesture { isPresented = false }
 
-            panel
+            panel()
                 .offset(
                     x: triggerFrame.minX,
                     y: triggerFrame.minY - panelHeight - 12
@@ -177,10 +193,11 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
         #endif
     }
 
-    private var panel: some View {
+    private func panel(maxHeight: CGFloat = 620) -> some View {
         PlaybackSourceMenuPanel(
             page: $page,
             measuredHeight: sheetHeightBinding,
+            maxHeight: maxHeight,
             sources: sources,
             selectedSourceID: selectedSourceID,
             offlineSourceAccountIDs: offlineSourceAccountIDs,
@@ -229,9 +246,12 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
 
 private struct PlaybackSourceMenuPanel: View {
     @Binding var page: PlaybackSourceMenuButtonPage
-    /// iPhone only: reports the panel's natural content height to the presenter
-    /// so the sheet detent can track it. Unused on tvOS/iPad.
+    /// Reports the panel's natural content height to the presenter so it can
+    /// anchor the panel. Unused on tvOS.
     var measuredHeight: Binding<CGFloat>? = nil
+    /// Ceiling imposed by the room available on the trigger's chosen side.
+    /// Past this the rows scroll rather than the panel running off screen.
+    var maxHeight: CGFloat = 620
     let sources: [MediaSourceRef]
     let selectedSourceID: String?
     var offlineSourceAccountIDs: Set<String> = []
@@ -273,7 +293,7 @@ private struct PlaybackSourceMenuPanel: View {
                 // the height look like it wasn't animating at all).
                 guard let measured = measurements.first(where: { $0.page == page })?.height,
                       measured > 0 else { return }
-                let total = min(measured, panelMaxHeight)
+                let total = min(measured, maxHeight)
                 guard abs(total - contentHeight) > 0.5 else { return }
                 withAnimation(.easeInOut(duration: 0.3)) {
                     contentHeight = total
@@ -709,10 +729,6 @@ private struct PlaybackSourceMenuPanel: View {
         #endif
     }
 
-    #if !os(tvOS)
-    /// Ceiling for the sheet: past this the column scrolls instead of growing.
-    private var panelMaxHeight: CGFloat { 620 }
-    #endif
 
     private var rowVerticalPadding: CGFloat {
         #if os(tvOS)

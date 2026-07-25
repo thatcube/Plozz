@@ -201,27 +201,47 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
             image = nil
             resolved = false
         }
-        // 1) Try provider candidates in order, skipping any that are too wide.
-        for reference in references {
-            guard let loaded = await ArtworkImageCache.shared.image(for: reference, variant: variant) else { continue }
-            guard Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) != nil else { continue }
-            image = loaded
-            resolved = true
-            loadedKey = key
-            return
+        // Attempt the network passes more than once. A `nil` from the cache means
+        // only "no image came back" — it does NOT distinguish "this title has no
+        // artwork" from a transient miss (the load was cancelled while the list
+        // settled, the account's artwork was momentarily not admitted during a
+        // credential purge, or the request simply failed). Recording a transient
+        // miss as final is what left visible cards blank until they were scrolled
+        // off and back, which recycled the cell and retried by accident.
+        for attempt in 0..<ArtworkResolveRetry.maxAttempts {
+            // 1) Try provider candidates in order, skipping any that are too wide.
+            for reference in references {
+                guard let loaded = await ArtworkImageCache.shared.image(for: reference, variant: variant) else { continue }
+                guard Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) != nil else { continue }
+                image = loaded
+                resolved = true
+                loadedKey = key
+                return
+            }
+            // 2) Nothing usable from the provider — try the async fallback (TMDb).
+            if let asyncFallbackURL,
+               let url = await asyncFallbackURL(),
+               let loaded = await ArtworkImageCache.shared.image(for: url, variant: variant) {
+                image = loaded
+                resolved = true
+                loadedKey = key
+                return
+            }
+            // Cancelled (the cell scrolled away, or the inputs changed): leave
+            // `loadedKey` unset so the next run re-resolves from scratch instead
+            // of inheriting this incomplete attempt as a final answer.
+            if Task.isCancelled { return }
+            if attempt < ArtworkResolveRetry.maxAttempts - 1 {
+                try? await Task.sleep(nanoseconds: ArtworkResolveRetry.delayNanoseconds)
+                if Task.isCancelled { return }
+            }
         }
-        // 2) Nothing usable from the provider — try the async fallback (TMDb).
-        if let asyncFallbackURL,
-           let url = await asyncFallbackURL(),
-           let loaded = await ArtworkImageCache.shared.image(for: url, variant: variant) {
-            image = loaded
-            resolved = true
-            loadedKey = key
-            return
-        }
+        // Genuinely nothing to show after retrying: record it so we stop asking.
         resolved = true
         loadedKey = key
     }
+
+
 
     /// Stable key for a given set of inputs, used both as the `.task` id and to
     /// remember which inputs the current `image` was resolved for.
@@ -257,3 +277,16 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
 }
 #endif
 #endif
+
+/// Retry budget for ``FallbackAsyncImage``'s network passes. A file-level enum
+/// because `FallbackAsyncImage` is generic, and generic types can't hold static
+/// stored properties.
+private enum ArtworkResolveRetry {
+    /// One immediate pass plus two retries. Bounded on purpose: the retries only
+    /// cost anything for artwork that is actually missing, and the task is
+    /// cancelled the moment the cell leaves the screen.
+    static let maxAttempts = 3
+    /// Long enough for a warming session / in-flight purge to settle, short
+    /// enough that a card fills in without the viewer noticing a second pass.
+    static let delayNanoseconds: UInt64 = 400_000_000
+}

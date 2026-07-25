@@ -1566,12 +1566,14 @@ private struct PlozziOSInlineEpisodeEntry: View {
                     episodeMenuActions
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.headline.weight(.bold))
+                        .font(.system(size: metrics.artworkMenuGlyphSize, weight: .bold))
                         .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
+                        .frame(
+                            width: metrics.artworkMenuTargetSize,
+                            height: metrics.artworkMenuTargetSize
+                        )
                         .contentShape(Circle())
                 }
-                .padding(4)
                 .accessibilityLabel("More actions for \(episode.title)")
             }
             .overlay(alignment: .topTrailing) {
@@ -1597,9 +1599,8 @@ private struct PlozziOSInlineEpisodeEntry: View {
                     .font(.caption.weight(.semibold))
                     .frame(height: 24)
                     Spacer(minLength: 8)
-                    if let record = currentDownloadRecord {
-                        PlozziOSEpisodeDownloadIndicator(record: record)
-                            .frame(width: 24, height: 24)
+                    if let state = currentDownloadRecord?.badgeState {
+                        MediaDownloadBadge(state: state, size: metrics.resumeChipAccessorySize)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -1668,17 +1669,8 @@ private struct PlozziOSInlineEpisodeEntry: View {
         }
         .frame(width: cardWidth, height: cardWidth * 9 / 16)
         .overlay {
-            LinearGradient(
-                stops: [
-                    .init(color: .black.opacity(0.5), location: 0),
-                    .init(color: .clear, location: 0.34),
-                    .init(color: .clear, location: 0.62),
-                    .init(color: .black.opacity(0.58), location: 1),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .allowsHitTesting(false)
+            // The shared wash — this card's own gradient is where it came from.
+            MediaArtworkChromeScrim(top: true, bottom: true)
         }
         .clipShape(
             RoundedRectangle(
@@ -1792,56 +1784,6 @@ private struct PlozziOSInlineEpisodeEntry: View {
 /// downloading (unmistakably progress, not a button), and a **filled gray
 /// down-arrow** when complete (a settled status, not an action). Hidden when the
 /// episode isn't downloaded — download itself is started from the ⋯ menu.
-private struct PlozziOSEpisodeDownloadIndicator: View {
-    let record: DownloadedMediaRecord
-    private let size: CGFloat = 22
-
-    var body: some View {
-        switch record.status {
-        case .completed:
-            Image(systemName: "arrow.down.circle.fill")
-                .font(.system(size: size))
-                .foregroundStyle(.white.opacity(0.85))
-                .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
-                .accessibilityLabel("Downloaded")
-        case .downloading, .queued:
-            ring(fraction: record.fractionCompleted ?? 0)
-                .accessibilityLabel("Downloading")
-        case .paused:
-            ring(fraction: record.fractionCompleted ?? 0, dimmed: true)
-                .accessibilityLabel("Download paused")
-        case .failed:
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: size))
-                .foregroundStyle(.orange)
-                .accessibilityLabel("Download failed")
-        }
-    }
-
-    private func ring(fraction: Double, dimmed: Bool = false) -> some View {
-        // Match the filled `arrow.down.circle.fill` glyph's visible circle (which
-        // is inset from its point size) and use a heavier stroke so the ring reads
-        // at the same weight as the icon rather than thin-and-oversized.
-        let diameter = size * 0.86
-        let lineWidth: CGFloat = 4
-        return ZStack {
-            Circle()
-                .stroke(Color.white.opacity(0.28), lineWidth: lineWidth)
-            Circle()
-                .trim(from: 0, to: max(0.02, fraction))
-                .stroke(
-                    Color.white.opacity(dimmed ? 0.5 : 1),
-                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-                .animation(.easeOut(duration: 0.25), value: fraction)
-        }
-        .frame(width: diameter, height: diameter)
-        .frame(width: size, height: size)
-        .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
-    }
-}
-
 private struct PlozziOSCastSection: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.themePalette) private var palette

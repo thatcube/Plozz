@@ -237,6 +237,16 @@ public enum PlozzTheme {
         public static let resumeChipBarWidth: CGFloat = 80
         public static let resumeChipBarHeight: CGFloat = 6
         public static let resumeChipAccessorySize: CGFloat = 30
+        /// Glyph size for the artwork "…" menu. Distinct from the download badge:
+        /// the badge is a status readout, this is a HIT TARGET, so it's sized for
+        /// the finger (and the tvOS remote) rather than to match adjacent text.
+        public static let artworkMenuGlyphSize: CGFloat = 26
+        /// Tap target. 44pt is Apple's minimum comfortable touch size (HIG); tvOS
+        /// scales up with the rest of its chrome.
+        public static let artworkMenuTargetSize: CGFloat = 52
+        /// Inset from the artwork's edge. Must clear the rounded corner so the
+        /// glyph doesn't collide with the curve.
+        public static let artworkMenuInset: CGFloat = 10
         /// Fallback base point size for a card's title when the platform's live
         /// `.subheadline` metric is unavailable (non-UIKit builds). On tvOS the
         /// real `.subheadline` size is used so standard density is unchanged.

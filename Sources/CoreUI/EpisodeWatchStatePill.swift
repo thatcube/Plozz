@@ -165,18 +165,11 @@ public struct ResumeChipOverlay: View {
         if hasBottomChrome || showsMenu {
             Color.clear
                 .overlay {
-                    if hasBottomChrome { MediaArtworkChromeScrim(.bottomLeading) }
-                }
-                .overlay(alignment: .top) {
-                    if showsMenu {
-                        MediaArtworkChromeScrim(.top)
-                            .frame(height: menuDiameter + metrics.resumeChipInset)
-                    }
+                    MediaArtworkChromeScrim(top: showsMenu, bottom: hasBottomChrome)
                 }
                 .overlay(alignment: .topLeading) {
                     if showsMenu {
-                        MediaItemEllipsisMenu(item: item, diameter: menuDiameter)
-                            .padding(metrics.resumeChipInset * 0.25)
+                        MediaItemEllipsisMenu(item: item)
                     }
                 }
             .allowsHitTesting(showsMenu)
@@ -213,7 +206,5 @@ public struct ResumeChipOverlay: View {
         item.cardRuntimeText != nil || downloadState != nil
     }
 
-    /// Matches the chip's accessory so the two corners read at the same weight.
-    private var menuDiameter: CGFloat { metrics.resumeChipAccessorySize }
 }
 #endif

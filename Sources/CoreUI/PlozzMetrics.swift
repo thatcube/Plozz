@@ -134,6 +134,12 @@ public struct PlozzMetrics: Equatable, Sendable {
     public let resumeChipBarHeight: CGFloat
     /// Edge length of the trailing accessory (download state) on a resume chip.
     public let resumeChipAccessorySize: CGFloat
+    /// Artwork "…" menu: glyph size, tap-target edge, and inset from the artwork
+    /// edge. Sized as a CONTROL (finger/remote), not to match nearby text — which
+    /// is why it doesn't ride `resumeChipAccessorySize`.
+    public let artworkMenuGlyphSize: CGFloat
+    public let artworkMenuTargetSize: CGFloat
+    public let artworkMenuInset: CGFloat
     /// Point size for a section/row header, scaled with density but *dampened*
     /// (see `PlozzTheme.Metrics.headerScaleDamping`) so headers stay anchored.
     public let sectionHeaderFontSize: CGFloat
@@ -355,6 +361,24 @@ public struct PlozzMetrics: Equatable, Sendable {
         // Floored: a sub-pixel bar disappears entirely at micro density.
         self.resumeChipBarHeight = max((baseChipBarHeight * densityScale).rounded(), 3)
         self.resumeChipAccessorySize = (baseChipAccessory * densityScale).rounded()
+
+        #if os(tvOS)
+        let baseMenuGlyph = PlozzTheme.Metrics.artworkMenuGlyphSize
+        let baseMenuTarget = PlozzTheme.Metrics.artworkMenuTargetSize
+        #elseif canImport(UIKit)
+        // Match the episode rows' existing, proven affordance: a bold `.headline`
+        // glyph in a 44pt target.
+        let baseMenuGlyph = UIFont.preferredFont(forTextStyle: .headline).pointSize
+        let baseMenuTarget: CGFloat = 44
+        #else
+        let baseMenuGlyph = PlozzTheme.Metrics.artworkMenuGlyphSize
+        let baseMenuTarget = PlozzTheme.Metrics.artworkMenuTargetSize
+        #endif
+        self.artworkMenuGlyphSize = (baseMenuGlyph * densityScale).rounded()
+        // Floored at 44: density must never shrink a control below the comfortable
+        // touch minimum.
+        self.artworkMenuTargetSize = max((baseMenuTarget * densityScale).rounded(), 44)
+        self.artworkMenuInset = (PlozzTheme.Metrics.artworkMenuInset * densityScale).rounded()
         self.cardStatusCueFontSize = max(
             (PlozzTheme.Metrics.cardStatusCueFontSize * densityScale).rounded(),
             PlozzTheme.Metrics.cardStatusCueMinFontSize

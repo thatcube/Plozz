@@ -39,9 +39,6 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
     @State private var triggerFrame: CGRect = .zero
     #if !os(tvOS)
     @Environment(\.horizontalSizeClass) private var hSizeClass
-    /// The panel's measured natural height, used to anchor it above the trigger
-    /// so it grows upward.
-    @State private var iosSheetHeight: CGFloat = 220
     @State private var appeared = false
     /// Which side of the trigger the panel sits on, locked for the duration of
     /// one presentation so a growing page can't make it jump sides.
@@ -121,11 +118,13 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
                 trigger: triggerFrame,
                 screen: screen,
                 width: width,
-                height: iosSheetHeight,
                 gap: gap,
                 margin: margin
             )
-            ZStack(alignment: .topLeading) {
+            // Align to the edge that touches the button so the layout system
+            // holds it. The panel's height is then the ONLY thing animating, and
+            // the pinned edge physically cannot move while it does.
+            ZStack(alignment: layout.pinsBottom ? .bottomLeading : .topLeading) {
                 Color.black.opacity(0.001)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
@@ -133,14 +132,12 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
 
                 panel(maxHeight: layout.available)
                     .frame(width: width)
-                    .offset(x: layout.x, y: layout.y)
-                    // Height is animated by the panel itself; animating the
-                    // offset with the same curve keeps the edge that's pinned to
-                    // the button steady while the far edge travels.
-                    .animation(.easeInOut(duration: 0.3), value: iosSheetHeight)
+                    .padding(.leading, layout.x)
+                    .padding(layout.pinsBottom ? .bottom : .top, layout.inset)
                     .scaleEffect(appeared ? 1 : 0.94, anchor: side.growthAnchor)
                     .opacity(appeared ? 1 : 0)
             }
+            .frame(width: screen.width, height: screen.height)
             .ignoresSafeArea()
             .onAppear {
                 // Lock the side for as long as the menu stays open.
@@ -196,18 +193,9 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
         }
     }
 
-    private var sheetHeightBinding: Binding<CGFloat>? {
-        #if os(tvOS)
-        nil
-        #else
-        $iosSheetHeight
-        #endif
-    }
-
     private func panel(maxHeight: CGFloat = 620) -> some View {
         PlaybackSourceMenuPanel(
             page: $page,
-            measuredHeight: sheetHeightBinding,
             maxHeight: maxHeight,
             sources: sources,
             selectedSourceID: selectedSourceID,
@@ -257,9 +245,6 @@ public struct PlaybackSourceMenuButton<Label: View>: View {
 
 private struct PlaybackSourceMenuPanel: View {
     @Binding var page: PlaybackSourceMenuButtonPage
-    /// Reports the panel's natural content height to the presenter so it can
-    /// anchor the panel. Unused on tvOS.
-    var measuredHeight: Binding<CGFloat>? = nil
     /// Ceiling imposed by the room available on the trigger's chosen side.
     /// Past this the rows scroll rather than the panel running off screen.
     var maxHeight: CGFloat = 620
@@ -313,7 +298,6 @@ private struct PlaybackSourceMenuPanel: View {
                     // A page changed → morph the container.
                     withAnimation(.easeInOut(duration: 0.3)) {
                         contentHeight = total
-                        measuredHeight?.wrappedValue = total
                     }
                 } else {
                     // First measurement of this presentation: snap to the natural
@@ -323,10 +307,7 @@ private struct PlaybackSourceMenuPanel: View {
                     hasMeasured = true
                     var snap = Transaction()
                     snap.disablesAnimations = true
-                    withTransaction(snap) {
-                        contentHeight = total
-                        measuredHeight?.wrappedValue = total
-                    }
+                    withTransaction(snap) { contentHeight = total }
                 }
             }
             .plozzGlassPanel(cornerRadius: 32, scrimOpacity: 0.08)
@@ -872,44 +853,48 @@ struct PlaybackSourceMenuSide: Equatable {
     }
 
     /// Where the panel goes, and how tall it may grow before its rows scroll.
+    ///
+    /// Returns an INSET FROM A PINNED EDGE rather than a top-left origin: the
+    /// caller aligns the panel to that edge, so the edge touching the button is
+    /// held by the layout system and only the far edge moves when the height
+    /// changes. Computing a top-left origin from the height instead meant the
+    /// height and the offset were two separate animations, and any drift between
+    /// them showed up as the pinned edge drifting too — the panel overshooting
+    /// and settling back.
+    ///
     /// `available` is always the room in the chosen direction, so the panel can
-    /// never grow off screen and never has to move to stay on it.
+    /// never grow off screen.
     func layout(
         trigger: CGRect,
         screen: CGSize,
         width: CGFloat,
-        height: CGFloat,
         gap: CGFloat,
         margin: CGFloat
-    ) -> (x: CGFloat, y: CGFloat, available: CGFloat) {
+    ) -> (x: CGFloat, inset: CGFloat, pinsBottom: Bool, available: CGFloat) {
         switch side {
         case .trailing, .leading:
             let x = side == .trailing
                 ? trigger.maxX + gap
                 : trigger.minX - gap - width
             if growsUp {
-                // Bottom edge level with the button; the top travels as it grows.
                 let bottom = min(screen.height - margin, max(margin + 160, trigger.maxY))
-                let available = max(160, bottom - margin)
-                return (x, bottom - min(height, available), available)
+                return (x, screen.height - bottom, true, max(160, bottom - margin))
             } else {
-                // Top edge level with the button; the bottom travels as it grows.
                 let top = max(margin, min(trigger.minY, screen.height - margin - 160))
-                return (x, top, max(160, screen.height - margin - top))
+                return (x, top, false, max(160, screen.height - margin - top))
             }
         case .above, .below:
-            let available = side == .above
-                ? trigger.minY - gap - margin
-                : screen.height - trigger.maxY - gap - margin
-            let capped = max(160, available)
-            let y = side == .above
-                ? trigger.minY - gap - min(height, capped)
-                : trigger.maxY + gap
             let x = min(
                 max(margin, trigger.midX - width / 2),
                 max(margin, screen.width - width - margin)
             )
-            return (x, y, capped)
+            if side == .above {
+                let bottom = trigger.minY - gap
+                return (x, screen.height - bottom, true, max(160, bottom - margin))
+            } else {
+                let top = trigger.maxY + gap
+                return (x, top, false, max(160, screen.height - margin - top))
+            }
         }
     }
 

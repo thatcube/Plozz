@@ -127,8 +127,15 @@ extension PlozziOSAppModel {
         if let seerr = bundle.seerr,
            let data = try? JSONEncoder().encode(seerr),
            let json = String(data: data, encoding: .utf8) {
-            do { try store.setString(json, for: Self.portableSeerrKey); published += 1 }
-            catch { PlozzLog.auth.error("KeychainSync: publish failed for Seerr: \(error.localizedDescription)") }
+            do {
+                try store.setString(json, for: Self.portableSeerrKey)
+                published += 1
+                PlozzLog.auth.info("KeychainSync: published shared Seerr connection")
+            } catch {
+                PlozzLog.auth.error("KeychainSync: publish failed for Seerr: \(error.localizedDescription)")
+            }
+        } else {
+            PlozzLog.auth.info("KeychainSync: no local Seerr connection to publish")
         }
         if published > 0 { PlozzLog.auth.info("KeychainSync: published \(published) portable credential(s)") }
     }
@@ -137,12 +144,24 @@ extension PlozziOSAppModel {
     /// independently of the pending-server loop below: Seerr is household-wide and
     /// has no descriptor, so it isn't gated on any server being pending.
     private func adoptSyncedSeerrConnection(from store: KeychainStore) {
-        guard let json = store.string(for: Self.portableSeerrKey),
-              let data = json.data(using: .utf8),
-              let secret = try? JSONDecoder().decode(SeerrSecret.self, from: data) else { return }
-        if Self.installSeerrSecretIfAbsent(secret) {
-            PlozzLog.auth.info("KeychainSync: adopted shared Seerr connection from iCloud Keychain")
+        guard let json = store.string(for: Self.portableSeerrKey) else {
+            PlozzLog.auth.info("KeychainSync: no Seerr connection in iCloud Keychain yet")
+            return
         }
+        guard let data = json.data(using: .utf8),
+              let secret = try? JSONDecoder().decode(SeerrSecret.self, from: data) else {
+            PlozzLog.auth.error("KeychainSync: Seerr connection in iCloud Keychain is undecodable")
+            return
+        }
+        guard Self.installSeerrSecretIfAbsent(secret) else {
+            PlozzLog.auth.info("KeychainSync: Seerr already configured locally — keeping this device's connection")
+            return
+        }
+        PlozzLog.auth.info("KeychainSync: adopted shared Seerr connection from iCloud Keychain")
+        // The service cached its config at init, BEFORE this ran, so without an
+        // explicit reload the freshly-installed connection stays invisible until
+        // the next launch.
+        Task { await seerService.reloadConnection() }
     }
 
     /// Remove a portable credential (an account was signed out on this device), so it

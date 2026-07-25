@@ -116,6 +116,18 @@ public final class SeerService {
         return result
     }
 
+    /// Re-read the household connection from the store and re-probe.
+    ///
+    /// `config` is cached at `init`, so a connection written to the Keychain by
+    /// something OTHER than this service — the iCloud-Keychain adopt path or an
+    /// incoming pairing bundle, both of which run AFTER the service is built —
+    /// would otherwise stay invisible until the next launch. Call this after
+    /// installing a connection out-of-band.
+    public func reloadConnection() async {
+        config = Self.loadConfig(from: connectionStore)
+        await refreshStatus()
+    }
+
     /// Resolves the current status: probes `/api/v1/status` when a connection is
     /// saved (so the Settings row reflects reachability). Safe to call repeatedly.
     public func refreshStatus() async {

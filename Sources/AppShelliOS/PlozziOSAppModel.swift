@@ -123,7 +123,12 @@ final class PlozziOSAppModel {
         let shareByID = Dictionary((received.secrets?.shares ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
         // Household-wide, so not gated on any per-account authorization — it rides
         // the bundle the user already approved.
-        if let seerr = received.secrets?.seerr { Self.installSeerrSecretIfAbsent(seerr) }
+        if let seerr = received.secrets?.seerr {
+            Self.installSeerrSecretIfAbsent(seerr)
+            // The service cached its config at init; reload so a connection that
+            // arrived with this pairing is live now, not after the next launch.
+            Task { [seerService] in await seerService.reloadConnection() }
+        }
         // Track credentialed accounts we ATTEMPT (expected to sign in without a tap)
         // vs those that actually persisted, so the caller can gate success and
         // surface any that failed. Intentional skips (device-local SSH key, no URL)

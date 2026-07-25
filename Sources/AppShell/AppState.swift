@@ -561,7 +561,12 @@ public final class AppState {
         let shareByID = Dictionary((received.secrets?.shares ?? []).map { ($0.accountID, $0) }, uniquingKeysWith: { a, _ in a })
         // The household Seerr connection isn't tied to any one account, so it isn't
         // gated on an authorization — it travels with the bundle the user approved.
-        if let seerr = received.secrets?.seerr { Self.installSeerrSecretIfAbsent(seerr) }
+        if let seerr = received.secrets?.seerr {
+            Self.installSeerrSecretIfAbsent(seerr)
+            // The service cached its config at init; reload so a connection that
+            // arrived with this pairing is live now, not after the next launch.
+            Task { [seerService] in await seerService.reloadConnection() }
+        }
         var expected = 0, added = 0
         var failedAccountIDs: [String] = []
         for auth in received.application.authorizedAuthorizations {

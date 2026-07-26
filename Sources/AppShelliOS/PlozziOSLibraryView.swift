@@ -95,20 +95,15 @@ private struct PlozziOSLibraryList: View {
                 spacing: 16
             ) {
                 ForEach(libraries) { library in
-                    if let provider {
-                        NavigationLink {
-                            PlozziOSLibraryGridView(
-                                viewModel: LibraryBrowseViewModel(
-                                    provider: provider,
-                                    containerID: library.id,
-                                    containerKind: library.kind,
-                                    sourceAccountID: library.sourceAccountID
-                                ),
-                                title: library.title,
-                                provider: provider,
-                                settings: settings
+                    if provider != nil {
+                        // Value-based so the pushed grid survives a re-render of
+                        // this list; see PlozziOSLibraryRoute.
+                        NavigationLink(
+                            value: PlozziOSLibraryRoute(
+                                library: library,
+                                accountID: library.sourceAccountID
                             )
-                        } label: {
+                        ) {
                             PlozziOSLibraryCard(library: library)
                         }
                         .buttonStyle(.plain)
@@ -257,7 +252,7 @@ struct PlozziOSLibraryGridView: View {
                 sortControl
             }
         }
-        .task { await viewModel.loadFirstPage() }
+        .task { await viewModel.loadFirstPageIfNeeded() }
     }
 
     private var sortControl: some View {

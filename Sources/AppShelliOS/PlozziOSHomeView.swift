@@ -1332,22 +1332,19 @@ private struct PlozziOSHomeRowView: View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 14) {
                 ForEach(row.libraries) { library in
-                    if let provider = appModel.accountsProviders.provider(
+                    // Still gated on the account having a live provider; the route
+                    // resolves it again at push time so this row holds no reference.
+                    if appModel.accountsProviders.provider(
                         forAccountID: library.accountID
-                    ) {
-                        NavigationLink {
-                            PlozziOSLibraryGridView(
-                                viewModel: LibraryBrowseViewModel(
-                                    provider: provider,
-                                    containerID: library.library.id,
-                                    containerKind: library.library.kind,
-                                    sourceAccountID: library.accountID
-                                ),
-                                title: library.library.title,
-                                provider: provider,
-                                settings: appModel.settings
+                    ) != nil {
+                        // Value-based: the stack builds the grid once per push, so
+                        // a Home re-render cannot remount it under the user.
+                        NavigationLink(
+                            value: PlozziOSLibraryRoute(
+                                library: library.library,
+                                accountID: library.accountID
                             )
-                        } label: {
+                        ) {
                             PlozziOSHomeLibraryCard(
                                 library: library,
                                 width: appModel.settings.density.density

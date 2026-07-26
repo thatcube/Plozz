@@ -387,4 +387,49 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         let otherKind = LibraryBrowseViewModel(provider: provider, containerID: "lib2", containerKind: .series, defaults: defaults)
         XCTAssertEqual(otherKind.sort, .default)
     }
+
+    // MARK: - reappearing must not reload
+
+    /// SwiftUI cancels a `.task` when its view is covered by a push and runs it
+    /// again on reappear, so a grid's load task fires every time the user returns
+    /// from a detail page. Reloading there re-entered `.loading` and cleared the
+    /// slots, which swapped the grid for a spinner, destroyed the `ScrollView`,
+    /// and dropped the user back at the top of a library they had scrolled deep
+    /// into. tvOS guarded this inline; iOS did not.
+    func testReappearingDoesNotRefetchAnAlreadyLoadedLibrary() async {
+        let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
+        await vm.loadFirstPage()
+        await vm.itemAppeared(at: 50)
+        let pagesAfterBrowsing = provider.requestedPages.count
+
+        await vm.loadFirstPageIfNeeded()
+
+        XCTAssertEqual(provider.requestedPages.count, pagesAfterBrowsing,
+                       "coming back from a detail page must not refetch")
+        XCTAssertEqual(vm.state.value, 100, "the grid must stay loaded, never flash a spinner")
+        XCTAssertNotNil(vm.item(at: 50), "already-loaded pages survive the reappear")
+    }
+
+    /// The guard must not stop the FIRST load, or a grid would never populate.
+    func testFirstAppearanceStillLoads() async {
+        let (vm, provider) = makeVM(itemCount: 20, pageSize: 10)
+
+        await vm.loadFirstPageIfNeeded()
+
+        XCTAssertEqual(vm.state.value, 20)
+        XCTAssertEqual(provider.requestedPages.count, 1)
+    }
+
+    /// A failed load is worth retrying when the user comes back — bouncing out and
+    /// in is a reasonable way to ask again, and there is no content to lose.
+    func testAFailedLibraryRetriesOnReappear() async {
+        let (vm, provider) = makeVM(itemCount: 10, pageSize: 10)
+        provider.failAtStartIndex = 0
+        await vm.loadFirstPage()
+        XCTAssertNil(vm.state.value, "precondition: the first load failed")
+
+        await vm.loadFirstPageIfNeeded()
+
+        XCTAssertEqual(vm.state.value, 10, "a retry after a failure must load")
+    }
 }

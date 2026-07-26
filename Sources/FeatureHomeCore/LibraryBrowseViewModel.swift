@@ -161,6 +161,32 @@ public final class LibraryBrowseViewModel {
         pruneInFlightPages(around: centerPage, lookAhead: 1)
     }
 
+    /// Loads the first page unless this model already holds one.
+    ///
+    /// SwiftUI cancels a `.task` when its view is covered by a push and runs it
+    /// again when the view reappears, so a grid's `.task` fires every time the
+    /// user comes back from a detail page. Calling ``loadFirstPage()`` there
+    /// re-entered `.loading` and cleared `loaded`, which swapped the whole grid
+    /// for a spinner — destroying the `ScrollView` and returning the user to the
+    /// top of a library they had scrolled deep into. Reappearing is not a reason
+    /// to refetch; a genuine refresh has its own entry points
+    /// (``loadFirstPage()`` for pull-to-refresh or a sort change, and
+    /// ``refreshAfterCatalogChange()`` after a scan).
+    public func loadFirstPageIfNeeded() async {
+        switch state {
+        case .loaded:
+            // Already showing this library. Keep the presentation, and with it the
+            // scroll position, exactly as the user left it.
+            return
+        case .idle, .loading, .empty, .failed:
+            // An empty or failed library keeps retrying on reappear: there is no
+            // scroll position or content to lose, and a bounce out and back is a
+            // reasonable way for the user to ask again. This matches what the tvOS
+            // grid already did inline.
+            await loadFirstPage()
+        }
+    }
+
     /// Loads (or reloads) the first page and sizes the grid to the full library.
     public func loadFirstPage() async {
         await noteInteractiveBrowseActivity()

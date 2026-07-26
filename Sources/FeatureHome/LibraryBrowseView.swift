@@ -134,7 +134,10 @@ public struct LibraryBrowseView: View {
         // Browse is a full-screen sub-page: hide the top tab bar so it reads as a
         // dedicated destination with no navigation chrome pinned at the top.
         .toolbar(.hidden, for: .tabBar)
-        .task { if viewModel.state.value == nil { await viewModel.loadFirstPage() } }
+        // Shared with the iOS grid so the two platforms cannot drift again: iOS
+        // lacked this guard and reloaded the library every time the user came back
+        // from a detail page.
+        .task { await viewModel.loadFirstPageIfNeeded() }
         .background {
             if viewModel.isMediaShare {
                 ShareCatalogRefreshObserver(shareID: viewModel.sourceServerID) {

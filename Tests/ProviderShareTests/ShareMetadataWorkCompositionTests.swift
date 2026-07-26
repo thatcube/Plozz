@@ -8,6 +8,16 @@ import XCTest
 /// falls through to external (finding A4). Uses fakes and an injected `isCancelled`
 /// so the boundaries are deterministic.
 final class ShareMetadataWorkCompositionTests: XCTestCase {
+    /// A one-way latch. The lanes run concurrently, so a cancellation fixture
+    /// that counts `isCancelled` calls is order-dependent and flaky; this lets the
+    /// fake trip cancellation at the exact boundary under test instead.
+    private final class Latch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        var isSet: Bool { lock.withLock { value } }
+        func set() { lock.withLock { value = true } }
+    }
+
     private final class LockedFlag: @unchecked Sendable {
         private let lock = NSLock()
         private var count = 0
@@ -55,9 +65,11 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         private(set) var beforeResolveResults: [Bool] = []
         private(set) var lastConcurrency = 0
         private let invokeBeforeResolve: Bool
+        private let latchBeforeResolve: Latch?
 
-        init(invokeBeforeResolve: Bool = false) {
+        init(invokeBeforeResolve: Bool = false, latchBeforeResolve: Latch? = nil) {
             self.invokeBeforeResolve = invokeBeforeResolve
+            self.latchBeforeResolve = latchBeforeResolve
         }
 
         func enrichPendingSlice(
@@ -69,6 +81,7 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
             sliceCalls += 1
             lastConcurrency = concurrency
             if invokeBeforeResolve, let beforeResolve {
+                latchBeforeResolve?.set()
                 beforeResolveResults.append(await beforeResolve("item-1"))
             }
             return .init(attempted: 1, hasMore: false)
@@ -114,13 +127,16 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         XCTAssertEqual(result.attempted, 3, "attempts combine local + external")
     }
 
-    func testRunSliceSkipsExternalWhenCancelledAfterLocal() async {
+    /// An already-cancelled slice starts no work at all. The lanes run
+    /// concurrently now, so cancellation is checked before either begins rather
+    /// than only between them.
+    func testACancelledSliceStartsNeitherLane() async {
         let local = FakeLocal(sliceResult: .init(attempted: 2, hasMore: false))
         let artwork = FakeArtwork()
         let external = FakeExternal()
         let result = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
-            budget: .testing(items: 10, sliceDuration: .seconds(1)),
+            budget: .testing(items: 10, sliceDuration: .milliseconds(20)),
             local: local,
             artwork: artwork,
             external: external,
@@ -128,27 +144,25 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         )
         let localSlices = await local.sliceCalls
         let externalSlices = await external.sliceCalls
-        XCTAssertEqual(localSlices, 1, "local work still runs")
-        XCTAssertEqual(externalSlices, 0, "cancellation after local must not start an external pass")
+        XCTAssertEqual(localSlices, 0, "cancellation must not start device work")
+        XCTAssertEqual(externalSlices, 0, "cancellation must not start an external pass")
         XCTAssertTrue(result.hasMore, "a cancelled slice reports more work remaining")
-        XCTAssertEqual(result.attempted, 2, "only local attempts are reported")
     }
 
     func testRunSliceBeforeResolveSkipsLocalOnCancellation() async {
-        // isCancelled is false at the post-NFO and post-artwork gates (calls 1–2)
-        // but true when beforeResolve fires (call 3), proving the per-item boundary
-        // is fenced too.
-        let flag = LockedFlag()
+        // Cancellation trips exactly when `beforeResolve` fires, proving the
+        // per-item boundary is fenced.
+        let latch = Latch()
         let local = FakeLocal()
         let artwork = FakeArtwork()
-        let external = FakeExternal(invokeBeforeResolve: true)
+        let external = FakeExternal(invokeBeforeResolve: true, latchBeforeResolve: latch)
         _ = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
-            budget: .testing(items: 10, sliceDuration: .seconds(1)),
+            budget: .testing(items: 10, sliceDuration: .milliseconds(20)),
             local: local,
             artwork: artwork,
             external: external,
-            isCancelled: { flag.trueFrom(3) }
+            isCancelled: { latch.isSet }
         )
         let externalSlices = await external.sliceCalls
         let beforeResults = await external.beforeResolveResults
@@ -166,26 +180,57 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
     /// with 11,575 pending artwork probes would have had to drain them all — on
     /// the order of an hour of slices — before one poster was fetched. External
     /// work now holds a reservation it cannot be squeezed out of.
-    func testLocalArtworkAndNFOShareTheNonReservedItemBudget() async {
+    func testExternalIsNotStarvedByAnEndlessLocalBacklog() async {
+        // The local lane always reports more work — the real shape of a library
+        // with thousands of pending artwork probes.
         let local = FakeLocal(sliceResult: .init(attempted: 6, hasMore: true))
         let artwork = FakeArtwork(result: .init(attempted: 4, hasMore: true))
         let external = FakeExternal()
         let result = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
-            budget: .testing(items: 10, sliceDuration: .seconds(1)),
+            budget: .testing(
+                items: 10,
+                sliceDuration: .milliseconds(20),
+                externalSliceDuration: .milliseconds(20)
+            ),
             local: local,
             artwork: artwork,
             external: external,
-            externalReservation: 0.5,
             isCancelled: { false }
         )
-        // Local is offered only the unreserved half; it reports 6 attempted (the
-        // fake ignores the cap), and external still gets its turn.
-        let localMax = await local.lastSliceMaxItems
-        XCTAssertEqual(localMax, 5, "local must be offered only the unreserved half")
+        // No reservation is needed any more: the lanes contend for different
+        // resources, so they run at the same time and neither can squeeze the
+        // other out.
         let externalSlices = await external.sliceCalls
-        XCTAssertEqual(externalSlices, 1, "external must not be starved by local work")
+        XCTAssertEqual(externalSlices, 1, "external must run alongside local work")
+        let localMax = await local.lastSliceMaxItems
+        XCTAssertEqual(localMax, 10, "the device lane gets the whole item budget")
         XCTAssertTrue(result.hasMore)
+    }
+
+    /// The regression that removed every hero and backdrop: once external work had
+    /// its own longer allowance, a single sequential local pass per slice meant
+    /// artwork probing ran a seventh as often and never converged (13,517 files
+    /// pending, ZERO validated — and `homeHero`/`detailBackdrop` require a
+    /// validated probe). The device lane must keep working for the whole slice.
+    func testDeviceLaneKeepsWorkingForTheWholeSlice() async {
+        let local = FakeLocal(sliceResult: .init(attempted: 1, hasMore: true))
+        let artwork = FakeArtwork(result: .init(attempted: 1, hasMore: true))
+        let external = FakeExternal()
+        _ = await ShareMetadataWorkComposition.runSlice(
+            accountKey: "a",
+            budget: .testing(
+                items: 4,
+                sliceDuration: .milliseconds(5),
+                externalSliceDuration: .milliseconds(60)
+            ),
+            local: local,
+            artwork: artwork,
+            external: external,
+            isCancelled: { false }
+        )
+        let passes = await local.sliceCalls
+        XCTAssertGreaterThan(passes, 1, "device work must not stop after one pass")
     }
 
     /// A share scan holds share I/O, but an external metadata lookup is an
@@ -296,21 +341,24 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
     /// Reporting the whole slice would let provider latency shrink the budget,
     /// which on device throttled a healthy M1 iPad from 32 items to 6.
     func testCapacitySampleCoversOnlyDeviceBoundWork() async {
-        let local = FakeLocal(sliceResult: .init(attempted: 5, hasMore: false))
+        let local = FakeLocal(sliceResult: .init(attempted: 10, hasMore: false))
         let artwork = FakeArtwork()
         let external = FakeExternal()
         let result = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
-            budget: .testing(items: 10, sliceDuration: .seconds(1)),
+            budget: .testing(
+                items: 10,
+                sliceDuration: .milliseconds(20),
+                externalSliceDuration: .milliseconds(20)
+            ),
             local: local,
             artwork: artwork,
             external: external,
             isCancelled: { false }
         )
-        let sample = try? XCTUnwrap(result.capacity)
-        XCTAssertNotNil(sample)
-        // Local budget is 5 of 10 (half reserved for external) and local attempted
-        // all 5, so the device-bound work saturated its allowance.
+        XCTAssertNotNil(result.capacity)
+        // The device lane used its whole item allowance, which is what "saturated"
+        // means — the signal that there may be headroom to grow.
         XCTAssertEqual(result.capacity?.saturated, true)
     }
 

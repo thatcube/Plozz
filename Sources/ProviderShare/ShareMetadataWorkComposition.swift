@@ -68,97 +68,133 @@ enum ShareMetadataWorkComposition {
         local: some ShareLocalMetadataRunning,
         artwork: some ShareLocalArtworkProbing,
         external: some ShareExternalMetadataRunning,
-        sharePermits: @Sendable () async -> Bool = { true },
-        externalReservation: Double = 0.5,
+        sharePermits: @Sendable @escaping () async -> Bool = { true },
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled }
     ) async -> ShareEnrichmentSliceResult {
         ShareBackgroundActivity.enrichStarted()
         defer { ShareBackgroundActivity.enrichFinished() }
-        // Local work FIRST, then whatever slice budget remains for the existing
-        // external pass — the minimum ordering needed so explicit ids/local fields
-        // prevent an unnecessary fuzzy external lookup, without reordering external
-        // providers.
-        let clock = ContinuousClock()
-        let sliceStart = clock.now
-        let maxItems = budget.itemsPerSlice
-        // The CPU-fairness window bounds DEVICE work (local sidecars, artwork
-        // probes). External lookups get their own, longer allowance below.
-        let maxDuration = budget.sliceDuration
-        // Reserve part of the budget for external work up front, so local work
-        // cannot consume the slice and starve it.
-        let reserved = max(1, Int((Double(maxItems) * externalReservation).rounded()))
-        let localBudget = max(0, maxItems - reserved)
-        let shareIsFree = await sharePermits()
+        // Two lanes, run CONCURRENTLY because they contend for different things:
+        // the device lane reads sidecars and probes artwork over the share, while
+        // the external lane makes internet requests. Running them in sequence made
+        // the slower lane set the pace for both — after external work was given its
+        // own (longer) allowance, artwork probing got roughly a seventh of its
+        // former opportunities and stopped converging: 13,517 files pending with
+        // ZERO validated, which is what silently removes every hero and backdrop,
+        // since those placements require a validated probe.
+        let deadline = ContinuousClock().now.advanced(by: budget.externalSliceDuration)
+        async let deviceLane = runDeviceLane(
+            accountKey: accountKey,
+            budget: budget,
+            deadline: deadline,
+            local: local,
+            artwork: artwork,
+            sharePermits: sharePermits,
+            isCancelled: isCancelled
+        )
+        async let externalLane = runExternalLane(
+            accountKey: accountKey,
+            budget: budget,
+            local: local,
+            external: external,
+            isCancelled: isCancelled
+        )
+        let (device, remote) = await (deviceLane, externalLane)
+        return ShareEnrichmentSliceResult(
+            attempted: device.attempted + remote.attempted,
+            hasMore: device.hasMore || remote.hasMore,
+            retryAfter: device.retryAfter ?? remote.retryAfter,
+            capacity: device.capacity
+        )
+    }
 
-        var localResult = ShareEnrichmentSliceResult(attempted: 0, hasMore: true)
-        if shareIsFree, localBudget > 0 {
-            BrowseDiagnostics.event("local-slice+ \(accountKey)")
-            localResult = await local.resolvePendingSlice(
-                maxItems: localBudget,
-                maxDuration: maxDuration
+    /// Share-bound work: local sidecars and artwork probes. Keeps working for the
+    /// whole slice at its own cadence — one bounded pass, then the configured idle
+    /// gap — rather than taking a single pass and then idling for however long the
+    /// metadata providers happen to take.
+    private static func runDeviceLane(
+        accountKey: String,
+        budget: ShareMetadataBudget,
+        deadline: ContinuousClock.Instant,
+        local: some ShareLocalMetadataRunning,
+        artwork: some ShareLocalArtworkProbing,
+        sharePermits: @Sendable () async -> Bool,
+        isCancelled: @Sendable () -> Bool
+    ) async -> ShareEnrichmentSliceResult {
+        let clock = ContinuousClock()
+        var attempted = 0
+        var hasMore = false
+        var retryAfter: Duration?
+        var measured: Duration = .zero
+        var saturated = false
+        var ranAnyPass = false
+
+        while !isCancelled(), clock.now < deadline {
+            // A scan owns share I/O; yielding to it is the point of the permit.
+            guard await sharePermits() else { break }
+            let passStart = clock.now
+            let localResult = await local.resolvePendingSlice(
+                maxItems: budget.itemsPerSlice,
+                maxDuration: budget.sliceDuration
             )
-        } else {
-            BrowseDiagnostics.event("local-slice~ \(accountKey) shareBusy=\(!shareIsFree)")
+            if isCancelled() { hasMore = true; break }
+            let elapsed = passStart.duration(to: clock.now)
+            let remaining = budget.sliceDuration > elapsed ? budget.sliceDuration - elapsed : .zero
+            let remainingItems = max(0, budget.itemsPerSlice - localResult.attempted)
+            var artworkResult = ShareEnrichmentSliceResult(attempted: 0, hasMore: false)
+            if remaining > .zero, remainingItems > 0 {
+                artworkResult = await artwork.resolvePendingSlice(
+                    maxItems: remainingItems,
+                    maxDuration: remaining
+                )
+            }
+            let passItems = localResult.attempted + artworkResult.attempted
+            ranAnyPass = true
+            attempted += passItems
+            measured = passStart.duration(to: clock.now)
+            saturated = passItems >= budget.itemsPerSlice
+            retryAfter = artworkResult.retryAfter ?? retryAfter
+            hasMore = localResult.hasMore || artworkResult.hasMore
+            BrowseDiagnostics.event(
+                "device-lane \(accountKey) items=\(passItems) more=\(hasMore)"
+            )
+            // Out of work, or told to back off: stop rather than spin.
+            if !hasMore || passItems == 0 { break }
+            if isCancelled() { break }
+            try? await Task.sleep(for: budget.delayBetweenSlices)
         }
-        BrowseDiagnostics.event(
-            "local-slice- \(accountKey) attempted=\(localResult.attempted) more=\(localResult.hasMore)"
+
+        return ShareEnrichmentSliceResult(
+            attempted: attempted,
+            hasMore: hasMore || isCancelled(),
+            retryAfter: retryAfter,
+            // Only a real pass is evidence about this device. No pass — because a
+            // scan holds the share, or the queue is empty — must not be read as
+            // either slowness or headroom.
+            capacity: ranAnyPass
+                ? ShareMetadataCapacitySample(elapsed: measured, saturated: saturated)
+                : nil
         )
-        // Local NFO and local artwork share one scheduler-slice item/time budget.
-        if isCancelled() {
-            return ShareEnrichmentSliceResult(attempted: localResult.attempted, hasMore: true)
-        }
-        let elapsed = sliceStart.duration(to: clock.now)
-        let remaining = maxDuration > elapsed ? maxDuration - elapsed : .zero
-        let remainingItems = max(0, localBudget - localResult.attempted)
-        var artworkResult = ShareEnrichmentSliceResult(attempted: 0, hasMore: true)
-        if shareIsFree, remaining > .zero, remainingItems > 0 {
-            BrowseDiagnostics.event("artwork-slice+ \(accountKey)")
-            artworkResult = await artwork.resolvePendingSlice(
-                maxItems: remainingItems,
-                maxDuration: remaining
-            )
-        }
-        BrowseDiagnostics.event(
-            "artwork-slice- \(accountKey) attempted=\(artworkResult.attempted) more=\(artworkResult.hasMore)"
-        )
-        if isCancelled() {
-            return ShareEnrichmentSliceResult(
-                attempted: localResult.attempted + artworkResult.attempted,
-                hasMore: true
-            )
-        }
-        let afterArtwork = sliceStart.duration(to: clock.now)
-        // Everything up to here was disk + share I/O — the only part of a slice
-        // that measures THIS device. The external lookups below are internet round
-        // trips, so their duration must not steer the adaptive budget.
-        let deviceBoundItems = localResult.attempted + artworkResult.attempted
-        let capacity: ShareMetadataCapacitySample? = (shareIsFree && localBudget > 0)
-            ? ShareMetadataCapacitySample(
-                elapsed: afterArtwork,
-                saturated: deviceBoundItems >= localBudget
-            )
-            : nil
-        // Not `maxDuration - afterArtwork`: that window exists to keep disk work
-        // off the device's back, and spending it on network waits truncated the
-        // external pass after a single round trip (measured: `attempted=1` of a
-        // 13-item allowance).
-        let externalDuration = budget.externalSliceDuration
-        // The reservation, plus anything local/artwork left unused. When the share
-        // is busy that is the WHOLE slice — the scan and the metadata fetch use
-        // different resources, so there is no reason for one to idle the other.
-        let externalItems = maxItems - localResult.attempted - artworkResult.attempted
-        guard externalDuration > .zero, externalItems > 0 else {
-            return ShareEnrichmentSliceResult(
-                attempted: localResult.attempted + artworkResult.attempted,
-                hasMore: true,
-                retryAfter: artworkResult.retryAfter,
-                capacity: capacity
-            )
+    }
+
+    /// Internet-bound work. Never gated on share availability: a metadata lookup
+    /// cannot contend with a share scan, and gating it there left a 2,185-title
+    /// library at 330 enriched.
+    private static func runExternalLane(
+        accountKey: String,
+        budget: ShareMetadataBudget,
+        local: some ShareLocalMetadataRunning,
+        external: some ShareExternalMetadataRunning,
+        isCancelled: @escaping @Sendable () -> Bool
+    ) async -> ShareEnrichmentSliceResult {
+        guard !isCancelled(),
+              budget.externalSliceDuration > .zero,
+              budget.itemsPerSlice > 0 else {
+            return ShareEnrichmentSliceResult(attempted: 0, hasMore: true)
         }
         BrowseDiagnostics.event("enrich-slice+ \(accountKey)")
         let result = await external.enrichPendingSlice(
-            maxItems: externalItems,
-            maxDuration: externalDuration,
+            maxItems: budget.itemsPerSlice,
+            maxDuration: budget.externalSliceDuration,
             concurrency: budget.externalConcurrency,
             beforeResolve: { itemID in
                 if isCancelled() { return false }
@@ -169,12 +205,7 @@ enum ShareMetadataWorkComposition {
         BrowseDiagnostics.event(
             "enrich-slice- \(accountKey) attempted=\(result.attempted) more=\(result.hasMore)"
         )
-        return ShareEnrichmentSliceResult(
-            attempted: localResult.attempted + artworkResult.attempted + result.attempted,
-            hasMore: localResult.hasMore || artworkResult.hasMore || result.hasMore,
-            retryAfter: artworkResult.retryAfter ?? result.retryAfter,
-            capacity: capacity
-        )
+        return result
     }
 
     static func runItem(

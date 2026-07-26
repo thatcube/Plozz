@@ -264,8 +264,11 @@ private extension View {
     /// play or skip read as tapping off the controls and dismissed them, and the
     /// buttons appeared to do nothing. `contentShape` makes the padded area part
     /// of the label rather than empty space the tap passes through.
-    func playerTransportHitTarget() -> some View {
-        frame(minWidth: 44, minHeight: 44)
+    func playerTransportGlyph(font: Font = .title3) -> some View {
+        self
+            .font(font)
+            .foregroundStyle(.white)
+            .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
     }
 }
@@ -278,7 +281,7 @@ private extension View {
 /// menu's rows visibly flash. Holding plain values instead means SwiftUI only
 /// rebuilds the menu when a track list, a capability, or the Dialog Enhance
 /// state actually changes.
-private struct PlozziOSPlaybackOptionsMenu: View {
+private struct PlozziOSPlaybackOptionsMenu: View, Equatable {
     let audioOptions: [PlayerTrackOption]
     let subtitleOptions: [PlayerTrackOption]
     let canSearchRemoteSubtitles: Bool
@@ -291,6 +294,23 @@ private struct PlozziOSPlaybackOptionsMenu: View {
     let onShowSubtitles: () -> Void
     let onShowSpeed: () -> Void
     let onShowSync: () -> Void
+
+    /// Compares the VALUES only. The transport's body re-evaluates on every
+    /// playback-clock tick (roughly ten a second), which rebuilds this struct with
+    /// freshly allocated closures; closures never compare equal, so without an
+    /// explicit `==` SwiftUI has to assume the view changed and re-runs the `Menu`
+    /// content closure. UIKit then rebuilds every row and submenu of the open
+    /// menu, which is the repeated flashing. Splitting the view out is not enough
+    /// on its own, the equality is what actually stops the work.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.audioOptions == rhs.audioOptions
+            && lhs.subtitleOptions == rhs.subtitleOptions
+            && lhs.canSearchRemoteSubtitles == rhs.canSearchRemoteSubtitles
+            && lhs.supportsPlaybackSpeed == rhs.supportsPlaybackSpeed
+            && lhs.supportsSync == rhs.supportsSync
+            && lhs.supportsDialogEnhance == rhs.supportsDialogEnhance
+            && lhs.dialogEnhanceEnabled == rhs.dialogEnhanceEnabled
+    }
 
     var body: some View {
         Menu {
@@ -341,7 +361,7 @@ private struct PlozziOSPlaybackOptionsMenu: View {
             }
         } label: {
             Image(systemName: "ellipsis.circle")
-                .playerTransportHitTarget()
+                .playerTransportGlyph()
         }
         .accessibilityLabel("Audio, subtitles, and speed")
     }
@@ -411,7 +431,7 @@ private struct PlozziOSPlayerTransport: View {
             HStack(spacing: 22) {
                 Button(action: onSkipBackward) {
                     Image(systemName: "gobackward.\(viewModel.controls.skipBackwardInterval.rawValue)")
-                        .playerTransportHitTarget()
+                        .playerTransportGlyph()
                 }
                 .accessibilityLabel("Skip backward")
 
@@ -421,8 +441,7 @@ private struct PlozziOSPlayerTransport: View {
                             ? "play.fill"
                             : "pause.fill"
                     )
-                    .font(.title)
-                    .playerTransportHitTarget()
+                    .playerTransportGlyph(font: .title)
                 }
                 .accessibilityLabel(
                     viewModel.controls.intendsPause ? "Play" : "Pause"
@@ -430,7 +449,7 @@ private struct PlozziOSPlayerTransport: View {
 
                 Button(action: onSkipForward) {
                     Image(systemName: "goforward.\(viewModel.controls.skipForwardInterval.rawValue)")
-                        .playerTransportHitTarget()
+                        .playerTransportGlyph()
                 }
                 .accessibilityLabel("Skip forward")
 
@@ -440,13 +459,15 @@ private struct PlozziOSPlayerTransport: View {
 
                 Button(action: onShowInfo) {
                     Image(systemName: "info.circle")
-                        .playerTransportHitTarget()
+                        .playerTransportGlyph()
                 }
                 .accessibilityLabel("Playback information")
             }
-            .font(.title3)
-            .foregroundStyle(.white)
-            .buttonStyle(.plain)
+            // Deliberately no .font / .foregroundStyle / .buttonStyle here. Those
+            // travel through the environment into a Menu's POPUP content, not just
+            // its label, so the menu's rows rendered white-on-light with the plain
+            // button style until UIKit re-applied its own styling: the flash on
+            // open. Each glyph now carries its own styling instead.
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 18)
@@ -481,6 +502,7 @@ private struct PlozziOSPlayerTransport: View {
             onShowSpeed: onShowSpeed,
             onShowSync: onShowSync
         )
+        .equatable()
     }
 
     private var supportsSync: Bool {

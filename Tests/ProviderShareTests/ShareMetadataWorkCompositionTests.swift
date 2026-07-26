@@ -53,6 +53,7 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         private(set) var sliceCalls = 0
         private(set) var itemCalls = 0
         private(set) var beforeResolveResults: [Bool] = []
+        private(set) var lastConcurrency = 0
         private let invokeBeforeResolve: Bool
 
         init(invokeBeforeResolve: Bool = false) {
@@ -62,9 +63,11 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         func enrichPendingSlice(
             maxItems: Int,
             maxDuration: Duration,
+            concurrency: Int,
             beforeResolve: (@Sendable (String) async -> Bool)?
         ) async -> ShareEnrichmentSliceResult {
             sliceCalls += 1
+            lastConcurrency = concurrency
             if invokeBeforeResolve, let beforeResolve {
                 beforeResolveResults.append(await beforeResolve("item-1"))
             }
@@ -98,8 +101,7 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         let external = FakeExternal()
         let result = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
-            maxItems: 10,
-            maxDuration: .seconds(1),
+            budget: .testing(items: 10, sliceDuration: .seconds(1)),
             local: local,
             artwork: artwork,
             external: external,
@@ -118,8 +120,7 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         let external = FakeExternal()
         let result = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
-            maxItems: 10,
-            maxDuration: .seconds(1),
+            budget: .testing(items: 10, sliceDuration: .seconds(1)),
             local: local,
             artwork: artwork,
             external: external,
@@ -143,8 +144,7 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         let external = FakeExternal(invokeBeforeResolve: true)
         _ = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
-            maxItems: 10,
-            maxDuration: .seconds(1),
+            budget: .testing(items: 10, sliceDuration: .seconds(1)),
             local: local,
             artwork: artwork,
             external: external,
@@ -172,8 +172,7 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         let external = FakeExternal()
         let result = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
-            maxItems: 10,
-            maxDuration: .seconds(1),
+            budget: .testing(items: 10, sliceDuration: .seconds(1)),
             local: local,
             artwork: artwork,
             external: external,
@@ -198,8 +197,7 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         let external = FakeExternal()
         _ = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
-            maxItems: 10,
-            maxDuration: .seconds(1),
+            budget: .testing(items: 10, sliceDuration: .seconds(1)),
             local: local,
             artwork: artwork,
             external: external,
@@ -272,5 +270,65 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         )
         let itemCalls = await external.itemCalls
         XCTAssertEqual(itemCalls, 0, "a cancelled local outcome must not fall through to external")
+    }
+
+    /// External lookups are HTTP round trips, so the slice must hand the enricher
+    /// its concurrency width — resolving them one at a time made throughput the
+    /// reciprocal of provider latency (measured on device: `attempted=1` against a
+    /// 13-item allowance).
+    func testExternalWorkReceivesTheBudgetsConcurrencyWidth() async {
+        let local = FakeLocal(sliceResult: .init(attempted: 0, hasMore: false))
+        let artwork = FakeArtwork()
+        let external = FakeExternal()
+        _ = await ShareMetadataWorkComposition.runSlice(
+            accountKey: "a",
+            budget: .testing(items: 10, sliceDuration: .seconds(1), externalConcurrency: 6),
+            local: local,
+            artwork: artwork,
+            external: external,
+            isCancelled: { false }
+        )
+        let width = await external.lastConcurrency
+        XCTAssertEqual(width, 6)
+    }
+
+    /// The device-bound portion is the only capacity evidence a slice produces.
+    /// Reporting the whole slice would let provider latency shrink the budget,
+    /// which on device throttled a healthy M1 iPad from 32 items to 6.
+    func testCapacitySampleCoversOnlyDeviceBoundWork() async {
+        let local = FakeLocal(sliceResult: .init(attempted: 5, hasMore: false))
+        let artwork = FakeArtwork()
+        let external = FakeExternal()
+        let result = await ShareMetadataWorkComposition.runSlice(
+            accountKey: "a",
+            budget: .testing(items: 10, sliceDuration: .seconds(1)),
+            local: local,
+            artwork: artwork,
+            external: external,
+            isCancelled: { false }
+        )
+        let sample = try? XCTUnwrap(result.capacity)
+        XCTAssertNotNil(sample)
+        // Local budget is 5 of 10 (half reserved for external) and local attempted
+        // all 5, so the device-bound work saturated its allowance.
+        XCTAssertEqual(result.capacity?.saturated, true)
+    }
+
+    /// When the share is busy the slice does no device-bound work at all, so it
+    /// must report no capacity sample rather than a misleadingly fast one.
+    func testNoCapacitySampleWhenShareWorkWasSkipped() async {
+        let local = FakeLocal(sliceResult: .init(attempted: 0, hasMore: false))
+        let artwork = FakeArtwork()
+        let external = FakeExternal()
+        let result = await ShareMetadataWorkComposition.runSlice(
+            accountKey: "a",
+            budget: .testing(items: 10, sliceDuration: .seconds(1)),
+            local: local,
+            artwork: artwork,
+            external: external,
+            sharePermits: { false },
+            isCancelled: { false }
+        )
+        XCTAssertNil(result.capacity)
     }
 }

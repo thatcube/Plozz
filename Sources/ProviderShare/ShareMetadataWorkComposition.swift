@@ -24,6 +24,7 @@ protocol ShareExternalMetadataRunning: Sendable {
     func enrichPendingSlice(
         maxItems: Int,
         maxDuration: Duration,
+        concurrency: Int,
         beforeResolve: (@Sendable (String) async -> Bool)?
     ) async -> ShareEnrichmentSliceResult
     func enrichOne(itemID: String) async
@@ -63,8 +64,7 @@ enum ShareMetadataWorkComposition {
     ///     minutes of slices — before a single poster was fetched.
     static func runSlice(
         accountKey: String,
-        maxItems: Int,
-        maxDuration: Duration,
+        budget: ShareMetadataBudget,
         local: some ShareLocalMetadataRunning,
         artwork: some ShareLocalArtworkProbing,
         external: some ShareExternalMetadataRunning,
@@ -80,6 +80,10 @@ enum ShareMetadataWorkComposition {
         // providers.
         let clock = ContinuousClock()
         let sliceStart = clock.now
+        let maxItems = budget.itemsPerSlice
+        // The CPU-fairness window bounds DEVICE work (local sidecars, artwork
+        // probes). External lookups get their own, longer allowance below.
+        let maxDuration = budget.sliceDuration
         // Reserve part of the budget for external work up front, so local work
         // cannot consume the slice and starve it.
         let reserved = max(1, Int((Double(maxItems) * externalReservation).rounded()))
@@ -124,7 +128,21 @@ enum ShareMetadataWorkComposition {
             )
         }
         let afterArtwork = sliceStart.duration(to: clock.now)
-        let externalDuration = maxDuration > afterArtwork ? maxDuration - afterArtwork : .zero
+        // Everything up to here was disk + share I/O — the only part of a slice
+        // that measures THIS device. The external lookups below are internet round
+        // trips, so their duration must not steer the adaptive budget.
+        let deviceBoundItems = localResult.attempted + artworkResult.attempted
+        let capacity: ShareMetadataCapacitySample? = (shareIsFree && localBudget > 0)
+            ? ShareMetadataCapacitySample(
+                elapsed: afterArtwork,
+                saturated: deviceBoundItems >= localBudget
+            )
+            : nil
+        // Not `maxDuration - afterArtwork`: that window exists to keep disk work
+        // off the device's back, and spending it on network waits truncated the
+        // external pass after a single round trip (measured: `attempted=1` of a
+        // 13-item allowance).
+        let externalDuration = budget.externalSliceDuration
         // The reservation, plus anything local/artwork left unused. When the share
         // is busy that is the WHOLE slice — the scan and the metadata fetch use
         // different resources, so there is no reason for one to idle the other.
@@ -133,13 +151,15 @@ enum ShareMetadataWorkComposition {
             return ShareEnrichmentSliceResult(
                 attempted: localResult.attempted + artworkResult.attempted,
                 hasMore: true,
-                retryAfter: artworkResult.retryAfter
+                retryAfter: artworkResult.retryAfter,
+                capacity: capacity
             )
         }
         BrowseDiagnostics.event("enrich-slice+ \(accountKey)")
         let result = await external.enrichPendingSlice(
             maxItems: externalItems,
             maxDuration: externalDuration,
+            concurrency: budget.externalConcurrency,
             beforeResolve: { itemID in
                 if isCancelled() { return false }
                 let outcome = await local.resolveOne(itemID: itemID)
@@ -152,7 +172,8 @@ enum ShareMetadataWorkComposition {
         return ShareEnrichmentSliceResult(
             attempted: localResult.attempted + artworkResult.attempted + result.attempted,
             hasMore: localResult.hasMore || artworkResult.hasMore || result.hasMore,
-            retryAfter: artworkResult.retryAfter ?? result.retryAfter
+            retryAfter: artworkResult.retryAfter ?? result.retryAfter,
+            capacity: capacity
         )
     }
 

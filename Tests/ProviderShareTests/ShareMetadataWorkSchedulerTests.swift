@@ -125,7 +125,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
             await scheduler.register(
                 accountKey: account,
                 mayRun: { true },
-                runSlice: { _, _ in
+                runSlice: { budget in
                     await recorder.begin("slice-\(account)")
                     try? await Task.sleep(for: .milliseconds(10))
                     await recorder.end()
@@ -168,7 +168,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
             await scheduler.register(
                 accountKey: account,
                 mayRun: { await gate.isOpen },
-                runSlice: { _, _ in
+                runSlice: { budget in
                     await recorder.begin(account)
                     await recorder.end()
                     let call = await recorder.nextSlice(account)
@@ -208,7 +208,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "active",
             mayRun: { false },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("active")
                 await recorder.end()
                 return ShareEnrichmentSliceResult(attempted: 1, hasMore: false)
@@ -218,7 +218,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "inactive",
             mayRun: { true },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("inactive")
                 await recorder.end()
                 return ShareEnrichmentSliceResult(attempted: 1, hasMore: false)
@@ -248,7 +248,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "a",
             mayRun: { await gate.isOpen },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("backlog")
                 await recorder.end()
                 return ShareEnrichmentSliceResult(attempted: 1, hasMore: false)
@@ -283,7 +283,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "a",
             mayRun: { true },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("slice")
                 do {
                     try await Task.sleep(for: .seconds(5))
@@ -319,7 +319,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "a",
             mayRun: { await gate.mayRun() },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("slice")
                 await recorder.end()
                 return .init(attempted: 1, hasMore: false)
@@ -354,7 +354,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "a",
             mayRun: { await gate.mayRun() },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("slice")
                 await recorder.end()
                 return .init(attempted: 1, hasMore: false)
@@ -390,7 +390,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "a",
             mayRun: { await gate.mayRun() },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("slice")
                 try? await Task.sleep(for: .seconds(5))
                 await recorder.end()
@@ -427,7 +427,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "a",
             mayRun: { true },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("old")
                 await gate.wait()
                 await recorder.end()
@@ -443,7 +443,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "a",
             mayRun: { true },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("new")
                 await recorder.end()
                 return .init(attempted: 1, hasMore: false)
@@ -484,7 +484,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "a",
             mayRun: { await gate.mayRun() },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("old")
                 await recorder.end()
                 return .init(attempted: 1, hasMore: false)
@@ -500,7 +500,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "a",
             mayRun: { true },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("new")
                 await recorder.end()
                 return .init(attempted: 1, hasMore: false)
@@ -538,7 +538,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "a",
             mayRun: { await gate.mayRun() },
-            runSlice: { _, _ in .init(attempted: 0, hasMore: false) },
+            runSlice: { budget in .init(attempted: 0, hasMore: false) },
             runItem: { itemID in
                 await recorder.begin("old-item-\(itemID)")
                 await recorder.end()
@@ -551,7 +551,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "a",
             mayRun: { true },
-            runSlice: { _, _ in .init(attempted: 0, hasMore: false) },
+            runSlice: { budget in .init(attempted: 0, hasMore: false) },
             runItem: { itemID in
                 await recorder.begin("new-item-\(itemID)")
                 await recorder.end()
@@ -590,7 +590,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "p",
             mayRun: { true },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("p")
                 await recorder.end()
                 return .init(attempted: 1, hasMore: true)
@@ -600,7 +600,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "n",
             mayRun: { true },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("n")
                 await recorder.end()
                 return .init(attempted: 1, hasMore: false)
@@ -641,7 +641,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "p",
             mayRun: { true },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("p")
                 await recorder.end()
                 return .init(attempted: 1, hasMore: true)
@@ -651,7 +651,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "n",
             mayRun: { true },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("n")
                 await recorder.end()
                 return .init(attempted: 1, hasMore: false)
@@ -694,7 +694,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "p",
             mayRun: { true },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("p")
                 await recorder.end()
                 return .init(attempted: 1, hasMore: true)
@@ -704,7 +704,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         await scheduler.register(
             accountKey: "n",
             mayRun: { false },
-            runSlice: { _, _ in
+            runSlice: { budget in
                 await recorder.begin("n")
                 await recorder.end()
                 return .init(attempted: 1, hasMore: false)

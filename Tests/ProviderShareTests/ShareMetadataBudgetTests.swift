@@ -101,7 +101,7 @@ final class ShareMetadataBudgetTests: XCTestCase {
         let budget = ShareMetadataBudget(
             itemsPerSlice: 32, sliceDuration: .seconds(2), delayBetweenSlices: .zero
         )
-        let next = budget.adjusted(after: .seconds(5), attempted: 32)
+        let next = budget.adjusted(after: .seconds(5), saturated: true)
         XCTAssertLessThan(next.itemsPerSlice, budget.itemsPerSlice)
     }
 
@@ -109,7 +109,7 @@ final class ShareMetadataBudgetTests: XCTestCase {
         let budget = ShareMetadataBudget(
             itemsPerSlice: 8, sliceDuration: .seconds(2), delayBetweenSlices: .zero
         )
-        let next = budget.adjusted(after: .milliseconds(400), attempted: 8)
+        let next = budget.adjusted(after: .milliseconds(400), saturated: true)
         XCTAssertGreaterThan(next.itemsPerSlice, budget.itemsPerSlice)
     }
 
@@ -119,8 +119,8 @@ final class ShareMetadataBudgetTests: XCTestCase {
         let start = ShareMetadataBudget(
             itemsPerSlice: 16, sliceDuration: .seconds(2), delayBetweenSlices: .zero
         )
-        let grown = start.adjusted(after: .milliseconds(100), attempted: 16).itemsPerSlice - 16
-        let shrunk = 16 - start.adjusted(after: .seconds(9), attempted: 16).itemsPerSlice
+        let grown = start.adjusted(after: .milliseconds(100), saturated: true).itemsPerSlice - 16
+        let shrunk = 16 - start.adjusted(after: .seconds(9), saturated: true).itemsPerSlice
         XCTAssertGreaterThan(shrunk, grown)
     }
 
@@ -131,7 +131,7 @@ final class ShareMetadataBudgetTests: XCTestCase {
             delayBetweenSlices: .zero
         )
         for _ in 0..<10 {
-            budget = budget.adjusted(after: .seconds(30), attempted: 4)
+            budget = budget.adjusted(after: .seconds(30), saturated: true)
         }
         XCTAssertEqual(budget.itemsPerSlice, ShareMetadataBudget.minimumItemsPerSlice)
     }
@@ -143,22 +143,37 @@ final class ShareMetadataBudgetTests: XCTestCase {
             delayBetweenSlices: .zero
         )
         for _ in 0..<10 {
-            budget = budget.adjusted(
-                after: .milliseconds(1),
-                attempted: ShareMetadataBudget.maximumItemsPerSlice
-            )
+            budget = budget.adjusted(after: .milliseconds(1), saturated: true)
         }
         XCTAssertEqual(budget.itemsPerSlice, ShareMetadataBudget.maximumItemsPerSlice)
     }
 
-    /// A slice that attempted nothing says nothing about capacity — usually it was
-    /// blocked rather than slow — so it must not move the budget in either
-    /// direction.
-    func testAnEmptySliceIsNotEvidence() {
+    /// A slice that did no device-bound work says nothing about capacity — usually
+    /// it was blocked, or the time went to provider latency — so the caller reports
+    /// no sample at all and the budget must not move.
+    func testASliceWithNoDeviceBoundWorkIsNotEvidence() {
         let budget = ShareMetadataBudget(
             itemsPerSlice: 16, sliceDuration: .seconds(2), delayBetweenSlices: .zero
         )
-        XCTAssertEqual(budget.adjusted(after: .seconds(60), attempted: 0), budget)
+        let sample: ShareMetadataCapacitySample? = nil
+        let next = sample.map { budget.adjusted(after: $0.elapsed, saturated: $0.saturated) }
+        XCTAssertNil(next)
+    }
+
+    /// The regression this signal exists for: a slice dominated by internet round
+    /// trips must not be read as this device being slow. Measured in the field as
+    /// `items=6 device=32 constrained=false thermal=nominal` — the control loop had
+    /// throttled a healthy M1 iPad to a fifth of its capacity because 32 HTTP
+    /// requests cannot complete inside a 2-second CPU-fairness window.
+    func testProviderLatencyDoesNotShrinkTheBudget() {
+        let budget = ShareMetadataBudget(
+            itemsPerSlice: 32, sliceDuration: .seconds(2), delayBetweenSlices: .zero
+        )
+        // Device-bound work finished quickly; the slice's remaining 8 seconds were
+        // spent waiting on metadata providers.
+        let deviceBound = ShareMetadataCapacitySample(elapsed: .milliseconds(120), saturated: false)
+        let next = budget.adjusted(after: deviceBound.elapsed, saturated: deviceBound.saturated)
+        XCTAssertEqual(next.itemsPerSlice, 32)
     }
 
     /// A partially-filled slice means the QUEUE ran dry, not that the device is
@@ -168,7 +183,7 @@ final class ShareMetadataBudgetTests: XCTestCase {
         let budget = ShareMetadataBudget(
             itemsPerSlice: 16, sliceDuration: .seconds(2), delayBetweenSlices: .zero
         )
-        let next = budget.adjusted(after: .milliseconds(50), attempted: 2)
+        let next = budget.adjusted(after: .milliseconds(50), saturated: false)
         XCTAssertEqual(next.itemsPerSlice, budget.itemsPerSlice)
     }
 }

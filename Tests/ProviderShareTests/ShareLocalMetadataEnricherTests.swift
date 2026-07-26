@@ -743,6 +743,7 @@ private actor SpyExternalRunning: ShareExternalMetadataRunning {
     func enrichPendingSlice(
         maxItems: Int,
         maxDuration: Duration,
+        concurrency: Int,
         beforeResolve: (@Sendable (String) async -> Bool)?
     ) async -> ShareEnrichmentSliceResult {
         sliceCalls += 1

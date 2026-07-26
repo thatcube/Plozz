@@ -113,11 +113,13 @@ actor ShareEnricher {
     func enrichPendingSlice(
         maxItems: Int,
         maxDuration: Duration,
+        concurrency: Int = 1,
         beforeResolve: (@Sendable (String) async -> Bool)? = nil
     ) async -> ShareEnrichmentSliceResult {
         await runSlice(
             maxItems: maxItems,
             maxDuration: maxDuration,
+            concurrency: concurrency,
             beforeResolve: beforeResolve
         )
     }
@@ -125,6 +127,7 @@ actor ShareEnricher {
     private func runSlice(
         maxItems: Int,
         maxDuration: Duration?,
+        concurrency: Int = 1,
         beforeResolve: (@Sendable (String) async -> Bool)? = nil
     ) async -> ShareEnrichmentSliceResult {
         if isRunning {
@@ -171,33 +174,60 @@ actor ShareEnricher {
         var attempted = 0
         var deferred = 0
         var writeFailures = 0
-        for pending in snapshot {
+        // Resolve in overlapping batches. One lookup is an HTTP round trip, so
+        // serial resolution made throughput the reciprocal of provider latency —
+        // about one item per slice on device. Preparation (which reads the share
+        // and this actor's state) and persistence (which serializes on the store
+        // actor anyway) stay ordered; only the network waits overlap.
+        let width = max(1, concurrency)
+        let resolver = self.resolver
+        var index = snapshot.startIndex
+        batches: while index < snapshot.endIndex {
             if Task.isCancelled { break }
-            if let beforeResolve, !(await beforeResolve(pending.itemID)) {
-                deferred += 1
-                continue
+            if let maxDuration, started.duration(to: clock.now) >= maxDuration { break }
+            let end = snapshot.index(index, offsetBy: width, limitedBy: snapshot.endIndex)
+                ?? snapshot.endIndex
+            var batch: [(pending: PendingEnrichment, request: ShareEnrichRequest)] = []
+            for pending in snapshot[index..<end] {
+                if Task.isCancelled { break batches }
+                if let beforeResolve, !(await beforeResolve(pending.itemID)) {
+                    deferred += 1
+                    continue
+                }
+                batch.append((pending, await request(for: pending)))
             }
-            let request = await request(for: pending)
-            let record = await resolver.resolve(request)
+            index = end
+            if batch.isEmpty { continue }
+
+            var records: [Int: EnrichmentRecord] = [:]
+            await withTaskGroup(of: (Int, EnrichmentRecord).self) { group in
+                for (offset, entry) in batch.enumerated() {
+                    let request = entry.request
+                    group.addTask { (offset, await resolver.resolve(request)) }
+                }
+                for await (offset, record) in group {
+                    records[offset] = record
+                }
+            }
             if Task.isCancelled { break }
-            let ok = await store.saveEnrichment(
-                itemID: pending.itemID,
-                record,
-                version: Self.version
-            )
-            if ok {
-                processed += 1
-            } else {
-                writeFailures += 1
-            }
-            attempted += 1
-            if advertisedAttemptedItemIDs.insert(pending.itemID).inserted {
-                enrichDone += 1
-                reporter.enrichProgress(shareID, enrichDone)
-            }
-            if let maxDuration,
-               started.duration(to: clock.now) >= maxDuration {
-                break
+
+            for (offset, entry) in batch.enumerated() {
+                guard let record = records[offset] else { continue }
+                let ok = await store.saveEnrichment(
+                    itemID: entry.pending.itemID,
+                    record,
+                    version: Self.version
+                )
+                if ok {
+                    processed += 1
+                } else {
+                    writeFailures += 1
+                }
+                attempted += 1
+                if advertisedAttemptedItemIDs.insert(entry.pending.itemID).inserted {
+                    enrichDone += 1
+                    reporter.enrichProgress(shareID, enrichDone)
+                }
             }
         }
 
@@ -249,7 +279,8 @@ actor ShareEnricher {
         let saved = await store.saveEnrichment(
             itemID: pending.itemID,
             record,
-            version: Self.version
+            version: Self.version,
+            countsTowardRetryBudget: false
         )
         if saved,
            isPassActive,

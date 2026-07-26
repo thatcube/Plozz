@@ -291,11 +291,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                     // metadata for the whole of every scan. Share admission is now
                     // checked per step inside `runSlice`, at the point of use.
                     mayRun: { true },
-                    runSlice: { maxItems, maxDuration in
+                    runSlice: { budget in
                         await ShareMetadataWorkComposition.runSlice(
                             accountKey: accountKey,
-                            maxItems: maxItems,
-                            maxDuration: maxDuration,
+                            budget: budget,
                             local: localEnricher,
                             artwork: artworkProbeWorker,
                             external: enricher,

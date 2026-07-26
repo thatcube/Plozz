@@ -1,9 +1,15 @@
 import Foundation
+import CoreNetworking
 
 struct ShareEnrichmentSliceResult: Sendable, Equatable {
     var attempted: Int
     var hasMore: Bool
     var retryAfter: Duration? = nil
+    /// What the slice's device-bound work cost, when any ran. Left `nil` by the
+    /// leaf enrichers — only the composition knows which part of a slice was
+    /// disk/share work and which part was an internet round trip, and only the
+    /// former may steer the adaptive budget.
+    var capacity: ShareMetadataCapacitySample? = nil
 }
 
 /// App-wide admission control for share metadata work.
@@ -52,7 +58,7 @@ actor ShareMetadataWorkScheduler {
     }
 
     typealias MayRun = @Sendable () async -> Bool
-    typealias RunSlice = @Sendable (Int, Duration) async -> ShareEnrichmentSliceResult
+    typealias RunSlice = @Sendable (ShareMetadataBudget) async -> ShareEnrichmentSliceResult
     typealias RunItem = @Sendable (String) async -> Void
     typealias PassAction = @Sendable () async -> Void
 
@@ -326,10 +332,18 @@ actor ShareMetadataWorkScheduler {
                     await job.runItem(urgent.itemID)
                     return Outcome.item
                 case .backlog:
-                    return .backlog(await job.runSlice(
-                        budget.itemsPerSlice,
-                        budget.sliceDuration
-                    ))
+                    let deviceItems = ShareMetadataBudget.forCurrentDevice().itemsPerSlice
+                    let constrained = ShareMetadataBudget.isConstrained()
+                    let thermal = ProcessInfo.processInfo.thermalState.rawValue
+                    let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+                    let items = budget.itemsPerSlice
+                    var line = "share.enrich budget items=\(items)"
+                    line += " device=\(deviceItems)"
+                    line += " constrained=\(constrained)"
+                    line += " thermal=\(thermal)"
+                    line += " lowPower=\(lowPower)"
+                    PlozzLog.boot(line)
+                    return .backlog(await job.runSlice(budget))
                 }
             }
             let sliceStartedAt = clock.now
@@ -357,15 +371,16 @@ actor ShareMetadataWorkScheduler {
                 // A served turn restarts age; requeue is generation-guarded.
                 if wasCancelled { requeue(queued, resetAge: true) }
             case .backlog(let result):
-                // Close the loop: correct the budget with what the slice actually
-                // cost, and re-read thermal/low-power state so a device that heats
-                // up mid-library is noticed rather than driven harder. A cancelled
-                // slice is not evidence about capacity, so it is not fed back.
-                if !wasCancelled, adaptiveBudget {
-                    let observed = sliceStartedAt.duration(to: clock.now)
+                // Close the loop: correct the budget with what the slice's
+                // DEVICE-BOUND work actually cost, and re-read thermal/low-power
+                // state so a device that heats up mid-library is noticed rather
+                // than driven harder. A cancelled slice is not evidence about
+                // capacity, so it is not fed back; neither is a slice that did no
+                // device-bound work, since the remaining time was provider latency.
+                if !wasCancelled, adaptiveBudget, let sample = result.capacity {
                     let deviceBudget = ShareMetadataBudget.forCurrentDevice()
                     let corrected = budget.adjusted(
-                        after: observed, attempted: result.attempted
+                        after: sample.elapsed, saturated: sample.saturated
                     )
                     // A CONSTRAINED device (thermal pressure / Low Power Mode) is a
                     // hard ceiling — a thermal event must immediately pull back a
@@ -378,7 +393,9 @@ actor ShareMetadataWorkScheduler {
                     budget = ShareMetadataBudget(
                         itemsPerSlice: min(corrected.itemsPerSlice, ceiling),
                         sliceDuration: deviceBudget.sliceDuration,
-                        delayBetweenSlices: deviceBudget.delayBetweenSlices
+                        delayBetweenSlices: deviceBudget.delayBetweenSlices,
+                        externalConcurrency: deviceBudget.externalConcurrency,
+                        externalSliceDuration: deviceBudget.externalSliceDuration
                     )
                 }
                 if wasCancelled || result.hasMore {

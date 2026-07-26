@@ -332,6 +332,29 @@ final class CatalogConnection {
         apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_associations_item ON local_artwork_associations(item_id, placement, selected_order);")
         apply("CREATE INDEX IF NOT EXISTS idx_local_artwork_associations_path ON local_artwork_associations(artwork_rel_path);")
         apply("PRAGMA user_version=3;")
+        // One-shot repair: `attempts` was inflated by a bug, not by real background
+        // retries. The fast-track path (an item the user opened) intentionally
+        // ignores the retry cap, but it was reached through `ShareProvider.item(id:)`
+        // — which also fires while merely browsing — and every pass through it
+        // incremented the counter. Catalogs in the field reached 55-72 attempts
+        // against a cap of 3, which permanently excluded those items from the
+        // backlog query (`e.attempts < maxEnrichAttempts`) and left a 2,185-title
+        // library stuck at a few hundred posters. The counter now records only
+        // background attempts, so these historic values are simply wrong; clearing
+        // them returns the affected items to the backlog with their real budget.
+        // Only unusable rows are touched — a successful enrichment already reads 0.
+        if !hasMetaFlag("enrichment_attempts_repaired_v1") {
+            apply("""
+            UPDATE enrichment SET attempts = 0
+            WHERE attempts > 0
+              AND provider_ids_json IS NULL AND overview IS NULL AND poster_url IS NULL
+              AND backdrop_url IS NULL AND logo_url IS NULL;
+            """)
+            apply("""
+            INSERT OR REPLACE INTO meta(key, value)
+            VALUES('enrichment_attempts_repaired_v1', '1');
+            """)
+        }
         if migrationSucceeded, exec("COMMIT;") {
             return true
         }
@@ -356,6 +379,17 @@ final class CatalogConnection {
         query("PRAGMA table_info(\(table));") { stmt in
             if CatalogConnection.columnText(stmt, 1) == column { found = true }
         }
+        return found
+    }
+
+    /// Whether a one-shot data repair has already run against this catalog.
+    /// Schema migrations can guard on schema shape; a data correction cannot, so
+    /// it leaves a marker in `meta` instead.
+    func hasMetaFlag(_ key: String) -> Bool {
+        var found = false
+        query("SELECT 1 FROM meta WHERE key=? LIMIT 1;", bind: { stmt in
+            CatalogConnection.bindText(stmt, 1, key)
+        }) { _ in found = true }
         return found
     }
 

@@ -236,8 +236,14 @@ final class ShareCatalogStoreTests: XCTestCase {
             .legacyUnknown
         )
 
+        // The one-shot repair clears attempt counts that the fast-track path
+        // inflated, so a previously "exhausted" miss returns to the backlog with
+        // its real budget. Retry.mkv (under the cap) was always pending.
         let pending = await store.pendingEnrichment(version: 7, limit: 20)
-        XCTAssertEqual(pending.map(\.itemID), ["f:Movies/Retry.mkv"])
+        XCTAssertEqual(pending.map(\.itemID).sorted(), [
+            "f:Movies/Exhausted.mkv",
+            "f:Movies/Retry.mkv"
+        ])
 
         let state = try queryMigrationState(at: url)
         // v3 adds local-artwork inventory without changing the legacy normalized
@@ -254,7 +260,8 @@ final class ShareCatalogStoreTests: XCTestCase {
 
         let reopened = ShareCatalogStore(accountKey: "legacy", directory: directory)
         let reopenedPending = await reopened.pendingEnrichment(version: 7, limit: 20)
-        XCTAssertEqual(reopenedPending.map(\.itemID), [
+        XCTAssertEqual(reopenedPending.map(\.itemID).sorted(), [
+            "f:Movies/Exhausted.mkv",
             "f:Movies/Retry.mkv"
         ])
         XCTAssertEqual(try queryMigrationState(at: url).userVersion, 3)
@@ -1051,5 +1058,34 @@ final class ShareCatalogStoreTests: XCTestCase {
         )
     }
 
+    /// The retry budget bounds the BACKLOG. The fast-track path has its own
+    /// limiter (a per-item cooldown), so it must not spend the counter —
+    /// otherwise browsing alone exhausts an item the background never tried, and
+    /// the item is then excluded from the backlog query forever. Field catalogs
+    /// reached 55-72 attempts against a cap of 3 exactly this way, which is why a
+    /// 2,185-title library sat at a few hundred posters.
+    func testFastTrackMissesDoNotSpendTheBacklogRetryBudget() async {
+        let directory = tempDir()
+        let store = ShareCatalogStore(accountKey: "budget", directory: directory)
+        await store.upsert([movie("Movies/Blank (2020).mkv", title: "Blank", year: 2020)], scanID: 1)
+        let miss = EnrichmentRecord()
 
+        for _ in 0..<8 {
+            _ = await store.saveEnrichment(
+                itemID: "f:Movies/Blank (2020).mkv",
+                miss,
+                version: 3,
+                countsTowardRetryBudget: false
+            )
+        }
+        let stillPending = await store.pendingEnrichment(version: 3, limit: 10)
+        XCTAssertEqual(stillPending.map(\.itemID), ["f:Movies/Blank (2020).mkv"])
+
+        // Background attempts DO spend it, and the item settles at the cap.
+        for _ in 0..<EnrichmentRepository.maxEnrichAttempts {
+            _ = await store.saveEnrichment(itemID: "f:Movies/Blank (2020).mkv", miss, version: 3)
+        }
+        let settled = await store.pendingEnrichment(version: 3, limit: 10)
+        XCTAssertTrue(settled.isEmpty)
+    }
 }

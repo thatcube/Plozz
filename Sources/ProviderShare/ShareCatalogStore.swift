@@ -2079,7 +2079,13 @@ actor ShareCatalogStore {
     /// under TV, all its assets are reclassified to Anime — the Phase-2 "anime
     /// confirmed once ids resolve" correction.
     @discardableResult
-    func saveEnrichment(itemID: String, _ record: EnrichmentRecord, version: Int, now: Date = Date()) -> Bool {
+    func saveEnrichment(
+        itemID: String,
+        _ record: EnrichmentRecord,
+        version: Int,
+        now: Date = Date(),
+        countsTowardRetryBudget: Bool = true
+    ) -> Bool {
         ensureOpen()
         guard db != nil, normalizedMetadataReady else { return false }
         var record = record
@@ -2102,7 +2108,20 @@ actor ShareCatalogStore {
         // so a previously-exhausted miss gets the full retry count again, not one.
         // Within the same version the count accrues as before.
         let priorAttempts = (prior?.version == version) ? (prior?.attempts ?? 0) : 0
-        let attempts = merged.isUsable ? 0 : priorAttempts + 1
+        // The budget belongs to the BACKLOG. The fast-track path deliberately
+        // ignores the cap (an item the user opened deserves another look) and is
+        // limited instead by its own cooldown, so letting it spend the counter
+        // would let browsing exhaust an item the background never tried — and did:
+        // field catalogs reached 55-72 attempts against a cap of 3, locking those
+        // items out of the backlog entirely.
+        let attempts: Int
+        if merged.isUsable {
+            attempts = 0
+        } else if countsTowardRetryBudget {
+            attempts = priorAttempts + 1
+        } else {
+            attempts = priorAttempts
+        }
 
         guard exec("BEGIN IMMEDIATE;") else { return false }
         var stmt: OpaquePointer?

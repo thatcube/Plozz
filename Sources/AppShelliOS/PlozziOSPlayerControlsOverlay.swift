@@ -252,6 +252,101 @@ private struct PlozziOSPlayerTopBar: View {
     }
 }
 
+private extension View {
+    /// Gives a transport glyph a real 44pt touch target.
+    ///
+    /// The sizing has to live on the button's LABEL. Applied to the `Button`
+    /// itself, `.frame(minWidth: 44, minHeight: 44)` only enlarges the layout
+    /// slot the button is centred in; the button stays as big as its label, which
+    /// for these glyphs is around 20pt. The overlay puts a full-screen tap layer
+    /// behind the controls to toggle them, so every tap that landed in the gap
+    /// between the glyph and its 44pt slot fell through to that layer: pressing
+    /// play or skip read as tapping off the controls and dismissed them, and the
+    /// buttons appeared to do nothing. `contentShape` makes the padded area part
+    /// of the label rather than empty space the tap passes through.
+    func playerTransportHitTarget() -> some View {
+        frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+    }
+}
+
+/// The transport's "..." menu, driven by values rather than by the view model.
+///
+/// Split out so the playback clock cannot reach it: `PlayerControlsModel` is
+/// @Observable, and a `Menu` whose content closure reads it re-evaluates on
+/// every one of the roughly ten position updates a second, which makes an open
+/// menu's rows visibly flash. Holding plain values instead means SwiftUI only
+/// rebuilds the menu when a track list, a capability, or the Dialog Enhance
+/// state actually changes.
+private struct PlozziOSPlaybackOptionsMenu: View {
+    let audioOptions: [PlayerTrackOption]
+    let subtitleOptions: [PlayerTrackOption]
+    let canSearchRemoteSubtitles: Bool
+    let supportsPlaybackSpeed: Bool
+    let supportsSync: Bool
+    let supportsDialogEnhance: Bool
+    let dialogEnhanceEnabled: Bool
+    let onSelectAudio: (PlayerTrackOption.ID) -> Void
+    let onSetDialogEnhance: (Bool) -> Void
+    let onShowSubtitles: () -> Void
+    let onShowSpeed: () -> Void
+    let onShowSync: () -> Void
+
+    var body: some View {
+        Menu {
+            if !audioOptions.isEmpty || supportsDialogEnhance {
+                Menu("Audio") {
+                    ForEach(audioOptions) { option in
+                        Button {
+                            onSelectAudio(option.id)
+                        } label: {
+                            if option.isSelected {
+                                Label(option.title, systemImage: "checkmark")
+                            } else {
+                                Text(option.title)
+                            }
+                        }
+                    }
+                    if !audioOptions.isEmpty, supportsDialogEnhance {
+                        Divider()
+                    }
+                    if supportsDialogEnhance {
+                        Toggle(
+                            "Dialog Enhance",
+                            isOn: Binding(
+                                get: { dialogEnhanceEnabled },
+                                set: { onSetDialogEnhance($0) }
+                            )
+                        )
+                    }
+                }
+            }
+
+            if !subtitleOptions.isEmpty || canSearchRemoteSubtitles {
+                Button("Subtitles", systemImage: "captions.bubble") {
+                    onShowSubtitles()
+                }
+            }
+
+            if supportsPlaybackSpeed {
+                Button("Playback Speed", systemImage: "speedometer") {
+                    onShowSpeed()
+                }
+            }
+
+            if supportsSync {
+                Button("Playback Sync", systemImage: "slider.horizontal.3") {
+                    onShowSync()
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .playerTransportHitTarget()
+        }
+        .accessibilityLabel("Audio, subtitles, and speed")
+    }
+}
+
 private struct PlozziOSPlayerTransport: View {
     let viewModel: PlayerViewModel
     let displayedSeconds: TimeInterval
@@ -316,8 +411,8 @@ private struct PlozziOSPlayerTransport: View {
             HStack(spacing: 22) {
                 Button(action: onSkipBackward) {
                     Image(systemName: "gobackward.\(viewModel.controls.skipBackwardInterval.rawValue)")
+                        .playerTransportHitTarget()
                 }
-                .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel("Skip backward")
 
                 Button(action: onPlayPause) {
@@ -326,17 +421,17 @@ private struct PlozziOSPlayerTransport: View {
                             ? "play.fill"
                             : "pause.fill"
                     )
+                    .font(.title)
+                    .playerTransportHitTarget()
                 }
-                .font(.title)
-                .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel(
                     viewModel.controls.intendsPause ? "Play" : "Pause"
                 )
 
                 Button(action: onSkipForward) {
                     Image(systemName: "goforward.\(viewModel.controls.skipForwardInterval.rawValue)")
+                        .playerTransportHitTarget()
                 }
-                .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel("Skip forward")
 
                 Spacer(minLength: 8)
@@ -345,8 +440,8 @@ private struct PlozziOSPlayerTransport: View {
 
                 Button(action: onShowInfo) {
                     Image(systemName: "info.circle")
+                        .playerTransportHitTarget()
                 }
-                .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel("Playback information")
             }
             .font(.title3)
@@ -359,65 +454,33 @@ private struct PlozziOSPlayerTransport: View {
     }
 
     private var playbackOptions: some View {
-        Menu {
-            if !viewModel.controls.audioOptions.isEmpty || supportsDialogEnhance {
-                Menu("Audio") {
-                    ForEach(viewModel.controls.audioOptions) { option in
-                        Button {
-                            viewModel.selectAudioOption(id: option.id)
-                            onInteraction()
-                        } label: {
-                            if option.isSelected {
-                                Label(option.title, systemImage: "checkmark")
-                            } else {
-                                Text(option.title)
-                            }
-                        }
-                    }
-                    if !viewModel.controls.audioOptions.isEmpty,
-                       supportsDialogEnhance {
-                        Divider()
-                    }
-                    if supportsDialogEnhance {
-                        Toggle(
-                            "Dialog Enhance",
-                            isOn: Binding(
-                                get: {
-                                    viewModel.controls.dialogEnhanceEnabled
-                                },
-                                set: {
-                                    viewModel.setDialogEnhanceEnabled($0)
-                                    onInteraction()
-                                }
-                            )
-                        )
-                    }
-                }
-            }
-
-            if !viewModel.controls.subtitleOptions.isEmpty
-                || viewModel.controls.canSearchRemoteSubtitles {
-                Button("Subtitles", systemImage: "captions.bubble") {
-                    onShowSubtitles()
-                }
-            }
-
-            if viewModel.controls.engineCapabilities.contains(.playbackSpeed) {
-                Button("Playback Speed", systemImage: "speedometer") {
-                    onShowSpeed()
-                }
-            }
-
-            if supportsSync {
-                Button("Playback Sync", systemImage: "slider.horizontal.3") {
-                    onShowSync()
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .frame(minWidth: 44, minHeight: 44)
-        }
-        .accessibilityLabel("Audio, subtitles, and speed")
+        // Passes plain values, not the view model. `PlayerControlsModel` is
+        // @Observable and the playback clock writes `currentSeconds` about ten
+        // times a second, so a menu whose content closure touches
+        // `viewModel.controls` is invalidated on every tick. UIKit then rebuilds
+        // the open menu's rows underneath the user, which reads as the text
+        // flashing. Snapshotting the inputs here means the menu only redraws when
+        // something it actually shows has changed.
+        PlozziOSPlaybackOptionsMenu(
+            audioOptions: viewModel.controls.audioOptions,
+            subtitleOptions: viewModel.controls.subtitleOptions,
+            canSearchRemoteSubtitles: viewModel.controls.canSearchRemoteSubtitles,
+            supportsPlaybackSpeed: viewModel.controls.engineCapabilities.contains(.playbackSpeed),
+            supportsSync: supportsSync,
+            supportsDialogEnhance: supportsDialogEnhance,
+            dialogEnhanceEnabled: viewModel.controls.dialogEnhanceEnabled,
+            onSelectAudio: { id in
+                viewModel.selectAudioOption(id: id)
+                onInteraction()
+            },
+            onSetDialogEnhance: { enabled in
+                viewModel.setDialogEnhanceEnabled(enabled)
+                onInteraction()
+            },
+            onShowSubtitles: onShowSubtitles,
+            onShowSpeed: onShowSpeed,
+            onShowSync: onShowSync
+        )
     }
 
     private var supportsSync: Bool {

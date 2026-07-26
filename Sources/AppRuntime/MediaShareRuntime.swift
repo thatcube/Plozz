@@ -1,5 +1,6 @@
 import Foundation
 import CoreModels
+import CoreNetworking
 import CoreUI
 import FeatureAuthCore
 import MediaTransportCore
@@ -244,7 +245,12 @@ public final class DefaultMediaShareRuntime: MediaShareRuntime {
     public var artworkNetworkFileService: ArtworkNetworkFileService {
         ArtworkNetworkFileService(
             loader: MediaShareArtworkLoader(
-                resolver: networkFileResolver,
+                // Artwork is a small display-time JPEG read. Taking a PLAYBACK
+                // lease for it drained the running library scan — and artwork
+                // loads continuously while browsing, so the scan was cancelled
+                // over and over and never completed. That, not the scan interval,
+                // was the battery drain.
+                resolver: networkFileResolver.withoutPlaybackAdmission(),
                 catalogCoordinator: coordinator
             ),
             failureReporter: self

@@ -285,6 +285,12 @@ targets:
         # remote-notification lets CloudKit (CKSyncEngine) wake the app to pull
         # config changes pushed from another device on the same Apple ID.
         UIBackgroundModes:
+          # `audio` keeps playback running once the app leaves the foreground,
+          # which is what both Picture in Picture and AirPlay need. The tvOS
+          # target has always declared it; this one did not, so a PiP window or
+          # an AirPlay hand-off would have been silenced the moment the app
+          # backgrounded.
+          - audio
           - remote-notification
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

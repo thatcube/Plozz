@@ -2,6 +2,7 @@
 import CoreGraphics
 import CoreModels
 import FeaturePlayback
+import AVKit
 import SwiftUI
 import CoreUI
 
@@ -24,6 +25,7 @@ struct PlozziOSPlayerControlsOverlay: View {
     @State private var scrubPreviewCoordinator: ScrubPreviewCoordinator?
     @State private var presentedSheet: PlozziOSPlayerSheet?
     @State private var autoHideTask: Task<Void, Never>?
+    @StateObject private var pictureInPicture = PlozziOSPictureInPictureController()
 
     var body: some View {
         ZStack {
@@ -31,6 +33,13 @@ struct PlozziOSPlayerControlsOverlay: View {
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { toggleControls() }
+
+            if isPlayingElsewhere {
+                PlozziOSExternalPlaybackPlaceholder(
+                    routeName: viewModel.externalPlaybackRouteName,
+                    isPictureInPicture: pictureInPicture.isActive
+                )
+            }
 
             if controlsVisible {
                 LinearGradient(
@@ -55,6 +64,11 @@ struct PlozziOSPlayerControlsOverlay: View {
                     isScrubbing: isScrubbing,
                     scrubPreviewImage: scrubPreviewCoordinator?.image,
                     showsScrubPreview: scrubPreviewCoordinator != nil,
+                    pictureInPictureAvailable: pictureInPicture.isAvailable,
+                    onTogglePictureInPicture: {
+                        pictureInPicture.toggle()
+                        noteInteraction()
+                    },
                     onScrubChanged: { value in
                         scrubSeconds = value
                         scrubPreviewCoordinator?.update(for: value)
@@ -131,6 +145,12 @@ struct PlozziOSPlayerControlsOverlay: View {
         .animation(.easeInOut(duration: 0.2), value: controlsVisible)
         .onAppear { scheduleAutoHide() }
         .onAppear { configureScrubPreview() }
+        .onAppear { attachPictureInPicture() }
+        // The presenting layer does not exist until the native path has loaded,
+        // and an engine hand-off can replace it mid-session, so re-read it
+        // whenever playback becomes ready rather than once at appear.
+        .onChange(of: viewModel.phase) { _, _ in attachPictureInPicture() }
+        .onDisappear { pictureInPicture.detach() }
         .onDisappear {
             cancelAutoHide()
             scrubPreviewCoordinator?.clear()
@@ -197,6 +217,11 @@ struct PlozziOSPlayerControlsOverlay: View {
         guard !viewModel.controls.intendsPause, presentedSheet == nil, !isScrubbing else {
             return
         }
+        // Auto-hide exists to get the chrome out of the way of the video. With
+        // the video on a TV or in a PiP window there is nothing to reveal, and
+        // hiding leaves the user staring at a placeholder with no way to pause
+        // without tapping first.
+        guard !isPlayingElsewhere else { return }
         autoHideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled else { return }
@@ -209,11 +234,94 @@ struct PlozziOSPlayerControlsOverlay: View {
         autoHideTask = nil
     }
 
+    /// True while the frames are presenting somewhere other than this screen.
+    private var isPlayingElsewhere: Bool {
+        pictureInPicture.isActive || viewModel.externalPlaybackRouteName != nil
+    }
+
+    private func attachPictureInPicture() {
+        guard let engine = viewModel.pictureInPictureEngine else { return }
+        pictureInPicture.attach(engine: engine)
+        pictureInPicture.onRestoreUI = { @MainActor in
+            // Nothing to rebuild today: the player stays mounted behind the PiP
+            // window. The handler still has to run so AVKit completes the
+            // restore rather than leaving the window half-dismissed.
+        }
+    }
+
     private func configureScrubPreview() {
         scrubPreviewCoordinator?.clear()
         scrubPreviewCoordinator = viewModel.makeScrubPreviewCoordinator()
         scrubPreviewCoordinator?.prefetch()
     }
+}
+
+/// The system AirPlay route picker.
+///
+/// Nothing else is needed to AirPlay a locally-remuxed stream: AetherEngine
+/// watches `isExternalPlaybackActive` on its own AVPlayer and, when a wireless
+/// receiver picks up, reloads at the current position with the device's LAN IP
+/// swapped in for 127.0.0.1 and the MEDIA playlist forced, because the Apple TV
+/// cannot fetch segments from the phone's loopback and rejects a DV/HDR master
+/// playlist on an SDR receiver. That makes this true AirPlay video rather than
+/// screen mirroring. A wired HDMI display is deliberately left on the loopback.
+/// Shown when the video has moved off this screen.
+///
+/// The local surface goes black in both cases, because the frames are being
+/// presented somewhere else: a Picture in Picture window, or an AirPlay
+/// receiver. A black rectangle with floating subtitles over it reads as a
+/// failure, so say plainly where the video went.
+private struct PlozziOSExternalPlaybackPlaceholder: View {
+    let routeName: String?
+    let isPictureInPicture: Bool
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: isPictureInPicture ? "pip" : "airplayvideo")
+                .font(.system(size: 52, weight: .light))
+            Text(title)
+                .font(.title3.weight(.semibold))
+            if let detail {
+                Text(detail)
+                    .font(.subheadline)
+                    .plozzForeground(.secondary)
+            }
+        }
+        .foregroundStyle(.white)
+        .multilineTextAlignment(.center)
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Opaque on purpose. The shared player keeps rendering its subtitle
+        // overlay against a black surface, and those cues are meaningless here
+        // while the frames they belong to are on another screen, so this covers
+        // them rather than letting them float over an empty rectangle.
+        .background(Color.black)
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+
+    private var title: String {
+        if isPictureInPicture { return "Playing in Picture in Picture" }
+        if let routeName { return "Playing on \(routeName)" }
+        return "Playing on AirPlay"
+    }
+
+    private var detail: String? {
+        isPictureInPicture ? "Tap the window to bring playback back here." : nil
+    }
+}
+
+private struct PlozziOSAirPlayRouteButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        // Surfaces Apple TV class receivers ahead of audio-only routes.
+        view.prioritizesVideoDevices = true
+        view.tintColor = .white
+        view.activeTintColor = .white
+        return view
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }
 
 private struct PlozziOSPlayerTopBar: View {
@@ -245,6 +353,10 @@ private struct PlozziOSPlayerTopBar: View {
             .padding(.top, 3)
 
             Spacer(minLength: 0)
+
+            PlozziOSAirPlayRouteButton()
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("AirPlay")
         }
         .foregroundStyle(.white)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -373,6 +485,8 @@ private struct PlozziOSPlayerTransport: View {
     let isScrubbing: Bool
     let scrubPreviewImage: CGImage?
     let showsScrubPreview: Bool
+    let pictureInPictureAvailable: Bool
+    let onTogglePictureInPicture: () -> Void
     let onScrubChanged: (TimeInterval) -> Void
     let onScrubEditingChanged: (Bool) -> Void
     let onSkipBackward: () -> Void
@@ -456,6 +570,14 @@ private struct PlozziOSPlayerTransport: View {
                 Spacer(minLength: 8)
 
                 playbackOptions
+
+                if pictureInPictureAvailable {
+                    Button(action: onTogglePictureInPicture) {
+                        Image(systemName: "pip.enter")
+                            .playerTransportGlyph()
+                    }
+                    .accessibilityLabel("Picture in Picture")
+                }
 
                 Button(action: onShowInfo) {
                     Image(systemName: "info.circle")

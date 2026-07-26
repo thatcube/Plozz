@@ -1269,6 +1269,16 @@ public final class PlayerViewModel {
     /// to life on its own.
     public func suspendForBackground() {
         progressReporter.emitCheckpoint(includingPaused: true)
+        #if os(iOS)
+        // A PiP window or an AirPlay receiver is still showing this video, so
+        // leaving the foreground is not a reason to stop. Pausing here froze the
+        // PiP window the instant it became useful and stopped an AirPlay stream
+        // the moment the phone was put down. The checkpoint above still runs, so
+        // resume position stays correct either way.
+        if pictureInPictureEngine?.continuesPlaybackInBackground == true {
+            return
+        }
+        #endif
         // Key off intent, not `engine.isPaused`: if we mean to be playing (even
         // while the engine is mid post-seek settle), pause for real — this also
         // routes through `cancelResumeConfirm()` so a recovery loop can't wake the
@@ -1486,6 +1496,20 @@ public final class PlayerViewModel {
     /// AVFoundation-specific diagnostics sampler and the system player view.
     /// Returns `nil` for a non-AVFoundation engine (diagnostics is best-effort).
     public var player: AVPlayer? { (engine as? NativeVideoEngine)?.underlyingPlayer }
+
+    #if os(iOS)
+    /// The active engine when it can present Picture in Picture, else nil.
+    /// Re-read after an engine hand-off: routing can swap engines mid-session,
+    /// and a PiP controller bound to the previous one presents nothing.
+    public var pictureInPictureEngine: (any PictureInPicturePresentingEngine)? {
+        engine as? any PictureInPicturePresentingEngine
+    }
+
+    /// The AirPlay receiver showing this video, when one is.
+    public var externalPlaybackRouteName: String? {
+        pictureInPictureEngine?.externalPlaybackRouteName
+    }
+    #endif
 
     /// Live engine telemetry (dropped frames / FPS / bitrate) for diagnostics.
     /// `nil` on the native engine (the sampler uses the AVPlayer access log); the

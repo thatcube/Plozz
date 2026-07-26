@@ -516,11 +516,83 @@ public final class PlozzigenVideoEngine: VideoEngine {
     public func makeVideoOutputView() -> UIView {
         videoView
     }
+
+    /// The layer actually presenting video on the native path, for a host-built
+    /// `AVPictureInPictureController`.
+    ///
+    /// AetherEngine attaches its `AVPlayerLayer` to the view we bind but keeps the
+    /// reference internal, so this reads it back out of the layer tree. Returning
+    /// the engine's real layer matters: a second layer built from
+    /// `currentAVPlayer` would be a detached surface PiP could not present from.
+    /// Nil on the software-decode path, which has no AVPlayer at all, so a host
+    /// must treat PiP as unavailable rather than assume it.
+    public func pictureInPicturePlayerLayer() -> AVPlayerLayer? {
+        Self.firstPlayerLayer(in: videoView.layer)
+    }
+
+    private static func firstPlayerLayer(in layer: CALayer) -> AVPlayerLayer? {
+        if let found = layer as? AVPlayerLayer { return found }
+        for sublayer in layer.sublayers ?? [] {
+            if let found = firstPlayerLayer(in: sublayer) { return found }
+        }
+        return nil
+    }
+
+    /// Mirrors the host's PiP state into the engine.
+    ///
+    /// The engine reads this for its background keepalive policy and, on the
+    /// software path, to composite subtitle cues into the frames themselves so
+    /// they appear in the PiP window instead of double-drawing under our
+    /// fullscreen overlay. Leaving it unset means a PiP window can be torn down
+    /// as if the app had simply backgrounded.
+    public func setPictureInPictureActive(_ active: Bool) {
+        engine.pictureInPictureActive = active
+    }
+
+    /// Whether something outside this app's window is presenting the video.
+    ///
+    /// Both cases keep playing while backgrounded, and both are ruined by the
+    /// pause-on-background that a foreground-only session wants: a PiP window
+    /// freezes the moment it becomes useful, and an AirPlay receiver stops the
+    /// instant the user puts the phone down.
+    public var onPresentationLayerChanged: (() -> Void)?
+
+    public var externalPlaybackRouteName: String? {
+        guard engine.currentAVPlayer?.isExternalPlaybackActive == true else { return nil }
+        // The audio route names the receiver; AVPlayer itself does not expose it.
+        return AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName
+    }
+
+    public var continuesPlaybackInBackground: Bool {
+        if engine.pictureInPictureActive { return true }
+        return engine.currentAVPlayer?.isExternalPlaybackActive == true
+    }
     #endif
 
     // MARK: - Engine Observation (Combine)
 
     private func observeEngine() {
+        // AirPlay: opt the engine's AVPlayer into external playback as it is
+        // (re)created. The engine republishes `currentAVPlayer` on every audio
+        // track reload, so a one-shot assignment at load would go stale and the
+        // route picker would silently stop handing off. Everything harder than
+        // this is already the engine's job: it watches `isExternalPlaybackActive`
+        // and, for a wireless receiver, reloads with the device's LAN IP in place
+        // of 127.0.0.1 and forces the MEDIA playlist, since the Apple TV cannot
+        // reach the phone's loopback and rejects a DV/HDR master on an SDR panel.
+        engine.$currentAVPlayer
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] player in
+                guard let player else { return }
+                player.allowsExternalPlayback = true
+                player.usesExternalPlaybackWhileExternalScreenIsActive = true
+                // A new player means a new layer. Announce it on the next turn so
+                // the engine has finished attaching the layer to the bound view
+                // before a host reads it back.
+                Task { @MainActor in self?.onPresentationLayerChanged?() }
+            }
+            .store(in: &cancellables)
+
         // State → status/isPaused/onEnded/onFailure
         engine.$state
             .receive(on: DispatchQueue.main)
@@ -744,4 +816,8 @@ public enum PlozzigenVideoEngineFactory {
         )
     }
 }
+#endif
+
+#if os(iOS)
+extension PlozzigenVideoEngine: PictureInPicturePresentingEngine {}
 #endif

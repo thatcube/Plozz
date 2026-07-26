@@ -379,3 +379,37 @@ public extension VideoEngine {
     func setScrubRefreshBoost(_ enabled: Bool) {}
 }
 #endif
+
+#if os(iOS)
+import AVKit
+
+/// An engine that can present Picture in Picture.
+///
+/// Declared here rather than reaching for the concrete engine so the app shell
+/// does not have to know which engine is playing: PiP presents from an
+/// `AVPlayerLayer`, and only the native path has one. An engine that cannot
+/// present returns nil and the host hides the control.
+public protocol PictureInPicturePresentingEngine: AnyObject {
+    func pictureInPicturePlayerLayer() -> AVPlayerLayer?
+    func setPictureInPictureActive(_ active: Bool)
+
+    /// True while a Picture in Picture window or an AirPlay receiver is showing
+    /// this playback, so the session must keep running when the app leaves the
+    /// foreground instead of pausing with it.
+    var continuesPlaybackInBackground: Bool { get }
+
+    /// The AirPlay receiver currently showing this video, or nil when playback is
+    /// local or in a Picture in Picture window on this device.
+    var externalPlaybackRouteName: String? { get }
+
+    /// Called when the presenting layer is replaced.
+    ///
+    /// The layer is not stable for the life of a session: an audio-track change,
+    /// an engine hand-off, and the AirPlay hand-off (which reloads the source
+    /// against the device's LAN address) each rebuild the player and its layer.
+    /// A Picture in Picture controller bound to the previous one reports itself
+    /// impossible and cannot present, so the host has to rebuild rather than
+    /// wait for some unrelated state change to happen to re-trigger it.
+    var onPresentationLayerChanged: (() -> Void)? { get set }
+}
+#endif

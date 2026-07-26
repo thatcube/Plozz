@@ -329,6 +329,16 @@ targets:
         NSCameraUsageDescription: "Plozz uses the camera to scan the setup code shown on your other device."
         OMDBAPIKey: "$(OMDB_API_KEY)"
         TMDBBearerToken: "$(TMDB_BEARER_TOKEN)"
+        TMDBProxyBaseURL: "$(TMDB_PROXY_BASE_URL)"
+        # TheTVDB v4 API key. This MUST stay in step with the tvOS target: TheTVDB
+        # is the only bundled provider that covers MOVIES (the keyless sources are
+        # anime- or TV-only, leaving Wikidata/Wikipedia as a patchy fallback), so
+        # omitting it here silently disabled movie posters on iPhone and iPad while
+        # the Apple TV looked fine — roughly half of a mainstream library rendered
+        # blank with no error anywhere.
+        TVDBAPIKey: "$(TVDB_API_KEY)"
+        LastFmAPIKey: "$(LASTFM_API_KEY)"
+        LastFmSharedSecret: "$(LASTFM_SHARED_SECRET)"
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true

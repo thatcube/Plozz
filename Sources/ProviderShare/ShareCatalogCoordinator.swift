@@ -283,7 +283,14 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                 let arbiter = runtime.arbiter
                 await metadataScheduler.register(
                     accountKey: accountKey,
-                    mayRun: { await arbiter.permitsBackgroundWork() },
+                    // Deliberately NOT `arbiter.permitsBackgroundWork()`. That gate
+                    // asks whether the SHARE is idle, which is the right question
+                    // for an NFO read or an artwork probe and the wrong one for an
+                    // external metadata lookup — that is an internet HTTP call and
+                    // cannot contend with a share scan. Using it here blocked all
+                    // metadata for the whole of every scan. Share admission is now
+                    // checked per step inside `runSlice`, at the point of use.
+                    mayRun: { true },
                     runSlice: { maxItems, maxDuration in
                         await ShareMetadataWorkComposition.runSlice(
                             accountKey: accountKey,
@@ -291,7 +298,8 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
                             maxDuration: maxDuration,
                             local: localEnricher,
                             artwork: artworkProbeWorker,
-                            external: enricher
+                            external: enricher,
+                            sharePermits: { await arbiter.permitsBackgroundWork() }
                         )
                     },
                     runItem: { itemID in

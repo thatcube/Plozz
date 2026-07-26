@@ -113,7 +113,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
 
     func testBacklogSlicesAreSerializedAcrossAccounts() async {
         let recorder = Recorder()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 3,
             maxSliceDuration: .milliseconds(50),
             delayBetweenSlices: .milliseconds(1),
@@ -155,7 +155,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
     func testPreferredBacklogRunsFirstAndOtherProfilesEventuallyRun() async {
         let recorder = Recorder()
         let gate = Gate()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .milliseconds(1),
@@ -197,7 +197,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
 
     func testBlockedPreferredBacklogFallsBackToOtherProfile() async {
         let recorder = Recorder()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .milliseconds(1),
@@ -238,7 +238,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
     func testOpenedItemJumpsAheadOfBlockedBacklog() async {
         let recorder = Recorder()
         let gate = Gate()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .milliseconds(1),
@@ -273,7 +273,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
 
     func testInteractiveActivityCancelsCurrentBacklogSlice() async {
         let recorder = Recorder()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 10,
             maxSliceDuration: .seconds(2),
             delayBetweenSlices: .milliseconds(1),
@@ -309,7 +309,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
     func testInterruptInvalidatesAdmissionAlreadyInFlight() async {
         let recorder = Recorder()
         let gate = AdmissionGate()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .milliseconds(1),
@@ -344,7 +344,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
     func testSuspensionBlocksRetryAcrossAdmissionTransition() async {
         let recorder = Recorder()
         let gate = AdmissionGate()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .milliseconds(1),
@@ -380,7 +380,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
     func testRemovalInvalidatesAdmissionAndWaitsForRunningWork() async {
         let recorder = Recorder()
         let gate = AdmissionGate()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .milliseconds(1),
@@ -417,7 +417,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
     func testRemovedWorkCannotRequeueIntoReplacementRegistration() async {
         let recorder = Recorder()
         let gate = WorkGate()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .milliseconds(1),
@@ -474,7 +474,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
     func testStaleBacklogDiscardedWhenRegistrationReplacedDuringAdmission() async {
         let recorder = Recorder()
         let gate = AdmissionGate()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .milliseconds(1),
@@ -528,7 +528,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
     func testStaleUrgentItemDiscardedWhenRegistrationReplacedDuringAdmission() async {
         let recorder = Recorder()
         let gate = AdmissionGate()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .milliseconds(1),
@@ -577,7 +577,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
     /// it forever and never admit the non-preferred account.
     func testNonPreferredBacklogAdmittedWithinBurstQuotaUnderInfinitePreferred() async {
         let recorder = Recorder()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .zero,
@@ -628,7 +628,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
     /// promoted by age. Burst is set impossibly high so ONLY aging can surface it.
     func testAgedNonPreferredBacklogRunsUnderSteadyPreferred() async {
         let recorder = Recorder()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .zero,
@@ -681,7 +681,7 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
     /// so preferred work keeps making progress and is never stalled by the block.
     func testBlockedNonPreferredCannotConsumePreferredBurstQuota() async {
         let recorder = Recorder()
-        let scheduler = ShareMetadataWorkScheduler(configuration: .init(
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
             maxItemsPerSlice: 1,
             maxSliceDuration: .seconds(1),
             delayBetweenSlices: .zero,

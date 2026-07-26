@@ -132,13 +132,33 @@ actor ShareMetadataWorkScheduler {
     private var worker: Task<Void, Never>?
     private var running: Running?
 
-    init(configuration: Configuration = Configuration()) {
+    /// - Parameter adaptiveBudget: when true (production) the slice size is
+    ///   derived from the device and corrected by observed cost. Tests inject a
+    ///   fixed `Configuration` and pass false so the schedule stays deterministic —
+    ///   an adaptive budget would otherwise make slice sizes and delays depend on
+    ///   whatever machine the suite runs on.
+    init(adaptiveBudget: Bool = true, configuration: Configuration = Configuration()) {
         self.configuration = configuration
+        self.adaptiveBudget = adaptiveBudget
+        self.budget = adaptiveBudget
+            ? ShareMetadataBudget.forCurrentDevice()
+            : ShareMetadataBudget(
+                itemsPerSlice: configuration.maxItemsPerSlice,
+                sliceDuration: configuration.maxSliceDuration,
+                delayBetweenSlices: configuration.delayBetweenSlices
+            )
         self.fairnessPolicy = ShareBacklogFairnessPolicy(
             preferredBurst: configuration.preferredBacklogBurst,
             agePromotion: configuration.nonPreferredAgePromotion
         )
     }
+
+    /// Device-derived, self-correcting slice budget. Replaces the fixed
+    /// `maxItemsPerSlice`/`maxSliceDuration` constants: one number cannot be
+    /// right for both an Apple TV HD and an M-series iPad, and hard-coding the
+    /// safe end of that range is what made a large library take hours.
+    private var budget: ShareMetadataBudget
+    private let adaptiveBudget: Bool
 
     func register(
         accountKey: String,
@@ -307,11 +327,12 @@ actor ShareMetadataWorkScheduler {
                     return Outcome.item
                 case .backlog:
                     return .backlog(await job.runSlice(
-                        configuration.maxItemsPerSlice,
-                        configuration.maxSliceDuration
+                        budget.itemsPerSlice,
+                        budget.sliceDuration
                     ))
                 }
             }
+            let sliceStartedAt = clock.now
             let runningID = UUID()
             running = Running(
                 id: runningID,
@@ -336,9 +357,33 @@ actor ShareMetadataWorkScheduler {
                 // A served turn restarts age; requeue is generation-guarded.
                 if wasCancelled { requeue(queued, resetAge: true) }
             case .backlog(let result):
+                // Close the loop: correct the budget with what the slice actually
+                // cost, and re-read thermal/low-power state so a device that heats
+                // up mid-library is noticed rather than driven harder. A cancelled
+                // slice is not evidence about capacity, so it is not fed back.
+                if !wasCancelled, adaptiveBudget {
+                    let observed = sliceStartedAt.duration(to: clock.now)
+                    let deviceBudget = ShareMetadataBudget.forCurrentDevice()
+                    let corrected = budget.adjusted(
+                        after: observed, attempted: result.attempted
+                    )
+                    // A CONSTRAINED device (thermal pressure / Low Power Mode) is a
+                    // hard ceiling — a thermal event must immediately pull back a
+                    // budget that measurement had grown. An unconstrained device
+                    // only supplies the pacing; measured headroom decides the size,
+                    // otherwise the growth path could never take effect.
+                    let ceiling = ShareMetadataBudget.isConstrained()
+                        ? deviceBudget.itemsPerSlice
+                        : ShareMetadataBudget.maximumItemsPerSlice
+                    budget = ShareMetadataBudget(
+                        itemsPerSlice: min(corrected.itemsPerSlice, ceiling),
+                        sliceDuration: deviceBudget.sliceDuration,
+                        delayBetweenSlices: deviceBudget.delayBetweenSlices
+                    )
+                }
                 if wasCancelled || result.hasMore {
                     if var updated = jobs[work.accountKey] {
-                        let nextDelay = result.retryAfter ?? configuration.delayBetweenSlices
+                        let nextDelay = result.retryAfter ?? budget.delayBetweenSlices
                         let sliceDelay = clock.now.advanced(
                             by: nextDelay
                         )

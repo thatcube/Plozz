@@ -48,6 +48,19 @@ extension ShareEnricher: ShareExternalMetadataRunning {}
 /// through to external. The enrichers additionally fence cancellation internally so
 /// no local or external attempt is burned.
 enum ShareMetadataWorkComposition {
+    /// - Parameters:
+    ///   - sharePermits: whether SHARE I/O may run right now (no scan holding
+    ///     admission, no playback lease). Consulted per step rather than around
+    ///     the whole slice, because the three kinds of work do not use the same
+    ///     resource: local NFO reads and artwork probes go over the share, while
+    ///     external metadata is an internet HTTP call that cannot contend with a
+    ///     share scan at all. Gating the whole slice on share availability — the
+    ///     previous behaviour — blocked TMDb lookups for the entire duration of
+    ///     every scan, which is why a 2,185-title library sat at 330 enriched.
+    ///   - externalReservation: fraction of the slice reserved for external work
+    ///     so it can never be starved by a large local backlog. Strict local-first
+    ///     priority meant 11,575 pending artwork probes had to drain — roughly 48
+    ///     minutes of slices — before a single poster was fetched.
     static func runSlice(
         accountKey: String,
         maxItems: Int,
@@ -55,6 +68,8 @@ enum ShareMetadataWorkComposition {
         local: some ShareLocalMetadataRunning,
         artwork: some ShareLocalArtworkProbing,
         external: some ShareExternalMetadataRunning,
+        sharePermits: @Sendable () async -> Bool = { true },
+        externalReservation: Double = 0.5,
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled }
     ) async -> ShareEnrichmentSliceResult {
         ShareBackgroundActivity.enrichStarted()
@@ -65,11 +80,22 @@ enum ShareMetadataWorkComposition {
         // providers.
         let clock = ContinuousClock()
         let sliceStart = clock.now
-        BrowseDiagnostics.event("local-slice+ \(accountKey)")
-        let localResult = await local.resolvePendingSlice(
-            maxItems: maxItems,
-            maxDuration: maxDuration
-        )
+        // Reserve part of the budget for external work up front, so local work
+        // cannot consume the slice and starve it.
+        let reserved = max(1, Int((Double(maxItems) * externalReservation).rounded()))
+        let localBudget = max(0, maxItems - reserved)
+        let shareIsFree = await sharePermits()
+
+        var localResult = ShareEnrichmentSliceResult(attempted: 0, hasMore: true)
+        if shareIsFree, localBudget > 0 {
+            BrowseDiagnostics.event("local-slice+ \(accountKey)")
+            localResult = await local.resolvePendingSlice(
+                maxItems: localBudget,
+                maxDuration: maxDuration
+            )
+        } else {
+            BrowseDiagnostics.event("local-slice~ \(accountKey) shareBusy=\(!shareIsFree)")
+        }
         BrowseDiagnostics.event(
             "local-slice- \(accountKey) attempted=\(localResult.attempted) more=\(localResult.hasMore)"
         )
@@ -79,15 +105,15 @@ enum ShareMetadataWorkComposition {
         }
         let elapsed = sliceStart.duration(to: clock.now)
         let remaining = maxDuration > elapsed ? maxDuration - elapsed : .zero
-        let remainingItems = max(0, maxItems - localResult.attempted)
-        guard remaining > .zero, remainingItems > 0 else {
-            return ShareEnrichmentSliceResult(attempted: localResult.attempted, hasMore: true)
+        let remainingItems = max(0, localBudget - localResult.attempted)
+        var artworkResult = ShareEnrichmentSliceResult(attempted: 0, hasMore: true)
+        if shareIsFree, remaining > .zero, remainingItems > 0 {
+            BrowseDiagnostics.event("artwork-slice+ \(accountKey)")
+            artworkResult = await artwork.resolvePendingSlice(
+                maxItems: remainingItems,
+                maxDuration: remaining
+            )
         }
-        BrowseDiagnostics.event("artwork-slice+ \(accountKey)")
-        let artworkResult = await artwork.resolvePendingSlice(
-            maxItems: remainingItems,
-            maxDuration: remaining
-        )
         BrowseDiagnostics.event(
             "artwork-slice- \(accountKey) attempted=\(artworkResult.attempted) more=\(artworkResult.hasMore)"
         )
@@ -99,7 +125,10 @@ enum ShareMetadataWorkComposition {
         }
         let afterArtwork = sliceStart.duration(to: clock.now)
         let externalDuration = maxDuration > afterArtwork ? maxDuration - afterArtwork : .zero
-        let externalItems = max(0, remainingItems - artworkResult.attempted)
+        // The reservation, plus anything local/artwork left unused. When the share
+        // is busy that is the WHOLE slice — the scan and the metadata fetch use
+        // different resources, so there is no reason for one to idle the other.
+        let externalItems = maxItems - localResult.attempted - artworkResult.attempted
         guard externalDuration > .zero, externalItems > 0 else {
             return ShareEnrichmentSliceResult(
                 attempted: localResult.attempted + artworkResult.attempted,

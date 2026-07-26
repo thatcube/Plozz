@@ -23,6 +23,9 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
     private actor FakeLocal: ShareLocalMetadataRunning {
         private(set) var sliceCalls = 0
         private(set) var resolveOneCalls = 0
+        /// The budget the composition actually offered, so a test can assert the
+        /// reservation without depending on what the fake chooses to consume.
+        private(set) var lastSliceMaxItems = 0
         private let sliceResult: ShareEnrichmentSliceResult
         private let oneOutcome: ShareLocalMetadataOutcome
 
@@ -36,6 +39,7 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
 
         func resolvePendingSlice(maxItems: Int, maxDuration: Duration) async -> ShareEnrichmentSliceResult {
             sliceCalls += 1
+            lastSliceMaxItems = maxItems
             return sliceResult
         }
 
@@ -154,9 +158,17 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         XCTAssertEqual(resolveOneCalls, 0, "a cancelled beforeResolve must not call local resolveOne")
     }
 
-    func testLocalArtworkAndNFOShareTheSchedulerItemBudget() async {
-        let local = FakeLocal(sliceResult: .init(attempted: 6, hasMore: false))
-        let artwork = FakeArtwork(result: .init(attempted: 4, hasMore: false))
+    /// Local NFO and artwork still share ONE budget between them — but that budget
+    /// is now the non-reserved part of the slice, not the whole thing.
+    ///
+    /// The contract deliberately changed. Strict local-first priority meant a
+    /// large local backlog starved external metadata indefinitely: a real library
+    /// with 11,575 pending artwork probes would have had to drain them all — on
+    /// the order of an hour of slices — before one poster was fetched. External
+    /// work now holds a reservation it cannot be squeezed out of.
+    func testLocalArtworkAndNFOShareTheNonReservedItemBudget() async {
+        let local = FakeLocal(sliceResult: .init(attempted: 6, hasMore: true))
+        let artwork = FakeArtwork(result: .init(attempted: 4, hasMore: true))
         let external = FakeExternal()
         let result = await ShareMetadataWorkComposition.runSlice(
             accountKey: "a",
@@ -165,12 +177,41 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
             local: local,
             artwork: artwork,
             external: external,
+            externalReservation: 0.5,
             isCancelled: { false }
         )
-        XCTAssertEqual(result.attempted, 10)
-        XCTAssertTrue(result.hasMore, "external work must remain scheduled when local artwork exhausts the shared slice")
+        // Local is offered only the unreserved half; it reports 6 attempted (the
+        // fake ignores the cap), and external still gets its turn.
+        let localMax = await local.lastSliceMaxItems
+        XCTAssertEqual(localMax, 5, "local must be offered only the unreserved half")
         let externalSlices = await external.sliceCalls
-        XCTAssertEqual(externalSlices, 0)
+        XCTAssertEqual(externalSlices, 1, "external must not be starved by local work")
+        XCTAssertTrue(result.hasMore)
+    }
+
+    /// A share scan holds share I/O, but an external metadata lookup is an
+    /// internet call — it must keep running. Blocking it was why enrichment stalled
+    /// for the entire duration of every scan.
+    func testExternalStillRunsWhileShareIOIsBusy() async {
+        let local = FakeLocal(sliceResult: .init(attempted: 0, hasMore: true))
+        let artwork = FakeArtwork(result: .init(attempted: 0, hasMore: true))
+        let external = FakeExternal()
+        _ = await ShareMetadataWorkComposition.runSlice(
+            accountKey: "a",
+            maxItems: 10,
+            maxDuration: .seconds(1),
+            local: local,
+            artwork: artwork,
+            external: external,
+            sharePermits: { false },
+            isCancelled: { false }
+        )
+        let localSlices = await local.sliceCalls
+        let artworkSlices = await artwork.sliceCalls
+        let externalSlices = await external.sliceCalls
+        XCTAssertEqual(localSlices, 0, "share I/O must not run while the share is busy")
+        XCTAssertEqual(artworkSlices, 0, "share I/O must not run while the share is busy")
+        XCTAssertEqual(externalSlices, 1, "internet work does not contend with the share")
     }
 
     // MARK: - runItem

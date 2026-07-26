@@ -58,15 +58,23 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
     }
 
     /// Stable ordering for consistent UI layout (lower sorts first).
+    ///
+    /// Leads with the two Rotten Tomatoes scores because they read fastest: a
+    /// tomato and a bucket of popcorn are recognisable before any number is,
+    /// and the critic/audience pair together says more about a film than any
+    /// single figure. IMDb follows as the familiar general-audience number, then
+    /// TMDB. AniList sits behind them rather than near the front — it is
+    /// anime-only, and on an anime title the western scores are usually absent
+    /// anyway, so it still surfaces first exactly when it matters.
     public var sortRank: Int {
         switch self {
-        case .imdb: return 0
-        case .anilist: return 1
-        case .rottenTomatoes: return 2
-        case .rottenTomatoesAudience: return 3
-        case .metacritic: return 4
-        case .letterboxd: return 5
-        case .tmdb: return 6
+        case .rottenTomatoes: return 0
+        case .rottenTomatoesAudience: return 1
+        case .imdb: return 2
+        case .tmdb: return 3
+        case .anilist: return 4
+        case .metacritic: return 5
+        case .letterboxd: return 6
         case .community: return 7
         case .critic: return 8
         }

@@ -720,9 +720,9 @@ final class PlexProviderMappingTests: XCTestCase {
         let provider = PlexProvider(session: makeSession(), http: stub)
 
         let item = try await provider.item(id: "88")
-        // All four sources surface, ordered by sortRank (IMDb, RT critic, RT
-        // audience, TMDB), each with no duplicate entries.
-        XCTAssertEqual(item.ratings.map(\.source), [.imdb, .rottenTomatoes, .rottenTomatoesAudience, .tmdb])
+        // All four sources surface, ordered by sortRank (RT critic, RT audience,
+        // IMDb, TMDB), each with no duplicate entries.
+        XCTAssertEqual(item.ratings.map(\.source), [.rottenTomatoes, .rottenTomatoesAudience, .imdb, .tmdb])
         XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "7.3")
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "53%")
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoesAudience })?.displayValue, "77%")

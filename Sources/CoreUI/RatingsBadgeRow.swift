@@ -12,7 +12,12 @@ public struct RatingsBadgeRow: View {
     #endif
 
     public init(ratings: [ExternalRating]) {
-        self.ratings = ratings
+        // Order here, not at each call site. The detail page sorted by
+        // `sortRank` and the three hero views did not, so a title's badges could
+        // appear in one order on Home and another on its detail page depending
+        // on which backend happened to supply them. Sorting where they are
+        // rendered makes the order a property of the row itself.
+        self.ratings = ratings.sorted { $0.source.sortRank < $1.source.sortRank }
     }
 
     public var body: some View {

@@ -142,8 +142,9 @@ final class ExternalRatingTests: XCTestCase {
         XCTAssertEqual(rt?.value, 74)
         // Native-only source is preserved.
         XCTAssertTrue(merged.contains { $0.source == .community })
-        // Ordered by sortRank: imdb, rottenTomatoes, metacritic, community.
-        XCTAssertEqual(merged.map(\.source), [.imdb, .rottenTomatoes, .metacritic, .community])
+        // Ordered by sortRank: the Rotten Tomatoes scores lead, then IMDb, then
+        // the remaining sources.
+        XCTAssertEqual(merged.map(\.source), [.rottenTomatoes, .imdb, .metacritic, .community])
     }
 
     func testMergePreservesNativeCountWhenAuthoritativeScoreHasNone() {

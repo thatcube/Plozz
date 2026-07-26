@@ -86,6 +86,23 @@ final class CatalogConnection {
         // Covers the Movies grid query (WHERE library, kind ORDER BY sort_title) so
         // the sort is index-provided instead of a per-page temp B-tree sort.
         apply("CREATE INDEX IF NOT EXISTS idx_assets_movies_sort ON assets(library, kind, sort_title);")
+        // Per-directory state for INCREMENTAL scans. A directory's mtime changes
+        // when its DIRECT children are added/removed/renamed, so a folder whose
+        // mtime matches the stored one needs no network listing — by far the
+        // expensive part of a walk (an SMB/NFS round trip each, vs a local row
+        // read). We still descend into its known subdirectories, because a
+        // directory's mtime says nothing about changes DEEPER in the tree.
+        //
+        // `last_scan` mirrors the other scan-scoped tables so a directory that
+        // disappears is pruned by the same rule.
+        apply("""
+        CREATE TABLE IF NOT EXISTS dir_state(
+            rel_path    TEXT PRIMARY KEY,
+            modified_at REAL NOT NULL,
+            last_scan   INTEGER NOT NULL
+        );
+        """)
+        apply("CREATE INDEX IF NOT EXISTS idx_dir_state_scan ON dir_state(last_scan);")
         apply("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);")
         // Per-logical-item enrichment (resolved at scan time by ShareEnricher and
         // persisted): external ids for merge/ratings/Trakt, plus overview + artwork

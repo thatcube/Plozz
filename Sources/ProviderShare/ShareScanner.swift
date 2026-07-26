@@ -235,7 +235,18 @@ actor ShareScanner {
             await finishScan(listers: pool)
             return .invalidated
         }
+        // Incremental scan state: a directory whose mtime is unchanged since the
+        // last scan doesn't need listing. Loaded once for the whole walk.
+        let storedDirectoryMTimes = await store.directoryModifiedTimes()
+        // Directories holding metadata (NFO sidecars / local artwork) are never
+        // skipped — see `directoriesRequiringRelist` for why. This is what broke
+        // when incremental scanning first landed.
+        let directoriesNeedingRelist = await store.directoriesRequiringRelist()
+        // mtime each directory was reported with by its parent's listing, so the
+        // value recorded for a folder is the one a later scan will compare against.
+        var listedDirectoryMTimes: [String: Date?] = [:]
         var dirsWalked = 0
+        var dirsSkipped = 0
         var filesFound = 0
         let progressClock = ContinuousClock()
         var lastProgressReport = progressClock.now
@@ -302,7 +313,37 @@ actor ShareScanner {
                         free.append(fresh)
                     }
                     dirsWalked += 1
-                    nextFrontier.append(contentsOf: result.subdirs)
+                    if result.ok {
+                        await store.recordDirectory(
+                            relPath: result.dir,
+                            modifiedAt: listedDirectoryMTimes[result.dir] ?? nil,
+                            scanID: scanID,
+                            scanGeneration: scanGeneration
+                        )
+                    }
+                    // Split this directory's children: an unchanged one keeps its
+                    // recorded contents (stamped so the prune spares them) and is
+                    // NOT listed, but we still descend into ITS children — a
+                    // directory's mtime says nothing about deeper changes.
+                    for child in result.subdirectories {
+                        listedDirectoryMTimes[child.relPath] = child.modifiedAt
+                        if let mtime = child.modifiedAt,
+                           let known = storedDirectoryMTimes[child.relPath],
+                           known == mtime,
+                           !directoriesNeedingRelist.contains(child.relPath) {
+                            dirsSkipped += 1
+                            await store.touchDirectoryContents(
+                                relPath: child.relPath,
+                                scanID: scanID,
+                                scanGeneration: scanGeneration
+                            )
+                            nextFrontier.append(
+                                contentsOf: await store.recordedSubdirectories(of: child.relPath)
+                            )
+                        } else {
+                            nextFrontier.append(child.relPath)
+                        }
+                    }
                     if !result.assets.isEmpty {
                         filesFound += result.assets.count
                         await store.upsert(
@@ -388,6 +429,15 @@ actor ShareScanner {
             // associations, and rematerialize local + filename projections — all in
             // ONE atomic transaction. After commit no readable item can resurrect a
             // deleted item's ids/artwork/metadata/state on path/series-key reuse.
+            await store.pruneDirectoryStateNotSeen(
+                inScan: scanID, scanGeneration: scanGeneration
+            )
+            // Only NOW is this scan's directory state safe to skip against: the
+            // pass completed, so every recorded directory had its full subtree
+            // walked. A partial pass's rows are never trusted.
+            await store.markDirectoryStateComplete(
+                scanID: scanID, scanGeneration: scanGeneration
+            )
             let finalized = await store.finalizeCleanScan(
                 inScan: scanID,
                 scanGeneration: scanGeneration
@@ -451,7 +501,7 @@ actor ShareScanner {
                 .map { "\($0.key.rawValue):\($0.value)" }
                 .joined(separator: ",")
         PlozzLog.boot(
-            "share.scan done scanID=\(scanID) dirs=\(dirsWalked) files=\(filesFound) pruned=\(!anyListingFailed) failed=\(listFailureCounts.values.reduce(0, +)) failures=[\(failureSummary)] elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
+            "share.scan done scanID=\(scanID) dirs=\(dirsWalked) skipped=\(dirsSkipped) files=\(filesFound) pruned=\(!anyListingFailed) failed=\(listFailureCounts.values.reduce(0, +)) failures=[\(failureSummary)] elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
         )
         await finishScan(listers: pool)
         // A completed pass earns a completion stamp. When some listing failed the pass
@@ -479,9 +529,18 @@ actor ShareScanner {
     /// sidecar candidates discovered (pure filename/sibling-stem facts — no read),
     /// and whether the listing actually succeeded (a failed listing must not let
     /// the walk treat the folder as "empty" and prune its still-present content).
+    /// A subdirectory seen in a listing, with the mtime used to decide whether it
+    /// needs listing on the next scan.
+    struct ScannedSubdirectory: Sendable {
+        let relPath: String
+        let modifiedAt: Date?
+    }
+
     private struct DirResult: Sendable {
         let lister: ScanLister
-        let subdirs: [String]
+        let dir: String
+        let subdirectories: [ScannedSubdirectory]
+        var subdirs: [String] { subdirectories.map(\.relPath) }
         let assets: [CatalogAsset]
         let sidecars: [LocalSidecarCandidate]
         let artwork: [LocalArtworkCandidate]
@@ -507,11 +566,12 @@ actor ShareScanner {
             // error's localized description (either can embed a share path). Classify
             // the failure into a bounded category; the caller aggregates counts.
             return DirResult(
-                lister: lister, subdirs: [], assets: [], sidecars: [], artwork: [], ok: false,
+                lister: lister, dir: dir, subdirectories: [], assets: [], sidecars: [],
+                artwork: [], ok: false,
                 failureCategory: ShareScanListFailureCategory(error)
             )
         }
-        var subdirs: [String] = []
+        var subdirs: [ScannedSubdirectory] = []
         var assets: [CatalogAsset] = []
         // Video stems discovered in THIS SAME listing, bucketed by classified
         // kind, so a sibling `.nfo`'s stem can be matched against a movie vs an
@@ -525,7 +585,7 @@ actor ShareScanner {
             let childPath = dir.isEmpty ? entry.name : "\(dir)/\(entry.name)"
             if entry.kind == .directory {
                 if excludedDirs.contains(entry.name.lowercased()) { continue }
-                subdirs.append(childPath)
+                subdirs.append(ScannedSubdirectory(relPath: childPath, modifiedAt: entry.modifiedAt))
             } else if ShareMediaParser.isVideoFile(entry.name), !isSampleFile(entry.name) {
                 let parsed = asset(relPath: childPath, entry: entry)
                 let stem = ShareMediaParser.videoStem(entry.name).lowercased()
@@ -573,8 +633,8 @@ actor ShareScanner {
         // readSmallFile, source lease, ImageIO, or metadata work is admitted here.
         let artwork = ShareArtworkInventoryPolicy.candidates(entries: entries, parentDir: dir)
         return DirResult(
-            lister: lister, subdirs: subdirs, assets: assets, sidecars: sidecars,
-            artwork: artwork, ok: true
+            lister: lister, dir: dir, subdirectories: subdirs, assets: assets,
+            sidecars: sidecars, artwork: artwork, ok: true
         )
     }
 

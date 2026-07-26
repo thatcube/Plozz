@@ -64,6 +64,7 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         private(set) var itemCalls = 0
         private(set) var beforeResolveResults: [Bool] = []
         private(set) var lastConcurrency = 0
+        private(set) var lastMaxItems = 0
         private let invokeBeforeResolve: Bool
         private let latchBeforeResolve: Latch?
 
@@ -80,6 +81,7 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
         ) async -> ShareEnrichmentSliceResult {
             sliceCalls += 1
             lastConcurrency = concurrency
+            lastMaxItems = maxItems
             if invokeBeforeResolve, let beforeResolve {
                 latchBeforeResolve?.set()
                 beforeResolveResults.append(await beforeResolve("item-1"))
@@ -378,5 +380,29 @@ final class ShareMetadataWorkCompositionTests: XCTestCase {
             isCancelled: { false }
         )
         XCTAssertNil(result.capacity)
+    }
+
+    /// The device lane's adapted budget must not govern the network lane. They
+    /// contend for different resources, so letting a slow share shrink the number
+    /// of internet requests throttles work the share has nothing to do with.
+    func testExternalItemBudgetIsIndependentOfTheAdaptedDeviceBudget() async {
+        let local = FakeLocal(sliceResult: .init(attempted: 0, hasMore: false))
+        let artwork = FakeArtwork()
+        let external = FakeExternal()
+        _ = await ShareMetadataWorkComposition.runSlice(
+            accountKey: "a",
+            budget: .testing(
+                items: 4,                 // device lane shrunk to its floor
+                sliceDuration: .milliseconds(20),
+                externalItemsPerSlice: 48,
+                externalSliceDuration: .milliseconds(20)
+            ),
+            local: local,
+            artwork: artwork,
+            external: external,
+            isCancelled: { false }
+        )
+        let offered = await external.lastMaxItems
+        XCTAssertEqual(offered, 48, "external work must use its own allowance")
     }
 }

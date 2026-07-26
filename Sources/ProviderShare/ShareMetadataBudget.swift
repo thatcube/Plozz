@@ -46,6 +46,15 @@ struct ShareMetadataBudget: Equatable, Sendable {
     /// materially more work for the device. Kept deliberately modest so the
     /// providers see a polite request rate.
     var externalConcurrency: Int
+    /// How many external lookups one slice may attempt.
+    ///
+    /// Deliberately NOT ``itemsPerSlice``. That number is adapted from how long
+    /// this device's disk-and-share work takes, which is the right governor for
+    /// the device lane and the wrong one for the network lane: a slow share would
+    /// otherwise throttle internet requests it has nothing to do with. External
+    /// work is bounded by ``externalConcurrency`` and by being polite to the
+    /// providers, so it gets a flat allowance instead of an adapted one.
+    var externalItemsPerSlice: Int
     /// Wall-clock ceiling for the external portion of a slice. Separate from
     /// ``sliceDuration``, which is a CPU-fairness window for disk and share work:
     /// applying that window to network I/O just truncates the slice after the
@@ -57,12 +66,14 @@ struct ShareMetadataBudget: Equatable, Sendable {
         sliceDuration: Duration,
         delayBetweenSlices: Duration,
         externalConcurrency: Int = 6,
+        externalItemsPerSlice: Int = 48,
         externalSliceDuration: Duration = .seconds(15)
     ) {
         self.itemsPerSlice = itemsPerSlice
         self.sliceDuration = sliceDuration
         self.delayBetweenSlices = delayBetweenSlices
         self.externalConcurrency = externalConcurrency
+        self.externalItemsPerSlice = externalItemsPerSlice
         self.externalSliceDuration = externalSliceDuration
     }
 
@@ -90,6 +101,7 @@ struct ShareMetadataBudget: Equatable, Sendable {
                 sliceDuration: .seconds(1),
                 delayBetweenSlices: .seconds(5),
                 externalConcurrency: 1,
+                externalItemsPerSlice: minimumItemsPerSlice,
                 externalSliceDuration: .seconds(2)
             )
         case .serious:
@@ -98,6 +110,7 @@ struct ShareMetadataBudget: Equatable, Sendable {
                 sliceDuration: .seconds(1),
                 delayBetweenSlices: .seconds(2),
                 externalConcurrency: 2,
+                externalItemsPerSlice: minimumItemsPerSlice * 2,
                 externalSliceDuration: .seconds(4)
             )
         default:
@@ -109,6 +122,7 @@ struct ShareMetadataBudget: Equatable, Sendable {
                 sliceDuration: .seconds(1),
                 delayBetweenSlices: .seconds(2),
                 externalConcurrency: 2,
+                externalItemsPerSlice: minimumItemsPerSlice * 2,
                 externalSliceDuration: .seconds(4)
             )
         }
@@ -206,6 +220,7 @@ extension ShareMetadataBudget {
         sliceDuration: Duration,
         delayBetweenSlices: Duration = .zero,
         externalConcurrency: Int = 1,
+        externalItemsPerSlice: Int? = nil,
         externalSliceDuration: Duration? = nil
     ) -> ShareMetadataBudget {
         ShareMetadataBudget(
@@ -213,6 +228,7 @@ extension ShareMetadataBudget {
             sliceDuration: sliceDuration,
             delayBetweenSlices: delayBetweenSlices,
             externalConcurrency: externalConcurrency,
+            externalItemsPerSlice: externalItemsPerSlice ?? items,
             externalSliceDuration: externalSliceDuration ?? sliceDuration
         )
     }

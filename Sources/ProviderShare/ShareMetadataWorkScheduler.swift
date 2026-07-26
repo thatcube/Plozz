@@ -395,6 +395,7 @@ actor ShareMetadataWorkScheduler {
                         sliceDuration: deviceBudget.sliceDuration,
                         delayBetweenSlices: deviceBudget.delayBetweenSlices,
                         externalConcurrency: deviceBudget.externalConcurrency,
+                        externalItemsPerSlice: deviceBudget.externalItemsPerSlice,
                         externalSliceDuration: deviceBudget.externalSliceDuration
                     )
                 }

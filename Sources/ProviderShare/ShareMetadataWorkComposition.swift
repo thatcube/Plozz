@@ -188,12 +188,12 @@ enum ShareMetadataWorkComposition {
     ) async -> ShareEnrichmentSliceResult {
         guard !isCancelled(),
               budget.externalSliceDuration > .zero,
-              budget.itemsPerSlice > 0 else {
+              budget.externalItemsPerSlice > 0 else {
             return ShareEnrichmentSliceResult(attempted: 0, hasMore: true)
         }
         BrowseDiagnostics.event("enrich-slice+ \(accountKey)")
         let result = await external.enrichPendingSlice(
-            maxItems: budget.itemsPerSlice,
+            maxItems: budget.externalItemsPerSlice,
             maxDuration: budget.externalSliceDuration,
             concurrency: budget.externalConcurrency,
             beforeResolve: { itemID in

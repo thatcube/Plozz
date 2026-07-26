@@ -205,14 +205,36 @@ actor ShareScanner {
         // holds exactly `concurrency` healthy listers.
         var free = pool
 
-        guard let scanID = await store.nextScanID(for: scanGeneration),
-              !isInvalidated else {
-            await finishScan(listers: pool)
-            return isInvalidated ? .invalidated : .failedToStart
+        // Resume an interrupted pass rather than re-walking from the root.
+        //
+        // CRITICAL: a resume reuses the interrupted pass's scanID. Everything the
+        // earlier pass upserted carries that id, and the prune deletes rows whose
+        // `last_scan` differs — so allocating a fresh id here would make the
+        // completed portion look vanished and delete it. Reusing the id also makes
+        // the union of both passes a complete walk, which is exactly what the
+        // prune requires to be correct.
+        let resumeState = await Self.loadResumeState(store: store)
+        let scanID: Int64
+        var frontier: [String]
+        if let resumeState {
+            scanID = resumeState.scanID
+            frontier = resumeState.frontier
+            PlozzLog.boot(
+                "share.scan resume scanID=\(scanID) pending=\(frontier.count) concurrency=\(concurrency)"
+            )
+        } else {
+            guard let fresh = await store.nextScanID(for: scanGeneration), !isInvalidated else {
+                await finishScan(listers: pool)
+                return isInvalidated ? .invalidated : .failedToStart
+            }
+            scanID = fresh
+            frontier = [""] // "" == share root
+            PlozzLog.boot("share.scan begin scanID=\(scanID) concurrency=\(concurrency)")
         }
-        PlozzLog.boot("share.scan begin scanID=\(scanID) concurrency=\(concurrency)")
-
-        var frontier: [String] = [""] // "" == share root
+        guard !isInvalidated else {
+            await finishScan(listers: pool)
+            return .invalidated
+        }
         var dirsWalked = 0
         var filesFound = 0
         let progressClock = ContinuousClock()
@@ -231,7 +253,14 @@ actor ShareScanner {
         // concurrency to the pool size with no locks/continuations.
         while !frontier.isEmpty {
             if Task.isCancelled {
-                PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
+                await Self.saveResumeState(
+                    store: store, scanID: scanID, frontier: frontier,
+                    scanGeneration: scanGeneration
+                )
+                PlozzLog.boot(
+                    "share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — "
+                        + "no prune, \(frontier.count) dir(s) saved to resume"
+                )
                 await finishScan(listers: pool)
                 return .cancelled(scanGeneration: scanGeneration)
             }
@@ -314,11 +343,31 @@ actor ShareScanner {
             }
 
             if Task.isCancelled || isInvalidated {
-                PlozzLog.boot("share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — no prune")
+                // Everything still unwalked: this level's undispatched tail plus the
+                // children discovered so far. Directories already listed keep their
+                // rows stamped with `scanID`, so they simply aren't revisited.
+                let pending = Array(frontier[min(index, frontier.count)...]) + nextFrontier
+                await Self.saveResumeState(
+                    store: store, scanID: scanID, frontier: pending,
+                    scanGeneration: scanGeneration
+                )
+                PlozzLog.boot(
+                    "share.scan cancelled after \(dirsWalked) dirs, \(filesFound) files — "
+                        + "no prune, \(pending.count) dir(s) saved to resume"
+                )
                 await finishScan(listers: pool)
                 return isInvalidated ? .invalidated : .cancelled(scanGeneration: scanGeneration)
             }
             frontier = nextFrontier
+            // Checkpoint at every level boundary, not only on graceful
+            // cancellation: an app that is force-quit, crashes, or is suspended and
+            // reclaimed by iOS never runs the cancellation path at all — which is
+            // the common way a scan dies on a phone. One small meta write per BFS
+            // level is cheap against a walk measured in minutes.
+            await Self.saveResumeState(
+                store: store, scanID: scanID, frontier: frontier,
+                scanGeneration: scanGeneration
+            )
         }
         reporter.scanDetailedProgress(shareID, dirsWalked, filesFound)
 
@@ -365,6 +414,8 @@ actor ShareScanner {
             }
             await store.materializeFilenameProviderIDs(scanGeneration: scanGeneration)
         }
+        // The walk finished: no partial state to carry forward.
+        await Self.clearResumeState(store: store, scanGeneration: scanGeneration)
         await store.setMeta(
             "last_full_scan_at",
             String(Date().timeIntervalSince1970),
@@ -525,6 +576,69 @@ actor ShareScanner {
             lister: lister, subdirs: subdirs, assets: assets, sidecars: sidecars,
             artwork: artwork, ok: true
         )
+    }
+
+    // MARK: - Interrupted-scan resume
+
+    /// A partial walk's remaining work, persisted so an interruption costs only
+    /// what was left rather than the whole share.
+    private struct ResumeState {
+        let scanID: Int64
+        let frontier: [String]
+    }
+
+    private static let resumeScanIDKey = "resume_scan_id"
+    private static let resumeFrontierKey = "resume_frontier"
+    private static let resumeSavedAtKey = "resume_saved_at"
+
+    /// How long a saved frontier stays usable. A resume reuses the interrupted
+    /// pass's scanID, so its already-walked half is never revisited — if that half
+    /// is days old it is better to re-walk from scratch than to prune against a
+    /// stale picture of the share.
+    private static let resumeMaxAge: TimeInterval = 6 * 60 * 60
+
+    private static func loadResumeState(store: ShareCatalogStore) async -> ResumeState? {
+        guard let idText = await store.meta(resumeScanIDKey),
+              let scanID = Int64(idText),
+              let savedAtText = await store.meta(resumeSavedAtKey),
+              let savedAt = TimeInterval(savedAtText),
+              let json = await store.meta(resumeFrontierKey),
+              let data = json.data(using: .utf8),
+              let frontier = try? JSONDecoder().decode([String].self, from: data),
+              !frontier.isEmpty
+        else { return nil }
+        guard Date().timeIntervalSince1970 - savedAt < resumeMaxAge else { return nil }
+        return ResumeState(scanID: scanID, frontier: frontier)
+    }
+
+    private static func saveResumeState(
+        store: ShareCatalogStore,
+        scanID: Int64,
+        frontier: [String],
+        scanGeneration: UUID?
+    ) async {
+        guard !frontier.isEmpty,
+              let data = try? JSONEncoder().encode(frontier),
+              let json = String(data: data, encoding: .utf8)
+        else {
+            // Nothing left to do, or the frontier can't be encoded: drop any stale
+            // state rather than leaving a resume pointing at the wrong work.
+            await clearResumeState(store: store, scanGeneration: scanGeneration)
+            return
+        }
+        await store.setMeta(resumeScanIDKey, String(scanID), scanGeneration: scanGeneration)
+        await store.setMeta(resumeFrontierKey, json, scanGeneration: scanGeneration)
+        await store.setMeta(
+            resumeSavedAtKey,
+            String(Date().timeIntervalSince1970),
+            scanGeneration: scanGeneration
+        )
+    }
+
+    private static func clearResumeState(store: ShareCatalogStore, scanGeneration: UUID?) async {
+        for key in [resumeScanIDKey, resumeFrontierKey, resumeSavedAtKey] {
+            await store.setMeta(key, "", scanGeneration: scanGeneration)
+        }
     }
 
     /// A supported NFO sidecar filename (any casing).

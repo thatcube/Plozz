@@ -411,5 +411,9 @@ public protocol PictureInPicturePresentingEngine: AnyObject {
     /// impossible and cannot present, so the host has to rebuild rather than
     /// wait for some unrelated state change to happen to re-trigger it.
     var onPresentationLayerChanged: (() -> Void)? { get set }
+
+    /// Routes subtitles through the video pipeline, so they reach a Picture in
+    /// Picture window that the host's own overlay cannot follow into.
+    func setNativeSubtitlesActive(_ active: Bool)
 }
 #endif

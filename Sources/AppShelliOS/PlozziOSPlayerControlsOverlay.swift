@@ -150,6 +150,12 @@ struct PlozziOSPlayerControlsOverlay: View {
         // and an engine hand-off can replace it mid-session, so re-read it
         // whenever playback becomes ready rather than once at appear.
         .onChange(of: viewModel.phase) { _, _ in attachPictureInPicture() }
+        // No AirPlay equivalent yet, and not for want of trying: the engine
+        // declares its native subtitle renditions in the master playlist, but the
+        // wireless AirPlay path serves the media playlist so AVPlayer will not
+        // reject a DV/HDR master on an SDR receiver. A media playlist carries no
+        // EXT-X-MEDIA tags, so there is no legible track to select and the call
+        // changes nothing. Tracked upstream as AetherEngine#227.
         .onDisappear { pictureInPicture.detach() }
         .onDisappear {
             cancelAutoHide()

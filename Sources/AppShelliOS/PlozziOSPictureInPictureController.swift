@@ -111,6 +111,9 @@ extension PlozziOSPictureInPictureController: AVPictureInPictureControllerDelega
             // The engine's background keepalive and its software-path subtitle
             // compositor both read this.
             engine?.setPictureInPictureActive(true)
+            // The overlay cannot follow the video into the window, so hand the
+            // cues to the native track for as long as the window is up.
+            engine?.setNativeSubtitlesActive(true)
         }
     }
 
@@ -120,6 +123,7 @@ extension PlozziOSPictureInPictureController: AVPictureInPictureControllerDelega
         Task { @MainActor in
             isActive = false
             engine?.setPictureInPictureActive(false)
+            engine?.setNativeSubtitlesActive(false)
         }
     }
 
@@ -130,6 +134,7 @@ extension PlozziOSPictureInPictureController: AVPictureInPictureControllerDelega
         Task { @MainActor in
             isActive = false
             engine?.setPictureInPictureActive(false)
+            engine?.setNativeSubtitlesActive(false)
         }
     }
 

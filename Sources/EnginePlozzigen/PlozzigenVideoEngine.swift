@@ -275,6 +275,17 @@ public final class PlozzigenVideoEngine: VideoEngine {
             matchContentEnabled: true,
             audioBridgeMode: channels > 6 ? .lossless : .surroundCompat
         )
+        // Build the native WebVTT renditions so subtitles can travel into a
+        // Picture in Picture window, where our own overlay cannot follow: it is a
+        // view in this app's hierarchy and the window only carries what is in the
+        // video pipeline. The engine renders them DEFAULT=NO / AUTOSELECT=NO, so
+        // nothing is selected and nothing double-draws until asked. Styled
+        // ASS/SSA keeps the overlay for normal playback; the native copy is plain
+        // text, which is the trade for being visible in the window at all.
+        options.prepareNativeSubtitles = true
+        // Populate the readers at load, so a window opened mid-playback has cues
+        // immediately instead of starting with a gap.
+        options.eagerNativeSubtitleReaders = true
         // Steer the INITIAL active audio/subtitle track via language preference
         // (no reload). Computed upstream from per-series memory / prefer-original
         // policy. Empty arrays express no preference (container default wins).
@@ -557,6 +568,39 @@ public final class PlozzigenVideoEngine: VideoEngine {
     /// instant the user puts the phone down.
     public var onPresentationLayerChanged: (() -> Void)?
 
+    /// Routes subtitles through the video pipeline instead of the host overlay.
+    ///
+    /// Used for Picture in Picture, where the overlay cannot follow the video.
+    /// Deliberately NOT used for AirPlay: starting a receiver reloads the source
+    /// against the device's LAN address, and that producer restart detaches
+    /// AVKit's legible renderer, so a track selected across it renders nowhere on
+    /// the way out and then double-draws with the overlay on the way back.
+    public func setNativeSubtitlesActive(_ active: Bool) {
+        wantsNativeSubtitles = active
+        applyNativeSubtitleSelection()
+    }
+
+    /// Held as intent rather than applied once, because a selection does not
+    /// survive a producer restart: starting AirPlay reloads the source against
+    /// the device's LAN address, and a track selected before that reload lands on
+    /// a detached legible renderer, so it shows nowhere on the receiver and then
+    /// double-draws with the overlay when playback returns. Re-applied whenever
+    /// the session reports itself ready again.
+    private var wantsNativeSubtitles = false
+
+    private func applyNativeSubtitleSelection() {
+        guard wantsNativeSubtitles else {
+            engine.setNativeSubtitleSelected(track: nil)
+            return
+        }
+        // Match what the user already has selected; fall back to the engine's
+        // language-ranked default when the overlay is showing nothing.
+        let ordinal = engine.activeSubtitleTrackIndex
+            .flatMap { active in engine.subtitleTracks.firstIndex { $0.id == active } }
+            ?? engine.nativeSubtitleDefaultOrdinal
+        engine.setNativeSubtitleSelected(track: ordinal)
+    }
+
     public var externalPlaybackRouteName: String? {
         guard engine.currentAVPlayer?.isExternalPlaybackActive == true else { return nil }
         // The audio route names the receiver; AVPlayer itself does not expose it.
@@ -590,6 +634,18 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 // the engine has finished attaching the layer to the bound view
                 // before a host reads it back.
                 Task { @MainActor in self?.onPresentationLayerChanged?() }
+            }
+            .store(in: &cancellables)
+
+        // A reload rebuilds the session, which drops any native subtitle
+        // selection. Re-assert the intent once the new session is ready rather
+        // than at the moment the route changed, which is too early to stick.
+        engine.$isSessionReady
+            .removeDuplicates()
+            .filter { $0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.applyNativeSubtitleSelection()
             }
             .store(in: &cancellables)
 

@@ -1664,8 +1664,9 @@ private struct PlozziOSInlineEpisodeEntry: View {
                 .resizable()
                 .scaledToFill()
         } placeholder: {
-            Rectangle()
-                .fill(palette.fill)
+            // Shared with the tvOS cards so a missing episode still looks the same
+            // on every platform; this was a bare filled rectangle with no glyph.
+            MediaArtworkPlaceholder(glyphSize: 32)
         }
         .frame(width: cardWidth, height: cardWidth * 9 / 16)
         .overlay {

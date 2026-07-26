@@ -160,20 +160,7 @@ public struct EpisodeColumnCard: View {
     }
 
     private var neutralPlaceholder: some View {
-        ZStack {
-            Color.secondary.opacity(0.08)
-            VStack(spacing: 10) {
-                Image(systemName: "play.rectangle")
-                    .font(.system(size: 40))
-                    .plozzForeground(.secondary)
-                Text(item.parentTitle ?? "Episode")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-            }
-        }
+        MediaArtworkPlaceholder()
     }
 
     private var asyncArtworkFallback: (@Sendable () async -> URL?)? {

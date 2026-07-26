@@ -603,25 +603,11 @@ public struct PosterCardView: View {
         }
     }
 
-    /// Neutral, theme-agnostic placeholder showing the (series) title. Carries no
-    /// episode-number text — the `S· · E·` subtitle already conveys that.
-    /// Uses the shared caption colors so icon/text flip on focus and respect
-    /// reduced-transparency.
+    /// Neutral stand-in when a card has no artwork. Uses the shared
+    /// `MediaArtworkPlaceholder` so every surface looks identical, tinted with
+    /// the caption colour so it flips on focus and respects reduced-transparency.
     private var neutralPlaceholder: some View {
-        ZStack {
-            titleColor.opacity(0.08)
-            VStack(spacing: 10) {
-                Image(systemName: "play.rectangle")
-                    .font(.system(size: 40))
-                    .foregroundStyle(subtitleColor)
-                Text(primaryText)
-                    .font(.headline)
-                    .foregroundStyle(titleColor)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-            }
-        }
+        MediaArtworkPlaceholder(tint: subtitleColor)
     }
 
     // MARK: Progress

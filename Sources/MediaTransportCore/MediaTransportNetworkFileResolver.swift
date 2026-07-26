@@ -3,6 +3,24 @@ import Foundation
 
 public protocol MediaTransportNetworkFileResolving: Sendable {
     func resolve(_ locator: NetworkFileLocator) async throws -> MediaTransportResolvedSource
+
+    /// The same resolver, but WITHOUT playback admission.
+    ///
+    /// Acquiring a playback lease deliberately drains any running library scan —
+    /// correct when a movie starts, wrong for the lightweight reads that share the
+    /// playback resolver: a codec/Atmos probe, a trickplay thumbnail. Those fire
+    /// from ordinary browsing, so on a share they cancelled the in-flight scan on
+    /// every detail page open. A cancelled scan never stamps `last_full_scan_at`,
+    /// so `scanIfStale` saw it as stale and restarted a FULL walk — forever. That
+    /// loop, not the scan interval, was the app's battery drain.
+    ///
+    /// Defaulted to `self` so test doubles and resolvers with no admission concept
+    /// need not implement it.
+    func withoutPlaybackAdmission() -> any MediaTransportNetworkFileResolving
+}
+
+public extension MediaTransportNetworkFileResolving {
+    func withoutPlaybackAdmission() -> any MediaTransportNetworkFileResolving { self }
 }
 
 /// Owns both an opened source and the resolver session that created it. The
@@ -76,6 +94,17 @@ public struct MediaTransportNetworkFileResolver: MediaTransportNetworkFileResolv
         self.registry = registry
         self.playbackLeaseProvider = playbackLeaseProvider
         self.sessionKeyProvider = sessionKeyProvider
+    }
+
+    /// Drops playback admission only. The session identity/credential checks in
+    /// `resolve` are untouched, so a lightweight read is still bound to the same
+    /// account + credential revision as playback.
+    public func withoutPlaybackAdmission() -> any MediaTransportNetworkFileResolving {
+        MediaTransportNetworkFileResolver(
+            registry: registry,
+            playbackLeaseProvider: { _ in nil },
+            sessionKeyProvider: sessionKeyProvider
+        )
     }
 
     public func resolve(_ locator: NetworkFileLocator) async throws -> MediaTransportResolvedSource {

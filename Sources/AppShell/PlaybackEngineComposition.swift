@@ -66,8 +66,10 @@ enum HybridPlayback {
                 guard case .some(.networkFile(let locator)) = request.playbackSource else {
                     return nil
                 }
+                // A probe reads headers; it must NOT preempt a library scan the way
+                // starting playback does.
                 let prober = PlozzigenNetworkFileStreamProber(
-                    resolver: networkFileResolver
+                    resolver: networkFileResolver.withoutPlaybackAdmission()
                 )
                 guard let facts = await prober.probe(locator: locator) else {
                     return nil

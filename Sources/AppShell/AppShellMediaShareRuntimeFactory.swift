@@ -12,7 +12,7 @@ enum AppShellMediaShareRuntimeFactory {
             accountStore: accountStore,
             artworkCacheLifecycle: artworkCacheLifecycle
         ) { resolver in
-            PlozzigenNetworkFileStreamProber(resolver: resolver)
+            PlozzigenNetworkFileStreamProber(resolver: resolver.withoutPlaybackAdmission())
         }
         ArtworkImageCache.shared.configure(
             networkFileService: runtime.artworkNetworkFileService

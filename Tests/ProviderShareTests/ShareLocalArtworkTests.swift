@@ -1174,4 +1174,96 @@ final class ShareLocalArtworkTests: XCTestCase {
         XCTAssertTrue(item.artworkReferences(for: .detailBackdrop).isEmpty)
         XCTAssertFalse(item.artworkReferences(for: .banner).isEmpty)
     }
+
+    // MARK: - probe durability and ordering
+
+    private func openArtworkConnection() -> (CatalogConnection, URL) {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("artwork-repo-\(UUID().uuidString).sqlite")
+        let conn = CatalogConnection(url: url)
+        XCTAssertTrue(conn.ensureOpen(legacyMetadataMigration: { _ in true }))
+        return (conn, url)
+    }
+
+    private func probeStatus(_ conn: CatalogConnection, _ relPath: String) -> String? {
+        var status: String?
+        conn.query("SELECT probe_status FROM local_artwork_files WHERE rel_path=?;", bind: {
+            CatalogConnection.bindText($0, 1, relPath)
+        }) { status = CatalogConnection.columnText($0, 0) }
+        return status
+    }
+
+    /// A rescan must not throw away a probe the file has not invalidated. SMB and
+    /// NFS serve no ETag, so every file there is "weak" — and weak files used to be
+    /// forced back to `pending` on every single scan. With ~17,000 artwork files
+    /// and scans completing every few minutes, validation was discarded faster than
+    /// it could ever be redone, so `homeHero` and `detailBackdrop` (the only
+    /// placements that require a validated probe) could never render at all.
+    func testWeakFingerprintProbeSurvivesARescanOfAnUnchangedFile() {
+        let (conn, url) = openArtworkConnection()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = LocalArtworkRepository(connection: conn)
+        let weak = candidate("Movies/Film/fanart.jpg", etag: nil)
+        XCTAssertTrue(repo.upsert([weak], scanID: 1, now: Date()))
+        XCTAssertTrue(repo.updateProbe(
+            relPath: "Movies/Film/fanart.jpg",
+            fingerprint: "mtime:100:100",
+            status: "validated",
+            probeVersion: 1, width: 1920, height: 1080, contentType: "image/jpeg",
+            incrementAttempts: false, now: Date()
+        ))
+
+        // A later scan sees the same file: same size, same mtime.
+        XCTAssertTrue(repo.upsert([weak], scanID: 2, now: Date()))
+
+        XCTAssertEqual(probeStatus(conn, "Movies/Film/fanart.jpg"), "validated")
+    }
+
+    /// The durability above must not become blindness: a file whose size or mtime
+    /// moved is genuinely different and has to be probed again.
+    func testAChangedWeakFileIsProbedAgain() {
+        let (conn, url) = openArtworkConnection()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = LocalArtworkRepository(connection: conn)
+        let original = candidate("Movies/Film/fanart.jpg", etag: nil)
+        XCTAssertTrue(repo.upsert([original], scanID: 1, now: Date()))
+        XCTAssertTrue(repo.updateProbe(
+            relPath: "Movies/Film/fanart.jpg",
+            fingerprint: "mtime:100:100",
+            status: "validated",
+            probeVersion: 1, width: 1920, height: 1080, contentType: "image/jpeg",
+            incrementAttempts: false, now: Date()
+        ))
+
+        var edited = original
+        edited.modifiedAt = Date(timeIntervalSince1970: 999)
+        XCTAssertTrue(repo.upsert([edited], scanID: 2, now: Date()))
+
+        XCTAssertEqual(probeStatus(conn, "Movies/Film/fanart.jpg"), "pending")
+    }
+
+    /// Probe the files the UI is actually blocked on first. Only hero/backdrop
+    /// placements refuse to render from an unprobed file; posters, logos and
+    /// episode thumbnails display straight from a pending row. On a real library
+    /// the 8,039 episode thumbnails otherwise compete with the 3,346 files that
+    /// unblock a hero.
+    func testHeroCandidatesAreProbedBeforeThumbnails() {
+        let (conn, url) = openArtworkConnection()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = LocalArtworkRepository(connection: conn)
+        let thumb = candidate("Shows/Series/S01E01-thumb.jpg", etag: nil)
+        let hero = candidate("Shows/Series/fanart.jpg", etag: nil)
+        XCTAssertTrue(repo.upsert([thumb, hero], scanID: 1, now: Date()))
+        XCTAssertTrue(repo.replaceAllAssociations([
+            .init(itemID: "series:s", placement: .episodeThumbnail,
+                  artworkRelPath: thumb.relPath, rank: 0),
+            .init(itemID: "series:s", placement: .homeHero,
+                  artworkRelPath: hero.relPath, rank: 0)
+        ]))
+
+        let queued = repo.pendingArtworkFiles(limit: 10, maxAttempts: 3)
+
+        XCTAssertEqual(queued.first?.relPath, hero.relPath,
+                       "the hero candidate must be probed before an episode thumbnail")
+    }
 }

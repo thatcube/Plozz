@@ -39,21 +39,31 @@ struct LocalArtworkRepository {
           stable_file_id=excluded.stable_file_id,strong_etag=excluded.strong_etag,
           change_token=excluded.change_token,fingerprint=excluded.fingerprint,
           scan_generation_bound=excluded.scan_generation_bound,last_scan=excluded.last_scan,
+          -- A probe result survives a rescan unless the file itself changed.
+          -- `scan_generation_bound` marks a WEAK fingerprint (no ETag, no stable
+          -- id — i.e. every SMB and NFS file), and it used to force 'pending' on
+          -- every scan. That is unmeetable work: a real library holds ~17,000
+          -- artwork files and scans complete every few minutes, so validation was
+          -- discarded far faster than it could be redone and `homeHero` /
+          -- `detailBackdrop` — the placements that require a validated probe —
+          -- could never render at all. The stored fingerprint is `mtime:<mtime>:<size>`
+          -- and is stable across scans, so it already detects every real edit; the
+          -- residual case is a byte swap that preserves BOTH size and mtime, which
+          -- leaves a stale aspect ratio until the file next genuinely changes.
+          -- Cached artwork BYTES are unaffected: those still revalidate per scan
+          -- generation via `artworkSourceFingerprint`.
           probe_status=CASE WHEN local_artwork_files.fingerprint IS NOT excluded.fingerprint
-                              OR excluded.scan_generation_bound=1 THEN 'pending'
-                            ELSE local_artwork_files.probe_status END,
+                            THEN 'pending' ELSE local_artwork_files.probe_status END,
           processed_fingerprint=CASE WHEN local_artwork_files.fingerprint IS NOT excluded.fingerprint
-                                       OR excluded.scan_generation_bound=1 THEN NULL
-                                     ELSE local_artwork_files.processed_fingerprint END,
+                                     THEN NULL ELSE local_artwork_files.processed_fingerprint END,
           probe_attempts=CASE WHEN local_artwork_files.fingerprint IS NOT excluded.fingerprint
-                                OR excluded.scan_generation_bound=1 THEN 0
-                              ELSE local_artwork_files.probe_attempts END,
+                              THEN 0 ELSE local_artwork_files.probe_attempts END,
           width=CASE WHEN local_artwork_files.fingerprint IS NOT excluded.fingerprint
-                       OR excluded.scan_generation_bound=1 THEN NULL ELSE local_artwork_files.width END,
+                     THEN NULL ELSE local_artwork_files.width END,
           height=CASE WHEN local_artwork_files.fingerprint IS NOT excluded.fingerprint
-                        OR excluded.scan_generation_bound=1 THEN NULL ELSE local_artwork_files.height END,
+                      THEN NULL ELSE local_artwork_files.height END,
           content_type=CASE WHEN local_artwork_files.fingerprint IS NOT excluded.fingerprint
-                              OR excluded.scan_generation_bound=1 THEN NULL ELSE local_artwork_files.content_type END,
+                            THEN NULL ELSE local_artwork_files.content_type END,
           catalog_artwork_id=COALESCE(local_artwork_files.catalog_artwork_id,excluded.catalog_artwork_id),
           updated_at=excluded.updated_at;
         """, -1, &stmt, nil) == SQLITE_OK else { return false }
@@ -154,11 +164,23 @@ struct LocalArtworkRepository {
     func pendingArtworkFiles(limit: Int, maxAttempts: Int) -> [PendingLocalArtworkFile] {
         guard limit > 0 else { return [] }
         var files: [PendingLocalArtworkFile] = []
+        // Probe what the UI is actually waiting on first. Only `homeHero` and
+        // `detailBackdrop` refuse to render from an unprobed file (they need the
+        // aspect check), so those candidates gate visible artwork; posters, logos
+        // and episode thumbnails all display straight from a pending row. Ordering
+        // by `last_scan` alone interleaved them, so on a real library the 8,039
+        // episode thumbnails competed with the 3,346 files that actually unblock a
+        // hero — turning half an hour of useful work into hours of indifferent
+        // work. Unassociated files sort last: nothing displays them at all.
         connection.query("""
         SELECT rel_path,size,modified_at,stable_file_id,strong_etag,change_token,fingerprint,probe_attempts
         FROM local_artwork_files
         WHERE probe_status='pending' AND probe_attempts<?
-        ORDER BY last_scan,rel_path
+        ORDER BY COALESCE((
+            SELECT MIN(CASE WHEN a.placement IN ('homeHero','detailBackdrop') THEN 0 ELSE 1 END)
+            FROM local_artwork_associations a
+            WHERE a.artwork_rel_path = local_artwork_files.rel_path
+        ), 2), last_scan, rel_path
         LIMIT ?;
         """, bind: {
             sqlite3_bind_int64($0, 1, Int64(maxAttempts))

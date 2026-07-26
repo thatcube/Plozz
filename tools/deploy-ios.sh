@@ -32,7 +32,14 @@ NO_BUILD=0
 # verifier false-positive; see install-verified.sh). --no-regen skips it; --no-build
 # implies it (nothing new is compiled).
 REGEN=1
-INCLUDE_METADATA_KEYS=0
+# Metadata provider keys ship on EVERY platform. iOS used to blank them by
+# default, which silently left iPhone and iPad with no provider that covers
+# films (TheTVDB and TMDb are the only two; the keyless sources are anime- or
+# TV-only and Wikipedia's API withholds non-free images), so half a mainstream
+# library rendered blank there while the Apple TV — whose script has no such
+# override — looked perfect. Parity with tvOS is the default; --keyless opts out
+# for a deliberate no-key test build.
+INCLUDE_METADATA_KEYS=1
 BRANDED=0
 
 for arg in "$@"; do
@@ -45,6 +52,7 @@ for arg in "$@"; do
     --no-regen) REGEN=0 ;;
     --branded) BRANDED=1 ;;
     --metadata-keys) INCLUDE_METADATA_KEYS=1 ;;
+    --keyless) INCLUDE_METADATA_KEYS=0 ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown flag: $arg (try --help)" >&2; exit 2 ;;
   esac
@@ -93,9 +101,7 @@ fi
 
 BUILD_SETTING_OVERRIDES=()
 if [[ "$INCLUDE_METADATA_KEYS" != "1" ]]; then
-  # Device builds are keyless by default. Account-level integrations such as
-  # Trakt remain available through Secrets.xcconfig; only optional metadata keys
-  # are blanked unless the caller explicitly opts in.
+  # Only when --keyless is passed explicitly, to exercise the no-key path.
   BUILD_SETTING_OVERRIDES+=("TMDB_BEARER_TOKEN=" "OMDB_API_KEY=")
 fi
 
@@ -138,15 +144,31 @@ BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/I
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")"
 codesign --verify --deep --strict "$APP_PATH"
 
-if [[ "$INCLUDE_METADATA_KEYS" != "1" ]]; then
-  TMDB_VALUE="$(
-    /usr/libexec/PlistBuddy -c 'Print :TMDBBearerToken' \
-      "$APP_PATH/Info.plist" 2>/dev/null || true
-  )"
-  if [[ -n "$TMDB_VALUE" ]]; then
-    echo "✗ Expected a keyless build, but TMDBBearerToken is populated." >&2
+# Verify the build carries what was asked for. The failure this catches is
+# silent at runtime: a provider without its key returns nothing forever, with no
+# error and no log line.
+TMDB_VALUE="$(
+  /usr/libexec/PlistBuddy -c 'Print :TMDBBearerToken' \
+    "$APP_PATH/Info.plist" 2>/dev/null || true
+)"
+TVDB_VALUE="$(
+  /usr/libexec/PlistBuddy -c 'Print :TVDBAPIKey' \
+    "$APP_PATH/Info.plist" 2>/dev/null || true
+)"
+if [[ "$INCLUDE_METADATA_KEYS" == "1" ]]; then
+  if [[ -z "$TVDB_VALUE" ]]; then
+    echo "✗ TVDBAPIKey is empty — films will have no poster source." >&2
+    echo "  Check TVDB_API_KEY in Config/Secrets.local.xcconfig." >&2
     exit 1
   fi
+  if [[ -z "$TMDB_VALUE" ]]; then
+    echo "✗ TMDBBearerToken is empty — films lose their primary poster source." >&2
+    echo "  Check TMDB_BEARER_TOKEN in Config/Secrets.local.xcconfig." >&2
+    exit 1
+  fi
+elif [[ -n "$TMDB_VALUE" ]]; then
+  echo "✗ Expected a --keyless build, but TMDBBearerToken is populated." >&2
+  exit 1
 fi
 
 echo "✓ Build $BUILD ready ($(du -sh "$APP_PATH" | awk '{print $1}'))."

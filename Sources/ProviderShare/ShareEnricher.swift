@@ -53,7 +53,14 @@ actor ShareEnricher {
     /// v14: prefer the English title too (not just non-Latin overviews) when the
     /// resolved name doesn't resemble the searched title — TheTVDB serves a foreign
     /// primary name in Latin script for some shows ("The Eternaut" → "El eternauta").
-    static let version = 14
+    /// v15: iPhone and iPad shipped with no film-capable provider at all — the iOS
+    /// target was missing TVDBAPIKey and the deploy script blanked the TMDb token —
+    /// so every movie enriched on those devices resolved against anime/TV-only
+    /// sources and settled as a miss through no fault of its own. Items that spent
+    /// their retry budget that way are excluded from the backlog forever at their
+    /// version, so the correction has to be a bump: this is precisely the "re-enrich
+    /// everything once the sources improve" mechanism, and the sources did improve.
+    static let version = 15
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving

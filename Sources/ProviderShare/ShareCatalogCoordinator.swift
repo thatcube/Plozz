@@ -480,16 +480,34 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     /// no latency. No-op if the share was never registered or the item is already
     /// enriched.
     public func enrichItem(accountKey: String, itemID: String) async {
-        guard runtimes[accountKey]?.enricher != nil else { return }
+        await enrichItem(accountKey: accountKey, itemID: itemID, userRequested: false)
+    }
+
+    /// `userRequested` distinguishes the two callers that both look like "the user
+    /// opened this". `ShareProvider.item(id:)` fires while merely browsing, so its
+    /// requests are rate-limited per item (``EnrichmentRepository/fastTrackRetryCooldown``);
+    /// the Refresh control is unambiguous intent and bypasses the cooldown.
+    private func enrichItem(accountKey: String, itemID: String, userRequested: Bool) async {
+        guard let runtime = runtimes[accountKey], runtime.enricher != nil else { return }
+        if !userRequested {
+            let store = runtime.store
+            let cooling = await store.fastTrackEnrichmentIsCoolingDown(
+                itemID: itemID,
+                version: ShareEnricher.version
+            )
+            if cooling { return }
+        }
         await metadataScheduler.enqueueItem(accountKey: accountKey, itemID: itemID)
     }
 
     /// Manual item-level re-enrichment (Step 6 "Refresh"): enqueues the item ahead of
-    /// the backlog, exactly like ``enrichItem(accountKey:itemID:)``. Named for the
+    /// the backlog like ``enrichItem(accountKey:itemID:)``, but as unambiguous user
+    /// intent, so it bypasses the per-item fast-track cooldown that keeps ordinary
+    /// browsing from re-asking the providers about the same miss. Named for the
     /// user-facing intent so Settings/detail refresh controls read clearly; whole-share
     /// refresh uses `rescan(accountKey:)` (surfaced via the runtime facet's `rescanShare`).
     public func requestRefresh(accountKey: String, itemID: String) async {
-        await enrichItem(accountKey: accountKey, itemID: itemID)
+        await enrichItem(accountKey: accountKey, itemID: itemID, userRequested: true)
     }
 
     /// Aggregate per-source provenance-row counts across **every** registered share

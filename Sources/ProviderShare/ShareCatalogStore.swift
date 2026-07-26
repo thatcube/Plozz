@@ -2045,6 +2045,26 @@ actor ShareCatalogStore {
         return readQueries.pendingEnrichment(forItemID: id, version: version)
     }
 
+    /// Whether the fast-track path should leave `id` alone for now because the
+    /// providers were already asked about it recently and had nothing usable.
+    ///
+    /// Resolves through ``pendingEnrichment(forItemID:version:)`` first so the
+    /// cooldown is read against the row the enricher would actually write — a
+    /// logical movie enriches its *representative* file, not the movie id.
+    /// Answers `false` when nothing is pending, leaving the existing no-op path
+    /// (already-enriched items) exactly as it was.
+    func fastTrackEnrichmentIsCoolingDown(itemID id: String, version: Int, now: Date = Date()) -> Bool {
+        ensureOpen()
+        guard let pending = readQueries.pendingEnrichment(forItemID: id, version: version) else {
+            return false
+        }
+        return enrichmentRepo.unusableAttemptIsRecent(
+            itemID: pending.itemID,
+            version: version,
+            now: now
+        )
+    }
+
     /// Persist one item's enrichment, **merging** onto any existing row so a later
     /// sparse/transient result can never erase richer ids/art already stored (a
     /// fast-track `enrichOne` racing the background drain, or a partial source

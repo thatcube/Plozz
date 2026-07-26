@@ -39,9 +39,52 @@ struct EnrichmentRepository {
     /// `LEFT JOIN enrichment e`) keeps it *pending* — retried up to
     /// `maxEnrichAttempts` — until it either resolves to something usable or is
     /// settled as a genuine miss. Matches a row with no ids, overview, or artwork.
-    static let unusableEnrichmentPredicate =
-        "e.provider_ids_json IS NULL AND e.overview IS NULL AND e.poster_url IS NULL "
-        + "AND e.backdrop_url IS NULL AND e.logo_url IS NULL"
+    static let unusableEnrichmentPredicate = unusableEnrichmentPredicate(alias: "e")
+
+    /// The same predicate over an arbitrary table alias, so the single-row
+    /// fast-track probe below can't drift from the backlog queries above.
+    static func unusableEnrichmentPredicate(alias: String) -> String {
+        ["provider_ids_json", "overview", "poster_url", "backdrop_url", "logo_url"]
+            .map { "\(alias).\($0) IS NULL" }
+            .joined(separator: " AND ")
+    }
+
+    /// How long the fast-track path waits before asking the providers the same
+    /// question again about an item whose last attempt produced nothing usable.
+    ///
+    /// The background budget (``maxEnrichAttempts``) only bounds the *backlog*.
+    /// The fast-track path deliberately ignores it — an item the user opened is
+    /// worth another look even after background retries settled it as a miss —
+    /// but "the user opened it" is inferred from `ShareProvider.item(id:)`, which
+    /// also fires while merely browsing. Without a cooldown, every render of an
+    /// unmatched item bought another provider lookup and incremented `attempts`,
+    /// so the bounded-retry contract was only nominal: catalogs in the field
+    /// showed 55–72 attempts against a cap of 3. A day is long enough that
+    /// browsing costs nothing and short enough that fixing a provider's
+    /// configuration heals the library without touching every item by hand.
+    /// The explicit Refresh control bypasses it entirely.
+    static let fastTrackRetryCooldown: TimeInterval = 24 * 60 * 60
+
+    /// Whether `itemID` was last attempted within ``fastTrackRetryCooldown`` and
+    /// produced nothing usable. Only rows written by the *current* resolver
+    /// generation count: a `version` bump means different logic, which deserves an
+    /// immediate retry rather than serving out an old generation's cooldown.
+    func unusableAttemptIsRecent(itemID: String, version: Int, now: Date) -> Bool {
+        guard db != nil else { return false }
+        var recent = false
+        query("""
+        SELECT e.enriched_at FROM enrichment e
+        WHERE e.item_id=? AND e.enrich_version=?
+          AND \(Self.unusableEnrichmentPredicate(alias: "e")) LIMIT 1;
+        """, bind: {
+            self.bindText($0, 1, itemID)
+            sqlite3_bind_int64($0, 2, Int64(version))
+        }) { stmt in
+            let attemptedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0))
+            recent = now.timeIntervalSince(attemptedAt) < Self.fastTrackRetryCooldown
+        }
+        return recent
+    }
 
     // MARK: - External enrichment writes
 
@@ -234,7 +277,9 @@ struct EnrichmentRepository {
     /// Whether `itemID` already has a **usable** enrichment row (any id / overview /
     /// artwork) at `version`. An unusable miss row does NOT count — so the fast-track
     /// path still re-attempts an item a user opens even after background retries
-    /// settled it as a miss.
+    /// settled it as a miss. That re-attempt is rate-limited by
+    /// ``fastTrackRetryCooldown``; this predicate alone would let every render buy
+    /// another provider lookup.
     func hasUsableEnrichment(itemID: String, version: Int) -> Bool {
         guard db != nil else { return false }
         var stmt: OpaquePointer?

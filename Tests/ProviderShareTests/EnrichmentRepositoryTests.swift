@@ -352,4 +352,77 @@ final class EnrichmentRepositoryTests: XCTestCase {
         XCTAssertEqual(ids["tvdb"], "222")
         XCTAssertEqual(ids["imdb"], "tt5")
     }
+
+    // MARK: - fast-track retry cooldown
+
+    /// The background budget bounds the backlog; the fast-track path deliberately
+    /// ignores it. Without a cooldown that made "bounded retry" nominal — field
+    /// catalogs showed 55–72 attempts against a cap of 3 — because
+    /// `ShareProvider.item(id:)` fires while browsing, not only on a real open.
+    func testRecentUnusableAttemptCoolsDownTheFastTrackPath() {
+        let (conn, url) = openConnection()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = EnrichmentRepository(connection: conn)
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        seedEnrichmentRow(
+            conn, itemID: "f:a.mkv", version: 14, usable: false, attempts: 3,
+            enrichedAt: now.timeIntervalSince1970 - 60
+        )
+
+        XCTAssertTrue(repo.unusableAttemptIsRecent(itemID: "f:a.mkv", version: 14, now: now))
+    }
+
+    /// Past the cooldown the item is fair game again, so fixing a provider's
+    /// configuration heals the library by browsing instead of by hand.
+    func testCooldownExpiresSoAnExhaustedMissBecomesRetryable() {
+        let (conn, url) = openConnection()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = EnrichmentRepository(connection: conn)
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        seedEnrichmentRow(
+            conn, itemID: "f:a.mkv", version: 14, usable: false, attempts: 3,
+            enrichedAt: now.timeIntervalSince1970 - EnrichmentRepository.fastTrackRetryCooldown - 1
+        )
+
+        XCTAssertFalse(repo.unusableAttemptIsRecent(itemID: "f:a.mkv", version: 14, now: now))
+    }
+
+    /// A usable row is not a miss, so it never reports as cooling down — the
+    /// already-enriched no-op path stays the one that skips it.
+    func testUsableRowIsNeverReportedAsCoolingDown() {
+        let (conn, url) = openConnection()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = EnrichmentRepository(connection: conn)
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        seedEnrichmentRow(
+            conn, itemID: "f:a.mkv", version: 14, usable: true,
+            enrichedAt: now.timeIntervalSince1970
+        )
+
+        XCTAssertFalse(repo.unusableAttemptIsRecent(itemID: "f:a.mkv", version: 14, now: now))
+    }
+
+    /// A version bump means different resolver logic, which deserves an immediate
+    /// retry rather than serving out the previous generation's cooldown.
+    func testVersionBumpEndsTheCooldownImmediately() {
+        let (conn, url) = openConnection()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = EnrichmentRepository(connection: conn)
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        seedEnrichmentRow(
+            conn, itemID: "f:a.mkv", version: 13, usable: false, attempts: 3,
+            enrichedAt: now.timeIntervalSince1970
+        )
+
+        XCTAssertFalse(repo.unusableAttemptIsRecent(itemID: "f:a.mkv", version: 14, now: now))
+    }
+
+    /// An item nobody has attempted has nothing to cool down from.
+    func testUnknownItemIsNotCoolingDown() {
+        let (conn, url) = openConnection()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = EnrichmentRepository(connection: conn)
+
+        XCTAssertFalse(repo.unusableAttemptIsRecent(itemID: "f:missing.mkv", version: 14, now: Date()))
+    }
 }

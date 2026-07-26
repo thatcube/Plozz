@@ -196,6 +196,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
         authenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? = nil
     ) throws {
         self.engine = try AEEngine()
+        // Plozz owns its audio session, and on an E-AC-3/Atmos bitstream-passthrough route the HDMI sink
+        // otherwise keeps looping the last MAT frame after we leave playback. The engine defaults this off
+        // because it never activates the session itself (AVKit does, per playback), so deactivating is only
+        // safe for a host that owns it — which we do.
+        engine.deactivatesAudioSessionOnStop = true
         self.networkFileResolver = networkFileResolver
         self.authenticatedHTTPResolver = authenticatedHTTPResolver
         #if canImport(UIKit)
@@ -614,6 +619,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     switch cue.body {
                     case .text(let string):
                         body = .text(CoreModels.SubtitleText(string))
+                    case .richText(let runs):
+                        // Plozz's cue model has no coloured-run case; flatten to plain text the
+                        // same way AetherEngine's own `SubtitleCue.text` accessor does, so
+                        // teletext/ASS colour-tagged cues still render instead of being dropped.
+                        body = .text(CoreModels.SubtitleText(runs.map(\.text).joined()))
                     case .image(let image):
                         body = .image(CoreModels.SubtitleImage(
                             cgImage: image.cgImage,
@@ -646,6 +656,9 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     switch cue.body {
                     case .text(let string):
                         body = .text(CoreModels.SubtitleText(string))
+                    case .richText(let runs):
+                        // See the primary channel above: flatten coloured runs to plain text.
+                        body = .text(CoreModels.SubtitleText(runs.map(\.text).joined()))
                     case .image(let image):
                         body = .image(CoreModels.SubtitleImage(
                             cgImage: image.cgImage,

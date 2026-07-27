@@ -1807,7 +1807,10 @@ private struct PlozziOSInlineEpisodeEntry: View {
             for: episode,
             context: MediaItemActionContext(orderedSiblings: episodes)
         )
-        .filter { !$0.isNavigation }
+        // Drop navigation actions only when nothing can route them, matching
+        // `MediaItemContextMenu`. Filtering them unconditionally is what kept
+        // "Episode Info" out of this menu even after the button learned to route.
+        .filter { !$0.isNavigation || navigator != nil }
     }
 
     private var currentDownloadRecord: DownloadedMediaRecord? {

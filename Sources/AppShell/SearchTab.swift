@@ -130,6 +130,7 @@ struct SearchTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
+                    onNavigate: { navigateToItem($0) },
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     initialSeasonID: item.seasonID,
                     isDiscoveryItem: isDiscovery,
@@ -167,6 +168,7 @@ struct SearchTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
+                    onNavigate: { navigateToItem($0) },
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     initialEpisode: route.episode,
                     seerConnected: seer.isConfigured,
@@ -199,6 +201,7 @@ struct SearchTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
+                    onNavigate: { navigateToItem($0) },
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     initialSeasonID: route.season.id,
                     seerConnected: seer.isConfigured,
@@ -211,21 +214,21 @@ struct SearchTab: View {
                     confirmAdminRequest: confirmAdminRequest
                 )
             }
+            // Inside the stack, after the destinations — see HomeTab. Outside it,
+            // pushed pages never see the router.
+            .mediaItemNavigator { navigateToItem($0) }
         }
-        .mediaItemNavigator { item in
-            // An episode arriving through the *menu* is "Episode Info", which wants
-            // the episode's own page. "Go to Season" hands over a season, so the
-            // two are distinguishable by kind.
-            if item.kind == .episode {
-                path.append(item)
-            } else if item.kind == .season, item.seriesID != nil {
-                path.append(SeasonContextRoute(
-                    season: item,
-                    originAccountID: nil
-                ))
-            } else {
-                path.append(item)
-            }
+    }
+
+    /// Routes a context-menu navigation action to this tab's stack. An episode
+    /// arriving through the *menu* is "Episode Info", which wants the episode's
+    /// own page; "Go to Season" hands over a season, so the two are
+    /// distinguishable by kind.
+    private func navigateToItem(_ item: MediaItem) {
+        if item.kind == .season, item.seriesID != nil {
+            path.append(SeasonContextRoute(season: item, originAccountID: nil))
+        } else {
+            path.append(item)
         }
     }
 

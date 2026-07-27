@@ -263,6 +263,7 @@ struct HomeTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
+                    onNavigate: { navigate($0, asOwnSubject: $0.kind == .episode) },
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     preservesHeroTrailerOnDisappear: true,
                     initialEpisode: route.episode,
@@ -297,6 +298,7 @@ struct HomeTab: View {
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
+                    onNavigate: { navigate($0, asOwnSubject: $0.kind == .episode) },
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     preservesHeroTrailerOnDisappear: true,
                     initialSeasonID: route.season.id,
@@ -310,9 +312,13 @@ struct HomeTab: View {
                     confirmAdminRequest: confirmAdminRequest
                 )
             }
+            // Installed *inside* the stack, after the destinations, so pushed
+            // pages inherit it too. Applied outside the `NavigationStack` it only
+            // reaches the root content — "Episode Info" worked on Continue
+            // Watching and was silently dropped in every pushed detail page.
+            .mediaItemNavigator { navigate($0, asOwnSubject: $0.kind == .episode) }
         }
         .task(id: pendingPlayItemID) { await handleDeepLink() }
-        .mediaItemNavigator { navigate($0, asOwnSubject: $0.kind == .episode) }
     }
 
     /// Resolves a deep-linked item id (from a Top Shelf card) and routes to it,
@@ -410,6 +416,7 @@ struct HomeTab: View {
             spoilerSettings: spoilerSettings,
             onPlay: { requestPlay($0) },
             onSelectChild: { navigate($0, libraryOrigin: libraryOrigin) },
+            onNavigate: { navigate($0, asOwnSubject: $0.kind == .episode) },
             heroTrailerResolver: makeHeroTrailerResolver(),
             preservesHeroTrailerOnDisappear: true,
             initialSeasonID: item.seasonID,

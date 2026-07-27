@@ -21,7 +21,6 @@ private struct PlozziOSItemNavigationModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .mediaItemNavigator { navigatedItem = $0 }
             .navigationDestination(item: $navigatedItem) { item in
                 // Resolve against the best server for this title, the same way a
                 // tapped card does, so a navigated push is not pinned to whichever
@@ -50,6 +49,11 @@ private struct PlozziOSItemNavigationModifier: ViewModifier {
                     )
                 }
             }
+            // Applied *after* the destination so the environment encloses it and
+            // pushed pages inherit the router. The other order leaves the
+            // destination outside the environment, so navigation actions are
+            // dropped from every menu on a pushed page.
+            .mediaItemNavigator { navigatedItem = $0 }
     }
 }
 

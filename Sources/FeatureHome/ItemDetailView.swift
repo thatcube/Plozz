@@ -10,6 +10,15 @@ public struct ItemDetailView: View {
     private let spoilerSettings: SpoilerSettings
     private let onPlay: (MediaItem) -> Void
     private let onSelectChild: (MediaItem) -> Void
+    /// Routes a context-menu navigation action ("Episode Info", "Go to Season")
+    /// to this page's own navigation stack.
+    ///
+    /// Passed in rather than read from `Environment`: a `navigationDestination`
+    /// destination does not inherit environment installed on the stack that owns
+    /// it, so an environment-based router is silently nil on every pushed page —
+    /// which dropped these actions from every menu inside a detail page while
+    /// they kept working on the stack's root content.
+    private let onNavigate: ((MediaItem) -> Void)?
     /// Fast/local trailer resolver. A nil result leaves the static detail hero;
     /// online YouTube autoplay remains deliberately out of the first version.
     private let heroTrailerResolver: HeroTrailerResolving
@@ -112,6 +121,7 @@ public struct ItemDetailView: View {
         spoilerSettings: SpoilerSettings = .default,
         onPlay: @escaping (MediaItem) -> Void,
         onSelectChild: @escaping (MediaItem) -> Void,
+        onNavigate: ((MediaItem) -> Void)? = nil,
         heroTrailerResolver: @escaping HeroTrailerResolving = { _ in nil },
         preservesHeroTrailerOnDisappear: Bool = false,
         initialSeasonID: String? = nil,
@@ -130,6 +140,7 @@ public struct ItemDetailView: View {
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
         self.onSelectChild = onSelectChild
+        self.onNavigate = onNavigate
         self.heroTrailerResolver = heroTrailerResolver
         self.preservesHeroTrailerOnDisappear = preservesHeroTrailerOnDisappear
         self.initialSeasonID = initialSeasonID
@@ -293,6 +304,11 @@ public struct ItemDetailView: View {
             resolve: { await viewModel.resolveThemeMusic() }
         )
         #endif
+        // Overrides rather than replaces, so a caller that supplies no router
+        // leaves any inherited one intact.
+        .transformEnvironment(\.mediaItemNavigator) { navigator in
+            if let onNavigate { navigator = onNavigate }
+        }
     }
 
     private var heroTrailerTaskID: String {

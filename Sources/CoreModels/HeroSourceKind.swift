@@ -22,12 +22,32 @@ public enum HeroSourceKind: String, CaseIterable, Identifiable, Codable, Sendabl
     public var id: String { rawValue }
 
     /// User-facing label for the Settings source picker.
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .featured: return "Featured"
-        case .continueWatching: return "Continue Watching"
-        case .randomFromLibrary: return "Random from Library"
-        case .watchlist: return "Watchlist"
+        case .featured:
+            return LocalizedStringResource(
+                "heroSource.featured",
+                defaultValue: "Featured",
+                comment: "Home hero content-source option in Settings."
+            )
+        case .continueWatching:
+            return LocalizedStringResource(
+                "heroSource.continueWatching",
+                defaultValue: "Continue Watching",
+                comment: "Home hero content-source option in Settings."
+            )
+        case .randomFromLibrary:
+            return LocalizedStringResource(
+                "heroSource.randomFromLibrary",
+                defaultValue: "Random from Library",
+                comment: "Home hero content-source option in Settings."
+            )
+        case .watchlist:
+            return LocalizedStringResource(
+                "heroSource.watchlist",
+                defaultValue: "Watchlist",
+                comment: "Home hero content-source option in Settings."
+            )
         }
     }
 

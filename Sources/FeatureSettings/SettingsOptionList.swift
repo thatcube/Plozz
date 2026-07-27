@@ -47,7 +47,7 @@ struct SettingsOptionList<Option: Hashable>: View {
     /// Wrap the list in the shared bordered container. Default `true`; pass
     /// `false` when the list already sits inside another container.
     var bordered: Bool = true
-    let title: (Option) -> String
+    let title: (Option) -> LocalizedStringResource
 
     @FocusState private var focusedOption: Option?
 
@@ -55,7 +55,7 @@ struct SettingsOptionList<Option: Hashable>: View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(options, id: \.self) { option in
                 SettingsCheckableRow(
-                    title: title(option),
+                    title: Text(title(option)),
                     icon: icon(option),
                     isChecked: selection == option,
                     action: { selection = option }
@@ -90,8 +90,8 @@ struct SettingsOptionList<Option: Hashable>: View {
 /// primary single-select pickers.
 struct SettingsCheckList<Option: Hashable & Identifiable>: View {
     let options: [Option]
-    var title: (Option) -> String
-    var subtitle: (Option) -> String? = { _ in nil }
+    var title: (Option) -> Text
+    var subtitle: (Option) -> Text? = { _ in nil }
     var icon: (Option) -> String? = { _ in nil }
     /// Per-option enablement. A `false` row is dimmed and non-focusable (e.g. a
     /// source that depends on an integration that isn't configured yet).

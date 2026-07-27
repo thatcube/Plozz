@@ -269,8 +269,8 @@ public struct ThemeOptionCard: View {
 /// The caller owns focus (apply `.focused(...)`) and selection state; tapping
 /// invokes `action`.
 public struct PreviewCard<Swatch: View>: View {
-    private let title: String
-    private let detail: String?
+    private let title: LocalizedStringResource
+    private let detail: LocalizedStringResource?
     private let isSelected: Bool
     private let accent: Color
     private let compact: Bool
@@ -279,8 +279,8 @@ public struct PreviewCard<Swatch: View>: View {
     private let swatch: () -> Swatch
 
     public init(
-        title: String,
-        detail: String? = nil,
+        title: LocalizedStringResource,
+        detail: LocalizedStringResource? = nil,
         isSelected: Bool,
         accent: Color,
         compact: Bool = false,

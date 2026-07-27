@@ -57,13 +57,38 @@ public struct SubtitleColor: Codable, Equatable, Sendable, Hashable {
 public enum SubtitleEdgeStyle: String, Codable, CaseIterable, Sendable {
     case none, dropShadow, raised, depressed, uniform
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .none: return "None"
-        case .dropShadow: return "Shadow"
-        case .raised: return "Raised"
-        case .depressed: return "Depressed"
-        case .uniform: return "Outline"
+        case .none:
+            return LocalizedStringResource(
+                "subtitleEdgeStyle.none",
+                defaultValue: "None",
+                comment: "Subtitle text edge/outline style option in Settings > Playback."
+            )
+        case .dropShadow:
+            return LocalizedStringResource(
+                "subtitleEdgeStyle.dropShadow",
+                defaultValue: "Shadow",
+                comment: "Subtitle text edge/outline style option in Settings > Playback."
+            )
+        case .raised:
+            return LocalizedStringResource(
+                "subtitleEdgeStyle.raised",
+                defaultValue: "Raised",
+                comment: "Subtitle text edge/outline style option in Settings > Playback."
+            )
+        case .depressed:
+            return LocalizedStringResource(
+                "subtitleEdgeStyle.depressed",
+                defaultValue: "Depressed",
+                comment: "Subtitle text edge/outline style option in Settings > Playback."
+            )
+        case .uniform:
+            return LocalizedStringResource(
+                "subtitleEdgeStyle.uniform",
+                defaultValue: "Outline",
+                comment: "Subtitle text edge/outline style option in Settings > Playback."
+            )
         }
     }
 }
@@ -81,11 +106,26 @@ public enum SubtitleMode: String, Codable, CaseIterable, Sendable {
     /// leaving regular dialogue unsubtitled.
     case forcedOnly
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .off: return "Off"
-        case .all: return "On"
-        case .forcedOnly: return "Forced Only"
+        case .off:
+            return LocalizedStringResource(
+                "subtitleMode.off",
+                defaultValue: "Off",
+                comment: "Subtitle on/off/auto mode option in Settings > Playback."
+            )
+        case .all:
+            return LocalizedStringResource(
+                "subtitleMode.all",
+                defaultValue: "On",
+                comment: "Subtitle on/off/auto mode option in Settings > Playback."
+            )
+        case .forcedOnly:
+            return LocalizedStringResource(
+                "subtitleMode.forcedOnly",
+                defaultValue: "Forced Only",
+                comment: "Subtitle on/off/auto mode option in Settings > Playback."
+            )
         }
     }
 

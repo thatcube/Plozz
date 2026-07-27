@@ -77,12 +77,32 @@ public enum SubtitleFontWeight: String, Codable, Sendable, Equatable, CaseIterab
     case semibold
     case bold
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .regular: return "Regular"
-        case .medium: return "Medium"
-        case .semibold: return "Semibold"
-        case .bold: return "Bold"
+        case .regular:
+            return LocalizedStringResource(
+                "subtitleWeight.regular",
+                defaultValue: "Regular",
+                comment: "Subtitle font-weight option in the in-player subtitle style panel."
+            )
+        case .medium:
+            return LocalizedStringResource(
+                "subtitleWeight.medium",
+                defaultValue: "Medium",
+                comment: "Subtitle font-weight option in the in-player subtitle style panel."
+            )
+        case .semibold:
+            return LocalizedStringResource(
+                "subtitleWeight.semibold",
+                defaultValue: "Semibold",
+                comment: "Subtitle font-weight option in the in-player subtitle style panel."
+            )
+        case .bold:
+            return LocalizedStringResource(
+                "subtitleWeight.bold",
+                defaultValue: "Bold",
+                comment: "Subtitle font-weight option in the in-player subtitle style panel."
+            )
         }
     }
 

@@ -20,12 +20,32 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
 
     public var id: String { rawValue }
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .system: return "System"
-        case .light: return "Light"
-        case .dark: return "Dark"
-        case .pureBlack: return "Black"
+        case .system:
+            return LocalizedStringResource(
+                "theme.appearance.system",
+                defaultValue: "System",
+                comment: "Appearance/theme option shown in the Settings theme picker."
+            )
+        case .light:
+            return LocalizedStringResource(
+                "theme.appearance.light",
+                defaultValue: "Light",
+                comment: "Appearance/theme option shown in the Settings theme picker."
+            )
+        case .dark:
+            return LocalizedStringResource(
+                "theme.appearance.dark",
+                defaultValue: "Dark",
+                comment: "Appearance/theme option shown in the Settings theme picker."
+            )
+        case .pureBlack:
+            return LocalizedStringResource(
+                "theme.appearance.pureBlack",
+                defaultValue: "Black",
+                comment: "Appearance/theme option shown in the Settings theme picker."
+            )
         }
     }
 
@@ -67,12 +87,32 @@ public enum MusicPlayerAppearance: String, CaseIterable, Identifiable, Codable, 
 
     public var id: String { rawValue }
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .matchTheme: return "Match Theme"
-        case .light: return "Light"
-        case .dark: return "Dark"
-        case .pureBlack: return "Pure Black"
+        case .matchTheme:
+            return LocalizedStringResource(
+                "musicPlayerAppearance.matchTheme",
+                defaultValue: "Match Theme",
+                comment: "Music player appearance option in Settings."
+            )
+        case .light:
+            return LocalizedStringResource(
+                "musicPlayerAppearance.light",
+                defaultValue: "Light",
+                comment: "Music player appearance option in Settings."
+            )
+        case .dark:
+            return LocalizedStringResource(
+                "musicPlayerAppearance.dark",
+                defaultValue: "Dark",
+                comment: "Music player appearance option in Settings."
+            )
+        case .pureBlack:
+            return LocalizedStringResource(
+                "musicPlayerAppearance.pureBlack",
+                defaultValue: "Pure Black",
+                comment: "Music player appearance option in Settings."
+            )
         }
     }
 
@@ -126,11 +166,26 @@ public enum TransparencyPreference: String, CaseIterable, Identifiable, Codable,
 
     public var id: String { rawValue }
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .system: return "tvOS Default"
-        case .on: return "On"
-        case .off: return "Off"
+        case .system:
+            return LocalizedStringResource(
+                "transparency.system",
+                defaultValue: "tvOS Default",
+                comment: "Interface transparency option in Settings > Appearance."
+            )
+        case .on:
+            return LocalizedStringResource(
+                "transparency.on",
+                defaultValue: "On",
+                comment: "Interface transparency option in Settings > Appearance."
+            )
+        case .off:
+            return LocalizedStringResource(
+                "transparency.off",
+                defaultValue: "Off",
+                comment: "Interface transparency option in Settings > Appearance."
+            )
         }
     }
 
@@ -145,11 +200,26 @@ public enum TransparencyPreference: String, CaseIterable, Identifiable, Codable,
 
     /// One-line explanation of what each option does, shown live under the
     /// tri-toggle as focus moves across it (mirrors `SkipIntrosMode.detail`).
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
-        case .system: return "Follow the tvOS “Reduce Transparency” accessibility setting."
-        case .on: return "Always use translucent liquid-glass panels and cards."
-        case .off: return "Always use solid backgrounds — no translucency."
+        case .system:
+            return LocalizedStringResource(
+                "transparency.detail.system",
+                defaultValue: "Follow the tvOS “Reduce Transparency” accessibility setting.",
+                comment: "One-line explanation shown under the transparency picker."
+            )
+        case .on:
+            return LocalizedStringResource(
+                "transparency.detail.on",
+                defaultValue: "Always use translucent liquid-glass panels and cards.",
+                comment: "One-line explanation shown under the transparency picker."
+            )
+        case .off:
+            return LocalizedStringResource(
+                "transparency.detail.off",
+                defaultValue: "Always use solid backgrounds — no translucency.",
+                comment: "One-line explanation shown under the transparency picker."
+            )
         }
     }
 

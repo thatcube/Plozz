@@ -13,19 +13,49 @@ public enum HeroBackgroundMode: String, Codable, CaseIterable, Sendable {
     /// Play the item's theme music softly on the detail page (no trailer).
     case themeMusic
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .off: "Off"
-        case .trailer: "Trailer"
-        case .themeMusic: "Theme music"
+        case .off:
+            return LocalizedStringResource(
+                "heroBackground.off",
+                defaultValue: "Off",
+                comment: "Home hero background style option in Settings."
+            )
+        case .trailer:
+            return LocalizedStringResource(
+                "heroBackground.trailer",
+                defaultValue: "Trailer",
+                comment: "Home hero background style option in Settings."
+            )
+        case .themeMusic:
+            return LocalizedStringResource(
+                "heroBackground.themeMusic",
+                defaultValue: "Theme music",
+                comment: "Home hero background style option in Settings."
+            )
         }
     }
 
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
-        case .off: "Show static hero artwork only."
-        case .trailer: "Play the title's trailer behind the hero."
-        case .themeMusic: "Play a title's theme music while you browse its detail page."
+        case .off:
+            return LocalizedStringResource(
+                "heroBackground.detail.off",
+                defaultValue: "Show static hero artwork only.",
+                comment: "One-line explanation shown under the hero-background picker."
+            )
+        case .trailer:
+            return LocalizedStringResource(
+                "heroBackground.detail.trailer",
+                defaultValue: "Play the title's trailer behind the hero.",
+                comment: "One-line explanation shown under the hero-background picker."
+            )
+        case .themeMusic:
+            return LocalizedStringResource(
+                "heroBackground.detail.themeMusic",
+                defaultValue: "Play a title's theme music while you browse its detail page.",
+                comment: "One-line explanation shown under the hero-background picker."
+            )
         }
     }
 }

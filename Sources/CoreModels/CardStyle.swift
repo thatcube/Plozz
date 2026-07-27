@@ -20,19 +20,39 @@ public enum CardStyle: String, CaseIterable, Identifiable, Codable, Sendable {
     public var id: String { rawValue }
 
     /// Short, user-facing option label for the Settings picker.
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .framed: return "Cards"
-        case .borderless: return "Posters"
+        case .framed:
+            return LocalizedStringResource(
+                "cardStyle.framed",
+                defaultValue: "Cards",
+                comment: "Artwork card-style option in Settings > Appearance."
+            )
+        case .borderless:
+            return LocalizedStringResource(
+                "cardStyle.borderless",
+                defaultValue: "Posters",
+                comment: "Artwork card-style option in Settings > Appearance."
+            )
         }
     }
 
     /// Tiny line shown beneath the picker, updated live as focus moves. Kept
     /// deliberately minimal — a few words is enough to disambiguate the two looks.
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
-        case .framed: return "Framed in a card."
-        case .borderless: return "Just the artwork."
+        case .framed:
+            return LocalizedStringResource(
+                "cardStyle.detail.framed",
+                defaultValue: "Framed in a card.",
+                comment: "One-line explanation shown under the card-style picker."
+            )
+        case .borderless:
+            return LocalizedStringResource(
+                "cardStyle.detail.borderless",
+                defaultValue: "Just the artwork.",
+                comment: "One-line explanation shown under the card-style picker."
+            )
         }
     }
 

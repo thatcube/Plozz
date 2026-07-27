@@ -89,7 +89,7 @@ struct CustomizeHomeDetailView: View {
             ) {
                 SettingsCheckList(
                     options: HomeGlobalRow.allCases.map(GlobalRowOption.init),
-                    title: { $0.row.title },
+                    title: { Text($0.row.title) },
                     bordered: false,
                     isChecked: { homeVisibility.isGlobalRowEnabled($0.row) },
                     onToggle: { opt in
@@ -145,7 +145,7 @@ struct CustomizeHomeDetailView: View {
                         ) {
                             SettingsCheckList(
                                 options: rowKinds(for: library).map { LibraryRowOption(libraryKey: library.key, kind: $0) },
-                                title: { $0.kind.displayName },
+                                title: { Text($0.kind.displayName) },
                                 bordered: false,
                                 isChecked: { homeVisibility.isLibraryRowEnabled($0.libraryKey, kind: $0.kind) },
                                 onToggle: { opt in
@@ -234,9 +234,9 @@ struct CustomizeHomeDetailView: View {
                 SettingsDetailGroup(title: "Sources") {
                     SettingsCheckList(
                         options: orderedHeroSources,
-                        title: { $0.displayName },
+                        title: { Text($0.displayName) },
                         subtitle: { source in
-                            (source == .featured && !seerConfigured) ? "Requires Seerr" : nil
+                            (source == .featured && !seerConfigured) ? Text("Requires Seerr") : nil
                         },
                         isEnabled: { source in
                             source == .featured ? seerConfigured : true
@@ -343,8 +343,8 @@ struct CustomizeHomeDetailView: View {
         } else {
             SettingsCheckList(
                 options: libraries,
-                title: { $0.library.title },
-                subtitle: { $0.serverName },
+                title: { Text(verbatim: $0.library.title) },
+                subtitle: { Text(verbatim: $0.serverName) },
                 isChecked: { isRandomLibraryOn($0.key, universe: libraries) },
                 onToggle: { toggleRandomLibrary($0.key, universe: libraries) }
             )

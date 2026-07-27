@@ -25,10 +25,20 @@ public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendab
     public var id: String { rawValue }
 
     /// Short, user-facing option label for the Settings picker.
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .tabBar: return "Top Bar"
-        case .sidebar: return "Sidebar"
+        case .tabBar:
+            return LocalizedStringResource(
+                "navigationStyle.tabBar",
+                defaultValue: "Top Bar",
+                comment: "Navigation layout option in Settings > Appearance."
+            )
+        case .sidebar:
+            return LocalizedStringResource(
+                "navigationStyle.sidebar",
+                defaultValue: "Sidebar",
+                comment: "Navigation layout option in Settings > Appearance."
+            )
         }
     }
 
@@ -42,10 +52,20 @@ public enum NavigationStyle: String, CaseIterable, Identifiable, Codable, Sendab
 
     /// One-line explanation shown live beneath the picker as focus moves across
     /// it (mirrors `TransparencyPreference.detail`).
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
-        case .tabBar: return "Tabs sit in a bar across the top of each page."
-        case .sidebar: return "A collapsible left sidebar that expands on focus."
+        case .tabBar:
+            return LocalizedStringResource(
+                "navigationStyle.detail.tabBar",
+                defaultValue: "Tabs sit in a bar across the top of each page.",
+                comment: "One-line explanation shown under the navigation-style picker."
+            )
+        case .sidebar:
+            return LocalizedStringResource(
+                "navigationStyle.detail.sidebar",
+                defaultValue: "A collapsible left sidebar that expands on focus.",
+                comment: "One-line explanation shown under the navigation-style picker."
+            )
         }
     }
 

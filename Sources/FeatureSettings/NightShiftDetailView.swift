@@ -329,24 +329,64 @@ private struct NightShiftScheduleControl: View {
 private enum NightShiftMode: String, CaseIterable, Hashable {
     case off, auto, manual, alwaysOn
 
-    var title: String {
+    var title: LocalizedStringResource {
         switch self {
-        case .off: return "Off"
-        case .auto: return "Auto"
-        case .manual: return "Manual"
-        case .alwaysOn: return "Always On"
+        case .off:
+            return LocalizedStringResource(
+                "circadianMode.off",
+                defaultValue: "Off",
+                comment: "Circadian (Night Shift) mode option in Settings."
+            )
+        case .auto:
+            return LocalizedStringResource(
+                "circadianMode.auto",
+                defaultValue: "Auto",
+                comment: "Circadian (Night Shift) mode option in Settings."
+            )
+        case .manual:
+            return LocalizedStringResource(
+                "circadianMode.manual",
+                defaultValue: "Manual",
+                comment: "Circadian (Night Shift) mode option in Settings."
+            )
+        case .alwaysOn:
+            return LocalizedStringResource(
+                "circadianMode.alwaysOn",
+                defaultValue: "Always On",
+                comment: "Circadian (Night Shift) mode option in Settings."
+            )
         }
     }
 
     /// One-line, plain-language behaviour shown live under the toggle. Auto and
     /// Manual stay generic because the concrete schedule (location / times) sits
     /// right below in the mode's own controls.
-    var detail: String {
+    var detail: LocalizedStringResource {
         switch self {
-        case .off: return "The picture is never dimmed or warmed."
-        case .auto: return "Warms automatically from sunset to sunrise for your location."
-        case .manual: return "Warms between two times you set each day."
-        case .alwaysOn: return "Always warm, at full strength, around the clock."
+        case .off:
+            return LocalizedStringResource(
+                "circadianMode.detail.off",
+                defaultValue: "The picture is never dimmed or warmed.",
+                comment: "One-line explanation shown under the Circadian mode picker."
+            )
+        case .auto:
+            return LocalizedStringResource(
+                "circadianMode.detail.auto",
+                defaultValue: "Warms automatically from sunset to sunrise for your location.",
+                comment: "One-line explanation shown under the Circadian mode picker."
+            )
+        case .manual:
+            return LocalizedStringResource(
+                "circadianMode.detail.manual",
+                defaultValue: "Warms between two times you set each day.",
+                comment: "One-line explanation shown under the Circadian mode picker."
+            )
+        case .alwaysOn:
+            return LocalizedStringResource(
+                "circadianMode.detail.alwaysOn",
+                defaultValue: "Always warm, at full strength, around the clock.",
+                comment: "One-line explanation shown under the Circadian mode picker."
+            )
         }
     }
 }

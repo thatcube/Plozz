@@ -336,7 +336,7 @@ struct MyLibrariesDetailView: View {
                 // inside the server card under the "Libraries" caption.
                 SettingsCheckList(
                     options: libs,
-                    title: { $0.library.title },
+                    title: { Text(verbatim: $0.library.title) },
                     bordered: false,
                     flushLeading: false,
                     isChecked: { context.homeVisibility.isEnabled($0.key) },

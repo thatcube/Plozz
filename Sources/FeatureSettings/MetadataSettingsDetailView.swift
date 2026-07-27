@@ -317,10 +317,20 @@ public struct MetadataSettingsDetailView: View {
         )
     }
 
-    private func orderModeTitle(_ mode: MetadataProviderOrderMode) -> String {
+    private func orderModeTitle(_ mode: MetadataProviderOrderMode) -> LocalizedStringResource {
         switch mode {
-        case .recommended: "Recommended"
-        case .custom: "Custom"
+        case .recommended:
+            LocalizedStringResource(
+                "metadataOrder.recommended",
+                defaultValue: "Recommended",
+                comment: "Metadata provider ordering option: use Plozz's recommended order."
+            )
+        case .custom:
+            LocalizedStringResource(
+                "metadataOrder.custom",
+                defaultValue: "Custom",
+                comment: "Metadata provider ordering option: use the user's own order."
+            )
         }
     }
 

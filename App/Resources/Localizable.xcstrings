@@ -2249,6 +2249,9 @@
     "Requires PIN" : {
 
     },
+    "Requires Seerr" : {
+
+    },
     "Rescan" : {
 
     },
@@ -2905,6 +2908,9 @@
     "Sync your watch history and track what to watch next with Simkl." : {
 
     },
+    "System" : {
+
+    },
     "TMDB rejected this key. Check the token and try again." : {
 
     },
@@ -3449,6 +3455,180 @@
     "You’re not signed in to any servers yet." : {
 
     },
+    "cardStyle.borderless" : {
+      "comment" : "Artwork card-style option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Posters"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pósteres"
+          }
+        }
+      }
+    },
+    "cardStyle.detail.borderless" : {
+      "comment" : "One-line explanation shown under the card-style picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Just the artwork."
+          }
+        }
+      }
+    },
+    "cardStyle.detail.framed" : {
+      "comment" : "One-line explanation shown under the card-style picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Framed in a card."
+          }
+        }
+      }
+    },
+    "cardStyle.framed" : {
+      "comment" : "Artwork card-style option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cards"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tarjetas"
+          }
+        }
+      }
+    },
+    "circadianMode.alwaysOn" : {
+      "comment" : "Circadian (Night Shift) mode option in Settings.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Always On"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Siempre activo"
+          }
+        }
+      }
+    },
+    "circadianMode.auto" : {
+      "comment" : "Circadian (Night Shift) mode option in Settings.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automático"
+          }
+        }
+      }
+    },
+    "circadianMode.detail.alwaysOn" : {
+      "comment" : "One-line explanation shown under the Circadian mode picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Always warm, at full strength, around the clock."
+          }
+        }
+      }
+    },
+    "circadianMode.detail.auto" : {
+      "comment" : "One-line explanation shown under the Circadian mode picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Warms automatically from sunset to sunrise for your location."
+          }
+        }
+      }
+    },
+    "circadianMode.detail.manual" : {
+      "comment" : "One-line explanation shown under the Circadian mode picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Warms between two times you set each day."
+          }
+        }
+      }
+    },
+    "circadianMode.detail.off" : {
+      "comment" : "One-line explanation shown under the Circadian mode picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The picture is never dimmed or warmed."
+          }
+        }
+      }
+    },
+    "circadianMode.manual" : {
+      "comment" : "Circadian (Night Shift) mode option in Settings.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manual"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manual"
+          }
+        }
+      }
+    },
+    "circadianMode.off" : {
+      "comment" : "Circadian (Night Shift) mode option in Settings.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desactivado"
+          }
+        }
+      }
+    },
     "e.g. 192.168.1.100 or mynas.local" : {
 
     },
@@ -3634,6 +3814,177 @@
         }
       }
     },
+    "heroBackground.detail.off" : {
+      "comment" : "One-line explanation shown under the hero-background picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Show static hero artwork only."
+          }
+        }
+      }
+    },
+    "heroBackground.detail.themeMusic" : {
+      "comment" : "One-line explanation shown under the hero-background picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Play a title's theme music while you browse its detail page."
+          }
+        }
+      }
+    },
+    "heroBackground.detail.trailer" : {
+      "comment" : "One-line explanation shown under the hero-background picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Play the title's trailer behind the hero."
+          }
+        }
+      }
+    },
+    "heroBackground.off" : {
+      "comment" : "Home hero background style option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Off"
+          }
+        }
+      }
+    },
+    "heroBackground.themeMusic" : {
+      "comment" : "Home hero background style option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Theme music"
+          }
+        }
+      }
+    },
+    "heroBackground.trailer" : {
+      "comment" : "Home hero background style option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Trailer"
+          }
+        }
+      }
+    },
+    "heroSource.continueWatching" : {
+      "comment" : "Home hero content-source option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Continue Watching"
+          }
+        }
+      }
+    },
+    "heroSource.featured" : {
+      "comment" : "Home hero content-source option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Featured"
+          }
+        }
+      }
+    },
+    "heroSource.randomFromLibrary" : {
+      "comment" : "Home hero content-source option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Random from Library"
+          }
+        }
+      }
+    },
+    "heroSource.watchlist" : {
+      "comment" : "Home hero content-source option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Watchlist"
+          }
+        }
+      }
+    },
+    "homeRow.continueWatching" : {
+      "comment" : "Home screen row name, e.g. in Settings > Customize Home.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continue Watching"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continuar viendo"
+          }
+        }
+      }
+    },
+    "homeRow.recentlyAdded" : {
+      "comment" : "Home screen row name, e.g. in Settings > Customize Home.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recently Added"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Añadido recientemente"
+          }
+        }
+      }
+    },
+    "homeRow.watchlist" : {
+      "comment" : "Home screen row name, e.g. in Settings > Customize Home.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Watchlist"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lista"
+          }
+        }
+      }
+    },
     "https://nas.local/dav" : {
 
     },
@@ -3645,6 +3996,40 @@
     },
     "iCloud identity: %@…  (must match on every device)" : {
 
+    },
+    "libraryRowKind.hubs" : {
+      "comment" : "Per-library Home row type in Settings > Customize Home.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recommended rows"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filas recomendadas"
+          }
+        }
+      }
+    },
+    "libraryRowKind.recentlyAdded" : {
+      "comment" : "Per-library Home row type in Settings > Customize Home.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recently Added"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Añadido recientemente"
+          }
+        }
+      }
     },
     "mediaAction.addToWatchlist" : {
       "comment" : "Context-menu action adding an item to the user's watchlist.",
@@ -3842,6 +4227,146 @@
         }
       }
     },
+    "metadataOrder.custom" : {
+      "comment" : "Metadata provider ordering option: use the user's own order.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personalizado"
+          }
+        }
+      }
+    },
+    "metadataOrder.recommended" : {
+      "comment" : "Metadata provider ordering option: use Plozz's recommended order.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recommended"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recomendado"
+          }
+        }
+      }
+    },
+    "musicPlayerAppearance.dark" : {
+      "comment" : "Music player appearance option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Dark"
+          }
+        }
+      }
+    },
+    "musicPlayerAppearance.light" : {
+      "comment" : "Music player appearance option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Light"
+          }
+        }
+      }
+    },
+    "musicPlayerAppearance.matchTheme" : {
+      "comment" : "Music player appearance option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Match Theme"
+          }
+        }
+      }
+    },
+    "musicPlayerAppearance.pureBlack" : {
+      "comment" : "Music player appearance option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Pure Black"
+          }
+        }
+      }
+    },
+    "navigationStyle.detail.sidebar" : {
+      "comment" : "One-line explanation shown under the navigation-style picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "A collapsible left sidebar that expands on focus."
+          }
+        }
+      }
+    },
+    "navigationStyle.detail.tabBar" : {
+      "comment" : "One-line explanation shown under the navigation-style picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Tabs sit in a bar across the top of each page."
+          }
+        }
+      }
+    },
+    "navigationStyle.sidebar" : {
+      "comment" : "Navigation layout option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidebar"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Barra lateral"
+          }
+        }
+      }
+    },
+    "navigationStyle.tabBar" : {
+      "comment" : "Navigation layout option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top Bar"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Barra superior"
+          }
+        }
+      }
+    },
     "on another device" : {
 
     },
@@ -4005,6 +4530,237 @@
         }
       }
     },
+    "skipIntros.autoDelay" : {
+      "comment" : "Skip-intro behaviour option in Settings > Playback.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Auto (delay)"
+          }
+        }
+      }
+    },
+    "skipIntros.autoInstant" : {
+      "comment" : "Skip-intro behaviour option in Settings > Playback.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Auto (instant)"
+          }
+        }
+      }
+    },
+    "skipIntros.detail.autoDelay" : {
+      "comment" : "One-line explanation shown under the skip-intro picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Show a Skip button, then skip automatically after a few seconds."
+          }
+        }
+      }
+    },
+    "skipIntros.detail.autoInstant" : {
+      "comment" : "One-line explanation shown under the skip-intro picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Skip intros and credits automatically, the instant they start."
+          }
+        }
+      }
+    },
+    "skipIntros.detail.off" : {
+      "comment" : "One-line explanation shown under the skip-intro picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Never skip intros or credits."
+          }
+        }
+      }
+    },
+    "skipIntros.detail.on" : {
+      "comment" : "One-line explanation shown under the skip-intro picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Show a Skip button during intros and credits."
+          }
+        }
+      }
+    },
+    "skipIntros.off" : {
+      "comment" : "Skip-intro behaviour option in Settings > Playback.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Off"
+          }
+        }
+      }
+    },
+    "skipIntros.on" : {
+      "comment" : "Skip-intro behaviour option in Settings > Playback.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "On"
+          }
+        }
+      }
+    },
+    "spoilerMode.blur" : {
+      "comment" : "Spoiler-protection style option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Blur Thumbnail"
+          }
+        }
+      }
+    },
+    "spoilerMode.placeholder" : {
+      "comment" : "Spoiler-protection style option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Placeholder Art"
+          }
+        }
+      }
+    },
+    "subtitleEdgeStyle.depressed" : {
+      "comment" : "Subtitle text edge/outline style option in Settings > Playback.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Depressed"
+          }
+        }
+      }
+    },
+    "subtitleEdgeStyle.dropShadow" : {
+      "comment" : "Subtitle text edge/outline style option in Settings > Playback.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Shadow"
+          }
+        }
+      }
+    },
+    "subtitleEdgeStyle.none" : {
+      "comment" : "Subtitle text edge/outline style option in Settings > Playback.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "None"
+          }
+        }
+      }
+    },
+    "subtitleEdgeStyle.raised" : {
+      "comment" : "Subtitle text edge/outline style option in Settings > Playback.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Raised"
+          }
+        }
+      }
+    },
+    "subtitleEdgeStyle.uniform" : {
+      "comment" : "Subtitle text edge/outline style option in Settings > Playback.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Outline"
+          }
+        }
+      }
+    },
+    "subtitleMode.all" : {
+      "comment" : "Subtitle on/off/auto mode option in Settings > Playback.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activados"
+          }
+        }
+      }
+    },
+    "subtitleMode.forcedOnly" : {
+      "comment" : "Subtitle on/off/auto mode option in Settings > Playback.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forced Only"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Solo forzados"
+          }
+        }
+      }
+    },
+    "subtitleMode.off" : {
+      "comment" : "Subtitle on/off/auto mode option in Settings > Playback.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desactivados"
+          }
+        }
+      }
+    },
     "subtitlePolicy.category.anime" : {
       "comment" : "Content-type label for the per-type subtitle rules in Settings.",
       "localizations" : {
@@ -4073,8 +4829,559 @@
         }
       }
     },
+    "subtitleWeight.bold" : {
+      "comment" : "Subtitle font-weight option in the in-player subtitle style panel.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bold"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Negrita"
+          }
+        }
+      }
+    },
+    "subtitleWeight.medium" : {
+      "comment" : "Subtitle font-weight option in the in-player subtitle style panel.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medium"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Media"
+          }
+        }
+      }
+    },
+    "subtitleWeight.regular" : {
+      "comment" : "Subtitle font-weight option in the in-player subtitle style panel.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Regular"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Normal"
+          }
+        }
+      }
+    },
+    "subtitleWeight.semibold" : {
+      "comment" : "Subtitle font-weight option in the in-player subtitle style panel.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Semibold"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seminegrita"
+          }
+        }
+      }
+    },
+    "theme.appearance.dark" : {
+      "comment" : "Appearance/theme option shown in the Settings theme picker.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dark"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oscuro"
+          }
+        }
+      }
+    },
+    "theme.appearance.light" : {
+      "comment" : "Appearance/theme option shown in the Settings theme picker.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Light"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claro"
+          }
+        }
+      }
+    },
+    "theme.appearance.pureBlack" : {
+      "comment" : "Appearance/theme option shown in the Settings theme picker.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Black"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Negro"
+          }
+        }
+      }
+    },
+    "theme.appearance.system" : {
+      "comment" : "Appearance/theme option shown in the Settings theme picker.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sistema"
+          }
+        }
+      }
+    },
+    "themeMusic.detail.high" : {
+      "comment" : "One-line explanation shown under the theme-music volume picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The loudest theme level, still capped below full volume."
+          }
+        }
+      }
+    },
+    "themeMusic.detail.low" : {
+      "comment" : "One-line explanation shown under the theme-music volume picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "A quiet background bed behind the detail page."
+          }
+        }
+      }
+    },
+    "themeMusic.detail.medium" : {
+      "comment" : "One-line explanation shown under the theme-music volume picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "More present, while staying below normal playback volume."
+          }
+        }
+      }
+    },
+    "themeMusic.detail.off" : {
+      "comment" : "One-line explanation shown under the theme-music volume picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Keep theme music enabled without playing audio."
+          }
+        }
+      }
+    },
+    "themeMusic.high" : {
+      "comment" : "Theme-music volume option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "High"
+          }
+        }
+      }
+    },
+    "themeMusic.low" : {
+      "comment" : "Theme-music volume option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Low"
+          }
+        }
+      }
+    },
+    "themeMusic.medium" : {
+      "comment" : "Theme-music volume option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Medium"
+          }
+        }
+      }
+    },
+    "themeMusic.off" : {
+      "comment" : "Theme-music volume option in Settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Off"
+          }
+        }
+      }
+    },
+    "transparency.detail.off" : {
+      "comment" : "One-line explanation shown under the transparency picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Always use solid backgrounds — no translucency."
+          }
+        }
+      }
+    },
+    "transparency.detail.on" : {
+      "comment" : "One-line explanation shown under the transparency picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Always use translucent liquid-glass panels and cards."
+          }
+        }
+      }
+    },
+    "transparency.detail.system" : {
+      "comment" : "One-line explanation shown under the transparency picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Follow the tvOS “Reduce Transparency” accessibility setting."
+          }
+        }
+      }
+    },
+    "transparency.off" : {
+      "comment" : "Interface transparency option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desactivada"
+          }
+        }
+      }
+    },
+    "transparency.on" : {
+      "comment" : "Interface transparency option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activada"
+          }
+        }
+      }
+    },
+    "transparency.system" : {
+      "comment" : "Interface transparency option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "tvOS Default"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Predeterminado de tvOS"
+          }
+        }
+      }
+    },
+    "uiDensity.compact" : {
+      "comment" : "UI density (size) option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Small"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pequeño"
+          }
+        }
+      }
+    },
+    "uiDensity.detail.compact" : {
+      "comment" : "One-line explanation shown under each UI density option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Slightly smaller"
+          }
+        }
+      }
+    },
+    "uiDensity.detail.extraCompact" : {
+      "comment" : "One-line explanation shown under each UI density option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "More cards, smaller"
+          }
+        }
+      }
+    },
+    "uiDensity.detail.extraLarge" : {
+      "comment" : "One-line explanation shown under each UI density option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Fewest cards, biggest"
+          }
+        }
+      }
+    },
+    "uiDensity.detail.micro" : {
+      "comment" : "One-line explanation shown under each UI density option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Most cards, smallest"
+          }
+        }
+      }
+    },
+    "uiDensity.detail.spacious" : {
+      "comment" : "One-line explanation shown under each UI density option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Fewer cards, bigger"
+          }
+        }
+      }
+    },
+    "uiDensity.detail.standard" : {
+      "comment" : "One-line explanation shown under each UI density option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Default size"
+          }
+        }
+      }
+    },
+    "uiDensity.extraCompact" : {
+      "comment" : "UI density (size) option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tiny"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diminuto"
+          }
+        }
+      }
+    },
+    "uiDensity.extraLarge" : {
+      "comment" : "UI density (size) option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Huge"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enorme"
+          }
+        }
+      }
+    },
+    "uiDensity.micro" : {
+      "comment" : "UI density (size) option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Micro"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Micro"
+          }
+        }
+      }
+    },
+    "uiDensity.spacious" : {
+      "comment" : "UI density (size) option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Large"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grande"
+          }
+        }
+      }
+    },
+    "uiDensity.standard" : {
+      "comment" : "UI density (size) option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Default"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Predeterminado"
+          }
+        }
+      }
+    },
     "v%@" : {
 
+    },
+    "watchIndicator.detail.unwatched" : {
+      "comment" : "One-line explanation shown under the watch-indicator picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Corner flag on unwatched items."
+          }
+        }
+      }
+    },
+    "watchIndicator.detail.watched" : {
+      "comment" : "One-line explanation shown under the watch-indicator picker.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Check badge on watched items."
+          }
+        }
+      }
+    },
+    "watchIndicator.unwatched" : {
+      "comment" : "Watch-status badge style option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unwatched"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No visto"
+          }
+        }
+      }
+    },
+    "watchIndicator.watched" : {
+      "comment" : "Watch-status badge style option in Settings > Appearance.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Watched"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visto"
+          }
+        }
+      }
     },
     "·" : {
 

@@ -34,7 +34,7 @@ import CoreUI
 struct SettingsSegmentedPicker<Option: Hashable>: View {
     let options: [Option]
     @Binding var selection: Option
-    let title: (Option) -> String
+    let title: (Option) -> LocalizedStringResource
     /// Reports the option under focus as the user moves across the segments —
     /// before any Select/commit — and `nil` when focus leaves the control. Lets a
     /// caller mirror the focused option's own description live, decoupled from
@@ -58,7 +58,7 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
                 }
                 .buttonStyle(SegmentButtonStyle(isSelected: option == selection))
                 .focused($focusedOption, equals: option)
-                .accessibilityValue(option == selection ? "Selected" : "")
+                .accessibilityValue(option == selection ? Text("Selected") : Text(verbatim: ""))
             }
         }
         // Generous inset so a focused segment's bright thumb and lift have room
@@ -86,7 +86,7 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
     /// text, and the checkmark is laid out inline only when present so unselected
     /// segments don't carry an empty gap.
     private struct SegmentLabel: View {
-        let text: String
+        let text: LocalizedStringResource
         let isSelected: Bool
 
         var body: some View {

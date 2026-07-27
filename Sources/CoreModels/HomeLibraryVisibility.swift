@@ -211,11 +211,26 @@ public enum HomeGlobalRow: String, CaseIterable, Sendable {
     case recentlyAdded
 
     /// The row's display heading (matches ``HomeRowKind`` titles).
-    public var title: String {
+    public var title: LocalizedStringResource {
         switch self {
-        case .continueWatching: return "Continue Watching"
-        case .watchlist: return "Watchlist"
-        case .recentlyAdded: return "Recently Added"
+        case .continueWatching:
+            return LocalizedStringResource(
+                "homeRow.continueWatching",
+                defaultValue: "Continue Watching",
+                comment: "Home screen row name, e.g. in Settings > Customize Home."
+            )
+        case .watchlist:
+            return LocalizedStringResource(
+                "homeRow.watchlist",
+                defaultValue: "Watchlist",
+                comment: "Home screen row name, e.g. in Settings > Customize Home."
+            )
+        case .recentlyAdded:
+            return LocalizedStringResource(
+                "homeRow.recentlyAdded",
+                defaultValue: "Recently Added",
+                comment: "Home screen row name, e.g. in Settings > Customize Home."
+            )
         }
     }
 }
@@ -231,10 +246,20 @@ public enum LibraryHomeRowKind: String, CaseIterable, Sendable {
     case hubs
 
     /// A short label for the Customize Home checklist.
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .recentlyAdded: return "Recently Added"
-        case .hubs: return "Recommended rows"
+        case .recentlyAdded:
+            return LocalizedStringResource(
+                "libraryRowKind.recentlyAdded",
+                defaultValue: "Recently Added",
+                comment: "Per-library Home row type in Settings > Customize Home."
+            )
+        case .hubs:
+            return LocalizedStringResource(
+                "libraryRowKind.hubs",
+                defaultValue: "Recommended rows",
+                comment: "Per-library Home row type in Settings > Customize Home."
+            )
         }
     }
 }

@@ -50,21 +50,61 @@ public enum ThemeMusicVolume: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .off: "Off"
-        case .low: "Low"
-        case .medium: "Medium"
-        case .high: "High"
+        case .off:
+            return LocalizedStringResource(
+                "themeMusic.off",
+                defaultValue: "Off",
+                comment: "Theme-music volume option in Settings."
+            )
+        case .low:
+            return LocalizedStringResource(
+                "themeMusic.low",
+                defaultValue: "Low",
+                comment: "Theme-music volume option in Settings."
+            )
+        case .medium:
+            return LocalizedStringResource(
+                "themeMusic.medium",
+                defaultValue: "Medium",
+                comment: "Theme-music volume option in Settings."
+            )
+        case .high:
+            return LocalizedStringResource(
+                "themeMusic.high",
+                defaultValue: "High",
+                comment: "Theme-music volume option in Settings."
+            )
         }
     }
 
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
-        case .off: "Keep theme music enabled without playing audio."
-        case .low: "A quiet background bed behind the detail page."
-        case .medium: "More present, while staying below normal playback volume."
-        case .high: "The loudest theme level, still capped below full volume."
+        case .off:
+            return LocalizedStringResource(
+                "themeMusic.detail.off",
+                defaultValue: "Keep theme music enabled without playing audio.",
+                comment: "One-line explanation shown under the theme-music volume picker."
+            )
+        case .low:
+            return LocalizedStringResource(
+                "themeMusic.detail.low",
+                defaultValue: "A quiet background bed behind the detail page.",
+                comment: "One-line explanation shown under the theme-music volume picker."
+            )
+        case .medium:
+            return LocalizedStringResource(
+                "themeMusic.detail.medium",
+                defaultValue: "More present, while staying below normal playback volume.",
+                comment: "One-line explanation shown under the theme-music volume picker."
+            )
+        case .high:
+            return LocalizedStringResource(
+                "themeMusic.detail.high",
+                defaultValue: "The loudest theme level, still capped below full volume.",
+                comment: "One-line explanation shown under the theme-music volume picker."
+            )
         }
     }
 }

@@ -25,18 +25,38 @@ public enum WatchStatusIndicator: String, CaseIterable, Identifiable, Codable, S
     public var id: String { rawValue }
 
     /// Short, user-facing option label for the Settings picker.
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .watched: return "Watched"
-        case .unwatched: return "Unwatched"
+        case .watched:
+            return LocalizedStringResource(
+                "watchIndicator.watched",
+                defaultValue: "Watched",
+                comment: "Watch-status badge style option in Settings > Appearance."
+            )
+        case .unwatched:
+            return LocalizedStringResource(
+                "watchIndicator.unwatched",
+                defaultValue: "Unwatched",
+                comment: "Watch-status badge style option in Settings > Appearance."
+            )
         }
     }
 
     /// Tiny line shown beneath the picker, updated live as focus moves.
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
-        case .watched: return "Check badge on watched items."
-        case .unwatched: return "Corner flag on unwatched items."
+        case .watched:
+            return LocalizedStringResource(
+                "watchIndicator.detail.watched",
+                defaultValue: "Check badge on watched items.",
+                comment: "One-line explanation shown under the watch-indicator picker."
+            )
+        case .unwatched:
+            return LocalizedStringResource(
+                "watchIndicator.detail.unwatched",
+                defaultValue: "Corner flag on unwatched items.",
+                comment: "One-line explanation shown under the watch-indicator picker."
+            )
         }
     }
 

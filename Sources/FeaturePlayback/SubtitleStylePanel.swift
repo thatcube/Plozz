@@ -58,13 +58,13 @@ struct SubtitleStylePanel: View {
         enum Kind {
             /// Numeric range: ←/→ step (hold to accelerate), Select nudges up one.
             /// `step` moves by a signed number of grid indices, clamped at the ends.
-            case number(value: String, step: (Int) -> Void)
+            case number(value: Text, step: (Int) -> Void)
             /// Small enum: Select cycles next (wrap); ←/→ cycle; no ± glyphs.
-            case choice(value: String, prev: () -> Void, next: () -> Void)
+            case choice(value: Text, prev: () -> Void, next: () -> Void)
             /// On/off: Select flips.
             case toggle(isOn: Bool, flip: () -> Void)
             /// Opens a detail sub-screen: Select opens; shows a `›` chevron.
-            case submenu(summary: String, open: () -> Void)
+            case submenu(summary: Text, open: () -> Void)
             /// One-shot: Select runs it.
             case action(run: () -> Void)
         }
@@ -168,15 +168,15 @@ struct SubtitleStylePanel: View {
     private func styleRowValue(_ row: StyleRowSpec) -> some View {
         switch row.kind {
         case let .number(value, _):
-            Text(value).font(.body).monospacedDigit().playerMenuRowSecondary()
+            value.font(.body).monospacedDigit().playerMenuRowSecondary()
         case let .choice(value, _, _):
-            Text(value).font(.body).lineLimit(2).multilineTextAlignment(.trailing).playerMenuRowSecondary()
+            value.font(.body).lineLimit(2).multilineTextAlignment(.trailing).playerMenuRowSecondary()
         case let .toggle(isOn, _):
             Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                 .font(.body)
                 .playerMenuRowMark(isSelected: isOn, accent: palette.accent)
         case let .submenu(summary, _):
-            Text(summary).font(.body).playerMenuRowSecondary()
+            summary.font(.body).playerMenuRowSecondary()
         case .action:
             EmptyView()
         }
@@ -214,7 +214,7 @@ struct SubtitleStylePanel: View {
         var rows: [StyleRowSpec] = []
         var slot = 0
 
-        rows.append(StyleRowSpec(slot: slot, title: "Font", kind: .submenu(summary: s.fontFamily.displayName, open: { openScreen(.styleFont) }))); slot += 1
+        rows.append(StyleRowSpec(slot: slot, title: "Font", kind: .submenu(summary: Text(verbatim: s.fontFamily.displayName), open: { openScreen(.styleFont) }))); slot += 1
         rows.append(choiceRow(slot, "Weight", options: weights, current: s.fontWeight.snapped(to: weights), label: { $0.displayName }) { v in updateStyle { $0.fontWeight = v } }); slot += 1
         rows.append(numberRow(slot, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } }); slot += 1
         rows.append(numberRow(slot, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: PlayerControlsFormatting.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } }); slot += 1
@@ -229,9 +229,9 @@ struct SubtitleStylePanel: View {
 
         // The submenu group + Reset sit under a divider, wherever the knobs above end.
         let dividerBefore = slot
-        rows.append(StyleRowSpec(slot: slot, title: "Shadow & Outline", kind: .submenu(summary: PlayerControlsFormatting.edgeSummary(s), open: { openScreen(.styleOutline) }))); slot += 1
-        rows.append(StyleRowSpec(slot: slot, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openScreen(.styleBackground) }))); slot += 1
-        rows.append(StyleRowSpec(slot: slot, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openScreen(.styleDual) }))); slot += 1
+        rows.append(StyleRowSpec(slot: slot, title: "Shadow & Outline", kind: .submenu(summary: Text(verbatim: PlayerControlsFormatting.edgeSummary(s)), open: { openScreen(.styleOutline) }))); slot += 1
+        rows.append(StyleRowSpec(slot: slot, title: "Background", kind: .submenu(summary: s.background.isEnabled ? Text("On") : Text("Off"), open: { openScreen(.styleBackground) }))); slot += 1
+        rows.append(StyleRowSpec(slot: slot, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? Text("On") : Text("Off"), open: { openScreen(.styleDual) }))); slot += 1
         rows.append(StyleRowSpec(slot: slot, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } }))); slot += 1
         return (rows, dividerBefore)
     }
@@ -373,7 +373,7 @@ struct SubtitleStylePanel: View {
         let trackValue = hasTrack ? baseValue + Self.secondaryStatusSuffix(model.secondarySubtitleStatus) : baseValue
         var rows: [StyleRowSpec] = [
             StyleRowSpec(slot: 0, title: "Second Track", kind: .choice(
-                value: trackValue,
+                value: Text(verbatim: trackValue),
                 prev: { step(-1) },
                 next: { step(1) }
             )),
@@ -418,7 +418,7 @@ struct SubtitleStylePanel: View {
         let n = options.count
         let idx = Self.nearestIndex(options, current)
         return StyleRowSpec(slot: slot, title: title, kind: .number(
-            value: label(options[idx]),
+            value: Text(verbatim: label(options[idx])),
             step: { delta in
                 let target = min(max(idx + delta, 0), n - 1)
                 if target != idx { apply(options[target]) }
@@ -427,11 +427,11 @@ struct SubtitleStylePanel: View {
     }
 
     /// Cycle row over any small `Equatable` set; wraps at both ends.
-    private func choiceRow<V: Equatable>(_ slot: Int, _ title: String, options: [V], current: V, label: @escaping (V) -> String, apply: @escaping (V) -> Void) -> StyleRowSpec {
+    private func choiceRow<V: Equatable>(_ slot: Int, _ title: String, options: [V], current: V, label: @escaping (V) -> LocalizedStringResource, apply: @escaping (V) -> Void) -> StyleRowSpec {
         let n = options.count
         let idx = options.firstIndex(of: current) ?? 0
         return StyleRowSpec(slot: slot, title: title, kind: .choice(
-            value: label(options[idx]),
+            value: Text(label(options[idx])),
             prev: { apply(options[(idx - 1 + n) % n]) },
             next: { apply(options[(idx + 1) % n]) }
         ))
@@ -445,7 +445,7 @@ struct SubtitleStylePanel: View {
         let idx = options.firstIndex(where: { $0.red == current.red && $0.green == current.green && $0.blue == current.blue }) ?? 0
         func withAlpha(_ c: SubtitleColor) -> SubtitleColor { SubtitleColor(red: c.red, green: c.green, blue: c.blue, alpha: current.alpha) }
         return StyleRowSpec(slot: slot, title: title, kind: .choice(
-            value: label(current),
+            value: Text(verbatim: label(current)),
             prev: { apply(withAlpha(options[(idx - 1 + n) % n])) },
             next: { apply(withAlpha(options[(idx + 1) % n])) }
         ))

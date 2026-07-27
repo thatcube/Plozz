@@ -16,10 +16,20 @@ public struct SpoilerSettings: Codable, Equatable, Sendable {
         /// the episode number instead, so not even a blurred frame can leak.
         case placeholder
 
-        public var displayName: String {
+        public var displayName: LocalizedStringResource {
             switch self {
-            case .blur: return "Blur Thumbnail"
-            case .placeholder: return "Placeholder Art"
+            case .blur:
+                return LocalizedStringResource(
+                    "spoilerMode.blur",
+                    defaultValue: "Blur Thumbnail",
+                    comment: "Spoiler-protection style option in Settings."
+                )
+            case .placeholder:
+                return LocalizedStringResource(
+                    "spoilerMode.placeholder",
+                    defaultValue: "Placeholder Art",
+                    comment: "Spoiler-protection style option in Settings."
+                )
             }
         }
     }

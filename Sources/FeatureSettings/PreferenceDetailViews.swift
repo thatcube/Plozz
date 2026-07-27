@@ -590,8 +590,8 @@ struct PlaybackDetailView: View {
 private struct DescribedSegmentedPicker<Option: Hashable>: View {
     let options: [Option]
     @Binding var selection: Option
-    let title: (Option) -> String
-    let detail: (Option) -> String
+    let title: (Option) -> LocalizedStringResource
+    let detail: (Option) -> LocalizedStringResource
 
     @State private var focusedOption: Option?
 

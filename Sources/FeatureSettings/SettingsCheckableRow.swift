@@ -13,8 +13,8 @@ import CoreUI
 /// as tall as a switch row on the same screen, and `.secondary` steps that down
 /// for child rows — matching selector rows of the same prominence.
 struct SettingsCheckableRow: View {
-    let title: String
-    var subtitle: String? = nil
+    let title: Text
+    var subtitle: Text? = nil
     var icon: String? = nil
     let isChecked: Bool
     /// When false the row is dimmed and pulled out of the focus order (can't be
@@ -54,11 +54,11 @@ struct SettingsCheckableRow: View {
                         .settingsRowIcon()
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
+                    title
                         .font(titleFont)
                         .lineLimit(1)
                     if let subtitle {
-                        Text(subtitle)
+                        subtitle
                             .font(.footnote)
                             .plozzForeground(.secondary)
                             .lineLimit(2)

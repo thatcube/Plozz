@@ -22,26 +22,62 @@ public enum SkipIntrosMode: String, Codable, CaseIterable, Sendable {
     public static let autoSkipDelay: TimeInterval = 5
 
     /// Short label for the settings picker / summaries.
-    public var title: String {
+    public var title: LocalizedStringResource {
         switch self {
-        case .off: return "Off"
-        case .on: return "On"
-        case .autoDelay: return "Auto (delay)"
-        case .autoInstant: return "Auto (instant)"
+        case .off:
+            return LocalizedStringResource(
+                "skipIntros.off",
+                defaultValue: "Off",
+                comment: "Skip-intro behaviour option in Settings > Playback."
+            )
+        case .on:
+            return LocalizedStringResource(
+                "skipIntros.on",
+                defaultValue: "On",
+                comment: "Skip-intro behaviour option in Settings > Playback."
+            )
+        case .autoDelay:
+            return LocalizedStringResource(
+                "skipIntros.autoDelay",
+                defaultValue: "Auto (delay)",
+                comment: "Skip-intro behaviour option in Settings > Playback."
+            )
+        case .autoInstant:
+            return LocalizedStringResource(
+                "skipIntros.autoInstant",
+                defaultValue: "Auto (instant)",
+                comment: "Skip-intro behaviour option in Settings > Playback."
+            )
         }
     }
 
     /// One-line explanation shown beneath each option in settings.
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
         case .off:
-            return "Never skip intros or credits."
+            return LocalizedStringResource(
+                "skipIntros.detail.off",
+                defaultValue: "Never skip intros or credits.",
+                comment: "One-line explanation shown under the skip-intro picker."
+            )
         case .on:
-            return "Show a Skip button during intros and credits."
+            return LocalizedStringResource(
+                "skipIntros.detail.on",
+                defaultValue: "Show a Skip button during intros and credits.",
+                comment: "One-line explanation shown under the skip-intro picker."
+            )
         case .autoDelay:
-            return "Show a Skip button, then skip automatically after a few seconds."
+            return LocalizedStringResource(
+                "skipIntros.detail.autoDelay",
+                defaultValue: "Show a Skip button, then skip automatically after a few seconds.",
+                comment: "One-line explanation shown under the skip-intro picker."
+            )
         case .autoInstant:
-            return "Skip intros and credits automatically, the instant they start."
+            return LocalizedStringResource(
+                "skipIntros.detail.autoInstant",
+                defaultValue: "Skip intros and credits automatically, the instant they start.",
+                comment: "One-line explanation shown under the skip-intro picker."
+            )
         }
     }
 

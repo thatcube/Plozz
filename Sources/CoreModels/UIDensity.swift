@@ -26,26 +26,86 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
 
     public var id: String { rawValue }
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .micro: return "Micro"
-        case .extraCompact: return "Tiny"
-        case .compact: return "Small"
-        case .standard: return "Default"
-        case .spacious: return "Large"
-        case .extraLarge: return "Huge"
+        case .micro:
+            return LocalizedStringResource(
+                "uiDensity.micro",
+                defaultValue: "Micro",
+                comment: "UI density (size) option in Settings > Appearance."
+            )
+        case .extraCompact:
+            return LocalizedStringResource(
+                "uiDensity.extraCompact",
+                defaultValue: "Tiny",
+                comment: "UI density (size) option in Settings > Appearance."
+            )
+        case .compact:
+            return LocalizedStringResource(
+                "uiDensity.compact",
+                defaultValue: "Small",
+                comment: "UI density (size) option in Settings > Appearance."
+            )
+        case .standard:
+            return LocalizedStringResource(
+                "uiDensity.standard",
+                defaultValue: "Default",
+                comment: "UI density (size) option in Settings > Appearance."
+            )
+        case .spacious:
+            return LocalizedStringResource(
+                "uiDensity.spacious",
+                defaultValue: "Large",
+                comment: "UI density (size) option in Settings > Appearance."
+            )
+        case .extraLarge:
+            return LocalizedStringResource(
+                "uiDensity.extraLarge",
+                defaultValue: "Huge",
+                comment: "UI density (size) option in Settings > Appearance."
+            )
         }
     }
 
     /// Short helper line shown under each option in Settings.
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
-        case .micro: return "Most cards, smallest"
-        case .extraCompact: return "More cards, smaller"
-        case .compact: return "Slightly smaller"
-        case .standard: return "Default size"
-        case .spacious: return "Fewer cards, bigger"
-        case .extraLarge: return "Fewest cards, biggest"
+        case .micro:
+            return LocalizedStringResource(
+                "uiDensity.detail.micro",
+                defaultValue: "Most cards, smallest",
+                comment: "One-line explanation shown under each UI density option."
+            )
+        case .extraCompact:
+            return LocalizedStringResource(
+                "uiDensity.detail.extraCompact",
+                defaultValue: "More cards, smaller",
+                comment: "One-line explanation shown under each UI density option."
+            )
+        case .compact:
+            return LocalizedStringResource(
+                "uiDensity.detail.compact",
+                defaultValue: "Slightly smaller",
+                comment: "One-line explanation shown under each UI density option."
+            )
+        case .standard:
+            return LocalizedStringResource(
+                "uiDensity.detail.standard",
+                defaultValue: "Default size",
+                comment: "One-line explanation shown under each UI density option."
+            )
+        case .spacious:
+            return LocalizedStringResource(
+                "uiDensity.detail.spacious",
+                defaultValue: "Fewer cards, bigger",
+                comment: "One-line explanation shown under each UI density option."
+            )
+        case .extraLarge:
+            return LocalizedStringResource(
+                "uiDensity.detail.extraLarge",
+                defaultValue: "Fewest cards, biggest",
+                comment: "One-line explanation shown under each UI density option."
+            )
         }
     }
 

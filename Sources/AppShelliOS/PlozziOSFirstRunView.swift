@@ -43,19 +43,23 @@ private struct PlozziOSFirstProfileView: View {
     private var profile: Profile { appModel.profiles.activeProfile }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 28) {
-                PlozziOSProfileAvatar(profile: profile, size: 128)
+        // Centre the column when the screen is taller than the content (every
+        // iPad, and iPhone portrait) instead of stranding it at the top with a
+        // screenful of dead space below. `minHeight` keeps it scrollable when
+        // the content IS taller, e.g. iPhone landscape or large Dynamic Type.
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 32) {
+                    editableAvatar
 
-                VStack(spacing: 8) {
-                    Text(profile.name)
-                        .font(.largeTitle.bold())
-                    Text("We created this profile from your first media account. Rename it or change the photo any time.")
-                        .plozzForeground(.secondary)
-                        .multilineTextAlignment(.center)
-                }
+                    VStack(spacing: 8) {
+                        Text(profile.name)
+                            .font(.largeTitle.bold())
+                        Text("We created this profile from your first media account. Tap the photo to rename it or pick a different picture.")
+                            .plozzForeground(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
 
-                VStack(spacing: 12) {
                     Button("Looks Good") {
                         appModel.confirmFirstRunProfile()
                     }
@@ -63,23 +67,16 @@ private struct PlozziOSFirstProfileView: View {
                     .controlSize(.large)
                     .frame(maxWidth: .infinity)
 
-                    Button("Edit Profile", systemImage: "pencil") {
-                        editing = true
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity)
+                    Text("Add a profile for anyone else in Settings. Each one keeps its own settings, Home, watch history, and downloads — your servers stay shared.")
+                        .font(.footnote)
+                        .plozzForeground(.secondary)
+                        .multilineTextAlignment(.center)
                 }
-
-                Text("Add a profile for anyone else in Settings. Each one keeps its own settings, Home, watch history, and downloads — your servers stay shared.")
-                    .font(.footnote)
-                    .plozzForeground(.secondary)
-                    .multilineTextAlignment(.center)
+                .frame(maxWidth: 520)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 40)
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
             }
-            .frame(maxWidth: 520)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 56)
-            .frame(maxWidth: .infinity)
         }
         .sheet(isPresented: $editing) {
             NavigationStack {
@@ -91,6 +88,28 @@ private struct PlozziOSFirstProfileView: View {
                 )
             }
         }
+    }
+
+    /// The avatar IS the edit control — a pencil badge in the corner, the same
+    /// shape Contacts and Apple ID use. Keeps the one-and-only filled button on
+    /// screen meaning "continue", instead of two equal-weight pills competing.
+    private var editableAvatar: some View {
+        Button {
+            editing = true
+        } label: {
+            PlozziOSProfileAvatar(profile: profile, size: 128)
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.system(size: 34))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(Color.white, Color.accentColor)
+                        .background(Circle().fill(.black.opacity(0.001)))
+                        .offset(x: 2, y: 2)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Edit profile")
+        .accessibilityHint("Rename this profile or change its picture")
     }
 }
 

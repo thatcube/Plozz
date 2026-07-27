@@ -20,6 +20,17 @@ public struct ShareScanState: Sendable, Equatable, Identifiable {
     /// Directories listed so far. This advances even through folders with no media,
     /// so a slow walk never looks frozen merely because the item count is unchanged.
     public var directoriesScanned: Int
+    /// Directories the walk still has queued (the BFS frontier: this level's
+    /// undispatched tail plus the children discovered so far). Paired with
+    /// ``directoriesScanned`` this makes the walk's progress a REAL fraction
+    /// rather than an indeterminate spinner. 0 until a frontier-aware scanner
+    /// reports one.
+    public var directoriesPending: Int
+    /// Highest walk fraction reached in the current pass. A breadth-first walk's
+    /// denominator grows as it discovers subtrees, so the raw fraction can dip;
+    /// holding the high-water mark keeps the bar from sliding backwards while the
+    /// live item counter next to it keeps climbing. Reset on each `scanStarted`.
+    public var scanFractionCeiling: Double
     /// Items enriched so far in the current enrichment pass.
     public var enrichDone: Int
     /// Total items in the current enrichment pass (0 until a pass advertises one).
@@ -29,17 +40,20 @@ public struct ShareScanState: Sendable, Equatable, Identifiable {
 
     public init(name: String, isScanning: Bool = false, isEnriching: Bool = false,
                 itemsFound: Int = 0, directoriesScanned: Int = 0,
-                enrichDone: Int = 0, enrichTotal: Int = 0,
-                lastScanAt: Date? = nil, shareID: String = "") {
+                directoriesPending: Int = 0, enrichDone: Int = 0, enrichTotal: Int = 0,
+                lastScanAt: Date? = nil, shareID: String = "",
+                scanFractionCeiling: Double = 0) {
         self.shareID = shareID
         self.name = name
         self.isScanning = isScanning
         self.isEnriching = isEnriching
         self.itemsFound = itemsFound
         self.directoriesScanned = directoriesScanned
+        self.directoriesPending = directoriesPending
         self.enrichDone = enrichDone
         self.enrichTotal = enrichTotal
         self.lastScanAt = lastScanAt
+        self.scanFractionCeiling = scanFractionCeiling
     }
 
     /// Stable identity for `ForEach`. Falls back to the display name for states
@@ -97,12 +111,27 @@ public struct ShareScanState: Sendable, Equatable, Identifiable {
         return min(1, Double(enrichDone) / Double(enrichTotal))
     }
 
-    /// The single 0...1 completion a progress bar should draw, or `nil` when the
-    /// current phase has no knowable total (the directory walk) and the bar must
-    /// run indeterminate. Today only enrichment advertises a total; keeping the
-    /// name phase-neutral means a future scanner that *can* pre-count files only
-    /// has to fill this in — no UI change.
-    public var fraction: Double? { enrichFraction }
+    /// Real completion of the directory walk, from the breadth-first frontier:
+    /// directories listed against directories listed + still queued. Genuine
+    /// progress (not a guess from a previous scan), self-correcting as the walk
+    /// discovers subtrees, and monotonic via ``scanFractionCeiling`` so it never
+    /// slides backwards. Capped just below 1 so it can't read "100%" while the
+    /// walk is still going; `nil` before the first frontier report.
+    public var scanFraction: Double? {
+        guard isScanning else { return nil }
+        let known = directoriesScanned + directoriesPending
+        guard known > 0, directoriesScanned > 0 else { return nil }
+        let raw = Double(directoriesScanned) / Double(known)
+        return min(0.99, max(raw, scanFractionCeiling))
+    }
+
+    /// The single 0...1 completion a progress bar should draw, following whichever
+    /// phase ``phase`` reports, or `nil` when neither has a usable measure yet (the
+    /// first moments of a walk) and the bar must run indeterminate.
+    public var fraction: Double? {
+        if isScanning { return scanFraction }
+        return enrichFraction
+    }
 
     /// Whole-percent completion as text ("62%"), or `nil` while indeterminate.
     /// Rendered with a monospaced-digit font by the shared progress views so the
@@ -110,26 +139,6 @@ public struct ShareScanState: Sendable, Equatable, Identifiable {
     public var percentText: String? {
         guard let fraction else { return nil }
         return "\(Int((fraction * 100).rounded()))%"
-    }
-
-    /// The shortest useful progress string for a space-constrained surface (a
-    /// library card badge): the percentage while enriching, else the live scan
-    /// counter. Falls back to the phase label when there's no number yet, so the
-    /// badge always says *something*.
-    public var compactDetail: String {
-        if let percentText { return percentText }
-        if isScanning {
-            if itemsFound > 0 { return "\(Self.decimal(itemsFound)) items" }
-            if directoriesScanned > 0 { return "\(Self.decimal(directoriesScanned)) folders" }
-        }
-        return phase
-    }
-
-    /// An SF Symbol for the current phase — a magnifier while walking the tree,
-    /// a wand while filling in metadata/artwork. Shared so Settings and the
-    /// library cards can't drift apart.
-    public var phaseSymbol: String {
-        isScanning ? "text.magnifyingglass" : "wand.and.sparkles"
     }
 
     private static func decimal(_ n: Int) -> String {
@@ -175,7 +184,7 @@ public final class ShareScanStatusModel {
     enum Event: Sendable {
         case shareRegistered(id: String)
         case scanStarted(id: String, name: String)
-        case scanProgress(id: String, directories: Int, items: Int)
+        case scanProgress(id: String, directories: Int, pending: Int, items: Int)
         case scanFinished(id: String)
         case enrichStarted(id: String, total: Int)
         case enrichProgress(id: String, done: Int)
@@ -188,8 +197,13 @@ public final class ShareScanStatusModel {
         switch event {
         case let .shareRegistered(id): registerShare(shareID: id)
         case let .scanStarted(id, name): scanStarted(shareID: id, name: name)
-        case let .scanProgress(id, directories, items):
-            scanProgress(shareID: id, directoriesScanned: directories, itemsFound: items)
+        case let .scanProgress(id, directories, pending, items):
+            scanProgress(
+                shareID: id,
+                directoriesScanned: directories,
+                directoriesPending: pending,
+                itemsFound: items
+            )
         case let .scanFinished(id): scanFinished(shareID: id)
         case let .enrichStarted(id, total): enrichStarted(shareID: id, total: total)
         case let .enrichProgress(id, done): enrichProgress(shareID: id, done: done)
@@ -247,14 +261,37 @@ public final class ShareScanStatusModel {
         state.isScanning = true
         state.itemsFound = 0
         state.directoriesScanned = 0
+        state.directoriesPending = 0
+        state.scanFractionCeiling = 0
         byShare[shareID] = state
     }
 
-    public func scanProgress(shareID: String, directoriesScanned: Int, itemsFound: Int) {
+    public func scanProgress(
+        shareID: String,
+        directoriesScanned: Int,
+        directoriesPending: Int,
+        itemsFound: Int
+    ) {
         guard var state = byShare[shareID] else { return }
         state.directoriesScanned = directoriesScanned
+        state.directoriesPending = directoriesPending
         state.itemsFound = itemsFound
+        // Latch the high-water mark BEFORE the view reads `scanFraction`, so the
+        // bar only ever moves forward within a pass.
+        if let fraction = state.scanFraction {
+            state.scanFractionCeiling = fraction
+        }
         byShare[shareID] = state
+    }
+
+    /// Source compatibility for callers that have no frontier count.
+    public func scanProgress(shareID: String, directoriesScanned: Int, itemsFound: Int) {
+        scanProgress(
+            shareID: shareID,
+            directoriesScanned: directoriesScanned,
+            directoriesPending: byShare[shareID]?.directoriesPending ?? 0,
+            itemsFound: itemsFound
+        )
     }
 
     /// Source compatibility for direct model callers that only care about items.
@@ -262,6 +299,7 @@ public final class ShareScanStatusModel {
         scanProgress(
             shareID: shareID,
             directoriesScanned: byShare[shareID]?.directoriesScanned ?? 0,
+            directoriesPending: byShare[shareID]?.directoriesPending ?? 0,
             itemsFound: itemsFound
         )
     }
@@ -269,6 +307,8 @@ public final class ShareScanStatusModel {
     public func scanFinished(shareID: String) {
         guard var state = byShare[shareID] else { return }
         state.isScanning = false
+        state.directoriesPending = 0
+        state.scanFractionCeiling = 0
         state.lastScanAt = Date()
         byShare[shareID] = state
     }
@@ -315,10 +355,13 @@ public final class ShareScanStatusModel {
             shareRegistered: { id in c.yield(.shareRegistered(id: id)) },
             scanStarted: { id, name in c.yield(.scanStarted(id: id, name: name)) },
             scanProgress: { id, items in
-                c.yield(.scanProgress(id: id, directories: 0, items: items))
+                c.yield(.scanProgress(id: id, directories: 0, pending: 0, items: items))
             },
             scanDetailedProgress: { id, directories, items in
-                c.yield(.scanProgress(id: id, directories: directories, items: items))
+                c.yield(.scanProgress(id: id, directories: directories, pending: 0, items: items))
+            },
+            scanFrontierProgress: { id, directories, pending, items in
+                c.yield(.scanProgress(id: id, directories: directories, pending: pending, items: items))
             },
             scanFinished: { id in c.yield(.scanFinished(id: id)) },
             enrichStarted: { id, total in c.yield(.enrichStarted(id: id, total: total)) },
@@ -339,6 +382,15 @@ public struct ShareScanReporter: Sendable {
     public var scanProgress: @Sendable (_ shareID: String, _ itemsFound: Int) -> Void
     /// Additive detailed progress for directory-aware scanners.
     public var scanDetailedProgress: @Sendable (_ shareID: String, _ directoriesScanned: Int, _ itemsFound: Int) -> Void
+    /// Additive progress for frontier-aware (breadth-first) scanners, which also
+    /// know how many directories are still QUEUED. That pending count is what
+    /// turns the walk into a real progress fraction instead of a spinner.
+    public var scanFrontierProgress: @Sendable (
+        _ shareID: String,
+        _ directoriesScanned: Int,
+        _ directoriesPending: Int,
+        _ itemsFound: Int
+    ) -> Void
     public var scanFinished: @Sendable (_ shareID: String) -> Void
     public var enrichStarted: @Sendable (_ shareID: String, _ total: Int) -> Void
     public var enrichProgress: @Sendable (_ shareID: String, _ done: Int) -> Void
@@ -350,6 +402,7 @@ public struct ShareScanReporter: Sendable {
         scanStarted: @escaping @Sendable (String, String) -> Void,
         scanProgress: @escaping @Sendable (String, Int) -> Void,
         scanDetailedProgress: (@Sendable (String, Int, Int) -> Void)? = nil,
+        scanFrontierProgress: (@Sendable (String, Int, Int, Int) -> Void)? = nil,
         scanFinished: @escaping @Sendable (String) -> Void,
         enrichStarted: @escaping @Sendable (String, Int) -> Void,
         enrichProgress: @escaping @Sendable (String, Int) -> Void,
@@ -359,8 +412,12 @@ public struct ShareScanReporter: Sendable {
         self.shareRegistered = shareRegistered
         self.scanStarted = scanStarted
         self.scanProgress = scanProgress
-        self.scanDetailedProgress = scanDetailedProgress ?? { id, _, items in
+        let resolvedDetailed = scanDetailedProgress ?? { id, _, items in
             scanProgress(id, items)
+        }
+        self.scanDetailedProgress = resolvedDetailed
+        self.scanFrontierProgress = scanFrontierProgress ?? { id, directories, _, items in
+            resolvedDetailed(id, directories, items)
         }
         self.scanFinished = scanFinished
         self.enrichStarted = enrichStarted
@@ -373,7 +430,9 @@ public struct ShareScanReporter: Sendable {
     public static let noop = ShareScanReporter(
         shareRegistered: { _ in },
         scanStarted: { _, _ in }, scanProgress: { _, _ in },
-        scanDetailedProgress: { _, _, _ in }, scanFinished: { _ in },
+        scanDetailedProgress: { _, _, _ in },
+        scanFrontierProgress: { _, _, _, _ in },
+        scanFinished: { _ in },
         enrichStarted: { _, _ in }, enrichProgress: { _, _ in },
         enrichFinished: { _ in }, shareRemoved: { _ in }
     )

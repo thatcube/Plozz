@@ -96,54 +96,48 @@ public struct ShareScanProgressBar: View {
 
 // MARK: - Settings row
 
-/// One busy media share, as it appears at the top of Settings: phase glyph,
-/// share name, the live phase + counter, a progress bar, and the trailing
-/// percentage while a total is known.
+/// One busy media share, as it appears at the top of Settings and above a
+/// library's grid: share name, the trailing percentage while a fraction is
+/// known, a progress bar, and the live phase + counter beneath it.
+///
+/// Deliberately glyph-free — the phase is already spelled out in words on the
+/// line below, so a leading icon only added visual noise and pushed the text off
+/// the container's leading edge (which has to line up with the poster wall).
 ///
 /// Shared verbatim by tvOS and iOS/iPadOS; only the container around it differs
-/// (see ``ShareScanStatusCard``).
+/// (see ``ShareScanStatusCard`` / ``ShareScanProgressBanner``).
 public struct ShareScanStatusRow: View {
     private let state: ShareScanState
-
-    @Environment(\.themePalette) private var palette
 
     public init(state: ShareScanState) {
         self.state = state
     }
 
     public var body: some View {
-        HStack(alignment: .center, spacing: iconSpacing) {
-            Image(systemName: state.phaseSymbol)
-                .font(.system(size: glyphSize, weight: .semibold))
-                .foregroundStyle(palette.accent)
-                .frame(width: glyphSize + 6)
-                .symbolRenderingMode(.hierarchical)
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(state.displayName)
-                        .font(titleFont)
-                        .plozzForeground(.primary)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 8)
-
-                    if let percent = state.percentText {
-                        Text(percent)
-                            .font(valueFont)
-                            .monospacedDigit()
-                            .plozzForeground(.secondary)
-                    }
-                }
-
-                ShareScanProgressBar(fraction: state.fraction, height: barHeight)
-
-                Text(detailLine)
-                    .font(detailFont)
-                    .monospacedDigit()
-                    .plozzForeground(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(state.displayName)
+                    .font(titleFont)
+                    .plozzForeground(.primary)
                     .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                if let percent = state.percentText {
+                    Text(percent)
+                        .font(valueFont)
+                        .monospacedDigit()
+                        .plozzForeground(.secondary)
+                }
             }
+
+            ShareScanProgressBar(fraction: state.fraction, height: barHeight)
+
+            Text(detailLine)
+                .font(detailFont)
+                .monospacedDigit()
+                .plozzForeground(.secondary)
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
@@ -157,15 +151,11 @@ public struct ShareScanStatusRow: View {
     }
 
     #if os(tvOS)
-    private var iconSpacing: CGFloat { 20 }
-    private var glyphSize: CGFloat { 30 }
     private var barHeight: CGFloat { 8 }
     private var titleFont: Font { .system(size: 30, weight: .semibold) }
     private var valueFont: Font { .system(size: 26, weight: .semibold) }
     private var detailFont: Font { .system(size: 24) }
     #else
-    private var iconSpacing: CGFloat { 12 }
-    private var glyphSize: CGFloat { 17 }
     private var barHeight: CGFloat { 6 }
     private var titleFont: Font { .subheadline.weight(.semibold) }
     private var valueFont: Font { .subheadline.weight(.semibold) }

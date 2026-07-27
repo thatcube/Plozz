@@ -33,6 +33,9 @@ public struct LibraryBrowseView: View {
     private let onSelect: (MediaItem) -> Void
 
     @Environment(\.plozzMetrics) private var metrics
+    /// Per-profile card presentation. Decides how far a grid card insets its
+    /// artwork, which is what the banner's edges have to match.
+    @Environment(\.plozzCardStyle) private var cardStyle
     /// App-wide media-share scan/enrich status (optional so previews/tests that
     /// don't inject it don't crash). Feeds the banner under this library's title.
     @Environment(ShareScanStatusModel.self) private var shareScanStatus: ShareScanStatusModel?
@@ -208,6 +211,13 @@ public struct LibraryBrowseView: View {
     /// directly under the title so it explains a grid that's short or still
     /// growing. Renders nothing for a server-backed library or an idle share, and
     /// does its own status lookup so progress ticks never reach the poster grid.
+    ///
+    /// Horizontally it lines up with the poster ARTWORK below it, not the grid's
+    /// column edges: a card insets its artwork inside its own surface, so matching
+    /// only the grid padding left the banner overhanging every poster by that
+    /// inset. Vertically it takes an equal, generous gap on both sides — the first
+    /// grid row scales up on focus (``mediumFocusedCardScale``) and would
+    /// otherwise crowd the banner's lower edge.
     @ViewBuilder
     private var scanBanner: some View {
         if viewModel.isMediaShare {
@@ -215,9 +225,20 @@ public struct LibraryBrowseView: View {
                 status: shareScanStatus,
                 shareID: viewModel.sourceServerID
             )
-            .padding(.horizontal, HomeLayout.horizontalPadding)
+            .padding(.horizontal, HomeLayout.horizontalPadding + posterArtworkInset)
+            .padding(.vertical, Self.scanBannerVerticalGap)
         }
     }
+
+    /// How far a grid card insets its artwork inside its own footprint, so the
+    /// banner can sit flush with the posters in either card style.
+    private var posterArtworkInset: CGFloat {
+        cardStyle == .framed ? metrics.cardInset : metrics.borderlessCardSideMargin
+    }
+
+    /// Equal breathing room above and below the banner, on top of the stack's own
+    /// section spacing. Sized to clear a focused poster's 1.07 bloom.
+    private static let scanBannerVerticalGap: CGFloat = PlozzTheme.Spacing.large
 
     /// A focusable native sort menu.
     private var sortControl: some View {

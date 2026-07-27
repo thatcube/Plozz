@@ -205,15 +205,17 @@ final class ShareScanStatusModelTests: XCTestCase {
         XCTAssertEqual(captured.get(), 123)
     }
 
-    // MARK: - Progress presentation (shared tvOS/iOS progress bar + badge)
+    // MARK: - Progress presentation (shared tvOS/iOS progress bar)
 
-    func testFractionAndPercentTextOnlyExistWhenATotalIsKnown() {
+    func testFractionFollowsTheActivePhase() {
         let model = ShareScanStatusModel()
         model.scanStarted(shareID: "s1", name: "NAS")
-        model.scanProgress(shareID: "s1", directoriesScanned: 12, itemsFound: 340)
+        model.scanProgress(
+            shareID: "s1", directoriesScanned: 30, directoriesPending: 70, itemsFound: 340
+        )
         let scanning = model.state(forShareID: "s1")
-        XCTAssertNil(scanning?.fraction, "the directory walk has no knowable total — the bar runs indeterminate")
-        XCTAssertNil(scanning?.percentText)
+        XCTAssertEqual(scanning?.fraction, 0.3, "the walk reports its own frontier progress")
+        XCTAssertEqual(scanning?.percentText, "30%")
 
         model.scanFinished(shareID: "s1")
         model.enrichStarted(shareID: "s1", total: 200)
@@ -221,26 +223,6 @@ final class ShareScanStatusModelTests: XCTestCase {
         let enriching = model.state(forShareID: "s1")
         XCTAssertEqual(enriching?.fraction, 0.25)
         XCTAssertEqual(enriching?.percentText, "25%")
-    }
-
-    func testCompactDetailPrefersPercentThenLiveScanCounter() {
-        let model = ShareScanStatusModel()
-        model.scanStarted(shareID: "s1", name: "NAS")
-        model.scanProgress(shareID: "s1", directoriesScanned: 12, itemsFound: 340)
-        XCTAssertEqual(model.state(forShareID: "s1")?.compactDetail, "340 items")
-
-        model.scanFinished(shareID: "s1")
-        model.enrichStarted(shareID: "s1", total: 4)
-        model.enrichProgress(shareID: "s1", done: 3)
-        XCTAssertEqual(model.state(forShareID: "s1")?.compactDetail, "75%")
-    }
-
-    func testCompactDetailFallsBackToFoldersThenPhase() {
-        var state = ShareScanState(name: "NAS", isScanning: true, directoriesScanned: 9)
-        XCTAssertEqual(state.compactDetail, "9 folders")
-
-        state.directoriesScanned = 0
-        XCTAssertEqual(state.compactDetail, "Scanning", "never render an empty badge")
     }
 
     func testDisplayNameNeverBlankWhenEnrichBeatsANamedScanStart() {
@@ -258,5 +240,94 @@ final class ShareScanStatusModelTests: XCTestCase {
             ["s2", "s1"],
             "ordered by display name (Archive, NAS), each carrying its own share id"
         )
+    }
+
+    // MARK: - Real walk progress (breadth-first frontier)
+
+    func testScanFractionIsWalkedOverWalkedPlusPending() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.scanProgress(
+            shareID: "s1", directoriesScanned: 25, directoriesPending: 75, itemsFound: 400
+        )
+        XCTAssertEqual(model.state(forShareID: "s1")?.fraction, 0.25)
+        XCTAssertEqual(model.state(forShareID: "s1")?.percentText, "25%")
+    }
+
+    func testScanFractionNeverSlidesBackwardsWhenTheFrontierGrows() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.scanProgress(
+            shareID: "s1", directoriesScanned: 50, directoriesPending: 50, itemsFound: 100
+        )
+        XCTAssertEqual(model.state(forShareID: "s1")?.fraction, 0.5)
+
+        // A deep subtree lands: the raw estimate drops to 50/250 = 0.2.
+        model.scanProgress(
+            shareID: "s1", directoriesScanned: 50, directoriesPending: 200, itemsFound: 100
+        )
+        XCTAssertEqual(
+            model.state(forShareID: "s1")?.fraction, 0.5,
+            "holds the high-water mark instead of visibly rewinding"
+        )
+
+        model.scanProgress(
+            shareID: "s1", directoriesScanned: 200, directoriesPending: 50, itemsFound: 900
+        )
+        XCTAssertEqual(model.state(forShareID: "s1")?.fraction, 0.8)
+    }
+
+    func testScanFractionIsCappedBelowOneUntilTheWalkFinishes() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.scanProgress(
+            shareID: "s1", directoriesScanned: 900, directoriesPending: 0, itemsFound: 9000
+        )
+        XCTAssertEqual(
+            model.state(forShareID: "s1")?.fraction, 0.99,
+            "an empty frontier mid-walk must not read 100%"
+        )
+    }
+
+    func testScanFractionIsNilBeforeTheFirstFrontierReport() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        XCTAssertNil(
+            model.state(forShareID: "s1")?.fraction,
+            "nothing walked yet — the bar stays indeterminate"
+        )
+    }
+
+    func testANewScanResetsTheProgressCeiling() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.scanProgress(
+            shareID: "s1", directoriesScanned: 90, directoriesPending: 10, itemsFound: 800
+        )
+        model.scanFinished(shareID: "s1")
+
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.scanProgress(
+            shareID: "s1", directoriesScanned: 1, directoriesPending: 99, itemsFound: 4
+        )
+        XCTAssertEqual(model.state(forShareID: "s1")?.fraction, 0.01)
+    }
+
+    func testFrontierReporterForwardsPendingDirectories() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        let reporter = model.reporter()
+        reporter.scanFrontierProgress("s1", 30, 70, 250)
+
+        let expectation = expectation(description: "frontier progress applied")
+        Task { @MainActor in
+            // The model applies reported events through a serialized stream pump.
+            while model.state(forShareID: "s1")?.directoriesPending != 70 {
+                await Task.yield()
+            }
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 2)
+        XCTAssertEqual(model.state(forShareID: "s1")?.fraction, 0.3)
     }
 }

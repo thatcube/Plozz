@@ -179,6 +179,10 @@ private struct PlozziOSLibraryCard: View {
 
 struct PlozziOSLibraryGridView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.plozzMetrics) private var metrics
+    /// Per-profile card presentation. Decides how far a grid card insets its
+    /// artwork, which is what the banner's edges have to match.
+    @Environment(\.plozzCardStyle) private var cardStyle
     @State private var viewModel: LibraryBrowseViewModel
     private let title: String
     private let provider: any MediaProvider
@@ -221,8 +225,6 @@ struct PlozziOSLibraryGridView: View {
                 } else {
                     ScrollView {
                         scanBanner
-                            .padding(.horizontal)
-                            .padding(.top, 8)
                         LazyVGrid(
                             columns: settings.density.density.iOSPosterGridColumns(
                                 horizontalSizeClass: horizontalSizeClass
@@ -268,6 +270,11 @@ struct PlozziOSLibraryGridView: View {
     /// the grid so it explains a wall that's short or still growing. Renders
     /// nothing for a server-backed library or an idle share, and does its own
     /// status lookup so progress ticks never reach the grid.
+    ///
+    /// Horizontally it lines up with the poster ARTWORK below it, not the grid's
+    /// column edges: a card insets its artwork inside its own surface, so matching
+    /// only the grid padding leaves the banner overhanging every poster by that
+    /// inset. Matches the tvOS treatment exactly.
     @ViewBuilder
     private var scanBanner: some View {
         if viewModel.isMediaShare {
@@ -275,8 +282,19 @@ struct PlozziOSLibraryGridView: View {
                 status: scanStatus,
                 shareID: viewModel.sourceServerID
             )
+            .padding(.horizontal, Self.gridInset + posterArtworkInset)
+            .padding(.top, Self.gridInset)
         }
     }
+
+    /// How far a grid card insets its artwork inside its own footprint.
+    private var posterArtworkInset: CGFloat {
+        cardStyle == .framed ? metrics.cardInset : metrics.borderlessCardSideMargin
+    }
+
+    /// The grid's own `.padding()` — matched so the banner starts from the same
+    /// edge before the artwork inset is added.
+    private static let gridInset: CGFloat = 16
 
     private var sortControl: some View {
         Menu {

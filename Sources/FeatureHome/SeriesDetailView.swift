@@ -71,6 +71,16 @@ struct SeriesDetailView: View {
     /// from a transient `nil` during a fast horizontal hold, which could strand the
     /// focus indicator.
     @State private var episodeRailResetToken = 0
+    /// Latched once the page has opened, so `defaultFocus` claims Play exactly
+    /// once. It is declarative and re-evaluates on every appearance — including a
+    /// pop — where it would override the returning user's focus.
+    @State private var hasOpenedOnce = false
+    /// True from the moment a pushed page pops until the rail has reclaimed
+    /// focus. `hasChildOnTop` alone is too short a window: it clears the instant
+    /// the pop completes, and tvOS then parks focus on the hero — restoring it
+    /// and hiding the cast — before the rail takes focus back.
+    @State private var isReclaimingFocus = false
+
     /// Drives initial focus onto the hero Play button when the page is opened
     /// targeting a specific episode, so focus lands at the top rather than down
     /// in the episode row.
@@ -122,9 +132,14 @@ struct SeriesDetailView: View {
     /// Cosmetic-only series hero recede state. The parent writes it but never reads
     /// it, so episode focus changes do not invalidate this page or its rail.
     @State private var recedeModel = SeriesHeroRecedeModel()
+    /// Whether another detail page is pushed on top of this one — see
+    /// `DetailStackDepth`. Supplied by the hosting page, which owns the counter
+    /// and so is the only view that can record its own level correctly.
+    private let hasChildOnTop: Bool
 
     init(
         series: MediaItem,
+        hasChildOnTop: Bool = false,
         seasons: [MediaItem],
         looseEpisodes: [MediaItem],
         viewModel: ItemDetailViewModel,
@@ -138,6 +153,7 @@ struct SeriesDetailView: View {
         initialEpisode: MediaItem? = nil
     ) {
         self.series = series
+        self.hasChildOnTop = hasChildOnTop
         self.seasons = seasons
         self.looseEpisodes = looseEpisodes
         self.stampedLooseEpisodes = SeriesEpisodeContext(series: series).stamping(looseEpisodes)
@@ -233,10 +249,39 @@ struct SeriesDetailView: View {
 
     @ViewBuilder
     private var scrollContent: some View {
-        // Always land initial focus on the hero Play button (top) rather than the
-        // episode row or a season chip, while the episode rail merely pre-scrolls
-        // to the resume/target episode below.
-        scroll.defaultFocus($playFocused, true)
+        // Land initial focus on the hero Play button (top) rather than the episode
+        // row or a season chip, while the episode rail merely pre-scrolls to the
+        // resume/target episode below.
+        //
+        // Only on a genuine open. `defaultFocus` is declarative and re-fires on
+        // every appearance, so on a pop back from a pushed page it yanked focus
+        // off whatever the user was on — and because Play taking focus restores
+        // the hero, that also collapsed the episode browser and hid the cast.
+        // Designating `false` leaves no target (nothing binds `equals: false`),
+        // which keeps the modifier applied unconditionally so view identity is
+        // stable, rather than branching it in or out of the hierarchy.
+        scroll
+            // Only claim Play on a genuine open — see `hasOpenedOnce`.
+            .defaultFocus($playFocused, !hasOpenedOnce)
+            .onAppear { hasOpenedOnce = true }
+            .onChange(of: hasChildOnTop) { _, covered in
+                // Returning from a pushed page. tvOS hands focus to the hero
+                // rather than back to the rail (verified on device: the rail
+                // receives no focus event at all), so the rail has to reclaim it
+                // for the episode the user actually left from — which it still
+                // remembers correctly.
+                guard !covered else { return }
+                isReclaimingFocus = true
+            }
+
+
+    }
+
+    /// Whether focus changes arriving now are the system's rather than the
+    /// user's — while a child page is on top, or while the rail is reclaiming
+    /// focus just after one pops.
+    private var ignoresSystemFocusMoves: Bool {
+        hasChildOnTop || isReclaimingFocus
     }
 
     private var scroll: some View {
@@ -252,6 +297,7 @@ struct SeriesDetailView: View {
                         // sweep the entire series.
                         actionItem: playTarget,
                         seriesRecedeModel: recedeModel,
+                        ignoresSystemFocusMoves: ignoresSystemFocusMoves,
                         spoilerSettings: spoilerSettings,
                         playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
                         onPlay: playTarget.map { target in { onPlay(target.selectingVersion(effectivePlayVersionID)) } },
@@ -274,6 +320,11 @@ struct SeriesDetailView: View {
                         // scroll drift the page down. Same animation as the
                         // Play-regains-focus case below.
                         onHeroActionFocused: {
+                            // The second path by which the system's focus moves
+                            // reach the hero. Guarded identically: while a child
+                            // page is on top this is tvOS re-establishing focus
+                            // by geometry, not the user pressing up.
+                            guard !ignoresSystemFocusMoves else { return }
                             rearmEpisodeRailOnHeroFocusIfNeeded()
                             seasonBarEngaged = false
                             recedeModel.restore()
@@ -373,6 +424,12 @@ struct SeriesDetailView: View {
             // "up" from the seasons), animated so the page glides up smoothly
             // rather than jumping instantly.
             .onChange(of: playFocused) { _, focused in
+                // tvOS re-establishes focus by geometry whenever the stack
+                // changes, landing on the topmost control — Play. While a child
+                // page is on top that is the system moving focus, not the user
+                // pressing up out of the browser, and acting on it collapsed the
+                // browser (hiding the cast) as the child was pushed.
+                guard !ignoresSystemFocusMoves else { return }
                 if focused {
                     recedeModel.restore()
                     if reduceMotion {
@@ -724,6 +781,8 @@ struct SeriesDetailView: View {
             initialScrollID: target,
             defaultFocusID: target,
             focusResetToken: episodeRailResetToken,
+            isCovered: hasChildOnTop,
+            onRefocusComplete: { isReclaimingFocus = false },
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
             onFocusEntered: {
                 seasonBarEngaged = false

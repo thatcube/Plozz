@@ -19,6 +19,12 @@ public struct ItemDetailView: View {
     /// which dropped these actions from every menu inside a detail page while
     /// they kept working on the stack's root content.
     private let onNavigate: ((MediaItem) -> Void)?
+    /// Detail-page depth for this navigation stack. Passed in for the same reason
+    /// as `onNavigate`: a `navigationDestination` destination does not inherit
+    /// environment installed on the stack that owns it.
+    private let stackDepth: DetailStackDepth?
+    /// This page's own level on the stack, recorded once it has appeared.
+    @State private var ownStackDepth: Int?
     /// Fast/local trailer resolver. A nil result leaves the static detail hero;
     /// online YouTube autoplay remains deliberately out of the first version.
     private let heroTrailerResolver: HeroTrailerResolving
@@ -122,6 +128,7 @@ public struct ItemDetailView: View {
         onPlay: @escaping (MediaItem) -> Void,
         onSelectChild: @escaping (MediaItem) -> Void,
         onNavigate: ((MediaItem) -> Void)? = nil,
+        stackDepth: DetailStackDepth? = nil,
         heroTrailerResolver: @escaping HeroTrailerResolving = { _ in nil },
         preservesHeroTrailerOnDisappear: Bool = false,
         initialSeasonID: String? = nil,
@@ -141,6 +148,7 @@ public struct ItemDetailView: View {
         self.onPlay = onPlay
         self.onSelectChild = onSelectChild
         self.onNavigate = onNavigate
+        self.stackDepth = stackDepth
         self.heroTrailerResolver = heroTrailerResolver
         self.preservesHeroTrailerOnDisappear = preservesHeroTrailerOnDisappear
         self.initialSeasonID = initialSeasonID
@@ -174,6 +182,7 @@ public struct ItemDetailView: View {
             } else if detail.item.kind == .series {
                 SeriesDetailView(
                     series: detail.item,
+                    hasChildOnTop: hasChildOnTop,
                     seasons: detail.children.filter { $0.kind == .season },
                     looseEpisodes: detail.children.filter { $0.kind == .episode },
                     viewModel: viewModel,
@@ -309,6 +318,15 @@ public struct ItemDetailView: View {
         .transformEnvironment(\.mediaItemNavigator) { navigator in
             if let onNavigate { navigator = onNavigate }
         }
+        // A push does not disappear the page beneath it, so a page can only learn
+        // it has been covered from the *child's* lifecycle — see DetailStackDepth.
+        // The level is recorded here, after incrementing, because a child view's
+        // `onAppear` runs BEFORE this one and would capture the pre-push value.
+        .onAppear {
+            stackDepth?.pageAppeared()
+            if ownStackDepth == nil { ownStackDepth = stackDepth?.depth }
+        }
+        .onDisappear { stackDepth?.pageDismissed() }
     }
 
     private var heroTrailerTaskID: String {
@@ -459,6 +477,24 @@ public struct ItemDetailView: View {
         seasonRequestAvailabilityFailed = false
     }
 
+    /// Whether the episode is this page's *subject* rather than a season/series
+    /// page's fronted child.
+    ///
+    /// `detail.item.kind` alone is not enough: an `EpisodeContextRoute` seeds the
+    /// tapped episode as `initialItem` for an instant first paint and only then
+    /// loads the series over it, so during that window the page is showing an
+    /// episode while genuinely being the *series* page. `initialEpisode` is set
+    /// on exactly that route and nowhere else, so it separates the two.
+    private var presentsEpisodeAsSubject: Bool {
+        initialEpisode == nil && viewModel.state.value?.item.kind == .episode
+    }
+
+    /// Whether another detail page is pushed on top of this one.
+    private var hasChildOnTop: Bool {
+        guard let ownStackDepth, let depth = stackDepth?.depth else { return false }
+        return depth > ownStackDepth
+    }
+
     private func container(_ detail: ItemDetailViewModel.Detail) -> some View {
         let sources = viewModel.sources
         let serverChoices = serverChoices(from: sources)
@@ -478,6 +514,11 @@ public struct ItemDetailView: View {
                     DetailHeroView(
                         item: detail.item,
                         heroHeightFraction: detail.children.isEmpty ? 1.0 : 0.8,
+                        // An episode's own page can be reached from Continue
+                        // Watching or Search, where Back leaves the show
+                        // entirely — so offer a way over to it.
+                        offersParentNavigation: presentsEpisodeAsSubject,
+                        presentsEpisodeStill: presentsEpisodeAsSubject,
                         spoilerSettings: spoilerSettings,
                         playTitle: canPlay ? viewModel.playButtonTitle(for: detail.item) : nil,
                         onPlay: canPlay ? {
@@ -554,13 +595,25 @@ public struct ItemDetailView: View {
                 // edge-to-edge via its own `.ignoresSafeArea`.
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .defaultFocus($playFocused, true)
+            // `.userInitiated` rather than the default `.automatic`: automatic is
+            // only a hint, and tvOS otherwise takes the topmost focusable element
+            // — which on an episode page is the show breadcrumb above the title,
+            // so the page opened focused on "leave" instead of "play".
+            .defaultFocus($playFocused, true, priority: .userInitiated)
             // Pin to the top on first load: the Play button is bottom-anchored in
             // the full-screen hero, so initial focus on it makes tvOS auto-scroll
             // the page down. Snap back to the hero top so focus stays on Play.
             .task {
                 try? await Task.sleep(nanoseconds: 50_000_000)
                 proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                // An episode page puts a focusable breadcrumb above the title,
+                // and tvOS takes that topmost element on entry no matter what
+                // `defaultFocus` declares (tried at both `.automatic` and
+                // `.userInitiated`). Naming the target outright is what actually
+                // holds. Scoped to episodes so no other detail page changes.
+                if detail.item.kind == .episode, canPlay {
+                    playFocused = true
+                }
             }
             // Snap back to the hero top whenever Play regains focus (e.g. moving
             // "up" from a children rail), animated so the page glides up smoothly.

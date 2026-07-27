@@ -37,6 +37,18 @@ public struct MediaRowView: View {
     /// produces constantly (the focused card is recycled between frames) and which
     /// would otherwise disable cards mid-browse and strand the focus indicator.
     private let focusResetToken: Int
+    /// Bumped to actively move focus back onto this row's gate target (the card
+    /// focus was last on). Used when returning from a pushed page: tvOS restores
+    /// focus by geometry and can land anywhere, so the row has to reclaim it
+    /// rather than merely re-arm its entry gate.
+    /// Whether another page is currently covering this row's page. On the way in
+    /// the row snapshots the card focus was on; on the way out it restores focus
+    /// to that snapshot, because tvOS hands focus to the page's hero instead and
+    /// can overwrite the row's live memory in the process.
+    private let isCovered: Bool
+    /// Called once the row has finished reclaiming focus, so the caller can stop
+    /// suppressing the side effects of the system's own focus moves.
+    private let onRefocusComplete: (() -> Void)?
     /// Leading inset for the row's title and first card. Defaults to the standard
     /// screen padding (Home rows); detail pages pass the larger hero leading
     /// padding so the row aligns with the hero text above it.
@@ -86,6 +98,8 @@ public struct MediaRowView: View {
     /// Items whose artwork has already been queued for prefetch, so each card's
     /// `onAppear` only ever schedules its forward window once.
     @State private var prefetchedIDs: Set<String> = []
+    /// The card focus was on when this row's page was covered — see `isCovered`.
+    @State private var coveredFocusID: String?
 
     public init(
         title: String,
@@ -96,6 +110,8 @@ public struct MediaRowView: View {
         initialScrollID: String? = nil,
         defaultFocusID: String? = nil,
         focusResetToken: Int = 0,
+        isCovered: Bool = false,
+        onRefocusComplete: (() -> Void)? = nil,
         leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
         onFocusEntered: (() -> Void)? = nil,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
@@ -111,6 +127,8 @@ public struct MediaRowView: View {
             initialScrollID: initialScrollID,
             defaultFocusID: defaultFocusID,
             focusResetToken: focusResetToken,
+            isCovered: isCovered,
+            onRefocusComplete: onRefocusComplete,
             leadingInset: leadingInset,
             onFocusEntered: onFocusEntered,
             onFocusChange: onFocusChange,
@@ -128,6 +146,8 @@ public struct MediaRowView: View {
         initialScrollID: String? = nil,
         defaultFocusID: String? = nil,
         focusResetToken: Int = 0,
+        isCovered: Bool = false,
+        onRefocusComplete: (() -> Void)? = nil,
         leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
         onFocusEntered: (() -> Void)? = nil,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
@@ -142,6 +162,8 @@ public struct MediaRowView: View {
         self.initialScrollID = initialScrollID
         self.defaultFocusID = defaultFocusID
         self.focusResetToken = focusResetToken
+        self.isCovered = isCovered
+        self.onRefocusComplete = onRefocusComplete
         self.leadingInset = leadingInset
         self.onFocusEntered = onFocusEntered
         self.onFocusChange = onFocusChange
@@ -275,6 +297,16 @@ public struct MediaRowView: View {
                         lastFocusedID = nil
                         guard let newTarget, itemIDSet.contains(newTarget) else { return }
                         scrollToIfNeeded(newTarget, using: proxy)
+                    }
+                    .onChange(of: isCovered) { _, covered in
+                        guard covered else {
+                            reclaimFocusAfterCovering(using: proxy)
+                            return
+                        }
+                        // Snapshot on the way IN. Reading the live value on the
+                        // way out is too late: the system's own focus moves can
+                        // land on another card first and overwrite it.
+                        coveredFocusID = focusEngaged ? lastFocusedID : nil
                     }
                     .onChange(of: focusResetToken) { _, _ in
                         // Focus genuinely left the row for a sibling above (the season
@@ -470,6 +502,34 @@ public struct MediaRowView: View {
         }
         focusEngaged = true
         scheduleFocusReport(for: newValue)
+    }
+
+    /// Restores focus to the card the row was on before its page was covered.
+    ///
+    /// Claimed immediately so the target is focused in the same frame the page
+    /// reappears — deferring it entirely let the system's own restoration land
+    /// visibly first (on the cast row, or the wrong card) before jumping. It is
+    /// then re-asserted once, because that restoration can still arrive after
+    /// ours and overwrite it.
+    private func reclaimFocusAfterCovering(using proxy: ScrollViewProxy) {
+        guard let target = coveredFocusID, itemIDSet.contains(target) else {
+            onRefocusComplete?()
+            return
+        }
+        coveredFocusID = nil
+        scrollToIfNeeded(target, using: proxy)
+        claimFocus(target)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            claimFocus(target)
+            onRefocusComplete?()
+        }
+    }
+
+    private func claimFocus(_ target: String) {
+        guard focusedID != target else { return }
+        focusedID = target
+        lastFocusedID = target
+        focusEngaged = true
     }
 
     /// Coalesces hero updates: each focus change schedules a deferred report and

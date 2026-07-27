@@ -62,6 +62,10 @@ struct SearchTab: View {
     @Binding var resumePrompt: MediaItem?
 
     @State private var path = NavigationPath()
+    /// Lets a detail page tell whether a child page is pushed on top of it, so
+    /// focus and hero state survive a push/pop. Per-stack, so this tab needs its
+    /// own — see `DetailStackDepth`.
+    @State private var detailStackDepth = DetailStackDepth()
 
     private func makeHeroTrailerResolver() -> HeroTrailerResolving {
         { item in
@@ -131,6 +135,7 @@ struct SearchTab: View {
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
                     onNavigate: { navigateToItem($0) },
+                    stackDepth: detailStackDepth,
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     initialSeasonID: item.seasonID,
                     isDiscoveryItem: isDiscovery,
@@ -169,6 +174,7 @@ struct SearchTab: View {
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
                     onNavigate: { navigateToItem($0) },
+                    stackDepth: detailStackDepth,
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     initialEpisode: route.episode,
                     seerConnected: seer.isConfigured,
@@ -202,6 +208,7 @@ struct SearchTab: View {
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
                     onNavigate: { navigateToItem($0) },
+                    stackDepth: detailStackDepth,
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     initialSeasonID: route.season.id,
                     seerConnected: seer.isConfigured,

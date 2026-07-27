@@ -70,24 +70,11 @@ public struct MediaItemEllipsisMenu: View {
 
     private func perform(_ action: MediaItemAction) {
         if action.isNavigation {
-            navigator.map { navigate(action, using: $0) }
+            if let navigator, let target = item.navigationTarget(for: action) {
+                navigator(target)
+            }
         } else {
             handler?.perform(action, on: item, context: context)
-        }
-    }
-
-    private func navigate(_ action: MediaItemAction, using navigate: (MediaItem) -> Void) {
-        switch action {
-        case .goToSeason:
-            item.seasonNavigationTarget.map(navigate)
-        case .goToMovie:
-            navigate(item)
-        case .goToEpisode:
-            navigate(item)
-        case .markWatched, .markUnwatched, .markWatchedUpToHere,
-             .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
-             .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
-            break
         }
     }
 }

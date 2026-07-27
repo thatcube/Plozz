@@ -119,6 +119,19 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         }
     }
 
+    /// Whether the action navigates to the item it was offered for. These are
+    /// redundant on that item's own detail page (you are already there), unlike
+    /// `goToSeason`, which leaves for the parent show.
+    public var navigatesToSelf: Bool {
+        switch self {
+        case .goToEpisode, .goToMovie: return true
+        case .goToSeason, .markWatched, .markUnwatched, .markWatchedUpToHere,
+             .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
+             .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
+            return false
+        }
+    }
+
     /// Whether the platform should style the action as destructive (red). No
     /// current watched-state action loses data irreversibly; this exists so a
     /// future `delete` action can opt in without reworking the menu.

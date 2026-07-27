@@ -141,25 +141,29 @@ public struct MediaItemContextMenu: ViewModifier {
     /// builds a lightweight destination item from what the card already knows;
     /// the destination screen re-fetches full detail by id.
     private func navigate(_ action: MediaItemAction) {
-        switch action {
-        case .goToSeason:
-            guard let target = item.seasonNavigationTarget else { return }
-            pendingNavigationTarget = target
-        case .goToMovie:
-            pendingNavigationTarget = item
-        case .goToEpisode:
-            // The episode itself is the destination; the page re-fetches full
-            // detail by id.
-            pendingNavigationTarget = item
-        case .markWatched, .markUnwatched, .markWatchedUpToHere,
-             .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
-             .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
-            break
-        }
+        pendingNavigationTarget = item.navigationTarget(for: action)
     }
 }
 
 extension MediaItem {
+    /// The destination a navigation action leads to, or `nil` when this item
+    /// can't reach one. Shared so a hero's "…" menu and a card's long-press menu
+    /// route identically.
+    public func navigationTarget(for action: MediaItemAction) -> MediaItem? {
+        switch action {
+        case .goToSeason:
+            return seasonNavigationTarget
+        case .goToMovie, .goToEpisode:
+            // The item itself is the destination; the page re-fetches full
+            // detail by id.
+            return self
+        case .markWatched, .markUnwatched, .markWatchedUpToHere,
+             .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
+             .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
+            return nil
+        }
+    }
+
     /// The destination for "Go to Season". Preferred: the full **series** detail
     /// page (rich hero, badges, season tabs, episode rail) with this episode's
     /// season pre-selected, carried in `seasonID`. Falls back to a bare season

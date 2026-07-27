@@ -261,6 +261,8 @@ struct PlozziOSDetailHeroSection: View {
     let actionHandler: any MediaItemActionHandling
     let onPlay: (MediaItem, Bool) -> Void
     var heroRequest: PlozziOSHeroRequest?
+    /// Forwarded to the action row — see `offersParentNavigation` there.
+    var offersParentNavigation: Bool = false
     var pullDistance: CGFloat = 0
 
     var body: some View {
@@ -304,7 +306,8 @@ struct PlozziOSDetailHeroSection: View {
                 style: style,
                 actionHandler: actionHandler,
                 onPlay: onPlay,
-                heroRequest: heroRequest
+                heroRequest: heroRequest,
+                offersParentNavigation: offersParentNavigation
             )
         }
     }
@@ -1113,6 +1116,11 @@ private struct PlozziOSDetailHeroForeground: View {
     let actionHandler: any MediaItemActionHandling
     let onPlay: (MediaItem, Bool) -> Void
     var heroRequest: PlozziOSHeroRequest?
+    /// Whether this hero fronts an item with a parent page worth returning to —
+    /// an episode on its own page, reachable from Continue Watching or Search
+    /// where Back leaves the show entirely. See `DetailHeroView`.
+    var offersParentNavigation: Bool = false
+    @Environment(\.mediaItemNavigator) private var navigator
 
     private struct ActionEntry: Identifiable {
         let action: MediaItemAction
@@ -1125,11 +1133,28 @@ private struct PlozziOSDetailHeroForeground: View {
         var entries: [ActionEntry] = []
         for target in [item, rootItem] {
             for action in actionHandler.actions(for: target, context: .none)
-                where !action.isNavigation && seen.insert(action).inserted {
+                where offersAction(action) && seen.insert(action).inserted {
                 entries.append(ActionEntry(action: action, target: target))
             }
         }
         return entries
+    }
+
+    /// Navigation is dropped from a hero menu except when it leaves for a parent
+    /// this page can't otherwise reach, and only when something can route it.
+    private func offersAction(_ action: MediaItemAction) -> Bool {
+        guard action.isNavigation else { return true }
+        return offersParentNavigation && !action.navigatesToSelf && navigator != nil
+    }
+
+    private func perform(_ entry: ActionEntry) {
+        if entry.action.isNavigation {
+            if let navigator, let target = entry.target.navigationTarget(for: entry.action) {
+                navigator(target)
+            }
+        } else {
+            actionHandler.perform(entry.action, on: entry.target, context: .none)
+        }
     }
 
     private var primaryActions: [ActionEntry] {
@@ -1137,7 +1162,16 @@ private struct PlozziOSDetailHeroForeground: View {
     }
 
     private var contextActions: [ActionEntry] {
-        actions.filter { !$0.action.isPrimaryDetailAction }
+        actions.filter {
+            !$0.action.isPrimaryDetailAction && $0.id != parentNavigationEntry?.id
+        }
+    }
+
+    /// The navigation action shown as its own button in the action row, so an
+    /// episode page has a *visible* way back to its show rather than one buried
+    /// in a long-press menu.
+    private var parentNavigationEntry: ActionEntry? {
+        actions.first { $0.action.isNavigation && !$0.action.navigatesToSelf }
     }
 
     private var hasSourceVersionOptions: Bool {
@@ -1238,6 +1272,9 @@ private struct PlozziOSDetailHeroForeground: View {
     /// power-user Download, which folds into "…" first as width shrinks.
     private var orderedInlineExtras: [InlineExtra] {
         var extras = primaryActions.map { InlineExtra.primary($0) }
+        if let parentNavigationEntry {
+            extras.append(.primary(parentNavigationEntry))
+        }
         if downloadItem != nil {
             extras.append(.download)
         }
@@ -1375,7 +1412,7 @@ private struct PlozziOSDetailHeroForeground: View {
     }
 
     private var compactPanelActions: [PlaybackSourceMenuAction] {
-        var result = primaryActions.map { entry in
+        var result = inlineActionEntries.map { entry in
             PlaybackSourceMenuAction(
                 id: "media.\(entry.action.rawValue)",
                 title: entry.action.title,
@@ -1398,12 +1435,18 @@ private struct PlozziOSDetailHeroForeground: View {
             return
         }
         guard id.hasPrefix("media."),
-              let entry = primaryActions.first(where: {
+              let entry = inlineActionEntries.first(where: {
                   "media.\($0.action.rawValue)" == id
               }) else {
             return
         }
-        actionHandler.perform(entry.action, on: entry.target, context: .none)
+        perform(entry)
+    }
+
+    /// Every entry that can appear inline, in the same order — so a collapsed
+    /// one keeps its title/symbol and stays actionable from the "…" menu.
+    private var inlineActionEntries: [ActionEntry] {
+        primaryActions + (parentNavigationEntry.map { [$0] } ?? [])
     }
 
     private func primaryActionSymbol(for entry: ActionEntry) -> String {
@@ -1428,11 +1471,7 @@ private struct PlozziOSDetailHeroForeground: View {
                 entry.action.title,
                 systemImage: entry.action.systemImage
             ) {
-                actionHandler.perform(
-                    entry.action,
-                    on: entry.target,
-                    context: .none
-                )
+                perform(entry)
             }
         }
         sourceVersionMenuActions

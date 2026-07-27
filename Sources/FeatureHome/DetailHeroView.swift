@@ -36,6 +36,21 @@ struct DetailHeroView: View {
     /// Stable title used when no logo resolves. A series page supplies the series
     /// title so the fallback remains the same identity while episodes are browsed.
     var titleFallbackOverride: String? = nil
+    /// Whether this hero fronts an item that has a parent page worth returning to
+    /// — an episode shown on its own page, which offers "Go to Season" so you can
+    /// reach the show even when you arrived from Continue Watching rather than
+    /// from the show itself. Off for a series page, whose hero fronts a play
+    /// target that already belongs to the page you're on.
+    var offersParentNavigation: Bool = false
+    /// Renders the episode-page hero: the episode's own 16:9 still, inset over
+    /// the themed background, with the show's name as a breadcrumb above the
+    /// episode title — instead of the full-bleed backdrop + show wordmark.
+    ///
+    /// A hero's job is to answer "what am I looking at". On a series page that's
+    /// the show, so its backdrop and logo are right. On an episode page it's the
+    /// episode — and dressing it in the show's artwork makes every episode look
+    /// identical to every other episode *and* to the series page.
+    var presentsEpisodeStill: Bool = false
     /// The item hero *actions* apply to, when that differs from `item`.
     ///
     /// On a series page whose hero rests on the show — nothing watched, or all of
@@ -50,6 +65,11 @@ struct DetailHeroView: View {
     /// Optional series-only cosmetic recede state. The model is consumed by leaf
     /// modifiers so changing it never invalidates the parent page or episode rail.
     var seriesRecedeModel: SeriesHeroRecedeModel? = nil
+    /// Whether focus changes arriving right now are the system re-establishing
+    /// focus (a child page pushed/popped) rather than the user navigating. The
+    /// receded hero's invisible focus proxy must ignore those — see
+    /// `SeriesHeroFocusProxy`.
+    var ignoresSystemFocusMoves: Bool = false
     let spoilerSettings: SpoilerSettings
     /// Title for the Play/Resume button, or `nil` to omit the button entirely
     /// (e.g. a season with no resolved episodes yet).
@@ -163,7 +183,7 @@ struct DetailHeroView: View {
     /// to the hero top" correction (see ``onHeroActionFocused``); the per-button
     /// bool focus states above still own their local colour/behaviour tweaks.
     private enum HeroRowAction: Hashable {
-        case play, trailer, watchlist, watched, refresh, more, request
+        case play, trailer, watchlist, watched, refresh, more, request, parent
     }
 
     /// The action-row control that currently holds focus, or `nil` when focus is
@@ -179,6 +199,7 @@ struct DetailHeroView: View {
     /// as the scope's preferred default makes "up" from any season reliably land on
     /// Play, matching the page's contract that Play is the action row's home.
     @Namespace private var heroActionsScope
+
 
     /// Set the instant the user taps a server row in the "…" menu, and consumed by
     /// the `selectedSourceAccountID` `onChange` below. It gates the focus re-assert
@@ -204,11 +225,16 @@ struct DetailHeroView: View {
     /// Surrounding-list context, so a hero acting on a focused episode behaves
     /// exactly like that episode's context-menu would.
     @Environment(\.mediaItemActionContext) private var actionContext
+    /// Routes "Go to Season" out of this page — see `offersParentNavigation`.
+    @Environment(\.mediaItemNavigator) private var navigator
     /// Drives the Refresh button's animated state machine: the refresh itself is
     /// a fire-and-forget server task, so this gives the user visible feedback —
     /// idle ➝ a spinning "refreshing" indicator ➝ a green success check ➝ back to
     /// idle, with each icon animating in and out.
     @State private var refreshPhase: RefreshPhase = .idle
+    /// Gates the breadcrumb out of the focus system until entry focus has landed
+    /// on Play — see `seriesBreadcrumb`.
+    @State private var breadcrumbAcceptsFocus = false
 
     /// The visible lifecycle of the Refresh Metadata button.
     private enum RefreshPhase {
@@ -303,17 +329,99 @@ struct DetailHeroView: View {
                 for: backdrop,
                 context: actionContext
             ) ?? []))
-            .filter { !$0.isNavigation && seen.insert($0).inserted }
+            .filter { offersHeroAction($0) && seen.insert($0).inserted }
+    }
+
+    /// Navigation is dropped from a hero menu except when it leaves for a parent
+    /// this page can't otherwise reach, and only when something can route it.
+    private func offersHeroAction(_ action: MediaItemAction) -> Bool {
+        guard action.isNavigation else { return true }
+        return offersParentNavigation && !action.navigatesToSelf && navigator != nil
     }
 
     private var heroContextMenuActions: [MediaItemAction] {
-        heroMenuActions.filter { !$0.isPrimaryDetailAction }
+        heroMenuActions.filter { !$0.isPrimaryDetailAction && $0 != heroParentNavigationAction }
+    }
+
+    /// The navigation action shown as its own button in the action row, so an
+    /// episode page has a *visible* way back to its show rather than one buried
+    /// in a long-press menu. Nil unless this hero fronts an item with a parent
+    /// page and something can route there.
+    private var heroParentNavigationAction: MediaItemAction? {
+        guard offersParentNavigation, navigator != nil else { return nil }
+        return (actionHandler?.actions(for: backdrop, context: actionContext) ?? [])
+            .first { $0.isNavigation && !$0.navigatesToSelf }
+    }
+
+    @ViewBuilder
+    private func parentNavigationButton(action: MediaItemAction) -> some View {
+        Button {
+            performHeroAction(action)
+        } label: {
+            Image(systemName: action.systemImage)
+                .font(.system(size: heroGlyphSize))
+                .foregroundStyle(Color.primary)
+                .frame(width: heroIconSize, height: heroIconSize)
+        }
+        .modifier(HeroActionButtonStyle(prominent: false, circular: true))
+        .focused($heroActionRowFocus, equals: .parent)
+        .accessibilityLabel(action.title)
+    }
+
+    /// The show's name rendered as a breadcrumb link above the episode title.
+    /// Self-labelling in a way an icon button is not: it says both where you are
+    /// and that you can leave, and it sits where the eye naturally starts rather
+    /// than in a row of watch-state actions where navigation doesn't belong.
+    @ViewBuilder
+    private func seriesBreadcrumb(_ show: String, action: MediaItemAction) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                performHeroAction(action)
+            } label: {
+                HStack(spacing: 8) {
+                    Text(show)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 24, weight: .semibold))
+                }
+                .font(.system(size: 30, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .focused($heroActionRowFocus, equals: .parent)
+            // tvOS gives entry focus to the topmost focusable element, and no
+            // amount of `defaultFocus` (tried at `.automatic` and
+            // `.userInitiated`, on both this view and the scroll column) beat it
+            // — the page kept opening focused on "leave" instead of "play".
+            // Removing the breadcrumb from the focus system until focus has
+            // landed is what actually decides it. `.focusable(false)` rather
+            // than `.disabled` so it never *looks* inert; and the gate opens on
+            // the action row actually taking focus rather than on a timer, which
+            // raced and let the breadcrumb win whenever the page was slow.
+            .focusable(breadcrumbAcceptsFocus)
+            .accessibilityLabel("Go to \(show)")
+            .accessibilityHint(action.title)
+            Spacer(minLength: 0)
+        }
+        // tvOS only enters a section that has geometry in the swipe's path, so a
+        // short show name has nothing above the right-hand end of the action row
+        // and "up" from those buttons finds nothing. Stretching the *section* the
+        // full content width (the button itself stays leading, inside the HStack)
+        // puts a focus target above every button — the same fix the action row
+        // uses to catch "up" from a far-right season chip.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
+        .onChange(of: heroActionRowFocus) { _, focus in
+            // Any hero control taking focus means entry focus has resolved, so
+            // the breadcrumb can safely join the focus system.
+            if focus != nil { breadcrumbAcceptsFocus = true }
+        }
     }
 
     /// Whether any visible item-action button should render — used to decide
     /// whether the action row appears even when there's no Play/Trailer/Version.
     private var hasHeroActionButtons: Bool {
         heroWatchlistAction != nil || heroWatchedAction != nil
+            || heroParentNavigationAction != nil
             || showsMoreMenu
     }
 
@@ -336,6 +444,12 @@ struct DetailHeroView: View {
     /// items, and marking watched must follow what Play would run rather than the
     /// whole series.
     private func performHeroAction(_ action: MediaItemAction) {
+        if action.isNavigation {
+            if let navigator, let target = item.navigationTarget(for: action) {
+                navigator(target)
+            }
+            return
+        }
         let subject = (action == .markWatched || action == .markUnwatched)
             ? watchedActionItem
             : item
@@ -476,19 +590,38 @@ struct DetailHeroView: View {
         // hero, so the hero always reports the safe viewport width — never the
         // full panel — keeping its title/logo/Play on-screen and focusable.
         VStack(alignment: .leading, spacing: 12) {
+            // The episode's still sits centred above its own details, the way
+            // Apple's episode page does — the page's subject, shown once, rather
+            // than a show backdrop that makes every episode look the same.
+            //
+            // The flexible height is what centres it: the text block below keeps
+            // its natural size and its usual bottom-anchored position, so this
+            // slot absorbs every remaining point between the top of the hero and
+            // the top of the text, and centres the still within it.
+            if presentsEpisodeStill {
+                episodeStill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             // The hero logo is the *show's* branded title art — identical for
             // every episode — so it is never a spoiler and stays visible even
             // when an unwatched episode is focused (spoiler-hiding only masks the
             // episode's name and overview, handled below). Only the *text*
             // fallback respects masking, so a show with no logo still hides an
             // unwatched episode's title rather than leaking it.
-            HeroLogoArtwork(
-                references: backdrop.artworkReferences(for: .logo),
-                asyncFallbackURL: tmdbLogoFallback,
-                backgroundSample: heroBackgroundSample,
-                maxHeight: heroLogoHeight
-            ) {
+            //
+            // An episode page skips the wordmark entirely: it names the show in a
+            // breadcrumb above the episode's own title instead.
+            if presentsEpisodeStill {
                 titleText(hideText: hideText)
+            } else {
+                HeroLogoArtwork(
+                    references: backdrop.artworkReferences(for: .logo),
+                    asyncFallbackURL: tmdbLogoFallback,
+                    backgroundSample: heroBackgroundSample,
+                    maxHeight: heroLogoHeight
+                ) {
+                    titleText(hideText: hideText)
+                }
             }
             ZStack(alignment: .leading) {
                 // The season/episode ("S{n} · E{m}") is now shown only in the Play
@@ -582,6 +715,12 @@ struct DetailHeroView: View {
                     if let heroWatchlistAction {
                         watchlistButton(action: heroWatchlistAction)
                     }
+                    // The breadcrumb above the title carries this on an episode
+                    // page; the icon button is the fallback for any other hero
+                    // that gains a parent.
+                    if !presentsEpisodeStill, let heroParentNavigationAction {
+                        parentNavigationButton(action: heroParentNavigationAction)
+                    }
                     if showsMoreMenu {
                         moreMenu()
                     }
@@ -643,13 +782,18 @@ struct DetailHeroView: View {
         // still looked correct. As a background, the image bleeds edge-to-edge
         // purely visually and the content column stays at the safe width.
         .background(alignment: .bottom) {
-            heroBackdrop()
-                // Re-key on the backdrop identity so a server switch (the only
-                // thing that changes the backdrop — episode focus deliberately
-                // keeps the show-level backdrop) cross-fades the old artwork out
-                // and the new one in instead of hard-cutting.
-                .id(backdrop.id)
-                .transition(.opacity)
+            // An episode page has no full-bleed backdrop: the themed page
+            // background shows through, and the episode's own still is inset
+            // opposite the text instead.
+            if !presentsEpisodeStill {
+                heroBackdrop()
+                    // Re-key on the backdrop identity so a server switch (the only
+                    // thing that changes the backdrop — episode focus deliberately
+                    // keeps the show-level backdrop) cross-fades the old artwork out
+                    // and the new one in instead of hard-cutting.
+                    .id(backdrop.id)
+                    .transition(.opacity)
+            }
         }
         .overlay(alignment: .bottomLeading) {
             if let seriesRecedeModel {
@@ -657,6 +801,7 @@ struct DetailHeroView: View {
                     model: seriesRecedeModel,
                     playButtonFocus: playButtonFocus,
                     bottomInset: bottomInset,
+                    ignoresFocus: ignoresSystemFocusMoves,
                     onRestore: { onHeroActionFocused?() }
                 )
             }
@@ -667,7 +812,8 @@ struct DetailHeroView: View {
         // `bottomInset` so the two sit on the same baseline, and is hidden while
         // the hero is receded for the episode browser.
         .overlay(alignment: .bottomTrailing) {
-            if seriesRecedeModel?.isReceded != true,
+            if !presentsEpisodeStill,
+               seriesRecedeModel?.isReceded != true,
                !starringCastValues.isEmpty
                 || !directorValues.isEmpty
                 || !animeStudioValues.isEmpty {
@@ -747,6 +893,39 @@ struct DetailHeroView: View {
             && heroTrailerController.isPlaying
     }
 
+    /// The episode's own 16:9 still, inset opposite the text on an episode page.
+    /// Uses the same artwork chain and spoiler policy as the episode cards, so an
+    /// unwatched episode's frame is blurred here exactly as it is in a rail.
+    @ViewBuilder
+    private func episodeStill() -> some View {
+        let width = Self.screenWidth * 0.40
+        FallbackAsyncImage(
+            references: item.artworkReferences(for: .episodeThumbnail),
+            variant: .landscapeCard,
+            asyncFallbackURL: episodeStillFallback
+        ) {
+            MediaArtworkPlaceholder()
+        }
+        .blur(radius: spoilerSettings.shouldHideThumbnail(for: item) ? 28 : 0)
+        .frame(width: width, height: width * 9 / 16)
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: PlozzMetrics.standard.landscapeCardCornerRadius,
+                style: .continuous
+            )
+        )
+        .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
+        .id(item.id)
+        .transition(.opacity)
+        .accessibilityHidden(true)
+    }
+
+    /// Resolves a still from the external artwork router when the server has none.
+    private var episodeStillFallback: (@Sendable () async -> URL?)? {
+        let snapshot = item
+        return { await ArtworkRouter.shared.artworkURL(.thumbnail, for: snapshot) }
+    }
+
     /// The full-bleed backdrop image with its legibility scrim and bottom
     /// dissolve mask. Rendered as a `.background` of the hero content so it can
     /// ignore the horizontal/top overscan safe area and span the screen edge to
@@ -757,8 +936,7 @@ struct DetailHeroView: View {
         // + full-bleed treatment, so the detail hero and the Home hero carousel
         // render an identical backdrop. Hero artwork is never spoiler-blurred;
         // episode spoiler masking remains limited to episode text and cards.
-        SeriesDetailHeroBackdrop(
-            references: backdrop.artworkReferences(for: .detailBackdrop),
+        SeriesDetailHeroBackdrop(            references: backdrop.artworkReferences(for: .detailBackdrop),
             asyncFallbackURL: tmdbBackdropFallback,
             height: Self.screenHeight * heroHeightFraction,
             scrimTone: scrimTone,
@@ -1064,6 +1242,10 @@ struct DetailHeroView: View {
     }
 
     private func performHeroMenuAction(_ action: MediaItemAction) {
+        guard !action.isNavigation else {
+            performHeroAction(action)
+            return
+        }
         let target: MediaItem
         if action == .addToWatchlist || action == .removeFromWatchlist {
             target = backdrop
@@ -1212,20 +1394,31 @@ struct DetailHeroView: View {
     /// which would blow the hero's content past the viewport and shove the whole
     /// page (title + focusable buttons) off the left edge.
     private func titleText(hideText: Bool) -> some View {
+        // `normalizedTitle` resolves an episode to its *show's* name, which is
+        // right when a series hero fronts a focused episode — but wrong when the
+        // episode is the page's own subject, where the breadcrumb already names
+        // the show and the headline must be the episode.
+        let resolvedTitle = seriesContextTitle == nil
+            ? HeroPresentation.normalizedTitle(for: item)
+            : item.title
         let title = titleFallbackOverride
             ?? (hideText
                 ? spoilerSettings.maskedTitle(for: item)
-                : HeroPresentation.normalizedTitle(for: item))
+                : resolvedTitle)
         return VStack(alignment: .leading, spacing: 4) {
             // The show's name above the episode's, quiet and small — the episode
             // is the subject of this page, the series is the context it sits in.
             // Only when the episode IS the page: on a series page the hero already
             // carries the show's logo, so repeating the name would be noise.
             if let show = seriesContextTitle {
-                Text(show)
-                    .font(.system(size: 30, weight: .semibold))
-                    .plozzForeground(.secondary)
-                    .lineLimit(1)
+                if let action = heroParentNavigationAction {
+                    seriesBreadcrumb(show, action: action)
+                } else {
+                    Text(show)
+                        .font(.system(size: 30, weight: .semibold))
+                        .plozzForeground(.secondary)
+                        .lineLimit(1)
+                }
             }
             Text(title)
                 .font(.system(size: 64, weight: .bold))
@@ -1254,6 +1447,16 @@ struct DetailHeroView: View {
         return UIScreen.main.bounds.height
         #else
         return 1080
+        #endif
+    }
+
+    /// Full screen width, the basis for the inset episode still. Same fallback
+    /// rationale as `screenHeight`.
+    private static var screenWidth: CGFloat {
+        #if canImport(UIKit)
+        return UIScreen.main.bounds.width
+        #else
+        return 1920
         #endif
     }
 
@@ -1499,6 +1702,15 @@ private struct SeriesHeroFocusProxy: View {
     let model: SeriesHeroRecedeModel
     let playButtonFocus: FocusState<Bool>.Binding?
     let bottomInset: CGFloat
+    /// Withdraw this proxy from the focus system while a child page is on top.
+    /// On a pop tvOS restores focus by geometry and lands on this invisible
+    /// proxy, which would expand the hero — leaving focus on a hero the user
+    /// can't see and collapsing the episode browser and cast with it.
+    ///
+    /// It must become genuinely non-focusable rather than merely ignore the
+    /// event: swallowing focus silently stranded it here, with nothing visible
+    /// focused and no way to navigate back up.
+    let ignoresFocus: Bool
     let onRestore: () -> Void
 
     @FocusState private var focused: Bool
@@ -1510,7 +1722,7 @@ private struct SeriesHeroFocusProxy: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 96)
                 .contentShape(Rectangle())
-                .focusable(true)
+                .focusable(!ignoresFocus)
                 .focused($focused)
                 .focusEffectDisabled()
                 .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
@@ -1524,7 +1736,7 @@ private struct SeriesHeroFocusProxy: View {
                 // focusable between them.
                 .padding(.bottom, bottomInset)
                 .onChange(of: focused) { _, isFocused in
-                    guard isFocused else { return }
+                    guard isFocused, !ignoresFocus else { return }
                     model.restore()
                     onRestore()
                     // The action row becomes focusable after the recede-state update

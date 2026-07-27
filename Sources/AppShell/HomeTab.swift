@@ -90,6 +90,9 @@ struct HomeTab: View {
     @Binding var resumePrompt: MediaItem?
 
     @State private var path = NavigationPath()
+    /// Lets a detail page tell whether a child page is pushed on top of it.
+    /// See `DetailStackDepth`.
+    @State private var detailStackDepth = DetailStackDepth()
 
     /// Resolves only a FAST hero trailer: a real local/server extra from any
     /// cross-server copy. Online YouTube ids are deliberately rejected on Home.
@@ -264,6 +267,7 @@ struct HomeTab: View {
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
                     onNavigate: { navigate($0, asOwnSubject: $0.kind == .episode) },
+                    stackDepth: detailStackDepth,
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     preservesHeroTrailerOnDisappear: true,
                     initialEpisode: route.episode,
@@ -299,6 +303,7 @@ struct HomeTab: View {
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
                     onNavigate: { navigate($0, asOwnSubject: $0.kind == .episode) },
+                    stackDepth: detailStackDepth,
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     preservesHeroTrailerOnDisappear: true,
                     initialSeasonID: route.season.id,
@@ -417,6 +422,7 @@ struct HomeTab: View {
             onPlay: { requestPlay($0) },
             onSelectChild: { navigate($0, libraryOrigin: libraryOrigin) },
             onNavigate: { navigate($0, asOwnSubject: $0.kind == .episode) },
+            stackDepth: detailStackDepth,
             heroTrailerResolver: makeHeroTrailerResolver(),
             preservesHeroTrailerOnDisappear: true,
             initialSeasonID: item.seasonID,

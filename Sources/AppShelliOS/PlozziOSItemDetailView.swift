@@ -362,6 +362,10 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         play(playbackItem(for: liveTarget), fromBeginning: fromBeginning)
                     },
                     heroRequest: heroRequest(for: detail.item),
+                    // An episode's own page can be reached from Continue Watching
+                    // or Search, where Back leaves the show entirely — so offer a
+                    // way over to it.
+                    offersParentNavigation: detail.item.kind == .episode,
                     pullDistance: heroPullDistance
                 )
 

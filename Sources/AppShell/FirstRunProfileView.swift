@@ -38,12 +38,15 @@ struct FirstRunProfileView: View {
                         .font(.largeTitle.weight(.bold))
                         .multilineTextAlignment(.center)
 
-                    Text("Each profile keeps its own settings and Home — add more in Settings.")
-                        .font(.body)
-                        .plozzForeground(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 760)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(spacing: 6) {
+                        Text("Almost all settings are saved per profile.")
+                        Text("You can add more profiles in Settings.")
+                    }
+                    .font(.body)
+                    .plozzForeground(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 760)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
 

@@ -64,9 +64,15 @@ private struct PlozziOSFirstProfileView: View {
                     VStack(spacing: 12) {
                         Text(profile.name)
                             .font(.largeTitle.bold())
-                        Text("Each profile keeps its own settings and Home — add more in Settings.")
-                            .plozzForeground(.secondary)
-                            .multilineTextAlignment(.center)
+
+                        // Two discrete statements rather than one run-on: what a
+                        // profile does, then what you can do about it.
+                        VStack(spacing: 4) {
+                            Text("Almost all settings are saved per profile.")
+                            Text("You can add more profiles in Settings.")
+                        }
+                        .plozzForeground(.secondary)
+                        .multilineTextAlignment(.center)
                     }
 
                     // "Continue" to match the library and theme steps either side

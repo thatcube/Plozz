@@ -33,23 +33,104 @@ public enum SeriesResume {
         }
     }
 
-    /// The "next up" child to surface focus on when a series/season detail loads.
+    /// The "next up" child to surface when a series/season detail loads.
+    ///
+    /// **Recency decides, not list order.** Someone watching Season 5 continues in
+    /// Season 5 even if Season 1 was never touched — which is what Jellyfin's
+    /// *Next Up* and Plex's *On Deck* both do. Ordering alone would send them back
+    /// to the earliest gap, offering an episode they deliberately skipped.
     ///
     /// Selection order:
-    ///   1. the first in-progress item (so a half-watched episode is offered);
-    ///   2. otherwise the first unwatched item (the next episode to start);
-    ///   3. otherwise the last item (everything is watched — offer the finale).
+    ///   1. an in-progress item — the **most recently played** when several are
+    ///      part-watched, rather than whichever sorts first;
+    ///   2. the next unwatched item *after* the most recently completed one
+    ///      (finished S5 · E10 → S5 · E11, regardless of gaps earlier in the show);
+    ///   3. otherwise the first unwatched item — the only remaining gap;
+    ///   4. otherwise the last item (everything is watched — offer the finale).
+    ///
+    /// `lastPlayedAt` drives steps 1 and 2 and is populated by every backend:
+    /// Jellyfin from `UserData.LastPlayedDate`, Plex from `lastViewedAt`, shares
+    /// from the watch record. Where it is missing the comparison degrades to list
+    /// order, which is the old behaviour.
     ///
     /// Returns `nil` only for an empty list. The input order is treated as the
     /// display order, so callers should pass episodes/seasons already sorted.
     public static func nextUp(in items: [MediaItem]) -> MediaItem? {
-        if let inProgress = items.first(where: isInProgress) {
-            return inProgress
+        let inProgress = items.filter(isInProgress)
+        if !inProgress.isEmpty {
+            return mostRecentlyPlayed(in: inProgress) ?? inProgress.first
         }
+
+        // Continue from wherever they actually were, not from the earliest gap.
+        if let latest = mostRecentlyPlayed(in: items.filter(\.isPlayed)),
+           let index = items.firstIndex(where: { $0.id == latest.id }),
+           let following = items[items.index(after: index)...].first(where: { !$0.isPlayed }) {
+            return following
+        }
+
         if let unwatched = items.first(where: { !$0.isPlayed }) {
             return unwatched
         }
         return items.last
+    }
+
+    /// The most recently played of `items`, or `nil` when none carries a
+    /// timestamp — in which case the caller falls back to list order.
+    private static func mostRecentlyPlayed(in items: [MediaItem]) -> MediaItem? {
+        items
+            .compactMap { item in item.lastPlayedAt.map { (item: item, played: $0) } }
+            .max { $0.played < $1.played }?
+            .item
+    }
+
+    /// Whether the viewer has watched any part of this show.
+    ///
+    /// Read from the **seasons**, which are always loaded, rather than the
+    /// episodes, which are only ever loaded one season at a time: someone who
+    /// finished Season 1 and opens on Season 2 would look untouched, because
+    /// every Season 2 episode is unwatched. A flat show with no season containers
+    /// has its whole episode list to hand, so it answers from that instead.
+    public static func hasStarted(seasons: [MediaItem], episodes: [MediaItem]) -> Bool {
+        let pool = seasons.isEmpty ? episodes : seasons
+        return pool.contains { $0.isPlayed || isInProgress($0) }
+    }
+
+    /// Whether every episode of this show has been watched.
+    ///
+    /// Explicitly false for an empty list: `allSatisfy` is vacuously true on one,
+    /// so an unloaded or genuinely empty show would otherwise report "finished".
+    public static func isFinished(seasons: [MediaItem], episodes: [MediaItem]) -> Bool {
+        let pool = seasons.isEmpty ? episodes : seasons
+        guard !pool.isEmpty else { return false }
+        return pool.allSatisfy(\.isPlayed)
+    }
+
+    /// What the series page should rest on — the subject of the hero, and of the
+    /// Play button, which are always the same thing.
+    ///
+    /// The show itself when there is no resume point to offer: either nothing has
+    /// been watched, or all of it has and the pointer is stale. A finished series
+    /// is treated as "start over", which is behaviourally identical to one never
+    /// started. Otherwise the episode to resume.
+    public static func restingHero(
+        series: MediaItem,
+        seasons: [MediaItem],
+        episodes: [MediaItem]
+    ) -> MediaItem {
+        guard hasStarted(seasons: seasons, episodes: episodes),
+              !isFinished(seasons: seasons, episodes: episodes)
+        else { return series }
+        return nextUp(in: episodes) ?? series
+    }
+
+    /// The season a restart begins from.
+    ///
+    /// The first non-special season, because season 0 holds specials and sorts
+    /// ahead of season 1 — "start from the beginning" landing on a Christmas
+    /// special is not what anyone means. Falls back to whatever is first when
+    /// specials are all there is.
+    public static func restartSeason(in seasons: [MediaItem]) -> MediaItem? {
+        seasons.first { ($0.seasonNumber ?? 1) > 0 } ?? seasons.first
     }
 }
 

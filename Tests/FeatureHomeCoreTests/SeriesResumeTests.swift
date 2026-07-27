@@ -8,7 +8,8 @@ final class SeriesResumeTests: XCTestCase {
         number: Int,
         played: Bool = false,
         percentage: Double? = nil,
-        resume: TimeInterval? = nil
+        resume: TimeInterval? = nil,
+        playedAt: Date? = nil
     ) -> MediaItem {
         MediaItem(
             id: id,
@@ -17,8 +18,13 @@ final class SeriesResumeTests: XCTestCase {
             episodeNumber: number,
             resumePosition: resume,
             playedPercentage: percentage,
-            isPlayed: played
+            isPlayed: played,
+            lastPlayedAt: playedAt
         )
+    }
+
+    private func day(_ offset: Int) -> Date {
+        Date(timeIntervalSince1970: 1_700_000_000 + Double(offset) * 86_400)
     }
 
     // MARK: nextUp selection
@@ -151,6 +157,173 @@ final class SeriesResumeTests: XCTestCase {
         var replayed = episode("e1", number: 1)
         replayed.hasBeenPlayed = true
         XCTAssertFalse(SeriesResume.isInProgress(replayed))
+    }
+
+    // MARK: recency
+
+    /// The case that ordering alone gets wrong: everything up to E10 watched, E11
+    /// onward not. Continue from where they actually were.
+    func testResumesAfterTheMostRecentlyCompletedEpisode() {
+        let items = [
+            episode("e9", number: 9, played: true, playedAt: day(1)),
+            episode("e10", number: 10, played: true, playedAt: day(5)),
+            episode("e11", number: 11),
+            episode("e12", number: 12)
+        ]
+        XCTAssertEqual(SeriesResume.nextUp(in: items)?.id, "e11")
+    }
+
+    /// Watched out of order — E5 watched most recently, E2 skipped. Resume after
+    /// E5 rather than doubling back to the earliest gap.
+    func testOutOfOrderViewingResumesFromTheMostRecentNotTheEarliestGap() {
+        let items = [
+            episode("e1", number: 1, played: true, playedAt: day(1)),
+            episode("e2", number: 2),
+            episode("e3", number: 3),
+            episode("e4", number: 4, played: true, playedAt: day(2)),
+            episode("e5", number: 5, played: true, playedAt: day(9)),
+            episode("e6", number: 6)
+        ]
+        XCTAssertEqual(
+            SeriesResume.nextUp(in: items)?.id, "e6",
+            "continue from the most recent watch, not the earliest unwatched episode"
+        )
+    }
+
+    /// Two part-watched episodes: the one touched most recently wins, not the one
+    /// that happens to sort first.
+    func testMostRecentInProgressWinsOverEarlierInProgress() {
+        let items = [
+            episode("e2", number: 2, percentage: 0.3, playedAt: day(1)),
+            episode("e7", number: 7, percentage: 0.6, playedAt: day(4))
+        ]
+        XCTAssertEqual(SeriesResume.nextUp(in: items)?.id, "e7")
+    }
+
+    /// An in-progress episode still outranks "the one after the most recently
+    /// completed" — a half-watched episode is the strongest resume signal there is.
+    func testInProgressBeatsTheEpisodeAfterTheLastCompleted() {
+        let items = [
+            episode("e1", number: 1, percentage: 0.4, playedAt: day(1)),
+            episode("e2", number: 2, played: true, playedAt: day(6)),
+            episode("e3", number: 3)
+        ]
+        XCTAssertEqual(SeriesResume.nextUp(in: items)?.id, "e1")
+    }
+
+    /// Without timestamps the comparison has nothing to sort on and must degrade
+    /// to the previous list-order behaviour rather than picking arbitrarily.
+    func testFallsBackToListOrderWithoutTimestamps() {
+        let items = [
+            episode("e1", number: 1, played: true),
+            episode("e2", number: 2, played: true),
+            episode("e3", number: 3)
+        ]
+        XCTAssertEqual(SeriesResume.nextUp(in: items)?.id, "e3")
+    }
+
+    /// Most recent completed is the finale, so there is nothing after it — fall
+    /// through to the remaining gap rather than returning nil.
+    func testFallsBackToTheEarlierGapWhenNothingFollowsTheLastWatched() {
+        let items = [
+            episode("e1", number: 1),
+            episode("e2", number: 2, played: true, playedAt: day(3))
+        ]
+        XCTAssertEqual(SeriesResume.nextUp(in: items)?.id, "e1")
+    }
+
+    // MARK: hasStarted / isFinished / restingHero
+
+    private func show() -> MediaItem {
+        MediaItem(id: "show", title: "Test Show", kind: .series)
+    }
+
+    /// The pool is read from the seasons because episodes are only ever loaded one
+    /// season at a time: someone who finished S1 and opened on S2 sees nothing but
+    /// unwatched episodes, and would look like they had never started.
+    func testHasStartedReadsSeasonsNotTheLoadedEpisodePool() {
+        let seasons = [
+            season("s1", number: 1, played: true, percentage: 1, hasBeenPlayed: true),
+            season("s2", number: 2)
+        ]
+        let loadedSeasonTwoEpisodes = [episode("e1", number: 1), episode("e2", number: 2)]
+        XCTAssertTrue(
+            SeriesResume.hasStarted(seasons: seasons, episodes: loadedSeasonTwoEpisodes)
+        )
+    }
+
+    /// `allSatisfy` is vacuously true on an empty collection, so an unloaded show
+    /// would otherwise report itself finished.
+    func testEmptyShowIsNotFinished() {
+        XCTAssertFalse(SeriesResume.isFinished(seasons: [], episodes: []))
+        XCTAssertFalse(SeriesResume.hasStarted(seasons: [], episodes: []))
+    }
+
+    func testFinishedShowRestsOnTheSeries() {
+        let seasons = [season("s1", number: 1, played: true, percentage: 1, hasBeenPlayed: true)]
+        let episodes = [episode("e1", number: 1, played: true, playedAt: day(1))]
+        XCTAssertEqual(
+            SeriesResume.restingHero(series: show(), seasons: seasons, episodes: episodes).id,
+            "show",
+            "a finished series starts over — the episode pointer is stale"
+        )
+    }
+
+    func testUnstartedShowRestsOnTheSeries() {
+        let seasons = [season("s1", number: 1)]
+        let episodes = [episode("e1", number: 1)]
+        XCTAssertEqual(
+            SeriesResume.restingHero(series: show(), seasons: seasons, episodes: episodes).id,
+            "show"
+        )
+    }
+
+    func testPartWatchedShowRestsOnTheResumeEpisode() {
+        let seasons = [season("s1", number: 1, hasBeenPlayed: true)]
+        let episodes = [
+            episode("e1", number: 1, played: true, playedAt: day(2)),
+            episode("e2", number: 2)
+        ]
+        XCTAssertEqual(
+            SeriesResume.restingHero(series: show(), seasons: seasons, episodes: episodes).id,
+            "e2"
+        )
+    }
+
+    /// A flat loose-episode show has no season containers, so the episode list is
+    /// the whole show and answers for itself.
+    func testFlatShowWithNoSeasonsUsesItsEpisodes() {
+        let episodes = [
+            episode("e1", number: 1, played: true, playedAt: day(1)),
+            episode("e2", number: 2)
+        ]
+        XCTAssertTrue(SeriesResume.hasStarted(seasons: [], episodes: episodes))
+        XCTAssertEqual(
+            SeriesResume.restingHero(series: show(), seasons: [], episodes: episodes).id,
+            "e2"
+        )
+    }
+
+    // MARK: restart season
+
+    /// Season 0 is specials and sorts ahead of Season 1 — "start from the
+    /// beginning" must not open on a Christmas special.
+    func testRestartSkipsSpecials() {
+        let seasons = [
+            season("s0", number: 0),
+            season("s1", number: 1),
+            season("s2", number: 2)
+        ]
+        XCTAssertEqual(SeriesResume.restartSeason(in: seasons)?.id, "s1")
+    }
+
+    func testRestartUsesSpecialsWhenTheyAreAllThereIs() {
+        let seasons = [season("s0", number: 0)]
+        XCTAssertEqual(SeriesResume.restartSeason(in: seasons)?.id, "s0")
+    }
+
+    func testRestartOnEmptySeasonsIsNil() {
+        XCTAssertNil(SeriesResume.restartSeason(in: []))
     }
 
     // MARK: timecode formatting

@@ -39,7 +39,7 @@ public enum PlozzMediaChrome {
     /// Foreground for text, glyphs and a progress bar's filled portion.
     public static func foreground(isFocused: Bool) -> Color {
         #if os(tvOS)
-        isFocused ? .white : .white.opacity(restOpacity)
+        isFocused ? .white : restForeground
         #else
         .white
         #endif
@@ -48,16 +48,24 @@ public enum PlozzMediaChrome {
     /// The unfilled portion of a progress bar behind ``foreground(isFocused:)``.
     public static func track(isFocused: Bool) -> Color {
         #if os(tvOS)
-        .white.opacity(isFocused ? focusedTrackOpacity : restTrackOpacity)
+        isFocused ? focusedTrack : restTrack
         #else
-        .white.opacity(focusedTrackOpacity)
+        focusedTrack
         #endif
     }
 
-    /// Held just below pure white — enough to settle a resting card without
-    /// reading as disabled.
-    private static let restOpacity: Double = 0.75
-    private static let focusedTrackOpacity: Double = 0.32
-    private static let restTrackOpacity: Double = 0.24
+    // Every tone here is OPAQUE. A translucent bar composites with whatever
+    // artwork happens to sit behind it, so its contrast changes shot to shot and
+    // a bright frame can wash it out entirely — the legibility is only as good as
+    // the poster. Solid greys render identically on every card, which is the
+    // whole point of a shared treatment.
+
+    /// Held just below pure white so a resting wall of cards stays calm, but high
+    /// enough to read cleanly at 10 feet.
+    private static let restForeground = Color(white: 0.88)
+    /// Unfilled track. Dark enough to read as "not yet watched" against the fill,
+    /// light enough to stay visible on the scrim.
+    private static let focusedTrack = Color(white: 0.42)
+    private static let restTrack = Color(white: 0.34)
 }
 #endif

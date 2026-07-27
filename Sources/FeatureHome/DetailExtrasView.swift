@@ -113,7 +113,7 @@ private struct SeriesCastRevealModifier: ViewModifier {
 
 /// A labelled, wrapping strip of pill chips (e.g. studios or tags).
 private struct InfoChipsRow: View {
-    let title: String
+    let title: LocalizedStringResource
     let values: [String]
     var leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding
     @Environment(\.plozzMetrics) private var metrics

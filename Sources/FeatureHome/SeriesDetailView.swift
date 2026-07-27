@@ -990,9 +990,11 @@ struct SeriesDetailView: View {
     /// its tab/chip above the rail, so the rail itself stays unlabelled to avoid
     /// repeating it. The flat "loose episodes" case (no season tabs) keeps an
     /// "Episodes" header since nothing else names it.
-    private var railTitle: String {
-        if selectedSeasonID != nil { return "" }
-        return seasons.isEmpty ? "Episodes" : ""
+    /// `nil` hides the rail heading — clearer than the empty string this used to
+    /// return, now that MediaRowView takes an Optional.
+    private var railTitle: Text? {
+        if selectedSeasonID != nil { return nil }
+        return seasons.isEmpty ? Text("Episodes") : nil
     }
 
     /// The episode the hero's Play button acts on: the focused episode itself, or

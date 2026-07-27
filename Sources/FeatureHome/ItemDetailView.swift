@@ -113,7 +113,8 @@ public struct ItemDetailView: View {
     /// A user-facing request failure, wrapped for `.alert(item:)`.
     private struct RequestFailureAlert: Identifiable {
         let id = UUID()
-        let title: String
+        let title: LocalizedStringResource
+        /// Server-supplied detail — content, so rendered verbatim.
         let message: String?
     }
 
@@ -569,7 +570,7 @@ public struct ItemDetailView: View {
                     .id(Self.topAnchorID)
                     if !detail.children.isEmpty {
                         MediaRowView(
-                            title: childrenTitle(for: detail.item),
+                            title: Text(childrenTitle(for: detail.item)),
                             items: detail.children,
                             style: .landscape,
                             spoilerSettings: spoilerSettings,
@@ -727,7 +728,7 @@ public struct ItemDetailView: View {
         .defaultFocus($emptyBackFocused, true)
     }
 
-    private func childrenTitle(for item: MediaItem) -> String {
+    private func childrenTitle(for item: MediaItem) -> LocalizedStringResource {
         "Contents"
     }
 

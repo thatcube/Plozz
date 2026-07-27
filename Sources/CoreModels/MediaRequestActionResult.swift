@@ -102,11 +102,11 @@ public struct MediaRequestActionResult: Sendable, Equatable {
     public var status: MediaAvailabilityStatus?
     /// A short, user-facing failure title (e.g. "Request Limit Reached"). `nil`
     /// on success. Non-nil signals the UI to present a failure alert.
-    public var failureTitle: String?
+    public var failureTitle: LocalizedStringResource?
     /// An optional longer explanation shown under `failureTitle`.
     public var failureMessage: String?
 
-    public init(status: MediaAvailabilityStatus? = nil, failureTitle: String? = nil, failureMessage: String? = nil) {
+    public init(status: MediaAvailabilityStatus? = nil, failureTitle: LocalizedStringResource? = nil, failureMessage: String? = nil) {
         self.status = status
         self.failureTitle = failureTitle
         self.failureMessage = failureMessage
@@ -119,7 +119,9 @@ public struct MediaRequestActionResult: Sendable, Equatable {
         MediaRequestActionResult(status: status)
     }
 
-    public static func failure(title: String, message: String? = nil) -> MediaRequestActionResult {
+    /// `message` stays a `String`: it is usually text the Seerr server sent us,
+    /// i.e. content, and is rendered verbatim.
+    public static func failure(title: LocalizedStringResource, message: String? = nil) -> MediaRequestActionResult {
         MediaRequestActionResult(failureTitle: title, failureMessage: message)
     }
 }

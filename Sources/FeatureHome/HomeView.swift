@@ -798,9 +798,9 @@ public struct HomeView: View {
     private func rowView(_ row: HomeRow) -> some View {
         switch row.kind {
         case .continueWatching:
-            MediaRowView(title: row.title, items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, playsOnSelect: true, onSelect: onPlayItem)
+            MediaRowView(title: Text(row.title), items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, playsOnSelect: true, onSelect: onPlayItem)
         case .watchlist, .recentlyAdded:
-            MediaRowView(title: row.title, items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, onSelect: onSelectItem)
+            MediaRowView(title: Text(row.title), items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, onSelect: onSelectItem)
         case .libraries:
             librariesRow(row.libraries)
         }
@@ -831,7 +831,7 @@ public struct HomeView: View {
     private func libraryGroupView(_ group: HomeLibrarySectionGroup) -> some View {
         ForEach(group.sections) { section in
             MediaRowView(
-                title: section.title,
+                title: Text(verbatim: section.title),
                 items: section.items,
                 style: cardStyle(section.style),
                 spoilerSettings: spoilerSettings,

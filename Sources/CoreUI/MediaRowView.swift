@@ -11,7 +11,10 @@ public struct MediaRowView: View {
         case episodeColumn
     }
 
-    private let title: String
+    /// Pre-built: a row heading is either a row-kind name (copy) or a library
+    /// name (provider content), and only the caller knows which. `nil` renders no
+    /// heading (previously spelled as an empty string).
+    private let title: Text?
     private let items: [MediaItem]
     private let presentation: Presentation
     private let spoilerSettings: SpoilerSettings
@@ -102,7 +105,7 @@ public struct MediaRowView: View {
     @State private var coveredFocusID: String?
 
     public init(
-        title: String,
+        title: Text?,
         items: [MediaItem],
         style: PosterCardView.Style = .poster,
         spoilerSettings: SpoilerSettings = .default,
@@ -138,7 +141,7 @@ public struct MediaRowView: View {
     }
 
     public init(
-        title: String,
+        title: Text?,
         items: [MediaItem],
         presentation: Presentation,
         spoilerSettings: SpoilerSettings = .default,
@@ -240,8 +243,8 @@ public struct MediaRowView: View {
     public var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: layoutMetrics.sectionTitleSpacing) {
-                if !title.isEmpty {
-                    Text(title)
+                if let title {
+                    title
                         .font(.system(size: layoutMetrics.sectionHeaderFontSize, weight: .bold))
                         .padding(.leading, leadingInset)
                 }

@@ -20,14 +20,14 @@ struct PlozziOSHomeSkeletonRail: View {
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    let title: String
+    let title: Text
     let style: PosterCardView.Style
     /// Enough cards to fill the widest supported screen; the rail clips the rest.
     var cardCount: Int = 8
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title)
+            title
                 .font(.title2.bold())
                 .padding(
                     .horizontal,
@@ -81,9 +81,9 @@ struct PlozziOSHomeSkeletonScreen: View {
                         ? .compactPortrait
                         : .landscape
                 )
-                PlozziOSHomeSkeletonRail(title: " ", style: .landscape)
-                PlozziOSHomeSkeletonRail(title: " ", style: .poster)
-                PlozziOSHomeSkeletonRail(title: " ", style: .poster)
+                PlozziOSHomeSkeletonRail(title: Text(verbatim: " "), style: .landscape)
+                PlozziOSHomeSkeletonRail(title: Text(verbatim: " "), style: .poster)
+                PlozziOSHomeSkeletonRail(title: Text(verbatim: " "), style: .poster)
             }
         }
         .scrollDisabled(true)

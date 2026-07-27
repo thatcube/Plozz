@@ -284,7 +284,7 @@ struct PlozziOSHomeView: View {
                             }
                         ) { library in
                             PlozziOSHomeSkeletonRail(
-                                title: library.library.title,
+                                title: Text(verbatim: library.library.title),
                                 style: .poster
                             )
                         }
@@ -292,7 +292,7 @@ struct PlozziOSHomeView: View {
                         ForEach(content.librarySections) { group in
                             ForEach(group.sections) { section in
                                 PlozziOSHomeMediaRail(
-                                    title: section.title,
+                                    title: Text(verbatim: section.title),
                                     items: section.items,
                                     style: section.style == .landscape
                                         ? .landscape
@@ -1321,12 +1321,12 @@ private struct PlozziOSHomeRowView: View {
                 // geometry as the real rail, so the cards swap in without the
                 // page shifting.
                 PlozziOSHomeSkeletonRail(
-                    title: row.title,
+                    title: Text(row.title),
                     style: row.style == .landscape ? .landscape : .poster
                 )
             } else {
                 PlozziOSHomeMediaRail(
-                    title: row.title,
+                    title: Text(row.title),
                     items: row.items,
                     style: row.style == .landscape ? .landscape : .poster,
                     appModel: appModel,
@@ -1385,7 +1385,7 @@ private struct PlozziOSHomeMediaRail: View {
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    let title: String
+    let title: Text
     let items: [MediaItem]
     let style: PosterCardView.Style
     let appModel: PlozziOSAppModel
@@ -1396,7 +1396,7 @@ private struct PlozziOSHomeMediaRail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title)
+            title
                 .font(.title2.bold())
                 .padding(
                     .horizontal,

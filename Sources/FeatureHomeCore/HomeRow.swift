@@ -1,3 +1,4 @@
+import Foundation
 import CoreModels
 
 /// Identifies a Home row independently of its content. This is the stable unit
@@ -12,12 +13,32 @@ public enum HomeRowKind: String, Hashable, Sendable, CaseIterable {
     case libraries
 
     /// The row's display heading.
-    public var title: String {
+    public var title: LocalizedStringResource {
         switch self {
-        case .continueWatching: return "Continue Watching"
-        case .watchlist: return "Watchlist"
-        case .recentlyAdded: return "Recently Added"
-        case .libraries: return "Libraries"
+        case .continueWatching:
+            return LocalizedStringResource(
+                "homeRowKind.continueWatching",
+                defaultValue: "Continue Watching",
+                comment: "Home screen row of partly-watched items the user can resume."
+            )
+        case .watchlist:
+            return LocalizedStringResource(
+                "homeRowKind.watchlist",
+                defaultValue: "Watchlist",
+                comment: "Home screen row of items the user saved to watch later."
+            )
+        case .recentlyAdded:
+            return LocalizedStringResource(
+                "homeRowKind.recentlyAdded",
+                defaultValue: "Recently Added",
+                comment: "Home screen row of the newest items on the server."
+            )
+        case .libraries:
+            return LocalizedStringResource(
+                "homeRowKind.libraries",
+                defaultValue: "Libraries",
+                comment: "Home screen row listing the user's media libraries."
+            )
         }
     }
 
@@ -70,7 +91,7 @@ public struct HomeRow: Identifiable, Equatable, Sendable {
     public var libraries: [AggregatedLibrary]
 
     public var id: HomeRowKind { kind }
-    public var title: String { kind.title }
+    public var title: LocalizedStringResource { kind.title }
 
     /// Continue Watching shows wide landscape stills (resume artwork); every other
     /// media row shows portrait posters.

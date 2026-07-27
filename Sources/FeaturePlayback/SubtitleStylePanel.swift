@@ -69,7 +69,7 @@ struct SubtitleStylePanel: View {
             case action(run: () -> Void)
         }
         let slot: Int
-        let title: String
+        let title: LocalizedStringResource
         let kind: Kind
         var id: Int { slot }
     }
@@ -414,7 +414,7 @@ struct SubtitleStylePanel: View {
     /// nearest listed option so it still displays and steps cleanly. Steps by a
     /// signed number of grid indices and clamps at both ends (no wrap), so a fast
     /// hold-to-accelerate run parks at Bottom/Top instead of jumping across.
-    private func numberRow(_ slot: Int, _ title: String, options: [Int], current: Int, label: @escaping (Int) -> String, apply: @escaping (Int) -> Void) -> StyleRowSpec {
+    private func numberRow(_ slot: Int, _ title: LocalizedStringResource, options: [Int], current: Int, label: @escaping (Int) -> String, apply: @escaping (Int) -> Void) -> StyleRowSpec {
         let n = options.count
         let idx = Self.nearestIndex(options, current)
         return StyleRowSpec(slot: slot, title: title, kind: .number(
@@ -427,7 +427,7 @@ struct SubtitleStylePanel: View {
     }
 
     /// Cycle row over any small `Equatable` set; wraps at both ends.
-    private func choiceRow<V: Equatable>(_ slot: Int, _ title: String, options: [V], current: V, label: @escaping (V) -> LocalizedStringResource, apply: @escaping (V) -> Void) -> StyleRowSpec {
+    private func choiceRow<V: Equatable>(_ slot: Int, _ title: LocalizedStringResource, options: [V], current: V, label: @escaping (V) -> LocalizedStringResource, apply: @escaping (V) -> Void) -> StyleRowSpec {
         let n = options.count
         let idx = options.firstIndex(of: current) ?? 0
         return StyleRowSpec(slot: slot, title: title, kind: .choice(
@@ -440,7 +440,7 @@ struct SubtitleStylePanel: View {
     /// Cycle row over a colour palette, matched by RGB so it recognises the current
     /// swatch regardless of its alpha, and preserves that alpha on change (so the
     /// separate opacity knobs stay independent of the colour choice).
-    private func colorRow(_ slot: Int, _ title: String, options: [SubtitleColor], current: SubtitleColor, label: @escaping (SubtitleColor) -> String, apply: @escaping (SubtitleColor) -> Void) -> StyleRowSpec {
+    private func colorRow(_ slot: Int, _ title: LocalizedStringResource, options: [SubtitleColor], current: SubtitleColor, label: @escaping (SubtitleColor) -> String, apply: @escaping (SubtitleColor) -> Void) -> StyleRowSpec {
         let n = options.count
         let idx = options.firstIndex(where: { $0.red == current.red && $0.green == current.green && $0.blue == current.blue }) ?? 0
         func withAlpha(_ c: SubtitleColor) -> SubtitleColor { SubtitleColor(red: c.red, green: c.green, blue: c.blue, alpha: current.alpha) }

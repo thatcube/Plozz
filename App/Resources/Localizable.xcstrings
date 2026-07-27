@@ -138,6 +138,12 @@
     "+ %lld more" : {
 
     },
+    "+50 ms" : {
+
+    },
+    "+500 ms" : {
+
+    },
     "-%@" : {
 
     },
@@ -416,7 +422,20 @@
     "Blush" : {
 
     },
+    "Boost speech clarity in loud mixes" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mejora la claridad de la voz en mezclas ruidosas"
+          }
+        }
+      }
+    },
     "Box" : {
+
+    },
+    "Box Opacity" : {
 
     },
     "Bring all of your media together into one unified experience. Free forever and open source." : {
@@ -671,6 +690,9 @@
     "Couldn't connect to the server. Check the address and that it's on the same network, then try again." : {
 
     },
+    "Couldn't get that subtitle" : {
+
+    },
     "Couldn't load libraries." : {
 
     },
@@ -803,7 +825,14 @@
 
     },
     "Dialog Enhance" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Realce de diálogo"
+          }
+        }
+      }
     },
     "Different default per type" : {
 
@@ -914,6 +943,9 @@
 
     },
     "Downloading subtitles" : {
+
+    },
+    "Downloading subtitle…" : {
 
     },
     "Downloads" : {
@@ -1071,6 +1103,9 @@
 
     },
     "Fade" : {
+
+    },
+    "Fetching it and loading it into the player." : {
 
     },
     "File" : {
@@ -1288,6 +1323,9 @@
     "Invalid or expired code — please try again" : {
 
     },
+    "It's now playing and available in your subtitle list." : {
+
+    },
     "Items in rotation" : {
 
     },
@@ -1428,6 +1466,9 @@
 
     },
     "Looking for a device…" : {
+
+    },
+    "Looking through your server's subtitle source." : {
 
     },
     "Looks Good" : {
@@ -1661,6 +1702,9 @@
     "No subfolders here." : {
 
     },
+    "No subtitles found" : {
+
+    },
     "No users found." : {
 
     },
@@ -1721,6 +1765,9 @@
       }
     },
     "Nothing here." : {
+
+    },
+    "Nothing matched in your language. If this is a Plex or Jellyfin server, make sure a subtitle source (e.g. OpenSubtitles) is set up on the server." : {
 
     },
     "Now Playing" : {
@@ -1843,6 +1890,12 @@
 
     },
     "Outline" : {
+
+    },
+    "Outline Color" : {
+
+    },
+    "Outline Width" : {
 
     },
     "Overview" : {
@@ -2289,7 +2342,14 @@
 
     },
     "Reset" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restablecer"
+          }
+        }
+      }
     },
     "Reset & Re-upload From This Device" : {
 
@@ -2500,6 +2560,9 @@
     "Searching for servers…" : {
 
     },
+    "Searching for subtitles…" : {
+
+    },
     "Searching…" : {
 
     },
@@ -2651,6 +2714,12 @@
 
     },
     "Shadow & Outline" : {
+
+    },
+    "Shadow Color" : {
+
+    },
+    "Shadow Thickness" : {
 
     },
     "Share" : {
@@ -2835,6 +2904,9 @@
     "Something went wrong" : {
 
     },
+    "Something went wrong searching or downloading. Try again." : {
+
+    },
     "Sort By" : {
 
     },
@@ -2891,6 +2963,9 @@
 
     },
     "Subtitle Delay" : {
+
+    },
+    "Subtitle Style" : {
 
     },
     "Subtitle Sync" : {
@@ -4442,6 +4517,125 @@
     "or enter this code" : {
 
     },
+    "player.category.audio" : {
+      "comment" : "Tab in the in-player options panel listing audio tracks.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audio"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audio"
+          }
+        }
+      }
+    },
+    "player.category.info" : {
+      "comment" : "Tab in the in-player options panel showing playback details.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Info"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Información"
+          }
+        }
+      }
+    },
+    "player.category.speed" : {
+      "comment" : "Tab in the in-player options panel for playback speed.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speed"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Velocidad"
+          }
+        }
+      }
+    },
+    "player.category.subtitles" : {
+      "comment" : "Tab in the in-player options panel listing subtitle tracks.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subtitles"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subtítulos"
+          }
+        }
+      }
+    },
+    "player.category.sync" : {
+      "comment" : "Tab in the in-player options panel for audio/subtitle delay.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A/V Sync"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronización A/V"
+          }
+        }
+      }
+    },
+    "player.subtitles.download" : {
+      "comment" : "Header of the in-player screen for downloading subtitle files.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Subtitles"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descargar subtítulos"
+          }
+        }
+      }
+    },
+    "player.subtitles.sync" : {
+      "comment" : "Header of the in-player screen for adjusting subtitle timing.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subtitle Sync"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sincronizar subtítulos"
+          }
+        }
+      }
+    },
     "plex.tv/link" : {
 
     },
@@ -5453,6 +5647,12 @@
 
     },
     "“%@” will also be removed from your other devices signed in to iCloud." : {
+
+    },
+    "−50 ms" : {
+
+    },
+    "−500 ms" : {
 
     }
   },

@@ -61,13 +61,38 @@ struct PlayerControls: View {
     enum Category: Hashable {
         case subtitles, audio, speed, sync, info
 
-        var title: String {
+        var title: LocalizedStringResource {
             switch self {
-            case .subtitles: return "Subtitles"
-            case .audio: return "Audio"
-            case .speed: return "Speed"
-            case .sync: return "A/V Sync"
-            case .info: return "Info"
+            case .subtitles:
+                return LocalizedStringResource(
+                    "player.category.subtitles",
+                    defaultValue: "Subtitles",
+                    comment: "Tab in the in-player options panel listing subtitle tracks."
+                )
+            case .audio:
+                return LocalizedStringResource(
+                    "player.category.audio",
+                    defaultValue: "Audio",
+                    comment: "Tab in the in-player options panel listing audio tracks."
+                )
+            case .speed:
+                return LocalizedStringResource(
+                    "player.category.speed",
+                    defaultValue: "Speed",
+                    comment: "Tab in the in-player options panel for playback speed."
+                )
+            case .sync:
+                return LocalizedStringResource(
+                    "player.category.sync",
+                    defaultValue: "A/V Sync",
+                    comment: "Tab in the in-player options panel for audio/subtitle delay."
+                )
+            case .info:
+                return LocalizedStringResource(
+                    "player.category.info",
+                    defaultValue: "Info",
+                    comment: "Tab in the in-player options panel showing playback details."
+                )
             }
         }
 
@@ -929,12 +954,20 @@ struct PlayerControls: View {
         .plozzFocusSection()
     }
 
-    private func headerTitle(for category: Category) -> String {
+    private func headerTitle(for category: Category) -> LocalizedStringResource {
         guard category == .subtitles else { return category.title }
         switch subtitleScreen {
-        case .tracks: return "Subtitles"
-        case .download: return "Download Subtitles"
-        case .sync: return "Subtitle Sync"
+        case .tracks: return category.title
+        case .download: return LocalizedStringResource(
+            "player.subtitles.download",
+            defaultValue: "Download Subtitles",
+            comment: "Header of the in-player screen for downloading subtitle files."
+        )
+        case .sync: return LocalizedStringResource(
+            "player.subtitles.sync",
+            defaultValue: "Subtitle Sync",
+            comment: "Header of the in-player screen for adjusting subtitle timing."
+        )
         case .style: return "Subtitle Style"
         case .styleFont: return "Font"
         case .styleOutline: return "Shadow & Outline"
@@ -1113,9 +1146,11 @@ struct PlayerControls: View {
 
     struct TrackRow: Identifiable {
         let id: Int
-        let header: String?
-        let title: String
-        let subtitle: String
+        let header: Text?
+        let title: Text
+        /// `nil` means the row has no second line (previously spelled as an empty
+        /// string, which Text can't express).
+        let subtitle: Text?
         let isSelected: Bool
         let isToggle: Bool
         var isExternal: Bool = false
@@ -1131,8 +1166,8 @@ struct PlayerControls: View {
             TrackRow(
                 id: index,
                 header: nil,
-                title: option.title,
-                subtitle: "",
+                title: Text(verbatim: option.title),
+                subtitle: nil,
                 isSelected: option.isSelected,
                 isToggle: false,
                 isExternal: option.isExternal,
@@ -1152,8 +1187,8 @@ struct PlayerControls: View {
             rows.append(TrackRow(
                 id: index,
                 header: nil,
-                title: option.title,
-                subtitle: "",
+                title: Text(verbatim: option.title),
+                subtitle: nil,
                 isSelected: option.isSelected,
                 isToggle: false,
                 action: { actions.selectAudio(option.id) }
@@ -1164,8 +1199,8 @@ struct PlayerControls: View {
             rows.append(TrackRow(
                 id: index,
                 header: nil,
-                title: "Dialog Enhance",
-                subtitle: "Boost speech clarity in loud mixes",
+                title: Text("Dialog Enhance"),
+                subtitle: Text("Boost speech clarity in loud mixes"),
                 isSelected: model.dialogEnhanceEnabled,
                 isToggle: true,
                 action: { actions.setDialogEnhance(!model.dialogEnhanceEnabled) }

@@ -29,7 +29,7 @@ struct PlayerMenuRowStack: View {
     private func compactSelectableRow(_ row: PlayerControls.TrackRow) -> some View {
         Button(action: row.action) {
             HStack(spacing: 10) {
-                Text(row.title)
+                row.title
                     .font(.body)
                     .lineLimit(1)
                 if row.isExternal {
@@ -58,9 +58,9 @@ struct PlayerMenuRowStack: View {
         Button(action: row.action) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(row.title).font(.body.weight(.medium)).lineLimit(1)
-                    if !row.subtitle.isEmpty {
-                        Text(row.subtitle)
+                    row.title.font(.body.weight(.medium)).lineLimit(1)
+                    if let subtitle = row.subtitle {
+                        subtitle
                             .font(.caption2)
                             .playerMenuRowSecondary()
                             .lineLimit(2)
@@ -146,7 +146,7 @@ struct SpeedPaneView: View {
             // Quick presets.
             ForEach(Array(PlayerControls.speedPresets.enumerated()), id: \.offset) { index, speed in
                 selectableRow(
-                    title: PlayerControls.speedLabel(speed),
+                    title: Text(verbatim: PlayerControls.speedLabel(speed)),
                     isSelected: abs(model.playbackSpeed - speed) < 0.001,
                     index: index
                 ) {
@@ -157,14 +157,14 @@ struct SpeedPaneView: View {
     }
 
     private func selectableRow(
-        title: String,
+        title: Text,
         isSelected: Bool,
         index: Int,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Text(title).font(.body).lineLimit(1)
+                title.font(.body).lineLimit(1)
                 Spacer(minLength: 8)
                 if isSelected {
                     Image(systemName: "checkmark")
@@ -217,7 +217,7 @@ struct SyncPaneView: View {
     }
 
     private func delayRow(
-        title: String,
+        title: LocalizedStringResource,
         value: TimeInterval,
         firstSlot: Int,
         onAdjust: @escaping (TimeInterval) -> Void,
@@ -241,7 +241,7 @@ struct SyncPaneView: View {
         }
     }
 
-    private func stepButton(_ title: String, slot: Int, action: @escaping () -> Void) -> some View {
+    private func stepButton(_ title: LocalizedStringResource, slot: Int, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).font(.callout.weight(.medium))
         }

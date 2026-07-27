@@ -56,7 +56,7 @@ struct SubtitleDownloadScreen: View {
         }
     }
 
-    private func subtitleDownloadStatus(systemImage: String, title: String, detail: String, showSpinner: Bool = false) -> some View {
+    private func subtitleDownloadStatus(systemImage: String, title: LocalizedStringResource, detail: LocalizedStringResource, showSpinner: Bool = false) -> some View {
         VStack(spacing: 12) {
             HStack(spacing: 10) {
                 if showSpinner {

@@ -212,7 +212,10 @@ public struct ShareScanStatusCard: View {
             }
             .padding(28)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
+            // Same shared focusable read-only surface the library banner and
+            // Settings ▸ About use, so this card can be reached and read with the
+            // remote instead of being a dead patch at the top of the page.
+            .plozzFocusableCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
             #else
             SettingsSectionGroup(headerTitle) {
                 ForEach(states) { state in
@@ -294,8 +297,12 @@ public struct ShareScanProgressBanner: View {
                 ShareScanStatusRow(state: state)
                     .padding(rowInset)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .plozzSurface(
-                        .raised,
+                    // The shared read-only focusable surface (the one Settings ▸
+                    // About and the detail page's information panels use). Same
+                    // raised surface at rest, plus a tvOS focus lift — without it
+                    // the banner is unreachable on a 10-foot UI, so it can't be
+                    // scrolled into view or read. A no-op surface on iOS/iPadOS.
+                    .plozzFocusableCard(
                         cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius
                     )
                     .transition(.opacity.combined(with: .move(edge: .top)))

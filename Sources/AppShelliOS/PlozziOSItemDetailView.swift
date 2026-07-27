@@ -103,7 +103,8 @@ struct PlozziOSItemDetailView: View {
                 : contextItem.seasonID,
             initialEpisode: contextItem.kind == .episode
                 ? contextItem
-                : nil
+                : nil,
+            presentsEpisodeAsSubject: presentsEpisodeAsSubject
         )
     }
 
@@ -166,6 +167,9 @@ private struct PlozziOSCanonicalItemDetailView: View {
     private let initialSources: [MediaSourceRef]
     private let initialSeasonID: String?
     private let initialEpisode: MediaItem?
+    /// Whether the episode is this page's own subject rather than a season/series
+    /// page's fronted child — see `showsEpisodeSubjectHero`.
+    private let presentsEpisodeAsSubject: Bool
     private let capabilities = MediaCapabilities.detected()
 
     init(
@@ -175,11 +179,13 @@ private struct PlozziOSCanonicalItemDetailView: View {
         seerService: SeerService? = nil,
         originSourceAccountID: String? = nil,
         initialSeasonID: String? = nil,
-        initialEpisode: MediaItem? = nil
+        initialEpisode: MediaItem? = nil,
+        presentsEpisodeAsSubject: Bool = false
     ) {
         self.seerService = seerService
         self.initialSeasonID = initialSeasonID
         self.initialEpisode = initialEpisode
+        self.presentsEpisodeAsSubject = presentsEpisodeAsSubject
         _seriesPlayTarget = State(initialValue: initialEpisode)
         let isDiscoveryItem = item.isNotInLibraryDiscovery
         self.isDiscoveryItem = isDiscoveryItem
@@ -365,7 +371,8 @@ private struct PlozziOSCanonicalItemDetailView: View {
                     // An episode's own page can be reached from Continue Watching
                     // or Search, where Back leaves the show entirely — so offer a
                     // way over to it.
-                    offersParentNavigation: detail.item.kind == .episode,
+                    offersParentNavigation: showsEpisodeSubjectHero(detail.item),
+                    presentsEpisodeStill: showsEpisodeSubjectHero(detail.item),
                     pullDistance: heroPullDistance
                 )
 
@@ -482,6 +489,14 @@ private struct PlozziOSCanonicalItemDetailView: View {
     /// Movies get a one-tap request; series get a season-picker menu (once the
     /// season availability has loaded) so you choose which seasons to request.
     /// `nil` for in-library items and other kinds.
+    /// Whether this page's subject is an episode in its own right, rather than a
+    /// season/series page fronting one. iOS carries an explicit flag for this
+    /// (set only by the menu's "Episode Info" route), unlike tvOS which infers
+    /// it — here `initialEpisode` is set in *both* cases and can't separate them.
+    private func showsEpisodeSubjectHero(_ item: MediaItem) -> Bool {
+        presentsEpisodeAsSubject && item.kind == .episode
+    }
+
     private func heroRequest(for item: MediaItem) -> PlozziOSHeroRequest? {
         guard isDiscoveryItem, item.kind == .movie || item.kind == .series else { return nil }
         let availability = requestStatusOverride ?? item.availability

@@ -1012,7 +1012,12 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         // For an episode, the series title is the grandparent; otherwise the
         // immediate parent (e.g. a season's show, a movie has none).
         let parentTitle = isEpisode ? (dto.grandparentTitle ?? dto.parentTitle) : dto.parentTitle
-        let posterPath = isEpisode ? (dto.grandparentThumb ?? dto.thumb) : dto.thumb
+        // An episode's own still is `thumb`; `grandparentThumb` is the SHOW's
+        // poster, which already has its own home in `seriesPosterURL`. Preferring
+        // the show here meant an episode never exposed its still at all — every
+        // surface asking for `.episodeThumbnail` got series art instead. Jellyfin
+        // maps this the same way (own primary image, series poster separately).
+        let posterPath = isEpisode ? (dto.thumb ?? dto.grandparentThumb) : dto.thumb
         let viewCount = dto.viewCount ?? 0
         let viewedLeafCount = dto.viewedLeafCount ?? 0
         let leafCount = dto.leafCount ?? 0

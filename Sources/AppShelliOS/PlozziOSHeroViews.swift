@@ -6,6 +6,7 @@ import CoreUI
 import FeatureHomeCore
 import HeroUI
 import MediaDownloads
+import MetadataKit
 import Observation
 import SwiftUI
 import UIKit
@@ -263,6 +264,8 @@ struct PlozziOSDetailHeroSection: View {
     var heroRequest: PlozziOSHeroRequest?
     /// Forwarded to the action row — see `offersParentNavigation` there.
     var offersParentNavigation: Bool = false
+    /// Forwarded to the action row — see `presentsEpisodeStill` there.
+    var presentsEpisodeStill: Bool = false
     var pullDistance: CGFloat = 0
 
     var body: some View {
@@ -285,6 +288,10 @@ struct PlozziOSDetailHeroSection: View {
             style: style,
             surfaceRole: .detail,
             isActive: true,
+            // An episode page has no full-bleed backdrop: the themed page
+            // background shows through and the episode's own still leads
+            // instead. The show's artwork here made every episode look the same.
+            showsBackdrop: !presentsEpisodeStill,
             pullDistance: pullDistance,
             trailerController: trailerController,
             backgroundSettings: appModel.settings.heroBackground,
@@ -307,7 +314,8 @@ struct PlozziOSDetailHeroSection: View {
                 actionHandler: actionHandler,
                 onPlay: onPlay,
                 heroRequest: heroRequest,
-                offersParentNavigation: offersParentNavigation
+                offersParentNavigation: offersParentNavigation,
+                presentsEpisodeStill: presentsEpisodeStill
             )
         }
     }
@@ -1120,6 +1128,10 @@ private struct PlozziOSDetailHeroForeground: View {
     /// an episode on its own page, reachable from Continue Watching or Search
     /// where Back leaves the show entirely. See `DetailHeroView`.
     var offersParentNavigation: Bool = false
+    /// Renders the episode-page hero: the episode's own 16:9 still, inset above
+    /// its details, with the show named in a breadcrumb rather than a wordmark.
+    /// See `DetailHeroView.presentsEpisodeStill` for the reasoning.
+    var presentsEpisodeStill: Bool = false
     @Environment(\.mediaItemNavigator) private var navigator
 
     private struct ActionEntry: Identifiable {
@@ -1178,11 +1190,38 @@ private struct PlozziOSDetailHeroForeground: View {
         sources.count > 1 || versions.count > 1
     }
 
+    /// The episode's own 16:9 still, shown above its details on an episode page.
+    /// Same artwork chain and spoiler policy as the episode cards.
+    private var episodeStill: some View {
+        FallbackAsyncImage(
+            references: item.artworkReferences(for: .episodeThumbnail),
+            variant: .landscapeCard,
+            asyncFallbackURL: { await ArtworkRouter.shared.artworkURL(.thumbnail, for: item) }
+        ) {
+            MediaArtworkPlaceholder()
+        }
+        .blur(radius: appModel.settings.spoilers.settings.shouldHideThumbnail(for: item) ? 24 : 0)
+        .aspectRatio(16 / 9, contentMode: .fit)
+        .frame(maxWidth: style == .compactPortrait ? .infinity : 560)
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
+                style: .continuous
+            )
+        )
+        .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+        .padding(.bottom, 4)
+        .accessibilityHidden(true)
+    }
+
     var body: some View {
         VStack(
             alignment: style == .compactPortrait ? .center : .leading,
             spacing: 12
         ) {
+            if presentsEpisodeStill {
+                episodeStill
+            }
             PlozziOSHeroMetadata(
                 presentation: presentation,
                 style: style,
@@ -1190,7 +1229,12 @@ private struct PlozziOSDetailHeroForeground: View {
                 fallbackPresentation: fallbackPresentation,
                 technicalBadgesOverride: playableItem?.technicalBadges,
                 hidesRatings: appModel.settings.spoilers.settings
-                    .shouldHideRatings(for: item)
+                    .shouldHideRatings(for: item),
+                seriesBreadcrumb: presentsEpisodeStill ? item.parentTitle : nil,
+                onTapBreadcrumb: parentNavigationEntry.map { entry in
+                    { perform(entry) }
+                },
+                subjectTitle: presentsEpisodeStill ? item.title : nil
             )
 
             // Progressive overflow: try every inline layout from "all buttons
@@ -1272,7 +1316,9 @@ private struct PlozziOSDetailHeroForeground: View {
     /// power-user Download, which folds into "…" first as width shrinks.
     private var orderedInlineExtras: [InlineExtra] {
         var extras = primaryActions.map { InlineExtra.primary($0) }
-        if let parentNavigationEntry {
+        // On an episode page the breadcrumb above the title carries this, so it
+        // isn't repeated as a button in a row of watch-state actions.
+        if !presentsEpisodeStill, let parentNavigationEntry {
             extras.append(.primary(parentNavigationEntry))
         }
         if downloadItem != nil {
@@ -1720,26 +1766,63 @@ private struct PlozziOSHeroMetadata: View {
     var fallbackPresentation: HeroPresentation? = nil
     var technicalBadgesOverride: [MediaBadge]? = nil
     var hidesRatings = false
+    /// The owning show's name, shown as a breadcrumb link above an episode's own
+    /// title in place of the show wordmark. `nil` on every other hero.
+    var seriesBreadcrumb: String? = nil
+    var onTapBreadcrumb: (() -> Void)? = nil
+    /// The subject's own title, when it differs from `presentation.title`.
+    var subjectTitle: String? = nil
 
     var body: some View {
         VStack(
             alignment: style == .compactPortrait ? .center : .leading,
             spacing: 9
         ) {
-            HeroLogoArtwork(
-                references: presentation.logoReferences,
-                maxWidth: style == .compactPortrait ? 330 : 520,
-                maxHeight: style == .compactPortrait ? 95 : 130,
-                alignment: style == .compactPortrait ? .center : .leading
-            ) {
-                Text(presentation.title)
-                    .font(style == .compactPortrait ? .largeTitle : .largeTitle)
+            if let seriesBreadcrumb {
+                // The episode is this page's subject, so the show is context
+                // rather than identity — and naming it says both where you are
+                // and that you can leave. See `DetailHeroView` on tvOS.
+                Button {
+                    onTapBreadcrumb?()
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(seriesBreadcrumb)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(palette.secondaryText)
+                }
+                .buttonStyle(.plain)
+                .disabled(onTapBreadcrumb == nil)
+                .accessibilityLabel(Text("Go to \(seriesBreadcrumb)"))
+
+                // `presentation.title` resolves an episode to its *show's* name,
+                // which is right when a series hero fronts an episode but wrong
+                // here: the breadcrumb above already names the show.
+                Text(subjectTitle ?? presentation.title)
+                    .font(.largeTitle)
                     .fontWeight(.bold)
                     .foregroundStyle(palette.primaryText)
                     .lineLimit(2)
+                    .accessibilityAddTraits(.isHeader)
+            } else {
+                HeroLogoArtwork(
+                    references: presentation.logoReferences,
+                    maxWidth: style == .compactPortrait ? 330 : 520,
+                    maxHeight: style == .compactPortrait ? 95 : 130,
+                    alignment: style == .compactPortrait ? .center : .leading
+                ) {
+                    Text(presentation.title)
+                        .font(style == .compactPortrait ? .largeTitle : .largeTitle)
+                        .fontWeight(.bold)
+                        .foregroundStyle(palette.primaryText)
+                        .lineLimit(2)
+                }
+                .accessibilityLabel(Text(presentation.title))
+                .accessibilityAddTraits(.isHeader)
             }
-            .accessibilityLabel(Text(presentation.title))
-            .accessibilityAddTraits(.isHeader)
 
             if effectiveRatingBadge != nil || !effectiveGenres.isEmpty {
                 HStack(spacing: 10) {

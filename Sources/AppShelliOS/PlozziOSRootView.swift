@@ -465,6 +465,7 @@ private struct PlozziOSTabShell: View {
                         onShowSettings: showSettings
                     )
                     .plozziOSLibraryDestination(appModel: appModel)
+                    .plozziOSItemNavigation(appModel: appModel)
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
                 .toolbarBackground(.hidden, for: .tabBar)
@@ -483,6 +484,7 @@ private struct PlozziOSTabShell: View {
                         onAddServer: onAddServer,
                         onShowSettings: showSettings
                     )
+                    .plozziOSItemNavigation(appModel: appModel)
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
                 .background { AppBackground(palette: palette) }

@@ -141,6 +141,11 @@ struct PlozziOSHomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
             viewModel.scheduleReenrich()
         }
+        // Lets a Continue Watching card resume without knowing how playback is
+        // presented. Routed through the same `play` the hero uses, so a series
+        // still resolves to its next-up episode rather than being handed to the
+        // player as a container.
+        .plozziOSRailPlay { play($0) }
         .fullScreenCover(item: $playbackRequest) { request in
             if let provider = appModel.provider(for: request.item) {
                 PlozziOSPlayerView(request: request, provider: provider)
@@ -1322,7 +1327,11 @@ private struct PlozziOSHomeRowView: View {
                     title: row.title,
                     items: row.items,
                     style: row.style == .landscape ? .landscape : .poster,
-                    appModel: appModel
+                    appModel: appModel,
+                    // Continue Watching is a resume affordance: pressing it should
+                    // carry on watching, which is what tvOS already did. The
+                    // context menu still reaches the detail page.
+                    interaction: row.kind == .continueWatching ? .play : .openDetail
                 )
             }
         }
@@ -1378,6 +1387,10 @@ private struct PlozziOSHomeMediaRail: View {
     let items: [MediaItem]
     let style: PosterCardView.Style
     let appModel: PlozziOSAppModel
+    /// What pressing a card does. Declared by the caller rather than inferred
+    /// from the card's shape — a landscape rail is a presentation choice, not a
+    /// promise that the row is Continue Watching.
+    var interaction: PlozziOSRailInteraction = .openDetail
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1394,6 +1407,7 @@ private struct PlozziOSHomeMediaRail: View {
                         PlozziOSHomeMediaCard(
                             item: item,
                             isLandscape: style == .landscape,
+                            interaction: interaction,
                             provider: provider(for: item)
                         )
                         .frame(
@@ -1427,8 +1441,10 @@ private struct PlozziOSHomeMediaCard: View {
     @Environment(PlozziOSAppModel.self) private var appModel
     let item: MediaItem
     let isLandscape: Bool
+    var interaction: PlozziOSRailInteraction = .openDetail
     let provider: (any MediaProvider)?
     @State private var downloadRecord: DownloadedMediaRecord?
+    @Environment(\.plozziOSRailPlay) private var railPlay
 
     var body: some View {
         let detailItem = PlaybackSourceSelection.bestPlayItem(
@@ -1438,7 +1454,15 @@ private struct PlozziOSHomeMediaCard: View {
         )
         let detailProvider = appModel.provider(for: detailItem) ?? provider
         Group {
-            if let detailProvider {
+            // A Continue Watching card resumes; every other rail opens detail.
+            // Playing needs a handler installed by the page that owns the player,
+            // and an item that is actually playable — a discovery/request stub has
+            // nothing to run — so both fall back to the detail push rather than
+            // opening a broken player.
+            if interaction == .play, let railPlay, item.isPlayableNow {
+                Button { railPlay(detailItem) } label: { card }
+                    .buttonStyle(.plain)
+            } else if let detailProvider {
                 NavigationLink {
                     PlozziOSItemDetailView(
                         appModel: appModel,
@@ -1461,10 +1485,9 @@ private struct PlozziOSHomeMediaCard: View {
         PlozziOSPosterCard(
             item: item,
             style: isLandscape ? .landscape : .poster,
-            // Mirrors tvOS, which shows the chip on landscape rows
-            // (`playsOnSelect: section.style == .landscape`). iOS cards open a
-            // detail page rather than playing on tap, so the chip is requested
-            // explicitly instead of riding `playsOnSelect`.
+            // The chip is requested explicitly rather than riding an implicit
+            // "landscape means playable" rule, so presentation and behaviour stay
+            // independently controlled.
             showsResumeChip: isLandscape,
             downloadState: liveDownloadRecord?.badgeState,
             showsActionsMenu: isLandscape

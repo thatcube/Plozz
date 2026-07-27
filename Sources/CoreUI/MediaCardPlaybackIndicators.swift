@@ -41,6 +41,20 @@ public struct MediaCardPlaybackIndicators: View {
 
     public var body: some View {
         Color.clear
+            // One scrim for ALL bottom chrome, drawn beneath it. Shared with the
+            // resume chip (``MediaArtworkChromeScrim``) so a card's bottom edge
+            // darkens identically whichever treatment it carries.
+            //
+            // It used to live inside `progressBar`, which meant a downloaded but
+            // unstarted card had its badge floating on bare artwork, and the ramp
+            // was a full-length linear fade whose darkening was so spread out it
+            // was hard to see at all. The shared scrim holds clear until ~62% and
+            // then ramps, so the darkening is concentrated where the chrome is.
+            .overlay {
+                if hasBottomChrome {
+                    MediaArtworkChromeScrim(top: false, bottom: true)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 statusIndicator
             }
@@ -57,6 +71,12 @@ public struct MediaCardPlaybackIndicators: View {
 
     private var showsProgressBar: Bool {
         MediaPlaybackIndicatorPresentation.showsProgress(for: item)
+    }
+
+    /// Any chrome along the card's bottom edge that needs the artwork darkened
+    /// behind it — the progress bar, the download badge, or both.
+    private var hasBottomChrome: Bool {
+        (progressBarEnabled && showsProgressBar) || downloadState != nil
     }
 
     @ViewBuilder
@@ -164,45 +184,34 @@ public struct MediaCardPlaybackIndicators: View {
     @ViewBuilder
     private var progressBar: some View {
         if showsProgressBar, let percentage = item.playedPercentage {
-            let scrimReach = progressHeight * 7.5
             let shadowRadius = progressHeight * 0.25
-            ZStack(alignment: .bottom) {
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.6)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: progressHeight + scrimReach)
-                .frame(maxWidth: .infinity)
-
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        // Matches ``ResumeProgressCapsule`` — the same white bar the
-                        // resume chip and the detail Play button draw — so progress
-                        // reads identically wherever it appears. Deliberately not the
-                        // brand blue: colour is reserved for specific moments, and a
-                        // white bar sits better over arbitrary artwork.
-                        Capsule(style: .continuous)
-                            .fill(.white.opacity(0.32))
-                        Capsule(style: .continuous)
-                            .fill(.white)
-                            .frame(
-                                width: max(
-                                    progressHeight,
-                                    geometry.size.width * percentage
-                                )
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    // Matches ``ResumeProgressCapsule`` — the same white bar the
+                    // resume chip and the detail Play button draw — so progress
+                    // reads identically wherever it appears. Deliberately not the
+                    // brand blue: colour is reserved for specific moments, and a
+                    // white bar sits better over arbitrary artwork.
+                    Capsule(style: .continuous)
+                        .fill(.white.opacity(0.32))
+                    Capsule(style: .continuous)
+                        .fill(.white)
+                        .frame(
+                            width: max(
+                                progressHeight,
+                                geometry.size.width * percentage
                             )
-                            .shadow(
-                                color: .black.opacity(0.35),
-                                radius: shadowRadius
-                            )
-                    }
+                        )
+                        .shadow(
+                            color: .black.opacity(0.35),
+                            radius: shadowRadius
+                        )
                 }
-                .frame(height: progressHeight)
-                .padding(.leading, progressHorizontalInset)
-                .padding(.trailing, progressTrailingInset)
-                .padding(.bottom, progressBottomInset)
             }
+            .frame(height: progressHeight)
+            .padding(.leading, progressHorizontalInset)
+            .padding(.trailing, progressTrailingInset)
+            .padding(.bottom, progressBottomInset)
         }
     }
 }

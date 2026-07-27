@@ -64,7 +64,7 @@ private struct PlozziOSFirstProfileView: View {
                     VStack(spacing: 12) {
                         Text(profile.name)
                             .font(.largeTitle.bold())
-                        Text("We created this profile from your first media account — rename it or change the photo any time. Add a profile for anyone else in Settings; each keeps its own settings, Home, watch history, and downloads.")
+                        Text("Each profile keeps its own settings and Home — add more in Settings.")
                             .plozzForeground(.secondary)
                             .multilineTextAlignment(.center)
                     }

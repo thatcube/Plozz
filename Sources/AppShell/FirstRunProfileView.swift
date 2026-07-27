@@ -38,7 +38,7 @@ struct FirstRunProfileView: View {
                         .font(.largeTitle.weight(.bold))
                         .multilineTextAlignment(.center)
 
-                    Text("We created this profile from your \(providerName) account. You can rename it or change the photo here, or any time in Settings.")
+                    Text("Each profile keeps its own settings and Home — add more in Settings.")
                         .font(.body)
                         .plozzForeground(.secondary)
                         .multilineTextAlignment(.center)
@@ -69,13 +69,6 @@ struct FirstRunProfileView: View {
                 .buttonStyle(.borderedProminent)
                 .focused($focus, equals: .confirm)
             }
-
-            Text("Add a profile for anyone else in Settings. Each one keeps its own settings, Home, watch history, and downloads — your servers stay shared.")
-                .font(.footnote)
-                .plozzForeground(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 900)
-                .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 0)
         }
@@ -112,10 +105,5 @@ struct FirstRunProfileView: View {
         return name.isEmpty ? "Your Profile" : name
     }
 
-    /// The provider the seeded identity came from — the first account added on
-    /// this fresh install. Defaults to a neutral word if none is resolvable.
-    private var providerName: String {
-        appState.accountsProviders.accounts.first?.server.provider.displayName ?? "media"
-    }
 }
 #endif

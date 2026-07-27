@@ -755,7 +755,7 @@ private struct PlozziOSProfilesView: View {
                     )
                 )
             } footer: {
-                Text("Profiles keep Home, settings, watch history, and downloads personal.")
+                Text("Profiles keep Home, settings, and downloads personal. Watch history belongs to the account each profile watches as.")
             }
 
             SettingsSectionGroup("Who’s watching?") {

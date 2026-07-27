@@ -72,9 +72,17 @@ public struct ShareScanProgressBar: View {
         .accessibilityHidden(true)
     }
 
+    /// Plozz's brand blue — the SAME fill every other progress bar in the app
+    /// uses (see ``MediaCardPlaybackIndicators``'s resume bar). Deliberately NOT
+    /// `palette.accent`: that resolves to `Color.accentColor`, which falls back to
+    /// each platform's OS default because the app ships no accent colour — system
+    /// white on tvOS, system blue on iOS/iPadOS — so the same bar rendered a
+    /// different colour on each device.
+    private var tint: Color { ThemePalette.brandBlue }
+
     private var fillGradient: LinearGradient {
         LinearGradient(
-            colors: [palette.accent, palette.accent.opacity(0.62)],
+            colors: [tint, tint.opacity(0.62)],
             startPoint: .leading,
             endPoint: .trailing
         )
@@ -84,9 +92,9 @@ public struct ShareScanProgressBar: View {
     private var sweepGradient: LinearGradient {
         LinearGradient(
             stops: [
-                .init(color: palette.accent.opacity(0.0), location: 0),
-                .init(color: palette.accent.opacity(0.9), location: 0.5),
-                .init(color: palette.accent.opacity(0.0), location: 1)
+                .init(color: tint.opacity(0.0), location: 0),
+                .init(color: tint.opacity(0.9), location: 0.5),
+                .init(color: tint.opacity(0.0), location: 1)
             ],
             startPoint: .leading,
             endPoint: .trailing

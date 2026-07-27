@@ -193,7 +193,10 @@ public struct PlozzOpaquePillButtonStyle: ButtonStyle {
         }
         private var foreground: Color {
             if isFocused { return .black }
-            if isSelected { return .white }
+            // Sits ON the accent fill above. The accent is monochrome (white on
+            // dark themes, near-black on Light), so a hardcoded white glyph would
+            // vanish into a selected pill — take the palette's inverse instead.
+            if isSelected { return palette.onAccent }
             return palette.primaryText
         }
         private var border: Color {

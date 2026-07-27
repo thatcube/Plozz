@@ -284,6 +284,9 @@
     "Allow Cellular Downloads" : {
 
     },
+    "Already Requested" : {
+
+    },
     "Amber" : {
 
     },
@@ -314,6 +317,9 @@
       }
     },
     "Approve & Continue" : {
+
+    },
+    "Artists" : {
 
     },
     "Artwork limit" : {
@@ -395,6 +401,9 @@
     "Backward" : {
 
     },
+    "Based on" : {
+
+    },
     "Bearer Token" : {
 
     },
@@ -450,6 +459,15 @@
     "Browse This Folder" : {
 
     },
+    "Browse all emoji" : {
+
+    },
+    "Browse all photos" : {
+
+    },
+    "Browse all symbols" : {
+
+    },
     "Budgets cap on-disk caches; lowering a budget evicts immediately." : {
 
     },
@@ -468,6 +486,9 @@
     "Cached images and resolved links are rebuilt automatically as you browse." : {
 
     },
+    "Can't connect" : {
+
+    },
     "Can't reach this server — it may be offline." : {
 
     },
@@ -475,6 +496,12 @@
 
     },
     "Cancel Active Downloads" : {
+
+    },
+    "Cancel Active Downloads?" : {
+
+    },
+    "Can’t Reach Seerr" : {
 
     },
     "Can’t connect" : {
@@ -503,6 +530,9 @@
 
     },
     "Certificate SHA-256" : {
+
+    },
+    "Certificate fingerprint" : {
 
     },
     "Check the other device shows the same number before continuing." : {
@@ -664,6 +694,9 @@
 
     },
     "Content Rating" : {
+
+    },
+    "Contents" : {
 
     },
     "Continue" : {
@@ -843,6 +876,9 @@
     "Directed By" : {
 
     },
+    "Director" : {
+
+    },
     "Disabled" : {
 
     },
@@ -876,6 +912,9 @@
     "Display name" : {
 
     },
+    "Display name (optional)" : {
+
+    },
     "Display size" : {
 
     },
@@ -895,6 +934,9 @@
 
     },
     "Download %@" : {
+
+    },
+    "Download %@?" : {
 
     },
     "Download %lld Episodes" : {
@@ -957,6 +999,9 @@
           }
         }
       }
+    },
+    "Downloads %@" : {
+
     },
     "Downloads Unavailable" : {
 
@@ -1021,6 +1066,9 @@
     "Enter Code" : {
 
     },
+    "Enter address" : {
+
+    },
     "Enter an address manually" : {
 
     },
@@ -1064,6 +1112,9 @@
 
     },
     "Episode titles, summaries, and artwork can be hidden until you watch them." : {
+
+    },
+    "Episodes" : {
 
     },
     "Erase Everything From iCloud" : {
@@ -1528,6 +1579,9 @@
     "More actions for %@" : {
 
     },
+    "More colors" : {
+
+    },
     "Move a provider here to stop using it." : {
 
     },
@@ -1582,10 +1636,16 @@
     "Next Episode" : {
 
     },
+    "Nickname" : {
+
+    },
     "Nickname — e.g. Living Room NAS" : {
 
     },
     "No" : {
+
+    },
+    "No Default Server" : {
 
     },
     "No Downloads" : {
@@ -1720,6 +1780,9 @@
     "None yet" : {
 
     },
+    "Not Allowed" : {
+
+    },
     "Not Now" : {
 
     },
@@ -1830,6 +1893,9 @@
 
     },
     "On your watchlist" : {
+
+    },
+    "Online" : {
 
     },
     "Only approve if this matches your server. Approving pins this exact certificate; a change requires re-approval." : {
@@ -2033,6 +2099,18 @@
     "Playing from %@" : {
 
     },
+    "Playing in Picture in Picture" : {
+
+    },
+    "Playing on %@" : {
+
+    },
+    "Playing on AirPlay" : {
+
+    },
+    "Playlists" : {
+
+    },
     "Plex Home" : {
 
     },
@@ -2124,6 +2202,9 @@
     "Priority" : {
 
     },
+    "Profile" : {
+
+    },
     "Profile created automatically" : {
 
     },
@@ -2191,6 +2272,12 @@
     "Recent Activity" : {
 
     },
+    "Recently Played" : {
+
+    },
+    "Recently used" : {
+
+    },
     "Reconnect the selected server and try again." : {
 
     },
@@ -2221,7 +2308,20 @@
     "Remove %@" : {
 
     },
+    "Remove %@ %@?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Remove %1$@ %2$@?"
+          }
+        }
+      }
+    },
     "Remove %@?" : {
+
+    },
+    "Remove All Downloads?" : {
 
     },
     "Remove Download" : {
@@ -2276,6 +2376,9 @@
 
     },
     "Request Failed" : {
+
+    },
+    "Request Limit Reached" : {
 
     },
     "Request Movie" : {
@@ -2581,6 +2684,9 @@
     "Seek without pausing" : {
 
     },
+    "Seerr User Not Found" : {
+
+    },
     "Seerr users" : {
 
     },
@@ -2740,6 +2846,9 @@
     "Shared settings and accounts on this %@." : {
 
     },
+    "Shares" : {
+
+    },
     "Show Box" : {
 
     },
@@ -2804,6 +2913,9 @@
 
     },
     "Sign in to a server under This Apple TV › Servers, then choose what you watch here." : {
+
+    },
+    "Sign in with username & password" : {
 
     },
     "Sign in with username and password" : {
@@ -2929,6 +3041,9 @@
         }
       }
     },
+    "Starring" : {
+
+    },
     "Start Over" : {
 
     },
@@ -2954,6 +3069,9 @@
 
     },
     "Stored Fields" : {
+
+    },
+    "Studio" : {
 
     },
     "Studios" : {
@@ -3122,6 +3240,28 @@
     "This build has no crash-reporting endpoint configured, so nothing can be sent. Crash reporting is available in TestFlight and release builds." : {
 
     },
+    "This deletes all %lld downloaded episodes in this season." : {
+
+    },
+    "This deletes all %lld downloaded episodes." : {
+
+    },
+    "This deletes every downloaded movie and episode for this profile." : {
+
+    },
+    "This downloads all %lld episodes at original quality and can use significant storage and data. You can remove them anytime from Downloads." : {
+
+    },
+    "This downloads all %lld episodes at original quality and can use significant storage and data. You can remove them anytime from Downloads.\n\n%@ free on this device." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This downloads all %1$lld episodes at original quality and can use significant storage and data. You can remove them anytime from Downloads.\n\n%2$@ free on this device."
+          }
+        }
+      }
+    },
     "This library is empty" : {
 
     },
@@ -3165,6 +3305,9 @@
 
     },
     "This signs everyone out of %@ on this Apple TV. Any profile will need to sign in again to use it." : {
+
+    },
+    "This stops and removes %lld in-progress downloads. Completed downloads are kept." : {
 
     },
     "This title's server is no longer connected." : {
@@ -4103,6 +4246,54 @@
         }
       }
     },
+    "homeRowKind.continueWatching" : {
+      "comment" : "Home screen row of partly-watched items the user can resume.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Continue Watching"
+          }
+        }
+      }
+    },
+    "homeRowKind.libraries" : {
+      "comment" : "Home screen row listing the user's media libraries.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Libraries"
+          }
+        }
+      }
+    },
+    "homeRowKind.recentlyAdded" : {
+      "comment" : "Home screen row of the newest items on the server.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Recently Added"
+          }
+        }
+      }
+    },
+    "homeRowKind.watchlist" : {
+      "comment" : "Home screen row of items the user saved to watch later.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Watchlist"
+          }
+        }
+      }
+    },
     "https://nas.local/dav" : {
 
     },
@@ -4644,6 +4835,42 @@
     },
     "plozz.app/myanimelist" : {
 
+    },
+    "profileAvatar.emoji" : {
+      "comment" : "Title of the sheet for picking an emoji as a profile avatar.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Emoji"
+          }
+        }
+      }
+    },
+    "profileAvatar.photos" : {
+      "comment" : "Title of the sheet for picking a photo as a profile avatar.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Photos"
+          }
+        }
+      }
+    },
+    "profileAvatar.symbols" : {
+      "comment" : "Title of the sheet for picking an SF Symbol as a profile avatar.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Symbols"
+          }
+        }
+      }
     },
     "required" : {
 

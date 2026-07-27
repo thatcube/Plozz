@@ -2013,7 +2013,7 @@ private struct PlozziOSDetailCredits: View {
         #endif
     }
 
-    private func credit(_ label: String, values: [String]) -> some View {
+    private func credit(_ label: LocalizedStringResource, values: [String]) -> some View {
         let capped = Array(values.prefix(3))
         return (
             Text("\(label) ")

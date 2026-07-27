@@ -254,9 +254,9 @@ struct PlozziOSSyncSetupReceiveView: View {
     }
 
     @ViewBuilder
-    private func card<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func card<Content: View>(title: LocalizedStringResource, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title.uppercased()).font(.caption2.weight(.semibold)).tracking(1.2)
+            Text(title).textCase(.uppercase).font(.caption2.weight(.semibold)).tracking(1.2)
                 .foregroundStyle(palette.secondaryText)
             content()
         }

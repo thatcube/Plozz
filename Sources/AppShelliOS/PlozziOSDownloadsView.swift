@@ -269,7 +269,7 @@ struct PlozziOSDownloadsStorageBar: View {
             .frame(width: max(minWidth, width))
     }
 
-    private func legendDot(color: Color, label: String) -> some View {
+    private func legendDot(color: Color, label: LocalizedStringResource) -> some View {
         HStack(spacing: 6) {
             Circle().fill(color).frame(width: 8, height: 8)
             Text(label)
@@ -389,6 +389,7 @@ struct DownloadRowLink<Content: View>: View {
 }
 
 struct DownloadRowContent: View {
+    /// Media title and a formatted status line — both provider/derived content.
     let title: String
     let subtitle: String
     let subtitleColor: Color
@@ -432,6 +433,7 @@ struct DownloadTileContent: View {
     @Environment(\.plozzCardStyle) private var cardStyle
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.themePalette) private var palette
+    /// Media title and a formatted status line — both provider/derived content.
     let title: String
     let subtitle: String
     let subtitleColor: Color
@@ -724,8 +726,8 @@ enum DownloadArtworkCache {
 /// transfers, or everything) routed through one confirmation dialog.
 struct PlozziOSDownloadsBulkDeletion: Identifiable {
     let id: String
-    let title: String
-    let message: String
+    let title: LocalizedStringResource
+    let message: LocalizedStringResource
     let confirmLabel: String
     let records: [DownloadedMediaRecord]
     /// When true, the confirm handler should re-derive the currently-active

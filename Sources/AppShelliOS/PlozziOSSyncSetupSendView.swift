@@ -83,10 +83,10 @@ struct SyncSetupSentSuccessView: View {
 
     @ViewBuilder
     private func sectionCard<Content: View>(
-        title: String, @ViewBuilder content: () -> Content
+        title: LocalizedStringResource, @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title.uppercased())
+            Text(title).textCase(.uppercase)
                 .font(.caption2.weight(.semibold)).tracking(1.2)
                 .foregroundStyle(palette.secondaryText)
             content()

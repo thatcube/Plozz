@@ -306,7 +306,7 @@ private struct PlozziOSExternalPlaybackPlaceholder: View {
         .allowsHitTesting(false)
     }
 
-    private var title: String {
+    private var title: LocalizedStringResource {
         if isPictureInPicture { return "Playing in Picture in Picture" }
         if let routeName { return "Playing on \(routeName)" }
         return "Playing on AirPlay"

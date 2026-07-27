@@ -1513,18 +1513,23 @@ private struct PlozziOSSeasonDownloadPrompt: Identifiable {
     var id: String { season.id }
     var count: Int { episodes.count }
 
-    var title: String {
+    var title: LocalizedStringResource {
         "Download \(season.title)?"
     }
 
-    var message: String {
-        var text = "This downloads all \(count) episodes at original quality "
-            + "and can use significant storage and data. You can remove them "
-            + "anytime from Downloads."
-        if let free = Self.freeSpaceText() {
-            text += "\n\n\(free) free on this device."
+    var message: LocalizedStringResource {
+        guard let free = Self.freeSpaceText() else {
+            return """
+                This downloads all \(count) episodes at original quality and can use \
+                significant storage and data. You can remove them anytime from Downloads.
+                """
         }
-        return text
+        return """
+            This downloads all \(count) episodes at original quality and can use \
+            significant storage and data. You can remove them anytime from Downloads.
+
+            \(free) free on this device.
+            """
     }
 
     /// Best-effort human-readable free space so a bulk grab shows headroom
@@ -1544,6 +1549,7 @@ private struct PlozziOSSeasonDownloadPrompt: Identifiable {
 private struct PlozziOSSeasonButton: View {
     @Environment(\.themePalette) private var palette
 
+    /// Season name from the server — content, so rendered verbatim.
     let title: String
     let isSelected: Bool
     let action: () -> Void

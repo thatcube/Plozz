@@ -137,7 +137,7 @@ struct MusicLandingView: View {
 /// the same radius the Recently Played cards use) and the shared glass-card focus
 /// — the same treatment as every other media card — rather than a bespoke style.
 private struct BrowseButton: View {
-    let title: String
+    let title: LocalizedStringResource
     let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -166,7 +166,7 @@ private struct BrowseButton: View {
 
 /// A horizontal rail with a title.
 private struct MusicRow<Content: View>: View {
-    let title: String
+    let title: LocalizedStringResource
     /// Optional trailing accessory (used to hang the scrolling Now Playing card
     /// on the first section's header).
     var trailing: AnyView? = nil
@@ -214,7 +214,7 @@ private struct MusicRow<Content: View>: View {
 /// instead of floating in a fixed overlay. The card self-hides when nothing is
 /// playing.
 struct MusicPageHeader: View {
-    let title: String
+    let title: LocalizedStringResource
     var titleFont: Font = .system(size: 48, weight: .bold)
     var controller: AudioPlaybackController
 
@@ -289,7 +289,7 @@ struct MusicGridView: View {
         }
     }
 
-    private var title: String {
+    private var title: LocalizedStringResource {
         switch viewModel.kind {
         case .album: return "Albums"
         case .artist: return "Artists"

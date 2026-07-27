@@ -1356,8 +1356,6 @@ private struct PlozziOSHomeRowView: View {
                         ) {
                             PlozziOSHomeLibraryCard(
                                 library: library,
-                                scanStatus: appModel.shareScanStatus,
-                                shareID: appModel.libraryShareID(for: library),
                                 width: appModel.settings.density.density
                                     .iOSHomeLibraryWidth(
                                         horizontalSizeClass: horizontalSizeClass
@@ -1515,12 +1513,6 @@ private struct PlozziOSHomeLibraryCard: View {
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.themePalette) private var palette
     let library: AggregatedLibrary
-    /// App-wide media-share scan status + this library's share id (nil for a
-    /// Plex/Jellyfin section). Forwarded straight to the shared
-    /// ``LibraryScanProgressBadge``, which does its own lookup so progress ticks
-    /// invalidate only the badge — the same component tvOS draws on its tiles.
-    var scanStatus: ShareScanStatusModel?
-    var shareID: String?
     let width: CGFloat
 
     @ViewBuilder
@@ -1557,9 +1549,6 @@ private struct PlozziOSHomeLibraryCard: View {
                     }
             }
             .frame(width: width, height: width * 0.6)
-            .overlay {
-                LibraryScanProgressBadge(status: scanStatus, shareID: shareID)
-            }
             .clipShape(
                 RoundedRectangle(
                     cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,

@@ -183,17 +183,23 @@ struct PlozziOSLibraryGridView: View {
     private let title: String
     private let provider: any MediaProvider
     private let settings: PlozziOSSettingsModel
+    /// App-wide media-share scan/enrich status, feeding the banner above the grid.
+    /// Passed rather than read from the environment so the pushed destination
+    /// carries it explicitly, like every other dependency on this route.
+    private let scanStatus: ShareScanStatusModel?
 
     init(
         viewModel: LibraryBrowseViewModel,
         title: String,
         provider: any MediaProvider,
-        settings: PlozziOSSettingsModel
+        settings: PlozziOSSettingsModel,
+        scanStatus: ShareScanStatusModel? = nil
     ) {
         _viewModel = State(initialValue: viewModel)
         self.title = title
         self.provider = provider
         self.settings = settings
+        self.scanStatus = scanStatus
     }
 
     var body: some View {
@@ -214,6 +220,9 @@ struct PlozziOSLibraryGridView: View {
                     )
                 } else {
                     ScrollView {
+                        scanBanner
+                            .padding(.horizontal)
+                            .padding(.top, 8)
                         LazyVGrid(
                             columns: settings.density.density.iOSPosterGridColumns(
                                 horizontalSizeClass: horizontalSizeClass
@@ -253,6 +262,20 @@ struct PlozziOSLibraryGridView: View {
             }
         }
         .task { await viewModel.loadFirstPageIfNeeded() }
+    }
+
+    /// Live scan/enrich progress for the media share backing THIS library, above
+    /// the grid so it explains a wall that's short or still growing. Renders
+    /// nothing for a server-backed library or an idle share, and does its own
+    /// status lookup so progress ticks never reach the grid.
+    @ViewBuilder
+    private var scanBanner: some View {
+        if viewModel.isMediaShare {
+            ShareScanProgressBanner(
+                status: scanStatus,
+                shareID: viewModel.sourceServerID
+            )
+        }
     }
 
     private var sortControl: some View {

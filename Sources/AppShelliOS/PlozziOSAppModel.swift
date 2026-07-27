@@ -677,13 +677,6 @@ final class PlozziOSAppModel {
         )
     }
 
-    /// The media-share account id backing a Home library tile, or `nil` when the
-    /// library is a Plex/Jellyfin section. Feeds the shared
-    /// `LibraryScanProgressBadge`, which does its own status lookup.
-    func libraryShareID(for library: AggregatedLibrary) -> String? {
-        library.providerKind == .mediaShare ? library.accountID : nil
-    }
-
     var deviceID: String {
         accountStore.deviceID()
     }

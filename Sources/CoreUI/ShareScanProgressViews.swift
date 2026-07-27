@@ -268,30 +268,31 @@ public struct ShareScanStatusHeader: View {
     }
 }
 
-// MARK: - Library card badge
+// MARK: - Library page banner
 
-/// The per-library progress overlay for a Home "Libraries" tile whose media
-/// share is scanning or enriching. Bottom-anchored over a short scrim so it
-/// reads on any artwork, with the same bar the Settings card uses.
+/// The scan/enrich banner shown at the **top of an opened library** whose media
+/// share is still filling in. Explains a grid that's short or gaining titles as
+/// you look at it, in the exact same shape as the Settings card — same row, same
+/// bar — so the two surfaces read as one feature.
 ///
-/// Shared by tvOS `LibraryCardView` and iOS `PlozziOSHomeLibraryCard`, so a
-/// library tile looks and reports the same on both platforms. Purely decorative:
-/// non-focusable, hit-transparent, hidden from accessibility (the card's own
-/// label carries the status).
+/// It deliberately lives here and NOT on the Home library tiles: one share fans
+/// out to several libraries, so a per-tile badge printed the identical counter
+/// three times over. Home stays clean; the detail is one tap away, where it's
+/// about the library you're actually looking at.
 ///
-/// **Render-isolated on purpose:** the badge does its own status lookup, so a
-/// share reporting progress dozens of times a second invalidates only the badges
-/// — never the Home page body that hosts the rails. Renders nothing (and reads
-/// nothing) for a library that isn't a busy media share.
-public struct LibraryScanProgressBadge: View {
+/// **Render-isolated on purpose:** the banner does its own status lookup, so a
+/// share reporting progress dozens of times a second invalidates only the banner
+/// — never the poster grid behind it. Renders nothing (and reads nothing) for a
+/// library that isn't backed by a busy share.
+public struct ShareScanProgressBanner: View {
     private let status: ShareScanStatusModel?
     private let shareID: String?
 
     /// - Parameters:
     ///   - status: the app-wide status model (optional for previews/tests).
     ///   - shareID: the library's media-share account id, or `nil` when the
-    ///     library isn't backed by a share (Plex/Jellyfin) — the badge then never
-    ///     draws and never observes.
+    ///     library is a Plex/Jellyfin section — the banner then never draws and
+    ///     never observes.
     public init(status: ShareScanStatusModel?, shareID: String?) {
         self.status = status
         self.shareID = shareID
@@ -300,7 +301,14 @@ public struct LibraryScanProgressBadge: View {
     public var body: some View {
         ZStack {
             if let state {
-                badge(state)
+                ShareScanStatusRow(state: state)
+                    .padding(rowInset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .plozzSurface(
+                        .raised,
+                        cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .animation(.easeInOut(duration: 0.25), value: state?.isBusy)
@@ -314,62 +322,10 @@ public struct LibraryScanProgressBadge: View {
         return state
     }
 
-    private func badge(_ state: ShareScanState) -> some View {
-        VStack(alignment: .leading, spacing: labelSpacing) {
-            HStack(spacing: 6) {
-                Image(systemName: state.phaseSymbol)
-                    .font(.system(size: labelSize, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                Text(state.phase)
-                    .font(.system(size: labelSize, weight: .semibold))
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Text(state.compactDetail)
-                    .font(.system(size: labelSize))
-                    .monospacedDigit()
-                    .lineLimit(1)
-            }
-            .foregroundStyle(.white)
-            .shadow(color: .black.opacity(0.7), radius: 2, y: 1)
-
-            ShareScanProgressBar(fraction: state.fraction, height: barHeight)
-        }
-        .padding(.horizontal, horizontalInset)
-        .padding(.bottom, bottomInset)
-        // A generous top pad so the scrim behind (sized to THIS block, before the
-        // expanding frame below) fades in gradually rather than cutting a hard
-        // band across the artwork.
-        .padding(.top, scrimFade)
-        .background(alignment: .bottom) {
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.55), .black.opacity(0.8)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .allowsHitTesting(false)
-        }
-        // Only NOW expand to the tile and pin the whole scrimmed block to its
-        // bottom edge — so the scrim stays short instead of dimming the artwork.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .transition(.opacity)
-    }
-
     #if os(tvOS)
-    private var labelSize: CGFloat { 20 }
-    private var labelSpacing: CGFloat { 8 }
-    private var barHeight: CGFloat { 6 }
-    private var horizontalInset: CGFloat { 16 }
-    private var bottomInset: CGFloat { 14 }
-    private var scrimFade: CGFloat { 34 }
+    private var rowInset: CGFloat { 28 }
     #else
-    private var labelSize: CGFloat { 11 }
-    private var labelSpacing: CGFloat { 5 }
-    private var barHeight: CGFloat { 4 }
-    private var horizontalInset: CGFloat { 10 }
-    private var bottomInset: CGFloat { 9 }
-    private var scrimFade: CGFloat { 22 }
+    private var rowInset: CGFloat { 16 }
     #endif
 }
 #endif

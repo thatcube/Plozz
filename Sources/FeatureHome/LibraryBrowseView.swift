@@ -33,6 +33,9 @@ public struct LibraryBrowseView: View {
     private let onSelect: (MediaItem) -> Void
 
     @Environment(\.plozzMetrics) private var metrics
+    /// App-wide media-share scan/enrich status (optional so previews/tests that
+    /// don't inject it don't crash). Feeds the banner under this library's title.
+    @Environment(ShareScanStatusModel.self) private var shareScanStatus: ShareScanStatusModel?
 
     public init(
         viewModel: LibraryBrowseViewModel,
@@ -61,6 +64,7 @@ public struct LibraryBrowseView: View {
                 ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
                         header
+                        scanBanner
                         LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
                             ForEach(0..<total, id: \.self) { index in
                                 LibraryGridCell(
@@ -198,6 +202,21 @@ public struct LibraryBrowseView: View {
 
         .padding(.horizontal, HomeLayout.horizontalPadding)
         .focusSection()
+    }
+
+    /// Live scan/enrich progress for the media share backing THIS library, sitting
+    /// directly under the title so it explains a grid that's short or still
+    /// growing. Renders nothing for a server-backed library or an idle share, and
+    /// does its own status lookup so progress ticks never reach the poster grid.
+    @ViewBuilder
+    private var scanBanner: some View {
+        if viewModel.isMediaShare {
+            ShareScanProgressBanner(
+                status: shareScanStatus,
+                shareID: viewModel.sourceServerID
+            )
+            .padding(.horizontal, HomeLayout.horizontalPadding)
+        }
     }
 
     /// A focusable native sort menu.

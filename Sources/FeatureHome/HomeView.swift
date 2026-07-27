@@ -150,11 +150,6 @@ public struct HomeView: View {
 
     @Environment(\.plozzMetrics) private var metrics
 
-    /// App-wide media-share scan/enrich status (optional so previews/tests that
-    /// don't inject it don't crash). Drives the per-library-tile progress badge;
-    /// the app-level summary now lives at the top of Settings.
-    @Environment(ShareScanStatusModel.self) private var shareScanStatus: ShareScanStatusModel?
-
     public init(
         viewModel: HomeViewModel,
         visibility: HomeLibraryVisibilityModel,
@@ -760,7 +755,6 @@ public struct HomeView: View {
                         LibraryCardView(
                             aggregated: aggregated,
                             subtitle: Self.librarySubtitle(for: aggregated, in: libraries),
-                            scanStatus: shareScanStatus,
                             action: { onSelectLibrary(aggregated.library) }
                         )
                     }
@@ -980,10 +974,6 @@ enum HomeHeroDisplayResolver {
 private struct LibraryCardView: View {
     let aggregated: AggregatedLibrary
     let subtitle: String
-    /// The app-wide media-share scan status, forwarded to the tile's progress
-    /// badge. The badge does its own lookup, so high-frequency progress ticks
-    /// invalidate only the badge — never this card or the Home page.
-    var scanStatus: ShareScanStatusModel?
     let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -1092,19 +1082,6 @@ private struct LibraryCardView: View {
             } else {
                 placeholder
             }
-        }
-        // A media share still filling in wears the shared progress badge along the
-        // BOTTOM of the tile — phase, live counter and a real progress bar (a
-        // determinate fill while artwork is being enriched, a sweeping band while
-        // the directory walk's total is still unknown). Same component on
-        // iOS/iPadOS, so a library tile reports identically on both platforms.
-        .overlay {
-            LibraryScanProgressBadge(
-                status: scanStatus,
-                shareID: aggregated.providerKind == .mediaShare
-                    ? aggregated.accountID
-                    : nil
-            )
         }
     }
 

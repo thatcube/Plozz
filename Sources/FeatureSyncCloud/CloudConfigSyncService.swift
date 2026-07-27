@@ -79,6 +79,44 @@ public actor CloudConfigSyncService {
     /// whole xctest process, and the remaining tests in the bundle silently never
     /// ran (the suite still reported "Executed 0 tests, with 0 failures").
     private lazy var container: CKContainer = CKContainer(identifier: config.containerIdentifier)
+
+    /// Whether THIS build is actually entitled to the configured CloudKit container.
+    ///
+    /// `CKContainer(identifier:)` does not fail politely when the entitlement is
+    /// missing — it traps with SIGTRAP, taking the app down before any `do/catch`
+    /// or `accountStatus()` check can run. Making `container` lazy (above) keeps
+    /// mere construction safe, but anything that *touches* it still dies, so this
+    /// has to be checked before first use rather than recovered from.
+    ///
+    /// The case that motivated it: per-branch dev builds (`deploy-*.sh --branded`)
+    /// sign against stripped entitlements, because a fresh per-branch App ID cannot
+    /// auto-provision iCloud. Those builds crashed on launch the moment
+    /// `startCloudSyncIfEnabled` reached `activate()`. They should just run without
+    /// cloud sync.
+    ///
+    /// `SecTaskCopyValueForEntitlement` is macOS-only, so on iOS/tvOS we read the
+    /// entitlements out of the embedded provisioning profile instead. When there is
+    /// no profile to read we assume we ARE entitled: that is the conservative
+    /// direction, since sync is only switched off when the absence can be positively
+    /// proven, and a real user's build is never disabled by a parsing failure.
+    private static let hasCloudKitEntitlement: Bool = {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url)
+        else { return true }
+
+        // The profile is CMS-signed; the payload is a plain plist embedded between
+        // these markers. Scanning for them avoids pulling in a CMS decoder for what
+        // is a one-shot launch check.
+        guard let start = data.range(of: Data("<?xml".utf8)),
+              let end = data.range(of: Data("</plist>".utf8), in: start.lowerBound..<data.endIndex),
+              let profile = try? PropertyListSerialization.propertyList(
+                  from: data[start.lowerBound..<end.upperBound], format: nil) as? [String: Any],
+              let entitlements = profile["Entitlements"] as? [String: Any]
+        else { return true }
+
+        let containers = entitlements["com.apple.developer.icloud-container-identifiers"] as? [String]
+        return containers?.isEmpty == false
+    }()
     private var engine: CKSyncEngine?
     /// Bumped every time the engine is rebuilt; events from an older engine are
     /// ignored (generation fencing).
@@ -150,6 +188,13 @@ public actor CloudConfigSyncService {
     /// diffs. Safe to call repeatedly.
     public func activate() async {
         guard config.isEnabled() else { setStatus(.disabled); return }
+        // Reported as `disabled` rather than `signedOut`: the user has not signed
+        // out of anything, this build simply cannot do cloud sync at all.
+        guard Self.hasCloudKitEntitlement else {
+            PlozzLog.sync.info("CloudSync: disabled — this build carries no iCloud entitlement")
+            setStatus(.disabled)
+            return
+        }
         guard await accountIsAvailable() else { setStatus(.signedOut); return }
         ensureEngine()
         setStatus(.idle)
@@ -447,6 +492,12 @@ public actor CloudConfigSyncService {
     }
 
     private func accountIsAvailable() async -> Bool {
+        // Checked here because every path that touches `container` — activate,
+        // fetchNow, syncNow, resetAndReseed, redownloadFromCloud,
+        // reconcileServerInventory — passes through this method first. Returning
+        // false makes them all no-op instead of trapping. See
+        // `hasCloudKitEntitlement`.
+        guard Self.hasCloudKitEntitlement else { return false }
         do { return try await container.accountStatus() == .available }
         catch { PlozzLog.sync.error("CloudSync: accountStatus failed: \(error.localizedDescription)"); return false }
     }

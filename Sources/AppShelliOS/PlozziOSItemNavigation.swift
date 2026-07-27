@@ -36,7 +36,11 @@ private struct PlozziOSItemNavigationModifier: ViewModifier {
                         appModel: appModel,
                         provider: provider,
                         item: target,
-                        seerService: appModel.seerService
+                        seerService: appModel.seerService,
+                        // An episode arriving through the menu is "Episode Info",
+                        // which wants the episode itself. "Go to Season" hands
+                        // over a season, so the two are distinguishable by kind.
+                        presentsEpisodeAsSubject: target.kind == .episode
                     )
                 } else {
                     ContentUnavailableView(

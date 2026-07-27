@@ -13,6 +13,14 @@ struct PlozziOSItemDetailView: View {
     let item: MediaItem
     let seerService: SeerService?
     let originSourceAccountID: String?
+    /// Show this episode as the page's own subject instead of redirecting to its
+    /// series.
+    ///
+    /// Every other way of reaching an episode — a tapped card, a deep link —
+    /// means "show me this episode in context", which is the series page with it
+    /// fronted. "Episode Info" means the opposite: this episode's own synopsis,
+    /// air date and the file that would play.
+    let presentsEpisodeAsSubject: Bool
 
     @State private var resolvedSeries: MediaItem?
     @State private var resolvedContextItem: MediaItem?
@@ -24,12 +32,14 @@ struct PlozziOSItemDetailView: View {
         provider: any MediaProvider,
         item: MediaItem,
         seerService: SeerService? = nil,
-        originSourceAccountID: String? = nil
+        originSourceAccountID: String? = nil,
+        presentsEpisodeAsSubject: Bool = false
     ) {
         self.appModel = appModel
         self.provider = provider
         self.item = item
         self.seerService = seerService
+        self.presentsEpisodeAsSubject = presentsEpisodeAsSubject
         self.originSourceAccountID = originSourceAccountID
     }
 
@@ -62,7 +72,8 @@ struct PlozziOSItemDetailView: View {
     }
 
     private var shouldResolveSeries: Bool {
-        !item.isNotInLibraryDiscovery
+        guard !(presentsEpisodeAsSubject && item.kind == .episode) else { return false }
+        return !item.isNotInLibraryDiscovery
             && (item.kind == .episode || item.kind == .season)
             && item.seriesID != nil
     }
@@ -1588,6 +1599,7 @@ private struct PlozziOSInlineEpisodeEntry: View {
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.themePalette) private var palette
     @Environment(PlozziOSAppModel.self) private var appModel
+    @Environment(\.mediaItemNavigator) private var navigator
     @State private var downloadRecord: DownloadedMediaRecord?
     @State private var downloadError: String?
 
@@ -1746,11 +1758,18 @@ private struct PlozziOSInlineEpisodeEntry: View {
         // exclusive to this one surface.
         ForEach(mediaActions) { action in
             Button(role: action.isDestructive ? .destructive : nil) {
-                appModel.mediaItemActionHandler.perform(
-                    action,
-                    on: episode,
-                    context: MediaItemActionContext(orderedSiblings: episodes)
-                )
+                // Navigation is a view-layer concern: the action handler
+                // deliberately ignores it, so routing everything through the
+                // handler would leave "Episode Info" visible but inert.
+                if action.isNavigation {
+                    navigator?(episode)
+                } else {
+                    appModel.mediaItemActionHandler.perform(
+                        action,
+                        on: episode,
+                        context: MediaItemActionContext(orderedSiblings: episodes)
+                    )
+                }
             } label: {
                 Label(action.title, systemImage: action.systemImage)
             }

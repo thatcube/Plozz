@@ -53,7 +53,25 @@ public final class ItemDetailViewModel {
     /// season is shown/focused and cached so re-focusing a tab is instant. Keyed
     /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
     public private(set) var seasonEpisodes: [String: [MediaItem]] = [:]
-    /// Seasons whose last fetch failed. Their entry in ``seasonEpisodes`` is an
+    /// The episode this series should resume at, as the **server** reports it.
+    ///
+    /// Season containers cannot be trusted to answer this. Measured on a real
+    /// library, every season of a part-watched show came back
+    /// `played=false started=false pct=nil last=nil` — no watch state whatsoever —
+    /// so anything inferred from them was working from blanks and fell through to
+    /// "the first season in the list". Jellyfin and Plex both count only
+    /// *completed* children, so a season someone is part-way through an episode of
+    /// reports nothing at all.
+    ///
+    /// The Continue Watching feed asks the server directly and gets it right —
+    /// it is the same data behind the Home rail. `nil` when the show has no
+    /// resume point, which is a real answer meaning "start from the beginning".
+    /// Deliberately not observed: it is resolved *before* the children publish
+    /// that makes the page render its seasons, so a view reading it during that
+    /// render already sees the settled value. Tracking it would spend one of this
+    /// type's observable-property budget for no additional invalidation.
+    @ObservationIgnored public private(set) var serverResumeEpisode: MediaItem?
+
     /// empty array — cached deliberately, so a season that genuinely cannot be
     /// read does not re-request on every focus change — but that empty list is a
     /// placeholder, not an answer. Anything deciding what to show from "this
@@ -670,8 +688,16 @@ public final class ItemDetailViewModel {
                 startSpeculativeEnrichment(for: item)
                 // Children fill in off the critical path of first paint; merge them
                 // in (same item identity ⇒ no hero flicker) when they arrive.
-                let fetchedChildren = await fetchChildren(loadProvider, of: item.id)
+                // Both in flight together: the resume lookup must be settled
+                // BEFORE the children publish, because that publish is what makes
+                // the page resolve its opening season — and that decision needs
+                // the server's answer. First paint already happened above, so this
+                // costs nothing the user sees.
+                async let childrenTask = fetchChildren(loadProvider, of: item.id)
+                async let resumeTask = fetchServerResumeEpisode(for: item, provider: loadProvider)
+                let (fetchedChildren, resume) = await (childrenTask, resumeTask)
                 guard !Task.isCancelled, isCurrent() else { return }
+                serverResumeEpisode = resume
                 state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged), childrenLoaded: true))
                 // The selected server returned nothing for a container title. If
                 // another known server hosts it, switch to that one in place (its
@@ -1512,7 +1538,24 @@ public final class ItemDetailViewModel {
         return false
     }
 
-    /// Lazily fetches and caches the episodes of one season. Concurrent callers
+    /// Asks the server which episode of this series to resume, via the same
+    /// Continue Watching feed the Home rail is built from.
+    ///
+    /// Best-effort: a failure leaves ``serverResumeEpisode`` nil and the page
+    /// falls back to inferring from the loaded season, which is what it did
+    /// before. Never blocks first paint — it runs after children are published.
+    private func fetchServerResumeEpisode(
+        for item: MediaItem,
+        provider: any MediaProvider
+    ) async -> MediaItem? {
+        guard item.kind == .series else { return nil }
+        // A generous limit: the feed is ordered by recency across the whole
+        // library, and this series' entry can sit well down it for someone who
+        // watches a lot of different shows.
+        guard let feed = try? await provider.continueWatching(limit: 60) else { return nil }
+        return feed.first { $0.seriesID == item.id }
+    }
+
     /// coalesce onto one request and all await its result. Fetch failures cache an
     /// empty list so a missing season does not retry on every focus change.
     public func loadEpisodes(for seasonID: String) async {

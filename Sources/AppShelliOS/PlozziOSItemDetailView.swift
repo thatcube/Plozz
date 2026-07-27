@@ -1258,6 +1258,14 @@ private struct PlozziOSInlineSeriesBrowser: View {
                     || !ids.contains(selectedSeasonID ?? "") {
                     selectedSeasonID = ids.first
                 }
+                // A different set of season ids means a different server backing
+                // this show, so the resume point has to be resolved again against
+                // the new source. Leaving the pin in place left the Play button
+                // stuck on the previous server's target — or missing entirely,
+                // since none of those episode ids exist here.
+                if !ids.contains(resolvedSeasonID ?? "") {
+                    resolvedSeasonID = nil
+                }
             }
             .task(id: selectedSeasonID) {
                 if let selectedSeasonID {
@@ -1402,11 +1410,13 @@ private struct PlozziOSInlineSeriesBrowser: View {
     /// because the resume point has not moved. Apple's TV app shows exactly this —
     /// hero on S1 · E1 while the season selector reads Season 2.
     private func publishPlayTarget() {
-        guard let displayedEpisodes else {
-            onPlayTargetChange(nil)
-            onHeroShowsSeriesChange(false)
-            return
-        }
+        // `displayedEpisodes` is nil only while a season is loading — switching
+        // season or server passes through it. Publishing nil there cleared the
+        // Play button, and the pin below then prevented it ever coming back, so
+        // the button stayed gone until the original season was revisited. Hold
+        // the last good target across the gap instead; an *empty* season is a
+        // loaded empty array, which still publishes.
+        guard let displayedEpisodes else { return }
         // An explicitly opened episode outranks the resume point.
         if initialEpisode?.seasonID == selectedSeasonID,
            let initialID = initialEpisode?.id,

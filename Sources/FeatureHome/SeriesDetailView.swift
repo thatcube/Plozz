@@ -1,12 +1,16 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreNetworking
 import CoreUI
+import FeatureHomeCore
 import MetadataKit
 
-/// A single, self-contained page for an entire series. The hero at the top is
-/// dynamic: it reflects whatever the user is currently *focused* on (not what
-/// they've clicked).
+/// A single, self-contained page for an entire series. The hero at the top
+/// describes whatever the Play button would play — the episode to resume, or the
+/// show itself when there is no resume point. It follows watch state, never
+/// focus, so browsing the episode rail leaves it alone and both platforms behave
+/// identically (iPadOS has no focus concept at all).
 ///
 /// Layout, top to bottom:
 ///   1. Hero — series by default; becomes the focused season, then the focused
@@ -1111,13 +1115,55 @@ struct SeriesDetailView: View {
     ///
     /// Returns `nil` only when there are no season containers at all (a flat
     /// loose-episode show).
+    /// Dumps the watch state the season decision is actually made from.
+    ///
+    /// The page picks its opening season by asking the season containers which one
+    /// the viewer is on, and that answer is only as good as what each backend puts
+    /// on a season — where the three disagree sharply. A season whose only
+    /// progress is a part-watched episode reports no completed children on either
+    /// Jellyfin or Plex, so it can look untouched while an earlier season with
+    /// finished episodes looks "in progress". When the page opens somewhere
+    /// surprising this is the difference between reading the evidence and guessing
+    /// at it.
+    private static func logSeasonResolution(_ seasons: [MediaItem], resume: MediaItem?) {
+        guard !seasons.isEmpty else { return }
+        let summary = seasons.map { season in
+            let recency = season.lastPlayedAt.map { String(Int($0.timeIntervalSince1970)) } ?? "nil"
+            let percent = season.playedPercentage.map { String(format: "%.2f", $0) } ?? "nil"
+            return "S\(season.seasonNumber.map(String.init) ?? "?")"
+                + "[played=\(season.isPlayed)"
+                + " started=\(season.hasBeenPlayed)"
+                + " pct=\(percent)"
+                + " inProgress=\(SeriesResume.isInProgress(season))"
+                + " last=\(recency)]"
+        }.joined(separator: " ")
+        let chosen = SeriesResume.nextUp(in: seasons)?.seasonNumber.map(String.init) ?? "nil"
+        let server = resume.map { "S\($0.seasonNumber.map(String.init) ?? "?")E\($0.episodeNumber.map(String.init) ?? "?")" } ?? "nil"
+        PlozzLog.app.debug("seasonResolution serverResume=\(server) inferred=S\(chosen) \(summary)")
+    }
+
     private func resolvedInitialSeasonID() -> String? {
+        Self.logSeasonResolution(seasons, resume: viewModel.serverResumeEpisode)
         if let id = selectedSeasonID, seasons.contains(where: { $0.id == id }) { return id }
         if let id = initialSeasonID, seasons.contains(where: { $0.id == id }) { return id }
         if let id = initialEpisode?.seasonID, seasons.contains(where: { $0.id == id }) { return id }
         if let number = initialEpisode?.seasonNumber,
            let match = seasons.first(where: { $0.seasonNumber == number }) {
             return match.id
+        }
+        // The server's own answer, from the same Continue Watching feed the Home
+        // rail uses. It outranks anything inferred from the season containers,
+        // which on a real library came back with no watch state at all — no
+        // played flag, no percentage, no recency — leaving the inference to fall
+        // through to "the first season in the list".
+        if let resume = viewModel.serverResumeEpisode {
+            if let id = resume.seasonID, seasons.contains(where: { $0.id == id }) {
+                return id
+            }
+            if let number = resume.seasonNumber,
+               let match = seasons.first(where: { $0.seasonNumber == number }) {
+                return match.id
+            }
         }
         // No explicit hint (plain series open): land on the season the user is
         // watching, using the same next-up rule the rest of the app uses, applied
@@ -1172,6 +1218,15 @@ struct SeriesDetailView: View {
                 // same episode by its season/episode NUMBER on the new server.
                 heroItem = loaded
             }
+        } else if let resume = viewModel.serverResumeEpisode,
+                  let loaded = pool.first(where: { $0.id == resume.id })
+                      ?? pool.first(where: {
+                          $0.seasonNumber == resume.seasonNumber
+                              && $0.episodeNumber == resume.episodeNumber
+                      }) {
+            // The server named the episode to resume; prefer the loaded copy so
+            // the hero carries full metadata and badges.
+            heroItem = loaded
         } else {
             guard !pool.isEmpty else { return }
             heroItem = SeriesResume.restingHero(

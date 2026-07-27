@@ -304,6 +304,89 @@ final class SeriesResumeTests: XCTestCase {
         )
     }
 
+    // MARK: season selection by recency
+
+    /// Reported from the device: watching S3 · E1, but the page opened on Season 1
+    /// and offered S1 · E9.
+    ///
+    /// A season whose only progress is a *part-watched* episode reports nothing —
+    /// Jellyfin's `UnplayedItemCount` and Plex's `viewedLeafCount` both count only
+    /// completed children. So S3 looked untouched while S1, which had finished
+    /// episodes, looked "in progress", and list order picked S1. Recency is the
+    /// only signal that sees S3.
+    func testPicksTheMostRecentlyPlayedSeasonEvenWhenItReportsNoProgress() {
+        var s1 = season("s1", number: 1, hasBeenPlayed: true)
+        s1.lastPlayedAt = day(1)
+        // Watched an episode part-way: no completed children, so no percentage
+        // and no container history — but it was played, and recently.
+        var s3 = season("s3", number: 3)
+        s3.lastPlayedAt = day(30)
+
+        XCTAssertEqual(
+            SeriesResume.nextUp(in: [s1, season("s2", number: 2), s3])?.id, "s3",
+            "the season last played wins over an earlier one that merely has completed episodes"
+        )
+    }
+
+    /// A fully-watched season is never the answer, however recently it was played.
+    func testMostRecentlyPlayedSkipsCompletedSeasons() {
+        var s1 = season("s1", number: 1, played: true, percentage: 1, hasBeenPlayed: true)
+        s1.lastPlayedAt = day(30)
+        var s2 = season("s2", number: 2, hasBeenPlayed: true)
+        s2.lastPlayedAt = day(10)
+
+        XCTAssertEqual(SeriesResume.nextUp(in: [s1, s2])?.id, "s2")
+    }
+
+    // MARK: rewatching a finished show
+
+    /// Reported from the device: every season of Avatar watched, so all of them
+    /// report played — but S1 · E9 was part-way through a rewatch. The show read
+    /// as "finished", so the hero fell back to the series and Play offered to
+    /// start over at S1 · E1 while the viewer was nine episodes into the rewatch.
+    func testRewatchInProgressIsNotFinished() {
+        let seasons = [
+            season("s1", number: 1, played: true, percentage: 1, hasBeenPlayed: true),
+            season("s2", number: 2, played: true, percentage: 1, hasBeenPlayed: true)
+        ]
+        let episodes = [
+            episode("e8", number: 8, played: true, playedAt: day(1)),
+            episode("e9", number: 9, percentage: 0.4, playedAt: day(9)),
+            episode("e10", number: 10, played: true, playedAt: day(2))
+        ]
+        XCTAssertFalse(
+            SeriesResume.isFinished(seasons: seasons, episodes: episodes),
+            "an episode part-way through is a resume point even in a fully-watched show"
+        )
+    }
+
+    func testRewatchResumesTheInProgressEpisodeNotTheSeries() {
+        let seasons = [season("s1", number: 1, played: true, percentage: 1, hasBeenPlayed: true)]
+        let episodes = [
+            episode("e8", number: 8, played: true, playedAt: day(1)),
+            episode("e9", number: 9, percentage: 0.4, playedAt: day(9))
+        ]
+        XCTAssertEqual(
+            SeriesResume.restingHero(series: show(), seasons: seasons, episodes: episodes).id,
+            "e9",
+            "resume the rewatch, do not offer to start over"
+        )
+    }
+
+    /// A genuinely finished show — nothing part-way through — still starts over.
+    func testFinishedWithNothingInProgressStillRestsOnTheSeries() {
+        let seasons = [season("s1", number: 1, played: true, percentage: 1, hasBeenPlayed: true)]
+        let episodes = [
+            episode("e1", number: 1, played: true, playedAt: day(1)),
+            episode("e2", number: 2, played: true, playedAt: day(2))
+        ]
+        XCTAssertTrue(SeriesResume.isFinished(seasons: seasons, episodes: episodes))
+        XCTAssertEqual(
+            SeriesResume.restingHero(series: show(), seasons: seasons, episodes: episodes).id,
+            "show"
+        )
+    }
+
     // MARK: restart season
 
     /// Season 0 is specials and sorts ahead of Season 1 — "start from the

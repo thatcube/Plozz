@@ -56,6 +56,20 @@ public enum SeriesResume {
     /// Returns `nil` only for an empty list. The input order is treated as the
     /// display order, so callers should pass episodes/seasons already sorted.
     public static func nextUp(in items: [MediaItem]) -> MediaItem? {
+        // Recency first, and for containers it is often the *only* signal that
+        // works. A season whose sole progress is a part-watched episode reports
+        // nothing: Jellyfin's `UnplayedItemCount` and Plex's `viewedLeafCount`
+        // both count only *completed* children, so the season someone is actually
+        // in the middle of looks untouched, while an earlier season with finished
+        // episodes looks "in progress". Ranking by list order then picks the
+        // earlier season — the show opens on Season 1 for someone watching
+        // Season 3. `lastPlayedAt` is set whenever anything inside was played, so
+        // it sees the case the counts miss.
+        let unfinished = items.filter { !$0.isPlayed }
+        if let recent = mostRecentlyPlayed(in: unfinished) {
+            return recent
+        }
+
         let inProgress = items.filter(isInProgress)
         if !inProgress.isEmpty {
             return mostRecentlyPlayed(in: inProgress) ?? inProgress.first
@@ -97,9 +111,16 @@ public enum SeriesResume {
 
     /// Whether every episode of this show has been watched.
     ///
+    /// An episode part-way through disqualifies it even when every season reports
+    /// played: someone rewatching a finished show is mid-episode, and that is a
+    /// resume point. Without this, a show you have seen and are now rewatching
+    /// reads as "finished" and offers to start over from episode 1 while you are
+    /// nine episodes into the rewatch.
+    ///
     /// Explicitly false for an empty list: `allSatisfy` is vacuously true on one,
     /// so an unloaded or genuinely empty show would otherwise report "finished".
     public static func isFinished(seasons: [MediaItem], episodes: [MediaItem]) -> Bool {
+        guard !episodes.contains(where: isInProgress) else { return false }
         let pool = seasons.isEmpty ? episodes : seasons
         guard !pool.isEmpty else { return false }
         return pool.allSatisfy(\.isPlayed)
@@ -117,6 +138,14 @@ public enum SeriesResume {
         seasons: [MediaItem],
         episodes: [MediaItem]
     ) -> MediaItem {
+        // An episode part-way through is a resume point whatever the aggregate
+        // says. Checked before `hasStarted`/`isFinished` because those read the
+        // *seasons*, which cannot see a rewatch: every season of a show you have
+        // finished still reports played while you are mid-episode in it.
+        let resuming = episodes.filter(isInProgress)
+        if !resuming.isEmpty {
+            return mostRecentlyPlayed(in: resuming) ?? resuming[0]
+        }
         guard hasStarted(seasons: seasons, episodes: episodes),
               !isFinished(seasons: seasons, episodes: episodes)
         else { return series }

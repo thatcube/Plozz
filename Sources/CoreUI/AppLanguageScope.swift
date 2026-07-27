@@ -45,7 +45,12 @@ public struct AppLanguageScope<Content: View>: View {
             // freeze the app's language at launch and stop it tracking a change
             // the user makes in Settings.app.
             .environment(\.locale, model.locale ?? Locale.current)
-            .id(model.language)
+            // Deliberately NO `.id(model.language)`. Re-identifying the root would
+            // guarantee every string re-resolves, but it tears down and rebuilds
+            // the whole tree — losing scroll position and tvOS focus on every
+            // change. Measured on device: the environment change alone re-renders
+            // the UI correctly, because nothing resolves a resource eagerly (the
+            // l10n guard's `eager-localization` rule is what keeps that true).
     }
 }
 #endif

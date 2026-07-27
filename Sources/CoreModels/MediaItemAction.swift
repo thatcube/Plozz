@@ -104,7 +104,7 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .markUnwatched: return "arrow.uturn.backward.circle"
         case .markWatchedUpToHere: return "checkmark.circle.fill"
         case .goToSeason: return "play.rectangle.on.rectangle"
-        case .goToMovie: return "movieclapper"
+        case .goToMovie: return "film"
         case .goToEpisode: return "play.rectangle"
         case .addToWatchlist: return "bookmark"
         case .removeFromWatchlist: return "bookmark.slash"

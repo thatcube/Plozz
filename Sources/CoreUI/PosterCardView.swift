@@ -388,17 +388,38 @@ public struct PosterCardView: View {
         return parts.joined(separator: " · ")
     }
 
-    // MARK: Resume chip (immediate-play cards)
+    // MARK: Resume chip
 
-    /// Whether to show the shared resume/runtime chip (the same overlay episode
-    /// cards use). Only immediate-play cards (`playsOnSelect`) with runtime to show
-    /// qualify, so a card that opens a detail page never grows a play button. Also
-    /// suppresses the plain full-width progress bar + the subtitle runtime, since
-    /// the chip carries that info on the artwork.
-    private var showsResumeChip: Bool {
+    /// Cards that start playback the moment they're selected (Continue Watching,
+    /// landscape library rows) — or that a host explicitly opts in. These get the
+    /// full chip: ▶ + progress bar + time remaining, plus the runtime when idle
+    /// and the download affordance.
+    private var showsImmediatePlayChip: Bool {
         (playsOnSelect || showsResumeChipOverride)
             && !hideThumbnail
             && (item.cardRuntimeText != nil || downloadState != nil || showsActionsMenu)
+    }
+
+    /// An ordinary BROWSING card (library wall, Latest rail) that happens to be
+    /// part-watched. It gets the same white bar + time remaining, because that
+    /// reads far better over artwork than the old thin blue bar and tells you how
+    /// much is left rather than just "some". It does NOT get the play glyph:
+    /// selecting one of these opens a detail page, so a ▶ would promise instant
+    /// playback the card can't deliver.
+    ///
+    /// Gated on genuinely being in progress, so an untouched poster wall stays
+    /// completely clean — this adds chrome only where the blue bar already was.
+    private var showsResumeProgressChip: Bool {
+        !showsImmediatePlayChip
+            && !hideThumbnail
+            && MediaPlaybackIndicatorPresentation.showsProgress(for: item)
+            && item.resumeRemainingText != nil
+            && item.cardRuntimeText != nil
+    }
+
+    /// Either chip is drawn — the flag that suppresses the plain blue bar.
+    private var showsResumeChip: Bool {
+        showsImmediatePlayChip || showsResumeProgressChip
     }
 
     /// The shared resume affordance — identical to the episode card's overlay.
@@ -408,7 +429,11 @@ public struct PosterCardView: View {
             ResumeChipOverlay(
                 item: item,
                 downloadState: downloadState,
-                showsMenu: showsActionsMenu
+                showsMenu: showsActionsMenu,
+                // A browsing card shows the bar + time left, but never promises
+                // playback, and never adds a runtime badge to an unstarted poster.
+                showsPlayGlyph: showsImmediatePlayChip,
+                showsRuntimeWhenIdle: showsImmediatePlayChip
             )
         }
     }

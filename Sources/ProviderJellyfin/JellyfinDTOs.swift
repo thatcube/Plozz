@@ -190,6 +190,11 @@ struct UserItemDataDto: Decodable {
     let PlaybackPositionTicks: Int64?
     let PlayedPercentage: Double?
     let Played: Bool?
+    /// Episodes in this container the user has not watched. Jellyfin reports
+    /// container progress with this count rather than `PlayedPercentage`, which
+    /// it only sets for leaves that carry a playback position. Without it a
+    /// part-watched season looks identical to an untouched one.
+    let UnplayedItemCount: Int?
     /// Whether the user has favourited the item — surfaced as the unified
     /// Watchlist state.
     let IsFavorite: Bool?

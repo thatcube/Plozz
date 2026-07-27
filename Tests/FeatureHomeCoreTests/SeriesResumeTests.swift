@@ -87,6 +87,72 @@ final class SeriesResumeTests: XCTestCase {
         XCTAssertFalse(SeriesResume.isInProgress(episode("e1", number: 1, percentage: 0, resume: 0)))
     }
 
+    // MARK: container progress
+
+    private func season(
+        _ id: String,
+        number: Int,
+        played: Bool = false,
+        percentage: Double? = nil,
+        hasBeenPlayed: Bool = false
+    ) -> MediaItem {
+        MediaItem(
+            id: id,
+            title: "Season \(number)",
+            kind: .season,
+            seasonNumber: number,
+            playedPercentage: percentage,
+            isPlayed: played,
+            hasBeenPlayed: hasBeenPlayed
+        )
+    }
+
+    /// A container has no resume position of its own, and its percentage counts
+    /// only *completed* episodes — so a season whose first episode is half-watched
+    /// reports no percentage at all. Its progress is "started, not finished".
+    func testStartedSeasonIsInProgressWithoutPercentageOrResume() {
+        XCTAssertTrue(
+            SeriesResume.isInProgress(season("s3", number: 3, hasBeenPlayed: true))
+        )
+    }
+
+    func testUntouchedSeasonIsNotInProgress() {
+        XCTAssertFalse(SeriesResume.isInProgress(season("s1", number: 1)))
+    }
+
+    func testCompletedSeasonIsNotInProgress() {
+        XCTAssertFalse(
+            SeriesResume.isInProgress(
+                season("s2", number: 2, played: true, percentage: 1, hasBeenPlayed: true)
+            )
+        )
+    }
+
+    /// The reported bug: Season 2 marked fully watched, Season 3 started, Season 1
+    /// never touched. Resolving "which season is the viewer on" must answer S3 —
+    /// before this, S3 looked untouched, so it fell through to "first unwatched"
+    /// and opened on Season 1.
+    func testSeasonsResolveToTheStartedOneNotTheFirstUnwatched() {
+        let seasons = [
+            season("s1", number: 1),
+            season("s2", number: 2, played: true, percentage: 1, hasBeenPlayed: true),
+            season("s3", number: 3, hasBeenPlayed: true)
+        ]
+        XCTAssertEqual(
+            SeriesResume.nextUp(in: seasons)?.id, "s3",
+            "a started season outranks an earlier never-started one"
+        )
+    }
+
+    /// An episode must NOT inherit the container rule: a leaf that has been played
+    /// before but carries no resume position is a finished rewatch candidate, not
+    /// something to resume mid-way.
+    func testPlayedBeforeEpisodeIsNotInProgressWithoutResume() {
+        var replayed = episode("e1", number: 1)
+        replayed.hasBeenPlayed = true
+        XCTAssertFalse(SeriesResume.isInProgress(replayed))
+    }
+
     // MARK: timecode formatting
 
     func testTimecodeUnderAnHour() {

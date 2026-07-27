@@ -9,6 +9,16 @@ public enum SeriesResume {
     /// Whether `item` is partially watched and worth resuming: it has meaningful
     /// progress (a fractional `playedPercentage` strictly between 0 and 1, or a
     /// positive `resumePosition`) and has not been marked fully played.
+    ///
+    /// A **container** — a season or a series — expresses progress differently. It
+    /// has no resume position of its own, and its `playedPercentage` counts only
+    /// *completed* episodes, so a season whose first episode is half-watched
+    /// reports no percentage at all. Its progress is simply "started, not
+    /// finished", which is what `hasBeenPlayed` records.
+    ///
+    /// Without this a part-watched season looked identical to an untouched one, so
+    /// resolving "which season is the viewer on" fell through to "the first
+    /// unwatched one" — Season 1 — even for someone midway through Season 3.
     public static func isInProgress(_ item: MediaItem) -> Bool {
         guard !item.isPlayed else { return false }
         if let percentage = item.playedPercentage, percentage > 0, percentage < 1 {
@@ -17,7 +27,10 @@ public enum SeriesResume {
         if let resume = item.resumePosition, resume > 0 {
             return true
         }
-        return false
+        switch item.kind {
+        case .season, .series: return item.hasBeenPlayed
+        default: return false
+        }
     }
 
     /// The "next up" child to surface focus on when a series/season detail loads.

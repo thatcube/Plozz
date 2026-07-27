@@ -1310,10 +1310,33 @@ public struct JellyfinProvider: MediaProvider {
             )
         }
         let resumePosition = JellyfinTicks.seconds(fromTicks: dto.UserData?.PlaybackPositionTicks)
-        let playedPercentage = dto.UserData?.PlayedPercentage.map { $0 / 100.0 }
         let serverPlayed = dto.UserData?.Played ?? false
         let isRewatching = (resumePosition ?? 0) > 0
-        let hasSeriesHistory = kind == .series && (playedPercentage ?? 0) > 0
+
+        // A container — a series or a season — reports progress as a count of
+        // *unplayed* children, not a percentage: Jellyfin only sets
+        // `PlayedPercentage` on leaves that carry a playback position. Without
+        // reading the count, a part-watched season is indistinguishable from an
+        // untouched one, and "which season is the viewer on" falls through to
+        // "the first unwatched" — Season 1 — however far in they are.
+        let isContainer = kind == .series || kind == .season
+        let childCount = dto.ChildCount ?? 0
+        let watchedChildren: Int? = {
+            guard isContainer, childCount > 0,
+                  let unplayed = dto.UserData?.UnplayedItemCount
+            else { return nil }
+            return max(0, childCount - unplayed)
+        }()
+        let playedPercentage: Double? = {
+            if let percentage = dto.UserData?.PlayedPercentage { return percentage / 100.0 }
+            // Only when something has actually been watched: a 0 would be a
+            // non-nil "no progress", which reads downstream as a progress bar
+            // pinned at empty on every untouched season.
+            guard let watched = watchedChildren, watched > 0 else { return nil }
+            return min(1, Double(watched) / Double(childCount))
+        }()
+        let hasContainerHistory = isContainer
+            && ((playedPercentage ?? 0) > 0 || (watchedChildren ?? 0) > 0)
         return MediaItem(
             id: dto.Id,
             title: dto.Name ?? "Untitled",
@@ -1341,7 +1364,7 @@ public struct JellyfinProvider: MediaProvider {
             resumePosition: resumePosition,
             playedPercentage: playedPercentage,
             isPlayed: serverPlayed && !isRewatching,
-            hasBeenPlayed: serverPlayed || hasSeriesHistory,
+            hasBeenPlayed: serverPlayed || hasContainerHistory,
             posterURL: Self.imageURL(for: dto, kind: .primary, maxWidth: 500, client: client),
             seriesPosterURL: dto.SeriesId.flatMap {
                 client.imageURL(itemID: $0, kind: .primary, maxWidth: 500)

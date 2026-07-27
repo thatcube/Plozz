@@ -6,11 +6,22 @@
     <array>
         <string>group.com.thatcube.Plozz</string>
     </array>
-    <!-- NOTE: no push (aps-environment) entitlement on tvOS. tvOS background push is
-         unreliable (the system aggressively suspends/terminates apps), so CKSyncEngine
-         can't depend on it there. tvOS instead syncs on foreground (AppState
-         syncCloudOnForeground → fetchNow on scenePhase .active), which is the correct
-         platform pattern. iPhone/iPad get real background push (see PlozziOS.entitlements). -->
+    <!-- Push Notifications. tvOS does NOT rely on background push to sync: the
+         system aggressively suspends/terminates apps there, so CKSyncEngine can't
+         depend on it, and tvOS syncs on foreground instead (AppState
+         syncCloudOnForeground → fetchNow on scenePhase .active). iPhone/iPad get
+         real background push (see PlozziOS.entitlements).
+
+         The entitlement is still REQUIRED. App Store Connect rejects any tvOS
+         build that declares `com.apple.developer.icloud-services` without
+         `aps-environment` (error 90575, "Missing Entitlement"), so omitting it
+         made the upload fail rather than the app behave differently. Declaring
+         it does not make the app use push. `development` is rewritten to
+         `production` on App Store export. -->
+    <key>aps-environment</key>
+    <string>development</string>
+    <key>com.apple.developer.aps-environment</key>
+    <string>development</string>
     <!-- iCloud key-value storage: powers the non-secret Sync & Setup "presence
          beacon" (a configured device advertises that a setup exists so a fresh
          same-Apple-ID device can offer to bring it over). No secrets stored. -->

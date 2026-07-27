@@ -36,15 +36,12 @@ public enum OnboardingStep: Equatable, Sendable {
     /// time a profile encounters a given Plex account (both first run and later
     /// adds); the choice is remembered on the profile afterward.
     case selectPlexUser
-    /// First-ever account on a brand-new install — ask whether to set up
-    /// multiple Plozz profiles for this Apple TV (the explainer screen).
-    case enableProfilesPrompt
     /// First-ever account was just added on a brand-new install; confirm (or
     /// edit) the profile we seeded from the sign-in before entering the app.
     case confirmProfile
-    /// Brand-new install only: after profile setup completes (whether profiles
-    /// were enabled+confirmed or declined), pick the app's appearance/theme
-    /// before entering the app. Never shown again once first-run setup is done.
+    /// Brand-new install only: after the profile is confirmed, pick the app's
+    /// appearance/theme before entering the app. Never shown again once
+    /// first-run setup is done.
     case selectTheme
 }
 
@@ -73,8 +70,7 @@ public enum SessionEvent: Sendable {
     /// An account finished authenticating and was persisted.
     case accountAuthenticated
     /// The *first-ever* account finished authenticating on a brand-new install;
-    /// detour through the one-time profile-setup sub-flow (enable-profiles
-    /// prompt, then confirm) before the app.
+    /// detour through the one-time profile confirm step before the app.
     case accountAuthenticatedNeedsProfile
     /// A signed-in Plex account has 2+ Home users and this profile hasn't bound
     /// one yet — show the "Which Plex user are you?" picker.
@@ -82,10 +78,6 @@ public enum SessionEvent: Sendable {
     /// One or more accounts were persisted — show the per-server "choose your
     /// libraries" step before continuing onboarding.
     case librarySelectionRequired
-    /// The user chose to set up profiles on the first-run prompt.
-    case profilesEnabled
-    /// The user declined profiles on the first-run prompt ("Not Now — Just Me").
-    case profilesDeclined
     /// The user confirmed (or edited) their seeded profile on first run.
     case profileConfirmed
     /// The user picked an app theme on the one-time first-run theme step.
@@ -150,19 +142,19 @@ public struct SessionStateMachine: Sendable {
              (.onboarding(.selectPlexUser, _), .librarySelectionRequired):
             return .onboarding(.selectLibraries, canReturnToApp: true)
         // Leaving the library step: first-ever account on a fresh install detours
-        // through the one-time profile-setup sub-flow; a later add drops straight
+        // through the one-time profile confirm step; a later add drops straight
         // into the app.
         case (.onboarding(.selectLibraries, _), .accountAuthenticatedNeedsProfile):
-            return .onboarding(.enableProfilesPrompt, canReturnToApp: true)
+            return .onboarding(.confirmProfile, canReturnToApp: true)
         case (.onboarding(.selectLibraries, _), .accountAuthenticated):
             return .ready
         // First-ever account on a fresh install: detour through the one-time
-        // profile-setup sub-flow before entering the app. There is now ≥1 account
+        // profile confirm step before entering the app. There is now ≥1 account
         // behind it, so `canReturnToApp` is true. Reachable straight from auth
         // (Jellyfin, or Plex with <2 Home users) or after the Plex-user pick.
         case (.onboarding(.authenticating, _), .accountAuthenticatedNeedsProfile),
              (.onboarding(.selectPlexUser, _), .accountAuthenticatedNeedsProfile):
-            return .onboarding(.enableProfilesPrompt, canReturnToApp: true)
+            return .onboarding(.confirmProfile, canReturnToApp: true)
         case let (.onboarding(.selectingServer, canReturn), .authenticationFailed(error)),
              let (.onboarding(.authenticating, canReturn), .authenticationFailed(error)):
             return .failed(error, canReturnToApp: canReturn)
@@ -170,14 +162,6 @@ public struct SessionStateMachine: Sendable {
         // Plex-user pick on a *later* add (not first run) goes straight to the app.
         case (.onboarding(.selectPlexUser, _), .accountAuthenticated):
             return .ready
-
-        // First-run enable-profiles decision.
-        case (.onboarding(.enableProfilesPrompt, _), .profilesEnabled):
-            return .onboarding(.confirmProfile, canReturnToApp: true)
-        // Declining profiles still stops at the one-time theme picker before the
-        // app (brand-new install only).
-        case (.onboarding(.enableProfilesPrompt, _), .profilesDeclined):
-            return .onboarding(.selectTheme, canReturnToApp: true)
 
         // Finished the one-time first-run profile confirm step — continue to the
         // one-time theme picker before entering the app.

@@ -235,19 +235,6 @@ public final class ProfileFlowModel {
 
     // MARK: Household preferences
 
-    /// Opt the household into the profile UX (shows the "Enable Profiles"
-    /// affordance in Settings, surfaces profile management). Idempotent.
-    public func enableProfiles() {
-        profilesModel.enableProfiles()
-    }
-
-    /// Opt the household out of the profile UX. Only honored with a single
-    /// profile — `ProfilesModel.disableProfiles()` refuses when there are
-    /// multiple profiles so they don't become unreachable.
-    public func disableProfiles() {
-        profilesModel.disableProfiles()
-    }
-
     /// Persists the "Ask which profile on startup" launch-picker toggle.
     public func setAskProfileOnStartup(_ value: Bool) {
         profilesModel.setAskProfileOnStartup(value)

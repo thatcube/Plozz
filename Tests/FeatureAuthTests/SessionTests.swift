@@ -40,13 +40,11 @@ final class SessionStateMachineTests: XCTestCase {
     }
 
     func testFirstRunAuthDetoursThroughProfileSetup() {
-        // First-ever account: auth success routes into the profile-setup
-        // sub-flow (enable-profiles prompt → confirm → theme picker), not
-        // straight to the app.
+        // First-ever account: auth success routes into the one-time profile
+        // setup (confirm → theme picker), not straight to the app. Profiles are
+        // always on, so there is no opt-out prompt in between.
         var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: false))
         m.apply(.accountAuthenticatedNeedsProfile)
-        XCTAssertEqual(m.state, .onboarding(.enableProfilesPrompt, canReturnToApp: true))
-        m.apply(.profilesEnabled)
         XCTAssertEqual(m.state, .onboarding(.confirmProfile, canReturnToApp: true))
         m.apply(.profileConfirmed)
         XCTAssertEqual(m.state, .onboarding(.selectTheme, canReturnToApp: true))
@@ -54,26 +52,14 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(m.state, .ready)
     }
 
-    func testFirstRunDeclineProfilesStillShowsThemePicker() {
-        // "Not Now — Just Me" on the enable-profiles prompt skips the confirm
-        // screen but still stops at the one-time theme picker before the app.
-        var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: false))
-        m.apply(.accountAuthenticatedNeedsProfile)
-        XCTAssertEqual(m.state, .onboarding(.enableProfilesPrompt, canReturnToApp: true))
-        m.apply(.profilesDeclined)
-        XCTAssertEqual(m.state, .onboarding(.selectTheme, canReturnToApp: true))
-        m.apply(.themeSelected)
-        XCTAssertEqual(m.state, .ready)
-    }
-
     func testPlexUserSelectionThenFirstRunProfileSetup() {
-        // Plex with 2+ Home users on first run: pick the Plex user, then enter
-        // the profile-setup sub-flow.
+        // Plex with 2+ Home users on first run: pick the Plex user, then confirm
+        // the seeded profile.
         var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: false))
         m.apply(.plexUserSelectionRequired)
         XCTAssertEqual(m.state, .onboarding(.selectPlexUser, canReturnToApp: true))
         m.apply(.accountAuthenticatedNeedsProfile)
-        XCTAssertEqual(m.state, .onboarding(.enableProfilesPrompt, canReturnToApp: true))
+        XCTAssertEqual(m.state, .onboarding(.confirmProfile, canReturnToApp: true))
     }
 
     func testPlexUserSelectionCanResolveDirectlyFromProviderPicker() {

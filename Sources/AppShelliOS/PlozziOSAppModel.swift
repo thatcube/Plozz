@@ -37,7 +37,6 @@ final class PlozziOSAppModel {
     }
 
     enum FirstRunStep: String, Identifiable {
-        case profiles
         case confirmProfile
         case theme
 
@@ -438,7 +437,7 @@ final class PlozziOSAppModel {
         self.pendingFirstRunStep =
             !accountsProviders.accounts.isEmpty
                 && !profiles.firstRunProfileSetupComplete
-            ? .profiles
+            ? .confirmProfile
             : nil
         self.mediaShareAccountService = MediaShareAccountService(runtime: mediaShareRuntime)
         self.mediaShareConfigurationService = MediaShareAccountConfigurationService(
@@ -558,7 +557,7 @@ final class PlozziOSAppModel {
         accountsProviders.refreshServerNames()
         if !accountsProviders.accounts.isEmpty,
            !profiles.firstRunProfileSetupComplete {
-            pendingFirstRunStep = .profiles
+            pendingFirstRunStep = .confirmProfile
         }
         identityIndex.warmIdentityIndex()
         let scanReporter = shareScanStatus.reporter()
@@ -1269,21 +1268,11 @@ final class PlozziOSAppModel {
         pendingLibrarySelection = nil
         if beginsFirstRunAfterLibrarySelection {
             beginsFirstRunAfterLibrarySelection = false
-            scheduleFirstRunStep(.profiles)
+            scheduleFirstRunStep(.confirmProfile)
         } else if appliesPlexIdentityAfterLibrarySelection {
             appliesPlexIdentityAfterLibrarySelection = false
             plexHomeUsers.ensurePlexIdentityForActiveProfile()
         }
-    }
-
-    func enableProfilesForFirstRun() {
-        profiles.enableProfiles()
-        pendingFirstRunStep = .confirmProfile
-    }
-
-    func declineProfilesForFirstRun() {
-        profiles.disableProfiles()
-        pendingFirstRunStep = .theme
     }
 
     func confirmFirstRunProfile() {

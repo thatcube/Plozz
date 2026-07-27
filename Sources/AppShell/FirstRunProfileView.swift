@@ -4,11 +4,10 @@ import CoreModels
 import CoreUI
 import FeatureProfiles
 
-/// One-time first-run step shown after the user chose to set up profiles on a
-/// brand-new install. The always-present default profile has already been
-/// seeded with the signed-in identity (name + photo); this lets the user keep
-/// it ("Looks good") or open the shared editor to change the name/avatar. The
-/// Apple-TV-user explanation lives on the preceding `EnableProfilesView`.
+/// One-time first-run step on a brand-new install. The always-present default
+/// profile has already been seeded with the signed-in identity (name + photo);
+/// this lets the user keep it ("Looks good") or open the shared editor to
+/// change the name/avatar.
 ///
 /// It never appears again once completed — signing out of everything and
 /// re-adding a server skips straight into the app (see

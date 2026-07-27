@@ -159,13 +159,10 @@ struct MainTabView: View {
     let profiles: [Profile]
     let activeProfile: Profile
     let askProfileOnStartup: Bool
-    let profilesEnabled: Bool
     @Binding var pendingPlayItemID: String?
     let isAccountIncludedInActiveProfile: (String) -> Bool
     let onSetAccountIncluded: (String, Bool) -> Void
     let onSetAskProfileOnStartup: (Bool) -> Void
-    let onEnableProfiles: () -> Void
-    let onDisableProfiles: () -> Void
     let onSaveProfile: (ProfileDraft) -> Void
     /// Live cosmetics-only persistence for editing an existing profile (see
     /// `AppState.updateProfileCosmetics`), so the editor can auto-save.
@@ -393,7 +390,6 @@ struct MainTabView: View {
                 profiles: profiles,
                 activeProfile: activeProfile,
                 askProfileOnStartup: askProfileOnStartup,
-                profilesEnabled: profilesEnabled,
                 appVersion: AppInfo.version,
                 appBuild: AppInfo.build,
                 repoURL: AppInfo.repoURLString,
@@ -403,8 +399,6 @@ struct MainTabView: View {
                     scheduleLibraryReloadFromCurrentScope(changedAccountID: accountID)
                 },
                 onSetAskProfileOnStartup: onSetAskProfileOnStartup,
-                onEnableProfiles: onEnableProfiles,
-                onDisableProfiles: onDisableProfiles,
                 onSwitchProfile: onSwitchProfile,
                 onSaveProfile: onSaveProfile,
                 onUpdateProfileCosmetics: onUpdateProfileCosmetics,

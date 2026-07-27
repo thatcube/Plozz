@@ -25,12 +25,9 @@ struct SettingsContext {
     let profiles: [Profile]
     let activeProfile: Profile
     let askProfileOnStartup: Bool
-    let profilesEnabled: Bool
     let isAccountIncludedInActiveProfile: (String) -> Bool
     let onSetAccountIncluded: (String, Bool) -> Void
     let onSetAskProfileOnStartup: (Bool) -> Void
-    let onEnableProfiles: () -> Void
-    let onDisableProfiles: () -> Void
     let onSwitchProfile: () -> Void
     let onSaveProfile: (ProfileDraft) -> Void
     /// Live cosmetics-only persistence for editing an existing profile.

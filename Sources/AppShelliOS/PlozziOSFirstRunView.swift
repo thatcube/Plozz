@@ -13,8 +13,6 @@ struct PlozziOSFirstRunView: View {
     var body: some View {
         NavigationStack {
             switch step {
-            case .profiles:
-                PlozziOSProfilesWelcomeView(appModel: appModel)
             case .confirmProfile:
                 PlozziOSFirstProfileView(appModel: appModel)
             case .theme:
@@ -35,71 +33,6 @@ struct PlozziOSFirstRunView: View {
             for: appModel.settings.theme.theme,
             systemColorScheme: systemColorScheme
         )
-    }
-}
-
-private struct PlozziOSProfilesWelcomeView: View {
-    let appModel: PlozziOSAppModel
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 28) {
-                Image(systemName: "person.2.fill")
-                    .font(.system(size: 54, weight: .semibold))
-                    .foregroundStyle(.tint)
-                    .frame(width: 112, height: 112)
-                    .background(Color.accentColor.opacity(0.14), in: Circle())
-
-                VStack(spacing: 10) {
-                    Text("Who’s watching?")
-                        .font(.largeTitle.bold())
-                    Text("Profiles keep each person’s Home, watch history, settings, and downloads separate.")
-                        .plozzForeground(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-
-                VStack(spacing: 12) {
-                    PlozziOSFirstRunHighlight(
-                        systemImage: "house.fill",
-                        text: "Personal Home rows and library visibility"
-                    )
-                    PlozziOSFirstRunHighlight(
-                        systemImage: "externaldrive.fill",
-                        text: "Choose which media sources each profile uses"
-                    )
-                    PlozziOSFirstRunHighlight(
-                        systemImage: "arrow.down.circle.fill",
-                        text: "Separate offline downloads for every profile"
-                    )
-                }
-
-                VStack(spacing: 12) {
-                    Button("Use Profiles") {
-                        appModel.enableProfilesForFirstRun()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity)
-
-                    Button("Not Now — Just Me") {
-                        appModel.declineProfilesForFirstRun()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity)
-                }
-
-                Text("You can enable profiles later in Settings.")
-                    .font(.footnote)
-                    .plozzForeground(.secondary)
-            }
-            .frame(maxWidth: 640)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 44)
-            .frame(maxWidth: .infinity)
-        }
-        .navigationTitle("Welcome to Plozz")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -234,21 +167,4 @@ struct PlozziOSProfileAvatar: View {
     }
 }
 
-private struct PlozziOSFirstRunHighlight: View {
-    let systemImage: String
-    let text: LocalizedStringKey
-
-    var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: systemImage)
-                .font(.title3)
-                .foregroundStyle(.tint)
-                .frame(width: 30)
-            Text(text)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(16)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-    }
-}
 #endif

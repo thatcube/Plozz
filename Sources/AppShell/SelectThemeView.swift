@@ -47,11 +47,7 @@ struct SelectThemeView: View {
         ThemePalette.palette(for: selectedTheme, systemColorScheme: deviceColorScheme)
     }
 
-    /// Personalised when profiles are on; plain otherwise (e.g. the user chose
-    /// "Not Now — Just Me" on first run).
-    private var title: String {
-        appState.profilesModel.profilesEnabled ? "Choose theme for this profile" : "Choose theme"
-    }
+    private var title: String { "Choose theme for this profile" }
 
     var body: some View {
         VStack(spacing: 40) {

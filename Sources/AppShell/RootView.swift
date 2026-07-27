@@ -245,7 +245,6 @@ public struct RootView: View {
                         profiles: appState.profilesModel.profiles,
                         activeProfile: appState.profilesModel.activeProfile,
                         askProfileOnStartup: appState.profilesModel.askProfileOnStartup,
-                        profilesEnabled: appState.profilesModel.profilesEnabled,
                         pendingPlayItemID: Binding(
                             get: { appState.pendingPlayItemID },
                             set: { appState.pendingPlayItemID = $0 }
@@ -253,8 +252,6 @@ public struct RootView: View {
                         isAccountIncludedInActiveProfile: { appState.profileFlow.isAccountIncludedInActiveProfile($0) },
                         onSetAccountIncluded: { appState.profileFlow.setAccount($0, includedInActiveProfile: $1) },
                         onSetAskProfileOnStartup: { appState.profileFlow.setAskProfileOnStartup($0) },
-                        onEnableProfiles: { appState.profileFlow.enableProfiles() },
-                        onDisableProfiles: { appState.profileFlow.disableProfiles() },
                         onSaveProfile: { appState.profileFlow.saveProfile($0) },
                         onUpdateProfileCosmetics: { appState.profileFlow.updateProfileCosmetics($0) },
                         onDeleteProfile: { appState.profileFlow.removeProfile(id: $0) },
@@ -437,7 +434,6 @@ private enum OnboardingPage: Equatable {
     case authenticating(MediaServer)
     case selectPlexUser(PlexHomeUsersModel.PendingPlexUserSelection?)
     case selectLibraries
-    case enableProfilesPrompt
     case confirmProfile
     case selectTheme
 
@@ -455,8 +451,6 @@ private enum OnboardingPage: Equatable {
             self = .selectPlexUser(plexUserSelection)
         case .selectLibraries:
             self = .selectLibraries
-        case .enableProfilesPrompt:
-            self = .enableProfilesPrompt
         case .confirmProfile:
             self = .confirmProfile
         case .selectTheme:
@@ -470,9 +464,8 @@ private enum OnboardingPage: Equatable {
         case .authenticating: 1
         case .selectPlexUser: 2
         case .selectLibraries: 3
-        case .enableProfilesPrompt: 4
-        case .confirmProfile: 5
-        case .selectTheme: 6
+        case .confirmProfile: 4
+        case .selectTheme: 5
         }
     }
 
@@ -486,8 +479,6 @@ private enum OnboardingPage: Equatable {
             "selectPlexUser-\(selection?.accountID ?? "pending")"
         case .selectLibraries:
             "selectLibraries"
-        case .enableProfilesPrompt:
-            "enableProfilesPrompt"
         case .confirmProfile:
             "confirmProfile"
         case .selectTheme:
@@ -696,9 +687,6 @@ private struct OnboardingPageContent: View {
 
         case .selectLibraries:
             SelectLibrariesView(appState: appState)
-
-        case .enableProfilesPrompt:
-            EnableProfilesView(appState: appState)
 
         case .confirmProfile:
             FirstRunProfileView(appState: appState)

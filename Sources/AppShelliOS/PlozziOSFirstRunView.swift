@@ -90,22 +90,30 @@ private struct PlozziOSFirstProfileView: View {
         }
     }
 
-    /// The avatar IS the edit control — a pencil badge in the corner, the same
-    /// shape Contacts and Apple ID use. Keeps the one-and-only filled button on
-    /// screen meaning "continue", instead of two equal-weight pills competing.
+    /// The avatar IS the edit control, labelled with the word "Edit" on a neutral
+    /// capsule straddling its lower edge. Neutral rather than accent-coloured so
+    /// it stays subordinate to "Looks Good" — that button is the screen's only
+    /// call to action, and a second blue control would compete with it.
     private var editableAvatar: some View {
         Button {
             editing = true
         } label: {
             PlozziOSProfileAvatar(profile: profile, size: 128)
-                .overlay(alignment: .bottomTrailing) {
-                    Image(systemName: "pencil.circle.fill")
-                        .font(.system(size: 34))
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(Color.white, Color.accentColor)
-                        .background(Circle().fill(.black.opacity(0.001)))
-                        .offset(x: 2, y: 2)
+                .overlay(alignment: .bottom) {
+                    Text("Edit")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(.regularMaterial, in: Capsule())
+                        .overlay(
+                            Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                        )
+                        .offset(y: 12)
                 }
+                // Room for the capsule to hang past the avatar without the name
+                // below closing the gap on it.
+                .padding(.bottom, 12)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Edit profile")

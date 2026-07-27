@@ -308,7 +308,7 @@ public struct ServerPickerView: View {
         }
     }
 
-    private func statusText(_ title: String, systemImage: String) -> some View {
+    private func statusText(_ title: LocalizedStringResource, systemImage: String) -> some View {
         Label(title, systemImage: systemImage)
             .font(.footnote)
             .settingsRowSecondary()
@@ -327,13 +327,13 @@ public struct ServerPickerView: View {
 /// (uppercase secondary header, optional trailing accessory + footer). Kept local
 /// to FeatureDiscovery so the picker reads as Settings without depending on it.
 private struct PickerPanel<Content: View, Accessory: View>: View {
-    var title: String? = nil
+    var title: LocalizedStringResource? = nil
     var footer: String? = nil
     var titleAccessory: () -> Accessory
     var content: () -> Content
 
     init(
-        title: String? = nil,
+        title: LocalizedStringResource? = nil,
         footer: String? = nil,
         @ViewBuilder titleAccessory: @escaping () -> Accessory = { EmptyView() },
         @ViewBuilder content: @escaping () -> Content

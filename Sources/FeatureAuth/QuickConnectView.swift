@@ -11,9 +11,9 @@ public struct QuickConnectView: View {
     /// Cancel control (e.g. "Sign in with username & password"). Kept visually
     /// subordinate so Quick Connect remains the primary path.
     public struct SecondaryAction {
-        public let title: String
+        public let title: LocalizedStringResource
         public let handler: () -> Void
-        public init(title: String, handler: @escaping () -> Void) {
+        public init(title: LocalizedStringResource, handler: @escaping () -> Void) {
             self.title = title
             self.handler = handler
         }

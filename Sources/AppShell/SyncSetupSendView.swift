@@ -214,9 +214,12 @@ struct SyncSetupSendView: View {
     }
 
     @ViewBuilder
-    private func section<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func section<Content: View>(title: LocalizedStringResource, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(title.uppercased()).font(.caption.weight(.semibold)).tracking(1.5)
+            // `.textCase` rather than `String.uppercased()`: casing is applied at
+            // render time using the view's locale, which matters in languages
+            // whose uppercase rules differ (Turkish dotless i, German ß).
+            Text(title).textCase(.uppercase).font(.caption.weight(.semibold)).tracking(1.5)
                 .foregroundStyle(palette.secondaryText)
             content()
         }

@@ -253,7 +253,7 @@ struct AddShareView: View {
     /// failures, with an optional Retry button. Deliberately avoids implying a
     /// share list ever loaded.
     private func messagePanel(
-        title: String,
+        title: LocalizedStringResource,
         message: LocalizedStringKey,
         systemImage: String,
         retry: (() -> Void)? = nil
@@ -288,7 +288,7 @@ struct AddShareView: View {
     }
 
     private func credentialsPanel(
-        title: String,
+        title: LocalizedStringResource,
         message: LocalizedStringKey? = nil,
         error: LocalizedStringKey? = nil,
         button: LocalizedStringKey
@@ -380,13 +380,13 @@ struct AddShareView: View {
 /// Jellyfin server picker (uppercase secondary header, optional trailing
 /// accessory + footer). Kept local to the add-share screen.
 private struct SharePanel<Content: View, Accessory: View>: View {
-    var title: String? = nil
+    var title: LocalizedStringResource? = nil
     var footer: LocalizedStringKey? = nil
     var titleAccessory: () -> Accessory
     var content: () -> Content
 
     init(
-        title: String? = nil,
+        title: LocalizedStringResource? = nil,
         footer: LocalizedStringKey? = nil,
         @ViewBuilder titleAccessory: @escaping () -> Accessory = { EmptyView() },
         @ViewBuilder content: @escaping () -> Content

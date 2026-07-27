@@ -1275,11 +1275,26 @@ fileprivate struct IOSProfileAvatarPicker: View {
         .onChange(of: avatarImageURL) { _, _ in showingFullPicker = false }
     }
 
-    private var sheetTitle: String {
+    private var sheetTitle: LocalizedStringResource {
         switch avatarMode {
-        case .symbol: return "Symbols"
-        case .emoji: return "Emoji"
-        case .photo: return "Photos"
+        case .symbol:
+            return LocalizedStringResource(
+                "profileAvatar.symbols",
+                defaultValue: "Symbols",
+                comment: "Title of the sheet for picking an SF Symbol as a profile avatar."
+            )
+        case .emoji:
+            return LocalizedStringResource(
+                "profileAvatar.emoji",
+                defaultValue: "Emoji",
+                comment: "Title of the sheet for picking an emoji as a profile avatar."
+            )
+        case .photo:
+            return LocalizedStringResource(
+                "profileAvatar.photos",
+                defaultValue: "Photos",
+                comment: "Title of the sheet for picking a photo as a profile avatar."
+            )
         }
     }
 
@@ -1644,7 +1659,7 @@ fileprivate struct IOSProfileColorSwatch: View {
 /// the full set, keeping the inline row short and the whole editor scannable.
 fileprivate struct IOSProfileMoreCell: View {
     let systemImage: String
-    let label: String
+    let label: LocalizedStringResource
     let action: () -> Void
 
     @Environment(\.themePalette) private var palette
@@ -1709,7 +1724,7 @@ fileprivate struct IOSProfileCompactPhotoTile: View {
 /// A second-level modal that hosts a full picker grid with a Done button, themed
 /// to match the editor. Opened by an ``IOSProfileMoreCell``.
 fileprivate struct IOSProfilePickerSheet<Content: View>: View {
-    let title: String
+    let title: LocalizedStringResource
     @ViewBuilder var content: Content
 
     @Environment(\.dismiss) private var dismiss

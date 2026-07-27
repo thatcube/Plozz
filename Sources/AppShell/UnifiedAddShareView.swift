@@ -101,7 +101,7 @@ struct UnifiedAddShareView: View {
                 .focused($focus, equals: .rescan)
             }
 
-            Panel(title: "Detected automatically", accessory: {
+            Panel(title: Text("Detected automatically"), accessory: {
                 if viewModel.scanning { ProgressView() }
             }) {
                 VStack(spacing: 14) {
@@ -179,7 +179,7 @@ struct UnifiedAddShareView: View {
             ) { EmptyView() }
             .focusSection()
 
-            Panel(title: "") {
+            Panel(title: nil) {
                 VStack(alignment: .leading, spacing: 18) {
                     LabeledFormRow("Protocol") {
                         Menu {
@@ -222,7 +222,7 @@ struct UnifiedAddShareView: View {
 
             credentialPanel
 
-            Panel(title: "") {
+            Panel(title: nil) {
                 LabeledFormRow("Nickname") {
                     TextField("e.g. Living Room NAS", text: $viewModel.displayName)
                         .autocorrectionDisabled()
@@ -259,7 +259,7 @@ struct UnifiedAddShareView: View {
     private var credentialPanel: some View {
         let kind = viewModel.selectedTransport
         if let descriptor = viewModel.descriptor(kind), !descriptor.authModes.isEmpty {
-            Panel(title: "") {
+            Panel(title: nil) {
                 VStack(alignment: .leading, spacing: 18) {
                     if descriptor.authModes.contains(.token) {
                         Picker("Method", selection: $viewModel.authMode) {
@@ -335,7 +335,7 @@ struct UnifiedAddShareView: View {
                 title: isHostKey ? "Verify Host Key" : "Verify Certificate",
                 back: { viewModel.rejectTrust() }
             ) { EmptyView() }
-            Panel(title: isHostKey ? "SSH Host Key SHA-256" : "Certificate SHA-256") {
+            Panel(title: isHostKey ? Text("SSH Host Key SHA-256") : Text("Certificate SHA-256")) {
                 Text(formatFingerprint(sha256))
                     .font(.system(.body, design: .monospaced))
                     .fixedSize(horizontal: false, vertical: true)
@@ -362,15 +362,15 @@ struct UnifiedAddShareView: View {
             headerRow(title: LocalizedStringKey(locationTitle), back: { viewModel.backToConnect() }) { EmptyView() }
             switch viewModel.locationLoad {
             case .idle, .loading:
-                Panel(title: "Locations") { placeholder("Loading…") }
+                Panel(title: Text("Locations")) { placeholder("Loading…") }
             case .needsAuth, .badCredentials:
-                Panel(title: "Sign in") {
+                Panel(title: Text("Sign in")) {
                     Text("This server needs a username and password. Go back and enter them.")
                         .plozzForeground(.secondary)
                 }
                 manualSharePanel
             case .unreachable:
-                Panel(title: "Can’t connect") {
+                Panel(title: Text("Can’t connect")) {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Couldn’t connect. Check the address and network.").plozzForeground(.secondary)
                         Button("Try again") { retryLocation() }.buttonStyle(.borderedProminent)
@@ -378,7 +378,7 @@ struct UnifiedAddShareView: View {
                 }
                 if viewModel.selectedTransport == .nfs { manualSharePanel }
             case .failed(let message):
-                Panel(title: "Something went wrong") {
+                Panel(title: Text("Something went wrong")) {
                     VStack(alignment: .leading, spacing: 16) {
                         Text(LocalizedStringKey(message)).plozzForeground(.secondary)
                         Button("Try again") { retryLocation() }.buttonStyle(.borderedProminent)
@@ -418,7 +418,7 @@ struct UnifiedAddShareView: View {
             // confirming the folder you're looking inside never requires scrolling
             // past its contents. The path gets its own full-width line and wraps
             // rather than truncating — a deep path stays fully readable.
-            Panel(title: "Folder") {
+            Panel(title: Text("Folder")) {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(viewModel.currentPath)
                         .font(.system(.body, design: .monospaced))
@@ -431,7 +431,7 @@ struct UnifiedAddShareView: View {
                 }
             }
         }
-        Panel(title: isDrillable ? "Or open a subfolder" : "Locations") {
+        Panel(title: isDrillable ? Text("Or open a subfolder") : Text("Locations")) {
             if viewModel.locations.isEmpty {
                 placeholder(isDrillable ? "No subfolders here." : "Nothing here.")
             } else {
@@ -480,7 +480,7 @@ struct UnifiedAddShareView: View {
     private var manualSharePanel: some View {
         Group {
             if viewModel.selectedTransport == .nfs {
-                Panel(title: "Enter export path") {
+                Panel(title: Text("Enter export path")) {
                     VStack(alignment: .leading, spacing: 16) {
                         TextField("/volume1/Media", text: $viewModel.manualShare)
                             .autocorrectionDisabled().focused($focus, equals: .manualShare)
@@ -490,7 +490,7 @@ struct UnifiedAddShareView: View {
                     }
                 }
             } else {
-                Panel(title: "Enter share name") {
+                Panel(title: Text("Enter share name")) {
                     VStack(alignment: .leading, spacing: 16) {
                         TextField("Share name", text: $viewModel.manualShare)
                             .autocorrectionDisabled().focused($focus, equals: .manualShare)
@@ -536,7 +536,7 @@ struct UnifiedAddShareView: View {
     private func comingSoonStep(_ kind: MediaShareTransportKind) -> some View {
         Group {
             headerRow(title: LocalizedStringKey("\(kind.badgeLabel) coming soon"), back: { viewModel.backToConnect() }) { EmptyView() }
-            Panel(title: kind.badgeLabel) {
+            Panel(title: Text(verbatim: kind.badgeLabel)) {
                 Text("\(kind.badgeLabel) support is on the way. This device was detected, but Plozz can’t connect over \(kind.badgeLabel) just yet.")
                     .plozzForeground(.secondary)
             }
@@ -589,12 +589,13 @@ struct UnifiedAddShareView: View {
 
 /// A titled `.ultraThinMaterial` card matching the onboarding style.
 private struct Panel<Content: View, Accessory: View>: View {
-    var title: String
+    /// `nil` renders no header (previously spelled as an empty string).
+    var title: Text?
     var accessory: () -> Accessory
     var content: () -> Content
 
     init(
-        title: String,
+        title: Text?,
         @ViewBuilder accessory: @escaping () -> Accessory = { EmptyView() },
         @ViewBuilder content: @escaping () -> Content
     ) {
@@ -605,9 +606,9 @@ private struct Panel<Content: View, Accessory: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if !title.isEmpty {
+            if let title {
                 HStack {
-                    Text(title).font(.subheadline.weight(.semibold)).textCase(.uppercase)
+                    title.font(.subheadline.weight(.semibold)).textCase(.uppercase)
                         .tracking(1.0).plozzForeground(.secondary)
                     Spacer()
                     accessory()
@@ -627,10 +628,10 @@ private struct Panel<Content: View, Accessory: View>: View {
 /// while the control still stretches to the container's right edge, so tvOS
 /// up-focus from the first control can still reach the header's Back button.
 private struct LabeledFormRow<Control: View>: View {
-    let label: String
+    let label: LocalizedStringResource
     let control: () -> Control
 
-    init(_ label: String, @ViewBuilder control: @escaping () -> Control) {
+    init(_ label: LocalizedStringResource, @ViewBuilder control: @escaping () -> Control) {
         self.label = label
         self.control = control
     }

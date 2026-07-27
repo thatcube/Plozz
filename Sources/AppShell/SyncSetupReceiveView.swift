@@ -194,10 +194,10 @@ struct SyncSetupReceiveView: View {
 
     @ViewBuilder
     private func summarySection<Content: View>(
-        title: String, @ViewBuilder content: () -> Content
+        title: LocalizedStringResource, @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(title.uppercased())
+            Text(title).textCase(.uppercase)
                 .font(.caption.weight(.semibold)).tracking(1.5)
                 .foregroundStyle(palette.secondaryText)
             content()

@@ -295,13 +295,13 @@ private enum WebDAVShareMetrics {
 
 /// Local titled card matching `AddShareView`'s `SharePanel`.
 private struct WebDAVPanel<Content: View, Accessory: View>: View {
-    var title: String
+    var title: LocalizedStringResource
     var footer: LocalizedStringKey?
     var titleAccessory: () -> Accessory
     var content: () -> Content
 
     init(
-        title: String,
+        title: LocalizedStringResource,
         footer: LocalizedStringKey? = nil,
         @ViewBuilder titleAccessory: @escaping () -> Accessory = { EmptyView() },
         @ViewBuilder content: @escaping () -> Content

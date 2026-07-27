@@ -235,7 +235,7 @@ public enum PlozzTheme {
         public static let resumeChipFontSize: CGFloat = 24
         public static let resumeChipInset: CGFloat = 18
         public static let resumeChipBarWidth: CGFloat = 56
-        public static let resumeChipBarHeight: CGFloat = 6
+        public static let resumeChipBarHeight: CGFloat = 8
         public static let resumeChipAccessorySize: CGFloat = 30
         /// Glyph size for the artwork "…" menu. Distinct from the download badge:
         /// the badge is a status readout, this is a HIT TARGET, so it's sized for
@@ -301,7 +301,7 @@ public enum PlozzTheme {
         /// floor at `progressBarMinHeight`) in `PlozzMetrics`, so the scrubber
         /// grows/shrinks with the display-size setting like the rest of the card
         /// instead of staying a fixed pixel height.
-        public static let progressBarHeight: CGFloat = 14
+        public static let progressBarHeight: CGFloat = 12
         /// Smallest the density-scaled progress bar is allowed to get, so it stays
         /// legible at the smallest display-size settings.
         public static let progressBarMinHeight: CGFloat = 9

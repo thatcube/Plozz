@@ -345,7 +345,7 @@ public struct PlozzMetrics: Equatable, Sendable {
         let baseChipFont = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
         let baseChipInset: CGFloat = 12
         let baseChipBarWidth: CGFloat = 38
-        let baseChipBarHeight: CGFloat = 4
+        let baseChipBarHeight: CGFloat = 6
         // Matches the chip's cap height closely enough to sit on the same baseline.
         let baseChipAccessory = UIFont.preferredFont(forTextStyle: .subheadline).pointSize + 6
         #else

@@ -4,6 +4,7 @@ import CoreModels
 import CoreUI
 import FeatureHomeCore
 import MediaDownloads
+import MetadataKit
 import SeerService
 import SwiftUI
 
@@ -1757,11 +1758,16 @@ private struct PlozziOSInlineEpisodeEntry: View {
     }
 
     private var episodeArtwork: some View {
-        AsyncImage(url: episode.backdropURL ?? episode.posterURL) { image in
-            image
-                .resizable()
-                .scaledToFill()
-        } placeholder: {
+        // `.episodeThumbnail` rather than a hand-rolled `backdropURL ?? posterURL`:
+        // `backdropURL` is the SHOW's artwork, so preferring it showed series art
+        // on every episode row here while tvOS — which uses the shared placement —
+        // was correct. Going through the placement also picks up the external
+        // artwork fallback when a server has no still of its own.
+        FallbackAsyncImage(
+            references: episode.artworkReferences(for: .episodeThumbnail),
+            variant: .landscapeCard,
+            asyncFallbackURL: { await ArtworkRouter.shared.artworkURL(.thumbnail, for: episode) }
+        ) {
             // Shared with the tvOS cards so a missing episode still looks the same
             // on every platform; this was a bare filled rectangle with no glyph.
             MediaArtworkPlaceholder(glyphSize: 32)

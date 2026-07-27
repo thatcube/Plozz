@@ -58,7 +58,9 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     /// episode↔movie twin from a pre-fix build.
     /// v3 removes legacy direct-share relative paths and pre-validation hero
     /// candidates from persisted `MediaItem.artworkSelections`.
-    private static let schemaDirName = "plozz-home-content-v3"
+    /// v4: Plex episodes cached before the `posterURL` fix carry the SHOW's poster
+    /// where the episode's own still belongs — see `DetailSnapshotCache`.
+    private static let schemaDirName = "plozz-home-content-v4"
     private static let schemaDirPrefix = "plozz-home-content"
 
     /// Process-wide guards. `HomeContentStore` is (re)constructed inline in

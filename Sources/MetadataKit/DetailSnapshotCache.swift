@@ -77,7 +77,10 @@ public final class DetailSnapshotCache: Sendable {
     ///
     /// v5 removes legacy direct-share relative paths and pre-validation hero
     /// candidates from persisted `MediaItem.artworkSelections`.
-    private static let schemaDirName = "plozz-detail-cache-v5"
+    /// v6: Plex episodes cached before the `posterURL` fix hold the SHOW's poster
+    /// where the episode's own still belongs, so a series page kept serving series
+    /// artwork from cache while a freshly-fetched episode page looked right.
+    private static let schemaDirName = "plozz-detail-cache-v6"
     private static let schemaDirPrefix = "plozz-detail-cache"
     private static let defaultScopeComponent = "default"
 

@@ -147,6 +147,10 @@ public struct MediaItemContextMenu: ViewModifier {
             pendingNavigationTarget = target
         case .goToMovie:
             pendingNavigationTarget = item
+        case .goToEpisode:
+            // The episode itself is the destination; the page re-fetches full
+            // detail by id.
+            pendingNavigationTarget = item
         case .markWatched, .markUnwatched, .markWatchedUpToHere,
              .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
              .startDownload, .pauseDownload, .resumeDownload, .removeDownload:

@@ -312,7 +312,7 @@ struct HomeTab: View {
             }
         }
         .task(id: pendingPlayItemID) { await handleDeepLink() }
-        .mediaItemNavigator { navigate($0) }
+        .mediaItemNavigator { navigate($0, asOwnSubject: $0.kind == .episode) }
     }
 
     /// Resolves a deep-linked item id (from a Top Shelf card) and routes to it,
@@ -342,8 +342,21 @@ struct HomeTab: View {
     /// server. `nil` for Home/Search rows, which keep the smart best-version
     /// default. Episode/season routes carry the same origin because their series
     /// page can discover alternate servers after opening.
-    private func navigate(_ item: MediaItem, libraryOrigin: String? = nil) {
-        if item.kind == .episode, item.seriesID != nil {
+    /// Routes a navigation to `item`.
+    ///
+    /// `asOwnSubject` distinguishes the two ways an episode can be navigated to.
+    /// A menu's "Episode Info" wants the episode's *own* page — its synopsis, air
+    /// date, and the file that would play. Everything else that hands over an
+    /// episode (a deep link, a tapped card) means "show me this episode in
+    /// context", which is the series page with it fronted.
+    private func navigate(
+        _ item: MediaItem,
+        libraryOrigin: String? = nil,
+        asOwnSubject: Bool = false
+    ) {
+        if item.kind == .episode, asOwnSubject {
+            path.append(item)
+        } else if item.kind == .episode, item.seriesID != nil {
             path.append(EpisodeContextRoute(
                 episode: item,
                 originAccountID: libraryOrigin

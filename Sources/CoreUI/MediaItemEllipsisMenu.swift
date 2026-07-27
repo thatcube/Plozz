@@ -82,6 +82,8 @@ public struct MediaItemEllipsisMenu: View {
             item.seasonNavigationTarget.map(navigate)
         case .goToMovie:
             navigate(item)
+        case .goToEpisode:
+            navigate(item)
         case .markWatched, .markUnwatched, .markWatchedUpToHere,
              .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
              .startDownload, .pauseDownload, .resumeDownload, .removeDownload:

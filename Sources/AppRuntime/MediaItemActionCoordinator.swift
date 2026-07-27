@@ -93,7 +93,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             performRefresh(on: item)
         case .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
             performDownloadAction(action, item)
-        case .goToSeason, .goToMovie:
+        case .goToSeason, .goToMovie, .goToEpisode:
             // Navigation is handled in the view layer, never here.
             break
         }

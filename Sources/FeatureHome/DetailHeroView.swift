@@ -1216,13 +1216,34 @@ struct DetailHeroView: View {
             ?? (hideText
                 ? spoilerSettings.maskedTitle(for: item)
                 : HeroPresentation.normalizedTitle(for: item))
-        return Text(title)
-            .font(.system(size: 64, weight: .bold))
-            .lineLimit(2)
-            .minimumScaleFactor(0.5)
-            .multilineTextAlignment(.leading)
-            .frame(maxWidth: 1200, alignment: .leading)
-            .contentTransition(.opacity)
+        return VStack(alignment: .leading, spacing: 4) {
+            // The show's name above the episode's, quiet and small — the episode
+            // is the subject of this page, the series is the context it sits in.
+            // Only when the episode IS the page: on a series page the hero already
+            // carries the show's logo, so repeating the name would be noise.
+            if let show = seriesContextTitle {
+                Text(show)
+                    .font(.system(size: 30, weight: .semibold))
+                    .plozzForeground(.secondary)
+                    .lineLimit(1)
+            }
+            Text(title)
+                .font(.system(size: 64, weight: .bold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.5)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: 1200, alignment: .leading)
+                .contentTransition(.opacity)
+        }
+    }
+
+    /// The owning show's name, shown above the title when this page's subject is
+    /// an episode in its own right. `nil` on a series page, whose hero already
+    /// shows the show's logo — and where `titleFallbackOverride` pins the title to
+    /// the series anyway.
+    private var seriesContextTitle: String? {
+        guard titleFallbackOverride == nil, item.kind == .episode else { return nil }
+        return item.parentTitle
     }
 
     /// Full screen height, the basis for the backdrop's height (scaled by

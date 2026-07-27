@@ -35,6 +35,14 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     /// the movie's own detail page instead of playing it. A pure navigation
     /// action (no provider mutation) handled by the view layer's router.
     case goToMovie
+    /// Navigate to this episode's own detail page — its synopsis, air date, and
+    /// the technical facts of the file that would play.
+    ///
+    /// The series page shows one episode at a time (whatever Play would run), and
+    /// episode cards stay deliberately sparse, so this is the only place to
+    /// inspect a *different* episode's file before playing it. A pure navigation
+    /// action handled by the view layer's router.
+    case goToEpisode
     /// Add this item to the user's Watchlist (Jellyfin Favorites / Plex
     /// Watchlist). Offered only when the owning provider conforms to
     /// `WatchlistProviding`.
@@ -68,6 +76,7 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .markWatchedUpToHere: return "Mark Watched Up to Here"
         case .goToSeason: return "Go to Season"
         case .goToMovie: return "Go to Movie"
+        case .goToEpisode: return "Episode Info"
         case .addToWatchlist: return "Add to Watchlist"
         case .removeFromWatchlist: return "Remove from Watchlist"
         case .refreshMetadata: return "Refresh Metadata"
@@ -86,6 +95,7 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .markWatchedUpToHere: return "checkmark.circle.fill"
         case .goToSeason: return "rectangle.stack"
         case .goToMovie: return "film"
+        case .goToEpisode: return "info.circle"
         case .addToWatchlist: return "bookmark"
         case .removeFromWatchlist: return "bookmark.slash"
         case .refreshMetadata: return "arrow.clockwise"
@@ -101,7 +111,7 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     /// locally by the context menu, not the app-level action handler.
     public var isNavigation: Bool {
         switch self {
-        case .goToSeason, .goToMovie: return true
+        case .goToSeason, .goToMovie, .goToEpisode: return true
         case .markWatched, .markUnwatched, .markWatchedUpToHere,
              .addToWatchlist, .removeFromWatchlist, .refreshMetadata,
              .startDownload, .pauseDownload, .resumeDownload, .removeDownload:
@@ -133,7 +143,7 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .markWatched, .markUnwatched,
              .addToWatchlist, .removeFromWatchlist:
             return true
-        case .markWatchedUpToHere, .goToSeason, .goToMovie,
+        case .markWatchedUpToHere, .goToSeason, .goToMovie, .goToEpisode,
              .refreshMetadata, .startDownload, .pauseDownload,
              .resumeDownload, .removeDownload:
             return false

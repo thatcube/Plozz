@@ -2,6 +2,35 @@ import XCTest
 @testable import CoreModels
 
 final class MediaItemActionCatalogTests: XCTestCase {
+    /// "Episode Info" is offered for every episode, wherever it is shown —
+    /// including inside its own season's list, unlike the other navigation
+    /// actions. The series page shows one episode at a time and episode cards stay
+    /// deliberately sparse, so the rail is exactly where someone needs to inspect a
+    /// different episode's file before playing it.
+    func testEpisodeInfoOfferedForEveryEpisodeIncludingInsideItsOwnList() {
+        let episode = item(id: "e2", kind: .episode, episodeNumber: 2, seasonID: "s1")
+        let inOwnList = MediaItemActionCatalog.actions(
+            for: episode,
+            supportsWatchState: false,
+            context: MediaItemActionContext(orderedSiblings: [episode])
+        )
+        XCTAssertTrue(inOwnList.contains(.goToEpisode))
+        XCTAssertFalse(
+            inOwnList.contains(.goToSeason),
+            "Go to Season stays suppressed inside its own list — it would be a no-op"
+        )
+    }
+
+    func testEpisodeInfoNotOfferedForMoviesOrSeries() {
+        for kind in [MediaItemKind.movie, .series, .season] {
+            let actions = MediaItemActionCatalog.actions(
+                for: item(id: "x", kind: kind),
+                supportsWatchState: false
+            )
+            XCTAssertFalse(actions.contains(.goToEpisode), "\(kind) is not an episode")
+        }
+    }
+
     private func item(
         id: String,
         kind: MediaItemKind,
@@ -118,7 +147,7 @@ final class MediaItemActionCatalogTests: XCTestCase {
         let context = MediaItemActionContext(orderedSiblings: [e1, e2])
 
         let actions = MediaItemActionCatalog.actions(for: e2, supportsWatchState: true, context: context)
-        XCTAssertEqual(actions, [.markWatched, .markWatchedUpToHere])
+        XCTAssertEqual(actions, [.markWatched, .markWatchedUpToHere, .goToEpisode])
     }
 
     func testUpToHereHiddenWhenNothingPrecedingUnwatched() {
@@ -127,7 +156,7 @@ final class MediaItemActionCatalogTests: XCTestCase {
         let context = MediaItemActionContext(orderedSiblings: [e1])
 
         let actions = MediaItemActionCatalog.actions(for: e1, supportsWatchState: true, context: context)
-        XCTAssertEqual(actions, [.markWatched])
+        XCTAssertEqual(actions, [.markWatched, .goToEpisode])
     }
 
     func testUpToHereOfferedWhenPrecedingContainerExistsEvenIfFirstInSeason() {
@@ -192,7 +221,7 @@ final class MediaItemActionCatalogTests: XCTestCase {
     func testGoToSeasonOfferedEvenWithoutWatchStateSupport() {
         let episode = item(id: "e", kind: .episode, episodeNumber: 3, seasonID: "s1")
         let actions = MediaItemActionCatalog.actions(for: episode, supportsWatchState: false)
-        XCTAssertEqual(actions, [.goToSeason])
+        XCTAssertEqual(actions, [.goToSeason, .goToEpisode])
     }
 
     func testGoToSeasonNotOfferedForMovies() {

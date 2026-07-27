@@ -85,6 +85,10 @@ public enum MediaItemActionCatalog {
             actions.append(.goToMovie)
         }
 
+        if canGoToEpisode(item, in: context) {
+            actions.append(.goToEpisode)
+        }
+
         // Refresh Metadata: a server-side maintenance task, offered last for any
         // refreshable content item when the provider supports it.
         if supportsMetadataRefresh, isWatchStateEligible(item) {
@@ -114,6 +118,16 @@ public enum MediaItemActionCatalog {
     /// many files, so it has no one download to start, pause or remove.
     private static func isDownloadEligible(_ item: MediaItem) -> Bool {
         item.kind == .movie || item.kind == .episode
+    }
+
+    /// Whether "Episode Info" applies: any episode, wherever it is shown.
+    ///
+    /// Unlike the other navigation actions this is offered *inside* its own list
+    /// too. The series page shows one episode at a time — whatever Play would run
+    /// — and episode cards stay deliberately sparse, so the rail is exactly where
+    /// someone needs to inspect a different episode's file before playing it.
+    private static func canGoToEpisode(_ item: MediaItem, in context: MediaItemActionContext) -> Bool {
+        item.kind == .episode
     }
 
     /// Whether "Go to Season" applies: an episode that knows its season id and is

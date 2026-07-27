@@ -272,12 +272,30 @@ public struct DetailInformationSections: View {
         nonempty(item.overview) != nil
     }
 
+    /// `S1 · E1` for an episode, `nil` for anything else.
+    private var seasonEpisodeLocator: String? {
+        guard item.kind == .episode,
+              let season = item.seasonNumber,
+              let episode = item.episodeNumber
+        else { return nil }
+        return "S\(season) · E\(episode)"
+    }
+
     private var aboutContent: some View {
         Button { showsFullOverview = true } label: {
             VStack(alignment: .leading, spacing: aboutContentSpacing) {
-                Text(item.title)
-                    .font(aboutTitleFont)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    // "S1 · E1" ahead of the episode's title, so the card says
+                    // where in the show it sits without a separate line.
+                    if let locator = seasonEpisodeLocator {
+                        Text(locator)
+                            .font(aboutTitleFont)
+                            .plozzForeground(.secondary)
+                    }
+                    Text(item.title)
+                        .font(aboutTitleFont)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if let overview = nonempty(item.overview) {
                     aboutOverview(overview)
                 }

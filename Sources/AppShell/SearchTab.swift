@@ -213,11 +213,11 @@ struct SearchTab: View {
             }
         }
         .mediaItemNavigator { item in
-            if item.kind == .episode, item.seriesID != nil {
-                path.append(EpisodeContextRoute(
-                    episode: item,
-                    originAccountID: nil
-                ))
+            // An episode arriving through the *menu* is "Episode Info", which wants
+            // the episode's own page. "Go to Season" hands over a season, so the
+            // two are distinguishable by kind.
+            if item.kind == .episode {
+                path.append(item)
             } else if item.kind == .season, item.seriesID != nil {
                 path.append(SeasonContextRoute(
                     season: item,

@@ -43,6 +43,9 @@ public struct RootView: View {
     @State private var showSyncSend = false
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
+    /// The reader's text size. Feeds `PlozzMetrics` so the shared type/geometry
+    /// table rebuilds when it changes (see where the metrics are injected below).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// The OS-level Reduce Transparency setting, resolved against the active
     /// profile's in-app "Transparency (liquid glass)" preference (Settings ▸
     /// Appearance) and injected as `\.plozzReduceTransparency`. `tvOS Default`
@@ -300,7 +303,17 @@ public struct RootView: View {
         }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
-        .environment(\.plozzMetrics, PlozzMetrics(density: appState.profileSettings.uiDensityModel.density))
+        // `dynamicTypeSize` is read here on purpose: PlozzMetrics samples its
+        // typography once at construction, so this dependency is what makes the
+        // whole table rebuild when the reader changes their text size. Without it
+        // the sizes stay frozen at whatever they were when the app launched.
+        .environment(
+            \.plozzMetrics,
+            PlozzMetrics(
+                density: appState.profileSettings.uiDensityModel.density,
+                dynamicTypeSize: dynamicTypeSize
+            )
+        )
         .environment(\.plozzCardStyle, appState.profileSettings.cardStyleModel.style)
         .environment(\.plozzWatchStatusIndicator, appState.profileSettings.watchStatusIndicatorModel.indicator)
         .environment(\.plozzNavigationStyle, appState.profileSettings.navigationStyleModel.style)

@@ -9,6 +9,9 @@ import SwiftUI
 public struct PlozziOSRootView: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
+    /// The reader's text size. Feeds `PlozzMetrics` so the shared type/geometry
+    /// table rebuilds when it changes (see where the metrics are injected below).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceTransparency)
     private var systemReduceTransparency
     @State private var appModel = PlozziOSAppModel()
@@ -151,9 +154,14 @@ public struct PlozziOSRootView: View {
         }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
+        // See the tvOS root: reading `dynamicTypeSize` is what rebuilds the metrics
+        // when the reader's text size changes, rather than only on relaunch.
         .environment(
             \.plozzMetrics,
-            PlozzMetrics.touch(density: appModel.settings.density.density)
+            PlozzMetrics.touch(
+                density: appModel.settings.density.density,
+                dynamicTypeSize: dynamicTypeSize
+            )
         )
         .mediaItemActionHandler(appModel.mediaItemActionHandler)
         .environment(

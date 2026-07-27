@@ -36,6 +36,17 @@ struct DetailHeroView: View {
     /// Stable title used when no logo resolves. A series page supplies the series
     /// title so the fallback remains the same identity while episodes are browsed.
     var titleFallbackOverride: String? = nil
+    /// The item hero *actions* apply to, when that differs from `item`.
+    ///
+    /// On a series page whose hero rests on the show — nothing watched, or all of
+    /// it watched — Play still starts a specific episode. Without this, the
+    /// Watched button beside it acted on `item` and marked the **entire series**
+    /// watched, which contradicts the Play button it sits next to and is
+    /// destructive when hit by accident.
+    ///
+    /// Watchlist is deliberately excluded: you save a *show*, not an episode, so
+    /// it keeps targeting `item`.
+    var actionItem: MediaItem?
     /// Optional series-only cosmetic recede state. The model is consumed by leaf
     /// modifiers so changing it never invalidates the parent page or episode rail.
     var seriesRecedeModel: SeriesHeroRecedeModel? = nil
@@ -250,11 +261,22 @@ struct DetailHeroView: View {
 
     // MARK: - Visible item actions (discoverability)
 
+    /// The subject of watched-state actions: the play target when it differs from
+    /// the editorial hero, else the hero itself.
+    private var watchedActionItem: MediaItem { actionItem ?? item }
+
     /// The capability-gated actions the installed handler offers for the focused
     /// `item`. Identical to what the context menu shows, so the visible buttons
     /// and the long-press menu can never drift apart.
     private var heroActions: [MediaItemAction] {
         actionHandler?.actions(for: item, context: actionContext) ?? []
+    }
+
+    /// Actions offered for the *play target*, which is what watched-state buttons
+    /// act on. Same list when the two items are the same.
+    private var watchedActionCandidates: [MediaItemAction] {
+        guard actionItem != nil else { return heroActions }
+        return actionHandler?.actions(for: watchedActionItem, context: actionContext) ?? []
     }
 
     /// The watchlist toggle for `item`, if its resolving provider conforms to
@@ -263,11 +285,11 @@ struct DetailHeroView: View {
         heroActions.first { $0 == .addToWatchlist || $0 == .removeFromWatchlist }
     }
 
-    /// The watched-state toggle for `item`, if its provider can mutate it. On a
-    /// series page this lights up for the focused *episode* (the hero mirrors it),
-    /// giving episodes a visible watched toggle without touching the rail.
+    /// The watched-state toggle, resolved against the play target so it can never
+    /// mark a whole series watched while the Play button beside it starts one
+    /// episode. On a series page this lights up for the episode Play would run.
     private var heroWatchedAction: MediaItemAction? {
-        heroActions.first { $0 == .markWatched || $0 == .markUnwatched }
+        watchedActionCandidates.first { $0 == .markWatched || $0 == .markUnwatched }
     }
 
     /// Whether to show the Refresh Metadata button (provider conforms to
@@ -306,10 +328,18 @@ struct DetailHeroView: View {
         case .play, .unavailable: return false
         }
     }
-    /// Routes a hero button through the shared action handler with this hero's
-    /// item + context — the exact same path the context menu uses.
+    /// Routes a hero button through the shared action handler — the exact same
+    /// path the context menu uses.
+    ///
+    /// Watched-state actions go to the play target, everything else to the
+    /// editorial hero. On a series page resting on the show those are different
+    /// items, and marking watched must follow what Play would run rather than the
+    /// whole series.
     private func performHeroAction(_ action: MediaItemAction) {
-        actionHandler?.perform(action, on: item, context: actionContext)
+        let subject = (action == .markWatched || action == .markUnwatched)
+            ? watchedActionItem
+            : item
+        actionHandler?.perform(action, on: subject, context: actionContext)
     }
 
     /// Resolution/HDR/audio badges shown after the external ratings in the
@@ -1065,9 +1095,12 @@ struct DetailHeroView: View {
         .accessibilityValue(item.isFavorite ? "On your watchlist" : "Not on your watchlist")
     }
 
-    /// Visible watched-state toggle, shown when the provider can mutate it. On a
-    /// series page the hero mirrors the focused episode, so this doubles as the
-    /// episode's visible watched toggle. Unwatched shows a neutral `eye`; marking
+    /// Visible watched-state toggle, shown when the provider can mutate it.
+    ///
+    /// Reflects and mutates the **play target**, so its glyph always describes the
+    /// same thing the Play button beside it would run. On a series page resting on
+    /// the show these differ, and reading `item` here would show the series'
+    /// watched state above a button that marks one episode. Unwatched shows a neutral `eye`; marking
     /// watched first pops in a brand-blue filled circle (the same watched colour as
     /// the episode cards), then strokes a white checkmark *onto* it — drawn from the
     /// left point, down to the bottom vertex, up to the top-right — via an animated
@@ -1079,13 +1112,13 @@ struct DetailHeroView: View {
                 Image(systemName: "eye")
                     .font(.system(size: heroGlyphSize))
                     .foregroundStyle(Color.primary)
-                    .opacity(item.isPlayed ? 0 : 1)
-                    .scaleEffect(item.isPlayed ? 0.4 : 1)
+                    .opacity(watchedActionItem.isPlayed ? 0 : 1)
+                    .scaleEffect(watchedActionItem.isPlayed ? 0.4 : 1)
 
                 ZStack {
                     Circle()
                         .fill(ThemePalette.brandBlue)
-                    // The check's draw-on is a direct function of `item.isPlayed`
+                    // The check's draw-on is a direct function of `watchedActionItem.isPlayed`
                     // and carries its OWN animation keyed to that same value. This
                     // is deliberate: the surrounding `.animation(value:)` on the
                     // frame installs a *nil* animation on this whole subtree for any
@@ -1094,22 +1127,22 @@ struct DetailHeroView: View {
                     // transaction). Keeping the draw in the one transaction where
                     // `isPlayed` actually flips — and giving it a short delay so the
                     // circle pops first — makes it reliably animate on-device.
-                    CheckmarkShape(progress: item.isPlayed ? 1 : 0)
+                    CheckmarkShape(progress: watchedActionItem.isPlayed ? 1 : 0)
                         .stroke(Color.white,
                                 style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
                         .padding(heroIconSize * 0.20)
-                        .animation(.easeOut(duration: 0.32).delay(0.24), value: item.isPlayed)
+                        .animation(.easeOut(duration: 0.32).delay(0.24), value: watchedActionItem.isPlayed)
                 }
-                .opacity(item.isPlayed ? 1 : 0)
-                .scaleEffect(item.isPlayed ? 1 : 0.4)
+                .opacity(watchedActionItem.isPlayed ? 1 : 0)
+                .scaleEffect(watchedActionItem.isPlayed ? 1 : 0.4)
             }
             .frame(width: heroIconSize, height: heroIconSize)
-            .animation(.easeOut(duration: 0.18), value: item.isPlayed)
+            .animation(.easeOut(duration: 0.18), value: watchedActionItem.isPlayed)
         }
         .modifier(HeroActionButtonStyle(prominent: false, circular: true))
         .focused($heroActionRowFocus, equals: .watched)
         .accessibilityLabel(action.title)
-        .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
+        .accessibilityValue(watchedActionItem.isPlayed ? "Watched" : "Not watched")
     }
 
     /// Visible Refresh Metadata button, shown when the provider conforms to

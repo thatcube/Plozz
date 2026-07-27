@@ -247,6 +247,10 @@ struct SeriesDetailView: View {
                         item: displayHeroItem,
                         backdropItem: series,
                         titleFallbackOverride: series.title,
+                        // Watched-state actions follow what Play would run. When
+                        // the hero rests on the show, marking watched must not
+                        // sweep the entire series.
+                        actionItem: playTarget,
                         seriesRecedeModel: recedeModel,
                         spoilerSettings: spoilerSettings,
                         playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
@@ -262,7 +266,7 @@ struct SeriesDetailView: View {
                         offlineSourceAccountIDs: viewModel.unreachableSourceAccountIDs,
                         selectedSourceAccountID: series.sourceAccountID,
                         onSelectSource: serverPickerAction,
-                        fallbackTechnicalBadges: representativeTechnicalBadges,
+                        fallbackTechnicalBadges: playTargetTechnicalBadges,
                         playButtonFocus: $playFocused,
                         // Keep the whole hero action row pinned to the top for every
                         // button, not just Play — moving right to Trailer / the "…"
@@ -921,16 +925,6 @@ struct SeriesDetailView: View {
         episodeRailResetToken &+= 1
     }
 
-    /// A representative tech-badge set (best resolution/HDR/audio) derived from
-    /// every episode loaded so far. The series/season hero has no media file of
-    /// its own, so this summarises the show's peak capabilities — and because it
-    /// aggregates across all loaded seasons, it only grows toward the true peak
-    /// as more seasons are browsed.
-    private var representativeTechnicalBadges: [MediaBadge] {
-        let loaded = viewModel.seasonEpisodes.values.flatMap { $0 }
-        let episodes = loaded.isEmpty ? looseEpisodes : loaded
-        return episodes.representativeTechnicalBadges
-    }
 
     /// Header for the episode rail. A selected season's name is already shown on
     /// its tab/chip above the rail, so the rail itself stays unlabelled to avoid
@@ -999,6 +993,21 @@ struct SeriesDetailView: View {
             return versionOverride
         }
         return playVersions.recommendedSelection(for: .detected())?.id
+    }
+
+    /// The technical facts of the file Play would actually run.
+    ///
+    /// Replaces a peak-across-loaded-episodes summary, which claimed things we
+    /// cannot know and changed under the user: only the opening season is loaded
+    /// when the page appears, so a show with a 1080p S1 and a 4K S2 read "1080p"
+    /// and then flipped to "4K" ~2.5s later as neighbouring seasons warmed. Worse,
+    /// it could promise 4K above a Play button that starts a 1080p file.
+    ///
+    /// Empty until the play target's media info is known — showing nothing beats
+    /// showing the wrong thing, the same reasoning the version branch in
+    /// `DetailHeroView.featureBadges` already applies.
+    private var playTargetTechnicalBadges: [MediaBadge] {
+        playTarget?.technicalBadges ?? []
     }
 
     private var playTarget: MediaItem? {

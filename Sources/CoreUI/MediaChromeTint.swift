@@ -54,18 +54,21 @@ public enum PlozzMediaChrome {
         #endif
     }
 
-    // Every tone here is OPAQUE. A translucent bar composites with whatever
-    // artwork happens to sit behind it, so its contrast changes shot to shot and
-    // a bright frame can wash it out entirely — the legibility is only as good as
-    // the poster. Solid greys render identically on every card, which is the
-    // whole point of a shared treatment.
+    // The FOREGROUND is opaque on purpose. A translucent glyph or bar fill
+    // composites with whatever frame sits behind it, so its contrast changes shot
+    // to shot and a bright poster washes it out — the legibility ends up only as
+    // good as the artwork. A solid grey reads identically on every card.
+    //
+    // The TRACK stays translucent, which is the opposite call and deliberate: it
+    // is the unfilled remainder, so it should sink into the artwork rather than
+    // sit on top of it as a solid bar. Rendered opaque it read as a second,
+    // competing element instead of the absence of progress.
 
-    /// Held just below pure white so a resting wall of cards stays calm, but high
-    /// enough to read cleanly at 10 feet.
-    private static let restForeground = Color(white: 0.88)
-    /// Unfilled track. Dark enough to read as "not yet watched" against the fill,
-    /// light enough to stay visible on the scrim.
-    private static let focusedTrack = Color(white: 0.42)
-    private static let restTrack = Color(white: 0.34)
+    /// Held well below pure white so a resting wall of cards stays calm and the
+    /// focused card's chrome is clearly the brightest thing on screen. Safe to sit
+    /// this low because it's opaque — it can't be washed out by the poster.
+    private static let restForeground = Color(white: 0.72)
+    private static let focusedTrack = Color.white.opacity(0.32)
+    private static let restTrack = Color.white.opacity(0.24)
 }
 #endif

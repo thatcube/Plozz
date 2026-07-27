@@ -130,6 +130,13 @@ private struct PlozziOSCanonicalItemDetailView: View {
     @State private var sourceOverride: String?
     @State private var versionOverride: String?
     @State private var seriesPlayTarget: MediaItem?
+    /// Whether the hero describes the **show** rather than `seriesPlayTarget`.
+    ///
+    /// True when there is no resume point to offer — nothing watched, or all of it
+    /// watched and the pointer stale. Play still starts an episode in both cases,
+    /// so the two cannot be the same value: the hero is editorial (the show), the
+    /// play target is technical (the file that will run).
+    @State private var seriesHeroShowsSeries = false
     @State private var heroPullDistance: CGFloat = 0
     private let seerService: SeerService?
     private let isDiscoveryItem: Bool
@@ -288,7 +295,9 @@ private struct PlozziOSCanonicalItemDetailView: View {
     }
 
     private func detailContent(_ detail: ItemDetailViewModel.Detail) -> some View {
-        let heroTarget = seriesPlayTarget ?? detail.item
+        let heroTarget = seriesHeroShowsSeries
+            ? detail.item
+            : (seriesPlayTarget ?? detail.item)
         let playableHeroTarget = seriesPlayTarget.map(playbackItem(for:))
             ?? detailPlayableItem(for: detail.item)
         let options = detailPlaybackOptions(for: heroTarget)
@@ -341,6 +350,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         initialSeasonID: initialSeasonID,
                         initialEpisode: initialEpisode,
                         onPlayTargetChange: { seriesPlayTarget = $0 },
+                        onHeroShowsSeriesChange: { seriesHeroShowsSeries = $0 },
                         onPlay: play,
                         onDownloadSeason: downloadSeason,
                         seasonRequestAvailability: isDiscoveryItem
@@ -1124,12 +1134,17 @@ private struct PlozziOSInlineSeriesBrowser: View {
     @State private var isDownloadingSeason = false
     @State private var seasonDownloadError: String?
     @State private var seasonDownloadPrompt: PlozziOSSeasonDownloadPrompt?
+    /// The season the resting target was settled from, so browsing elsewhere
+    /// leaves the hero where the viewer actually is.
+    @State private var resolvedSeasonID: String?
 
     let viewModel: ItemDetailViewModel
     let seasons: [MediaItem]
     let looseEpisodes: [MediaItem]
     let initialEpisode: MediaItem?
     let onPlayTargetChange: (MediaItem?) -> Void
+    /// Whether the hero should describe the show rather than the play target.
+    let onHeroShowsSeriesChange: (Bool) -> Void
     let onPlay: (MediaItem, Bool) -> Void
     let onDownloadSeason: (MediaItem, [MediaItem]) async throws -> Int
     let seasonRequestAvailability: MediaRequestAvailability?
@@ -1144,6 +1159,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
         initialSeasonID: String?,
         initialEpisode: MediaItem?,
         onPlayTargetChange: @escaping (MediaItem?) -> Void,
+        onHeroShowsSeriesChange: @escaping (Bool) -> Void,
         onPlay: @escaping (MediaItem, Bool) -> Void,
         onDownloadSeason:
             @escaping (MediaItem, [MediaItem]) async throws -> Int,
@@ -1157,6 +1173,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
         self.looseEpisodes = looseEpisodes
         self.initialEpisode = initialEpisode
         self.onPlayTargetChange = onPlayTargetChange
+        self.onHeroShowsSeriesChange = onHeroShowsSeriesChange
         self.onPlay = onPlay
         self.onDownloadSeason = onDownloadSeason
         self.seasonRequestAvailability = seasonRequestAvailability
@@ -1378,18 +1395,43 @@ private struct PlozziOSInlineSeriesBrowser: View {
         }
     }
 
+    /// Settles what Play starts, and whether the hero describes that episode or
+    /// the show itself.
+    ///
+    /// Pinned once resolved: browsing to another season must not repoint the hero,
+    /// because the resume point has not moved. Apple's TV app shows exactly this —
+    /// hero on S1 · E1 while the season selector reads Season 2.
     private func publishPlayTarget() {
         guard let displayedEpisodes else {
             onPlayTargetChange(nil)
+            onHeroShowsSeriesChange(false)
             return
         }
+        // An explicitly opened episode outranks the resume point.
         if initialEpisode?.seasonID == selectedSeasonID,
            let initialID = initialEpisode?.id,
            let loaded = displayedEpisodes.first(where: { $0.id == initialID }) {
+            resolvedSeasonID = selectedSeasonID
             onPlayTargetChange(loaded)
+            onHeroShowsSeriesChange(false)
             return
         }
-        onPlayTargetChange(SeriesResume.nextUp(in: displayedEpisodes))
+        // Already settled from the opening season: a later season change is
+        // browsing, not a new resume point.
+        if let resolvedSeasonID, resolvedSeasonID != selectedSeasonID { return }
+        resolvedSeasonID = selectedSeasonID
+
+        let hasResumePoint = SeriesResume.hasStarted(seasons: seasons, episodes: displayedEpisodes)
+            && !SeriesResume.isFinished(seasons: seasons, episodes: displayedEpisodes)
+        // Both "never started" and "finished" mean start from the beginning, so
+        // Play takes the first episode rather than `nextUp`, which returns the
+        // finale once everything is played.
+        onPlayTargetChange(
+            hasResumePoint
+                ? SeriesResume.nextUp(in: displayedEpisodes)
+                : displayedEpisodes.first
+        )
+        onHeroShowsSeriesChange(!hasResumePoint)
     }
 }
 

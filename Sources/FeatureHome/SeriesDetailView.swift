@@ -200,10 +200,17 @@ struct SeriesDetailView: View {
             // so switching seasons later is instant (no gray-placeholder flash)
             // rather than fetching that season's stills only once it is selected.
             .task(id: seasonSetKey) { await prewarmAllSeasons() }
-            // The hero mirrors the focused episode via a local copy, so when a
-            // watched/watchlist mutation broadcasts (e.g. from the hero's own
-            // Watched button), flip the same flags on `heroItem` in place so the
-            // visible hero button reflects the new state immediately.
+            // The hero holds a local copy of its item, so when a watched/watchlist
+            // mutation broadcasts (e.g. from the hero's own Watched button), flip
+            // the same flags on `heroItem` in place so the visible hero button
+            // reflects the new state immediately.
+            //
+            // Marking the fronted episode watched then makes the hero *stale*: it
+            // now describes something finished while Play still points at it. The
+            // resting hero is derived from watch state, so re-derive it — the page
+            // moves on to the next episode the way it would on a fresh open. A
+            // deep-linked episode stays pinned, since arriving from Continue
+            // Watching is an explicit request for that episode.
             .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
                 guard let mutation = MediaItemMutation.from(note) else { return }
                 if mutation.targets(heroItem) {
@@ -213,6 +220,10 @@ struct SeriesDetailView: View {
                           let played = mutation.played {
                     heroItem.isPlayed = played
                 }
+                guard initialEpisode == nil, heroItem.kind == .episode, heroItem.isPlayed else {
+                    return
+                }
+                Task { await resolveRestingHero(in: selectedSeasonID) }
             }
     }
 
@@ -711,9 +722,12 @@ struct SeriesDetailView: View {
                 recedeModel.recede()
                 onFocusEntered()
             },
-            onFocusChange: { focused in
-                if let focused, heroItem.id != focused.id { heroItem = focused }
-            },
+            // Deliberately no `onFocusChange` hero repointing. The hero describes
+            // whatever Play would play, which is a property of *watch state*, not
+            // of where the cursor happens to be resting — so browsing the rail
+            // leaves it alone. Focus was the wrong driver twice over: it made the
+            // hero disagree with the fixed sections below it, and iPadOS has no
+            // focus concept at all, so the behaviour could never exist there.
             onSelect: onPlay
         )
         .mediaItemActionContext(
@@ -985,6 +999,12 @@ struct SeriesDetailView: View {
 
     private var playTarget: MediaItem? {
         if heroItem.kind == .episode { return heroItem }
+        // The hero is the show — either nothing is watched or all of it is. Both
+        // mean "start from the beginning", so offer the first episode rather than
+        // `nextUp`, which returns the *finale* once everything is played.
+        if SeriesResume.isFinished(seasons: seasons, episodes: currentEpisodes) {
+            return currentEpisodes.first
+        }
         return SeriesResume.nextUp(in: currentEpisodes)
     }
 
@@ -1030,12 +1050,12 @@ struct SeriesDetailView: View {
         // No seasons at all (a flat "loose episode" show): just front any target
         // episode and let the loose-episode rail show.
         guard let id = resolvedInitialSeasonID() else {
-            await frontTargetEpisodeIfNeeded(in: nil)
+            await resolveRestingHero(in: nil)
             return
         }
         selectedSeasonID = id
         await viewModel.loadEpisodes(for: id)
-        await frontTargetEpisodeIfNeeded(in: id)
+        await resolveRestingHero(in: id)
     }
 
     /// Re-selects the season with `target`'s number on the freshly-switched server
@@ -1102,19 +1122,45 @@ struct SeriesDetailView: View {
         // No explicit hint (plain series open): land on the season the user is
         // watching, using the same next-up rule the rest of the app uses, applied
         // to the seasons themselves. Never Season 1 unless it genuinely is next up.
+        //
+        // A **finished** show is the exception: `nextUp` falls through to the last
+        // season when everything is watched, which would open on the finale. A
+        // finished series starts over instead — behaviourally identical to one
+        // never started — so it opens on the first real season. `restartSeason`
+        // skips specials, because season 0 sorts ahead of season 1 and "start
+        // from the beginning" should not land on a Christmas special.
+        if SeriesResume.isFinished(seasons: seasons, episodes: stampedLooseEpisodes) {
+            return SeriesResume.restartSeason(in: seasons)?.id ?? seasons.first?.id
+        }
         if let resume = SeriesResume.nextUp(in: seasons) { return resume.id }
         return seasons.first?.id
     }
 
-    /// After episodes load, replace the hero's tapped-episode placeholder with the
-    /// fully-loaded episode (richer overview/badges) so the hero and Play target
-    /// reflect complete metadata. No-op unless the page is targeting an episode —
-    /// a normal open keeps the stable series hero (the Play button still resumes
-    /// "next up"), so nothing swaps under the user after load.
+    /// Settles what the hero describes, once the episodes it needs are loaded.
+    ///
+    /// The hero is the subject of the Play button, so it follows **watch state**,
+    /// not focus: the episode to resume when there is one, the show itself when
+    /// there is not — either because nothing has been watched, or because all of
+    /// it has and the pointer is stale.
+    ///
+    /// A tapped episode outranks that. Arriving from Continue Watching is an
+    /// explicit request for *that* episode, so it is fronted even if the resume
+    /// point has since moved.
+    ///
+    /// Only ever resolves from an **authoritative** pool. A failed fetch caches an
+    /// empty list, and acting on that would pin the show fallback with no playable
+    /// target until the page was closed.
     @MainActor
-    private func frontTargetEpisodeIfNeeded(in seasonID: String?) async {
-        let pool = seasonID.flatMap { viewModel.episodes(for: $0) } ?? (seasons.isEmpty ? stampedLooseEpisodes : [])
-        
+    private func resolveRestingHero(in seasonID: String?) async {
+        let loadState = seasonID.map { viewModel.seasonLoadState(for: $0) }
+        let pool: [MediaItem]
+        if let loadState {
+            guard let authoritative = loadState.authoritativeEpisodes else { return }
+            pool = authoritative
+        } else {
+            pool = seasons.isEmpty ? stampedLooseEpisodes : []
+        }
+
         if let target = initialEpisode {
             if let loaded = pool.first(where: { $0.id == target.id }) {
                 heroItem = loaded
@@ -1126,10 +1172,13 @@ struct SeriesDetailView: View {
                 // same episode by its season/episode NUMBER on the new server.
                 heroItem = loaded
             }
-        } else if initialSeasonID != nil {
-            if let target = SeriesResume.nextUp(in: pool) {
-                heroItem = target
-            }
+        } else {
+            guard !pool.isEmpty else { return }
+            heroItem = SeriesResume.restingHero(
+                series: series,
+                seasons: seasons,
+                episodes: pool
+            )
         }
         updateRailTarget()
     }

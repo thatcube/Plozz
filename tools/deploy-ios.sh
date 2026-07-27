@@ -73,12 +73,16 @@ if [[ "$BRANDED" == "1" ]]; then
   [[ -z "$SLUG" ]] && SLUG="branch"
   export PLOZZ_ID_SUFFIX=".$SLUG"
   export PLOZZ_NAME_SUFFIX=" $SLUG"
+  # A fresh per-branch App ID can't auto-provision the canonical app's Push /
+  # iCloud / Associated Domains capabilities, so sign against the stripped
+  # entitlements (all three degrade gracefully — see the branded plist).
+  export PLOZZ_IOS_APP_ENTITLEMENTS="App/PlozziOS/PlozziOS.branded.entitlements"
   REGEN=1
   echo "▸ Branded build: installing separate app com.thatcube.Plozz.$SLUG (\"Plozz $SLUG\")"
   restore_canonical() {
     echo "▸ Restoring canonical project + Info.plists (keeping the tree clean)…"
     git checkout -- App/Resources/Info.plist App/PlozziOS/Info.plist 2>/dev/null || true
-    ( unset PLOZZ_ID_SUFFIX PLOZZ_NAME_SUFFIX; tools/generate-project.sh >/dev/null 2>&1 ) || true
+    ( unset PLOZZ_ID_SUFFIX PLOZZ_NAME_SUFFIX PLOZZ_IOS_APP_ENTITLEMENTS; tools/generate-project.sh >/dev/null 2>&1 ) || true
   }
   trap restore_canonical EXIT
 fi

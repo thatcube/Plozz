@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Branded (per-branch, side-by-side) iOS build entitlements — see tools/deploy-ios.sh
+  --branded. The iOS mirror of App/Resources/Plozz.branded.entitlements.
+
+  Deliberately EMPTY. A fresh per-branch App ID (com.thatcube.Plozz.<slug>) cannot
+  auto-provision the canonical app's capabilities, and Xcode fails the build rather
+  than warning:
+
+      Provisioning profile "iOS Team Provisioning Profile: *" doesn't include the
+      Associated Domains / Push Notifications / iCloud capability
+
+  So a per-branch dev build drops them. What that costs, and why it's acceptable
+  for a side-by-side test install:
+    * Push Notifications — CloudKit's silent wake-ups. Sync still works, it just
+      falls back to syncing on foreground (the behaviour tvOS already ships).
+    * iCloud / CloudKit + ubiquity-kvstore — cross-device config sync and the Sync
+      & Setup presence beacon go quiet. CloudConfigSyncService checks
+      `container.accountStatus()` and treats a failure as unavailable, so the app
+      runs normally, just device-local.
+    * Associated Domains — the applinks:plozz.app universal link won't route into
+      this branch's app. QR pairing from another device is the affected flow; the
+      canonical app still handles it.
+
+  A branded build is for testing THIS branch's changes side-by-side, so none of
+  these block that. Never point the canonical build at this file.
+-->
+<dict>
+</dict>
+</plist>

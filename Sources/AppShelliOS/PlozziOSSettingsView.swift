@@ -174,6 +174,13 @@ private struct PlozziOSSettingsSplitView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             ScrollView {
                 LazyVStack(spacing: 18) {
+                    // Live media-share scan/enrich progress. Renders nothing when
+                    // idle, so Settings is unchanged unless a share is working.
+                    ShareScanStatusHeader(
+                        status: appModel.shareScanStatus,
+                        shareIDs: appModel.mediaShareAccountIDs
+                    )
+
                     SettingsSectionGroup(deviceSettingsTitle) {
                         Button {
                             selection = .profiles
@@ -513,6 +520,12 @@ private struct PlozziOSSettingsCompactMenu: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 18) {
+                // Live media-share scan/enrich progress. Renders nothing when idle.
+                ShareScanStatusHeader(
+                    status: appModel.shareScanStatus,
+                    shareIDs: appModel.mediaShareAccountIDs
+                )
+
                 SettingsSectionGroup(deviceSettingsTitle) {
                 NavigationLink {
                     PlozziOSProfilesView(appModel: appModel)
@@ -957,18 +970,19 @@ private struct PlozziOSShareScanSection: View {
     var body: some View {
         SettingsSectionGroup("Library") {
             if let state, state.isBusy {
-                LabeledContent(state.phase) {
-                    if let detail = state.progressDetail {
-                        Text(detail)
-                            .monospacedDigit()
-                    } else {
-                        ProgressView()
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(state.phase)
+                            .font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 8)
+                        if let detail = state.progressDetail {
+                            Text(detail.trimmingCharacters(in: .whitespaces))
+                                .font(.subheadline)
+                                .monospacedDigit()
+                                .plozzForeground(.secondary)
+                        }
                     }
-                }
-                if let fraction = state.enrichFraction {
-                    ProgressView(value: fraction)
-                } else {
-                    ProgressView()
+                    ShareScanProgressBar(fraction: state.fraction)
                 }
             } else {
                 LabeledContent("Last scanned") {

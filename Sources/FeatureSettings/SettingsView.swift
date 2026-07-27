@@ -59,6 +59,10 @@ public struct SettingsView: View {
     @Namespace private var rootFocusScope
     @Environment(\.resetFocus) private var resetFocus
     @Environment(\.themePalette) private var palette
+    /// App-wide media-share scan/enrich status. Optional so previews/tests that
+    /// don't inject it don't crash. Drives the status card at the top of this
+    /// page — the home for progress that used to float over Home's top-right.
+    @Environment(ShareScanStatusModel.self) private var shareScanStatus: ShareScanStatusModel?
 
     /// Shared sizing for the two identity headers (This Apple TV + the active
     /// profile) so their avatar/icon and title read as the same component. The
@@ -323,6 +327,16 @@ public struct SettingsView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 36) {
+                    // Live media-share scan/enrich progress, when any share is
+                    // working. Sits above everything so it's the first thing the
+                    // page reports; renders nothing at all when idle. This is
+                    // where the old floating Home status pill went — Home stays
+                    // clear of it, and this is where you'd come to look.
+                    ShareScanStatusHeader(
+                        status: shareScanStatus,
+                        shareIDs: mediaShareAccountIDs
+                    )
+
                     // Device-shared settings come FIRST: servers + profile
                     // management belong to the whole Apple TV, not to you.
                     thisAppleTVSection
@@ -401,6 +415,18 @@ public struct SettingsView: View {
     }
 
     // MARK: - Profile container (header + all settings this profile owns)
+
+    /// Media-share account ids signed in on this Apple TV. Scoping the status
+    /// header to these means a removed share's late scanner event can't leave a
+    /// ghost row. NOT narrowed to the active profile's subset — scanning is a
+    /// device-level background job, and this heads the device-shared page.
+    private var mediaShareAccountIDs: Set<String> {
+        Set(
+            accounts
+                .filter { $0.server.provider == .mediaShare }
+                .map(\.id)
+        )
+    }
 
     /// One visual container that wraps the active profile's identity AND
     /// every setting it saves. The profile header is the *top* of the same

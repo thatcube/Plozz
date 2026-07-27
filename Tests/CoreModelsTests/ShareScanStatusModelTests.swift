@@ -204,4 +204,59 @@ final class ShareScanStatusModelTests: XCTestCase {
         reporter.scanDetailedProgress("s1", 42, 123)
         XCTAssertEqual(captured.get(), 123)
     }
+
+    // MARK: - Progress presentation (shared tvOS/iOS progress bar + badge)
+
+    func testFractionAndPercentTextOnlyExistWhenATotalIsKnown() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.scanProgress(shareID: "s1", directoriesScanned: 12, itemsFound: 340)
+        let scanning = model.state(forShareID: "s1")
+        XCTAssertNil(scanning?.fraction, "the directory walk has no knowable total — the bar runs indeterminate")
+        XCTAssertNil(scanning?.percentText)
+
+        model.scanFinished(shareID: "s1")
+        model.enrichStarted(shareID: "s1", total: 200)
+        model.enrichProgress(shareID: "s1", done: 50)
+        let enriching = model.state(forShareID: "s1")
+        XCTAssertEqual(enriching?.fraction, 0.25)
+        XCTAssertEqual(enriching?.percentText, "25%")
+    }
+
+    func testCompactDetailPrefersPercentThenLiveScanCounter() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.scanProgress(shareID: "s1", directoriesScanned: 12, itemsFound: 340)
+        XCTAssertEqual(model.state(forShareID: "s1")?.compactDetail, "340 items")
+
+        model.scanFinished(shareID: "s1")
+        model.enrichStarted(shareID: "s1", total: 4)
+        model.enrichProgress(shareID: "s1", done: 3)
+        XCTAssertEqual(model.state(forShareID: "s1")?.compactDetail, "75%")
+    }
+
+    func testCompactDetailFallsBackToFoldersThenPhase() {
+        var state = ShareScanState(name: "NAS", isScanning: true, directoriesScanned: 9)
+        XCTAssertEqual(state.compactDetail, "9 folders")
+
+        state.directoriesScanned = 0
+        XCTAssertEqual(state.compactDetail, "Scanning", "never render an empty badge")
+    }
+
+    func testDisplayNameNeverBlankWhenEnrichBeatsANamedScanStart() {
+        let model = ShareScanStatusModel()
+        model.enrichStarted(shareID: "s1", total: 10)
+        XCTAssertEqual(model.state(forShareID: "s1")?.displayName, "Media library")
+    }
+
+    func testBusyStatesCarryTheirShareIDForForEachIdentity() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.scanStarted(shareID: "s2", name: "Archive")
+        XCTAssertEqual(
+            model.busyStates(forShareIDs: ["s1", "s2"]).map(\.id),
+            ["s2", "s1"],
+            "ordered by display name (Archive, NAS), each carrying its own share id"
+        )
+    }
 }

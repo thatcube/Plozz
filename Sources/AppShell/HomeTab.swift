@@ -128,11 +128,6 @@ struct HomeTab: View {
                     }
                 ),
                 visibility: homeVisibility,
-                activeShareIDs: Set(
-                    accounts
-                        .filter { $0.account.server.provider == .mediaShare }
-                        .map(\.account.id)
-                ),
                 spoilerSettings: spoilerSettings,
                 heroSettings: heroSettings,
                 heroBackground: heroBackground,

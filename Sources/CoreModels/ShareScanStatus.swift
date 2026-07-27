@@ -4,7 +4,11 @@ import Observation
 /// Live status of a media share's background scan + enrichment, per share. Drives
 /// the "Updating library…" indicator on Home and the last-scanned line in Settings,
 /// so the otherwise-invisible foreground scan is legible to the user.
-public struct ShareScanState: Sendable, Equatable {
+public struct ShareScanState: Sendable, Equatable, Identifiable {
+    /// The media-share account id this state belongs to. Carried on the value (not
+    /// just as the model's dictionary key) so a list of busy states is directly
+    /// `ForEach`-able without the view having to re-thread ids alongside it.
+    public var shareID: String
     /// Display name of the share (for the banner text).
     public var name: String
     /// A directory walk is in progress.
@@ -26,7 +30,8 @@ public struct ShareScanState: Sendable, Equatable {
     public init(name: String, isScanning: Bool = false, isEnriching: Bool = false,
                 itemsFound: Int = 0, directoriesScanned: Int = 0,
                 enrichDone: Int = 0, enrichTotal: Int = 0,
-                lastScanAt: Date? = nil) {
+                lastScanAt: Date? = nil, shareID: String = "") {
+        self.shareID = shareID
         self.name = name
         self.isScanning = isScanning
         self.isEnriching = isEnriching
@@ -37,8 +42,18 @@ public struct ShareScanState: Sendable, Equatable {
         self.lastScanAt = lastScanAt
     }
 
+    /// Stable identity for `ForEach`. Falls back to the display name for states
+    /// built directly in previews/tests without an id.
+    public var id: String { shareID.isEmpty ? name : shareID }
+
     /// Busy = actively scanning or enriching (the window the indicator shows).
     public var isBusy: Bool { isScanning || isEnriching }
+
+    /// The share's name as the UI should print it. A safety-net event can create
+    /// a state before any named `scanStarted` arrives, so never show a blank.
+    public var displayName: String {
+        name.isEmpty ? "Media library" : name
+    }
 
     /// A short human phase label — what the share is doing right now. Scanning wins
     /// over enriching when (briefly) both are true, since the walk is the earlier,
@@ -80,6 +95,41 @@ public struct ShareScanState: Sendable, Equatable {
     public var enrichFraction: Double? {
         guard isEnriching, enrichTotal > 0 else { return nil }
         return min(1, Double(enrichDone) / Double(enrichTotal))
+    }
+
+    /// The single 0...1 completion a progress bar should draw, or `nil` when the
+    /// current phase has no knowable total (the directory walk) and the bar must
+    /// run indeterminate. Today only enrichment advertises a total; keeping the
+    /// name phase-neutral means a future scanner that *can* pre-count files only
+    /// has to fill this in — no UI change.
+    public var fraction: Double? { enrichFraction }
+
+    /// Whole-percent completion as text ("62%"), or `nil` while indeterminate.
+    /// Rendered with a monospaced-digit font by the shared progress views so the
+    /// trailing value can't jitter as it climbs.
+    public var percentText: String? {
+        guard let fraction else { return nil }
+        return "\(Int((fraction * 100).rounded()))%"
+    }
+
+    /// The shortest useful progress string for a space-constrained surface (a
+    /// library card badge): the percentage while enriching, else the live scan
+    /// counter. Falls back to the phase label when there's no number yet, so the
+    /// badge always says *something*.
+    public var compactDetail: String {
+        if let percentText { return percentText }
+        if isScanning {
+            if itemsFound > 0 { return "\(Self.decimal(itemsFound)) items" }
+            if directoriesScanned > 0 { return "\(Self.decimal(directoriesScanned)) folders" }
+        }
+        return phase
+    }
+
+    /// An SF Symbol for the current phase — a magnifier while walking the tree,
+    /// a wand while filling in metadata/artwork. Shared so Settings and the
+    /// library cards can't drift apart.
+    public var phaseSymbol: String {
+        isScanning ? "text.magnifyingglass" : "wand.and.sparkles"
     }
 
     private static func decimal(_ n: Int) -> String {
@@ -191,7 +241,8 @@ public final class ShareScanStatusModel {
 
     public func scanStarted(shareID: String, name: String) {
         guard !removedShareIDs.contains(shareID) else { return }
-        var state = byShare[shareID] ?? ShareScanState(name: name)
+        var state = byShare[shareID] ?? ShareScanState(name: name, shareID: shareID)
+        state.shareID = shareID
         state.name = name
         state.isScanning = true
         state.itemsFound = 0
@@ -226,7 +277,8 @@ public final class ShareScanStatusModel {
         guard !removedShareIDs.contains(shareID) else { return }
         // Create state if the enrich pass beat a (missed) scanStarted — the banner
         // should still reflect in-flight enrichment.
-        var state = byShare[shareID] ?? ShareScanState(name: "")
+        var state = byShare[shareID] ?? ShareScanState(name: "", shareID: shareID)
+        state.shareID = shareID
         state.isEnriching = true
         state.enrichTotal = total
         state.enrichDone = 0

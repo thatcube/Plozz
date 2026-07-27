@@ -151,14 +151,13 @@ public struct HomeView: View {
     @Environment(\.plozzMetrics) private var metrics
 
     /// App-wide media-share scan/enrich status (optional so previews/tests that
-    /// don't inject it don't crash). Drives the "Updating library…" banner.
+    /// don't inject it don't crash). Drives the per-library-tile progress badge;
+    /// the app-level summary now lives at the top of Settings.
     @Environment(ShareScanStatusModel.self) private var shareScanStatus: ShareScanStatusModel?
-    private let activeShareIDs: Set<String>
 
     public init(
         viewModel: HomeViewModel,
         visibility: HomeLibraryVisibilityModel,
-        activeShareIDs: Set<String>,
         spoilerSettings: SpoilerSettings = .default,
         heroSettings: HeroSettingsModel? = nil,
         heroBackground: HeroBackgroundSettingsModel,
@@ -193,7 +192,6 @@ public struct HomeView: View {
     ) {
         _viewModel = State(initialValue: viewModel)
         self.visibility = visibility
-        self.activeShareIDs = activeShareIDs
         self.spoilerSettings = spoilerSettings
         self.heroSettings = heroSettings
         self.heroBackground = heroBackground
@@ -428,16 +426,6 @@ public struct HomeView: View {
                     // then lands initial focus on the hero instead of a Continue
                     // Watching card, with no visible focus steal-back.
                     .focusScope(heroFocusScope)
-                    // The share scan/enrich status pill. Lives INSIDE the scroll
-                    // content (anchored to the content's top-trailing) so it sits in
-                    // the top-right corner and scrolls away with the page — over the
-                    // hero on hero pages, above the first row otherwise. Non-focusable
-                    // and hit-transparent so it never intercepts focus or taps.
-                    .overlay(alignment: .topTrailing) {
-                        scanBanner
-                            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                            .padding(.top, heroLayoutActive ? 56 : 12)
-                    }
                 }
                 // Never clip a focused card's lift, shadow or border.
                 .scrollClipDisabled()
@@ -556,86 +544,6 @@ public struct HomeView: View {
 
     private var shouldRefreshAsyncWatchHistory: Bool {
         heroSettings?.settings.requiresExternalWatchHistory ?? false
-    }
-
-    /// A subtle, non-focusable status pill shown while a media share is scanning or
-    /// enriching, so the otherwise-invisible foreground work is legible. Names the
-    /// share, its current phase (Scanning / Updating artwork), and live progress
-    /// (items found, or "N of M" enriched). Floats over the top-right of the scroll
-    /// content (no layout reflow) and scrolls away with the page. Absent when idle.
-    @ViewBuilder
-    private var scanBanner: some View {
-        if let status = shareScanStatus {
-            let activeStates = status.busyStates(forShareIDs: activeShareIDs)
-            if let primary = activeStates.first {
-            let multi = activeStates.count > 1
-            HStack(spacing: 12) {
-                // Determinate ring during enrichment (we know N of M); otherwise an
-                // indeterminate spinner (the scan total is unknown as it walks).
-                if let fraction = primary.enrichFraction, !multi {
-                    ProgressView(value: fraction)
-                        .progressViewStyle(.circular)
-                        .controlSize(.small)
-                } else {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .controlSize(.small)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(multi ? "\(activeStates.count) libraries" : Self.pillTitle(primary))
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    if let detail = Self.pillSubtitle(primary, multi: multi) {
-                        Text(detail)
-                            .font(.caption2)
-                            .monospacedDigit()
-                            .plozzForeground(.secondary)
-                    }
-                }
-                // The subtitle is padded to a fixed width per pass, so leading-align
-                // it and let it keep its own width — nothing reflows as the counter
-                // climbs.
-                .fixedSize(horizontal: true, vertical: false)
-            }
-            .padding(.leading, 18)
-            .padding(.trailing, 28)
-            .padding(.vertical, 10)
-            .background(.thinMaterial, in: Capsule())
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .allowsHitTesting(false)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Self.pillAccessibilityLabel(activeStates))
-            // Animate ONLY on structural changes (phase, share, single↔multi), never
-            // on each progress tick — otherwise every count update animates the
-            // pill's width and it slides side to side. With the fixed-width digits
-            // above, count updates don't change the width at all.
-            .animation(.easeInOut(duration: 0.25), value: primary.phase)
-            .animation(.easeInOut(duration: 0.25), value: primary.name)
-            .animation(.easeInOut(duration: 0.25), value: multi)
-            }
-        }
-    }
-
-    /// The pill's bold line: the share being updated (what media).
-    private static func pillTitle(_ state: ShareScanState) -> String {
-        state.name.isEmpty ? "Media library" : state.name
-    }
-
-    /// The pill's secondary line: the current phase plus any live count.
-    private static func pillSubtitle(_ state: ShareScanState, multi: Bool) -> String? {
-        if multi { return "Updating…" }
-        let phase = state.phase
-        guard !phase.isEmpty else { return nil }
-        if let detail = state.progressDetail { return "\(phase) · \(detail)" }
-        return phase
-    }
-
-    /// A flattened, spoken description of the pill for VoiceOver.
-    private static func pillAccessibilityLabel(_ states: [ShareScanState]) -> String {
-        guard let primary = states.first else { return "" }
-        if states.count > 1 { return "Updating \(states.count) libraries" }
-        let sub = pillSubtitle(primary, multi: false).map { ", \($0)" } ?? ""
-        return "\(pillTitle(primary))\(sub)"
     }
 
     /// How far the rows are pulled up so the first row (Continue Watching) peeks
@@ -852,8 +760,7 @@ public struct HomeView: View {
                         LibraryCardView(
                             aggregated: aggregated,
                             subtitle: Self.librarySubtitle(for: aggregated, in: libraries),
-                            isUpdating: aggregated.providerKind == .mediaShare
-                                && (shareScanStatus?.state(forShareID: aggregated.accountID)?.isBusy ?? false),
+                            scanStatus: shareScanStatus,
                             action: { onSelectLibrary(aggregated.library) }
                         )
                     }
@@ -1073,10 +980,10 @@ enum HomeHeroDisplayResolver {
 private struct LibraryCardView: View {
     let aggregated: AggregatedLibrary
     let subtitle: String
-    /// When `true`, the card wears a subtle corner spinner — this library belongs
-    /// to a media share that's currently scanning/enriching, so its contents and
-    /// artwork are still filling in. Purely decorative (non-focusable).
-    var isUpdating: Bool = false
+    /// The app-wide media-share scan status, forwarded to the tile's progress
+    /// badge. The badge does its own lookup, so high-frequency progress ticks
+    /// invalidate only the badge — never this card or the Home page.
+    var scanStatus: ShareScanStatusModel?
     let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -1186,22 +1093,19 @@ private struct LibraryCardView: View {
                 placeholder
             }
         }
-        // A media share still filling in shows a spinner CENTERED in the tile —
-        // right where the library glyph would sit (the glyph is hidden while
-        // updating, see `placeholder`) — a quiet "this is updating" hint that
-        // matches the Home status pill, without a repetitive text label on each card.
+        // A media share still filling in wears the shared progress badge along the
+        // BOTTOM of the tile — phase, live counter and a real progress bar (a
+        // determinate fill while artwork is being enriched, a sweeping band while
+        // the directory walk's total is still unknown). Same component on
+        // iOS/iPadOS, so a library tile reports identically on both platforms.
         .overlay {
-            if isUpdating {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .controlSize(.large)
-                    .scaleEffect(1.1)
-                    .tint(palette.secondaryText.opacity(0.7))
-                    .transition(.opacity)
-                    .accessibilityHidden(true)
-            }
+            LibraryScanProgressBadge(
+                status: scanStatus,
+                shareID: aggregated.providerKind == .mediaShare
+                    ? aggregated.accountID
+                    : nil
+            )
         }
-        .animation(.easeInOut(duration: 0.25), value: isUpdating)
     }
 
     /// Themed empty-state for an imageless library: the shared ``ThemePalette/fill``
@@ -1218,13 +1122,9 @@ private struct LibraryCardView: View {
     private var placeholder: some View {
         ZStack {
             Color.clear
-            // The centered updating spinner takes the glyph's place, so hide the
-            // glyph while a share is updating (see `artwork`'s centered overlay).
-            if !isUpdating {
-                Image(systemName: librarySymbol)
-                    .font(.system(size: 64, weight: .semibold))
-                    .foregroundStyle(palette.tertiaryText)
-            }
+            Image(systemName: librarySymbol)
+                .font(.system(size: 64, weight: .semibold))
+                .foregroundStyle(palette.tertiaryText)
         }
     }
 

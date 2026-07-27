@@ -1,4 +1,5 @@
 #if os(iOS)
+import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureProfiles
@@ -15,6 +16,11 @@ struct PlozziOSFirstRunView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var displayedStep: PlozziOSAppModel.FirstRunStep
+    @State private var direction: OnboardingNavigationDirection = .forward
+    /// The Plex-user step clears the model's selection before the next step is
+    /// scheduled, so hold the last real payload to render from. Without it the
+    /// step blanks for a frame mid-transition.
+    @State private var lastPlexSelection: PlexHomeUsersModel.PendingPlexUserSelection?
 
     init(
         step: PlozziOSAppModel.FirstRunStep?,
@@ -28,33 +34,34 @@ struct PlozziOSFirstRunView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                switch displayedStep {
-                case .confirmProfile:
-                    PlozziOSFirstProfileView(appModel: appModel)
-                case .theme:
-                    PlozziOSThemeWelcomeView(appModel: appModel)
-                }
-            }
-            .id(displayedStep)
-            .geometryGroup()
-            // Same motion the tvOS onboarding flow uses, so the two platforms
-            // move alike and honour Reduce Motion the same way.
-            .transition(
-                OnboardingPageMotion.transition(
-                    direction: .forward,
-                    reduceMotion: reduceMotion
+        ZStack {
+            stepContent
+                .id(displayedStep)
+                .geometryGroup()
+                // Same motion the tvOS onboarding flow uses, so the two
+                // platforms move alike and honour Reduce Motion the same way.
+                .transition(
+                    OnboardingPageMotion.transition(
+                        direction: direction,
+                        reduceMotion: reduceMotion
+                    )
                 )
-            )
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: step) { _, newStep in
             // nil means the flow finished; keep the current screen rendered so
             // the cover slides away over it rather than over an empty view.
             guard let newStep, newStep != displayedStep else { return }
+            direction = newStep.order >= displayedStep.order ? .forward : .backward
             withAnimation(OnboardingPageMotion.animation(reduceMotion: reduceMotion)) {
                 displayedStep = newStep
             }
+        }
+        .onChange(of: appModel.plexHomeUsers.pendingPlexUserSelection) { _, selection in
+            if let selection { lastPlexSelection = selection }
+        }
+        .task {
+            lastPlexSelection = appModel.plexHomeUsers.pendingPlexUserSelection
         }
         .scrollContentBackground(.hidden)
         .background { AppBackground(palette: palette) }
@@ -63,6 +70,34 @@ struct PlozziOSFirstRunView: View {
         .preferredColorScheme(palette.isLight ? .light : .dark)
         .toolbarBackground(.hidden, for: .navigationBar)
         .interactiveDismissDisabled()
+    }
+
+    @ViewBuilder
+    private var stepContent: some View {
+        switch displayedStep {
+        case .plexUser:
+            if let selection = appModel.plexHomeUsers.pendingPlexUserSelection
+                ?? lastPlexSelection {
+                PlozziOSPlexUserSelectionView(
+                    selection: selection,
+                    onSelect: appModel.selectPlexUserDuringOnboarding
+                )
+            }
+        case .libraries:
+            if let selection = appModel.pendingLibrarySelection {
+                PlozziOSLibrarySelectionView(
+                    accounts: appModel.accountsProviders.resolvedAccounts(
+                        withIDs: selection.accountIDs
+                    ),
+                    visibility: appModel.settings.homeVisibility,
+                    onContinue: appModel.completeLibrarySelection
+                )
+            }
+        case .confirmProfile:
+            PlozziOSFirstProfileView(appModel: appModel)
+        case .theme:
+            NavigationStack { PlozziOSThemeWelcomeView(appModel: appModel) }
+        }
     }
 
     private var palette: ThemePalette {

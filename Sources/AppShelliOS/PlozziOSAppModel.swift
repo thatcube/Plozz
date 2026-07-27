@@ -36,11 +36,24 @@ final class PlozziOSAppModel {
         let accountIDs: [String]
     }
 
-    enum FirstRunStep: String, Identifiable {
+    /// Every screen of the post-sign-in first-run sequence, in order.
+    ///
+    /// One enum drives the whole flow so it can live in a SINGLE presentation:
+    /// the Plex-user and library steps used to be their own sheets, so handing
+    /// off between them dismissed to Home and re-presented. Outside first run
+    /// those two screens still present individually (adding a server later is
+    /// not a flow), which is why the model only populates this while first-run
+    /// setup is actually running.
+    enum FirstRunStep: String, Identifiable, CaseIterable {
+        case plexUser
+        case libraries
         case confirmProfile
         case theme
 
         var id: Self { self }
+
+        /// Drives the direction of the in-flow transition.
+        var order: Int { Self.allCases.firstIndex(of: self) ?? 0 }
     }
 
     let accountsProviders: AccountsProvidersModel
@@ -1253,6 +1266,10 @@ final class PlozziOSAppModel {
         if let selection = queuedPlexUserSelection {
             queuedPlexUserSelection = nil
             plexHomeUsers.presentUserSelection(selection)
+            // Mirrors schedulePlexUserSelection: this drain path bypasses it,
+            // so it has to enter the flow itself or the step would present as a
+            // bare sheet outside the cover.
+            if selection.isFirstRun { pendingFirstRunStep = .plexUser }
         } else if let accountIDs = queuedLibraryAccountIDs {
             let beginsFirstRun = queuedLibrarySelectionBeginsFirstRun
             queuedLibraryAccountIDs = nil
@@ -1268,7 +1285,10 @@ final class PlozziOSAppModel {
         pendingLibrarySelection = nil
         if beginsFirstRunAfterLibrarySelection {
             beginsFirstRunAfterLibrarySelection = false
-            scheduleFirstRunStep(.confirmProfile)
+            // Already inside the flow cover, so advance in place. Going through
+            // scheduleFirstRunStep would yield a runloop turn to let a sheet
+            // dismiss first — which is exactly the gap that flashed Home.
+            advanceFirstRunStep(to: .confirmProfile)
         } else if appliesPlexIdentityAfterLibrarySelection {
             appliesPlexIdentityAfterLibrarySelection = false
             plexHomeUsers.ensurePlexIdentityForActiveProfile()
@@ -1276,7 +1296,7 @@ final class PlozziOSAppModel {
     }
 
     func confirmFirstRunProfile() {
-        pendingFirstRunStep = .theme
+        advanceFirstRunStep(to: .theme)
     }
 
     func finishFirstRunThemeSelection() {
@@ -1501,11 +1521,17 @@ final class PlozziOSAppModel {
         let activeIDs = Set(accountsProviders.accounts.map(\.id))
         let available = accountIDs.filter(activeIDs.contains)
         guard !available.isEmpty else {
+            let wasFirstRun = beginsFirstRunAfterLibrarySelection
             beginsFirstRunAfterLibrarySelection = false
             appliesPlexIdentityAfterLibrarySelection = false
+            // Nothing to choose from. Previously this just meant no sheet
+            // appeared; now the flow is already on screen, so it has to be moved
+            // on or it would sit on a step that can never complete.
+            if wasFirstRun { advanceFirstRunStep(to: .confirmProfile) }
             return
         }
         pendingLibrarySelection = PendingLibrarySelection(accountIDs: available)
+        if beginsFirstRunAfterLibrarySelection { pendingFirstRunStep = .libraries }
     }
 
     private func preparePostShareOnboarding(
@@ -1525,6 +1551,14 @@ final class PlozziOSAppModel {
             accountIDs: [prepared.account.id],
             beginsFirstRun: beginsFirstRun
         )
+    }
+
+    /// Move to `step` within the already-presented flow. Unlike
+    /// `scheduleFirstRunStep` this never yields, because nothing has to be
+    /// dismissed first — the cover is already on screen.
+    private func advanceFirstRunStep(to step: FirstRunStep) {
+        guard !profiles.firstRunProfileSetupComplete else { return }
+        pendingFirstRunStep = step
     }
 
     private func scheduleFirstRunStep(_ step: FirstRunStep) {
@@ -1554,6 +1588,9 @@ final class PlozziOSAppModel {
             queuedPlexUserSelection = selection
         } else {
             plexHomeUsers.presentUserSelection(selection)
+            // First run renders this step inside the flow cover; the standalone
+            // sheet stays for the later add-a-server case.
+            if selection.isFirstRun { pendingFirstRunStep = .plexUser }
         }
     }
 
@@ -1561,7 +1598,12 @@ final class PlozziOSAppModel {
         accountIDs: [String],
         beginsFirstRun: Bool = false
     ) {
-        guard !accountIDs.isEmpty else { return }
+        guard !accountIDs.isEmpty else {
+            // Same dead-end guard as presentLibrarySelection: don't strand a
+            // presented flow on a step with nothing in it.
+            if beginsFirstRun { advanceFirstRunStep(to: .confirmProfile) }
+            return
+        }
         beginsFirstRunAfterLibrarySelection = beginsFirstRun
         postAddPresentationGeneration &+= 1
         let generation = postAddPresentationGeneration

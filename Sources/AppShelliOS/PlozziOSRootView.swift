@@ -296,7 +296,10 @@ public struct PlozziOSRootView: View {
     {
         Binding(
             get: {
-                showingSettings
+                // Suppressed during first run: the flow cover renders this step
+                // inline, so presenting it here too would stack a sheet on the
+                // cover (and reintroduce the dismiss-to-Home hand-off).
+                showingSettings || appModel.pendingFirstRunStep != nil
                     ? nil
                     : appModel.plexHomeUsers.pendingPlexUserSelection
             },
@@ -329,7 +332,13 @@ public struct PlozziOSRootView: View {
         Binding<PlozziOSAppModel.PendingLibrarySelection?>
     {
         Binding(
-            get: { showingSettings ? nil : appModel.pendingLibrarySelection },
+            get: {
+                // Same as the Plex-user step: inline during first run, its own
+                // sheet when adding a server later.
+                showingSettings || appModel.pendingFirstRunStep != nil
+                    ? nil
+                    : appModel.pendingLibrarySelection
+            },
             set: { selection in
                 if selection == nil {
                     appModel.completeLibrarySelection()

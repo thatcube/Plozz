@@ -50,9 +50,29 @@ private struct PlozziOSFirstProfileView: View {
                 VStack(spacing: 8) {
                     Text(profile.name)
                         .font(.largeTitle.bold())
-                    Text("We created this profile from your first media account.")
+                    Text("We created this profile from your first media account. Rename it or change the photo any time.")
                         .plozzForeground(.secondary)
                         .multilineTextAlignment(.center)
+                }
+
+                VStack(spacing: 12) {
+                    Text("Add a profile for anyone else in Settings — each one keeps its own:")
+                        .font(.subheadline)
+                        .plozzForeground(.secondary)
+                        .multilineTextAlignment(.center)
+
+                    PlozziOSFirstRunHighlight(
+                        systemImage: "house.fill",
+                        text: "Personal Home rows and library visibility"
+                    )
+                    PlozziOSFirstRunHighlight(
+                        systemImage: "externaldrive.fill",
+                        text: "Choose which media sources each profile uses"
+                    )
+                    PlozziOSFirstRunHighlight(
+                        systemImage: "arrow.down.circle.fill",
+                        text: "Separate watch history and downloads"
+                    )
                 }
 
                 VStack(spacing: 12) {
@@ -71,9 +91,9 @@ private struct PlozziOSFirstProfileView: View {
                     .frame(maxWidth: .infinity)
                 }
             }
-            .frame(maxWidth: 520)
+            .frame(maxWidth: 560)
             .padding(.horizontal, 24)
-            .padding(.vertical, 56)
+            .padding(.vertical, 44)
             .frame(maxWidth: .infinity)
         }
         .navigationTitle("Your Profile")
@@ -152,6 +172,25 @@ private struct PlozziOSThemeWelcomeView: View {
         }
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct PlozziOSFirstRunHighlight: View {
+    let systemImage: String
+    let text: LocalizedStringKey
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(.tint)
+                .frame(width: 30)
+            Text(text)
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 }
 

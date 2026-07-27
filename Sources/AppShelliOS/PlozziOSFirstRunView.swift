@@ -6,17 +6,54 @@ import Foundation
 import SwiftUI
 
 struct PlozziOSFirstRunView: View {
-    let step: PlozziOSAppModel.FirstRunStep
+    /// Optional so the view can hold the last real step on screen while the cover
+    /// dismisses — otherwise the final step would blank out before the animation
+    /// finished, flashing Home.
+    let step: PlozziOSAppModel.FirstRunStep?
     let appModel: PlozziOSAppModel
     let systemColorScheme: ColorScheme
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var displayedStep: PlozziOSAppModel.FirstRunStep
+
+    init(
+        step: PlozziOSAppModel.FirstRunStep?,
+        appModel: PlozziOSAppModel,
+        systemColorScheme: ColorScheme
+    ) {
+        self.step = step
+        self.appModel = appModel
+        self.systemColorScheme = systemColorScheme
+        _displayedStep = State(initialValue: step ?? .confirmProfile)
+    }
+
     var body: some View {
         NavigationStack {
-            switch step {
-            case .confirmProfile:
-                PlozziOSFirstProfileView(appModel: appModel)
-            case .theme:
-                PlozziOSThemeWelcomeView(appModel: appModel)
+            ZStack {
+                switch displayedStep {
+                case .confirmProfile:
+                    PlozziOSFirstProfileView(appModel: appModel)
+                case .theme:
+                    PlozziOSThemeWelcomeView(appModel: appModel)
+                }
+            }
+            .id(displayedStep)
+            .geometryGroup()
+            // Same motion the tvOS onboarding flow uses, so the two platforms
+            // move alike and honour Reduce Motion the same way.
+            .transition(
+                OnboardingPageMotion.transition(
+                    direction: .forward,
+                    reduceMotion: reduceMotion
+                )
+            )
+        }
+        .onChange(of: step) { _, newStep in
+            // nil means the flow finished; keep the current screen rendered so
+            // the cover slides away over it rather than over an empty view.
+            guard let newStep, newStep != displayedStep else { return }
+            withAnimation(OnboardingPageMotion.animation(reduceMotion: reduceMotion)) {
+                displayedStep = newStep
             }
         }
         .scrollContentBackground(.hidden)

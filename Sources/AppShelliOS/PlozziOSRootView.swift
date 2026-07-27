@@ -227,11 +227,13 @@ public struct PlozziOSRootView: View {
             )
             .preferredColorScheme(addServerPresentationColorScheme)
         }
-        .fullScreenCover(
-            item: firstRunStepBinding
-        ) { step in
+        // Presented ONCE for the whole first-run flow, not per step. Keyed by
+        // `item:` the cover tore down and rebuilt on every step change — because
+        // FirstRunStep is its own Identifiable id — so the flow dismissed to
+        // Home and re-presented between screens. Steps now cross-fade inside it.
+        .fullScreenCover(isPresented: firstRunPresentedBinding) {
             PlozziOSFirstRunView(
-                step: step,
+                step: appModel.pendingFirstRunStep,
                 appModel: appModel,
                 systemColorScheme: systemColorScheme
             )
@@ -336,11 +338,11 @@ public struct PlozziOSRootView: View {
         )
     }
 
-    private var firstRunStepBinding:
-        Binding<PlozziOSAppModel.FirstRunStep?>
-    {
+    /// True while ANY first-run step is pending. The specific step is read inside
+    /// the cover so changing it animates in place instead of re-presenting.
+    private var firstRunPresentedBinding: Binding<Bool> {
         Binding(
-            get: { appModel.pendingFirstRunStep },
+            get: { appModel.pendingFirstRunStep != nil },
             set: { _ in }
         )
     }

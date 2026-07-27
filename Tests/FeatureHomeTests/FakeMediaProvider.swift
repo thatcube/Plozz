@@ -37,6 +37,10 @@ final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting
     /// Optional per-call responses for a parent. The first request gets the first
     /// array, the second gets the second, and later requests reuse the last.
     var childrenResponsesByParent: [String: [[MediaItem]]]?
+    /// Parents whose `children(of:)` should throw, and on which call numbers.
+    /// Lets a test distinguish a season that genuinely has no episodes from one
+    /// whose request failed — they otherwise look identical downstream.
+    var childrenFailuresByParent: [String: Set<Int>]?
     /// How many times `children(of:)` was called for each parent id.
     private var _childrenCallCount: [String: Int] = [:]
     var childrenCallCount: [String: Int] { withLock { _childrenCallCount } }
@@ -135,6 +139,9 @@ final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting
         }
         if let gate = childrenGate?[itemID] {
             await gate(callNumber)
+        }
+        if childrenFailuresByParent?[itemID]?.contains(callNumber) == true {
+            throw AppError.serverUnreachable
         }
         if let sequencedResponse {
             return sequencedResponse

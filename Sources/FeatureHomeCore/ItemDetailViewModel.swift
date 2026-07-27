@@ -6,6 +6,28 @@ import MetadataKit
 import RatingsService
 import ProviderTrailers
 
+/// How much a season's cached episode list can be trusted.
+///
+/// A failed fetch and a genuinely empty season both cache `[]` — deliberately, so
+/// neither re-requests on every focus change — but only one of them is an answer.
+/// Rendering can treat them alike; anything *deciding* from the emptiness cannot,
+/// or a single dropped request reads as "this season has no episodes" for as long
+/// as the page stays open.
+public enum SeasonLoadState: Equatable, Sendable {
+    /// Never requested.
+    case notLoaded
+    /// The server answered. An empty array here means the season really is empty.
+    case loaded([MediaItem])
+    /// The request failed. The cached list is a placeholder, not an answer.
+    case failed
+
+    /// The episodes when they are authoritative, else `nil`.
+    public var authoritativeEpisodes: [MediaItem]? {
+        if case let .loaded(episodes) = self { return episodes }
+        return nil
+    }
+}
+
 /// Loads full detail for an item plus its children (episodes/seasons), and
 /// asynchronously enriches it with external ratings (IMDb/RT/Metacritic).
 @MainActor
@@ -31,6 +53,18 @@ public final class ItemDetailViewModel {
     /// season is shown/focused and cached so re-focusing a tab is instant. Keyed
     /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
     public private(set) var seasonEpisodes: [String: [MediaItem]] = [:]
+    /// Seasons whose last fetch failed. Their entry in ``seasonEpisodes`` is an
+    /// empty array — cached deliberately, so a season that genuinely cannot be
+    /// read does not re-request on every focus change — but that empty list is a
+    /// placeholder, not an answer. Anything deciding what to show from "this
+    /// season has no episodes" has to be able to tell the two apart, or one
+    /// dropped request looks exactly like a season that is really empty.
+    ///
+    /// Deliberately not observed: it is always written in the same turn as
+    /// ``seasonEpisodes``, which is, so a view re-reading load state on that
+    /// change already sees the current value. Tracking it too would spend one of
+    /// this type's observable-property budget for no additional invalidation.
+    @ObservationIgnored private var seasonLoadFailures: Set<String> = []
     /// Seasons painted from the stale-while-revalidate snapshot. They render
     /// instantly, but the first `loadEpisodes` must still fetch live provider state
     /// so watched/resume changes made since the snapshot are not frozen on revisit.
@@ -747,6 +781,20 @@ public final class ItemDetailViewModel {
         seasonEpisodes[seasonID]
     }
 
+    /// How much a season's episode list can be trusted.
+    ///
+    /// ``episodes(for:)`` returns the cached array either way, which is right for
+    /// rendering — an empty rail is an empty rail. But anything *deciding* from
+    /// that emptiness (which episode to resume, whether a show has been started)
+    /// must not act on a dropped request as though the season were genuinely
+    /// empty, or one bad moment on the network pins the wrong answer for as long
+    /// as the page stays open.
+    public func seasonLoadState(for seasonID: String) -> SeasonLoadState {
+        if seasonLoadFailures.contains(seasonID) { return .failed }
+        guard let episodes = seasonEpisodes[seasonID] else { return .notLoaded }
+        return .loaded(episodes)
+    }
+
     /// Starts the SPECULATIVE off-critical-path enrichment for `item` as
     /// cancellable work: cross-server server-picker discovery and alternate-source
     /// watch-state. Crucially `load()` does NOT await this — so navigating away
@@ -1154,6 +1202,7 @@ public final class ItemDetailViewModel {
         loadedSeasonIDs.append(contentsOf: seasonLoads.keys.filter { !loadedSeasonIDs.contains($0) })
         cancelSeasonLoads(retryWaiters: true)
         seasonEpisodes = [:]
+        seasonLoadFailures = []
         snapshotRestoredSeasonIDs = []
         for seasonID in loadedSeasonIDs {
             guard !Task.isCancelled, isCurrent() else { return }
@@ -1352,6 +1401,7 @@ public final class ItemDetailViewModel {
         seasonLoadingResumeSourceGeneration = sourceGeneration
         cancelSeasonLoads()
         seasonEpisodes = [:]
+        seasonLoadFailures = []
         snapshotRestoredSeasonIDs = []
         preselectedSeasonID = nil
 
@@ -1398,6 +1448,7 @@ public final class ItemDetailViewModel {
         // Drop the old server's per-season episode caches so the rail reloads from
         // the new server (its ids differ); the season list reloads via reload().
         seasonEpisodes = [:]
+        seasonLoadFailures = []
         snapshotRestoredSeasonIDs = []
         preselectedSeasonID = nil
 
@@ -1479,7 +1530,16 @@ public final class ItemDetailViewModel {
                 load = existing
             } else {
                 let requiresLiveRefresh = snapshotRestoredSeasonIDs.remove(seasonID) != nil
-                if seasonEpisodes[seasonID] != nil, !requiresLiveRefresh { return }
+                // A season whose fetch failed holds a placeholder `[]`, not an
+                // answer, so it stays eligible for another attempt: without this
+                // one dropped request would leave the season permanently empty
+                // for as long as the page is open. Retries are still bounded —
+                // the caller reaches here on discrete events (open, season
+                // change, refresh), not on every focus move.
+                let previousAttemptFailed = seasonLoadFailures.contains(seasonID)
+                if seasonEpisodes[seasonID] != nil, !requiresLiveRefresh, !previousAttemptFailed {
+                    return
+                }
                 let provider = activeProvider
                 let token = UUID()
                 load = SeasonLoad(token: token)
@@ -1490,12 +1550,21 @@ public final class ItemDetailViewModel {
                         }
                         load?.finish()
                     }
-                    let episodes = (try? await provider.children(of: seasonID)) ?? []
+                    // Distinguish "the server says this season is empty" from
+                    // "the request failed": both cache `[]` so neither retries on
+                    // every focus change, but only the first is an answer.
+                    let fetched = try? await provider.children(of: seasonID)
+                    let episodes = fetched ?? []
                     guard !Task.isCancelled,
                           let self,
                           self.sourceGeneration == loadSourceGeneration,
                           self.activeItemID == sourceItemID,
                           self.activeSourceAccountID == sourceAccountID else { return }
+                    if fetched == nil {
+                        self.seasonLoadFailures.insert(seasonID)
+                    } else {
+                        self.seasonLoadFailures.remove(seasonID)
+                    }
                     self.seasonEpisodes[seasonID] = self.stampSeriesTMDb(into: episodes.map(self.tagged))
                     self.persistSnapshot()
                 }

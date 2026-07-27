@@ -50,12 +50,21 @@ private struct PlozziOSFirstProfileView: View {
         GeometryReader { proxy in
             ScrollView {
                 VStack(spacing: 32) {
-                    editableAvatar
+                    // Edit sits with the thing it edits, and is a stock bordered
+                    // button so it reads as neutral next to the prominent CTA.
+                    VStack(spacing: 16) {
+                        PlozziOSProfileAvatar(profile: profile, size: 128)
+
+                        Button("Edit") { editing = true }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            .accessibilityHint("Rename this profile or change its picture")
+                    }
 
                     VStack(spacing: 8) {
                         Text(profile.name)
                             .font(.largeTitle.bold())
-                        Text("We created this profile from your first media account. Tap the photo to rename it or pick a different picture.")
+                        Text("We created this profile from your first media account. Rename it or change the photo any time.")
                             .plozzForeground(.secondary)
                             .multilineTextAlignment(.center)
                     }
@@ -90,35 +99,6 @@ private struct PlozziOSFirstProfileView: View {
         }
     }
 
-    /// The avatar IS the edit control, labelled with the word "Edit" on a neutral
-    /// capsule straddling its lower edge. Neutral rather than accent-coloured so
-    /// it stays subordinate to "Looks Good" — that button is the screen's only
-    /// call to action, and a second blue control would compete with it.
-    private var editableAvatar: some View {
-        Button {
-            editing = true
-        } label: {
-            PlozziOSProfileAvatar(profile: profile, size: 128)
-                .overlay(alignment: .bottom) {
-                    Text("Edit")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(.regularMaterial, in: Capsule())
-                        .overlay(
-                            Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-                        )
-                        .offset(y: 12)
-                }
-                // Room for the capsule to hang past the avatar without the name
-                // below closing the gap on it.
-                .padding(.bottom, 12)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Edit profile")
-        .accessibilityHint("Rename this profile or change its picture")
-    }
 }
 
 private struct PlozziOSThemeWelcomeView: View {

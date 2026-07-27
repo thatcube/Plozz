@@ -19,17 +19,15 @@ public enum SkipInterval: Int, Codable, CaseIterable, Hashable, Sendable {
     /// Interval in seconds.
     public var seconds: TimeInterval { TimeInterval(rawValue) }
 
-    /// Human-readable label for the settings picker (e.g. "10 seconds").
+    /// Human-readable label for the settings picker (e.g. "10 sec").
+    ///
+    /// Formatted rather than translated: `Duration`'s units style already knows
+    /// how every locale abbreviates seconds, so this needs no catalog entry and
+    /// can't drift from the platform's own wording.
     public var title: String {
-        switch self {
-        case .one:     return "1 sec"
-        case .three:   return "3 sec"
-        case .five:    return "5 sec"
-        case .ten:     return "10 sec"
-        case .fifteen: return "15 sec"
-        case .thirty:  return "30 sec"
-        case .sixty:   return "60 sec"
-        }
+        Duration.seconds(rawValue).formatted(
+            .units(allowed: [.seconds], width: .abbreviated)
+        )
     }
 
     /// SF Symbol name for the forward-skip glyph (e.g. `goforward.10`). Falls

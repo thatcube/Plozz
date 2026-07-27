@@ -83,8 +83,9 @@ final class ProfileModelTests: XCTestCase {
     func testAvatarSymbolCategoriesAreNonEmpty() {
         XCTAssertFalse(Profile.avatarSymbolCategories.isEmpty)
         for category in Profile.avatarSymbolCategories {
-            XCTAssertFalse(category.title.isEmpty)
-            XCTAssertFalse(category.symbols.isEmpty, "\(category.title) has no symbols")
+            XCTAssertFalse(category.id.isEmpty)
+            XCTAssertFalse(String(localized: category.title).isEmpty)
+            XCTAssertFalse(category.symbols.isEmpty, "\(category.id) has no symbols")
         }
     }
 
@@ -101,10 +102,11 @@ final class ProfileModelTests: XCTestCase {
     func testEmojiCategoriesAreEightWideAndNonEmpty() {
         XCTAssertFalse(Profile.avatarEmojiCategories.isEmpty)
         for category in Profile.avatarEmojiCategories {
-            XCTAssertFalse(category.title.isEmpty)
-            XCTAssertFalse(category.emojis.isEmpty, "\(category.title) has no emoji")
+            XCTAssertFalse(category.id.isEmpty)
+            XCTAssertFalse(String(localized: category.title).isEmpty)
+            XCTAssertFalse(category.emojis.isEmpty, "\(category.id) has no emoji")
             // Laid out 8 per row; a multiple of 8 keeps rows clean.
-            XCTAssertEqual(category.emojis.count % 8, 0, "\(category.title) should be a multiple of 8")
+            XCTAssertEqual(category.emojis.count % 8, 0, "\(category.id) should be a multiple of 8")
         }
     }
 
@@ -121,7 +123,7 @@ final class ProfileModelTests: XCTestCase {
     }
 
     func testAvailableEmojisFilterByOS() {
-        let cat = AvatarEmojiCategory(title: "T", emojis: [
+        let cat = AvatarEmojiCategory(id: "t", title: "T", emojis: [
             AvatarEmoji("😎"), AvatarEmoji("🫩", minMajor: 18, minMinor: 4)
         ])
         XCTAssertEqual(cat.availableEmojis(osMajor: 18, osMinor: 0).map(\.value), ["😎"])

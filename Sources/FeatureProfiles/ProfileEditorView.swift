@@ -932,7 +932,7 @@ public struct ProfileEditorView: View {
     /// L2 sub-group label (the symbol categories). Sentence-case and a step
     /// smaller than an L1 section header so it nests *under* "Avatar" instead of
     /// competing with it. Theme-aware colour for the same sheet reason.
-    private func categoryHeader(_ text: String) -> some View {
+    private func categoryHeader(_ text: LocalizedStringResource) -> some View {
         Text(text)
             .font(.footnote.weight(.semibold))
             .foregroundStyle(palette.secondaryText)
@@ -1913,7 +1913,7 @@ fileprivate struct IOSProfileSectionHeader: View {
 }
 
 fileprivate struct IOSProfileCategoryHeader: View {
-    let text: String
+    let text: LocalizedStringResource
 
     @Environment(\.themePalette) private var palette
 

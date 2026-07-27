@@ -159,14 +159,25 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
 /// browsable — "find a fun one for a kid / a nerd / grandma" — instead of an
 /// undifferentiated wall of glyphs.
 public struct AvatarSymbolCategory: Hashable, Sendable, Identifiable {
-    public var id: String { title }
-    public let title: String
+    /// Stable, language-independent identity. Previously derived from `title`,
+    /// which would have changed the category's id — and its SwiftUI identity —
+    /// the moment the title was localized.
+    public let id: String
+    public let title: LocalizedStringResource
     public let symbols: [String]
 
-    public init(title: String, symbols: [String]) {
+    public init(id: String, title: LocalizedStringResource, symbols: [String]) {
+        self.id = id
         self.title = title
         self.symbols = symbols
     }
+
+    // LocalizedStringResource is Equatable but not Hashable, so the synthesized
+    // conformance no longer compiles. Keying on `id` alone is correct regardless:
+    // two categories are the same category when they have the same id, whatever
+    // language their title happens to be showing.
+    public static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    public func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 /// One offered emoji avatar plus the minimum OS that renders it. Newer emoji
@@ -197,14 +208,24 @@ public struct AvatarEmoji: Hashable, Sendable, Identifiable {
 
 /// A labelled group of emoji avatars (one browsable section in the picker).
 public struct AvatarEmojiCategory: Hashable, Sendable, Identifiable {
-    public var id: String { title }
-    public let title: String
+    /// Stable, language-independent identity — see `AvatarSymbolCategory.id`.
+    public let id: String
+    public let title: LocalizedStringResource
     public let emojis: [AvatarEmoji]
 
-    public init(title: String, emojis: [AvatarEmoji]) {
+    public init(id: String, title: LocalizedStringResource, emojis: [AvatarEmoji]) {
+        self.id = id
         self.title = title
         self.emojis = emojis
     }
+
+    // LocalizedStringResource is Equatable but not Hashable, so the synthesized
+    // conformance no longer compiles. Keying on `id` alone is correct regardless:
+    // two categories are the same category when they have the same id, whatever
+    // language their title happens to be showing.
+    public static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    public func hash(into hasher: inout Hasher) { hasher.combine(id) }
+
 
     /// The emoji in this category the given OS can actually render, in order.
     public func availableEmojis(osMajor: Int, osMinor: Int) -> [AvatarEmoji] {
@@ -223,7 +244,7 @@ extension Profile {
     /// several call sites rely on it. Each category holds exactly 8 symbols so it
     /// renders as one clean row in the editor.
     public static let avatarSymbolCategories: [AvatarSymbolCategory] = [
-        AvatarSymbolCategory(title: "People", symbols: [
+        AvatarSymbolCategory(id: "people", title: "People", symbols: [
             "person.crop.circle.fill",
             "person.fill",
             "person.2.fill",
@@ -233,7 +254,7 @@ extension Profile {
             "eyeglasses",
             "mustache.fill"
         ]),
-        AvatarSymbolCategory(title: "Faces & Fun", symbols: [
+        AvatarSymbolCategory(id: "faces-fun", title: "Faces & Fun", symbols: [
             "face.smiling.inverse",
             "sunglasses.fill",
             "heart.fill",
@@ -243,7 +264,7 @@ extension Profile {
             "flame.fill",
             "wand.and.stars"
         ]),
-        AvatarSymbolCategory(title: "Sports & Fitness", symbols: [
+        AvatarSymbolCategory(id: "sports-fitness", title: "Sports & Fitness", symbols: [
             "figure.run",
             "figure.basketball",
             "figure.american.football",
@@ -253,7 +274,7 @@ extension Profile {
             "soccerball",
             "trophy.fill"
         ]),
-        AvatarSymbolCategory(title: "Gaming & Tech", symbols: [
+        AvatarSymbolCategory(id: "gaming-tech", title: "Gaming & Tech", symbols: [
             "gamecontroller.fill",
             "dpad.fill",
             "die.face.6",
@@ -263,7 +284,7 @@ extension Profile {
             "desktopcomputer",
             "visionpro"
         ]),
-        AvatarSymbolCategory(title: "Music & Audio", symbols: [
+        AvatarSymbolCategory(id: "music-audio", title: "Music & Audio", symbols: [
             "music.note",
             "music.mic",
             "guitars.fill",
@@ -273,7 +294,7 @@ extension Profile {
             "speaker.wave.3.fill",
             "tuningfork"
         ]),
-        AvatarSymbolCategory(title: "Movies & TV", symbols: [
+        AvatarSymbolCategory(id: "movies-tv", title: "Movies & TV", symbols: [
             "film.fill",
             "tv.fill",
             "ticket.fill",
@@ -283,7 +304,7 @@ extension Profile {
             "star.fill",
             "camera.fill"
         ]),
-        AvatarSymbolCategory(title: "Food & Drink", symbols: [
+        AvatarSymbolCategory(id: "food-drink", title: "Food & Drink", symbols: [
             "fork.knife",
             "birthday.cake.fill",
             "wineglass.fill",
@@ -293,7 +314,7 @@ extension Profile {
             "takeoutbag.and.cup.and.straw.fill",
             "popcorn.fill"
         ]),
-        AvatarSymbolCategory(title: "Animals", symbols: [
+        AvatarSymbolCategory(id: "animals", title: "Animals", symbols: [
             "pawprint.fill",
             "dog.fill",
             "cat.fill",
@@ -303,7 +324,7 @@ extension Profile {
             "tortoise.fill",
             "lizard.fill"
         ]),
-        AvatarSymbolCategory(title: "Nature & Weather", symbols: [
+        AvatarSymbolCategory(id: "nature-weather", title: "Nature & Weather", symbols: [
             "leaf.fill",
             "tree.fill",
             "mountain.2.fill",
@@ -313,7 +334,7 @@ extension Profile {
             "snowflake",
             "rainbow"
         ]),
-        AvatarSymbolCategory(title: "Space & Science", symbols: [
+        AvatarSymbolCategory(id: "space-science", title: "Space & Science", symbols: [
             "moon.stars.fill",
             "sun.max.fill",
             "atom",
@@ -323,7 +344,7 @@ extension Profile {
             "antenna.radiowaves.left.and.right",
             "globe.americas.fill"
         ]),
-        AvatarSymbolCategory(title: "Travel & Hobbies", symbols: [
+        AvatarSymbolCategory(id: "travel-hobbies", title: "Travel & Hobbies", symbols: [
             "airplane",
             "car.fill",
             "bicycle",
@@ -354,47 +375,47 @@ extension Profile {
     /// automatic fallback (hidden on older systems) rather than showing an empty
     /// "tofu" box.
     public static let avatarEmojiCategories: [AvatarEmojiCategory] = [
-        AvatarEmojiCategory(title: "Faces", emojis: [
+        AvatarEmojiCategory(id: "faces", title: "Faces", emojis: [
             AvatarEmoji("😎"), AvatarEmoji("🤠"), AvatarEmoji("😈"), AvatarEmoji("🤓"),
             AvatarEmoji("🥴"), AvatarEmoji("🫠"), AvatarEmoji("🙃"), AvatarEmoji("🤨")
         ]),
-        AvatarEmojiCategory(title: "Reactions", emojis: [
+        AvatarEmojiCategory(id: "reactions", title: "Reactions", emojis: [
             AvatarEmoji("💀"), AvatarEmoji("🗿"), AvatarEmoji("🤡"), AvatarEmoji("👀"),
             AvatarEmoji("🧢"), AvatarEmoji("😭"), AvatarEmoji("🫡"), AvatarEmoji("💯")
         ]),
-        AvatarEmojiCategory(title: "Cute Animals", emojis: [
+        AvatarEmojiCategory(id: "cute-animals", title: "Cute Animals", emojis: [
             AvatarEmoji("🐱"), AvatarEmoji("🐶"), AvatarEmoji("🐼"), AvatarEmoji("🦊"),
             AvatarEmoji("🐰"), AvatarEmoji("🐧"), AvatarEmoji("🦔"), AvatarEmoji("🪿")
         ]),
-        AvatarEmojiCategory(title: "Beasts", emojis: [
+        AvatarEmojiCategory(id: "beasts", title: "Beasts", emojis: [
             AvatarEmoji("🦁"), AvatarEmoji("🐺"), AvatarEmoji("🦅"), AvatarEmoji("🦈"),
             AvatarEmoji("🦖"), AvatarEmoji("🐉"), AvatarEmoji("🐦‍🔥"), AvatarEmoji("🫎")
         ]),
-        AvatarEmojiCategory(title: "Fantasy & Sci-Fi", emojis: [
+        AvatarEmojiCategory(id: "fantasy-sci-fi", title: "Fantasy & Sci-Fi", emojis: [
             AvatarEmoji("👽"), AvatarEmoji("🤖"), AvatarEmoji("👾"), AvatarEmoji("🧙"),
             AvatarEmoji("🧛"), AvatarEmoji("🧟"), AvatarEmoji("🦄"), AvatarEmoji("👻")
         ]),
-        AvatarEmojiCategory(title: "Food & Drink", emojis: [
+        AvatarEmojiCategory(id: "food-drink", title: "Food & Drink", emojis: [
             AvatarEmoji("🍕"), AvatarEmoji("🍔"), AvatarEmoji("🍣"), AvatarEmoji("🌮"),
             AvatarEmoji("🍦"), AvatarEmoji("🍩"), AvatarEmoji("🧋"), AvatarEmoji("🍿")
         ]),
-        AvatarEmojiCategory(title: "Play & Hobbies", emojis: [
+        AvatarEmojiCategory(id: "play-hobbies", title: "Play & Hobbies", emojis: [
             AvatarEmoji("🎮"), AvatarEmoji("🏆"), AvatarEmoji("🎸"), AvatarEmoji("🎧"),
             AvatarEmoji("⚽"), AvatarEmoji("🏀"), AvatarEmoji("🎲"), AvatarEmoji("🎬")
         ]),
-        AvatarEmojiCategory(title: "Nature & Sky", emojis: [
+        AvatarEmojiCategory(id: "nature-sky", title: "Nature & Sky", emojis: [
             AvatarEmoji("🌙"), AvatarEmoji("⭐"), AvatarEmoji("🌈"), AvatarEmoji("🪐"),
             AvatarEmoji("☀️"), AvatarEmoji("⚡"), AvatarEmoji("🌊"), AvatarEmoji("🪼")
         ]),
-        AvatarEmojiCategory(title: "Adventure", emojis: [
+        AvatarEmojiCategory(id: "adventure", title: "Adventure", emojis: [
             AvatarEmoji("👑"), AvatarEmoji("💎"), AvatarEmoji("🔮"), AvatarEmoji("🗡️"),
             AvatarEmoji("🛡️"), AvatarEmoji("🏴‍☠️"), AvatarEmoji("🔥"), AvatarEmoji("🧭")
         ]),
-        AvatarEmojiCategory(title: "Flair", emojis: [
+        AvatarEmojiCategory(id: "flair", title: "Flair", emojis: [
             AvatarEmoji("💅"), AvatarEmoji("🧊"), AvatarEmoji("🫧"), AvatarEmoji("🤙"),
             AvatarEmoji("💫"), AvatarEmoji("🪄"), AvatarEmoji("💥"), AvatarEmoji("🎀")
         ]),
-        AvatarEmojiCategory(title: "Hearts", emojis: [
+        AvatarEmojiCategory(id: "hearts", title: "Hearts", emojis: [
             AvatarEmoji("❤️"), AvatarEmoji("🧡"), AvatarEmoji("💛"), AvatarEmoji("💚"),
             AvatarEmoji("💙"), AvatarEmoji("💜"), AvatarEmoji("🖤"), AvatarEmoji("🩷")
         ])

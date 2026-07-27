@@ -275,6 +275,9 @@
     "Admin — unrestricted" : {
 
     },
+    "Adventure" : {
+
+    },
     "Albums" : {
 
     },
@@ -291,6 +294,9 @@
 
     },
     "AniList" : {
+
+    },
+    "Animals" : {
 
     },
     "Anonymous" : {
@@ -408,6 +414,9 @@
 
     },
     "Bearer token" : {
+
+    },
+    "Beasts" : {
 
     },
     "Behavior" : {
@@ -781,6 +790,9 @@
         }
       }
     },
+    "Cute Animals" : {
+
+    },
     "Cyan" : {
 
     },
@@ -1153,7 +1165,16 @@
     "FTPS uses TLS from connection start. Explicit TLS (AUTH TLS) is not supported." : {
 
     },
+    "Faces" : {
+
+    },
+    "Faces & Fun" : {
+
+    },
     "Fade" : {
+
+    },
+    "Fantasy & Sci-Fi" : {
 
     },
     "Fetching it and loading it into the player." : {
@@ -1189,6 +1210,9 @@
     "Finishing Plex sign-in…" : {
 
     },
+    "Flair" : {
+
+    },
     "Folder" : {
 
     },
@@ -1199,6 +1223,9 @@
 
     },
     "Font" : {
+
+    },
+    "Food & Drink" : {
 
     },
     "For example https://nas.local/dav. Defaults to https:// if you omit it." : {
@@ -1222,6 +1249,9 @@
           }
         }
       }
+    },
+    "Gaming & Tech" : {
+
     },
     "Gap" : {
 
@@ -1263,6 +1293,9 @@
 
     },
     "Hearing-impaired subtitles" : {
+
+    },
+    "Hearts" : {
 
     },
     "Help & Diagnostics" : {
@@ -1585,10 +1618,16 @@
     "Move a provider here to stop using it." : {
 
     },
+    "Movies & TV" : {
+
+    },
     "Movies, shows, and episodes" : {
 
     },
     "Music" : {
+
+    },
+    "Music & Audio" : {
 
     },
     "Music Player" : {
@@ -1607,6 +1646,12 @@
 
     },
     "Name (optional)" : {
+
+    },
+    "Nature & Sky" : {
+
+    },
+    "Nature & Weather" : {
 
     },
     "Navigation" : {
@@ -2006,6 +2051,9 @@
     "Pause in Low Data Mode" : {
 
     },
+    "People" : {
+
+    },
     "Personal Home rows and library visibility" : {
 
     },
@@ -2042,6 +2090,9 @@
           }
         }
       }
+    },
+    "Play & Hobbies" : {
+
     },
     "Play Now" : {
 
@@ -2267,6 +2318,9 @@
 
     },
     "Re-download From iCloud" : {
+
+    },
+    "Reactions" : {
 
     },
     "Recent Activity" : {
@@ -3031,6 +3085,9 @@
     "Sources" : {
 
     },
+    "Space & Science" : {
+
+    },
     "Spoilers" : {
       "localizations" : {
         "es" : {
@@ -3040,6 +3097,9 @@
           }
         }
       }
+    },
+    "Sports & Fitness" : {
+
     },
     "Starring" : {
 
@@ -3351,6 +3411,9 @@
 
     },
     "Trakt, Simkl, AniList, MyAnimeList, Last.fm" : {
+
+    },
+    "Travel & Hobbies" : {
 
     },
     "Trending" : {

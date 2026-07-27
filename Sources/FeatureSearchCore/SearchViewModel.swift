@@ -150,7 +150,7 @@ public final class SearchViewModel {
     public func applyWatchedState(_ mutation: MediaItemMutation) {
         guard case let .loaded(sections) = state else { return }
         state = .loaded(sections.map { section in
-            SearchSection(title: section.title, items: section.items.map { item in
+            SearchSection(kind: section.kind, items: section.items.map { item in
                 mutation.applied(to: item)
             })
         })
@@ -182,7 +182,7 @@ public final class SearchViewModel {
             else { return }
             self.state = .loaded(currentSections.map { section in
                 SearchSection(
-                    title: section.title,
+                    kind: section.kind,
                     items: SearchSection.mergingDiscoveryAvailability(
                         into: section.items,
                         discoveryResults: discoveryResults,

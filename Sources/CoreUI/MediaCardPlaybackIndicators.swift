@@ -152,9 +152,13 @@ public struct MediaCardPlaybackIndicators: View {
     /// The bar runs from the leading edge to just before the download badge, so
     /// the two sit on one line and neither is obscured. With no badge it reaches
     /// the card's normal inset.
+    ///
+    /// The gap it leaves before the badge is the SAME value as the bar's own edge
+    /// inset, so the whole strip is evenly spaced: inset · bar · inset · badge ·
+    /// inset.
     private var progressTrailingInset: CGFloat {
         guard downloadState != nil else { return progressHorizontalInset }
-        return progressHorizontalInset + downloadBadgeSize + 8
+        return progressHorizontalInset * 2 + downloadBadgeSize
     }
 
     @ViewBuilder

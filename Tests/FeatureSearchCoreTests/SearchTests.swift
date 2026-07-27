@@ -39,7 +39,7 @@ final class SearchSectionTests: XCTestCase {
 
         let sections = SearchSection.sections(from: items)
 
-        XCTAssertEqual(sections.map(\.title), ["Movies", "TV Shows", "Episodes"])
+        XCTAssertEqual(sections.map(\.kind), [.movies, .tvShows, .episodes])
         XCTAssertEqual(sections[0].items.map(\.id), ["m1", "m2"])
         XCTAssertEqual(sections[1].items.map(\.id), ["s1"])
         XCTAssertEqual(sections[2].items.map(\.id), ["e1"])
@@ -50,12 +50,62 @@ final class SearchSectionTests: XCTestCase {
 
         let sections = SearchSection.sections(from: items)
 
-        XCTAssertEqual(sections.map(\.title), ["Movies", "Other"])
+        XCTAssertEqual(sections.map(\.kind), [.movies, .other])
         XCTAssertEqual(sections.last?.items.map(\.id), ["c1"])
     }
 
     func testEmptyInputYieldsNoSections() {
         XCTAssertTrue(SearchSection.sections(from: []).isEmpty)
+    }
+
+    // MARK: Localization invariants
+
+    /// Resolves a resource in an explicit locale.
+    ///
+    /// `String(localized:locale:)` takes a `LocalizationValue`, not a
+    /// `LocalizedStringResource`; for a resource you set `locale` on the resource
+    /// itself and then resolve it.
+    private func resolved(_ resource: LocalizedStringResource, in identifier: String) -> String {
+        var localized = resource
+        localized.locale = Locale(identifier: identifier)
+        return String(localized: localized)
+    }
+
+    /// A section's identity must not be derived from its displayed title.
+    ///
+    /// If it were, switching language would change every section's SwiftUI
+    /// identity, tearing down and rebuilding the results grid and dropping tvOS
+    /// focus mid-browse. Resolving the title in a different locale must therefore
+    /// leave `id` untouched.
+    func testSectionIdentityIsIndependentOfDisplayedTitle() {
+        let sections = SearchSection.sections(from: [item("m1", .movie), item("s1", .series)])
+
+        let idsBefore = sections.map(\.id)
+        let spanish = sections.map { resolved($0.title, in: "es") }
+        let english = sections.map { resolved($0.title, in: "en") }
+        let idsAfter = sections.map(\.id)
+
+        XCTAssertEqual(idsBefore, idsAfter)
+        XCTAssertEqual(idsBefore, [.movies, .tvShows])
+        XCTAssertEqual(spanish.count, english.count)
+    }
+
+    /// Locks the English source copy for the Search slice. Translators work from
+    /// these defaults, so a silent edit here is a silent change to every language.
+    func testSectionTitlesCarryExpectedEnglishDefaults() {
+        let titles = SearchSection.Kind.allCases.map { resolved($0.title, in: "en") }
+
+        XCTAssertEqual(titles, ["Movies", "TV Shows", "Episodes", "Other", "Not in Your Library"])
+    }
+
+    func testAvailabilityCueCarriesExpectedEnglishDefault() {
+        var series = MediaItem(id: "s", title: "Show", kind: .series)
+        series.availability = .partiallyAvailable
+
+        let cue = SearchSection.availabilityCue(for: series)
+
+        XCTAssertNotNil(cue)
+        XCTAssertEqual(cue.map { resolved($0, in: "en") }, "More Seasons")
     }
 
     // MARK: - Not in Your Library (Seerr discovery) section
@@ -77,7 +127,7 @@ final class SearchSectionTests: XCTestCase {
     func testNotInLibrarySectionCollectsRequestableTitles() {
         let results = [discovery(1, .movie), discovery(2, .series)]
         let section = SearchSection.notInLibrarySection(discoveryResults: results, libraryResults: [])
-        XCTAssertEqual(section?.title, "Not in Your Library")
+        XCTAssertEqual(section?.kind, .notInLibrary)
         XCTAssertEqual(section?.items.map(\.id), ["seer:1", "seer:2"], "Seerr relevance order is preserved")
     }
 
@@ -130,7 +180,7 @@ final class SearchSectionTests: XCTestCase {
 
         XCTAssertEqual(merged.first?.id, "plex:1")
         XCTAssertEqual(merged.first?.availability, .partiallyAvailable)
-        XCTAssertEqual(SearchSection.availabilityCue(for: merged[0]), "More Seasons")
+        XCTAssertNotNil(SearchSection.availabilityCue(for: merged[0]))
         XCTAssertNil(
             SearchSection.notInLibrarySection(
                 discoveryResults: [discoveryResult],
@@ -196,7 +246,7 @@ final class SearchViewModelTests: XCTestCase {
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded, got \(vm.state)")
         }
-        XCTAssertEqual(sections.map(\.title), ["Movies", "TV Shows"])
+        XCTAssertEqual(sections.map(\.kind), [.movies, .tvShows])
         XCTAssertEqual(provider.lastQuery, "dune")
     }
 
@@ -241,7 +291,7 @@ final class SearchViewModelTests: XCTestCase {
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded, got \(vm.state)")
         }
-        let movies = sections.first { $0.title == "Movies" }
+        let movies = sections.first { $0.kind == .movies }
         XCTAssertEqual(movies?.items.map(\.id), ["p1", "j1"], "Round-robin interleave keeps account order")
         XCTAssertEqual(movies?.items.first?.sourceAccountID, "acct-plex")
         XCTAssertEqual(movies?.items.last?.sourceAccountID, "acct-jelly")
@@ -261,7 +311,7 @@ final class SearchViewModelTests: XCTestCase {
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded despite one account failing, got \(vm.state)")
         }
-        XCTAssertEqual(sections.first { $0.title == "Movies" }?.items.map(\.id), ["m1"])
+        XCTAssertEqual(sections.first { $0.kind == .movies }?.items.map(\.id), ["m1"])
     }
 
     // MARK: - Seerr "Not in Your Library" section
@@ -278,7 +328,7 @@ final class SearchViewModelTests: XCTestCase {
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded, got \(vm.state)")
         }
-        XCTAssertEqual(sections.map(\.title), ["Movies", "Not in Your Library"],
+        XCTAssertEqual(sections.map(\.kind), [.movies, .notInLibrary],
                        "Discovery hits form a trailing section after the library sections")
         XCTAssertEqual(sections.last?.items.map(\.id), ["seer:1"])
     }
@@ -296,7 +346,7 @@ final class SearchViewModelTests: XCTestCase {
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded, got \(vm.state)")
         }
-        XCTAssertEqual(sections.last?.title, "Not in Your Library")
+        XCTAssertEqual(sections.last?.kind, .notInLibrary)
         XCTAssertEqual(sections.last?.items.map(\.id), ["seer:2"], "An already-available title isn't listed")
     }
 
@@ -337,7 +387,7 @@ final class SearchViewModelTests: XCTestCase {
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded, got \(vm.state)")
         }
-        XCTAssertEqual(sections.map(\.title), ["TV Shows"])
+        XCTAssertEqual(sections.map(\.kind), [.tvShows])
         XCTAssertEqual(sections[0].items[0].id, "library-show")
         XCTAssertEqual(sections[0].items[0].availability, .partiallyAvailable)
     }
@@ -474,7 +524,7 @@ final class SearchViewModelTests: XCTestCase {
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded (discovery survives a library outage), got \(vm.state)")
         }
-        XCTAssertEqual(sections.map(\.title), ["Not in Your Library"])
+        XCTAssertEqual(sections.map(\.kind), [.notInLibrary])
     }
 
     func testDiscoveryOnlyResultsLoadWithNoLibraryAccounts() async {
@@ -488,7 +538,7 @@ final class SearchViewModelTests: XCTestCase {
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded, got \(vm.state)")
         }
-        XCTAssertEqual(sections.map(\.title), ["Not in Your Library"])
+        XCTAssertEqual(sections.map(\.kind), [.notInLibrary])
     }
 }
 
@@ -731,7 +781,7 @@ final class SearchViewModelDedupTests: XCTestCase {
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded, got \(vm.state)")
         }
-        let movies = sections.first { $0.title == "Movies" }
+        let movies = sections.first { $0.kind == .movies }
         XCTAssertEqual(movies?.items.count, 1, "Duplicate across providers collapses to one card")
         XCTAssertEqual(movies?.items.first?.allSourceAccountIDs, ["acct-plex", "acct-jelly"])
     }
@@ -773,7 +823,7 @@ final class SearchViewModelDedupTests: XCTestCase {
         guard case let .loaded(sections) = vm.state else {
             return XCTFail("Expected loaded, got \(vm.state)")
         }
-        let shows = sections.first { $0.title == "TV Shows" }
+        let shows = sections.first { $0.kind == .tvShows }
         XCTAssertEqual(shows?.items.count, 1)
         XCTAssertEqual(shows?.items.first?.sources.count, 2, "Merged hit keeps both sources for the server picker")
         XCTAssertEqual(shows?.items.first?.allSourceAccountIDs, ["acct-plex", "acct-jelly"])

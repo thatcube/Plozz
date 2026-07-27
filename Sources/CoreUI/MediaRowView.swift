@@ -289,19 +289,36 @@ public struct MediaRowView: View {
                     // opposite side" bug, commit f812fe64).
                     .focusSectionIf(gatesFocus)
                     .onAppear { applyInitialFocus(using: proxy) }
+                    // The opening alignment usually CAN'T run on first layout: a
+                    // season page loads its episodes asynchronously, so `onAppear`
+                    // fires with an empty row and the target not yet in `itemIDSet`.
+                    // Retry when the items land, otherwise the row simply opens
+                    // un-aligned and the target only snaps into place much later,
+                    // when focus leaves and the re-entry scroll runs.
+                    .onChange(of: itemIDSet) { _, _ in
+                        applyInitialFocus(using: proxy)
+                    }
                     .onChange(of: focusedID) { _, newValue in
                         handleFocusChange(to: newValue, using: proxy)
                     }
                     .onChange(of: defaultFocusID) { _, newTarget in
                         // The supplied target changed (e.g. switching seasons). Drop
-                        // any remembered focus from the previous set, re-arm the gate
-                        // and bring the new target into view only when needed so it's
-                        // realised and is
+                        // any remembered focus from the previous set, re-arm the gate,
+                        // and bring the new target into view so it's realised and is
                         // the only focusable card on the next entry.
                         focusEngaged = false
                         lastFocusedID = nil
                         guard let newTarget, itemIDSet.contains(newTarget) else { return }
-                        scrollToIfNeeded(newTarget, using: proxy)
+                        // Hard-align rather than going through `scrollToIfNeeded`.
+                        // The caller only re-points this at discrete moments — open,
+                        // season change, cross-server switch — never while browsing,
+                        // so there is no snap to protect against here. The "already
+                        // visible, skip it" shortcut actively breaks these cases: the
+                        // lazy stack has usually "appeared" the target already, off to
+                        // the right, so the row would open (or switch seasons) with the
+                        // episode stranded mid-row instead of leading.
+                        didApplyInitialFocus = true
+                        scrollToInitialPosition(newTarget, using: proxy)
                     }
                     .onChange(of: isCovered) { _, covered in
                         guard covered else {

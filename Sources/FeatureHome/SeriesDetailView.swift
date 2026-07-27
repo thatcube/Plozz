@@ -75,6 +75,19 @@ struct SeriesDetailView: View {
     /// once. It is declarative and re-evaluates on every appearance — including a
     /// pop — where it would override the returning user's focus.
     @State private var hasOpenedOnce = false
+    /// Latched once the opening claim on Play has been settled.
+    ///
+    /// `defaultFocus` fires when the page appears, but the hero's Play button only
+    /// EXISTS once `playTarget` resolves — and on a season page that's an async
+    /// load. Open before it lands and the action row's first focusable is whatever
+    /// else is there (the watched button), so tvOS gives entry focus to "Mark as
+    /// Watched" and the already-spent `defaultFocus` never reclaims it. Re-asserting
+    /// Play the moment it appears is what makes the page open on Play reliably.
+    @State private var hasSettledOpeningFocus = false
+    /// Set as soon as the user genuinely drives focus somewhere themselves (into
+    /// the rail or the season bar). It fences the re-assert above so a fast user
+    /// who has already moved on is never yanked back up to Play.
+    @State private var hasUserDirectedFocus = false
     /// True from the moment a pushed page pops until the rail has reclaimed
     /// focus. `hasChildOnTop` alone is too short a window: it clears the instant
     /// the pop completes, and tvOS then parks focus on the hero — restoring it
@@ -264,6 +277,19 @@ struct SeriesDetailView: View {
             // Only claim Play on a genuine open — see `hasOpenedOnce`.
             .defaultFocus($playFocused, !hasOpenedOnce)
             .onAppear { hasOpenedOnce = true }
+            // The Play button appears only once the play target resolves; until
+            // then there is nothing for `defaultFocus` to land on. Claim it the
+            // moment it exists — but only during the opening window, and never
+            // once the user has driven focus themselves.
+            .onChange(of: playTarget?.id) { _, resolved in
+                guard resolved != nil,
+                      !hasSettledOpeningFocus,
+                      !hasUserDirectedFocus,
+                      !hasChildOnTop
+                else { return }
+                hasSettledOpeningFocus = true
+                playFocused = true
+            }
             .onChange(of: hasChildOnTop) { _, covered in
                 // Returning from a pushed page. tvOS hands focus to the hero
                 // rather than back to the rail (verified on device: the rail
@@ -567,6 +593,10 @@ struct SeriesDetailView: View {
                 // We're now inside the bar — open every chip to focus so left/right
                 // navigation between seasons works.
                 seasonBarEngaged = true
+                // User-driven focus: fence the opening Play claim (see
+                // `hasSettledOpeningFocus`) so it can't fire behind them.
+                hasUserDirectedFocus = true
+                hasSettledOpeningFocus = true
                 recedeModel.recede()
                 if isEntering { onFocusEntered() }
                 // Focus has genuinely left the episode rail (it's now on the bar), so
@@ -639,6 +669,8 @@ struct SeriesDetailView: View {
             if focused {
                 let isEntering = !seasonBarEngaged
                 seasonBarEngaged = true
+                hasUserDirectedFocus = true
+                hasSettledOpeningFocus = true
                 recedeModel.recede()
                 if isEntering { onFocusEntered() }
                 episodeRailResetToken += 1
@@ -787,6 +819,10 @@ struct SeriesDetailView: View {
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
             onFocusEntered: {
                 seasonBarEngaged = false
+                // The user has taken focus into the rail themselves — the opening
+                // Play claim must not fire behind them.
+                hasUserDirectedFocus = true
+                hasSettledOpeningFocus = true
                 recedeModel.recede()
                 onFocusEntered()
             },

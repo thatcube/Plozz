@@ -461,7 +461,7 @@ public struct MediaRowView: View {
            !didApplyInitialFocus,
            itemIDSet.contains(target) {
             didApplyInitialFocus = true
-            scrollToIfNeeded(target, using: proxy)
+            scrollToInitialPosition(target, using: proxy)
             DispatchQueue.main.async { focusedID = target }
             return
         }
@@ -472,8 +472,23 @@ public struct MediaRowView: View {
             // Defer a tick so the LazyHStack has realised enough cards to compute
             // the target's offset before we scroll; focus is deliberately left
             // wherever it currently is (typically the hero Play button).
-            DispatchQueue.main.async { scrollToIfNeeded(target, using: proxy) }
+            DispatchQueue.main.async { scrollToInitialPosition(target, using: proxy) }
         }
+    }
+
+    /// The one-shot opening scroll, which must ALWAYS align the target to the
+    /// leading edge — unlike `scrollToIfNeeded`, which skips the work when the
+    /// target is already on screen.
+    ///
+    /// That skip is right for re-entry (it's what stops the row snapping while you
+    /// browse) but wrong here. `visibleIDs` is fed by the LazyHStack's `onAppear`,
+    /// which fires for a buffer of cards beyond the viewport, so an early episode
+    /// counts as "visible" while still sitting mid-row. The opening scroll was
+    /// therefore skipped and the row opened un-aligned; the episode only snapped
+    /// into first position later, when focus left the row and the re-entry scroll
+    /// finally ran with the target genuinely off screen. That's the "teleport".
+    private func scrollToInitialPosition(_ target: String, using proxy: ScrollViewProxy) {
+        proxy.scrollTo(target, anchor: .leading)
     }
 
     /// Responds to focus moving onto a card (`newValue` non-nil) or off the row

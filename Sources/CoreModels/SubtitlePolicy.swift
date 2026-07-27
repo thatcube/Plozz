@@ -14,12 +14,36 @@ public enum SubtitleContentCategory: String, Codable, CaseIterable, Sendable, Ha
     case other
 
     /// Human-readable label for the Settings per-content-type rule rows.
-    public var displayName: String {
+    ///
+    /// Semantic keys: "Movies"/"Other" are short nouns that recur elsewhere with
+    /// different senses (a search section, a library type), and a translator needs
+    /// those disambiguated.
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .anime: return "Anime"
-        case .movie: return "Movies"
-        case .tvShow: return "TV Shows"
-        case .other: return "Other"
+        case .anime:
+            return LocalizedStringResource(
+                "subtitlePolicy.category.anime",
+                defaultValue: "Anime",
+                comment: "Content-type label for the per-type subtitle rules in Settings."
+            )
+        case .movie:
+            return LocalizedStringResource(
+                "subtitlePolicy.category.movies",
+                defaultValue: "Movies",
+                comment: "Content-type label for the per-type subtitle rules in Settings."
+            )
+        case .tvShow:
+            return LocalizedStringResource(
+                "subtitlePolicy.category.tvShows",
+                defaultValue: "TV Shows",
+                comment: "Content-type label for the per-type subtitle rules in Settings."
+            )
+        case .other:
+            return LocalizedStringResource(
+                "subtitlePolicy.category.other",
+                defaultValue: "Other",
+                comment: "Content-type label covering music/mixed content in the per-type subtitle rules."
+            )
         }
     }
 }

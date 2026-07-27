@@ -19,10 +19,14 @@ public struct PlexPinChallenge: Hashable, Sendable {
 public enum PlexPinError: Error, Equatable, Sendable {
     case rateLimited(retryAfter: TimeInterval?)
 
-    public var userMessage: String {
+    public var userMessage: LocalizedStringResource {
         switch self {
         case .rateLimited:
-            "Plex is temporarily limiting sign-in attempts. Wait a minute and try again."
+            LocalizedStringResource(
+                "error.plex.rateLimited",
+                defaultValue: "Plex is temporarily limiting sign-in attempts. Wait a minute and try again.",
+                comment: "Shown when plex.tv throttles repeated sign-in attempts."
+            )
         }
     }
 }

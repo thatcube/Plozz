@@ -371,7 +371,7 @@ private struct DisplaySettleObserver: ViewModifier {
 
 /// Graceful playback error state with a way back.
 private struct PlaybackErrorView: View {
-    let message: String
+    let message: LocalizedStringResource
     let onDismiss: () -> Void
 
     var body: some View {

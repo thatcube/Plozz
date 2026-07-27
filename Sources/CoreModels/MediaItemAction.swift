@@ -69,21 +69,86 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     public var id: String { rawValue }
 
     /// The user-facing label shown in the native menu.
-    public var title: String {
+    public var title: LocalizedStringResource {
         switch self {
-        case .markWatched: return "Mark as Watched"
-        case .markUnwatched: return "Mark as Unwatched"
-        case .markWatchedUpToHere: return "Mark Watched Up to Here"
-        case .goToSeason: return "Go to Season"
-        case .goToMovie: return "Go to Movie"
-        case .goToEpisode: return "Episode Info"
-        case .addToWatchlist: return "Add to Watchlist"
-        case .removeFromWatchlist: return "Remove from Watchlist"
-        case .refreshMetadata: return "Refresh Metadata"
-        case .startDownload: return "Download"
-        case .pauseDownload: return "Pause Download"
-        case .resumeDownload: return "Resume Download"
-        case .removeDownload: return "Remove Download"
+        case .markWatched:
+            return LocalizedStringResource(
+                "mediaAction.markWatched",
+                defaultValue: "Mark as Watched",
+                comment: "Context-menu action marking an item as already watched."
+            )
+        case .markUnwatched:
+            return LocalizedStringResource(
+                "mediaAction.markUnwatched",
+                defaultValue: "Mark as Unwatched",
+                comment: "Context-menu action clearing an item's watched state."
+            )
+        case .markWatchedUpToHere:
+            return LocalizedStringResource(
+                "mediaAction.markWatchedUpToHere",
+                defaultValue: "Mark Watched Up to Here",
+                comment: "Context-menu action marking this episode and all earlier ones as watched."
+            )
+        case .goToSeason:
+            return LocalizedStringResource(
+                "mediaAction.goToSeason",
+                defaultValue: "Go to Season",
+                comment: "Context-menu action navigating to the season this episode belongs to."
+            )
+        case .goToMovie:
+            return LocalizedStringResource(
+                "mediaAction.goToMovie",
+                defaultValue: "Go to Movie",
+                comment: "Context-menu action navigating to the movie's detail page."
+            )
+        case .goToEpisode:
+            return LocalizedStringResource(
+                "mediaAction.goToEpisode",
+                defaultValue: "Episode Info",
+                comment: "Context-menu action opening the episode's detail page."
+            )
+        case .addToWatchlist:
+            return LocalizedStringResource(
+                "mediaAction.addToWatchlist",
+                defaultValue: "Add to Watchlist",
+                comment: "Context-menu action adding an item to the user's watchlist."
+            )
+        case .removeFromWatchlist:
+            return LocalizedStringResource(
+                "mediaAction.removeFromWatchlist",
+                defaultValue: "Remove from Watchlist",
+                comment: "Context-menu action removing an item from the user's watchlist."
+            )
+        case .refreshMetadata:
+            return LocalizedStringResource(
+                "mediaAction.refreshMetadata",
+                defaultValue: "Refresh Metadata",
+                comment: "Context-menu action asking the server to re-scan this item's metadata."
+            )
+        case .startDownload:
+            return LocalizedStringResource(
+                "mediaAction.startDownload",
+                defaultValue: "Download",
+                comment: "Context-menu action starting an offline download."
+            )
+        case .pauseDownload:
+            return LocalizedStringResource(
+                "mediaAction.pauseDownload",
+                defaultValue: "Pause Download",
+                comment: "Context-menu action pausing an in-progress download."
+            )
+        case .resumeDownload:
+            return LocalizedStringResource(
+                "mediaAction.resumeDownload",
+                defaultValue: "Resume Download",
+                comment: "Context-menu action resuming a paused download."
+            )
+        case .removeDownload:
+            return LocalizedStringResource(
+                "mediaAction.removeDownload",
+                defaultValue: "Remove Download",
+                comment: "Context-menu action deleting a downloaded file from the device."
+            )
         }
     }
 

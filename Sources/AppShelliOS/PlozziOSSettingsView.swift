@@ -155,7 +155,10 @@ var deviceName: String {
     UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
 }
 
-private var deviceSettingsTitle: String {
+private var deviceSettingsTitle: LocalizedStringResource {
+    // Interpolated inside the resource (not concatenated around it) so the
+    // placeholder is extracted and translators can move it — word order differs
+    // by language.
     "On This \(deviceName)"
 }
 
@@ -1920,8 +1923,8 @@ private struct PlozziOSAttributionsView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             ForEach(PlozzAttributions.entries) { entry in
-                SettingsSectionGroup(entry.title) {
-                    Text(entry.detail)
+                SettingsSectionGroup(verbatim: entry.title) {
+                    Text(verbatim: entry.detail)
                     if !entry.licenses.isEmpty {
                         PlozziOSLicenseBadges(licenses: entry.licenses)
                     }

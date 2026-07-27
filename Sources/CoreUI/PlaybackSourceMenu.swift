@@ -6,14 +6,21 @@ import CoreModels
 /// server/version choices.
 public struct PlaybackSourceMenuAction: Identifiable, Hashable, Sendable {
     public let id: String
-    public let title: String
+    public let title: LocalizedStringResource
     public let systemImage: String
 
-    public init(id: String, title: String, systemImage: String) {
+    public init(id: String, title: LocalizedStringResource, systemImage: String) {
         self.id = id
         self.title = title
         self.systemImage = systemImage
     }
+
+    // `LocalizedStringResource` is Equatable but NOT Hashable, so the synthesized
+    // conformance no longer compiles once `title` is localized. Hashing on `id`
+    // alone is the right answer regardless: identity must not depend on displayed
+    // text, or an action's identity would change with the user's language.
+    public static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    public func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 /// Anchored menu-shaped source selector. It uses drill-in pages rather than

@@ -11,7 +11,7 @@ public final class ServerPickerViewModel {
         case idle
         case scanning
         case validating
-        case error(String)
+        case error(LocalizedStringResource)
     }
 
     /// Live status of a server row, driving its trailing badge.

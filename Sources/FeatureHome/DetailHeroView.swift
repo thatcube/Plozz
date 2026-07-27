@@ -73,7 +73,7 @@ struct DetailHeroView: View {
     let spoilerSettings: SpoilerSettings
     /// Title for the Play/Resume button, or `nil` to omit the button entirely
     /// (e.g. a season with no resolved episodes yet).
-    let playTitle: String?
+    let playTitle: LocalizedStringResource?
     let onPlay: (() -> Void)?
     /// When provided (`0..<1`), a thin watched-progress bar is shown inside the
     /// Play button, between the play icon and the remaining-time line.
@@ -954,7 +954,7 @@ struct DetailHeroView: View {
     /// label becomes `▶  [progress bar]  … left`, keeping the button's normal
     /// height; otherwise it's the plain `▶  Play/Resume`.
     @ViewBuilder
-    private func playButton(title: String, action: @escaping () -> Void) -> some View {
+    private func playButton(title: LocalizedStringResource, action: @escaping () -> Void) -> some View {
         // The plain "▶ Play" form must occupy the SAME width as the wider resume
         // form ("▶ [bar] … left") so that flipping between them — e.g. when the
         // user marks the item Watched, which clears the live resume text — never

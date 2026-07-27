@@ -327,6 +327,9 @@
     "Audio, subtitles, and speed" : {
 
     },
+    "Authentication" : {
+
+    },
     "Authorization code" : {
 
     },
@@ -373,10 +376,16 @@
     "Background" : {
 
     },
+    "Backward" : {
+
+    },
     "Bearer Token" : {
 
     },
     "Bearer token" : {
+
+    },
+    "Behavior" : {
 
     },
     "Behind the hero" : {
@@ -452,7 +461,14 @@
 
     },
     "Cast" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reparto"
+          }
+        }
+      }
     },
     "Category" : {
 
@@ -549,6 +565,9 @@
 
     },
     "Code %@" : {
+
+    },
+    "Code cannot be empty" : {
 
     },
     "Code expires in %@" : {
@@ -700,6 +719,9 @@
     "Cyan" : {
 
     },
+    "Darkness" : {
+
+    },
     "Delete" : {
 
     },
@@ -750,6 +772,9 @@
 
     },
     "Detected:" : {
+
+    },
+    "Developer" : {
 
     },
     "Developer Mode Enabled" : {
@@ -957,6 +982,9 @@
     "Enter an address manually" : {
 
     },
+    "Enter both a server address and an API key." : {
+
+    },
     "Enter code" : {
 
     },
@@ -1017,6 +1045,9 @@
     "Export path" : {
 
     },
+    "Exports" : {
+
+    },
     "External subtitle" : {
 
     },
@@ -1065,6 +1096,9 @@
     "Folder" : {
 
     },
+    "Folders" : {
+
+    },
     "Follow system style" : {
 
     },
@@ -1074,7 +1108,13 @@
     "For example https://nas.local/dav. Defaults to https:// if you omit it." : {
 
     },
+    "Forced" : {
+
+    },
     "Forced subtitles" : {
+
+    },
+    "Forward" : {
 
     },
     "Free forever and open source." : {
@@ -1094,6 +1134,9 @@
 
     },
     "Genres" : {
+
+    },
+    "Get Help" : {
 
     },
     "Go Back" : {
@@ -1120,6 +1163,9 @@
     "Hearing impaired" : {
 
     },
+    "Hearing-Impaired (SDH)" : {
+
+    },
     "Hearing-impaired subtitles" : {
 
     },
@@ -1133,6 +1179,9 @@
 
     },
     "Hero item" : {
+
+    },
+    "Hero sources" : {
 
     },
     "Hero: %@" : {
@@ -1167,6 +1216,12 @@
 
     },
     "Home performance overlay" : {
+
+    },
+    "Home rows" : {
+
+    },
+    "Home users" : {
 
     },
     "Horizontal Offset" : {
@@ -1208,6 +1263,9 @@
     "Ignore" : {
 
     },
+    "In Progress" : {
+
+    },
     "Indigo" : {
 
     },
@@ -1215,6 +1273,12 @@
 
     },
     "Intros and credits" : {
+
+    },
+    "Invalid or expired code — please try again" : {
+
+    },
+    "Items in rotation" : {
 
     },
     "Items: %lld" : {
@@ -1263,6 +1327,9 @@
 
     },
     "Library" : {
+
+    },
+    "Library cards" : {
 
     },
     "Light blue" : {
@@ -1421,6 +1488,9 @@
     "NEARBY" : {
 
     },
+    "NFS server" : {
+
+    },
     "Name (optional)" : {
 
     },
@@ -1431,6 +1501,9 @@
 
     },
     "Needs sign-in on this device" : {
+
+    },
+    "Network protocol" : {
 
     },
     "Neutral background" : {
@@ -1467,6 +1540,9 @@
 
     },
     "No Plex account" : {
+
+    },
+    "No Plex servers are available on this account." : {
 
     },
     "No Recent Activity" : {
@@ -1523,6 +1599,9 @@
     "No movie or TV libraries are shown on this profile's Home yet." : {
 
     },
+    "No music found in your libraries." : {
+
+    },
     "No one in this household is signed in to this server yet." : {
 
     },
@@ -1530,6 +1609,9 @@
 
     },
     "No playable media in this folder." : {
+
+    },
+    "No results. Try a different search." : {
 
     },
     "No servers are available on this %@." : {
@@ -1608,6 +1690,16 @@
     "Nothing detected yet." : {
 
     },
+    "Nothing here yet." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aún no hay nada aquí."
+          }
+        }
+      }
+    },
     "Nothing here." : {
 
     },
@@ -1650,6 +1742,9 @@
       }
     },
     "On %@" : {
+
+    },
+    "On This %@" : {
 
     },
     "On by default during the beta; you can turn it off any time. When enabled, anonymous crash details help improve Plozz. Server addresses, media titles, profile names, and credentials are never included." : {
@@ -1787,6 +1882,9 @@
     "Pick a theme for this profile. You can change it any time." : {
 
     },
+    "Picture" : {
+
+    },
     "Picture in Picture" : {
 
     },
@@ -1797,7 +1895,14 @@
 
     },
     "Play" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reproducir"
+          }
+        }
+      }
     },
     "Play Now" : {
 
@@ -1845,6 +1950,9 @@
     "Playing from %@" : {
 
     },
+    "Plex Home" : {
+
+    },
     "Plex PIN" : {
 
     },
@@ -1855,6 +1963,9 @@
 
     },
     "Plex sign-in finds every server linked to your account." : {
+
+    },
+    "Plozz" : {
 
     },
     "Plozz picks the best source for each field automatically." : {
@@ -1884,10 +1995,16 @@
     "Preferred audio" : {
 
     },
+    "Preferred language" : {
+
+    },
     "Preferred language code" : {
 
     },
     "Presets" : {
+
+    },
+    "Preview" : {
 
     },
     "Preview a Day" : {
@@ -1916,6 +2033,9 @@
 
     },
     "Primary account" : {
+
+    },
+    "Priority" : {
 
     },
     "Profile created automatically" : {
@@ -1952,6 +2072,9 @@
     "Provider" : {
 
     },
+    "Providers" : {
+
+    },
     "Purple" : {
 
     },
@@ -1968,6 +2091,9 @@
 
     },
     "Random Libraries" : {
+
+    },
+    "Random libraries" : {
 
     },
     "Ratings" : {
@@ -2154,7 +2280,14 @@
 
     },
     "Resume" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reanudar"
+          }
+        }
+      }
     },
     "Resume All" : {
 
@@ -2208,6 +2341,12 @@
 
     },
     "Rust" : {
+
+    },
+    "SFTP server" : {
+
+    },
+    "SMB server" : {
 
     },
     "SSH Host Key SHA-256" : {
@@ -2334,6 +2473,9 @@
     "Second Track" : {
 
     },
+    "Seconds per title" : {
+
+    },
     "Security" : {
 
     },
@@ -2344,6 +2486,9 @@
 
     },
     "Selected" : {
+
+    },
+    "Send Diagnostics" : {
 
     },
     "Send Feedback" : {
@@ -2439,6 +2584,9 @@
     "Set up on another device — sign in to watch here" : {
 
     },
+    "Set up this device" : {
+
+    },
     "Set up this device from another" : {
 
     },
@@ -2494,6 +2642,9 @@
 
     },
     "Show Up Next card" : {
+
+    },
+    "Show album, quality & lyrics source" : {
 
     },
     "Show each library's own rows" : {
@@ -2630,6 +2781,9 @@
     "Skip forward" : {
 
     },
+    "Skipping" : {
+
+    },
     "Sky blue" : {
 
     },
@@ -2679,10 +2833,16 @@
     "Start over?" : {
 
     },
+    "Status" : {
+
+    },
     "Steel gray" : {
 
     },
     "Still wrong? Wipe the iCloud copy and re-upload from this Apple TV." : {
+
+    },
+    "Storage" : {
 
     },
     "Stored Fields" : {
@@ -2706,10 +2866,16 @@
     "Subtitle language" : {
 
     },
+    "Subtitle search" : {
+
+    },
     "Subtitle search failed." : {
 
     },
     "Subtitles" : {
+
+    },
+    "Support" : {
 
     },
     "Swipe to scrub while a title is playing and it resumes the moment you land — faster, but a stray swipe can move your position." : {
@@ -2826,10 +2992,16 @@
     "This NFS export connects without a sign-in — anyone on this Apple TV can browse it. Choose what shows on your Home under Profile › Your Libraries." : {
 
     },
+    "This Profile" : {
+
+    },
     "This build has no crash-reporting endpoint configured, so nothing can be sent. Crash reporting is available in TestFlight and release builds." : {
 
     },
     "This library is empty" : {
+
+    },
+    "This library is empty." : {
 
     },
     "This library's server is no longer connected." : {
@@ -2880,6 +3052,9 @@
     "Thumbnail treatment" : {
 
     },
+    "Time before the end" : {
+
+    },
     "Token" : {
 
     },
@@ -2899,6 +3074,9 @@
         }
       }
     },
+    "Tracks" : {
+
+    },
     "Trailer" : {
 
     },
@@ -2909,6 +3087,9 @@
 
     },
     "Trending" : {
+
+    },
+    "Troubleshoot" : {
 
     },
     "Troubleshooting overlays stay on this device and are off by default." : {
@@ -2927,7 +3108,14 @@
 
     },
     "Try Again" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reintentar"
+          }
+        }
+      }
     },
     "Try Download Again" : {
 
@@ -3134,6 +3322,9 @@
     "We found your setup" : {
 
     },
+    "WebDAV server" : {
+
+    },
     "Weight" : {
 
     },
@@ -3147,6 +3338,9 @@
 
     },
     "What to call this share on the Home screen. Defaults to the share name." : {
+
+    },
+    "When credits can't be detected" : {
 
     },
     "When on, Plozz sends an anonymous report if it crashes or freezes, so bugs can be fixed faster. Reports include only the crash itself plus your app version, tvOS version and device model — never your servers, logins, tokens, or what you were watching. On by default during the beta; you can turn it off any time. Applies to this Apple TV." : {
@@ -3221,6 +3415,9 @@
     "Your Profile" : {
 
     },
+    "Your libraries are empty. Add media on your media server to see it here." : {
+
+    },
     "Your other device is set up" : {
 
     },
@@ -3258,6 +3455,185 @@
     "e.g. Living Room NAS" : {
 
     },
+    "error.cancelled" : {
+      "comment" : "Shown when the user cancelled the operation.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancelled."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancelado."
+          }
+        }
+      }
+    },
+    "error.conflict" : {
+      "comment" : "Shown when a local change clashes with newer server data.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The server already has a newer version of this."
+          }
+        }
+      }
+    },
+    "error.decoding" : {
+      "comment" : "Shown when the server's response could not be parsed.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "We couldn’t read the server’s response."
+          }
+        }
+      }
+    },
+    "error.invalidCredentials" : {
+      "comment" : "Shown when a sign-in attempt is rejected.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Incorrect username or password. Please try again."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usuario o contraseña incorrectos. Inténtalo de nuevo."
+          }
+        }
+      }
+    },
+    "error.invalidResponse" : {
+      "comment" : "Shown when the server replies with something the app cannot interpret.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server sent an unexpected response."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El servidor envió una respuesta inesperada."
+          }
+        }
+      }
+    },
+    "error.notFound" : {
+      "comment" : "Shown when a requested item no longer exists on the server.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We couldn’t find what you were looking for."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No hemos encontrado lo que buscabas."
+          }
+        }
+      }
+    },
+    "error.plex.rateLimited" : {
+      "comment" : "Shown when plex.tv throttles repeated sign-in attempts.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Plex is temporarily limiting sign-in attempts. Wait a minute and try again."
+          }
+        }
+      }
+    },
+    "error.quickConnectExpired" : {
+      "comment" : "Shown when the Quick Connect sign-in code timed out.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The code expired. Request a new one to continue."
+          }
+        }
+      }
+    },
+    "error.quickConnectUnavailable" : {
+      "comment" : "Shown when Jellyfin's Quick Connect sign-in feature is disabled server-side.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Quick Connect is turned off on this server. Enable it in the Jellyfin dashboard."
+          }
+        }
+      }
+    },
+    "error.serverUnreachable" : {
+      "comment" : "Shown when the app cannot connect to the user's media server.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t reach the server. Check that it’s online and on the same network."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se puede conectar con el servidor. Comprueba que esté encendido y en la misma red."
+          }
+        }
+      }
+    },
+    "error.unauthorized" : {
+      "comment" : "Shown when the saved credentials are no longer accepted.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your session has expired. Please sign in again."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tu sesión ha caducado. Inicia sesión de nuevo."
+          }
+        }
+      }
+    },
+    "error.unknown" : {
+      "comment" : "Generic fallback shown when no more specific error applies.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Something went wrong. Please try again."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Algo ha salido mal. Inténtalo de nuevo."
+          }
+        }
+      }
+    },
     "https://nas.local/dav" : {
 
     },
@@ -3269,6 +3645,202 @@
     },
     "iCloud identity: %@…  (must match on every device)" : {
 
+    },
+    "mediaAction.addToWatchlist" : {
+      "comment" : "Context-menu action adding an item to the user's watchlist.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add to Watchlist"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Añadir a la lista"
+          }
+        }
+      }
+    },
+    "mediaAction.goToEpisode" : {
+      "comment" : "Context-menu action opening the episode's detail page.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Episode Info"
+          }
+        }
+      }
+    },
+    "mediaAction.goToMovie" : {
+      "comment" : "Context-menu action navigating to the movie's detail page.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Go to Movie"
+          }
+        }
+      }
+    },
+    "mediaAction.goToSeason" : {
+      "comment" : "Context-menu action navigating to the season this episode belongs to.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Go to Season"
+          }
+        }
+      }
+    },
+    "mediaAction.markUnwatched" : {
+      "comment" : "Context-menu action clearing an item's watched state.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mark as Unwatched"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Marcar como no visto"
+          }
+        }
+      }
+    },
+    "mediaAction.markWatched" : {
+      "comment" : "Context-menu action marking an item as already watched.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mark as Watched"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Marcar como visto"
+          }
+        }
+      }
+    },
+    "mediaAction.markWatchedUpToHere" : {
+      "comment" : "Context-menu action marking this episode and all earlier ones as watched.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Mark Watched Up to Here"
+          }
+        }
+      }
+    },
+    "mediaAction.pauseDownload" : {
+      "comment" : "Context-menu action pausing an in-progress download.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pause Download"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pausar descarga"
+          }
+        }
+      }
+    },
+    "mediaAction.refreshMetadata" : {
+      "comment" : "Context-menu action asking the server to re-scan this item's metadata.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Refresh Metadata"
+          }
+        }
+      }
+    },
+    "mediaAction.removeDownload" : {
+      "comment" : "Context-menu action deleting a downloaded file from the device.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Download"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eliminar descarga"
+          }
+        }
+      }
+    },
+    "mediaAction.removeFromWatchlist" : {
+      "comment" : "Context-menu action removing an item from the user's watchlist.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove from Watchlist"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quitar de la lista"
+          }
+        }
+      }
+    },
+    "mediaAction.resumeDownload" : {
+      "comment" : "Context-menu action resuming a paused download.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resume Download"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reanudar descarga"
+          }
+        }
+      }
+    },
+    "mediaAction.startDownload" : {
+      "comment" : "Context-menu action starting an offline download.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descargar"
+          }
+        }
+      }
     },
     "on another device" : {
 
@@ -3429,6 +4001,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bibliotecas"
+          }
+        }
+      }
+    },
+    "subtitlePolicy.category.anime" : {
+      "comment" : "Content-type label for the per-type subtitle rules in Settings.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anime"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anime"
+          }
+        }
+      }
+    },
+    "subtitlePolicy.category.movies" : {
+      "comment" : "Content-type label for the per-type subtitle rules in Settings.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Movies"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Películas"
+          }
+        }
+      }
+    },
+    "subtitlePolicy.category.other" : {
+      "comment" : "Content-type label covering music/mixed content in the per-type subtitle rules.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Otros"
+          }
+        }
+      }
+    },
+    "subtitlePolicy.category.tvShows" : {
+      "comment" : "Content-type label for the per-type subtitle rules in Settings.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TV Shows"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Series"
           }
         }
       }

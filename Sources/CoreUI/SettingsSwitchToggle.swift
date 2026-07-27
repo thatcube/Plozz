@@ -129,12 +129,12 @@ private struct SettingsSwitchToggleBody: View {
 /// focus move lands (e.g. keep this off the focus map until sibling controls have
 /// been focused) while it still looks fully enabled.
 public struct FocusGatedSwitch: View {
-    private let title: String
+    private let title: LocalizedStringResource
     @Binding private var isOn: Bool
     private let canFocus: Bool
     private var hInset: CGFloat { SettingsRowMetrics.horizontalPadding }
 
-    public init(_ title: String, isOn: Binding<Bool>, canFocus: Bool = true) {
+    public init(_ title: LocalizedStringResource, isOn: Binding<Bool>, canFocus: Bool = true) {
         self.title = title
         self._isOn = isOn
         self.canFocus = canFocus

@@ -1588,16 +1588,20 @@ private struct PlozziOSDetailHeroForeground: View {
         .accessibilityLabel(downloadActionTitle)
     }
 
-    private var downloadActionTitle: String {
+    /// Reuses `MediaItemAction`'s labels rather than repeating them: these were
+    /// four duplicate literals of the same copy, which meant a wording change had
+    /// to be made twice and — once localized — would have produced two catalog
+    /// entries translators had to keep in sync by hand.
+    private var downloadActionTitle: LocalizedStringResource {
         switch currentDownloadRecord?.status {
         case .queued, .downloading:
-            return "Pause Download"
+            return MediaItemAction.pauseDownload.title
         case .paused, .failed:
-            return "Resume Download"
+            return MediaItemAction.resumeDownload.title
         case .completed:
-            return "Remove Download"
+            return MediaItemAction.removeDownload.title
         case nil:
-            return "Download"
+            return MediaItemAction.startDownload.title
         }
     }
 

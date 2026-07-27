@@ -78,7 +78,7 @@ public struct PlayResumeButtonLabel: View {
     }
 
     /// Plain-form label shown when the item has no resumable progress (e.g. "Play").
-    public let title: String
+    public let title: LocalizedStringResource
     /// In-progress fraction; a value in `0..<1` (together with `remainingText`)
     /// switches the label to the resume form. `nil`/`0`/`1` shows the plain title.
     public let progress: Double?
@@ -100,7 +100,7 @@ public struct PlayResumeButtonLabel: View {
     public var resumeTrailingStyle: ResumeTrailingStyle
 
     public init(
-        title: String,
+        title: LocalizedStringResource,
         progress: Double?,
         remainingText: String?,
         seasonEpisodeText: String? = nil,
@@ -148,8 +148,13 @@ public struct PlayResumeButtonLabel: View {
 
     /// The plain (non-resume) label: the base title with the season/episode appended
     /// when present — "Play S21, E8" — else just the base title ("Play").
-    private var plainTitle: String {
-        seasonEpisodeText.map { "\(title) \($0)" } ?? title
+    ///
+    /// Composed as `Text` rather than an interpolated `String`: the base title is
+    /// localized copy while "S21, E8" is generated content, so joining them as a
+    /// String would drop the title's localization on the floor.
+    private var plainTitle: Text {
+        guard let seasonEpisodeText else { return Text(title) }
+        return Text(title) + Text(verbatim: " " + seasonEpisodeText)
     }
 
     public var body: some View {
@@ -162,7 +167,7 @@ public struct PlayResumeButtonLabel: View {
                         .lineLimit(1)
                 }
             } else {
-                Text(plainTitle)
+                plainTitle
                     .lineLimit(1)
             }
         }

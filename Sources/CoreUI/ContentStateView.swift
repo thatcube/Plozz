@@ -11,7 +11,7 @@ public struct ContentStateView<Value: Sendable, Content: View>: View {
     private let state: LoadState<Value>
     private let onRetry: () -> Void
     private let content: (Value) -> Content
-    private let emptyMessage: String
+    private let emptyMessage: LocalizedStringResource
     /// Optional custom view for the `.idle`/`.loading` states. When `nil` the
     /// default `LoadingMessagesView` (spinner → playful messages) is shown; Home
     /// passes a 1:1 skeleton here so the loading state matches the loaded layout.
@@ -19,7 +19,7 @@ public struct ContentStateView<Value: Sendable, Content: View>: View {
 
     public init(
         state: LoadState<Value>,
-        emptyMessage: String = "Nothing here yet.",
+        emptyMessage: LocalizedStringResource = "Nothing here yet.",
         onRetry: @escaping () -> Void,
         @ViewBuilder content: @escaping (Value) -> Content
     ) {
@@ -34,7 +34,7 @@ public struct ContentStateView<Value: Sendable, Content: View>: View {
     /// instead of the default spinner. Empty/error/loaded handling is unchanged.
     public init<Loading: View>(
         state: LoadState<Value>,
-        emptyMessage: String = "Nothing here yet.",
+        emptyMessage: LocalizedStringResource = "Nothing here yet.",
         onRetry: @escaping () -> Void,
         @ViewBuilder loadingContent: @escaping () -> Loading,
         @ViewBuilder content: @escaping (Value) -> Content
@@ -75,7 +75,7 @@ public struct ContentStateView<Value: Sendable, Content: View>: View {
         }
     }
 
-    private func messageView(icon: String, title: String, showRetry: Bool) -> some View {
+    private func messageView(icon: String, title: LocalizedStringResource, showRetry: Bool) -> some View {
         VStack(spacing: 24) {
             Image(systemName: icon)
                 .font(.system(size: 72))

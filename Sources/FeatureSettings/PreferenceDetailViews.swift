@@ -628,7 +628,7 @@ private struct SubtitleModeControl: View {
     @Binding var baseMode: SubtitleMode
     @Binding var perTypeEnabled: Bool
     let categories: [SubtitleContentCategory]
-    let categoryName: (SubtitleContentCategory) -> String
+    let categoryName: (SubtitleContentCategory) -> LocalizedStringResource
     let categoryMode: (SubtitleContentCategory) -> Binding<SubtitleMode>
 
     /// The option currently under focus, plus which picker owns that focus. The

@@ -7,7 +7,9 @@ import CoreModels
 /// For anime this surfaces the voice cast — exactly the metadata the web client
 /// shows but that Plozz previously dropped.
 public struct CastRowView: View {
-    private let title: String
+    /// `nil` hides the header entirely (previously spelled as an empty string,
+    /// which a LocalizedStringResource can't express).
+    private let title: LocalizedStringResource?
     private let people: [MediaPerson]
     /// Leading inset for the title and first headshot. Detail pages pass the
     /// hero leading padding so the cast row aligns with the hero text above.
@@ -17,7 +19,7 @@ public struct CastRowView: View {
     @Environment(\.plozzMetrics) private var metrics
 
     public init(
-        title: String = "Cast",
+        title: LocalizedStringResource? = "Cast",
         people: [MediaPerson],
         leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
         onFocusEntered: (() -> Void)? = nil
@@ -31,7 +33,7 @@ public struct CastRowView: View {
     public var body: some View {
         if !people.isEmpty {
             VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
-                if !title.isEmpty {
+                if let title {
                     Text(title)
                         .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                         .padding(.leading, leadingInset)

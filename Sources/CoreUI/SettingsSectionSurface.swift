@@ -3,16 +3,29 @@ import SwiftUI
 
 public struct SettingsSectionGroup<Content: View, Footer: View>: View {
     @Environment(\.themePalette) private var palette
-    private let title: String?
+    private let title: Text?
     private let content: Content
     private let footer: Footer
 
+    /// Section header that is app COPY — the common case, so literals still work.
     public init(
-        _ title: String? = nil,
+        _ title: LocalizedStringResource? = nil,
         @ViewBuilder content: () -> Content,
         @ViewBuilder footer: () -> Footer
     ) {
-        self.title = title
+        self.title = title.map(Text.init)
+        self.content = content()
+        self.footer = footer()
+    }
+
+    /// Section header that is verbatim CONTENT — e.g. the legal/trademark
+    /// attribution sections, whose wording is deliberately not translated.
+    public init(
+        verbatim title: String,
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder footer: () -> Footer
+    ) {
+        self.title = Text(verbatim: title)
         self.content = content()
         self.footer = footer()
     }
@@ -20,7 +33,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let title {
-                Text(title)
+                title
                     .font(.footnote.weight(.semibold))
                     .plozzForeground(.secondary)
                     .textCase(.uppercase)
@@ -78,10 +91,17 @@ private struct SettingsSectionButtonStyle: ButtonStyle {
 
 public extension SettingsSectionGroup where Footer == EmptyView {
     init(
-        _ title: String? = nil,
+        _ title: LocalizedStringResource? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.init(title, content: content, footer: { EmptyView() })
+    }
+
+    init(
+        verbatim title: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.init(verbatim: title, content: content, footer: { EmptyView() })
     }
 }
 #endif

@@ -17,7 +17,7 @@ public final class PlexAuthViewModel {
         case awaitingLink(code: String, authorizationURL: URL, expiresAt: Date)
         case loadingServers
         case selectingServer([PlexServerCandidate])
-        case error(String)
+        case error(LocalizedStringResource)
     }
 
     public private(set) var phase: Phase = .idle

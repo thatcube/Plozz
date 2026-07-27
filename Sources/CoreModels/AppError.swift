@@ -52,31 +52,81 @@ public enum AppError: Error, Equatable, Sendable {
         }
     }
 
-    /// A short, user-facing message safe to display on tvOS.
-    public var userMessage: String {
+    /// A short, user-facing message safe to display.
+    ///
+    /// `LocalizedStringResource` rather than `String` so these survive
+    /// translation: a `String` reaching `Text` renders verbatim and is invisible
+    /// to the String Catalog, which would leave every error message English
+    /// forever. This is Foundation-only, so `CoreModels` stays a dependency-free
+    /// leaf. Semantic keys because "Cancelled." is far too generic to key on.
+    public var userMessage: LocalizedStringResource {
         switch self {
         case .serverUnreachable:
-            return "Can’t reach the server. Check that it’s online and on the same network."
+            return LocalizedStringResource(
+                "error.serverUnreachable",
+                defaultValue: "Can’t reach the server. Check that it’s online and on the same network.",
+                comment: "Shown when the app cannot connect to the user's media server."
+            )
         case .invalidResponse:
-            return "The server sent an unexpected response."
+            return LocalizedStringResource(
+                "error.invalidResponse",
+                defaultValue: "The server sent an unexpected response.",
+                comment: "Shown when the server replies with something the app cannot interpret."
+            )
         case .unauthorized:
-            return "Your session has expired. Please sign in again."
+            return LocalizedStringResource(
+                "error.unauthorized",
+                defaultValue: "Your session has expired. Please sign in again.",
+                comment: "Shown when the saved credentials are no longer accepted."
+            )
         case .invalidCredentials:
-            return "Incorrect username or password. Please try again."
+            return LocalizedStringResource(
+                "error.invalidCredentials",
+                defaultValue: "Incorrect username or password. Please try again.",
+                comment: "Shown when a sign-in attempt is rejected."
+            )
         case .notFound:
-            return "We couldn’t find what you were looking for."
+            return LocalizedStringResource(
+                "error.notFound",
+                defaultValue: "We couldn’t find what you were looking for.",
+                comment: "Shown when a requested item no longer exists on the server."
+            )
         case .conflict:
-            return "The server already has a newer version of this."
+            return LocalizedStringResource(
+                "error.conflict",
+                defaultValue: "The server already has a newer version of this.",
+                comment: "Shown when a local change clashes with newer server data."
+            )
         case .quickConnectUnavailable:
-            return "Quick Connect is turned off on this server. Enable it in the Jellyfin dashboard."
+            return LocalizedStringResource(
+                "error.quickConnectUnavailable",
+                defaultValue: "Quick Connect is turned off on this server. Enable it in the Jellyfin dashboard.",
+                comment: "Shown when Jellyfin's Quick Connect sign-in feature is disabled server-side."
+            )
         case .quickConnectExpired:
-            return "The code expired. Request a new one to continue."
+            return LocalizedStringResource(
+                "error.quickConnectExpired",
+                defaultValue: "The code expired. Request a new one to continue.",
+                comment: "Shown when the Quick Connect sign-in code timed out."
+            )
         case .cancelled:
-            return "Cancelled."
+            return LocalizedStringResource(
+                "error.cancelled",
+                defaultValue: "Cancelled.",
+                comment: "Shown when the user cancelled the operation."
+            )
         case .decoding:
-            return "We couldn’t read the server’s response."
+            return LocalizedStringResource(
+                "error.decoding",
+                defaultValue: "We couldn’t read the server’s response.",
+                comment: "Shown when the server's response could not be parsed."
+            )
         case .unknown:
-            return "Something went wrong. Please try again."
+            return LocalizedStringResource(
+                "error.unknown",
+                defaultValue: "Something went wrong. Please try again.",
+                comment: "Generic fallback shown when no more specific error applies."
+            )
         }
     }
 }

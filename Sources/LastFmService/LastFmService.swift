@@ -12,7 +12,7 @@ public enum LastFmConnectionPhase: Equatable, Sendable {
     case disconnected
     case connecting(authURL: String, expiresAt: Date)
     case connected(username: String)
-    case error(String)
+    case error(LocalizedStringResource)
 }
 
 /// App-level façade for the Last.fm music-scrobbling integration.

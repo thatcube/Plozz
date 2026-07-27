@@ -14,7 +14,7 @@ public final class PasswordSignInViewModel {
         case idle
         case submitting
         case success
-        case error(String)
+        case error(LocalizedStringResource)
     }
 
     public var username: String = ""

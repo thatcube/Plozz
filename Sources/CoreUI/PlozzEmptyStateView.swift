@@ -10,12 +10,12 @@ import SwiftUI
 /// Pass a custom `imageName` to swap the mascot for another asset-catalog image
 /// (it resolves from the main bundle, matching the app's other brand marks).
 public struct PlozzEmptyStateView: View {
-    private let message: String
+    private let message: LocalizedStringResource
     private let imageName: String
     private let imageSize: CGFloat
 
     public init(
-        _ message: String,
+        _ message: LocalizedStringResource,
         imageName: String = "PlozzLogoSad",
         imageSize: CGFloat = 140
     ) {

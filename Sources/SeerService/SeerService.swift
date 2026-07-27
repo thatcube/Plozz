@@ -15,7 +15,7 @@ public enum SeerConnectionPhase: Equatable, Sendable {
     /// Connected; `summary` is a short label (server version) for the UI.
     case connected(summary: String)
     /// A connect/test attempt failed; the message is user-facing.
-    case failed(String)
+    case failed(LocalizedStringResource)
 }
 
 /// App-level façade for the Seerr integration — the concrete backing for the
@@ -187,7 +187,7 @@ public final class SeerService {
         return "Connected"
     }
 
-    private static func message(for error: Error) -> String {
+    private static func message(for error: Error) -> LocalizedStringResource {
         if let appError = error as? AppError { return appError.userMessage }
         return AppError.unknown("").userMessage
     }

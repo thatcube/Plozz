@@ -15,7 +15,7 @@ public enum AniListConnectionPhase: Equatable, Sendable {
     /// Waiting for the user to enter their token from the authorization page.
     case awaitingToken(authorizationURL: String)
     case connected(username: String)
-    case error(String)
+    case error(LocalizedStringResource)
 }
 
 /// App-level façade for the AniList integration.

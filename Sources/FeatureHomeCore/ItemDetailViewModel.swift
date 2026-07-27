@@ -2321,7 +2321,7 @@ public final class ItemDetailViewModel {
     }
 
     /// Label for the primary action button, reflecting resume vs. play.
-    public func playButtonTitle(for item: MediaItem) -> String {
+    public func playButtonTitle(for item: MediaItem) -> LocalizedStringResource {
         "Play"
     }
 }

@@ -15,7 +15,7 @@ public final class QuickConnectViewModel {
         case requesting
         case awaitingApproval(code: String, expiresAt: Date)
         case success
-        case error(String)
+        case error(LocalizedStringResource)
     }
 
     public private(set) var phase: Phase = .idle

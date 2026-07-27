@@ -25,7 +25,10 @@ struct PlozziOSItemDetailView: View {
 
     @State private var resolvedSeries: MediaItem?
     @State private var resolvedContextItem: MediaItem?
-    @State private var resolutionError: String?
+    /// Pre-built `Text` because the two sources differ in kind: an `AppError`
+    /// carries our own localizable resource, while `localizedDescription` is a
+    /// string Foundation has ALREADY localized and must not be re-looked-up.
+    @State private var resolutionError: Text?
     @State private var retryToken = 0
 
     init(
@@ -67,7 +70,7 @@ struct PlozziOSItemDetailView: View {
                         systemImage: "exclamationmark.triangle"
                     )
                 } description: {
-                    Text(resolutionError)
+                    resolutionError
                 } actions: {
                     Button("Try Again") {
                         self.resolutionError = nil
@@ -130,8 +133,8 @@ struct PlozziOSItemDetailView: View {
             resolutionError = nil
         } catch {
             guard !Task.isCancelled else { return }
-            resolutionError = (error as? AppError)?.userMessage
-                ?? error.localizedDescription
+            resolutionError = (error as? AppError).map { Text($0.userMessage) }
+                ?? Text(verbatim: error.localizedDescription)
         }
     }
 }

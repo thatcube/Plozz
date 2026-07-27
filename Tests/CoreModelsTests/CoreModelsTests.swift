@@ -25,7 +25,12 @@ final class AppErrorTests: XCTestCase {
             .quickConnectUnavailable, .quickConnectExpired, .cancelled, .decoding, .unknown("x")
         ]
         for error in cases {
-            XCTAssertFalse(error.userMessage.isEmpty, "\(error) should have a message")
+            // `userMessage` is a LocalizedStringResource now, so resolve it in an
+            // explicit locale before asserting — and resolving also proves the
+            // English default is actually reachable, not just declared.
+            var resource = error.userMessage
+            resource.locale = Locale(identifier: "en")
+            XCTAssertFalse(String(localized: resource).isEmpty, "\(error) should have a message")
         }
     }
 }

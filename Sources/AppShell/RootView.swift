@@ -1017,7 +1017,7 @@ private struct LaunchView: View {
 }
 
 private struct FailureView: View {
-    let message: String
+    let message: LocalizedStringResource
     let onRetry: () -> Void
 
     var body: some View {

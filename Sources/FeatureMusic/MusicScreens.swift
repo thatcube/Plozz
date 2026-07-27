@@ -299,7 +299,7 @@ struct MusicGridView: View {
         }
     }
 
-    private var emptyMessage: String { "Nothing here yet." }
+    private var emptyMessage: LocalizedStringResource { "Nothing here yet." }
 }
 
 /// A colourful genre tile: a curated gradient + a genre-appropriate icon, so

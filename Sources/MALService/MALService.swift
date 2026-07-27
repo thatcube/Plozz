@@ -10,7 +10,7 @@ public enum MALConnectionPhase: Equatable, Sendable {
     case disconnected
     case awaitingAuthorizationCode(authorizationURL: String)
     case connected(username: String)
-    case error(String)
+    case error(LocalizedStringResource)
 }
 
 /// App-level façade for the MyAnimeList integration.

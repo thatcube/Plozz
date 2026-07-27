@@ -12,8 +12,8 @@ import SwiftUI
 /// Pair the trailing slot with ``SettingsOptionPicker`` for the common
 /// "label + pills" row.
 public struct LabeledSettingRow<Trailing: View>: View {
-    private let title: String
-    private let subtitle: String?
+    private let title: LocalizedStringResource
+    private let subtitle: LocalizedStringResource?
     private let labelWidth: CGFloat
     private let trailingAlignment: Alignment
     private let trailing: Trailing
@@ -28,8 +28,8 @@ public struct LabeledSettingRow<Trailing: View>: View {
     ///     "button menus" so they align to the right edge of the row.
     ///   - trailing: The control shown to the right of the label.
     public init(
-        _ title: String,
-        subtitle: String? = nil,
+        _ title: LocalizedStringResource,
+        subtitle: LocalizedStringResource? = nil,
         labelWidth: CGFloat = 240,
         trailingAlignment: Alignment = .leading,
         @ViewBuilder trailing: () -> Trailing

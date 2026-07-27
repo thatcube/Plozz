@@ -271,7 +271,7 @@ private func connectedStatus(username: String) -> some View {
         .foregroundStyle(.green)
 }
 
-private func errorStatus(_ message: String) -> some View {
+private func errorStatus(_ message: LocalizedStringResource) -> some View {
     Label(message, systemImage: "exclamationmark.triangle.fill")
         .foregroundStyle(.red)
 }

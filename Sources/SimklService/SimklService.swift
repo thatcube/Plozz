@@ -10,7 +10,7 @@ public enum SimklConnectionPhase: Equatable, Sendable {
     case disconnected
     case connecting(userCode: String, verificationURL: String, expiresAt: Date)
     case connected(username: String)
-    case error(String)
+    case error(LocalizedStringResource)
 }
 
 /// App-level façade for the Simkl integration.

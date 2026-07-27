@@ -14,7 +14,7 @@ struct PlozziOSAddNFSShareView: View {
     @State private var exportPath = ""
     @State private var displayName = ""
     @State private var discoveredItems: [NFSDirectoryItem] = []
-    @State private var discoveryTitle = "Exports"
+    @State private var discoveryTitle: LocalizedStringResource = "Exports"
     @State private var isLoading = false
     @State private var errorMessage: String?
 

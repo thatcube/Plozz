@@ -16,7 +16,7 @@ public enum TraktConnectionPhase: Equatable, Sendable {
     /// Connected to `username`'s Trakt account.
     case connected(username: String)
     /// A connection attempt failed.
-    case error(String)
+    case error(LocalizedStringResource)
 }
 
 /// App-level façade for the Trakt integration.

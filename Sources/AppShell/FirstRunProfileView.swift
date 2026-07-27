@@ -10,9 +10,8 @@ import FeatureProfiles
 /// change the name/avatar.
 ///
 /// Profiles are always on, so there is no opt-in gate in front of this screen.
-/// It carries the "what profiles are for" explainer the retired prompt used to
-/// show, as a short highlight row under the seeded profile — the household
-/// still learns it can add people, without being asked to make a decision.
+/// Confirming is the only job here; the fact that more profiles exist is a
+/// single quiet line UNDER the actions, because it's an aside, not a decision.
 ///
 /// It never appears again once completed — signing out of everything and
 /// re-adding a server skips straight into the app (see
@@ -20,40 +19,23 @@ import FeatureProfiles
 struct FirstRunProfileView: View {
     @Bindable var appState: AppState
     @State private var editing = false
-    @Environment(\.themePalette) private var palette
     @FocusState private var focus: Field?
 
     private enum Field { case confirm, edit }
 
-    private struct Highlight: Identifiable {
-        let id = UUID()
-        let icon: String
-        let text: String
-    }
-
-    private let highlights = [
-        Highlight(icon: "house.fill", text: "Personal Home rows and library visibility"),
-        Highlight(icon: "externaldrive.fill", text: "Choose which servers each profile uses"),
-        Highlight(icon: "arrow.down.circle.fill", text: "Separate watch history and downloads"),
-    ]
-
     private var profile: Profile { appState.profilesModel.activeProfile }
 
     var body: some View {
-        VStack(spacing: 36) {
+        VStack(spacing: 44) {
             Spacer(minLength: 0)
 
-            VStack(spacing: 24) {
-                ProfileAvatarView(profile: profile, size: 180)
+            VStack(spacing: 28) {
+                ProfileAvatarView(profile: profile, size: 220)
                     .shadow(color: .black.opacity(0.35), radius: 20, y: 10)
 
                 VStack(spacing: 14) {
                     Text(displayName)
                         .font(.largeTitle.weight(.bold))
-                        .multilineTextAlignment(.center)
-
-                    Text("Profile created automatically")
-                        .font(.title3.weight(.semibold))
                         .multilineTextAlignment(.center)
 
                     Text("We created this profile from your \(providerName) account. You can rename it or change the photo here, or any time in Settings.")
@@ -63,20 +45,6 @@ struct FirstRunProfileView: View {
                         .frame(maxWidth: 760)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-
-            VStack(spacing: 16) {
-                Text("Add a profile for anyone else in Settings — each one keeps its own:")
-                    .font(.callout.weight(.medium))
-                    .plozzForeground(.secondary)
-                    .multilineTextAlignment(.center)
-
-                HStack(alignment: .top, spacing: 20) {
-                    ForEach(highlights) { highlight in
-                        highlightCard(highlight)
-                    }
-                }
-                .frame(maxWidth: 1180)
             }
 
             HStack(spacing: 24) {
@@ -101,6 +69,13 @@ struct FirstRunProfileView: View {
                 .buttonStyle(.borderedProminent)
                 .focused($focus, equals: .confirm)
             }
+
+            Text("Add a profile for anyone else in Settings. Each one keeps its own settings, Home, watch history, and downloads — your servers stay shared.")
+                .font(.footnote)
+                .plozzForeground(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 900)
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 0)
         }
@@ -130,30 +105,6 @@ struct FirstRunProfileView: View {
                 }
             )
         }
-    }
-
-    private func highlightCard(_ highlight: Highlight) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: highlight.icon)
-                .font(.system(size: 30, weight: .semibold))
-                .foregroundStyle(palette.accent)
-
-            Text(highlight.text)
-                .font(.footnote)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 20)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-        )
     }
 
     private var displayName: String {

@@ -86,6 +86,14 @@ public struct AniListRatingsProvider: ExternalRatingsProviding {
     /// Whether this is anime and, if so, the best AniList lookup variable to use.
     static func lookup(for item: MediaItem) -> (String, Any)? {
         guard isAnime(item) else { return nil }
+        // Episodes and seasons get no score. AniList only scores a *show*, so
+        // answering for an episode means lending it the series' number — which
+        // lands beside a server's genuinely per-episode rating (Jellyfin scopes
+        // its `CommunityRating` to the episode) in an identical tile, with
+        // nothing to say one is about 22 minutes and the other about 60 hours.
+        // A rating shown against an episode has to be about that episode.
+        guard item.kind != .episode, item.kind != .season else { return nil }
+
         for (key, value) in item.providerIDs {
             let lowered = key.lowercased()
             let trimmed = value.trimmingCharacters(in: .whitespaces)
@@ -98,9 +106,7 @@ public struct AniListRatingsProvider: ExternalRatingsProviding {
                 return ("idMal", id)
             }
         }
-        let title = (item.kind == .episode || item.kind == .season)
-            ? (item.parentTitle ?? item.title) : item.title
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : ("search", trimmed)
     }
 

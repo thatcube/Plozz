@@ -569,9 +569,15 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(community?.value, 7.2)
         XCTAssertEqual(community?.scale, .outOfTen)
 
-        let critic = item.ratings.first { $0.source == .critic }
+        let critic = item.ratings.first { $0.source == .rottenTomatoes }
         XCTAssertEqual(critic?.value, 74)
-        XCTAssertEqual(critic?.scale, .outOfHundred)
+        // Percent, not out-of-hundred: only one provider in Jellyfin's source
+        // writes CriticRating, and it copies the entry named "Rotten Tomatoes"
+        // from OMDb — the Tomatometer, which is a percentage of positive reviews.
+        // It must therefore read "74%" and not "74/100".
+        XCTAssertEqual(critic?.scale, .percent)
+        XCTAssertEqual(critic?.displayValue, "74%")
+        XCTAssertFalse(item.ratings.contains { $0.source == .critic })
     }
 
     func testItemCommunityRatingDoesNotInventTMDBProvenance() async throws {

@@ -159,9 +159,10 @@ targets:
         MALClientID: "$(MAL_CLIENT_ID)"
         OMDBAPIKey: "$(OMDB_API_KEY)"
         TMDBBearerToken: "$(TMDB_BEARER_TOKEN)"
-        # Simkl client credentials for watch tracking. Register at simkl.com/apps.
+        # Simkl client ID for watch tracking. Register at simkl.com/apps.
+        # No client secret: Simkl's rules forbid embedding one in code that ships
+        # to a device, and the PIN flow Plozz uses never needs it.
         SimklClientID: "$(SIMKL_CLIENT_ID)"
-        SimklClientSecret: "$(SIMKL_CLIENT_SECRET)"
         # AniList client ID/secret for anime tracking (authorization code grant).
         AniListClientID: "$(ANILIST_CLIENT_ID)"
         AniListClientSecret: "$(ANILIST_CLIENT_SECRET)"
@@ -355,7 +356,6 @@ targets:
         TraktClientID: "$(TRAKT_CLIENT_ID)"
         TraktClientSecret: "$(TRAKT_CLIENT_SECRET)"
         SimklClientID: "$(SIMKL_CLIENT_ID)"
-        SimklClientSecret: "$(SIMKL_CLIENT_SECRET)"
         AniListClientID: "$(ANILIST_CLIENT_ID)"
         AniListClientSecret: "$(ANILIST_CLIENT_SECRET)"
         MALClientID: "$(MAL_CLIENT_ID)"

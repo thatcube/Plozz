@@ -24,7 +24,7 @@
 #   tools/install-verified.sh <core-device-udid> <path-to.app> [--no-launch] [--force]
 #
 # ENV
-#   PLOZZ_INSTALL_TIMEOUT   per-attempt install timeout seconds (default 180)
+#   PLOZZ_INSTALL_TIMEOUT   per-attempt install timeout seconds (default 90)
 #   PLOZZ_INSTALL_ATTEMPTS  max install attempts             (default 3)
 set -uo pipefail
 
@@ -43,7 +43,7 @@ for arg in "$@"; do
   esac
 done
 
-TIMEOUT="${PLOZZ_INSTALL_TIMEOUT:-180}"
+TIMEOUT="${PLOZZ_INSTALL_TIMEOUT:-90}"
 ATTEMPTS="${PLOZZ_INSTALL_ATTEMPTS:-3}"
 
 if [[ ! -d "$APP" ]]; then echo "✗ no .app at: $APP" >&2; exit 1; fi
@@ -98,6 +98,16 @@ if [[ "$FORCE" != "1" ]]; then
 fi
 
 if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
+  # Cheap liveness probe before committing to a long install. A degraded
+  # CoreDevice tunnel is the usual reason an install sits for minutes, and the
+  # reset that fixes it used to run only after the first attempt had already
+  # burned its whole timeout. 15s here replaces up to a full attempt of waiting,
+  # and costs nothing when the tunnel is healthy.
+  if ! xcrun devicectl device info details --device "$DEVICE" --timeout 15 >/dev/null 2>&1; then
+    echo "  · device did not answer a 15s probe; tunnel looks degraded"
+    reset_coredevice_daemons
+  fi
+
   ok=0
   for attempt in $(seq 1 "$ATTEMPTS"); do
     echo "▸ Install attempt $attempt/$ATTEMPTS (timeout ${TIMEOUT}s)…"
@@ -106,8 +116,21 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
     # install we make ZERO extra queries. Only if the command ERRORS do we spend a
     # verify query: on wireless the install often actually completed and only the
     # final tunnel handshake dropped.
-    if xcrun devicectl device install app --device "$DEVICE" --timeout "$TIMEOUT" "$APP" \
-         >/dev/null 2>&1; then
+    # Heartbeat while the install runs. devicectl prints nothing until it is
+    # finished, and a silent multi-minute wait is indistinguishable from a hang,
+    # which is exactly how a slow wireless install has been read.
+    xcrun devicectl device install app --device "$DEVICE" --timeout "$TIMEOUT" "$APP" \
+      >/dev/null 2>&1 &
+    install_pid=$!
+    waited=0
+    while kill -0 "$install_pid" 2>/dev/null; do
+      sleep 5
+      waited=$((waited + 5))
+      if (( waited % 20 == 0 )); then
+        echo "  · still installing… ${waited}s of ${TIMEOUT}s"
+      fi
+    done
+    if wait "$install_pid"; then
       echo "✓ Install completed cleanly."
       ok=1; break
     fi

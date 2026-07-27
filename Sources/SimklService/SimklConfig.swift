@@ -2,22 +2,25 @@ import Foundation
 
 /// Configuration for the Simkl integration.
 ///
-/// Like Trakt, Simkl OAuth requires a registered application's **client id** and
-/// **client secret**. Read from Info.plist (`SimklClientID` / `SimklClientSecret`,
-/// substituted from build settings in the gitignored `Config/Secrets.local.xcconfig`),
-/// falling back to the process environment.
+/// Only the **client id** is held. Simkl's API rules are explicit that the client
+/// secret must never be embedded in code that ships to a user's device, and the
+/// PIN flow Plozz uses to authorize a TV or phone never needs one — so the secret
+/// is not read, not stored, and not shipped. A leaked secret would let anyone
+/// authenticate as Plozz, consume its rate-limit quota, and force every user to
+/// re-authorize after a rotation.
+///
+/// Read from Info.plist (`SimklClientID`, substituted from build settings in the
+/// gitignored `Config/Secrets.local.xcconfig`), falling back to the process
+/// environment.
 public struct SimklConfig: Sendable, Equatable {
     public var clientID: String?
-    public var clientSecret: String?
     public var apiBaseURL: URL
 
     public init(
         clientID: String? = nil,
-        clientSecret: String? = nil,
         apiBaseURL: URL = URL(string: "https://api.simkl.com")!
     ) {
         self.clientID = Self.sanitize(clientID)
-        self.clientSecret = Self.sanitize(clientSecret)
         self.apiBaseURL = apiBaseURL
     }
 
@@ -31,10 +34,8 @@ public struct SimklConfig: Sendable, Equatable {
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> SimklConfig {
         let plistID = bundle.object(forInfoDictionaryKey: "SimklClientID") as? String
-        let plistSecret = bundle.object(forInfoDictionaryKey: "SimklClientSecret") as? String
         return SimklConfig(
-            clientID: sanitize(plistID) ?? sanitize(environment["SIMKL_CLIENT_ID"]),
-            clientSecret: sanitize(plistSecret) ?? sanitize(environment["SIMKL_CLIENT_SECRET"])
+            clientID: sanitize(plistID) ?? sanitize(environment["SIMKL_CLIENT_ID"])
         )
     }
 

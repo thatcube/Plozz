@@ -180,6 +180,38 @@ final class RatingsCacheTests: XCTestCase {
 
         XCTAssertEqual(ratings.map(\.source), [.anilist])
     }
+
+    func testAniListSkipsEpisodesAndSeasons() {
+        // AniList scores a *show*, so answering for an episode means lending it
+        // the series' number — which would sit beside a server's genuinely
+        // per-episode rating in an identical tile, one describing 22 minutes and
+        // the other 60 hours, with nothing to tell them apart.
+        for kind in [MediaItemKind.episode, .season] {
+            let item = MediaItem(
+                id: "e1",
+                title: "Episode 1",
+                kind: kind,
+                parentTitle: "Frieren",
+                providerIDs: ["AniList": "154587"]
+            )
+            XCTAssertNil(
+                AniListRatingsProvider.lookup(for: item),
+                "\(kind) must not borrow the series' AniList score"
+            )
+        }
+    }
+
+    func testAniListStillResolvesSeries() {
+        let item = MediaItem(
+            id: "s1", title: "Frieren", kind: .series,
+            providerIDs: ["AniList": "154587"]
+        )
+        guard let (key, value) = AniListRatingsProvider.lookup(for: item) else {
+            return XCTFail("a series must still resolve")
+        }
+        XCTAssertEqual(key, "id")
+        XCTAssertEqual(value as? Int, 154587)
+    }
 }
 
 /// A thread-safe mutable clock for TTL tests.

@@ -114,6 +114,7 @@ public struct RatingBadge: View {
 public struct RatingSourceIcon: View {
     private let rating: ExternalRating
     private let size: CGFloat
+    @Environment(\.themePalette) private var palette
 
     public init(rating: ExternalRating, size: CGFloat) {
         self.rating = rating
@@ -125,7 +126,18 @@ public struct RatingSourceIcon: View {
         case .star:
             Image(systemName: "star.fill")
                 .font(.system(size: size * 0.8, weight: .semibold))
-                .foregroundStyle(starColor)
+                .foregroundStyle(Self.starGold)
+        case .anilist:
+            // AniList ships two lock-ups: the "A" is white on one and near-black
+            // on the other, and only the blue bar is constant. Pick by the theme's
+            // own luminance rather than the system colour scheme, because the tile
+            // sits on the palette's surface — which a user can set independently of
+            // the device appearance. tvOS focus keeps that surface (it deliberately
+            // never inverts to a white plate), so the same choice holds focused.
+            ratingArtwork(
+                palette.isLight ? "AniListLogoOnLight" : "AniListLogoOnDark",
+                aspect: 1.309
+            )
         case .imdb:
             Image("IMDbLogo", bundle: .module)
                 .resizable()
@@ -137,9 +149,20 @@ public struct RatingSourceIcon: View {
                 .scaledToFit()
                 .frame(width: size * 1.75, height: size * 0.75)
         case .tomato:
-            emoji("🍅")
+            // The Tomatometer's two states. `freshness` already applies the
+            // standard 60% cutoff (and defers to an explicit verdict when the
+            // source supplied one) — it just had nothing rendering it until now,
+            // so a 24% film wore the same cheerful tomato as a 98% one.
+            rating.freshness == .rotten
+                ? ratingArtwork("RatingTomatoRotten", aspect: 1.029)
+                : ratingArtwork("RatingTomatoFresh", aspect: 0.967)
         case .popcorn:
-            emoji("🍿")
+            // The audience pair carries white inside the tub, and the light
+            // theme's card surface is pure white — so unlike the solid-colour
+            // tomato and splat, these need the light/dark variant treatment.
+            rating.freshness == .rotten
+                ? ratingArtwork(popcornAsset(rotten: true), aspect: 1.331)
+                : ratingArtwork(popcornAsset(rotten: false), aspect: 0.754)
         case .metacritic:
             metacriticChip
         case .critic:
@@ -149,13 +172,31 @@ public struct RatingSourceIcon: View {
         }
     }
 
-    private var starColor: Color {
-        rating.source == .anilist ? Self.anilistBlue : Self.starGold
+    /// A branded rating mark, sized so every source carries the same optical
+    /// weight beside its score.
+    ///
+    /// Height alone is the wrong yardstick here: these marks run from a tall
+    /// narrow tub (0.75) to a wide tipped one (1.33), and matching their heights
+    /// would leave the tall one towering over the wide one. Holding the geometric
+    /// mean constant instead keeps them looking the same size whatever their
+    /// proportions.
+    ///
+    /// Each asset's canvas is cropped to its artwork, so the frame *is* the mark.
+    /// A square frame around a centred mark keeps the canvas margin as dead space
+    /// between the icon and its number — which is why the tomato and popcorn used
+    /// to sit noticeably further from their scores than the tight-cropped IMDb and
+    /// TMDB lock-ups did.
+    private func ratingArtwork(_ name: String, aspect: CGFloat) -> some View {
+        let mass = size * 0.95
+        return Image(name, bundle: .module)
+            .resizable()
+            .scaledToFit()
+            .frame(width: mass * sqrt(aspect), height: mass / sqrt(aspect))
     }
 
-    private func emoji(_ value: String) -> some View {
-        Text(value)
-            .font(.system(size: size * 0.82))
+    private func popcornAsset(rotten: Bool) -> String {
+        let base = rotten ? "RatingPopcornRotten" : "RatingPopcornFresh"
+        return palette.isLight ? base + "OnLight" : base
     }
 
     private var metacriticChip: some View {
@@ -175,7 +216,6 @@ public struct RatingSourceIcon: View {
     }
 
     static let starGold = Color(red: 0.96, green: 0.77, blue: 0.13)
-    static let anilistBlue = Color(red: 0.13, green: 0.62, blue: 1.0)
     static let metacriticGreen = Color(red: 0.40, green: 0.73, blue: 0.27)
     static let metacriticYellow = Color(red: 1.0, green: 0.80, blue: 0.0)
     static let metacriticRed = Color(red: 0.98, green: 0.27, blue: 0.20)

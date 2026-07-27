@@ -14,18 +14,27 @@ public enum RatingsServiceFactory {
     ) -> any ExternalRatingsProviding {
         // AniList anime scores are keyless and per-IP, so they're always on — the
         // anime experience never depends on any configured key.
-        let anilist = AniListRatingsProvider()
+        var providers: [any ExternalRatingsProviding] = [AniListRatingsProvider()]
 
-        let base: any ExternalRatingsProviding
-        if let key = config.omdbAPIKey {
-            let omdb = OMDbRatingsProvider(apiKey: key, baseURL: config.omdbBaseURL, http: http)
-            // OMDb (IMDb/RT/Metacritic) is authoritative for movies/western TV and
-            // is merged over the keyless AniList score for anime titles.
-            base = CompositeRatingsProvider([anilist, omdb])
-        } else {
-            // No OMDb key: still serve keyless AniList scores for anime.
-            base = anilist
+        // TMDb is the broad-coverage source, and the only one that reaches media
+        // shares (SMB/WebDAV/local), which have no server metadata to fall back
+        // on. Ordered ahead of OMDb only for readability — sources are merged by
+        // their own key, never overwritten positionally.
+        if let token = config.tmdbBearerToken {
+            providers.append(TMDbRatingsProvider(bearerToken: token, http: http))
         }
+
+        // OMDb (IMDb) is opt-in: its free tier is capped per key per day, so it
+        // is only ever configured for builds that have a key to spend.
+        if let key = config.omdbAPIKey {
+            providers.append(
+                OMDbRatingsProvider(apiKey: key, baseURL: config.omdbBaseURL, http: http)
+            )
+        }
+
+        let base: any ExternalRatingsProviding = providers.count == 1
+            ? providers[0]
+            : CompositeRatingsProvider(providers)
         let diskURL = cacheDirectory?.appendingPathComponent("plozz-ratings-cache.json")
         let cache = RatingsCache(ttl: config.cacheTTL, diskURL: diskURL)
         return CachingRatingsProvider(base: base, cache: cache)

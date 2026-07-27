@@ -1546,16 +1546,28 @@ public struct JellyfinProvider: MediaProvider {
 
     /// Maps Jellyfin's native rating fields onto provider-agnostic ratings.
     ///
-    /// Jellyfin and Emby do not preserve the originating service for these
-    /// aggregate fields. Keep their cohorts while avoiding invented TMDB/RT
-    /// attribution.
+    /// `CommunityRating` genuinely has no knowable source. Two providers write it
+    /// — TMDb (`vote_average`) and OMDb (IMDb's user score) — and which one wins
+    /// is decided by the library's fetcher order, which only an admin can read.
+    /// So it stays an unattributed community score.
+    ///
+    /// `CriticRating` is different, and attributable. Exactly one provider in the
+    /// Jellyfin source writes it, and it takes the entry whose source is literally
+    /// `"Rotten Tomatoes"` from OMDb — the Tomatometer, never the audience score
+    /// (OMDb carries no audience figure at all, which is also why Jellyfin can
+    /// never produce a popcorn rating). The only other writer is a local NFO file.
     private static func ratings(from dto: BaseItemDto) -> [ExternalRating] {
         var ratings: [ExternalRating] = []
         if let community = dto.CommunityRating {
             ratings.append(ExternalRating(source: .community, value: community, scale: .outOfTen))
         }
         if let critic = dto.CriticRating {
-            ratings.append(ExternalRating(source: .critic, value: critic, scale: .outOfHundred))
+            // `.percent`, not `.outOfHundred` — the Tomatometer is a percentage of
+            // positive reviews ("86%"), not a score out of 100 ("86/100"). Matches
+            // how the same score renders when it arrives via our own OMDb call.
+            ratings.append(
+                ExternalRating(source: .rottenTomatoes, value: critic, scale: .percent)
+            )
         }
         return ratings
     }

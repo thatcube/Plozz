@@ -57,6 +57,10 @@ final class ExternalRatingTests: XCTestCase {
         XCTAssertEqual(RatingSource.imdb.icon, .imdb)
         XCTAssertEqual(RatingSource.tmdb.icon, .tmdb)
         XCTAssertEqual(RatingSource.community.icon, .star)
+        XCTAssertEqual(RatingSource.letterboxd.icon, .star)
+        // AniList carries its own mark rather than a generic star, so a score from
+        // it is attributable at a glance instead of looking like the server's own.
+        XCTAssertEqual(RatingSource.anilist.icon, .anilist)
         XCTAssertEqual(RatingSource.metacritic.icon, .metacritic)
     }
 

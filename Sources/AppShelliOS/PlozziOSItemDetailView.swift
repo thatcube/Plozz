@@ -383,7 +383,10 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         } ?? MediaVersion.synthesized(from: heroTarget)
                 )
             }
-            .padding(.bottom, 32)
+            // No trailing padding here. The information band is the last thing in
+            // this stack and paints its own tint, so a gap added out here is page
+            // background sitting under the band: the tint stopped short of the
+            // bottom of the page. The band carries the trailing space itself.
             .frame(maxWidth: .infinity, alignment: .leading)
         }
 

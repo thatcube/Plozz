@@ -66,8 +66,6 @@
 	<string>$(PLOZZ_SENTRY_DSN)</string>
 	<key>SimklClientID</key>
 	<string>$(SIMKL_CLIENT_ID)</string>
-	<key>SimklClientSecret</key>
-	<string>$(SIMKL_CLIENT_SECRET)</string>
 	<key>TMDBBearerToken</key>
 	<string>$(TMDB_BEARER_TOKEN)</string>
 	<key>TMDBProxyBaseURL</key>

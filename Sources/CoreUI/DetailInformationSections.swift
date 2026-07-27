@@ -17,6 +17,17 @@ public struct DetailInformationSections: View {
     @State private var showsFullOverview = false
     @State private var overviewFullHeight: CGFloat = 0
     @State private var overviewVisibleHeight: CGFloat = 0
+    /// Height the About card would take at its *base* line cap, measured from a
+    /// hidden copy. The ratings column is floored at this, so the two columns end
+    /// on the same line. Measured at the base cap (never the adjusted one) so it
+    /// cannot feed back into the cap that is derived from it.
+    @State private var aboutBaseCardHeight: CGFloat = 0
+    /// The height the ratings column actually settled on. When the tiles wrap this
+    /// exceeds the About card, and About grows — and shows more text — to match.
+    @State private var ratingsBlockHeight: CGFloat = 0
+    /// One line of body text, so surplus height converts to a line count rather
+    /// than a guess. Measured, so it tracks Dynamic Type.
+    @State private var bodyLineHeight: CGFloat = 0
     @Environment(\.themePalette) private var palette
 
     public init(
@@ -41,9 +52,30 @@ public struct DetailInformationSections: View {
                 // A subtle full-bleed tint marks the lower "info" band as its own
                 // zone. Deliberately quiet, and distinct from the cards inside it
                 // (which sit on their own surface).
-                .background(palette.informationSurface)
+                //
+                // "Full-bleed" has to be painted, not declared: this sits inside a
+                // ScrollView, which has already consumed the container's safe area
+                // and turned it into content insets, so `ignoresSafeArea` here has
+                // nothing left to ignore. tvOS's overscan margin kept the tint off
+                // the left and right edges, and on both platforms the strip below
+                // the last content (home indicator / tab bar / bottom overscan)
+                // stayed page-coloured. Negative padding on the *background* layer
+                // reaches past all of it without touching the layout — a background
+                // never affects the size of what it sits behind.
+                .background {
+                    palette.informationSurface
+                        .padding(.horizontal, -Self.backgroundBleed)
+                        .padding(.bottom, -Self.backgroundBleed)
+                }
         }
     }
+
+    /// Overshoot for the band's tint. Generous on purpose: it only has to exceed
+    /// the largest inset it might be sitting inside (tvOS overscan, an iPhone home
+    /// indicator, a tab bar), and the screen edge does the clipping. It is drawn
+    /// behind the content and below the last of it, so there is nothing for the
+    /// overshoot to cover up.
+    private static let backgroundBleed: CGFloat = 400
 
     @ViewBuilder
     private var sectionBody: some View {
@@ -171,29 +203,38 @@ public struct DetailInformationSections: View {
 
     @ViewBuilder
     private var ratingsTiles: some View {
-        if matchesRatingsHeight {
-            // Side-by-side with About: a single row of equal-width tiles that fill
-            // the grid row's height, so they bottom-align with the About card. The
-            // Grid row is sized to the taller of {About, tiles}, and both cells fill
-            // it — so About drives the height when the synopsis is long, and the
-            // tiles drive it when the synopsis is short. No manual measurement, and
-            // it stays bounded because it's inside a Grid (not a raw ScrollView).
-            HStack(spacing: ratingsTileSpacing) {
-                ForEach(sortedRatings) { rating in
-                    RatingTile(rating: rating)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+        // One layout for both platforms and both arrangements. Each tile takes a
+        // quarter of the width, so a single rating reads as one of four rather
+        // than stretching across the column as if it were a table, and four fill
+        // the row. When the column is too narrow for quarters the tiles wrap and
+        // divide whatever is there, instead of shrinking below legibility to
+        // preserve a share that no longer fits.
+        //
+        // Height matching is an *input* (`minimumHeight`), not something the
+        // container does to us: the layout reports the About card's height as its
+        // own, so the tiles reach the bottom of About without depending on a Grid
+        // choosing to stretch the cell.
+        ProportionalWrapLayout(
+            preferredColumns: 4,
+            minimumCellWidth: ratingsTileMinWidth,
+            spacing: ratingsTileSpacing,
+            minimumHeight: matchesRatingsHeight ? aboutBaseCardHeight : 0
+        ) {
+            ForEach(sortedRatings) { rating in
+                RatingTile(rating: rating)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        } else {
-            // Stacked (iPhone): wrap naturally, tiles keep their square height.
-            LazyVGrid(columns: ratingsTileColumns, alignment: .leading, spacing: ratingsTileSpacing) {
-                ForEach(sortedRatings) { rating in
-                    RatingTile(rating: rating)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        // Report the height back so About can grow to meet it when the tiles wrap.
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: RatingsBlockHeightKey.self,
+                    value: proxy.size.height
+                )
+            }
+        }
+        .onPreferenceChange(RatingsBlockHeightKey.self) { ratingsBlockHeight = $0 }
     }
 
     /// Whether About and Ratings sit side-by-side and should be the same height
@@ -207,29 +248,11 @@ public struct DetailInformationSections: View {
         #endif
     }
 
-    private var ratingsTileColumns: [GridItem] {
-        [
-            GridItem(
-                .adaptive(minimum: ratingsTileMinWidth, maximum: ratingsTileMaxWidth),
-                spacing: ratingsTileSpacing,
-                alignment: .top
-            )
-        ]
-    }
-
     private var ratingsTileMinWidth: CGFloat {
         #if os(tvOS)
         210
         #else
         horizontalSizeClass == .compact ? 130 : 150
-        #endif
-    }
-
-    private var ratingsTileMaxWidth: CGFloat {
-        #if os(tvOS)
-        300
-        #else
-        horizontalSizeClass == .compact ? 200 : 230
         #endif
     }
 
@@ -259,16 +282,22 @@ public struct DetailInformationSections: View {
                     aboutOverview(overview)
                 }
             }
-            // Fill the grid row height when side-by-side with Ratings, so a short
-            // synopsis's card still grows to match the tiles (content stays pinned
-            // to the top). Natural height when stacked on iPhone.
+            // Grow to meet the ratings column when the tiles wrap past a single
+            // row. `minHeight` rather than a stretch, because the target is a
+            // measured number and not "whatever the row turns out to be".
             .frame(
                 maxWidth: .infinity,
-                maxHeight: matchesRatingsHeight ? .infinity : nil,
+                minHeight: aboutTargetContentHeight,
                 alignment: .topLeading
             )
+            // Measure the card at its *base* cap. This is what the ratings column
+            // is floored at, so it must never reflect the adjusted cap or the two
+            // would chase each other.
+            .background(alignment: .top) { aboutBaseHeightProbe }
             .onPreferenceChange(OverviewFullHeightKey.self) { overviewFullHeight = $0 }
             .onPreferenceChange(OverviewVisibleHeightKey.self) { overviewVisibleHeight = $0 }
+            .onPreferenceChange(AboutBaseCardHeightKey.self) { aboutBaseCardHeight = $0 }
+            .onPreferenceChange(BodyLineHeightKey.self) { bodyLineHeight = $0 }
             .padding(cardPadding)
         }
         .buttonStyle(.plain)
@@ -276,6 +305,65 @@ public struct DetailInformationSections: View {
         .sheet(isPresented: $showsFullOverview) {
             overviewSheet
         }
+    }
+
+    /// Hidden twin of the About card's content at the base line cap, plus a single
+    /// line of body text. Both are pure measurements: `.hidden()` keeps them out of
+    /// the render, the hit test and (on tvOS) the focus order.
+    @ViewBuilder
+    private var aboutBaseHeightProbe: some View {
+        VStack(alignment: .leading, spacing: aboutContentSpacing) {
+            Text(item.title)
+                .font(aboutTitleFont)
+                .fixedSize(horizontal: false, vertical: true)
+            if let overview = nonempty(item.overview) {
+                overviewText(overview)
+                    .font(bodyFont)
+                    .lineLimit(aboutBaseLineLimit)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .hidden()
+        .overlay {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: AboutBaseCardHeightKey.self,
+                    // The ratings column has no card padding of its own, so the
+                    // floor it gets is the whole card, insets included.
+                    value: proxy.size.height + cardPadding * 2
+                )
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            Text(verbatim: "Ag")
+                .font(bodyFont)
+                .hidden()
+                .overlay {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: BodyLineHeightKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                }
+        }
+    }
+
+    /// Height the About card's content must reach so the card matches the ratings
+    /// column. Zero (no floor) unless the ratings actually came out taller.
+    private var aboutTargetContentHeight: CGFloat {
+        guard aboutHeightSurplus > 0 else { return 0 }
+        return ratingsBlockHeight - cardPadding * 2
+    }
+
+    /// How much taller the ratings column is than the About card would naturally
+    /// be. Positive only when the tiles wrapped onto a second row.
+    private var aboutHeightSurplus: CGFloat {
+        guard matchesRatingsHeight, aboutBaseCardHeight > 0, ratingsBlockHeight > 0 else {
+            return 0
+        }
+        return ratingsBlockHeight - aboutBaseCardHeight
     }
 
     /// The synopsis, capped to `aboutLineLimit` lines — the line count (not a fixed
@@ -692,16 +780,32 @@ public struct DetailInformationSections: View {
         #endif
     }
 
-    /// Line cap for the About synopsis. Sized so the About card is a touch taller
-    /// than a single row of rating tiles, so the ratings column grows to match About
-    /// (keeping the tiles square) rather than About having to shrink. The line count
-    /// — not a fixed height — drives the card, so it scales with Dynamic Type.
+    /// Lines of synopsis to show.
+    ///
+    /// The base cap is what sets the About card's height, and therefore the height
+    /// the ratings tiles grow to meet — so it stays a real, tight cap and MORE
+    /// still appears the moment anything is hidden. It is only raised when the
+    /// ratings column came out *taller* (the tiles wrapped onto a second row): the
+    /// card has to grow to match, so it fills the extra with text rather than blank
+    /// space. `floor` on the surplus keeps the text inside the height it is
+    /// matching, so the card can never overshoot the column beside it.
     private var aboutLineLimit: Int {
+        aboutBaseLineLimit + extraAboutLines
+    }
+
+    private var aboutBaseLineLimit: Int {
         #if os(tvOS)
-        6
+        return 6
         #else
-        horizontalSizeClass == .regular ? 6 : 7
+        return horizontalSizeClass == .regular ? 6 : 7
         #endif
+    }
+
+    private var extraAboutLines: Int {
+        guard bodyLineHeight > 1, aboutHeightSurplus > 0 else { return 0 }
+        // Bounded by the surplus itself, which is bounded by the number of rating
+        // rows — the card can grow to meet the tiles and no further.
+        return Int((aboutHeightSurplus / bodyLineHeight).rounded(.down))
     }
 
     private var moreLabelFont: Font {
@@ -852,6 +956,27 @@ private struct OverviewFullHeightKey: PreferenceKey {
 }
 
 private struct OverviewVisibleHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct AboutBaseCardHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct RatingsBlockHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct BodyLineHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())

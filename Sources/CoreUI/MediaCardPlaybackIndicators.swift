@@ -122,26 +122,39 @@ public struct MediaCardPlaybackIndicators: View {
         }
     }
 
-    /// Offline indicator, pinned bottom-trailing and lifted clear of the progress
-    /// bar when one is showing, so the two never overlap on a small poster.
+    /// Offline indicator, pinned to ONE fixed spot in the bottom-trailing corner.
+    /// It never moves for the progress bar — a badge that shifts depending on
+    /// whether an item happens to be part-watched reads as a glitch across a wall
+    /// of cards. The bar yields to it instead (see ``progressTrailingInset``).
     @ViewBuilder
     private var downloadBadge: some View {
         if let downloadState {
             // Same size the resume chip drew it at, so a downloaded card's badge
             // doesn't change scale depending on which chrome path it takes. The
             // larger `watchedBadgeSize` would eat half an 86pt poster.
-            MediaDownloadBadge(state: downloadState, size: metrics.resumeChipAccessorySize)
+            MediaDownloadBadge(state: downloadState, size: downloadBadgeSize)
                 .padding(.trailing, progressHorizontalInset)
                 .padding(.bottom, downloadBadgeBottomInset)
                 .shadow(color: .black.opacity(0.45), radius: 4, y: 1)
         }
     }
 
-    /// Clears the bar (plus a small gap) when one is drawn; otherwise sits at the
-    /// card's normal badge inset.
+    private var downloadBadgeSize: CGFloat { metrics.resumeChipAccessorySize }
+
+    /// Centres the badge on the bar's line rather than sharing its baseline — the
+    /// badge is taller than the bar, so a shared baseline leaves its mass sitting
+    /// above the line. Derived only from constants, so the badge lands in the
+    /// identical spot on every card whether or not a bar is drawn.
     private var downloadBadgeBottomInset: CGFloat {
-        guard progressBarEnabled, showsProgressBar else { return badgeInset }
-        return progressBottomInset + progressHeight + 8
+        max(0, progressBottomInset - (downloadBadgeSize - progressHeight) / 2)
+    }
+
+    /// The bar runs from the leading edge to just before the download badge, so
+    /// the two sit on one line and neither is obscured. With no badge it reaches
+    /// the card's normal inset.
+    private var progressTrailingInset: CGFloat {
+        guard downloadState != nil else { return progressHorizontalInset }
+        return progressHorizontalInset + downloadBadgeSize + 8
     }
 
     @ViewBuilder
@@ -182,7 +195,8 @@ public struct MediaCardPlaybackIndicators: View {
                     }
                 }
                 .frame(height: progressHeight)
-                .padding(.horizontal, progressHorizontalInset)
+                .padding(.leading, progressHorizontalInset)
+                .padding(.trailing, progressTrailingInset)
                 .padding(.bottom, progressBottomInset)
             }
         }

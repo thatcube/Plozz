@@ -112,6 +112,26 @@ If the app feels laggy or you see blank artwork / memory crashes on device, see
 [`docs/performance-debugging.md`](docs/performance-debugging.md) — an on-device
 playbook using the watchdog and Instruments (`xctrace`).
 
+### Testing a branch on a device
+
+To install a branch's build **alongside** the canonical app rather than replacing
+it, use `--branded`:
+
+```bash
+tools/deploy-tv.sh  --branded          # Apple TV
+tools/deploy-ios.sh --ipad --branded   # iPad
+```
+
+This installs `com.thatcube.Plozz.<branch-slug>` as a separate app. Note it signs
+against stripped entitlements, so it has no cloud sync and won't inherit your
+servers — see [`docs/per-branch-builds.md`](docs/per-branch-builds.md).
+
+### Localization
+
+Plozz serves all UI copy from one app-owned String Catalog. Adding a string means
+writing it in Swift, running `tools/l10n-sync.py`, and committing both. The rules
+(and the traps) are in [`docs/localization.md`](docs/localization.md).
+
 ## Releasing to TestFlight
 
 Distribution is automated with fastlane (App Store Connect API key auth). Drop a

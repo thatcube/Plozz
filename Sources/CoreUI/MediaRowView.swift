@@ -229,7 +229,12 @@ public struct MediaRowView: View {
     /// card. `PosterCardView` ignores `isEnabled`, so this affects focusability
     /// only, never appearance.
     private func cardIsDisabled(_ item: MediaItem) -> Bool {
-        gatesFocus && !focusEngaged && item.id != gateTarget
+        // While the page is covered, the only focusable card is the one focus
+        // will be restored to. The system re-establishes focus by geometry as
+        // the page reappears, and leaving the other cards focusable let it land
+        // on one of them (or the row below) visibly before we corrected it.
+        if let coveredFocusID { return item.id != coveredFocusID }
+        return gatesFocus && !focusEngaged && item.id != gateTarget
     }
 
     public var body: some View {
@@ -513,14 +518,18 @@ public struct MediaRowView: View {
     /// ours and overwrite it.
     private func reclaimFocusAfterCovering(using proxy: ScrollViewProxy) {
         guard let target = coveredFocusID, itemIDSet.contains(target) else {
+            coveredFocusID = nil
             onRefocusComplete?()
             return
         }
-        coveredFocusID = nil
         scrollToIfNeeded(target, using: proxy)
         claimFocus(target)
+        // Hold the other cards non-focusable across the system's own restoration
+        // (`coveredFocusID` still set), then release them. Re-asserting after it
+        // has already moved focus is what produced the visible jump.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             claimFocus(target)
+            coveredFocusID = nil
             onRefocusComplete?()
         }
     }

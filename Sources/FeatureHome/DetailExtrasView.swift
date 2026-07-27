@@ -24,6 +24,11 @@ struct DetailExtrasView: View {
     /// A series with a definitively empty season/episode browser has no lower
     /// focus target that could trigger recede, so Cast must be available directly.
     var revealsSeriesCastWithoutBrowser = false
+    /// Withdraws these rows from the focus system while the page is covered by a
+    /// pushed page, or while focus is being restored after one pops. tvOS
+    /// re-establishes focus by geometry and would otherwise land here on the way
+    /// back, visibly, before the episode rail reclaims it.
+    var suppressesFocus = false
     var onCastFocusEntered: (() -> Void)? = nil
 
     /// Extra gap below the cast row on tvOS so a 3-line name wrapping out
@@ -66,7 +71,8 @@ struct DetailExtrasView: View {
                         .environment(\.plozzMetrics, .standard)
                         .modifier(SeriesCastRevealModifier(
                             model: seriesRecedeModel,
-                            revealsWithoutBrowser: revealsSeriesCastWithoutBrowser
+                            revealsWithoutBrowser: revealsSeriesCastWithoutBrowser,
+                            suppressesFocus: suppressesFocus
                         ))
                 }
                 DetailInformationSections(
@@ -83,6 +89,7 @@ struct DetailExtrasView: View {
 private struct SeriesCastRevealModifier: ViewModifier {
     let model: SeriesHeroRecedeModel?
     let revealsWithoutBrowser: Bool
+    let suppressesFocus: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -91,7 +98,7 @@ private struct SeriesCastRevealModifier: ViewModifier {
         content
             .opacity(revealed ? 1 : 0)
             .offset(y: revealed ? 0 : 96)
-            .disabled(!revealed)
+            .disabled(!revealed || suppressesFocus)
             .accessibilityHidden(!revealed)
             .animation(
                 reduceMotion

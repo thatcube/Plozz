@@ -401,6 +401,7 @@ struct SeriesDetailView: View {
                         leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
                         seriesRecedeModel: recedeModel,
                         revealsSeriesCastWithoutBrowser: revealsCastWithoutBrowser,
+                        suppressesFocus: ignoresSystemFocusMoves,
                         onCastFocusEntered: { seasonBarEngaged = false }
                     )
                         .padding(.top, 32)

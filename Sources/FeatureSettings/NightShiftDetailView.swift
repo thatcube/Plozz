@@ -38,7 +38,7 @@ struct NightShiftDetailView: View {
 @MainActor
 struct CircadianSectionsBuilder {
     let model: NightShiftSettingsModel
-    var primaryHeader: String? = nil
+    var primaryHeader: LocalizedStringResource? = nil
 
     /// Everything Circadian now lives in ONE row's detail pane (schedule + Fade +
     /// Darkness + Warmth + Preview) instead of being scattered across five master

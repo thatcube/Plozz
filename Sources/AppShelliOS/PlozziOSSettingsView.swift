@@ -188,7 +188,7 @@ private struct PlozziOSSettingsSplitView: View {
                         .buttonStyle(.plain)
                         settingsRow(
                             .requests,
-                            title: "Seerr",
+                            verbatimTitle: "Seerr",
                             systemImage: "sparkles.tv"
                         )
                         settingsRow(
@@ -327,13 +327,31 @@ private struct PlozziOSSettingsSplitView: View {
 
     private func settingsRow(
         _ destination: PlozziOSSettingsDestination,
-        title: String,
+        title: LocalizedStringResource,
+        systemImage: String
+    ) -> some View {
+        settingsRow(destination, label: Text(title), systemImage: systemImage)
+    }
+
+    /// A row labelled with a BRAND name (e.g. "Seerr"). Brands are never
+    /// translated, so this spelling keeps them out of the String Catalog.
+    private func settingsRow(
+        _ destination: PlozziOSSettingsDestination,
+        verbatimTitle: String,
+        systemImage: String
+    ) -> some View {
+        settingsRow(destination, label: Text(verbatim: verbatimTitle), systemImage: systemImage)
+    }
+
+    private func settingsRow(
+        _ destination: PlozziOSSettingsDestination,
+        label title: Text,
         systemImage: String
     ) -> some View {
         Button {
             selection = destination
         } label: {
-            Label(title, systemImage: systemImage)
+            Label { title } icon: { Image(systemName: systemImage) }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
         }

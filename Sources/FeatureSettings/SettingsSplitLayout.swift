@@ -19,16 +19,56 @@ enum SettingsMetrics {
 /// children so they read as nested under their parent toggle.
 struct SettingsSplitRow: Identifiable {
     let id: String
-    let title: String
-    let description: String?
+    /// Pre-built so a row can carry either localized app copy or verbatim
+    /// provider content, without the render site having to know which. See the
+    /// two initialisers.
+    let title: Text
+    let description: Text?
     let indented: Bool
     let detail: () -> AnyView
 
+    /// A row whose label is app COPY — the common case.
+    ///
+    /// `LocalizedStringResource` rather than `String` because `Text(aString)`
+    /// renders verbatim: copy typed as `String` is invisible to both the catalog
+    /// and the compiler's string extraction, so it would silently stay English
+    /// forever. Literals still work unchanged at the call site.
     init<Detail: View>(
         id: String,
-        title: String,
-        description: String? = nil,
+        title: LocalizedStringResource,
+        description: LocalizedStringResource? = nil,
         indented: Bool = false,
+        @ViewBuilder detail: @escaping () -> Detail
+    ) {
+        self.init(id: id,
+                  title: Text(title),
+                  description: description.map(Text.init),
+                  indented: indented,
+                  detail: detail)
+    }
+
+    /// A row labelled with provider CONTENT — a server name, library name, user
+    /// name. Deliberately a separate spelling: translating it would be wrong, and
+    /// making that explicit stops content drifting into the catalog.
+    init<Detail: View>(
+        id: String,
+        verbatimTitle: String,
+        description: LocalizedStringResource? = nil,
+        indented: Bool = false,
+        @ViewBuilder detail: @escaping () -> Detail
+    ) {
+        self.init(id: id,
+                  title: Text(verbatim: verbatimTitle),
+                  description: description.map(Text.init),
+                  indented: indented,
+                  detail: detail)
+    }
+
+    private init<Detail: View>(
+        id: String,
+        title: Text,
+        description: Text?,
+        indented: Bool,
         @ViewBuilder detail: @escaping () -> Detail
     ) {
         self.id = id
@@ -43,10 +83,10 @@ struct SettingsSplitRow: Identifiable {
 /// uppercase Settings section-header treatment.
 struct SettingsSplitSection: Identifiable {
     let id: String
-    let header: String?
+    let header: LocalizedStringResource?
     let rows: [SettingsSplitRow]
 
-    init(id: String, header: String? = nil, rows: [SettingsSplitRow]) {
+    init(id: String, header: LocalizedStringResource? = nil, rows: [SettingsSplitRow]) {
         self.id = id
         self.header = header
         self.rows = rows
@@ -71,7 +111,7 @@ struct SettingsSplitSection: Identifiable {
 struct SettingsSplitLayout: View {
     /// The page's own name (matches the parent nav row that opened it, e.g.
     /// "Appearance") — shown as the single header atop the left list.
-    let title: String
+    let title: LocalizedStringResource
     let sections: [SettingsSplitSection]
 
     @State private var selectedRowID: String?
@@ -193,10 +233,10 @@ struct SettingsSplitLayout: View {
             VStack(alignment: .leading, spacing: 44) {
                 if let row = selectedRow {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(row.title)
+                        row.title
                             .settingsFeatureTitle()
                         if let description = row.description {
-                            Text(description)
+                            description
                                 .settingsHelperText()
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -262,7 +302,7 @@ private struct SettingsMasterRowLabel: View {
                     .fill(Color.clear)
                     .frame(width: 26)
             }
-            Text(row.title)
+            row.title
                 .font(.callout.weight(.medium))
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
@@ -329,8 +369,8 @@ struct SettingsRevealSection<Content: View>: View {
 /// scattering them as separate (or indented) rows in the master list. The
 /// master list then stays one clean row per feature.
 struct SettingsDetailGroup<Content: View>: View {
-    let title: String
-    var description: String? = nil
+    let title: LocalizedStringResource
+    var description: LocalizedStringResource? = nil
     @ViewBuilder var content: () -> Content
 
     var body: some View {

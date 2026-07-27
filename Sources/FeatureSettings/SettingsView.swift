@@ -530,7 +530,7 @@ public struct SettingsView: View {
                 // "Ask on startup" (the launch picker) lives inside Profiles.
                 if profilesEnabled {
                     navRow("Profiles", icon: "person.2",
-                           value: "\(profiles.count)",
+                           value: Text(verbatim: profiles.count.formatted()),
                            route: .profile)
                 } else {
                     enableProfilesRow
@@ -541,7 +541,7 @@ public struct SettingsView: View {
                 // trending row + requests for everyone on this Apple TV, so it's
                 // a household concern — not a per-profile tracker. The per-profile
                 // "requests are made as" mapping is managed inside its page.
-                navRow("Seerr", icon: "sparkles.tv", assetIcon: "SeerrIcon",
+                navRow(verbatim: "Seerr", icon: "sparkles.tv", assetIcon: "SeerrIcon",
                        value: seerrRowValue,
                        route: .seerr)
 
@@ -549,7 +549,7 @@ public struct SettingsView: View {
                 // drills into a detail page (matches the Settings hierarchy).
                 if onSetSyncEnabled != nil || onSetUpAnotherDevice != nil {
                     navRow("iCloud Sync", icon: "icloud",
-                           value: onSetSyncEnabled != nil ? (syncEnabled ? "On" : "Off") : nil,
+                           value: onSetSyncEnabled == nil ? nil : (syncEnabled ? Text("On") : Text("Off")),
                            route: .syncSetup)
                 }
                 // Metadata (artwork/details enrichment) is household-wide: one set
@@ -1150,10 +1150,11 @@ public struct SettingsView: View {
 
     /// Global summary for the This Apple TV › Servers row: how many distinct
     /// servers the household is signed in to (device scope, not profile).
-    private var householdServersSummary: String {
-        if accounts.isEmpty { return "Add a server" }
+    private var householdServersSummary: Text {
+        if accounts.isEmpty { return Text("Add a server") }
         // Row already says "Servers", so show a bare count (no repeated noun).
-        return "\(Set(accounts.map { $0.server.id }).count)"
+        // `.formatted()` so the digits follow the user's locale.
+        return Text(verbatim: Set(accounts.map { $0.server.id }).count.formatted())
     }
 
     /// Number of distinct servers the active profile can watch from. Cross-server
@@ -1184,8 +1185,8 @@ public struct SettingsView: View {
     /// is loaded synchronously from the stored config at launch and cleared on
     /// disconnect, so it's a reliable "is a server configured?" signal without
     /// waiting on an async status refresh.
-    private var seerrRowValue: String {
-        seer.savedBaseURLString == nil ? "Not connected" : "Connected"
+    private var seerrRowValue: Text {
+        seer.savedBaseURLString == nil ? Text("Not connected") : Text("Connected")
     }
 
     /// Shared leading icon for every Settings row. Explicit point size +
@@ -1200,13 +1201,25 @@ public struct SettingsView: View {
 
     @ViewBuilder
     private func navRow(
-        _ title: String,
+        _ title: LocalizedStringResource,
         icon: String,
         assetIcon: String? = nil,
-        value: String?,
+        value: Text?,
         route: SettingsRoute
     ) -> some View {
-        navRow(title, icon: icon, assetIcon: assetIcon, value: value, route: route) { EmptyView() }
+        navRow(Text(title), icon: icon, assetIcon: assetIcon, value: value, route: route) { EmptyView() }
+    }
+
+    /// A nav row labelled with a BRAND name (e.g. "Seerr"). Brands are never
+    /// translated, so this spelling keeps them out of the String Catalog.
+    private func navRow(
+        verbatim title: String,
+        icon: String,
+        assetIcon: String? = nil,
+        value: Text?,
+        route: SettingsRoute
+    ) -> some View {
+        navRow(Text(verbatim: title), icon: icon, assetIcon: assetIcon, value: value, route: route) { EmptyView() }
     }
 
     /// Two-line variant: `secondary` renders a second line beneath the title
@@ -1214,10 +1227,22 @@ public struct SettingsView: View {
     /// as the one-line rows via ``SettingsRowLabel``.
     @ViewBuilder
     private func navRow<Secondary: View>(
-        _ title: String,
+        _ title: LocalizedStringResource,
         icon: String,
         assetIcon: String? = nil,
-        value: String?,
+        value: Text?,
+        route: SettingsRoute,
+        @ViewBuilder secondary: () -> Secondary
+    ) -> some View {
+        navRow(Text(title), icon: icon, assetIcon: assetIcon,
+               value: value, route: route, secondary: secondary)
+    }
+
+    private func navRow<Secondary: View>(
+        _ title: Text,
+        icon: String,
+        assetIcon: String? = nil,
+        value: Text?,
         route: SettingsRoute,
         @ViewBuilder secondary: () -> Secondary
     ) -> some View {
@@ -1225,7 +1250,7 @@ public struct SettingsView: View {
             SettingsRowLabel(icon: icon, assetIcon: assetIcon, title: title, secondary: secondary) {
                 HStack(spacing: 16) {
                     if let value {
-                        Text(value)
+                        value
                             .font(.subheadline)
                             .settingsRowSecondary()
                             .lineLimit(1)

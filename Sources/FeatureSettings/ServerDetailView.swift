@@ -166,7 +166,7 @@ struct ServerDetailView: View {
     }
 
     /// Provider-appropriate explanation of how sign-in works for this server.
-    private func accountsFooter(for provider: ProviderKind, transport: MediaShareTransportKind?) -> String {
+    private func accountsFooter(for provider: ProviderKind, transport: MediaShareTransportKind?) -> LocalizedStringResource {
         switch provider {
         case .plex:
             return "Plex shares one sign-in across the household. Each profile picks its own Plex user and libraries under Profile › Your Libraries."

@@ -96,17 +96,17 @@ extension EdgeInsets {
 /// detail page so the visual treatment is consistent.
 struct SettingsPanel<Content: View>: View {
     @Environment(\.themePalette) private var palette
-    let title: String?
-    var subtitle: String?
-    var footer: String?
+    let title: LocalizedStringResource?
+    var subtitle: LocalizedStringResource?
+    var footer: LocalizedStringResource?
     var contentPadding: EdgeInsets
     var showsSurface: Bool
     @ViewBuilder let content: Content
 
     init(
-        title: String? = nil,
-        subtitle: String? = nil,
-        footer: String? = nil,
+        title: LocalizedStringResource? = nil,
+        subtitle: LocalizedStringResource? = nil,
+        footer: LocalizedStringResource? = nil,
         contentPadding: EdgeInsets = .settingsPanelDefault,
         showsSurface: Bool = true,
         @ViewBuilder content: () -> Content
@@ -175,20 +175,30 @@ private struct ConditionalRaisedSurface: ViewModifier {
 /// the sub-sections *within* a page; this is the page heading that sits above
 /// them.
 struct SettingsPageHeader: View {
-    let title: String
-    var subtitle: String?
+    /// Pre-built so a page can be headed by either app copy or a provider-supplied
+    /// name (a server, a profile) without the render site knowing which.
+    let title: Text
+    var subtitle: Text?
 
-    init(_ title: String, subtitle: String? = nil) {
-        self.title = title
-        self.subtitle = subtitle
+    /// Page heading that is app COPY.
+    init(_ title: LocalizedStringResource, subtitle: LocalizedStringResource? = nil) {
+        self.title = Text(title)
+        self.subtitle = subtitle.map(Text.init)
+    }
+
+    /// Page heading that is provider CONTENT — a server or profile name, which
+    /// must never be translated.
+    init(verbatim title: String, subtitle: LocalizedStringResource? = nil) {   // l10n:content — server/profile name
+        self.title = Text(verbatim: title)
+        self.subtitle = subtitle.map(Text.init)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title)
+            title
                 .font(.largeTitle.bold())
             if let subtitle {
-                Text(subtitle)
+                subtitle
                     .font(.subheadline)
                     .plozzForeground(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -209,8 +219,8 @@ struct SettingsPageHeader: View {
 /// gentle lift), so contrast never inverts and the panel's resting look is
 /// identical to every other `SettingsPanel`.
 struct FocusableSettingsPanel<Content: View>: View {
-    let title: String?
-    var footer: String?
+    let title: LocalizedStringResource?
+    var footer: LocalizedStringResource?
     /// Optional remote-select handler. When set, clicking the focused panel with
     /// the Siri remote invokes it — used only by the About panel to drive the
     /// hidden Developer Mode unlock gesture (seven selects on the Version row).
@@ -218,8 +228,8 @@ struct FocusableSettingsPanel<Content: View>: View {
     @ViewBuilder let content: Content
 
     init(
-        title: String? = nil,
-        footer: String? = nil,
+        title: LocalizedStringResource? = nil,
+        footer: LocalizedStringResource? = nil,
         onActivate: (() -> Void)? = nil,
         @ViewBuilder content: () -> Content
     ) {

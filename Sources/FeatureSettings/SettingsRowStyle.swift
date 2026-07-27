@@ -42,14 +42,28 @@ private extension VerticalAlignment {
 struct SettingsRowLabel<Secondary: View, Trailing: View>: View {
     private let icon: String?
     private let assetIcon: String?
-    private let title: String
+    private let title: Text
     private let secondary: Secondary
     private let trailing: Trailing
 
+    /// Row label that is app COPY — the common case, so literals work unchanged.
     init(
         icon: String?,
         assetIcon: String? = nil,
-        title: String,
+        title: LocalizedStringResource,
+        @ViewBuilder secondary: () -> Secondary = { EmptyView() },
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+    ) {
+        self.init(icon: icon, assetIcon: assetIcon, title: Text(title),
+                  secondary: secondary, trailing: trailing)
+    }
+
+    /// Row label already built as `Text` — used when the caller must decide
+    /// between copy and verbatim content (e.g. a brand name).
+    init(
+        icon: String?,
+        assetIcon: String? = nil,
+        title: Text,
         @ViewBuilder secondary: () -> Secondary = { EmptyView() },
         @ViewBuilder trailing: () -> Trailing = { EmptyView() }
     ) {
@@ -89,7 +103,7 @@ struct SettingsRowLabel<Secondary: View, Trailing: View>: View {
                         .alignmentGuide(.rowTitleIcon) { $0[VerticalAlignment.center] }
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(title).font(.callout.weight(.medium))
+                    title.font(.callout.weight(.medium))
                         .alignmentGuide(.rowTitleIcon) { $0[VerticalAlignment.center] }
                     secondary
                 }

@@ -17,11 +17,11 @@ struct SendDiagnosticsCard: View {
     /// Whether sending is possible right now (crash reporting configured + on).
     let canSend: Bool
     /// Context-specific one-liner shown before the user has sent anything.
-    let idleDescription: String
+    let idleDescription: LocalizedStringResource
     /// Context-specific explainer shown when sending is unavailable. Defaults to
     /// pointing at Help & Diagnostics (correct from anywhere); the Help page
     /// passes a "below" variant since the toggle is right there.
-    var disabledDescription: String = "Turn on Share Crash Reports in Help & Diagnostics to enable this. Your recent activity is then sent anonymously — no logins, tokens, servers, or titles."
+    var disabledDescription: LocalizedStringResource = "Turn on Share Crash Reports in Help & Diagnostics to enable this. Your recent activity is then sent anonymously — no logins, tokens, servers, or titles."
 
     private enum SendState { case idle, sent, failed }
     @State private var sendState: SendState = .idle
@@ -73,7 +73,7 @@ struct SendDiagnosticsCard: View {
         }
     }
 
-    private var footer: String {
+    private var footer: LocalizedStringResource {
         switch sendState {
         case .idle:
             return idleDescription

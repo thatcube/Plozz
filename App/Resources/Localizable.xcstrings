@@ -159,6 +159,12 @@
     "A TMDB key is saved on this device." : {
 
     },
+    "A cinematic, rotating spotlight at the top of Home, with a Continue Watching row tucked under its lower edge." : {
+
+    },
+    "A media share connects with the credentials you entered (or as a guest). Choose what shows on your Home under Profile › Your Libraries." : {
+
+    },
     "API key" : {
 
     },
@@ -229,6 +235,19 @@
     "Add a message (optional) — e.g. what went wrong" : {
 
     },
+    "Add a server" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Añadir un servidor"
+          }
+        }
+      }
+    },
+    "Add another server to sync watch status across servers." : {
+
+    },
     "Add media to your server or connect another source." : {
 
     },
@@ -262,11 +281,21 @@
     "Amber" : {
 
     },
+    "AniList" : {
+
+    },
     "Anonymous" : {
 
     },
     "Appearance" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apariencia"
+          }
+        }
+      }
     },
     "Approve & Continue" : {
 
@@ -287,6 +316,9 @@
 
     },
     "Audio Delay" : {
+
+    },
+    "Audio defaults" : {
 
     },
     "Audio language" : {
@@ -347,6 +379,9 @@
     "Bearer token" : {
 
     },
+    "Behind the hero" : {
+
+    },
     "Below" : {
 
     },
@@ -386,6 +421,9 @@
     "Build your library" : {
 
     },
+    "Cache" : {
+
+    },
     "Cache and provider health" : {
 
     },
@@ -408,6 +446,9 @@
 
     },
     "Card style" : {
+
+    },
+    "Cards" : {
 
     },
     "Cast" : {
@@ -461,6 +502,9 @@
     "Choose what plays behind the hero on a movie or show's detail page. Trailer and theme music never play together." : {
 
     },
+    "Choose what plays behind the hero on a title's detail page. Trailer and theme music never play together." : {
+
+    },
     "Choose what to watch" : {
 
     },
@@ -480,7 +524,14 @@
 
     },
     "Circadian Mode" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modo circadiano"
+          }
+        }
+      }
     },
     "Clear Cache" : {
 
@@ -527,6 +578,9 @@
     "Connect Trakt" : {
 
     },
+    "Connect a Seerr server (Overseerr / Jellyseerr) to discover and request movies, shows & anime for everyone on this Apple TV." : {
+
+    },
     "Connect a media server or an NFS network share to start watching." : {
 
     },
@@ -534,7 +588,14 @@
 
     },
     "Connected" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conectado"
+          }
+        }
+      }
     },
     "Connected as %@" : {
 
@@ -590,6 +651,9 @@
     "Couldn't reach TMDB to check the key. Try again in a moment." : {
 
     },
+    "Couldn't send — crash reporting isn't active. Turn on Share Crash Reports below and try again." : {
+
+    },
     "Couldn’t Load Libraries" : {
 
     },
@@ -597,6 +661,9 @@
 
     },
     "Couldn’t load Seerr users." : {
+
+    },
+    "Crash Reports" : {
 
     },
     "Crash reporting is unavailable in this build." : {
@@ -621,7 +688,14 @@
 
     },
     "Customize Home" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personalizar inicio"
+          }
+        }
+      }
     },
     "Cyan" : {
 
@@ -654,7 +728,14 @@
 
     },
     "Detail Page" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Página de detalles"
+          }
+        }
+      }
     },
     "Details" : {
 
@@ -672,6 +753,9 @@
 
     },
     "Developer Mode Enabled" : {
+
+    },
+    "Device & Build" : {
 
     },
     "Diagnostic tools are now shown at the bottom of Settings. Turn them off again from the Developer Mode row." : {
@@ -720,6 +804,9 @@
 
     },
     "Display" : {
+
+    },
+    "Display Size" : {
 
     },
     "Display name" : {
@@ -773,6 +860,9 @@
     "Download subtitles automatically" : {
 
     },
+    "Download subtitles you don't already have." : {
+
+    },
     "Download subtitles…" : {
 
     },
@@ -786,6 +876,9 @@
 
     },
     "Downloading %lld percent" : {
+
+    },
+    "Downloading subtitles" : {
 
     },
     "Downloads" : {
@@ -822,6 +915,9 @@
     "Each profile gets its own settings, watch history, and libraries." : {
 
     },
+    "Each profile keeps its own settings — theme, playback, subtitles, spoilers, trackers, and Home layout. Only your servers are shared." : {
+
+    },
     "Edit" : {
 
     },
@@ -832,6 +928,9 @@
 
     },
     "Edition" : {
+
+    },
+    "Emby signs in per profile, each with its own credentials. Choose what shows on your Home under Profile › Your Libraries." : {
 
     },
     "Emerald" : {
@@ -1027,6 +1126,9 @@
     "Help & Diagnostics" : {
 
     },
+    "Hero" : {
+
+    },
     "Hero Foreground (Debug)" : {
 
     },
@@ -1036,7 +1138,13 @@
     "Hero: %@" : {
 
     },
+    "Hide all profile UI for solo use. You can re-enable Profiles anytime." : {
+
+    },
     "Hide ratings until watched" : {
+
+    },
+    "Hide unwatched episodes and ratings until you've seen them." : {
 
     },
     "Hide watched movies, shows, and episodes" : {
@@ -1067,10 +1175,25 @@
     "Horizontal Padding" : {
 
     },
+    "Horizontal tabs across the top, or a collapsible left sidebar." : {
+
+    },
     "Host" : {
 
     },
     "Host or IP address" : {
+
+    },
+    "How Plozz picks the audio language when a title offers more than one — with optional per-content-type rules and per-series memory." : {
+
+    },
+    "How far the remote's left and right buttons jump during playback." : {
+
+    },
+    "How media cards look across the app." : {
+
+    },
+    "How the now-playing music screen looks." : {
 
     },
     "How to sign in" : {
@@ -1097,10 +1220,19 @@
     "Items: %lld" : {
 
     },
+    "Jellyfin signs in per profile, each with its own credentials. Choose what shows on your Home under Profile › Your Libraries." : {
+
+    },
+    "Jump straight to the next episode." : {
+
+    },
     "Keep Editing" : {
 
     },
     "Keep Going" : {
+
+    },
+    "Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device — sign in or pair each server once. Off by default." : {
 
     },
     "Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device. Off by default. If a device stops receiving changes, tap Re-download From iCloud on it." : {
@@ -1112,7 +1244,13 @@
     "Last scanned" : {
 
     },
+    "Last.fm" : {
+
+    },
     "Layout" : {
+
+    },
+    "Leave all selected to use every library on Home." : {
 
     },
     "Leave both fields empty for a guest share." : {
@@ -1140,6 +1278,9 @@
 
     },
     "Link Plex account" : {
+
+    },
+    "Link each profile to a Seerr user so their requests use that person’s quota, approvals, and quality profile. Unlinked profiles request as the admin (unrestricted)." : {
 
     },
     "Link your Plex account" : {
@@ -1232,6 +1373,9 @@
     "Metadata" : {
 
     },
+    "Metadata Providers" : {
+
+    },
     "Metadata providers, artwork, and caches are shared by every profile on this device." : {
 
     },
@@ -1239,6 +1383,9 @@
 
     },
     "Mint" : {
+
+    },
+    "Mode" : {
 
     },
     "More Actions" : {
@@ -1262,13 +1409,22 @@
     "Music" : {
 
     },
+    "Music Player" : {
+
+    },
     "Mute trailer" : {
+
+    },
+    "MyAnimeList" : {
 
     },
     "NEARBY" : {
 
     },
     "Name (optional)" : {
+
+    },
+    "Navigation" : {
 
     },
     "Nearby servers" : {
@@ -1302,6 +1458,9 @@
 
     },
     "No Matches" : {
+
+    },
+    "No Plex Account" : {
 
     },
     "No Plex Home users found for this account." : {
@@ -1421,6 +1580,16 @@
     "Not Now — Just Me" : {
 
     },
+    "Not connected" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin conexión"
+          }
+        }
+      }
+    },
     "Not now" : {
 
     },
@@ -1458,12 +1627,29 @@
 
     },
     "Off" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desactivado"
+          }
+        }
+      }
     },
     "Offline" : {
 
     },
     "On" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activado"
+          }
+        }
+      }
+    },
+    "On %@" : {
 
     },
     "On by default during the beta; you can turn it off any time. When enabled, anonymous crash details help improve Plozz. Server addresses, media titles, profile names, and credentials are never included." : {
@@ -1544,6 +1730,9 @@
     "Outline" : {
 
     },
+    "Overview" : {
+
+    },
     "PIN" : {
 
     },
@@ -1620,12 +1809,22 @@
 
     },
     "Playback" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reproducción"
+          }
+        }
+      }
     },
     "Playback Diagnostics" : {
 
     },
     "Playback Diagnostics Overlay" : {
+
+    },
+    "Playback Diagnostics overlays live playback stats (codec, bitrate, buffer, memory) on top of the video. Home Performance Overlay shows a live Home rendering HUD. Both are power-user aids — leave them off for normal watching. Saved on this profile." : {
 
     },
     "Playback Speed" : {
@@ -1650,6 +1849,9 @@
 
     },
     "Plex User" : {
+
+    },
+    "Plex shares one sign-in across the household. Each profile picks its own Plex user and libraries under Profile › Your Libraries." : {
 
     },
     "Plex sign-in finds every server linked to your account." : {
@@ -1723,7 +1925,14 @@
 
     },
     "Profiles" : {
-
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Perfiles"
+          }
+        }
+      }
     },
     "Profiles keep Home, settings, watch history, and downloads personal." : {
 
@@ -1758,6 +1967,9 @@
     "Quick Connect unavailable" : {
 
     },
+    "Random Libraries" : {
+
+    },
     "Ratings" : {
 
     },
@@ -1786,6 +1998,9 @@
 
     },
     "Remember subtitles per series" : {
+
+    },
+    "Remote" : {
 
     },
     "Remove" : {
@@ -1896,6 +2111,15 @@
     "Requesting a code…" : {
 
     },
+    "Requests are made as" : {
+
+    },
+    "Requests as — %@" : {
+
+    },
+    "Requests from %@ will use this Seerr user’s quota, approvals, and default quality profile." : {
+
+    },
     "Requires PIN" : {
 
     },
@@ -1953,13 +2177,28 @@
     "Retry loading seasons" : {
 
     },
+    "Reuse the subtitle you pick for the rest of a series." : {
+
+    },
     "Revert All Changes" : {
+
+    },
+    "Rewind on resume" : {
 
     },
     "Rose" : {
 
     },
     "Rotate automatically" : {
+
+    },
+    "Rotation" : {
+
+    },
+    "Rows" : {
+
+    },
+    "Rows on Home" : {
 
     },
     "Royal blue" : {
@@ -1990,6 +2229,9 @@
 
     },
     "Saved on this %@." : {
+
+    },
+    "Scales card size, columns and spacing across the app." : {
 
     },
     "Scan Again" : {
@@ -2038,6 +2280,15 @@
 
     },
     "Schedule" : {
+
+    },
+    "Scrobble and sync your Jellyfin watch history to Trakt." : {
+
+    },
+    "Scrobble the music you play in Plozz to your Last.fm profile." : {
+
+    },
+    "Scrubbing" : {
 
     },
     "Sea green" : {
@@ -2129,6 +2380,16 @@
 
     },
     "Servers" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Servidores"
+          }
+        }
+      }
+    },
+    "Servers From Your Other Devices" : {
 
     },
     "Set Up" : {
@@ -2241,6 +2502,9 @@
     "Show hero" : {
 
     },
+    "Show subtitles" : {
+
+    },
     "Show the hero on Home" : {
 
     },
@@ -2265,6 +2529,9 @@
     "Sign in" : {
 
     },
+    "Sign in a phone or tablet from this Apple TV over your local network." : {
+
+    },
     "Sign in a phone or tablet from this Apple TV." : {
 
     },
@@ -2278,6 +2545,9 @@
 
     },
     "Sign in to a Plex account under This Apple TV › Servers to pick a Plex Home user." : {
+
+    },
+    "Sign in to a server under This Apple TV › Servers, then choose what you watch here." : {
 
     },
     "Sign in with username and password" : {
@@ -2302,6 +2572,9 @@
     "Sign-ins and network shares are available to every profile on this %@." : {
 
     },
+    "Sign-ins are shared by everyone on this Apple TV. Choose what each profile sees under Profile › Your Libraries." : {
+
+    },
     "Signed in" : {
 
     },
@@ -2314,6 +2587,16 @@
     "Signs everyone out and removes this server." : {
 
     },
+    "Signs out all %lld accounts and removes %@ from this Apple TV for everyone." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Signs out all %1$lld accounts and removes %2$@ from this Apple TV for everyone."
+          }
+        }
+      }
+    },
     "Signs out and removes this server." : {
 
     },
@@ -2323,10 +2606,22 @@
     "Silver" : {
 
     },
+    "Simkl" : {
+
+    },
     "Simulated time" : {
 
     },
     "Size" : {
+
+    },
+    "Skip Intervals" : {
+
+    },
+    "Skip Intros" : {
+
+    },
+    "Skip Intros & Credits" : {
 
     },
     "Skip backward" : {
@@ -2344,6 +2639,9 @@
     "Some servers could not be reached. Their libraries can be configured later in Settings." : {
 
     },
+    "Something not working? Send your recent activity straight to the developer — the quickest way to help track down a bug. Sent anonymously: no logins, tokens, servers, or titles." : {
+
+    },
     "Something went wrong" : {
 
     },
@@ -2356,8 +2654,18 @@
     "Source" : {
 
     },
-    "Spoilers" : {
+    "Sources" : {
 
+    },
+    "Spoilers" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spoilers"
+          }
+        }
+      }
     },
     "Start Over" : {
 
@@ -2375,6 +2683,9 @@
 
     },
     "Still wrong? Wipe the iCloud copy and re-upload from this Apple TV." : {
+
+    },
+    "Stored Fields" : {
 
     },
     "Studios" : {
@@ -2401,6 +2712,9 @@
     "Subtitles" : {
 
     },
+    "Swipe to scrub while a title is playing and it resumes the moment you land — faster, but a stray swipe can move your position." : {
+
+    },
     "Switch Profile" : {
 
     },
@@ -2420,6 +2734,9 @@
 
     },
     "Sync watch state across servers" : {
+
+    },
+    "Sync your watch history and track what to watch next with Simkl." : {
 
     },
     "TMDB rejected this key. Check the token and try again." : {
@@ -2458,7 +2775,16 @@
     "Text Size" : {
 
     },
+    "Thanks! Your recent activity was sent to the developer." : {
+
+    },
     "That username or password was incorrect. Please try again." : {
+
+    },
+    "The account owner is the main Plex account holder; the others are managed/family users under it and may need a PIN. Plozz asks for the PIN on playback and never stores it." : {
+
+    },
+    "The language Plozz prefers when choosing subtitles." : {
 
     },
     "The latest app log lines from this Apple TV" : {
@@ -2467,7 +2793,13 @@
     "The most recent app log lines, kept only on this Apple TV and already stripped of tokens and secrets. Newest first — a maintainer may ask what Plozz was doing when a bug happened." : {
 
     },
+    "The most recent app log lines, kept only on this Apple TV and already stripped of tokens and secrets. Shown so a maintainer can ask what Plozz was doing when a bug happened." : {
+
+    },
     "The other device is set up" : {
+
+    },
+    "Theme" : {
 
     },
     "Theme music volume" : {
@@ -2479,6 +2811,9 @@
     "These are signed in on your iPad or Apple TV. To use them here without retyping anything, tap “Set up this device from another” below and confirm on that device." : {
 
     },
+    "These servers are set up on another device on your iCloud account. Sign in to watch them here — your login stays private to each device." : {
+
+    },
     "They're rendered as images by the source, so font, colour, size and position controls don't apply." : {
 
     },
@@ -2486,6 +2821,12 @@
 
     },
     "This Apple TV" : {
+
+    },
+    "This NFS export connects without a sign-in — anyone on this Apple TV can browse it. Choose what shows on your Home under Profile › Your Libraries." : {
+
+    },
+    "This build has no crash-reporting endpoint configured, so nothing can be sent. Crash reporting is available in TestFlight and release builds." : {
 
     },
     "This library is empty" : {
@@ -2542,10 +2883,26 @@
     "Token" : {
 
     },
-    "Trackers" : {
+    "Track anime and manga progress on your AniList profile." : {
 
     },
+    "Track anime and manga progress on your MyAnimeList profile." : {
+
+    },
+    "Trackers" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rastreadores"
+          }
+        }
+      }
+    },
     "Trailer" : {
+
+    },
+    "Trakt" : {
 
     },
     "Trakt, Simkl, AniList, MyAnimeList, Last.fm" : {
@@ -2582,6 +2939,15 @@
 
     },
     "Turn Profiles Off" : {
+
+    },
+    "Turn on Share Crash Reports below to enable this. Your recent activity is then sent anonymously — no logins, tokens, servers, or titles." : {
+
+    },
+    "Turn on Share Crash Reports in Help & Diagnostics to enable this. Your recent activity is then sent anonymously — no logins, tokens, servers, or titles." : {
+
+    },
+    "Turn servers and libraries on or off, and pick who you watch as." : {
 
     },
     "Turns off" : {
@@ -2632,6 +2998,9 @@
     "Unmute trailer" : {
 
     },
+    "Up Next" : {
+
+    },
     "Up Next lead time" : {
 
     },
@@ -2639,6 +3008,9 @@
 
     },
     "Updated %@" : {
+
+    },
+    "Uploads the full log below so it can be read on a computer instead of scrolling here. Sent anonymously — no logins, tokens, servers, or titles are included." : {
 
     },
     "Use Password" : {
@@ -2678,6 +3050,9 @@
 
     },
     "Username (optional)" : {
+
+    },
+    "Uses intro and credit markers from your server. Requires Plex Pass on Plex, or Media Segments / Intro Skipper on Jellyfin." : {
 
     },
     "Verify & Browse" : {
@@ -2720,16 +3095,28 @@
     "Violet" : {
 
     },
+    "Volume" : {
+
+    },
     "Waiting for approval…" : {
 
     },
+    "Warms and dims the display at night to help you sleep." : {
+
+    },
     "Warmth" : {
+
+    },
+    "Watch Status" : {
 
     },
     "Watch indicator" : {
 
     },
     "Watched" : {
+
+    },
+    "Watched Indicator" : {
 
     },
     "Watching as" : {
@@ -2753,10 +3140,19 @@
     "Welcome to Plozz" : {
 
     },
+    "What Plozz does with subtitles when playback starts." : {
+
+    },
     "What to call this share on the Home screen." : {
 
     },
     "What to call this share on the Home screen. Defaults to the share name." : {
+
+    },
+    "When on, Plozz sends an anonymous report if it crashes or freezes, so bugs can be fixed faster. Reports include only the crash itself plus your app version, tvOS version and device model — never your servers, logins, tokens, or what you were watching. On by default during the beta; you can turn it off any time. Applies to this Apple TV." : {
+
+    },
+    "When you return to a partially-watched title, playback starts a little before where you left off. Set anywhere from 0 to 60 seconds." : {
 
     },
     "Which Plex User Are You?" : {
@@ -2819,10 +3215,16 @@
     "Your Home is empty" : {
 
     },
+    "Your Own TMDB Key" : {
+
+    },
     "Your Profile" : {
 
     },
     "Your other device is set up" : {
+
+    },
+    "Your share's library is built on this Apple TV by scanning it while the app is open. New files appear after the next scan." : {
 
     },
     "You’re all set" : {
@@ -2993,6 +3395,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Series"
+          }
+        }
+      }
+    },
+    "settings.nav.attributions" : {
+      "comment" : "Navigation row for the screen crediting third-party software and data sources.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attributions"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Atribuciones"
+          }
+        }
+      }
+    },
+    "settings.nav.libraries" : {
+      "comment" : "Navigation row and page heading for the screen listing the user's media libraries.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Libraries"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bibliotecas"
           }
         }
       }

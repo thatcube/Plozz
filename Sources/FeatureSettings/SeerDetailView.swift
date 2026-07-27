@@ -47,7 +47,7 @@ struct SeerDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                SettingsPageHeader("Seerr", subtitle: headerSubtitle)
+                SettingsPageHeader(verbatim: "Seerr", subtitle: headerSubtitle)
                 switch seer.phase {
                 case let .connected(summary):
                     connectionPanel(summary: summary)
@@ -73,7 +73,7 @@ struct SeerDetailView: View {
     /// Subtitle conveys the one thing the "Seerr" title doesn't: that this is a
     /// device-wide connection. When disconnected it also names what Seerr is,
     /// since that's the first-run context a new user needs to connect.
-    private var headerSubtitle: String {
+    private var headerSubtitle: LocalizedStringResource {
         if case .connected = seer.phase {
             return "Shared across every profile on this Apple TV."
         }

@@ -13,31 +13,86 @@
     "The other rules are safe enough to run repo-wide because they are",
     "syntactically decidable and cannot be confused by content-vs-copy ambiguity."
   ],
-
   "auditedPaths": [
-    "Sources/FeatureSearchCore/SearchSection.swift"
+    "Sources/CoreUI/SettingsCopy.swift",
+    "Sources/FeatureSearchCore/SearchSection.swift",
+    "Sources/FeatureSettings/SettingsContext.swift",
+    "Sources/FeatureSettings/SettingsRowStyle.swift",
+    "Sources/FeatureSettings/SettingsSplitLayout.swift"
   ],
-
   "copyPropertyNames": [
-    "title", "label", "header", "subtitle", "message", "caption",
-    "placeholder", "prompt", "heading", "footer", "buttonTitle", "cue"
+    "title",
+    "label",
+    "header",
+    "subtitle",
+    "message",
+    "caption",
+    "placeholder",
+    "prompt",
+    "heading",
+    "footer",
+    "buttonTitle",
+    "cue"
   ],
-
   "appCopySinks": [
-    "Text", "Button", "Label", "Section", "Toggle", "Picker", "TextField",
-    "Menu", "Tab", "navigationTitle", "accessibilityLabel", "accessibilityValue",
-    "accessibilityHint", "alert", "confirmationDialog"
+    "Text",
+    "Button",
+    "Label",
+    "Section",
+    "Toggle",
+    "Picker",
+    "TextField",
+    "Menu",
+    "Tab",
+    "navigationTitle",
+    "accessibilityLabel",
+    "accessibilityValue",
+    "accessibilityHint",
+    "alert",
+    "confirmationDialog",
+    "navRow",
+    "settingsRow",
+    "SettingsRowLabel",
+    "SettingsPanel",
+    "SettingsPageHeader",
+    "SettingsSplitRow",
+    "SettingsSplitSection",
+    "SettingsDetailGroup",
+    "FocusableSettingsPanel"
   ],
-
   "_neverTranslateComment": [
     "Brand, product and format names. A translator seeing 'Plex' in a catalog has",
     "no way to know it must not be translated, and some WILL translate it. These",
     "must reach the UI as Text(verbatim:) so they are never extracted at all."
   ],
   "neverTranslate": [
-    "Plozz", "Jellyfin", "Plex", "Emby", "Trakt", "Simkl", "AniList",
-    "MyAnimeList", "Last.fm", "Seerr", "Jellyseerr", "Overseerr", "TMDb",
-    "TheTVDB", "OMDb", "SMB", "NFS", "SFTP", "FTP", "WebDAV", "HEVC", "AV1",
-    "Dolby Vision", "Dolby Atmos", "HDR", "AirPlay", "CloudKit", "iCloud"
+    "Plozz",
+    "Jellyfin",
+    "Plex",
+    "Emby",
+    "Trakt",
+    "Simkl",
+    "AniList",
+    "MyAnimeList",
+    "Last.fm",
+    "Seerr",
+    "Jellyseerr",
+    "Overseerr",
+    "TMDb",
+    "TheTVDB",
+    "OMDb",
+    "SMB",
+    "NFS",
+    "SFTP",
+    "FTP",
+    "WebDAV",
+    "HEVC",
+    "AV1",
+    "Dolby Vision",
+    "Dolby Atmos",
+    "HDR",
+    "AirPlay",
+    "CloudKit",
+    "iCloud"
   ]
 }

@@ -11,7 +11,7 @@ struct PlozziOSAddShareView: View {
     private enum ShareProtocol: String, Hashable, CaseIterable, Identifiable {
         case smb, nfs, webdav, sftp, ftp
         var id: String { rawValue }
-        var title: String {
+        var title: LocalizedStringResource {
             switch self {
             case .smb: return "SMB"
             case .nfs: return "NFS"

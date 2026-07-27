@@ -14,11 +14,22 @@
     "syntactically decidable and cannot be confused by content-vs-copy ambiguity."
   ],
   "auditedPaths": [
-    "Sources/CoreUI/SettingsCopy.swift",
-    "Sources/FeatureSearchCore/SearchSection.swift",
-    "Sources/FeatureSettings/SettingsContext.swift",
-    "Sources/FeatureSettings/SettingsRowStyle.swift",
-    "Sources/FeatureSettings/SettingsSplitLayout.swift"
+    "Sources/AppShell",
+    "Sources/AppShelliOS",
+    "Sources/CoreUI",
+    "Sources/FeatureAuth",
+    "Sources/FeatureDiscovery",
+    "Sources/FeatureHome",
+    "Sources/FeatureHomeCore",
+    "Sources/FeatureMusic",
+    "Sources/FeaturePlayback",
+    "Sources/FeatureProfiles",
+    "Sources/FeatureSearch",
+    "Sources/FeatureSearchCore",
+    "Sources/FeatureSettings",
+    "Sources/FeatureShareOnboarding",
+    "Sources/FeatureSyncSetup",
+    "Sources/CoreModels/SettingsCopy.swift"
   ],
   "copyPropertyNames": [
     "title",

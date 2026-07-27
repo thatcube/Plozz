@@ -168,7 +168,7 @@ private struct RecentActivityRow: View {
 
 /// A focusable filter chip for the tvOS Recent Activity log.
 private struct RecentActivityFilterChip: View {
-    let title: String
+    let title: String   // l10n:content — log category identifier
     let isSelected: Bool
     let action: () -> Void
 

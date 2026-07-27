@@ -524,7 +524,7 @@ struct AttributionsDetailView: View {
 /// A single focusable credit card with the shared inverted-card focus look
 /// and optional license badge pills.
 private struct AttributionCard: View {
-    let title: String
+    let title: String   // l10n:content — third-party project name (legal attribution)
     let text: String
     var licenses: [PlozzAttributionLicense] = []
 

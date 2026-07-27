@@ -390,8 +390,8 @@ struct DownloadRowLink<Content: View>: View {
 
 struct DownloadRowContent: View {
     /// Media title and a formatted status line — both provider/derived content.
-    let title: String
-    let subtitle: String
+    let title: String   // l10n:content — media title from the server
+    let subtitle: String   // l10n:content — formatted download status
     let subtitleColor: Color
     let fraction: Double?
     let failure: String?
@@ -434,8 +434,8 @@ struct DownloadTileContent: View {
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.themePalette) private var palette
     /// Media title and a formatted status line — both provider/derived content.
-    let title: String
-    let subtitle: String
+    let title: String   // l10n:content — media title from the server
+    let subtitle: String   // l10n:content — formatted download status
     let subtitleColor: Color
     let fraction: Double?
     let failure: String?

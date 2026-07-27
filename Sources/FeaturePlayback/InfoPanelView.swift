@@ -171,7 +171,7 @@ struct InfoPanelView: View {
     /// frame (the stock glass styles animate their focus tint, which can't be
     /// disabled from outside — hence the custom style).
     private func infoActionButton(
-        title: String,
+        title: String,   // l10n:content — playback diagnostic values
         icon: String,
         prominent: Bool,
         slot: PlayerControls.FocusSlot,

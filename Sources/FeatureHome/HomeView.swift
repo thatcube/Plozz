@@ -1072,7 +1072,7 @@ enum HomeHeroDisplayResolver {
 /// library still reads as an intentional, on-brand tile.
 private struct LibraryCardView: View {
     let aggregated: AggregatedLibrary
-    let subtitle: String
+    let subtitle: String   // l10n:content — library card subtitle from the server
     /// When `true`, the card wears a subtle corner spinner — this library belongs
     /// to a media share that's currently scanning/enriching, so its contents and
     /// artwork are still filling in. Purely decorative (non-focusable).

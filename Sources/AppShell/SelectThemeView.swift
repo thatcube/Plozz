@@ -49,7 +49,7 @@ struct SelectThemeView: View {
 
     /// Personalised when profiles are on; plain otherwise (e.g. the user chose
     /// "Not Now — Just Me" on first run).
-    private var title: String {
+    private var title: LocalizedStringResource {
         appState.profilesModel.profilesEnabled ? "Choose theme for this profile" : "Choose theme"
     }
 

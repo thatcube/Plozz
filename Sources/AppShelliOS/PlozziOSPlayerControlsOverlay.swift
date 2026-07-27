@@ -331,8 +331,8 @@ private struct PlozziOSAirPlayRouteButton: UIViewRepresentable {
 }
 
 private struct PlozziOSPlayerTopBar: View {
-    let title: String
-    let subtitle: String
+    let title: String   // l10n:content — media title from the server
+    let subtitle: String   // l10n:content — media subtitle from the server
     let onClose: () -> Void
 
     var body: some View {

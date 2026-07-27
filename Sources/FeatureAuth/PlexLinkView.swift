@@ -297,7 +297,7 @@ private struct ServerList: View {
 /// mode card / white check on the black light mode card) instead of vanishing.
 private struct ServerCheckRow: View {
     let name: String
-    let subtitle: String
+    let subtitle: String   // l10n:content — server description from plex.tv
     let isSelected: Bool
 
     @Environment(\.settingsRowIsFocused) private var focused

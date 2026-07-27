@@ -33,8 +33,8 @@ struct PlexUserSelectionView: View {
     var body: some View {
         VStack(spacing: 0) {
             OnboardingHeader(
-                "Which Plex user are you?",
-                subtitle: "Choose your user on \(selection.serverName)."
+                Text("Which Plex user are you?"),
+                subtitle: Text("Choose your user on \(selection.serverName).")
             )
             .padding(.bottom, 28)
 

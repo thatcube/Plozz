@@ -1213,7 +1213,7 @@ public struct SettingsView: View {
     /// A nav row labelled with a BRAND name (e.g. "Seerr"). Brands are never
     /// translated, so this spelling keeps them out of the String Catalog.
     private func navRow(
-        verbatim title: String,
+        verbatim title: String,   // l10n:content — deliberately verbatim (brand names)
         icon: String,
         assetIcon: String? = nil,
         value: Text?,

@@ -371,7 +371,7 @@ public final class AudioPlaybackController {
     /// Appends an audio event to the pullable diagnostics log (see
     /// `AudioDiagnostics`). Cheap; called at every transition/route event so a
     /// pulled log reconstructs exactly what happened around an AirPlay break.
-    private func diag(_ category: String, _ message: String) {
+    private func diag(_ category: String, _ message: String) {   // l10n:content — diagnostic log text
         AudioDiagnostics.shared.log(category, message)
     }
 

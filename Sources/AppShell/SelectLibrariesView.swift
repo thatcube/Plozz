@@ -56,8 +56,8 @@ struct SelectLibrariesView: View {
     var body: some View {
         VStack(spacing: 0) {
             OnboardingHeader(
-                "Choose your libraries",
-                subtitle: "You can change this any time in Settings."
+                Text("Choose your libraries"),
+                subtitle: Text("You can change this any time in Settings.")
             )
             .padding(.bottom, 28)
 

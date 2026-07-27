@@ -116,7 +116,7 @@ final class ScrubDiagnostics {
     /// One-off stdout note (same `PLZSCRUB` channel as the per-scrub summary), for
     /// tracing things that aren't per-frame — e.g. which engine handled a scrub
     /// and whether the refresh boost actually engaged. No-op unless `SCRUB_DIAG=1`.
-    static func note(_ message: String) {
+    static func note(_ message: String) {   // l10n:content — diagnostic log text
         guard enabled else { return }
         try? FileHandle.standardOutput.write(contentsOf: Data(("PLZSCRUB " + message + "\n").utf8))
     }

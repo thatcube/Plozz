@@ -70,16 +70,16 @@ private struct FocusHaloModifier: ViewModifier {
 /// Callers constrain the width (the card slot / artwork width); this fills it and
 /// stays leading-aligned.
 public struct BorderlessCardCaption: View {
-    private let title: String
-    private let subtitle: String?
+    private let title: String   // l10n:content — media title/subtitle from the server
+    private let subtitle: String?   // l10n:content — media title/subtitle from the server
     private let horizontalInset: CGFloat
     private let reservesSubtitleSpace: Bool
 
     @Environment(\.plozzMetrics) private var metrics
 
     public init(
-        title: String,
-        subtitle: String?,
+        title: String,   // l10n:content — media title/subtitle from the server
+        subtitle: String?,   // l10n:content — media title/subtitle from the server
         horizontalInset: CGFloat,
         reservesSubtitleSpace: Bool = true
     ) {

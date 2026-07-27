@@ -84,8 +84,8 @@ struct AddShareView: View {
         // insertions instant so the list never introduces competing motion.
         Group {
             headerRow(
-                title: "Add a Media Share",
-                subtitle: "Pick a server found on your network, or enter its address.",
+                title: Text("Add a Media Share"),
+                subtitle: Text("Pick a server found on your network, or enter its address."),
                 back: onBack,
                 trailing: {
                     Button { viewModel.startScan() } label: {
@@ -154,8 +154,8 @@ struct AddShareView: View {
     private var shareStep: some View {
         Group {
             headerRow(
-                title: LocalizedStringKey(viewModel.serverLabel),
-                subtitle: "Choose a share to add.",
+                title: Text(verbatim: viewModel.serverLabel),
+                subtitle: Text("Choose a share to add."),
                 back: { viewModel.backToServers() },
                 trailing: { EmptyView() }
             )
@@ -178,7 +178,7 @@ struct AddShareView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     credentialsPanel(
                         title: "Sign in",
-                        error: "That username or password was incorrect. Please try again.",
+                        error: Text("That username or password was incorrect. Please try again."),
                         button: "Try again"
                     )
                     manualSharePanel
@@ -186,7 +186,7 @@ struct AddShareView: View {
             case .unreachable:
                 messagePanel(
                     title: "Can't connect",
-                    message: "Couldn't connect to the server. Check the address and that it's on the same network, then try again.",
+                    message: Text("Couldn't connect to the server. Check the address and that it's on the same network, then try again."),
                     systemImage: "wifi.exclamationmark",
                     retry: { viewModel.loadShares() }
                 )
@@ -194,7 +194,7 @@ struct AddShareView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     messagePanel(
                         title: "Something went wrong",
-                        message: LocalizedStringKey(message),
+                        message: Text(verbatim: message),
                         systemImage: "exclamationmark.triangle",
                         retry: { viewModel.loadShares() }
                     )
@@ -254,7 +254,7 @@ struct AddShareView: View {
     /// share list ever loaded.
     private func messagePanel(
         title: LocalizedStringResource,
-        message: LocalizedStringKey,
+        message: Text,
         systemImage: String,
         retry: (() -> Void)? = nil
     ) -> some View {
@@ -289,8 +289,8 @@ struct AddShareView: View {
 
     private func credentialsPanel(
         title: LocalizedStringResource,
-        message: LocalizedStringKey? = nil,
-        error: LocalizedStringKey? = nil,
+        message: LocalizedStringResource? = nil,
+        error: Text? = nil,
         button: LocalizedStringKey
     ) -> some View {
         SharePanel(title: title, footer: message) {
@@ -326,8 +326,8 @@ struct AddShareView: View {
     // MARK: - Shared pieces
 
     private func headerRow<Trailing: View>(
-        title: LocalizedStringKey,
-        subtitle: LocalizedStringKey,
+        title: Text,
+        subtitle: Text,
         back: @escaping () -> Void,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
@@ -381,13 +381,13 @@ struct AddShareView: View {
 /// accessory + footer). Kept local to the add-share screen.
 private struct SharePanel<Content: View, Accessory: View>: View {
     var title: LocalizedStringResource? = nil
-    var footer: LocalizedStringKey? = nil
+    var footer: LocalizedStringResource? = nil
     var titleAccessory: () -> Accessory
     var content: () -> Content
 
     init(
         title: LocalizedStringResource? = nil,
-        footer: LocalizedStringKey? = nil,
+        footer: LocalizedStringResource? = nil,
         @ViewBuilder titleAccessory: @escaping () -> Accessory = { EmptyView() },
         @ViewBuilder content: @escaping () -> Content
     ) {

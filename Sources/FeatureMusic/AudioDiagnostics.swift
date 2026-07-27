@@ -31,7 +31,7 @@ public final class AudioDiagnostics {
         public let id = UUID()
         public let time: Date
         public let category: String
-        public let message: String
+        public let message: String   // l10n:content — diagnostic log text, never shown as UI copy
     }
 
     public private(set) var entries: [Entry] = []
@@ -65,7 +65,7 @@ public final class AudioDiagnostics {
 
     /// Appends one event. `category` is a short tag (e.g. "route", "skip",
     /// "player") for quick scanning; `message` is free-form detail.
-    public func log(_ category: String, _ message: String) {
+    public func log(_ category: String, _ message: String) {   // l10n:content — diagnostic log text, never shown as UI copy
         let now = Date()
         let entry = Entry(time: now, category: category, message: message)
         entries.append(entry)

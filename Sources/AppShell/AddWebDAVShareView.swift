@@ -93,8 +93,8 @@ struct AddWebDAVShareView: View {
     private var addressStep: some View {
         Group {
             header(
-                title: "Add a WebDAV Share",
-                subtitle: "Enter the server’s web address and how to sign in.",
+                title: Text("Add a WebDAV Share"),
+                subtitle: Text("Enter the server’s web address and how to sign in."),
                 back: onBack
             )
             WebDAVPanel(title: "Address", footer: "For example https://nas.local/dav. Defaults to https:// if you omit it.") {
@@ -135,10 +135,10 @@ struct AddWebDAVShareView: View {
                 }
             }
             if let warning = viewModel.insecureHTTPWarning {
-                InlineErrorMessage(LocalizedStringKey(warning), systemImage: "lock.open")
+                InlineErrorMessage(Text(verbatim: warning), systemImage: "lock.open")
             }
             if let error = viewModel.errorMessage {
-                InlineErrorMessage(LocalizedStringKey(error), systemImage: "exclamationmark.triangle")
+                InlineErrorMessage(Text(verbatim: error), systemImage: "exclamationmark.triangle")
             }
             Button {
                 Task { await viewModel.connect() }
@@ -160,8 +160,8 @@ struct AddWebDAVShareView: View {
     private func trustStep(sha256: Data) -> some View {
         Group {
             header(
-                title: "Verify Certificate",
-                subtitle: "This server’s certificate isn’t trusted automatically (it may be self-signed).",
+                title: Text("Verify Certificate"),
+                subtitle: Text("This server’s certificate isn’t trusted automatically (it may be self-signed)."),
                 back: { viewModel.rejectTrust() }
             )
             WebDAVPanel(
@@ -174,7 +174,7 @@ struct AddWebDAVShareView: View {
                     .foregroundStyle(.primary)
             }
             if let error = viewModel.errorMessage {
-                InlineErrorMessage(LocalizedStringKey(error), systemImage: "exclamationmark.triangle")
+                InlineErrorMessage(Text(verbatim: error), systemImage: "exclamationmark.triangle")
             }
             HStack(spacing: 20) {
                 Button("Approve & Continue") {
@@ -196,8 +196,8 @@ struct AddWebDAVShareView: View {
     private var browseStep: some View {
         Group {
             header(
-                title: "Choose a Folder",
-                subtitle: LocalizedStringKey("Currently at \(viewModel.currentPath)"),
+                title: Text("Choose a Folder"),
+                subtitle: Text("Currently at \(viewModel.currentPath)"),
                 back: { viewModel.rejectTrust() }
             )
             if viewModel.currentPath != "/" {
@@ -248,7 +248,7 @@ struct AddWebDAVShareView: View {
                     .focused($focusedField, equals: .displayName)
             }
             if let error = viewModel.errorMessage {
-                InlineErrorMessage(LocalizedStringKey(error), systemImage: "exclamationmark.triangle")
+                InlineErrorMessage(Text(verbatim: error), systemImage: "exclamationmark.triangle")
             }
             Button("Use This Folder") { viewModel.useCurrentFolder() }
                 .buttonStyle(.borderedProminent)
@@ -260,8 +260,8 @@ struct AddWebDAVShareView: View {
     // MARK: - Shared pieces
 
     private func header(
-        title: LocalizedStringKey,
-        subtitle: LocalizedStringKey,
+        title: Text,
+        subtitle: Text,
         back: @escaping () -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: 20) {

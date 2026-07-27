@@ -190,7 +190,7 @@ struct MyLibrariesDetailView: View {
     /// secondary library checkmark (via ``SettingsRowMetrics``) and focuses
     /// concentrically inside the card. Leading avatar + name + trailing accessory.
     private func identityRow<Avatar: View>(
-        title: String,
+        title: String,   // l10n:content — Plex/Jellyfin user name
         @ViewBuilder avatar: () -> Avatar,
         accessory: IdentityAccessory
     ) -> some View {

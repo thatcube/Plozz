@@ -141,7 +141,7 @@ public struct ProviderBrandMark: View {
     /// fits, and lifted slightly off the very bottom edge. Rendered into the
     /// cleared band by `glyph`.
     @ViewBuilder
-    private func badgeText(_ label: String) -> some View {
+    private func badgeText(_ label: String) -> some View {   // l10n:content — transport/provider badge identifier
         Text(label)
             .font(.system(size: size * 0.22, weight: .black, design: .rounded))
             .lineLimit(1)

@@ -180,13 +180,13 @@ private struct PlozziOSLibraryCard: View {
 struct PlozziOSLibraryGridView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewModel: LibraryBrowseViewModel
-    private let title: String
+    private let title: String   // l10n:content — library name from the server
     private let provider: any MediaProvider
     private let settings: PlozziOSSettingsModel
 
     init(
         viewModel: LibraryBrowseViewModel,
-        title: String,
+        title: String,   // l10n:content — library name from the server
         provider: any MediaProvider,
         settings: PlozziOSSettingsModel
     ) {

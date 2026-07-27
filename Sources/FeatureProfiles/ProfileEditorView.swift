@@ -1057,7 +1057,7 @@ fileprivate struct IOSProfilePreviewSection: View {
     let profileID: String
     let profileName: String
     let displayName: String
-    let subtitle: String
+    let subtitle: String   // l10n:content — profile/server name
     let avatarSymbol: String
     let colorIndex: Int
     let avatarImageURL: String?

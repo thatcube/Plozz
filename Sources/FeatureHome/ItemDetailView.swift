@@ -115,7 +115,7 @@ public struct ItemDetailView: View {
         let id = UUID()
         let title: LocalizedStringResource
         /// Server-supplied detail — content, so rendered verbatim.
-        let message: String?
+        let message: String?   // l10n:content — Seerr's own error text
     }
 
     private struct PendingRequestIntent {

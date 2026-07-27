@@ -21,7 +21,7 @@ public struct SettingsSectionGroup<Content: View, Footer: View>: View {
     /// Section header that is verbatim CONTENT — e.g. the legal/trademark
     /// attribution sections, whose wording is deliberately not translated.
     public init(
-        verbatim title: String,
+        verbatim title: String,   // l10n:content — deliberately verbatim (legal/attribution headings)
         @ViewBuilder content: () -> Content,
         @ViewBuilder footer: () -> Footer
     ) {
@@ -98,7 +98,7 @@ public extension SettingsSectionGroup where Footer == EmptyView {
     }
 
     init(
-        verbatim title: String,
+        verbatim title: String,   // l10n:content — deliberately verbatim (legal/attribution headings)
         @ViewBuilder content: () -> Content
     ) {
         self.init(verbatim: title, content: content, footer: { EmptyView() })

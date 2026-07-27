@@ -172,7 +172,7 @@ struct PlaybackDiagnosticsOverlay: View {
     // MARK: - Section builder
 
     @ViewBuilder
-    private func section(_ title: String, @ViewBuilder rows: () -> some View) -> some View {
+    private func section(_ title: String, @ViewBuilder rows: () -> some View) -> some View {   // l10n:content — diagnostic values, developer-facing
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
@@ -191,13 +191,13 @@ struct PlaybackDiagnosticsOverlay: View {
     }
 
     @ViewBuilder
-    private func optionalRow(_ label: String, _ value: String) -> some View {
+    private func optionalRow(_ label: String, _ value: String) -> some View {   // l10n:content — diagnostic values, developer-facing
         if value != PlaybackDiagnostics.placeholder {
             row(label, value)
         }
     }
 
-    private func row(_ label: String, _ value: String) -> some View {
+    private func row(_ label: String, _ value: String) -> some View {   // l10n:content — diagnostic values, developer-facing
         GridRow {
             Text(label)
                 .font(.system(size: 14, design: .monospaced))

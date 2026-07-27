@@ -328,13 +328,13 @@ public struct ServerPickerView: View {
 /// to FeatureDiscovery so the picker reads as Settings without depending on it.
 private struct PickerPanel<Content: View, Accessory: View>: View {
     var title: LocalizedStringResource? = nil
-    var footer: String? = nil
+    var footer: String? = nil   // l10n:content — server-supplied footer detail
     var titleAccessory: () -> Accessory
     var content: () -> Content
 
     init(
         title: LocalizedStringResource? = nil,
-        footer: String? = nil,
+        footer: String? = nil,   // l10n:content — server-supplied footer detail
         @ViewBuilder titleAccessory: @escaping () -> Accessory = { EmptyView() },
         @ViewBuilder content: @escaping () -> Content
     ) {

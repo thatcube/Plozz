@@ -38,22 +38,24 @@ public enum OnboardingPageMotion {
 /// title (about half the old `.largeTitle`) over a `.subheadline` subtitle, so
 /// every setup screen reads the same.
 public struct OnboardingHeader: View {
-    private let title: LocalizedStringKey
-    private let subtitle: LocalizedStringKey?
+    /// Pre-built so a header can show either app copy or a server-supplied
+    /// name ("MyNAS") without this view having to know which.
+    private let title: Text
+    private let subtitle: Text?
 
-    public init(_ title: LocalizedStringKey, subtitle: LocalizedStringKey? = nil) {
+    public init(_ title: Text, subtitle: Text? = nil) {
         self.title = title
         self.subtitle = subtitle
     }
 
     public var body: some View {
         VStack(spacing: PlozzTheme.Spacing.xSmall) {
-            Text(title)
+            title
                 .font(.title2.weight(.bold))
                 .multilineTextAlignment(.center)
 
             if let subtitle {
-                Text(subtitle)
+                subtitle
                     .font(.subheadline)
                     .plozzForeground(.secondary)
                     .multilineTextAlignment(.center)

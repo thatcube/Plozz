@@ -42,7 +42,7 @@ struct HomePerfOverlay: View {
         .accessibilityHidden(true)
     }
 
-    private func row(_ label: String, _ value: String, color: Color) -> some View {
+    private func row(_ label: String, _ value: String, color: Color) -> some View {   // l10n:content — performance counters, developer-facing
         HStack(spacing: 8) {
             Text(label)
                 .font(.system(size: 15, weight: .semibold, design: .monospaced))

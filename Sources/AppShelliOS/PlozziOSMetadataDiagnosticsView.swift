@@ -126,7 +126,7 @@ struct PlozziOSMetadataDiagnosticsView: View {
     // MARK: Rows
 
     @ViewBuilder
-    private func metricRow(_ title: String, _ value: String, valueColor: Color = .primary) -> some View {
+    private func metricRow(_ title: String, _ value: String, valueColor: Color = .primary) -> some View {   // l10n:content — diagnostic values, developer-facing
         HStack {
             Text(title)
                 .plozzForeground(.secondary)

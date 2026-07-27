@@ -531,7 +531,7 @@ public final class ItemDetailViewModel {
         let env = ProcessInfo.processInfo.environment
         return env["SCRUB_DIAG"] == "1" || env["SEEK_DIAG"] == "1"
     }()
-    private static func trailerDiag(_ message: String) {
+    private static func trailerDiag(_ message: String) {   // l10n:content — diagnostic log text
         guard trailerDiagEnabled else { return }
         FileHandle.standardOutput.write(Data(("PLZTRAIL " + message + "\n").utf8))
     }

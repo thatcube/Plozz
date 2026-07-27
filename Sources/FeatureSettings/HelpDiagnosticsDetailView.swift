@@ -196,7 +196,7 @@ struct HelpDiagnosticsDetailView: View {
         return count == 1 ? "1 line" : "\(count) lines"
     }
 
-    private func infoRow(_ label: String, _ value: String) -> some View {
+    private func infoRow(_ label: String, _ value: String) -> some View {   // l10n:content — diagnostic row label, developer-facing
         HStack(spacing: 16) {
             Text(label)
                 .plozzForeground(.secondary)

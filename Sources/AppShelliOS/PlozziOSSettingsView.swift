@@ -1429,7 +1429,7 @@ private struct HomeLibraryChoice: Identifiable {
 
     var id: String { key }
     var key: String { "\(accountID):\(library.id)" }
-    var title: String { library.title }
+    var title: String { library.title }   // l10n:content — library name from the server
 }
 
 private struct PlozziOSLibraryHomeSettingsView: View {

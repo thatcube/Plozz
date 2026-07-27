@@ -59,7 +59,7 @@ struct PlozziOSDownloadedMovie: Identifiable {
 
 struct PlozziOSDownloadedShow: Identifiable {
     let id: String
-    let title: String
+    let title: String   // l10n:content — downloaded media titles
     let seasons: [PlozziOSDownloadedSeason]
 
     var records: [DownloadedMediaRecord] { seasons.flatMap(\.records) }
@@ -78,7 +78,7 @@ struct PlozziOSDownloadedShow: Identifiable {
 struct PlozziOSDownloadedSeason: Identifiable {
     let id: String
     let seasonNumber: Int?
-    let title: String
+    let title: String   // l10n:content — downloaded media titles
     let records: [DownloadedMediaRecord]
 
     var totalBytes: Int64 { records.reduce(0) { $0 + $1.bytesDownloaded } }
@@ -186,7 +186,7 @@ extension PlozziOSDownloadLibrary {
         records: [DownloadedMediaRecord]
     ) -> PlozziOSDownloadedSeason {
         let seasonNumber = records.compactMap { $0.snapshot.seasonNumber }.first
-        let title: String
+        let title: String   // l10n:content — downloaded media titles
         if let seasonNumber {
             title = "Season \(seasonNumber)"
         } else {

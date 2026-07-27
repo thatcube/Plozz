@@ -28,7 +28,7 @@ public struct LibraryBrowseView: View {
     /// you're actually flying through content. Reset when the rail's eligibility
     /// goes away (a non-name sort) so re-entering name sort re-arms the reveal.
     @State private var railHasRevealed = false
-    private let title: String
+    private let title: String   // l10n:content — library name from the server
     private let spoilerSettings: SpoilerSettings
     private let onSelect: (MediaItem) -> Void
 
@@ -36,7 +36,7 @@ public struct LibraryBrowseView: View {
 
     public init(
         viewModel: LibraryBrowseViewModel,
-        title: String,
+        title: String,   // l10n:content — library name from the server
         spoilerSettings: SpoilerSettings = .default,
         onSelect: @escaping (MediaItem) -> Void
     ) {

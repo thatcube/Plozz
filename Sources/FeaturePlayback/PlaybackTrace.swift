@@ -27,7 +27,7 @@ public enum PlaybackTrace {
     /// Emit one `PLZSEEK <t> <message>` line to stdout. `<t>` is wall-clock seconds
     /// (mod 100000) to 3 dp, enough to order events and measure gaps within a
     /// capture. No-op unless ``enabled``.
-    public static func note(_ message: String) {
+    public static func note(_ message: String) {   // l10n:content — diagnostic log text
         guard enabled else { return }
         let t = Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 100_000)
         let line = "PLZSEEK " + String(format: "%.3f", t) + " " + message + "\n"

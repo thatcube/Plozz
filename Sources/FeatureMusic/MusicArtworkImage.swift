@@ -95,8 +95,8 @@ struct MusicCard: View {
     let artworkURL: URL?
     var systemPlaceholder: String = "music.note"
     let width: CGFloat
-    let title: String
-    var subtitle: String? = nil
+    let title: String   // l10n:content — album/track name from the server
+    var subtitle: String? = nil   // l10n:content — album/track name from the server
     var asyncFallbackURL: (@Sendable () async -> URL?)? = nil
     let action: () -> Void
 
@@ -113,8 +113,8 @@ struct MusicCard: View {
         artworkURL: URL?,
         systemPlaceholder: String = "music.note",
         width: CGFloat,
-        title: String,
-        subtitle: String? = nil,
+        title: String,   // l10n:content — album/track name from the server
+        subtitle: String? = nil,   // l10n:content — album/track name from the server
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
         action: @escaping () -> Void
     ) {

@@ -25,7 +25,7 @@ struct SendDiagnosticsCard: View {
 
     private enum SendState { case idle, sent, failed }
     @State private var sendState: SendState = .idle
-    @State private var message: String = ""
+    @State private var message: String = ""   // l10n:content — user-typed message text
 
     var body: some View {
         if canSend {

@@ -25,7 +25,7 @@ enum OnlineTrailerSource {
     /// One YouTube search hit considered for ranking.
     struct SearchResult: Equatable, Sendable {
         let videoID: String
-        let title: String
+        let title: String   // l10n:content — media title used as a YouTube search term
         let author: String
     }
 
@@ -83,7 +83,7 @@ enum OnlineTrailerSource {
     }
 
     /// Builds the search query string, e.g. `Dune 2021 official trailer`.
-    static func searchQuery(title: String, year: Int?, isTV: Bool) -> String {
+    static func searchQuery(title: String, year: Int?, isTV: Bool) -> String {   // l10n:content — media title used as a YouTube search term
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if let year, !isTV {
             return "\(trimmed) \(year) official trailer"
@@ -96,7 +96,7 @@ enum OnlineTrailerSource {
     /// community Invidious/Piped front-ends — returning up to `limit` ranked
     /// candidate video ids from the first source that yields usable matches.
     static func searchCandidateVideoIDs(
-        title: String,
+        title: String,   // l10n:content — media title used as a YouTube search term
         year: Int?,
         isTV: Bool,
         limit: Int,
@@ -181,7 +181,7 @@ enum OnlineTrailerSource {
     private struct InvidiousVideo: Decodable {
         let type: String?
         let videoId: String?
-        let title: String?
+        let title: String?   // l10n:content — media title used as a YouTube search term
         let author: String?
     }
 
@@ -197,7 +197,7 @@ enum OnlineTrailerSource {
         let items: [PipedItem]?
         struct PipedItem: Decodable {
             let url: String?
-            let title: String?
+            let title: String?   // l10n:content — media title used as a YouTube search term
             let uploaderName: String?
         }
     }
@@ -263,7 +263,7 @@ enum OnlineTrailerSource {
 
     /// Picks the highest-quality trailer from search results, or `nil` when none
     /// looks like a real trailer for this title.
-    static func bestVideoID(from results: [SearchResult], title: String, year: Int?) -> String? {
+    static func bestVideoID(from results: [SearchResult], title: String, year: Int?) -> String? {   // l10n:content — media title used as a YouTube search term
         bestVideoIDs(from: results, title: title, year: year, limit: 1).first
     }
 
@@ -272,7 +272,7 @@ enum OnlineTrailerSource {
     /// reactions/reviews/breakdowns; requires the result to mention the title and
     /// the word trailer/teaser so an unrelated clip is never surfaced. De-dupes
     /// ids, preserving the highest-scoring position.
-    static func bestVideoIDs(from results: [SearchResult], title: String, year: Int?, limit: Int) -> [String] {
+    static func bestVideoIDs(from results: [SearchResult], title: String, year: Int?, limit: Int) -> [String] {   // l10n:content — media title used as a YouTube search term
         let wanted = tokenize(title)
         let scored = results.enumerated().compactMap { offset, result -> (id: String, score: Int, offset: Int)? in
             guard let s = score(result, wanted: wanted, year: year) else { return nil }

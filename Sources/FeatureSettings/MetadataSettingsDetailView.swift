@@ -784,7 +784,7 @@ private struct MetadataDiagnosticsOverviewPanel: View {
 }
 
 private struct MetadataDiagnosticMetric: View {
-    let title: String
+    let title: String   // l10n:content — diagnostic metric label, developer-facing
     let value: String
 
     var body: some View {
@@ -905,7 +905,7 @@ private struct MetadataDiagnosticsCachePanel: View {
     }
 
     private func budgetControl(
-        title: String,
+        title: LocalizedStringResource,
         options: [Int],
         selection: Binding<Int>
     ) -> some View {

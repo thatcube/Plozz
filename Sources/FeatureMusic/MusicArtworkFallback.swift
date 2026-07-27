@@ -14,7 +14,7 @@ import MetadataKit
 enum MusicArtworkFallback {
     /// Album cover (Deezer → Cover Art Archive), by album title disambiguated by
     /// artist. `nil` when the title is blank.
-    static func albumCover(title: String, artist: String?) -> (@Sendable () async -> URL?)? {
+    static func albumCover(title: String, artist: String?) -> (@Sendable () async -> URL?)? {   // l10n:content — album/track name used for artwork lookup
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty else { return nil }
         let cleanArtist = artist?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -35,7 +35,7 @@ enum MusicArtworkFallback {
 
     /// Album-cover fallback for a single track: prefers the track's album title,
     /// falling back to the track title, disambiguated by artist.
-    static func trackCover(title: String, album: String?, artist: String?) -> (@Sendable () async -> URL?)? {
+    static func trackCover(title: String, album: String?, artist: String?) -> (@Sendable () async -> URL?)? {   // l10n:content — album/track name used for artwork lookup
         let cleanAlbum = album?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let cleanAlbum, !cleanAlbum.isEmpty {
             return albumCover(title: cleanAlbum, artist: artist)

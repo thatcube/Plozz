@@ -13,7 +13,7 @@ import CoreUI
 public struct ProfilePickerView: View {
     private let profiles: [Profile]
     private let activeProfileID: String?
-    private let title: String
+    private let title: LocalizedStringResource
     private let onSelect: (Profile) -> Void
     private let onAddProfile: (() -> Void)?
     private let onCancel: (() -> Void)?
@@ -23,7 +23,7 @@ public struct ProfilePickerView: View {
     public init(
         profiles: [Profile],
         activeProfileID: String?,
-        title: String = "Who's watching?",
+        title: LocalizedStringResource = "Who's watching?",
         onSelect: @escaping (Profile) -> Void,
         onAddProfile: (() -> Void)? = nil,
         onCancel: (() -> Void)? = nil

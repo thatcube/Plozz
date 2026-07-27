@@ -204,7 +204,7 @@ final class SubtitleOverlayLoader {
         from url: URL,
         id: Int,
         language: String?,
-        title: String,
+        title: String,   // l10n:content — subtitle track name from the server
         forced: Bool,
         shouldDetectLanguage: Bool
     ) async throws -> ParsedSubtitlePayload? {

@@ -22,7 +22,7 @@ import FeatureHomeCore
 /// destination builder, since providers are reference types whose identity would
 /// otherwise re-trigger the same rebuild.
 struct PlozziOSLibraryRoute: Hashable {
-    var title: String
+    var title: String   // l10n:content — library name from the server
     var containerID: String
     var containerKind: MediaItemKind
     var accountID: String?

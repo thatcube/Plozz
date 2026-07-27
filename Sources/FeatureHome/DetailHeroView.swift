@@ -516,7 +516,7 @@ struct DetailHeroView: View {
 
     /// True when `subtitle` is just the production year — the richer metadata
     /// line below already opens with the year, so we drop the duplicate.
-    private func isYearOnlySubtitle(_ subtitle: String) -> Bool {
+    private func isYearOnlySubtitle(_ subtitle: String) -> Bool {   // l10n:content — media subtitle from the server
         guard let year = item.productionYear else { return false }
         return subtitle == String(year)
     }
@@ -1590,7 +1590,7 @@ private struct CheckmarkShape: Shape {
 }
 
 private struct DetailHeroCreditLine: View {
-    let label: String
+    let label: String   // l10n:content — media subtitle from the server
     let values: [String]
     @Environment(\.themePalette) private var palette
 

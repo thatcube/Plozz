@@ -30,8 +30,8 @@ public struct PasswordSignInView: View {
     public var body: some View {
         VStack(spacing: 32) {
             OnboardingHeader(
-                "Sign in to \(serverName)",
-                subtitle: "Enter your \(providerName) username and password."
+                Text("Sign in to \(serverName)"),
+                subtitle: Text("Enter your \(providerName) username and password.")
             )
 
             // A Form gives the native tvOS grouped-row appearance and the

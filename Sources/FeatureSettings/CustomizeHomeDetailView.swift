@@ -391,8 +391,8 @@ struct CustomizeHomeDetailView: View {
 /// server. The border + small header make each source read as its own group
 /// instead of a flat, repeating list.
 private struct HomeRowsGroupCard<Content: View>: View {
-    let title: String
-    var subtitle: String? = nil
+    let title: String   // l10n:content — library name from the server
+    var subtitle: String? = nil   // l10n:content — server name
     /// When set, the header shows this provider's brand logo (library cards).
     var providerKind: ProviderKind? = nil
     /// For a media-share library, the transport shown as a badge on its drive icon.

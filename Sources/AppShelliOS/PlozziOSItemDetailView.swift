@@ -1550,7 +1550,7 @@ private struct PlozziOSSeasonButton: View {
     @Environment(\.themePalette) private var palette
 
     /// Season name from the server — content, so rendered verbatim.
-    let title: String
+    let title: String   // l10n:content — season name from the server
     let isSelected: Bool
     let action: () -> Void
 

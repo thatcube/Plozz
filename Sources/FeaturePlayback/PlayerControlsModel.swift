@@ -11,13 +11,13 @@ import CoreModels
 public struct PlayerTrackOption: Identifiable, Hashable, Sendable {
     public static let offID = -1
     public var id: Int
-    public var title: String
+    public var title: String   // l10n:content — media/track metadata from the server
     public var isSelected: Bool
     /// `true` for an external (downloaded / sidecar) subtitle, so the menu can mark
     /// it apart from the media's embedded tracks.
     public var isExternal: Bool
 
-    public init(id: Int, title: String, isSelected: Bool, isExternal: Bool = false) {
+    public init(id: Int, title: String, isSelected: Bool, isExternal: Bool = false) {   // l10n:content — media/track metadata from the server
         self.id = id
         self.title = title
         self.isSelected = isSelected
@@ -102,8 +102,8 @@ public final class PlayerControlsModel {
     public var pendingSeekTarget: TimeInterval?
 
     // MARK: Presentation
-    public var title: String = ""
-    public var subtitle: String = ""
+    public var title: String = ""   // l10n:content — media/track metadata from the server
+    public var subtitle: String = ""   // l10n:content — media/track metadata from the server
     public var hasTrickplay: Bool = false
 
     // MARK: Info panel
@@ -453,9 +453,9 @@ public struct SkipSeekLanding: Equatable, Sendable {
 /// even when consecutive notices share the same `label`.
 public struct AutoSkipNotice: Equatable, Identifiable, Sendable {
     public let id: UUID
-    public let label: String
+    public let label: String   // l10n:content — media/track metadata from the server
 
-    public init(label: String) {
+    public init(label: String) {   // l10n:content — media/track metadata from the server
         self.id = UUID()
         self.label = label
     }

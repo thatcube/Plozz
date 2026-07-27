@@ -50,8 +50,8 @@ public struct QuickConnectView: View {
                 ProviderBrandMark(provider: .jellyfin, size: 80)
 
                 OnboardingHeader(
-                    "\(serverName)",
-                    subtitle: "Open Jellyfin on another device, choose **Quick Connect**, and enter this code."
+                    Text(verbatim: serverName),
+                    subtitle: Text("Open Jellyfin on another device, choose **Quick Connect**, and enter this code.")
                 )
             }
 

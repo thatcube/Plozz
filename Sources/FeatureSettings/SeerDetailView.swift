@@ -399,7 +399,7 @@ struct SeerUserPickerView: View {
     }
 
     @ViewBuilder
-    private func row(title: String, subtitle: String?, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    private func row(title: String, subtitle: String?, isSelected: Bool, action: @escaping () -> Void) -> some View {   // l10n:content — Seerr user name and detail
         Button(action: action) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {

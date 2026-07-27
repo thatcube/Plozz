@@ -198,7 +198,7 @@ public actor LyricsDiskCache {
 /// these words (e.g. "Karaoke" by Drake actually has lyrics). Untitled
 /// instrumentals like a classical piece named "Palladio" aren't caught here
 /// — those rely on `LyricsDiskCache` remembering the negative result instead.
-func isExplicitlyInstrumental(title: String) -> Bool {
+func isExplicitlyInstrumental(title: String) -> Bool {   // l10n:content — track title used for lyric matching
     let pattern = "(?i)[\\(\\[\\-–—]\\s*(instrumental|karaoke|backing\\s+track|score\\s+version|instrumental\\s+version|karaoke\\s+version)\\s*[\\)\\]]?\\s*$"
     return title.range(of: pattern, options: .regularExpression) != nil
 }

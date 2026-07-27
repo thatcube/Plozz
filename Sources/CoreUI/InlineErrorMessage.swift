@@ -9,11 +9,15 @@ import SwiftUI
 public struct InlineErrorMessage: View {
     @Environment(\.themePalette) private var palette
 
-    private let message: LocalizedStringKey
+    /// Pre-built: callers pass our own copy as `Text("…")` and a server- or
+    /// transport-supplied error as `Text(verbatim:)`. Wrapping a runtime string
+    /// in a LocalizedStringKey (as this used to require) asks the catalog to
+    /// look up the error text as if it were a key.
+    private let message: Text
     private let systemImage: String
 
     public init(
-        _ message: LocalizedStringKey,
+        _ message: Text,
         systemImage: String = "exclamationmark.triangle.fill"
     ) {
         self.message = message
@@ -22,7 +26,7 @@ public struct InlineErrorMessage: View {
 
     public var body: some View {
         Label {
-            Text(message)
+            message
         } icon: {
             Image(systemName: systemImage)
         }

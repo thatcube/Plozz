@@ -16,7 +16,7 @@ public enum HeroPresentationSurface: Sendable, Equatable {
 public struct HeroPresentation: Sendable, Equatable {
     public let itemID: String
     public let kind: MediaItemKind
-    public let title: String
+    public let title: String   // l10n:content — media title from the server
     public let artworkReferences: [ArtworkReference]
     public let logoReferences: [ArtworkReference]
     public let metadataComponents: [String]

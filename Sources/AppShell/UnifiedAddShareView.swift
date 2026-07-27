@@ -93,7 +93,7 @@ struct UnifiedAddShareView: View {
 
     private var deviceStep: some View {
         Group {
-            headerRow(title: "Add a Media Share", back: onBack) {
+            headerRow(title: Text("Add a Media Share"), back: onBack) {
                 Button { viewModel.startScan() } label: {
                     Label("Rescan", systemImage: "arrow.clockwise")
                 }
@@ -173,7 +173,7 @@ struct UnifiedAddShareView: View {
     private var connectStep: some View {
         Group {
             headerRow(
-                title: "",
+                title: Text(""),
                 showsTitle: false,
                 back: { viewModel.backToDevices() }
             ) { EmptyView() }
@@ -232,7 +232,7 @@ struct UnifiedAddShareView: View {
             .focusSection()
 
             if let error = viewModel.connectError {
-                InlineErrorMessage(LocalizedStringKey(error), systemImage: "exclamationmark.triangle")
+                InlineErrorMessage(Text(verbatim: error), systemImage: "exclamationmark.triangle")
             }
             Button {
                 viewModel.connect()
@@ -332,7 +332,7 @@ struct UnifiedAddShareView: View {
         let isHostKey = viewModel.selectedTransport == .sftp
         return Group {
             headerRow(
-                title: isHostKey ? "Verify Host Key" : "Verify Certificate",
+                title: isHostKey ? Text("Verify Host Key") : Text("Verify Certificate"),
                 back: { viewModel.rejectTrust() }
             ) { EmptyView() }
             Panel(title: isHostKey ? Text("SSH Host Key SHA-256") : Text("Certificate SHA-256")) {
@@ -359,7 +359,7 @@ struct UnifiedAddShareView: View {
 
     private var locationStep: some View {
         Group {
-            headerRow(title: LocalizedStringKey(locationTitle), back: { viewModel.backToConnect() }) { EmptyView() }
+            headerRow(title: Text(verbatim: locationTitle), back: { viewModel.backToConnect() }) { EmptyView() }
             switch viewModel.locationLoad {
             case .idle, .loading:
                 Panel(title: Text("Locations")) { placeholder("Loading…") }
@@ -380,7 +380,7 @@ struct UnifiedAddShareView: View {
             case .failed(let message):
                 Panel(title: Text("Something went wrong")) {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(LocalizedStringKey(message)).plozzForeground(.secondary)
+                        Text(verbatim: message).plozzForeground(.secondary)
                         Button("Try again") { retryLocation() }.buttonStyle(.borderedProminent)
                     }
                 }
@@ -535,7 +535,7 @@ struct UnifiedAddShareView: View {
 
     private func comingSoonStep(_ kind: MediaShareTransportKind) -> some View {
         Group {
-            headerRow(title: LocalizedStringKey("\(kind.badgeLabel) coming soon"), back: { viewModel.backToConnect() }) { EmptyView() }
+            headerRow(title: Text("\(kind.badgeLabel) coming soon"), back: { viewModel.backToConnect() }) { EmptyView() }
             Panel(title: Text(verbatim: kind.badgeLabel)) {
                 Text("\(kind.badgeLabel) support is on the way. This device was detected, but Plozz can’t connect over \(kind.badgeLabel) just yet.")
                     .plozzForeground(.secondary)
@@ -549,7 +549,7 @@ struct UnifiedAddShareView: View {
     // MARK: - Shared pieces
 
     private func headerRow<Trailing: View>(
-        title: LocalizedStringKey,
+        title: Text,
         showsTitle: Bool = true,
         back: @escaping () -> Void,
         @ViewBuilder trailing: () -> Trailing
@@ -563,7 +563,7 @@ struct UnifiedAddShareView: View {
                 trailing()
             }
             if showsTitle {
-                OnboardingHeader(title, subtitle: "").frame(maxWidth: .infinity)
+                OnboardingHeader(title).frame(maxWidth: .infinity)
             }
         }
         .padding(.top, 24)

@@ -7,9 +7,6 @@
     " " : {
 
     },
-    "%@" : {
-
-    },
     "%@ " : {
 
     },
@@ -328,6 +325,9 @@
     "Artists" : {
 
     },
+    "Artwork" : {
+
+    },
     "Artwork limit" : {
 
     },
@@ -581,6 +581,12 @@
 
     },
     "Choose a share to add." : {
+
+    },
+    "Choose theme" : {
+
+    },
+    "Choose theme for this profile" : {
 
     },
     "Choose what plays behind the hero on a movie or show's detail page. Trailer and theme music never play together." : {
@@ -1156,6 +1162,9 @@
     "External subtitle" : {
 
     },
+    "FTP / FTPS" : {
+
+    },
     "FTP sends credentials and media without encryption." : {
 
     },
@@ -1561,6 +1570,9 @@
     "Looks good" : {
 
     },
+    "Lookups" : {
+
+    },
     "Lookups limit" : {
 
     },
@@ -1640,6 +1652,9 @@
 
     },
     "NEARBY" : {
+
+    },
+    "NFS" : {
 
     },
     "NFS server" : {
@@ -2596,7 +2611,13 @@
     "Rust" : {
 
     },
+    "SFTP" : {
+
+    },
     "SFTP server" : {
+
+    },
+    "SMB" : {
 
     },
     "SMB server" : {
@@ -3652,6 +3673,9 @@
     "We found your setup" : {
 
     },
+    "WebDAV" : {
+
+    },
     "WebDAV server" : {
 
     },
@@ -3686,6 +3710,9 @@
 
     },
     "White" : {
+
+    },
+    "Who's watching?" : {
 
     },
     "Who’s watching?" : {

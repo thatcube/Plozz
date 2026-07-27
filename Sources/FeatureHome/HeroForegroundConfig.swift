@@ -103,7 +103,7 @@ enum HeroForegroundDiagnostics {
     /// the body's value. Near-free when disabled (still runs the body, but skips
     /// the clock reads and string build).
     @discardableResult
-    static func measure<T>(_ label: String, _ body: () -> T) -> T {
+    static func measure<T>(_ label: String, _ body: () -> T) -> T {   // l10n:content — instrumentation label
         guard isEnabled else { return body() }
         let startNs = DispatchTime.now().uptimeNanoseconds
         let result = body()

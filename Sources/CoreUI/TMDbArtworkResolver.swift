@@ -100,7 +100,7 @@ public actor TMDbArtworkResolver {
     ///   - year: Release year (movies only; pass `nil` for TV, where the item's
     ///     year is an episode air date, not the series start).
     ///   - isTV: Search the `tv` namespace instead of `movie`.
-    public func posterURL(title: String, year: Int?, isTV: Bool) async -> URL? {
+    public func posterURL(title: String, year: Int?, isTV: Bool) async -> URL? {   // l10n:content — media title used as an artwork-search term
         guard let token else { return nil }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -125,7 +125,7 @@ public actor TMDbArtworkResolver {
     ///   - year: Release year (movies only; pass `nil` for TV).
     ///   - isTV: Use the `tv` namespace instead of `movie`.
     ///   - tmdbID: A known TMDb numeric id (from `providerIDs["Tmdb"]`), if any.
-    public func logoURL(title: String, year: Int?, isTV: Bool, tmdbID: String?) async -> URL? {
+    public func logoURL(title: String, year: Int?, isTV: Bool, tmdbID: String?) async -> URL? {   // l10n:content — media title used as an artwork-search term
         guard let token else { return nil }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let id = tmdbID?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -151,7 +151,7 @@ public actor TMDbArtworkResolver {
     ///   - tmdbID: A known TMDb numeric id (from `providerIDs["Tmdb"]`), if any.
     ///   - large: When `true`, returns the full-resolution `original` image (for
     ///     the full-bleed detail hero); otherwise a `w1280` image (rail/card sized).
-    public func backdropURL(title: String, year: Int?, isTV: Bool, tmdbID: String?, large: Bool = false) async -> URL? {
+    public func backdropURL(title: String, year: Int?, isTV: Bool, tmdbID: String?, large: Bool = false) async -> URL? {   // l10n:content — media title used as an artwork-search term
         guard let token else { return nil }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let id = tmdbID?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -249,7 +249,7 @@ public actor TMDbArtworkResolver {
 
     /// Resolves (and caches) a TV series' TMDb id by title, shared across every
     /// per-episode still lookup for that show.
-    private func resolveSeriesID(title: String, token: String) async -> String? {
+    private func resolveSeriesID(title: String, token: String) async -> String? {   // l10n:content — media title used as an artwork-search term
         let key = title.lowercased()
         if let cached = seriesIDCache[key] { return cached }
         let id = await fetchID(title: title, year: nil, isTV: true, token: token)
@@ -275,7 +275,7 @@ public actor TMDbArtworkResolver {
         return Self.bestBackdropPath(decoded.stills)
     }
 
-    private func fetchBackdropPath(title: String, year: Int?, isTV: Bool, tmdbID: String?, token: String) async -> String? {
+    private func fetchBackdropPath(title: String, year: Int?, isTV: Bool, tmdbID: String?, token: String) async -> String? {   // l10n:content — media title used as an artwork-search term
         let id: String?
         if let tmdbID, !tmdbID.isEmpty {
             id = tmdbID
@@ -379,7 +379,7 @@ public actor TMDbArtworkResolver {
         return usable.first?.logo_path
     }
 
-    private func fetchLogoURL(title: String, year: Int?, isTV: Bool, tmdbID: String?, token: String) async -> URL? {
+    private func fetchLogoURL(title: String, year: Int?, isTV: Bool, tmdbID: String?, token: String) async -> URL? {   // l10n:content — media title used as an artwork-search term
         let id: String?
         if let tmdbID, !tmdbID.isEmpty {
             id = tmdbID
@@ -429,7 +429,7 @@ public actor TMDbArtworkResolver {
     }
 
     /// Resolves a TMDb id by title search (returns the first result's id).
-    private func fetchID(title: String, year: Int?, isTV: Bool, token: String) async -> String? {
+    private func fetchID(title: String, year: Int?, isTV: Bool, token: String) async -> String? {   // l10n:content — media title used as an artwork-search term
         guard var components = URLComponents(string: "https://api.themoviedb.org/3/search/\(isTV ? "tv" : "movie")") else {
             return nil
         }
@@ -458,7 +458,7 @@ public actor TMDbArtworkResolver {
         return String(id)
     }
 
-    private func fetchPosterURL(title: String, year: Int?, isTV: Bool, token: String) async -> URL? {
+    private func fetchPosterURL(title: String, year: Int?, isTV: Bool, token: String) async -> URL? {   // l10n:content — media title used as an artwork-search term
         guard var components = URLComponents(string: "https://api.themoviedb.org/3/search/\(isTV ? "tv" : "movie")") else {
             return nil
         }

@@ -56,7 +56,7 @@ public struct LoadingMessagesView: View {
             // appears; the message cross-fades within it.
             ZStack {
                 if let message = model.currentMessage {
-                    Text(LocalizedStringKey(message.text))
+                    Text(verbatim: message.text)
                         .font(.title3)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(messageColor)

@@ -1,6 +1,7 @@
 import SwiftUI
 import AppShell
 import CoreModels
+import CoreUI
 
 /// Plozz — an open-source tvOS client for Jellyfin, Emby, Plex, and media shares.
 @main
@@ -15,7 +16,12 @@ struct PlozzApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            // tvOS has no per-app language control in Settings.app, so this is the
+            // only way a household can run Plozz in a language other than the
+            // device's. See CoreUI.AppLanguageScope.
+            AppLanguageScope {
+                RootView()
+            }
         }
     }
 }

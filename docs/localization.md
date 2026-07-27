@@ -180,6 +180,35 @@ string, because it is the only context a translator gets.
 the importer will not retarget them to the app catalog. If XLIFF is needed: sync
 first, export only the app-owned catalog, then import that export unchanged.
 
+## Choosing a language in the app
+
+Settings › Appearance › Language (both shells). The option list is built from
+`AppLanguage.available()`, which reads `Bundle.main.localizations` — so a newly
+translated language appears on its own, and a language can never be offered that
+has no strings behind it.
+
+It is applied by `CoreUI.AppLanguageScope`, which wraps each app's root view and
+injects `\.locale`. That re-renders live, with no relaunch — unlike changing the
+system language, which kills and restarts the process.
+
+The setting is stored **per profile** (`AppLanguageSettingsStore`, scoped exactly
+like every other settings store), so one household member can read Plozz in
+Spanish while another keeps English on the same Apple TV.
+
+### What it deliberately does not change
+
+| Not affected | Why |
+| --- | --- |
+| Media titles, overviews, genres | They come from Jellyfin/Plex in whatever language that server is configured with |
+| Audio / subtitle track languages | A German UI does not imply German audio — they are separate settings on purpose |
+| Dates, numbers, sort order | Those follow the device REGION, which the override preserves |
+| AVKit player chrome, permission prompts | System-drawn; they follow the device language and no in-app setting can change that |
+| Top Shelf | A separate bundle **and** a separate process |
+
+`.environment(\.locale,)` also does **not** change `Locale.current`. Any non-view
+code that formats, compares or sorts text must be handed a locale explicitly
+rather than reading the process-wide one.
+
 ## Verifying
 
 ```sh

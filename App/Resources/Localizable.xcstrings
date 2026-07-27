@@ -297,6 +297,16 @@
         }
       }
     },
+    "Applies to Plozz's own labels. Media titles keep the language your server provides, and system prompts follow the device." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se aplica a las etiquetas de Plozz. Los títulos conservan el idioma de tu servidor y los avisos del sistema siguen el dispositivo."
+          }
+        }
+      }
+    },
     "Approve & Continue" : {
 
     },
@@ -1305,6 +1315,16 @@
     "Key verified — TMDB authenticated successfully." : {
 
     },
+    "Language" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Idioma"
+          }
+        }
+      }
+    },
     "Last scanned" : {
 
     },
@@ -1947,6 +1967,16 @@
     "Playback position" : {
 
     },
+    "Player controls, system prompts, and the Top Shelf row follow the Apple TV's own language." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Los controles del reproductor, los avisos del sistema y la fila Top Shelf siguen el idioma del Apple TV."
+          }
+        }
+      }
+    },
     "Playing from %@" : {
 
     },
@@ -1966,6 +1996,9 @@
 
     },
     "Plozz" : {
+
+    },
+    "Plozz is only available in English for now. More languages are on the way." : {
 
     },
     "Plozz picks the best source for each field automatically." : {
@@ -2958,6 +2991,16 @@
     },
     "The language Plozz prefers when choosing subtitles." : {
 
+    },
+    "The language Plozz uses for its own labels. Media titles keep the language your server provides." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El idioma que Plozz usa para sus propias etiquetas. Los títulos conservan el idioma de tu servidor."
+          }
+        }
+      }
     },
     "The latest app log lines from this Apple TV" : {
 
@@ -3996,6 +4039,23 @@
     },
     "iCloud identity: %@…  (must match on every device)" : {
 
+    },
+    "language.system" : {
+      "comment" : "Language picker option meaning 'follow the device language'.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sistema"
+          }
+        }
+      }
     },
     "libraryRowKind.hubs" : {
       "comment" : "Per-library Home row type in Settings > Customize Home.",

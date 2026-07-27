@@ -1120,9 +1120,23 @@ private struct PlozziOSAppearanceSettingsView: View {
     @Bindable var cardStyle: CardStyleSettingsModel
     @Bindable var density: UIDensitySettingsModel
     @Bindable var watchIndicator: WatchStatusIndicatorSettingsModel
+    @Environment(AppLanguageSettingsModel.self) private var appLanguage
 
     var body: some View {
-        List {
+        @Bindable var appLanguage = appLanguage
+        return List {
+            SettingsSectionGroup("Language") {
+                Picker("Language", selection: $appLanguage.language) {
+                    ForEach(AppLanguage.available()) { language in
+                        // Verbatim: an endonym ("Español") is a proper noun and
+                        // must read the same whatever the current UI language is.
+                        Text(verbatim: language.displayName).tag(language)
+                    }
+                }
+            } footer: {
+                Text("Applies to Plozz's own labels. Media titles keep the language your server provides, and system prompts follow the device.")
+            }
+
             SettingsSectionGroup("Theme") {
                 Picker("Appearance", selection: $theme.theme) {
                     ForEach(AppTheme.allCases) { theme in

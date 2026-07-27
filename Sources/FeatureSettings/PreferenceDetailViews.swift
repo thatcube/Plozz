@@ -24,6 +24,7 @@ struct AppearanceDetailView: View {
     /// per-profile appearance models).
     @Environment(NavigationStyleSettingsModel.self) private var navigation
     @Environment(TransparencyPreferenceModel.self) private var transparency
+    @Environment(AppLanguageSettingsModel.self) private var appLanguage
 
     var body: some View {
         SettingsSplitLayout(title: "Appearance", sections: sections)
@@ -42,6 +43,13 @@ struct AppearanceDetailView: View {
 
         return [
             SettingsSplitSection(id: "display", header: "Display", rows: [
+                SettingsSplitRow(
+                    id: "language",
+                    title: "Language",
+                    description: "The language Plozz uses for its own labels. Media titles keep the language your server provides."
+                ) {
+                    AppLanguagePicker(model: appLanguage)
+                },
                 SettingsSplitRow(
                     id: "theme",
                     title: "Theme"

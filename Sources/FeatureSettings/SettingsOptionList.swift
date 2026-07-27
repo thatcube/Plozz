@@ -47,7 +47,7 @@ struct SettingsOptionList<Option: Hashable>: View {
     /// Wrap the list in the shared bordered container. Default `true`; pass
     /// `false` when the list already sits inside another container.
     var bordered: Bool = true
-    let title: (Option) -> LocalizedStringResource
+    let title: (Option) -> Text
 
     @FocusState private var focusedOption: Option?
 
@@ -55,7 +55,7 @@ struct SettingsOptionList<Option: Hashable>: View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(options, id: \.self) { option in
                 SettingsCheckableRow(
-                    title: Text(title(option)),
+                    title: title(option),
                     icon: icon(option),
                     isChecked: selection == option,
                     action: { selection = option }

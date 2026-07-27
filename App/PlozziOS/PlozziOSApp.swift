@@ -1,4 +1,5 @@
 import AppShelliOS
+import CoreUI
 import SwiftUI
 import UIKit
 
@@ -38,7 +39,11 @@ struct PlozziOSApp: App {
 
     var body: some Scene {
         WindowGroup {
-            PlozziOSRootView()
+            // Same scope as tvOS so the two shells can't drift on how the
+            // language override is applied. See CoreUI.AppLanguageScope.
+            AppLanguageScope {
+                PlozziOSRootView()
+            }
         }
     }
 }

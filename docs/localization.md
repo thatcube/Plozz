@@ -120,6 +120,40 @@ Text("Continue Watching")    // app copy
 
 Content stays `String`. App copy becomes `LocalizedStringResource`.
 
+### Brand names are not copy
+
+Provider and format names must never be translated — a translator seeing "Plex" in
+a catalog has no way to know that, and some will translate it:
+
+```swift
+Text(verbatim: "Jellyfin")              // brand
+.navigationTitle(Text(verbatim: "Plex"))
+```
+
+The guard enforces this against the `neverTranslate` list in
+`tools/l10n-guard.json`.
+
+### Never build a sentence with `+`
+
+```swift
+Text("Connect a server. " + "Each profile can request separately.")   // WRONG
+```
+
+This is not merely bad for word order: `"a" + "b"` is an *expression*, not a
+literal, so the compiler's extractor **skips it entirely** — the string never
+enters the catalog and can never be translated. Six real strings were lost this
+way before the guard existed. Wrap long copy with a multi-line literal instead,
+which stays a single literal:
+
+```swift
+Text(
+    """
+    Connect a server. \
+    Each profile can request separately.
+    """
+)
+```
+
 ### `Text(someString)` renders verbatim — this is the classic trap
 
 A `String` reaching `Text` is **not** localized. Copy modelled as `String` in a
@@ -149,6 +183,7 @@ first, export only the app-owned catalog, then import that export unchanged.
 ## Verifying
 
 ```sh
+tools/l10n-guard.sh                         # catch localization regressions
 tools/run-tests.sh FeatureSearchCoreTests   # localization invariants live here
 tools/deploy-tv.sh --build-only             # tvOS compiles
 tools/l10n-sync.py --check                  # catalog matches the source
@@ -159,6 +194,60 @@ To check a language on a simulator, launch with an explicit language argument:
 ```sh
 xcrun simctl launch <sim-id> com.thatcube.Plozz -AppleLanguages "(es)"
 ```
+
+## The guard (`tools/l10n-guard.sh`)
+
+Runs in CI. It parses the source with SwiftSyntax — shipped inside the toolchain,
+so it needs no package dependency — and checks five things:
+
+| Rule | What it catches |
+| --- | --- |
+| `eager-localization` | `Text(String(localized:))`, which freezes the value and defeats live locale switching |
+| `key-from-variable` | `LocalizedStringKey(someString)` — a runtime string can't be a catalog key |
+| `concatenated-copy` | `Text("a " + "b")` — **the extractor skips this entirely**, so the string never reaches the catalog and can never be translated |
+| `brand-not-verbatim` | "Jellyfin"/"Plex"/… entering the catalog as translatable |
+| `copy-typed-as-string` | a migrated file reverting a copy property to `String` |
+
+The first four run repo-wide. `copy-typed-as-string` runs **only** on
+`auditedPaths` in `tools/l10n-guard.json` — add a path there as part of migrating
+that slice. That is what tightens the ratchet.
+
+### Why these rules and not others
+
+Every rule is **syntactically decidable**. A syntax tree cannot tell
+`Text(section.title)` (a `LocalizedStringResource`, fine) from `Text(item.title)`
+(media content, must be verbatim) — they are the same shape. Any rule needing that
+distinction would be guessing, so it isn't a rule. Type-level checking is the
+compiler's job, not this tool's.
+
+That also rules out the tempting "count bare string literals and ratchet down"
+design: SF Symbol names, log messages, URLs, codec names and test fixtures are all
+bare literals and none are copy, while the actual failure mode — copy modelled as
+a runtime `String` — isn't a literal at all.
+
+### The ratchet
+
+Pre-existing findings are recorded in `tools/l10n-guard-baseline.json`. The guard
+fails when a count goes **up**, or when anything at all is found in an audited
+file. Counts may only ever decrease — the tool refuses to write a higher number.
+
+```sh
+tools/l10n-guard.sh --update-baseline   # after fixing some; only ratchets DOWN
+```
+
+### Marking content in an audited file
+
+A property holding real content (a media title, filename, username) inside an
+audited file is exempted explicitly:
+
+```swift
+let title: String   // l10n:content — provider-supplied media title
+```
+
+Deliberately greppable: exempting content should be a visible decision.
+
+> **Note:** CI runs the guard but not `l10n-sync.py --check`, because that needs a
+> full tvOS *and* iOS build. Run the sync yourself when adding strings.
 
 ## Do not
 

@@ -23,8 +23,10 @@ struct PlozziOSSeerrSettingsView: View {
     var body: some View {
         List {
             Text(
-                "Connect one Overseerr or Jellyseerr server for the household. "
-                    + "Each Plozz profile can make requests as a different user."
+                """
+                Connect one Overseerr or Jellyseerr server for the household. \
+                Each Plozz profile can make requests as a different user.
+                """
             )
             .font(.footnote)
             .plozzForeground(.secondary)
@@ -41,14 +43,16 @@ struct PlozziOSSeerrSettingsView: View {
                     profileMappings
                 } footer: {
                     Text(
-                        "Unlinked profiles request as the administrator. "
-                            + "Linked profiles use that user’s permissions, quotas, and defaults."
+                        """
+                        Unlinked profiles request as the administrator. \
+                        Linked profiles use that user’s permissions, quotas, and defaults.
+                        """
                     )
                 }
             }
         }
         .settingsPageSurface()
-        .navigationTitle("Seerr")
+        .navigationTitle(Text(verbatim: "Seerr"))
         .task {
             await appModel.seerService.refreshStatus()
             if appModel.seerService.isConfigured {

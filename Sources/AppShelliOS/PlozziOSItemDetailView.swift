@@ -271,7 +271,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
         }
         .task { await viewModel.load() }
         .alert(
-            "Seerr",
+            Text(verbatim: "Seerr"),
             isPresented: Binding(
                 get: { requestError != nil },
                 set: { if !$0 { requestError = nil } }
@@ -318,8 +318,10 @@ private struct PlozziOSCanonicalItemDetailView: View {
             }
         } message: {
             Text(
-                "This profile isn’t linked to a Seerr user. "
-                    + "The request will use the unrestricted administrator account."
+                """
+                This profile isn’t linked to a Seerr user. \
+                The request will use the unrestricted administrator account.
+                """
             )
         }
     }

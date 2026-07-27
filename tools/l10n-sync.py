@@ -68,6 +68,10 @@ PROJECT = REPO / "Plozz.xcodeproj"
 # wiping it costs a localization rebuild rather than everyone's incremental state.
 DERIVED = REPO / ".build/l10n-deriveddata"
 
+# The architecture the extraction build pins (see build_for_extraction). The
+# collector must read the SAME arch or it will mix in a stale snapshot.
+ARCH = platform.machine()
+
 PLATFORMS = {
     # Simulator destinations on purpose: extraction only needs the code to
     # COMPILE, and a device destination drags in provisioning. A per-branch app id
@@ -121,7 +125,7 @@ def build_for_extraction(platform_keys: list[str], quiet: bool) -> None:
             # some vendored xcframeworks (LibDovi) ship no x86_64 simulator slice,
             # so the link fails on a symbol hunt we do not care about. Extraction
             # only needs one arch to compile — use the host's.
-            f"ARCHS={platform.machine()}",
+            f"ARCHS={ARCH}",
             "ONLY_ACTIVE_ARCH=NO",
             "build",
         ]
@@ -139,13 +143,23 @@ def build_for_extraction(platform_keys: list[str], quiet: bool) -> None:
             sys.exit(f"✗ Extraction build failed for {scheme}.")
 
 
-def collect_stringsdata() -> list[Path]:
+def collect_stringsdata(arch: str) -> list[Path]:
     """Every `.stringsdata` that represents app copy we own.
 
-    Also drops the empty ones. The compiler emits a `.stringsdata` per source
-    file whether or not that file contains a single localizable string, so the
-    vast majority are `{"tables": {}}` noise — dropping them keeps the sync
-    command small and makes the reported count mean something.
+    Three filters, each for a failure actually observed:
+
+    * **Architecture.** DerivedData accumulates a directory per architecture and
+      never prunes them. An earlier run that built a different arch leaves a full
+      set of `.stringsdata` behind, and globbing everything mixes that stale
+      snapshot into the current one — deleted strings come back from the dead.
+      Since the build pins ARCHS, only that arch's output is current.
+    * **Deleted sources.** A renamed or removed `.swift` file leaves its
+      `.stringsdata` behind forever, so entries are dropped when the recorded
+      `source` no longer exists.
+    * **Empty tables.** The compiler emits a `.stringsdata` per source file
+      whether or not it holds a localizable string, so most are `{"tables": {}}`
+      noise. Dropping them keeps the sync command small and makes the reported
+      count mean something.
     """
     if not DERIVED.exists():
         sys.exit("✗ No extraction build found. Run without --no-build first.")
@@ -153,6 +167,9 @@ def collect_stringsdata() -> list[Path]:
     kept: list[Path] = []
     for path in DERIVED.rglob("*.stringsdata"):
         if any(marker in path.name for marker in EXCLUDED_FILE_MARKERS):
+            continue
+        # `.../Objects-normal/<arch>/Foo.stringsdata`
+        if path.parent.name != arch:
             continue
         try:
             payload = json.loads(path.read_text())
@@ -167,6 +184,8 @@ def collect_stringsdata() -> list[Path]:
         # Anything outside the repo is a dependency (SwiftPM checkouts live in
         # DerivedData), and its copy is not ours to translate.
         if not source.startswith(str(REPO)):
+            continue
+        if not Path(source).exists():
             continue
         if not any(payload.get("tables", {}).values()):
             continue
@@ -264,11 +283,11 @@ def main() -> int:
     if not args.no_build:
         build_for_extraction(platform_keys, args.quiet)
 
-    files = collect_stringsdata()
+    files = collect_stringsdata(ARCH)
     if not files:
         sys.exit("✗ No .stringsdata found. Extraction did not run — check "
                  "defaultLocalization in Package.swift and SWIFT_EMIT_LOC_STRINGS.")
-    print(f"▸ {len(files)} .stringsdata files from {', '.join(platform_keys)}")
+    print(f"▸ {len(files)} .stringsdata files from {', '.join(platform_keys)} ({ARCH})")
 
     before = CATALOG.read_text()
     conflicts = check_conflicts(files)

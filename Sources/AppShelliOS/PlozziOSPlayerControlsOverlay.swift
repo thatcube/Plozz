@@ -362,7 +362,7 @@ private struct PlozziOSPlayerTopBar: View {
 
             PlozziOSAirPlayRouteButton()
                 .frame(width: 44, height: 44)
-                .accessibilityLabel("AirPlay")
+                .accessibilityLabel(Text(verbatim: "AirPlay"))
         }
         .foregroundStyle(.white)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

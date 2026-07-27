@@ -523,7 +523,11 @@ private struct PlozziOSSettingsCompactMenu: View {
                 NavigationLink {
                     PlozziOSSeerrSettingsView(appModel: appModel)
                 } label: {
-                    Label("Seerr", systemImage: "sparkles.tv")
+                    Label {
+                        Text(verbatim: "Seerr")
+                    } icon: {
+                        Image(systemName: "sparkles.tv")
+                    }
                 }
 
                 NavigationLink {

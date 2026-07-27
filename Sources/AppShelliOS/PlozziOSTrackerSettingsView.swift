@@ -12,8 +12,10 @@ struct PlozziOSTrackerSettingsView: View {
     var body: some View {
         List {
             Text(
-                "Connections are stored separately for each Plozz profile. "
-                    + "Playback progress is sent to every connected tracker."
+                """
+                Connections are stored separately for each Plozz profile. \
+                Playback progress is sent to every connected tracker.
+                """
             )
             .font(.footnote)
             .plozzForeground(.secondary)

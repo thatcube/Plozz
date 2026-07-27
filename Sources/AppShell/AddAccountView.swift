@@ -307,7 +307,7 @@ private struct FirstRunBranding: View {
                     .frame(width: 224, height: 112)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Plozz")
+            .accessibilityLabel(Text(verbatim: "Plozz"))
 
             Text("Free forever and open source.")
                 .font(.system(size: 22, weight: .medium))
@@ -326,7 +326,6 @@ private struct ProviderChoiceGroup: View {
         VStack(spacing: 0) {
             ProviderChoiceRow(
                 provider: .jellyfin,
-                title: "Jellyfin",
                 height: 108,
                 focusedControl: focusedControl
             ) {
@@ -337,7 +336,6 @@ private struct ProviderChoiceGroup: View {
 
             ProviderChoiceRow(
                 provider: .plex,
-                title: "Plex",
                 height: 108,
                 isLoading: isPreparingPlex,
                 focusedControl: focusedControl
@@ -349,7 +347,6 @@ private struct ProviderChoiceGroup: View {
 
             ProviderChoiceRow(
                 provider: .emby,
-                title: "Emby",
                 height: 108,
                 focusedControl: focusedControl
             ) {
@@ -360,7 +357,6 @@ private struct ProviderChoiceGroup: View {
 
             ProviderChoiceRow(
                 provider: .mediaShare,
-                title: "Media Share",
                 height: 108,
                 focusedControl: focusedControl
             ) {
@@ -384,7 +380,6 @@ private struct ProviderChoiceGroup: View {
 
 private struct ProviderChoiceRow: View {
     let provider: ProviderKind
-    let title: LocalizedStringKey
     let height: CGFloat
     var isLoading = false
     let focusedControl: FocusState<ProviderChooserFocus?>.Binding
@@ -395,7 +390,10 @@ private struct ProviderChoiceRow: View {
             HStack(spacing: 24) {
                 ProviderBrandMark(provider: provider, size: 64)
 
-                Text(title)
+                // Provider names are brands: rendered verbatim so they are never
+                // extracted as translatable copy, and derived from the provider so a
+                // caller can't pass a name that disagrees with the logo beside it.
+                Text(verbatim: provider.displayName)
                     .font(.system(size: 32, weight: .semibold))
 
                 Spacer(minLength: 24)

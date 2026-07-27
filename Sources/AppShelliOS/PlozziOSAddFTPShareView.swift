@@ -43,7 +43,7 @@ struct PlozziOSAddFTPShareView: View {
         Form {
             SettingsSectionGroup("Connection") {
                 Picker("Security", selection: $security) {
-                    Text("FTP").tag(Security.ftp)
+                    Text(verbatim: "FTP").tag(Security.ftp)
                     Text("FTPS (Implicit TLS)").tag(Security.ftps)
                 }
                 TextField("Host", text: $host)

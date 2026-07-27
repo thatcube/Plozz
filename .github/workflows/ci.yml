@@ -31,6 +31,13 @@ jobs:
       - name: Architecture layering guard
         run: python3 tools/arch-guard.py
 
+      # Localization regressions: brand names leaking into the catalog, copy
+      # concatenated with `+` (which the extractor skips entirely, so the string
+      # can never be translated), and migrated APIs reverting to `String`.
+      # Ratcheted against tools/l10n-guard-baseline.json — see docs/localization.md.
+      - name: Localization guard
+        run: tools/l10n-guard.sh
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

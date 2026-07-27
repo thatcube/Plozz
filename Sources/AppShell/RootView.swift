@@ -1008,7 +1008,7 @@ private struct PINKeyBody: View {
 private struct LaunchView: View {
     var body: some View {
         VStack(spacing: 24) {
-            Text("Plozz")
+            Text(verbatim: "Plozz")
                 .font(.system(size: 96, weight: .heavy, design: .rounded))
             ProgressView()
         }

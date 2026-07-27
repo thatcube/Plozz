@@ -276,8 +276,10 @@ private struct QuickConnectServerSignInView: View {
         Form {
             Section {
                 Text(
-                    "Open Jellyfin on another device, choose Quick Connect, "
-                        + "and enter this code."
+                    """
+                    Open Jellyfin on another device, choose Quick Connect, \
+                    and enter this code.
+                    """
                 )
                 .plozzForeground(.secondary)
                 Text(server.baseURL.absoluteString)
@@ -529,7 +531,7 @@ private struct PlexServerSignInView: View {
             }
         }
         .settingsPageSurface()
-        .navigationTitle("Plex")
+        .navigationTitle(Text(verbatim: "Plex"))
         .navigationBarTitleDisplayMode(.inline)
         .task { viewModel.startIfNeeded() }
         .onDisappear { viewModel.cancel() }

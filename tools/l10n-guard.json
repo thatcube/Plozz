@@ -1,0 +1,43 @@
+{
+  "_comment": [
+    "Configuration for tools/l10n-guard.sh. Data-driven so expanding scope is a",
+    "config change, not a code change.",
+    "",
+    "'auditedPaths' are files/directories that have BEEN migrated to",
+    "LocalizedStringResource. Only they are subject to the strict",
+    "copy-typed-as-string rule; everything else in the repo is grandfathered so",
+    "the guard reports real regressions instead of drowning in ~1,140 known-legacy",
+    "strings. Add a path here as part of migrating that slice — that is what makes",
+    "the ratchet tighten.",
+    "",
+    "The other rules are safe enough to run repo-wide because they are",
+    "syntactically decidable and cannot be confused by content-vs-copy ambiguity."
+  ],
+
+  "auditedPaths": [
+    "Sources/FeatureSearchCore/SearchSection.swift"
+  ],
+
+  "copyPropertyNames": [
+    "title", "label", "header", "subtitle", "message", "caption",
+    "placeholder", "prompt", "heading", "footer", "buttonTitle", "cue"
+  ],
+
+  "appCopySinks": [
+    "Text", "Button", "Label", "Section", "Toggle", "Picker", "TextField",
+    "Menu", "Tab", "navigationTitle", "accessibilityLabel", "accessibilityValue",
+    "accessibilityHint", "alert", "confirmationDialog"
+  ],
+
+  "_neverTranslateComment": [
+    "Brand, product and format names. A translator seeing 'Plex' in a catalog has",
+    "no way to know it must not be translated, and some WILL translate it. These",
+    "must reach the UI as Text(verbatim:) so they are never extracted at all."
+  ],
+  "neverTranslate": [
+    "Plozz", "Jellyfin", "Plex", "Emby", "Trakt", "Simkl", "AniList",
+    "MyAnimeList", "Last.fm", "Seerr", "Jellyseerr", "Overseerr", "TMDb",
+    "TheTVDB", "OMDb", "SMB", "NFS", "SFTP", "FTP", "WebDAV", "HEVC", "AV1",
+    "Dolby Vision", "Dolby Atmos", "HDR", "AirPlay", "CloudKit", "iCloud"
+  ]
+}

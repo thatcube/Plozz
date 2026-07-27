@@ -177,8 +177,10 @@ struct PlozziOSHomeView: View {
             }
         } message: {
             Text(
-                "This profile isn’t linked to a Seerr user. "
-                    + "The request will use the unrestricted administrator account."
+                """
+                This profile isn’t linked to a Seerr user. \
+                The request will use the unrestricted administrator account.
+                """
             )
         }
         .alert(

@@ -28,6 +28,9 @@ RELEASE_TARGETS = [
     name: "tvOS",
     scheme: "Plozz",
     platform: "appletvos",
+    # The App Store Connect API's own platform name, which differs from the
+    # xcodebuild/altool one above.
+    asc_platform: "TV_OS",
     output_name: "Plozz-tvOS.ipa",
     archive_path: File.join(OUTPUT_DIR, "Plozz-tvOS.xcarchive")
   },
@@ -35,6 +38,7 @@ RELEASE_TARGETS = [
     name: "iOS/iPadOS",
     scheme: "PlozziOS",
     platform: "ios",
+    asc_platform: "IOS",
     output_name: "Plozz-iOS.ipa",
     archive_path: File.join(OUTPUT_DIR, "Plozz-iOS.xcarchive")
   }
@@ -114,6 +118,111 @@ def next_build_number
     ).to_i
   end.max
   latest + 1
+end
+
+# The marketing version (CFBundleShortVersionString) this ship will carry.
+#
+# Mirrors tools/generate-project.sh's precedence — an explicit
+# PLOZZ_MARKETING_VERSION override, else CalVer `YYYY.M.D` — and is computed ONCE
+# per run, then exported so the script bakes the very same value. Letting both
+# derive it independently would disagree across a midnight boundary, which is
+# exactly the kind of mismatch App Store Review rejects.
+def marketing_version
+  @marketing_version ||= begin
+    override = ENV["PLOZZ_MARKETING_VERSION"]
+    if override && !override.strip.empty?
+      override.strip
+    else
+      t = Time.now
+      "#{t.year}.#{t.month}.#{t.day}"
+    end
+  end
+end
+
+# App Store version records whose version string can still be edited. Anything
+# else (in review, live, pending release) is frozen, so a new record has to be
+# created rather than the existing one renamed.
+EDITABLE_VERSION_STATES = %w[
+  PREPARE_FOR_SUBMISSION
+  DEVELOPER_REJECTED
+  REJECTED
+  METADATA_REJECTED
+  INVALID_BINARY
+].freeze
+
+# Points each platform's App Store version record at `version`, creating one when
+# the platform has none yet.
+#
+# App Store Review rejects a submission whose version record disagrees with the
+# binary's CFBundleShortVersionString. Because the marketing version is CalVer —
+# it changes on its own whenever you ship on a new day — keeping the records in
+# step by hand is a standing trap, so `release` does it as part of shipping.
+#
+# TestFlight ignores these records entirely, which is why `beta` doesn't call it.
+def sync_app_store_versions(version)
+  key = asc_api_key
+  Spaceship::ConnectAPI.auth(
+    key_id: key[:key_id],
+    issuer_id: key[:issuer_id],
+    key: OpenSSL::PKey::EC.new(key[:key])
+  )
+  app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+  UI.user_error!("App #{APP_IDENTIFIER} not found in App Store Connect") if app.nil?
+
+  existing = app.get_app_store_versions
+  RELEASE_TARGETS.each do |target|
+    platform = target[:asc_platform]
+    record = existing.find { |v| v.platform == platform }
+
+    if record.nil?
+      create_app_store_version(app_id: app.id, platform: platform, version: version)
+      UI.success("#{target[:name]}: created App Store version #{version}")
+      next
+    end
+
+    if record.version_string == version
+      UI.message("#{target[:name]}: App Store version already #{version}")
+      next
+    end
+
+    unless EDITABLE_VERSION_STATES.include?(record.app_store_state)
+      # The current record is frozen (in review / live), so renaming it would be
+      # rejected. A fresh record is the correct next version.
+      create_app_store_version(app_id: app.id, platform: platform, version: version)
+      UI.success(
+        "#{target[:name]}: #{record.version_string} is #{record.app_store_state}; " \
+        "created a new App Store version #{version}"
+      )
+      next
+    end
+
+    Spaceship::ConnectAPI.tunes_request_client.patch(
+      "v1/appStoreVersions/#{record.id}",
+      data: {
+        type: "appStoreVersions",
+        id: record.id,
+        attributes: { versionString: version }
+      }
+    )
+    UI.success("#{target[:name]}: App Store version #{record.version_string} -> #{version}")
+  end
+end
+
+# Creates an App Store version record for one platform.
+#
+# Uses the raw endpoint deliberately: Spaceship exposes no create helper for
+# `appStoreVersions`, and this is also the only route that can add a platform the
+# App Store Connect UI won't (its universal-purchase flow is iOS-anchored, so an
+# app record created tvOS-only offers no way to add iOS).
+def create_app_store_version(app_id:, platform:, version:)
+  Spaceship::ConnectAPI.tunes_request_client.post(
+    "v1/appStoreVersions",
+    data: {
+      type: "appStoreVersions",
+      attributes: { platform: platform, versionString: version },
+      relationships: { app: { data: { type: "apps", id: app_id } } }
+    }
+  )
 end
 
 # Release notes shown to testers as TestFlight's "What to Test". Sourced from the
@@ -222,11 +331,18 @@ lane :build do |options|
   # TestFlight is the source of truth, so derive the next build from (latest
   # TestFlight build + 1). Set it BEFORE generating the project so generate-project.sh
   # bakes it into CFBundleVersion for both the app and the Top Shelf extension.
-  # Marketing version (CFBundleShortVersionString) stays manual in project.yml —
-  # bump it by hand for real releases.
+  # Marketing version (CFBundleShortVersionString) is auto-derived — CalVer by
+  # default, or PLOZZ_MARKETING_VERSION for a hand-chosen release name — and
+  # `release` writes the same value to the App Store version records.
   build_number = next_build_number
   ENV["PLOZZ_BUILD_NUMBER"] = build_number.to_s
   UI.message("Using build number #{build_number} (CFBundleVersion)")
+
+  # Pin the marketing version for this run so generate-project.sh bakes exactly
+  # the value `release` will later write to the App Store version records —
+  # rather than each deriving CalVer separately and disagreeing at midnight.
+  ENV["PLOZZ_MARKETING_VERSION"] = marketing_version
+  UI.message("Using marketing version #{marketing_version} (CFBundleShortVersionString)")
 
   # Let Xcode create/download the distribution certificate and provisioning
   # profile on first run, authenticating with the same App Store Connect API key.
@@ -292,6 +408,9 @@ desc "Build and upload tvOS plus iOS/iPadOS to the App Store"
 lane :release do
   api_key = asc_api_key
   build
+  # Keep every platform's App Store version record in step with the binaries
+  # being uploaded. Review rejects a mismatch, and CalVer moves on its own.
+  sync_app_store_versions(marketing_version)
   RELEASE_TARGETS.each do |target|
     UI.header("Uploading #{target[:name]} to App Store Connect")
     upload_to_app_store(

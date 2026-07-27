@@ -18,6 +18,9 @@ public struct MediaCardPlaybackIndicators: View {
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.plozzWatchStatusIndicator) private var watchStatusIndicator
     @Environment(\.themePalette) private var palette
+    /// Published by the hosting card so this chrome can settle back at rest and
+    /// come to full strength on focus (tvOS only — see ``PlozzMediaChrome``).
+    @Environment(\.plozzChromeIsFocused) private var isFocused
 
     public init(
         item: MediaItem,
@@ -193,9 +196,9 @@ public struct MediaCardPlaybackIndicators: View {
                     // brand blue: colour is reserved for specific moments, and a
                     // white bar sits better over arbitrary artwork.
                     Capsule(style: .continuous)
-                        .fill(.white.opacity(0.32))
+                        .fill(PlozzMediaChrome.track(isFocused: isFocused))
                     Capsule(style: .continuous)
-                        .fill(.white)
+                        .fill(PlozzMediaChrome.foreground(isFocused: isFocused))
                         .frame(
                             width: max(
                                 progressHeight,

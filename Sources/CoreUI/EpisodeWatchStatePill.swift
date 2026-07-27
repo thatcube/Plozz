@@ -23,6 +23,8 @@ public struct EpisodeWatchStatePill: View {
     private let barHeight: CGFloat
     private let playGlyphHeight: CGFloat?
 
+    @Environment(\.plozzChromeIsFocused) private var isFocused
+
     public init(
         item: MediaItem,
         showsRuntimeWhenIdle: Bool = true,
@@ -64,7 +66,7 @@ public struct EpisodeWatchStatePill: View {
     public var body: some View {
         if let state {
             content(for: state)
-                .foregroundStyle(.white)
+                .foregroundStyle(PlozzMediaChrome.foreground(isFocused: isFocused))
                 .lineLimit(1)
                 // Flat. Legibility is the scrim's job (`MediaArtworkChromeScrim`);
                 // a shadow here made the chip read as a sticker on the artwork

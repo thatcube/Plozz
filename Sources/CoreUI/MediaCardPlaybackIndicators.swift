@@ -10,6 +10,10 @@ public struct MediaCardPlaybackIndicators: View {
     private let progressHeight: CGFloat
     private let progressHorizontalInset: CGFloat
     private let progressBottomInset: CGFloat
+    /// Offline state for this item, drawn bottom-trailing. Lives here (rather than
+    /// only inside the resume chip) because "is this downloaded?" is wanted on
+    /// EVERY card, including plain browsing posters that carry no chip.
+    private let downloadState: MediaDownloadBadgeState?
 
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.plozzWatchStatusIndicator) private var watchStatusIndicator
@@ -22,7 +26,8 @@ public struct MediaCardPlaybackIndicators: View {
         badgeInset: CGFloat,
         progressHeight: CGFloat = 0,
         progressHorizontalInset: CGFloat = 0,
-        progressBottomInset: CGFloat = 0
+        progressBottomInset: CGFloat = 0,
+        downloadState: MediaDownloadBadgeState? = nil
     ) {
         self.item = item
         self.hidesStatus = hidesStatus
@@ -31,6 +36,7 @@ public struct MediaCardPlaybackIndicators: View {
         self.progressHeight = progressHeight
         self.progressHorizontalInset = progressHorizontalInset
         self.progressBottomInset = progressBottomInset
+        self.downloadState = downloadState
     }
 
     public var body: some View {
@@ -42,6 +48,9 @@ public struct MediaCardPlaybackIndicators: View {
                 if progressBarEnabled {
                     progressBar
                 }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                downloadBadge
             }
             .allowsHitTesting(false)
     }
@@ -113,6 +122,28 @@ public struct MediaCardPlaybackIndicators: View {
         }
     }
 
+    /// Offline indicator, pinned bottom-trailing and lifted clear of the progress
+    /// bar when one is showing, so the two never overlap on a small poster.
+    @ViewBuilder
+    private var downloadBadge: some View {
+        if let downloadState {
+            // Same size the resume chip drew it at, so a downloaded card's badge
+            // doesn't change scale depending on which chrome path it takes. The
+            // larger `watchedBadgeSize` would eat half an 86pt poster.
+            MediaDownloadBadge(state: downloadState, size: metrics.resumeChipAccessorySize)
+                .padding(.trailing, progressHorizontalInset)
+                .padding(.bottom, downloadBadgeBottomInset)
+                .shadow(color: .black.opacity(0.45), radius: 4, y: 1)
+        }
+    }
+
+    /// Clears the bar (plus a small gap) when one is drawn; otherwise sits at the
+    /// card's normal badge inset.
+    private var downloadBadgeBottomInset: CGFloat {
+        guard progressBarEnabled, showsProgressBar else { return badgeInset }
+        return progressBottomInset + progressHeight + 8
+    }
+
     @ViewBuilder
     private var progressBar: some View {
         if showsProgressBar, let percentage = item.playedPercentage {
@@ -129,10 +160,15 @@ public struct MediaCardPlaybackIndicators: View {
 
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
+                        // Matches ``ResumeProgressCapsule`` — the same white bar the
+                        // resume chip and the detail Play button draw — so progress
+                        // reads identically wherever it appears. Deliberately not the
+                        // brand blue: colour is reserved for specific moments, and a
+                        // white bar sits better over arbitrary artwork.
                         Capsule(style: .continuous)
-                            .fill(.white.opacity(0.22))
+                            .fill(.white.opacity(0.32))
                         Capsule(style: .continuous)
-                            .fill(ThemePalette.brandBlue)
+                            .fill(.white)
                             .frame(
                                 width: max(
                                     progressHeight,

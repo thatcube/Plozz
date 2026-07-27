@@ -129,9 +129,10 @@ public struct PosterCardView: View {
                         hidesStatus: hideThumbnail,
                         showsProgressBar: !showsResumeChip,
                         badgeInset: 8,
-                        progressHeight: 12,
+                        progressHeight: metrics.progressBarHeight,
                         progressHorizontalInset: 16,
-                        progressBottomInset: 16
+                        progressBottomInset: 16,
+                        downloadState: showsResumeChip ? nil : downloadState
                     )
                 }
                 .overlay { resumeChip }
@@ -178,9 +179,10 @@ public struct PosterCardView: View {
                         hidesStatus: hideThumbnail,
                         showsProgressBar: !showsResumeChip,
                         badgeInset: 8,
-                        progressHeight: 12,
+                        progressHeight: metrics.progressBarHeight,
                         progressHorizontalInset: 16,
-                        progressBottomInset: 16
+                        progressBottomInset: 16,
+                        downloadState: showsResumeChip ? nil : downloadState
                     )
                 }
                 .overlay { resumeChip }
@@ -264,7 +266,8 @@ public struct PosterCardView: View {
                     badgeInset: borderlessBadgeInset,
                     progressHeight: metrics.progressBarHeight,
                     progressHorizontalInset: borderlessProgressInset,
-                    progressBottomInset: borderlessProgressInset
+                    progressBottomInset: borderlessProgressInset,
+                    downloadState: showsResumeChip ? nil : downloadState
                 )
             }
             .overlay { resumeChip }
@@ -390,36 +393,19 @@ public struct PosterCardView: View {
 
     // MARK: Resume chip
 
-    /// Cards that start playback the moment they're selected (Continue Watching,
-    /// landscape library rows) — or that a host explicitly opts in. These get the
-    /// full chip: ▶ + progress bar + time remaining, plus the runtime when idle
-    /// and the download affordance.
-    private var showsImmediatePlayChip: Bool {
+    /// The full resume chip — ▶ + progress bar + time remaining — reserved for
+    /// cards that start playback the moment they're selected (Continue Watching,
+    /// landscape library rows), plus hosts that explicitly opt in.
+    ///
+    /// Browsing cards deliberately do NOT get it. A ▶ would promise instant
+    /// playback they can't deliver, and the time text can't fit beside a download
+    /// badge on a poster. They show the shared full-width progress bar instead
+    /// (see ``MediaCardPlaybackIndicators``), which needs no runtime metadata — so
+    /// every in-progress card looks the same whether or not its runtime is known.
+    private var showsResumeChip: Bool {
         (playsOnSelect || showsResumeChipOverride)
             && !hideThumbnail
             && (item.cardRuntimeText != nil || downloadState != nil || showsActionsMenu)
-    }
-
-    /// An ordinary BROWSING card (library wall, Latest rail) that happens to be
-    /// part-watched. It gets the same white bar + time remaining, because that
-    /// reads far better over artwork than the old thin blue bar and tells you how
-    /// much is left rather than just "some". It does NOT get the play glyph:
-    /// selecting one of these opens a detail page, so a ▶ would promise instant
-    /// playback the card can't deliver.
-    ///
-    /// Gated on genuinely being in progress, so an untouched poster wall stays
-    /// completely clean — this adds chrome only where the blue bar already was.
-    private var showsResumeProgressChip: Bool {
-        !showsImmediatePlayChip
-            && !hideThumbnail
-            && MediaPlaybackIndicatorPresentation.showsProgress(for: item)
-            && item.resumeRemainingText != nil
-            && item.cardRuntimeText != nil
-    }
-
-    /// Either chip is drawn — the flag that suppresses the plain blue bar.
-    private var showsResumeChip: Bool {
-        showsImmediatePlayChip || showsResumeProgressChip
     }
 
     /// The shared resume affordance — identical to the episode card's overlay.
@@ -429,11 +415,7 @@ public struct PosterCardView: View {
             ResumeChipOverlay(
                 item: item,
                 downloadState: downloadState,
-                showsMenu: showsActionsMenu,
-                // A browsing card shows the bar + time left, but never promises
-                // playback, and never adds a runtime badge to an unstarted poster.
-                showsPlayGlyph: showsImmediatePlayChip,
-                showsRuntimeWhenIdle: showsImmediatePlayChip
+                showsMenu: showsActionsMenu
             )
         }
     }

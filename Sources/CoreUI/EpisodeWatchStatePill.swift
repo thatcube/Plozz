@@ -22,12 +22,7 @@ public struct EpisodeWatchStatePill: View {
     private let barWidth: CGFloat
     private let barHeight: CGFloat
     private let playGlyphHeight: CGFloat?
-    private let showsPlayGlyph: Bool
 
-    /// - Parameter showsPlayGlyph: draws the leading ▶ on the in-progress form.
-    ///   Pass `false` on a card that does NOT play on select — a browsing poster
-    ///   opens a detail page, so promising instant playback would be a lie. The
-    ///   bar and time-remaining still read exactly the same.
     public init(
         item: MediaItem,
         showsRuntimeWhenIdle: Bool = true,
@@ -35,8 +30,7 @@ public struct EpisodeWatchStatePill: View {
         showsBackground: Bool = true,
         barWidth: CGFloat = 54,
         barHeight: CGFloat = 5,
-        playGlyphHeight: CGFloat? = nil,
-        showsPlayGlyph: Bool = true
+        playGlyphHeight: CGFloat? = nil
     ) {
         self.item = item
         self.showsRuntimeWhenIdle = showsRuntimeWhenIdle
@@ -45,7 +39,6 @@ public struct EpisodeWatchStatePill: View {
         self.barWidth = barWidth
         self.barHeight = barHeight
         self.playGlyphHeight = playGlyphHeight
-        self.showsPlayGlyph = showsPlayGlyph
     }
 
     private enum State {
@@ -91,7 +84,7 @@ public struct EpisodeWatchStatePill: View {
                 .accessibilityLabel("Watched")
         case let .inProgress(fraction, remaining):
             HStack(spacing: 8) {
-                if showsPlayGlyph { playGlyph }
+                playGlyph
                 ResumeProgressCapsule(
                     progress: fraction,
                     onLight: false,
@@ -147,8 +140,6 @@ public struct ResumeChipOverlay: View {
     private let item: MediaItem
     private let downloadState: MediaDownloadBadgeState?
     private let showsMenu: Bool
-    private let showsPlayGlyph: Bool
-    private let showsRuntimeWhenIdle: Bool
 
     @Environment(\.plozzMetrics) private var metrics
 
@@ -158,23 +149,14 @@ public struct ResumeChipOverlay: View {
     ///   - showsMenu: draws the visible "…" actions menu. A press-and-hold menu is
     ///     discoverable on tvOS (cards focus before they're chosen) but hidden on a
     ///     touch card, so touch surfaces opt in.
-    ///   - showsPlayGlyph: draws the leading ▶. Off for browsing cards, which open
-    ///     a detail page rather than starting playback.
-    ///   - showsRuntimeWhenIdle: shows the plain runtime on a card that hasn't been
-    ///     started. Off for browsing cards, so an untouched poster wall stays clean
-    ///     and only genuinely in-progress posters carry chrome.
     public init(
         item: MediaItem,
         downloadState: MediaDownloadBadgeState? = nil,
-        showsMenu: Bool = false,
-        showsPlayGlyph: Bool = true,
-        showsRuntimeWhenIdle: Bool = true
+        showsMenu: Bool = false
     ) {
         self.item = item
         self.downloadState = downloadState
         self.showsMenu = showsMenu
-        self.showsPlayGlyph = showsPlayGlyph
-        self.showsRuntimeWhenIdle = showsRuntimeWhenIdle
     }
 
     public var body: some View {
@@ -206,12 +188,11 @@ public struct ResumeChipOverlay: View {
                         if item.cardRuntimeText != nil {
                             EpisodeWatchStatePill(
                                 item: item,
-                                showsRuntimeWhenIdle: showsRuntimeWhenIdle,
+                                showsRuntimeWhenIdle: true,
                                 showsWatched: false,
                                 showsBackground: false,
                                 barWidth: barWidth,
-                                barHeight: metrics.resumeChipBarHeight,
-                                showsPlayGlyph: showsPlayGlyph
+                                barHeight: metrics.resumeChipBarHeight
                             )
                             .font(.system(size: metrics.resumeChipFontSize, weight: .semibold))
                             // Last-resort guard for a very narrow card with a long

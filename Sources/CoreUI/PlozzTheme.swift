@@ -301,7 +301,7 @@ public enum PlozzTheme {
         /// floor at `progressBarMinHeight`) in `PlozzMetrics`, so the scrubber
         /// grows/shrinks with the display-size setting like the rest of the card
         /// instead of staying a fixed pixel height.
-        public static let progressBarHeight: CGFloat = 12
+        public static let progressBarHeight: CGFloat = 24
         /// Smallest the density-scaled progress bar is allowed to get, so it stays
         /// legible at the smallest display-size settings.
         public static let progressBarMinHeight: CGFloat = 9

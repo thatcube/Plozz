@@ -44,6 +44,18 @@ struct PlozziOSItemDetailView: View {
     }
 
     var body: some View {
+        detailBody
+            // Each detail page installs its own router. A pushed destination —
+            // whether from an inline `NavigationLink` or a
+            // `navigationDestination` — does not inherit environment installed
+            // on the stack that owns it, so the tab-level router is nil here and
+            // navigation actions ("Episode Info") were filtered out of every
+            // menu on this page.
+            .plozziOSItemNavigation(appModel: appModel)
+    }
+
+    @ViewBuilder
+    private var detailBody: some View {
         if shouldResolveSeries {
             if let resolvedSeries {
                 canonicalDetail(for: resolvedSeries)
@@ -1812,7 +1824,6 @@ private struct PlozziOSInlineEpisodeEntry: View {
         // "Episode Info" out of this menu even after the button learned to route.
         .filter { !$0.isNavigation || navigator != nil }
     }
-
     private var currentDownloadRecord: DownloadedMediaRecord? {
         guard let downloadRecord else { return nil }
         return appModel.downloads.records.first {

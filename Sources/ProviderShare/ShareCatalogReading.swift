@@ -36,6 +36,11 @@ public protocol ShareCatalogReading: Sendable {
     /// Episodes under a season.
     func episodes(seriesKey: String, season: Int) async -> [MediaItem]
 
+    /// Every episode file in a series, keyed for watch-state lookup and grouped by
+    /// season and *logical* episode, so a season container's played state can be
+    /// rolled up from its episodes in one pass instead of a query per season.
+    func episodeWatchIdentities(seriesKey: String) async -> [(season: Int, logicalKey: String, fileID: String)]
+
     /// A single indexed item, or nil for un-indexed raw file ids.
     func item(id: String) async -> MediaItem?
 

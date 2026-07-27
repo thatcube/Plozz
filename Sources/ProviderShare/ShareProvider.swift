@@ -221,7 +221,12 @@ public struct ShareProvider: MediaProvider {
         // Series → seasons, season → episodes (from the catalog); a raw folder's
         // children are that directory's live listing.
         if ShareCatalogID.isSeries(itemID), let key = ShareCatalogID.seriesKey(forSeriesID: itemID) {
-            return await watchState.stamp(await catalog.seasons(seriesKey: key))
+            // Seasons need the rollup, not `stamp` — they are synthetic containers
+            // with no record of their own, so `stamp` deliberately skips them.
+            return await watchState.stampSeasons(
+                await catalog.seasons(seriesKey: key),
+                seriesKey: key
+            )
         }
         if let (key, season) = ShareCatalogID.seasonComponents(forSeasonID: itemID) {
             return await watchState.stamp(await catalog.episodes(seriesKey: key, season: season))

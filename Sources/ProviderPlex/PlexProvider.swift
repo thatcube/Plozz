@@ -1015,16 +1015,31 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         let posterPath = isEpisode ? (dto.grandparentThumb ?? dto.thumb) : dto.thumb
         let viewCount = dto.viewCount ?? 0
         let viewedLeafCount = dto.viewedLeafCount ?? 0
-        let completedSeries = kind == .series
-            && (dto.leafCount ?? 0) > 0
-            && viewedLeafCount >= (dto.leafCount ?? 0)
-        let hasBeenPlayed = viewCount > 0
-            || (kind == .series && viewedLeafCount > 0)
+        let leafCount = dto.leafCount ?? 0
+        // Containers express progress through leaf counts, not `viewCount` — Plex
+        // does not increment `viewCount` on a series or a season, only on the
+        // leaves. This previously applied to `.series` alone, which left every
+        // *season* reporting unplayed forever however much of it had been
+        // watched. That is load-bearing: the season chips show no progress, and
+        // anything asking "which season is the viewer on" (`SeriesResume.nextUp`
+        // over the seasons) always answered "the first unwatched one" — i.e.
+        // Season 1 — so a Plex show watched into Season 5 still opened on
+        // Season 1.
+        let isContainer = kind == .series || kind == .season
+        let completedContainer = isContainer && leafCount > 0 && viewedLeafCount >= leafCount
+        let hasBeenPlayed = viewCount > 0 || (isContainer && viewedLeafCount > 0)
 
         let runtime = PlexTime.seconds(fromMilliseconds: dto.duration)
         let resume = PlexTime.seconds(fromMilliseconds: dto.viewOffset)
         let percentage: Double?
-        if let runtime, runtime > 0, let resume {
+        if isContainer, leafCount > 0, viewedLeafCount > 0 {
+            // Fraction of the container's episodes watched. A container has no
+            // runtime of its own, so a resume-position ratio is meaningless here.
+            // Only when something has actually been watched: a 0 would be a
+            // non-nil "no progress", which reads downstream as a progress bar
+            // pinned at empty on every untouched season.
+            percentage = min(1, max(0, Double(viewedLeafCount) / Double(leafCount)))
+        } else if let runtime, runtime > 0, let resume {
             percentage = min(1, max(0, resume / runtime))
         } else if viewCount > 0 {
             percentage = 1
@@ -1057,7 +1072,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             runtime: runtime,
             resumePosition: resume,
             playedPercentage: percentage,
-            isPlayed: completedSeries || (viewCount > 0 && (resume ?? 0) == 0),
+            isPlayed: completedContainer || (viewCount > 0 && (resume ?? 0) == 0),
             hasBeenPlayed: hasBeenPlayed,
             posterURL: client.imageURL(path: posterPath, maxWidth: 500),
             seriesPosterURL: isEpisode ? client.imageURL(path: dto.grandparentThumb, maxWidth: 500) : nil,

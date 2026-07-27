@@ -37,6 +37,9 @@ final class ShareProviderCapabilityTests: XCTestCase {
         func seriesCount(in library: CatalogLibrary) async -> Int { seriesItems.count }
         func seasons(seriesKey: String) async -> [MediaItem] { [] }
         func episodes(seriesKey: String, season: Int) async -> [MediaItem] { [] }
+        func episodeWatchIdentities(
+            seriesKey: String
+        ) async -> [(season: Int, logicalKey: String, fileID: String)] { [] }
         func item(id: String) async -> MediaItem? { indexedItem[id] }
         func defaultMovieRelPath(forKey key: String) async -> String? { nil }
         func canonicalItemID(_ id: String) async -> String { canonicalMap[id] ?? id }

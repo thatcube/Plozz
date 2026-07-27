@@ -2277,6 +2277,12 @@ actor ShareCatalogStore {
         ensureOpen(); return readQueries.seasons(seriesKey: seriesKey)
     }
 
+    /// Every episode file in a series, keyed for watch-state lookup and grouped by
+    /// season and logical episode, so season containers can carry rolled-up state.
+    func episodeWatchIdentities(seriesKey: String) -> [(season: Int, logicalKey: String, fileID: String)] {
+        ensureOpen(); return readQueries.episodeWatchIdentities(seriesKey: seriesKey)
+    }
+
     /// On-disk episode-title fingerprints for content-based series disambiguation.
     func episodeTitleHints(seriesKey: String, limit: Int = 12) -> [(season: Int, episode: Int, title: String)] {
         ensureOpen(); return readQueries.episodeTitleHints(seriesKey: seriesKey, limit: limit)

@@ -67,6 +67,67 @@ struct ShareWatchStateService: Sendable {
         return stamped
     }
 
+    /// Season containers with their episodes' watch state rolled up onto them.
+    ///
+    /// Share seasons are synthetic (a `GROUP BY` over the assets table), so
+    /// `stamp` skips them — there is no record under a season's own id and never
+    /// will be. That left every share season permanently unplayed, which is not
+    /// cosmetic: the season chips showed no progress, and anything resolving
+    /// "which season is the viewer on" over the season containers always answered
+    /// "the first unwatched one" — Season 1 — however far into the show they were.
+    ///
+    /// Two round trips regardless of season count: one query for the series'
+    /// episode identities, one batched record lookup.
+    ///
+    /// Note the store keeps a bounded history
+    /// (`ShareWatchStore.maximumRecordCount`), so a very old, very large library
+    /// can have episode records evicted. That makes a completed season
+    /// under-report as partly watched — never the reverse, which is the safe
+    /// direction: the viewer is offered an episode they have seen rather than
+    /// being told a show is finished when it is not.
+    func stampSeasons(_ seasons: [MediaItem], seriesKey: String) async -> [MediaItem] {
+        guard !seasons.isEmpty else { return seasons }
+        let identities = await catalog().episodeWatchIdentities(seriesKey: seriesKey)
+        guard !identities.isEmpty else { return seasons }
+
+        let records = await watchStore.records(for: Set(identities.map(\.fileID)))
+        guard !records.isEmpty else { return seasons }
+
+        // season → logical episode → the records of every file backing it
+        var bySeason: [Int: [String: [ShareWatchStore.Record]]] = [:]
+        for identity in identities {
+            var episodes = bySeason[identity.season] ?? [:]
+            var found = episodes[identity.logicalKey] ?? []
+            if let record = records[identity.fileID] { found.append(record) }
+            episodes[identity.logicalKey] = found
+            bySeason[identity.season] = episodes
+        }
+
+        return seasons.map { season in
+            guard let number = season.seasonNumber,
+                  let episodes = bySeason[number],
+                  !episodes.isEmpty
+            else { return season }
+
+            // A logical episode counts as watched when ANY of its files is —
+            // watching the 1080p rip means you have seen the episode.
+            let played = episodes.values.filter { $0.contains(where: \.played) }.count
+            let inProgress = episodes.values.contains { versions in
+                versions.contains { !$0.played && $0.position > 1 }
+            }
+            let latest = episodes.values.flatMap { $0 }.map(\.updatedAt).max()
+
+            var copy = season
+            copy.isPlayed = played == episodes.count
+            copy.playedPercentage = played > 0
+                ? min(1, Double(played) / Double(episodes.count))
+                : nil
+            copy.hasBeenPlayed = played > 0 || inProgress
+            copy.lastPlayedAt = latest
+            return copy
+        }
+    }
+
     /// Apply a resolved record onto an item (pure). Exposed so Continue Watching,
     /// which already folds all records itself, can stamp its rebuilt items.
     static func stamped(_ item: MediaItem, with record: ShareWatchStore.Record?) -> MediaItem {

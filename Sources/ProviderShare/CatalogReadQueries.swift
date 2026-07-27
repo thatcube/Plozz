@@ -277,6 +277,38 @@ struct CatalogReadQueries {
         library == .movies ? 0 : distinctSeriesCount(library: library)
     }
 
+    /// Every episode file in a series, addressed for watch-state lookup and
+    /// grouped by season and *logical* episode.
+    ///
+    /// Season containers are synthetic — built by grouping the assets table — so
+    /// they carry no watch state of their own. Rolling their episodes' state up
+    /// needs one pass over the series rather than a query per season, which for a
+    /// 20-season show would be 20 round trips to answer one question.
+    ///
+    /// The logical key matters because one episode can exist as several files
+    /// (a 1080p and a 4K rip). `canonicalItemID` folds *movie* versions together
+    /// but deliberately leaves episode files with their own ids, so counting raw
+    /// files would report "12 of 20 watched" for a 10-episode season. Files that
+    /// share a season+episode number are one logical episode; a file with no
+    /// episode number can't be grouped, so it stands alone under its own path.
+    func episodeWatchIdentities(seriesKey: String) -> [(season: Int, logicalKey: String, fileID: String)] {
+        guard db != nil else { return [] }
+        var out: [(season: Int, logicalKey: String, fileID: String)] = []
+        query("""
+        SELECT COALESCE(season, 1) AS s, episode, rel_path FROM assets
+        WHERE series_key=? AND kind='episode';
+        """, bind: { self.bindText($0, 1, seriesKey) }) { stmt in
+            let season = Int(sqlite3_column_int64(stmt, 0))
+            let episode: Int? = sqlite3_column_type(stmt, 1) == SQLITE_NULL
+                ? nil
+                : Int(sqlite3_column_int64(stmt, 1))
+            guard let rel = self.columnText(stmt, 2) else { return }
+            let logicalKey = episode.map(String.init) ?? "path:\(rel)"
+            out.append((season: season, logicalKey: logicalKey, fileID: ShareCatalogID.file(rel)))
+        }
+        return out
+    }
+
     /// Season container items for a series (distinct season numbers; a `NULL`
     /// season is treated as season 1).
     func seasons(seriesKey: String) -> [MediaItem] {

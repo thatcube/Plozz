@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import Foundation
 import CoreModels
 import CoreUI
 
@@ -14,6 +15,36 @@ struct AppLanguagePicker: View {
     @Bindable var model: AppLanguageSettingsModel
 
     private var languages: [AppLanguage] { AppLanguage.available() }
+
+    private var selectedLanguageCode: String? {
+        guard case let .explicit(code) = model.language else { return nil }
+        return code
+    }
+
+    /// A correction path that needs no translation-platform account. The issue
+    /// starts with the language and asks GitHub for the screen/current/better
+    /// wording; native speakers can report one bad phrase without editing JSON.
+    private var translationIssueURL: URL? {
+        guard let code = selectedLanguageCode else { return nil }
+        var components = URLComponents(
+            string: "https://github.com/thatcube/Plozz/issues/new"
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "title", value: "[Translation] \(code): "),
+            URLQueryItem(
+                name: "body",
+                value: """
+                Language: \(code)
+                Screen:
+                Current wording:
+                Better wording:
+                Why (optional):
+                """
+            ),
+            URLQueryItem(name: "labels", value: "translation"),
+        ]
+        return components?.url
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -50,6 +81,24 @@ struct AppLanguagePicker: View {
                 // resolves those titles before handing them to the extension.
                 Text("System prompts and the player's own on-screen controls follow the Apple TV's language, not this setting.")
                     .settingsHelperText()
+            }
+
+            if let translationIssueURL {
+                #if os(tvOS)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Send Feedback")
+                        .font(.headline)
+                    SettingsQRCode(
+                        string: translationIssueURL.absoluteString,
+                        correctionLevel: "M"
+                    )
+                    .frame(width: 180, height: 180)
+                }
+                #else
+                Link(destination: translationIssueURL) {
+                    Label("Send Feedback", systemImage: "exclamationmark.bubble")
+                }
+                #endif
             }
         }
     }

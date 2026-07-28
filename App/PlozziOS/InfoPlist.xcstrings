@@ -106,6 +106,18 @@
             "state": "needs_review",
             "value": "Plozz, medya sunucularını ve ağ paylaşımlarını bulmak için yerel ağınızı kullanır."
           }
+        },
+        "ca": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz utilitza la teva xarxa local per trobar servidors multimèdia i recursos compartits de xarxa."
+          }
+        },
+        "ro": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz folosește rețeaua ta locală pentru a găsi servere media și resurse de rețea partajate."
+          }
         }
       }
     },
@@ -213,6 +225,18 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Plozz, diğer aygıtınızda gösterilen kurulum kodunu taramak için kameranızı kullanır."
+          }
+        },
+        "ca": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz utilitza la càmera per escanejar el codi de configuració que es mostra a l'altre dispositiu."
+          }
+        },
+        "ro": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz folosește camera pentru a scana codul de configurare afișat pe celălalt dispozitiv al tău."
           }
         }
       }

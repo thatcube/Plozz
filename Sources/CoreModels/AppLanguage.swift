@@ -88,6 +88,7 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
     /// Adding a language: translate it, check it against the pseudolocalization
     /// pass, then add its tag here.
     public static let releaseReady: [String] = [
+        "ca",
         "cs",
         "da",
         "de",
@@ -99,6 +100,7 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
         "nl",
         "pl",
         "pt-BR",
+        "ro",
         "ru",
         "sk",
         "sv",

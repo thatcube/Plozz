@@ -72,14 +72,30 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
     /// Every language the picker should show: `.system` plus the release-ready
     /// tags that are actually present in the bundle. The bundle check means a
     /// mis-typed tag can never produce an option with nothing behind it.
+    ///
+    /// In DEBUG the release gate is lifted and every bundled localization is
+    /// offered, however incomplete. Otherwise a language in progress is
+    /// untestable without changing the WHOLE device's language — which is both
+    /// a nuisance and a poor test, because it changes every other app too and
+    /// isn't how a user would reach it. Partial languages are exactly the ones
+    /// worth looking at: that is where the layout breaks show up.
     public static func available(in bundle: Bundle = .main) -> [AppLanguage] {
         let shipped = Set(bundle.localizations)
-        let offered = releaseReady
-            .filter(shipped.contains)
-            .sorted { lhs, rhs in
-                localizedName(for: lhs).localizedCaseInsensitiveCompare(localizedName(for: rhs)) == .orderedAscending
-            }
+        #if DEBUG
+        let candidates = shipped.subtracting(["Base", "en"])
+        #else
+        let candidates = Set(releaseReady).intersection(shipped)
+        #endif
+        let offered = candidates.sorted { lhs, rhs in
+            localizedName(for: lhs).localizedCaseInsensitiveCompare(localizedName(for: rhs)) == .orderedAscending
+        }
         return [.system] + offered.map(AppLanguage.explicit)
+    }
+
+    /// True when this language is offered only because the build is a DEBUG one
+    /// — i.e. it is not release-ready and the picker should say so.
+    public static func isInProgress(_ code: String) -> Bool {
+        !releaseReady.contains(code)
     }
 
     /// The endonym for a specific language. `nil` for `.system`, whose label is

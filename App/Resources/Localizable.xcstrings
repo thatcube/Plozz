@@ -548,6 +548,9 @@
     "%lld%%" : {
       "comment" : "Standalone percentage label used for numeric values such as subtitle appearance controls and download progress. %lld is the percentage number."
     },
+    "(in progress)" : {
+
+    },
     "+ %lld more" : {
       "comment" : "Footer row on the detected-servers setup card when more than four servers were found. %lld is how many additional servers are hidden."
     },
@@ -3049,6 +3052,7 @@
       "comment" : "Accessibility label for the main seek slider in the iOS player controls."
     },
     "Player controls, system prompts, and the Top Shelf row follow the Apple TV's own language." : {
+      "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {
@@ -4366,6 +4370,9 @@
     },
     "System" : {
       "comment" : "Option label meaning use the device or system default, used in theme, app language, and transparency settings."
+    },
+    "System prompts and the player's own on-screen controls follow the Apple TV's language, not this setting." : {
+
     },
     "TMDB rejected this key. Check the token and try again." : {
 

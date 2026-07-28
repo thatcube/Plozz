@@ -14,6 +14,7 @@ import FeatureDiscoveryCore
 import FeatureHome
 import FeaturePlayback
 import FeatureSettings
+import FeatureSyncCloud
 import MetadataKit
 
 /// Composes the identity that scopes the Home tab subtree — and the retained
@@ -280,7 +281,7 @@ public struct RootView: View {
                         onSetUpAnotherDevice: { showSyncSend = true },
                         syncEnabled: appState.syncSetup.isEnabled,
                         onSetSyncEnabled: { appState.setSyncSetupEnabled($0) },
-                        syncStatusSummary: appState.cloudSyncStatus.summaryLine,
+                        syncStatusSummary: Self.syncStatusText(appState.cloudSyncStatus),
                         onSyncNow: { appState.syncCloudNow() },
                         syncRepair: syncRepairActions,
                         pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,
@@ -435,6 +436,21 @@ public struct RootView: View {
         // model is rebuilt on profile switch by AppState, so each profile gets its
         // own tint without re-architecting this call site.
         .installNightShiftOverlay(appState.profileSettings.nightShiftModel)
+    }
+
+    /// Composes the sync status line as `Text` rather than a `String`. The
+    /// diagnostic is a raw CloudKit message, so it stays verbatim; the wording
+    /// around it stays a resource and is resolved at render time.
+    private static func syncStatusText(_ status: CloudSyncStatus) -> Text {
+        let parts = status.summaryLineParts
+        var text = Text(parts.summary)
+        if let diagnostic = parts.diagnostic {
+            text = text + Text(verbatim: " · \(diagnostic)")
+        }
+        if let detail = parts.detail {
+            text = text + Text(verbatim: "\n") + Text(detail)
+        }
+        return text
     }
 }
 

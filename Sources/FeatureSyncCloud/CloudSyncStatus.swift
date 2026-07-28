@@ -63,12 +63,12 @@ public final class CloudSyncStatus {
     }
 
     /// A short, user-facing summary line, e.g. "Up to date · synced 2m ago".
-    public var summary: String {
+    public var summary: LocalizedStringResource {
         switch phase {
         case .disabled:  return "Off"
         case .signedOut: return "Sign in to iCloud to sync"
         case .syncing:   return "Syncing…"
-        case .error:     return lastErrorMessage.map { "Couldn't sync — \($0)" } ?? "Couldn't sync"
+        case .error:     return lastErrorMessage.map { "Couldn’t sync — \($0)" } ?? "Couldn’t sync"
         case .idle:
             guard let lastSyncedAt else { return "On" }
             return "Up to date · synced \(Self.relative(lastSyncedAt))"
@@ -86,25 +86,34 @@ public final class CloudSyncStatus {
     /// second line so it's easy to compare across devices — all folded into the one
     /// existing summary string (tvOS's settings initializer is at the type-checker's
     /// argument limit, so a NEW parameter there won't compile).
-    public var summaryLine: String {
-        var line = summary
-        if let diag = lastDiagnostic { line += " · \(diag)" }
-        if let detail = itemsDetail { line += "\n\(detail)" }
-        return line
+    /// The parts of the status line, in display order. Kept as separate resources
+    /// (rather than a pre-joined String) so nothing is resolved until the view
+    /// renders it — an eagerly-built String would freeze the language at the
+    /// moment sync last updated, not the language the UI is showing.
+    public var summaryLineParts: (summary: LocalizedStringResource,
+                                  diagnostic: String?,
+                                  detail: LocalizedStringResource?) {
+        (summary, lastDiagnostic, itemsDetail)
     }
 
     /// A dedicated detail line for the sync page: how many records this device
     /// mirrors plus its iCloud identity, so it's trivial to compare across devices
     /// (a device stuck at a lower count isn't receiving). `nil` until known.
-    public var itemsDetail: String? {
-        var parts: [String] = []
-        if let n = syncedRecordCount {
-            parts.append("\(n) \(n == 1 ? "item" : "items") in iCloud")
+    ///
+    /// Written as three whole sentences rather than joined fragments: a translator
+    /// needs the finished sentence to get agreement and word order right, and the
+    /// record count has to be a real placeholder so the catalog can carry plural
+    /// variations for languages with more than two forms.
+    public var itemsDetail: LocalizedStringResource? {
+        switch (syncedRecordCount, accountTag) {
+        case let (n?, tag?):
+            return "\(n) items in iCloud  ·  identity \(tag)…  (should match every device)"
+        case let (n?, nil):
+            return "\(n) items in iCloud  (should match every device)"
+        case let (nil, tag?):
+            return "identity \(tag)…  (should match every device)"
+        case (nil, nil):
+            return nil
         }
-        if let tag = accountTag {
-            parts.append("identity \(tag)…")
-        }
-        guard !parts.isEmpty else { return nil }
-        return parts.joined(separator: "  ·  ") + "  (should match every device)"
     }
 }

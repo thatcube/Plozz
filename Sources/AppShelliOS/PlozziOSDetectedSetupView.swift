@@ -120,6 +120,10 @@ struct PlozziOSDetectedSetupView: View {
 
     private var header: some View {
         VStack(spacing: 8) {
+            // Two separate strings rather than one plural-varied key: the copy
+            // never shows the number, and the toolchain rejects a plural
+            // variation that doesn't reference it — "use separate top-level
+            // strings for one and greater than one".
             Text(servers.count == 1 ? "We found your server" : "We found your setup")
                 .font(.title2.weight(.bold))
                 .multilineTextAlignment(.center)

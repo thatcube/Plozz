@@ -135,7 +135,7 @@ struct PlozziOSSyncSetupSettingsView: View {
                             .plozzForeground(.secondary)
                     }
                     if let n = appModel.cloudSyncStatus.syncedRecordCount {
-                        Text("\(n) item\(n == 1 ? "" : "s") in iCloud  (should match your other devices)")
+                        Text("\(n) items in iCloud  (should match your other devices)")
                             .font(.caption2)
                             .plozzForeground(.secondary)
                     }

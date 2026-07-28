@@ -34,6 +34,17 @@
 //                             property (`title`, `header`, …) typed `String`.
 //                             This is the regression that matters most — it is
 //                             how a migrated slice silently reverts.
+//  6. copy-returned-as-string A function or computed property that RETURNS prose
+//                             as `String`. Rule 5 only sees declarations whose
+//                             name is copy-shaped, so this catches the rest.
+//  7. hand-rolled-plural      `"\(n) \(n == 1 ? "item" : "items")"` builds a
+//                             counted phrase out of fragments, which only works
+//                             for English's two forms. Note this fires ONLY when
+//                             the phrase shows the number: for copy that does
+//                             not, Apple's toolchain rejects plural variations
+//                             outright ("use separate top-level strings for one
+//                             and greater than one"), so a bare ternary between
+//                             two literals is the CORRECT answer and is allowed.
 //
 // Rules 1–4 run repo-wide because they cannot produce content-vs-copy false
 // positives. Rule 5 runs only on `auditedPaths` from tools/l10n-guard.json, so
@@ -246,6 +257,67 @@ final class Analyzer: SyntaxVisitor {
     private func looksLikeProse(_ text: String) -> Bool {
         text.contains(" ") && text.contains(where: \.isLowercase)
             && !text.hasPrefix("%") && !text.contains("://")
+    }
+
+    /// A counted phrase assembled from fragments — `"\(n) \(n == 1 ? "item" :
+    /// "items")"`. The catalog can express this as one key with plural
+    /// variations; Swift cannot express Polish's four forms at all.
+    ///
+    /// Deliberately NOT flagged: a standalone ternary between two plain literals
+    /// that never shows the number ("Server" / "Servers"). `xcstringstool`
+    /// refuses a plural variation whose values don't reference the count and
+    /// tells you to use two top-level strings instead, so flagging that would be
+    /// this tool arguing with the toolchain.
+    ///
+    /// SwiftParser does NOT fold operators without an `OperatorTable`, so this
+    /// never arrives as a tidy `TernaryExprSyntax`. It is a flat sequence —
+    /// `n`, `==`, `1`, `? "item" :`, `"items"` — and the rule has to read it
+    /// that way or it silently matches nothing.
+    override func visit(_ node: SequenceExprSyntax) -> SyntaxVisitorContinueKind {
+        let elements = Array(node.elements)
+        guard let markIndex = elements.firstIndex(where: { $0.is(UnresolvedTernaryExprSyntax.self) }),
+              let ternary = elements[markIndex].as(UnresolvedTernaryExprSyntax.self),
+              elements.indices.contains(markIndex + 1)
+        else { return .visitChildren }
+        guard isStringLiteral(ternary.thenExpression),
+              isStringLiteral(elements[markIndex + 1]),
+              comparesToOne(elements[..<markIndex]),
+              buildsCountedPhrase(node),
+              !isMarkedContent(node)
+        else { return .visitChildren }
+        record("hand-rolled-plural", node,
+               "Plural chosen in code: \(node.trimmedDescription.prefix(64)).",
+               "Interpolate the count into ONE resource and add plural variations to "
+               + "the catalog — languages with 3–6 plural forms cannot be served by a ternary.")
+        return .visitChildren
+    }
+
+    /// True when the ternary is a fragment of a larger string — either nested in
+    /// an interpolation (`"\(n) \(cond ? "item" : "items")"`) or with a branch
+    /// that interpolates. That is what makes the number visible, and a visible
+    /// number is what the catalog needs to vary the phrase by plural.
+    private func buildsCountedPhrase(_ node: SequenceExprSyntax) -> Bool {
+        var parent = node.parent
+        while let current = parent {
+            if current.is(StringLiteralExprSyntax.self) { return true }
+            parent = current.parent
+        }
+        return node.elements.contains { element in
+            element.as(StringLiteralExprSyntax.self)?.segments
+                .contains { $0.is(ExpressionSegmentSyntax.self) } ?? false
+        }
+    }
+
+    /// True when the condition compares something to the literal `1`, which is
+    /// what separates a singular/plural decision from an arbitrary two-way choice.
+    private func comparesToOne(_ condition: ArraySlice<ExprSyntax>) -> Bool {
+        let comparesEqual = condition.contains {
+            $0.as(BinaryOperatorExprSyntax.self)?.operator.text == "=="
+        }
+        let mentionsOne = condition.contains {
+            $0.as(IntegerLiteralExprSyntax.self)?.literal.text == "1"
+        }
+        return comparesEqual && mentionsOne
     }
 
     override func visit(_ node: FunctionDeclSyntax) -> SyntaxVisitorContinueKind {

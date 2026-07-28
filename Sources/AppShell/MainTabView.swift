@@ -202,7 +202,7 @@ struct MainTabView: View {
     var syncEnabled: Bool = false
     var onSetSyncEnabled: ((Bool) -> Void)?
     /// Live sync status summary + manual sync action for the iCloud Sync page.
-    var syncStatusSummary: String?
+    var syncStatusSummary: Text?
     var onSyncNow: (() -> Void)?
     var syncRepair: SyncRepairActions?
     /// Pending (needs-sign-in) synced servers + their actions.

@@ -193,7 +193,7 @@ struct HelpDiagnosticsDetailView: View {
     private var recentActivityCountLabel: LocalizedStringResource {
         let count = PlozzLog.recentEntries(limit: 500).count
         guard count > 0 else { return "None yet" }
-        return count == 1 ? "1 line" : "\(count) lines"
+        return "\(count) lines"
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {   // l10n:content — diagnostic row label, developer-facing

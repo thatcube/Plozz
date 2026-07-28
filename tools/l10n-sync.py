@@ -52,6 +52,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -251,9 +252,75 @@ def validate_catalog() -> int:
         if not stripped or not any(ch.isalpha() for ch in stripped):
             problems.append(f"key {key!r} has no translatable content")
 
+    problems += plural_problems(strings)
+
     for problem in problems:
         print(f"  ✗ {problem}")
     return len(problems)
+
+
+# An integer placeholder. `%lld`/`%d`, optionally positional (`%2$lld`).
+INT_PLACEHOLDER = re.compile(r"%(?:(\d+)\$)?(?:ll)?d")
+ANY_PLACEHOLDER = re.compile(r"%(?:(\d+)\$)?(?:(?:ll)?d|@|f|#@[A-Za-z0-9_]+@)")
+
+
+def plural_problems(strings: dict) -> list[str]:
+    """Flag counts that no translator can fix from the catalog.
+
+    A key like "%lld episodes" is only correct in languages with English's two
+    plural forms. Polish has four and Arabic six, and a translator handed a
+    single flat string has nowhere to put them — the variations have to exist in
+    the catalog. This also checks that every variation keeps the placeholders of
+    the string it replaces, because a dropped specifier is a crash, not a typo.
+    """
+    problems: list[str] = []
+
+    # Counts that are identifiers or measurements, not quantities of a noun.
+    exempt = {
+        "%lld", "%lld%%", "%lld of %lld", "Items: %lld", ":%lld", "%lld sec",
+        "Episode %lld", "Downloading %lld%%", "Downloading %lld percent",
+        "Left %lld%%", "Right %lld%%", "%lld queued", "%lld unavailable",
+        "+ %lld more", "· +%lld more",
+        "The media server returned HTTP %lld instead of a media file.",
+    }
+
+    for key in sorted(strings):
+        if key in exempt or not INT_PLACEHOLDER.search(key):
+            continue
+        english = strings[key].get("localizations", {}).get("en", {})
+        variations = english.get("variations", {}).get("plural")
+        substitutions = english.get("substitutions", {})
+        if not variations and not substitutions:
+            problems.append(
+                f"key {key!r} counts something but has no plural variations — "
+                "add them in Xcode's catalog editor (Vary by Plural)"
+            )
+            continue
+
+        expected = sorted(ANY_PLACEHOLDER.findall(key))
+        for label, unit in plural_units(english):
+            found = sorted(ANY_PLACEHOLDER.findall(unit))
+            if variations and found != expected:
+                problems.append(
+                    f"key {key!r} variation {label!r} has placeholders {found} "
+                    f"but the key has {expected}"
+                )
+    return problems
+
+
+def plural_units(english: dict) -> list[tuple[str, str]]:
+    """Every (category, value) pair under a localization's plural variations."""
+    units: list[tuple[str, str]] = []
+    for category, unit in english.get("variations", {}).get("plural", {}).items():
+        value = unit.get("stringUnit", {}).get("value")
+        if value is not None:
+            units.append((category, value))
+    for name, substitution in english.get("substitutions", {}).items():
+        for category, unit in substitution.get("variations", {}).get("plural", {}).items():
+            value = unit.get("stringUnit", {}).get("value")
+            if value is not None:
+                units.append((f"{name}.{category}", value))
+    return units
 
 
 def sync(files: list[Path], allow_stale: bool) -> None:

@@ -83,6 +83,10 @@ lacks native review without hiding a usable language from users.
 ## Commands
 
 ```sh
+# Build a full packet, or only the keys a language is missing after a merge
+tools/l10n-export-source.py /tmp/source.json
+tools/l10n-export-source.py /tmp/fr-delta.json --missing-for fr
+
 # Validate isolated language files without changing the catalog
 python3 tools/l10n-import.py <artifact-dir> \
   --languages de,fr,es \

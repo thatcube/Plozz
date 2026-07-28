@@ -1,7 +1,9 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreNetworking
 import CoreUI
+import FeatureHomeCore
 import FeatureHome
 import FeatureMusic
 import FeaturePlayback
@@ -159,10 +161,12 @@ struct MainTabView: View {
     let profiles: [Profile]
     let activeProfile: Profile
     let askProfileOnStartup: Bool
-    /// Carried by reference, never as a `Binding`: a stored binding makes this
-    /// view a subscriber of its source and every publish re-runs the whole tab
-    /// tree. See ``PendingPlayRequest``.
-    let pendingPlay: PendingPlayRequest
+    /// Session-scoped handles for the Home tab, assembled by `RootView`. Stored
+    /// rather than computed here on purpose: this view's body is a `TabView`
+    /// with four large tabs, and it sits close enough to the Swift
+    /// type-checker's budget that one extra computed value in it fails the
+    /// build outright.
+    let homeRuntime: HomeTabRuntime
     let isAccountIncludedInActiveProfile: (String) -> Bool
     let onSetAccountIncluded: (String, Bool) -> Void
     let onSetAskProfileOnStartup: (Bool) -> Void
@@ -202,7 +206,7 @@ struct MainTabView: View {
     var syncEnabled: Bool = false
     var onSetSyncEnabled: ((Bool) -> Void)?
     /// Live sync status summary + manual sync action for the iCloud Sync page.
-    var syncStatusSummary: Text?
+    var syncStatusSummary: SyncStatusProvider?
     var onSyncNow: (() -> Void)?
     var syncRepair: SyncRepairActions?
     /// Pending (needs-sign-in) synced servers + their actions.
@@ -268,103 +272,14 @@ struct MainTabView: View {
         HomeRuntimeScope.accountScopeKey(accounts.map(\.account))
     }
 
-    var body: some View {
-        if MainThreadStallProbe.printsChanges { let _ = Self._printChanges() }
-        return TabView(selection: selectedTab) {
-            Tab("Home", systemImage: "house.fill", value: MainTab.home) {
-            HomeTab(
-                accounts: accounts,
-                detailSnapshotCache: detailSnapshotCache,
-                authenticatedHTTPResolver: authenticatedHTTPResolver,
-                seer: seer,
-                activeSeerrUserID: activeProfile.seerrUserID,
-                activeSeerrUserName: activeProfile.seerrUserName,
-                confirmAdminRequest: profiles.count > 1,
-                homeVisibility: homeVisibility,
-                homeLayoutStore: homeLayoutStore,
-                homeContentStore: homeContentStore,
-                heroSettings: heroSettingsModel,
-                heroBackground: heroBackgroundModel,
-                heroTrailerController: heroTrailerController,
-                heroRuntime: homeHeroRuntime,
-                navigationStyle: navigationStyle,
-                behavior: subtitleBehaviorModel.settings,
-                style: subtitleStyleModel.style,
-                playbackSettings: playbackModel.settings,
-                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(behavior: subtitleBehaviorModel.settings),
-                audioPolicy: audioPolicyModel.resolvedPolicy(settings: playbackModel.settings),
-                seriesTrackStore: seriesTrackStore,
-                spoilerSettings: spoilerModel.settings,
-                showDiagnostics: diagnosticsModel.settings.isEnabled,
-                // Home performance HUD, gated on the Help & Diagnostics toggle
-                // (Diagnostics ▸ Home Performance Overlay). Off by default and opt-in
-                // per profile. Remote env-gated PLZPERF capture also remains available.
-                homePerfOverlayEnabled: diagnosticsModel.settings.homePerformanceOverlayEnabled,
-                themePalette: resolvedPalette,
-                ratingsProvider: ratingsProvider,
-                scrobbler: RealtimePlaybackScrobbler(trakt: trakt.scrobbler, simkl: simkl.scrobbler),
-                enqueueWatchMutation: enqueueWatchMutation,
-                watchBridge: watchBridge,
-                identitySources: identitySources,
-                pendingPlay: pendingPlay,
-                pendingWatchMutations: pendingWatchMutations,
-                appliedWatchRecency: appliedWatchRecency,
-                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
-                playRequest: $playRequest,
-                resumePrompt: $resumePrompt
-            )
-            .id(accountScopeKey)
-            }
 
-            Tab("Search", systemImage: "magnifyingglass", value: MainTab.search) {
-            SearchTab(
-                accounts: accounts,
-                detailSnapshotCache: detailSnapshotCache,
-                authenticatedHTTPResolver: authenticatedHTTPResolver,
-                seer: seer,
-                activeSeerrUserID: activeProfile.seerrUserID,
-                activeSeerrUserName: activeProfile.seerrUserName,
-                confirmAdminRequest: profiles.count > 1,
-                homeVisibility: homeVisibility,
-                behavior: subtitleBehaviorModel.settings,
-                style: subtitleStyleModel.style,
-                playbackSettings: playbackModel.settings,
-                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(behavior: subtitleBehaviorModel.settings),
-                audioPolicy: audioPolicyModel.resolvedPolicy(settings: playbackModel.settings),
-                seriesTrackStore: seriesTrackStore,
-                spoilerSettings: spoilerModel.settings,
-                showDiagnostics: diagnosticsModel.settings.isEnabled,
-                themePalette: resolvedPalette,
-                ratingsProvider: ratingsProvider,
-                scrobbler: RealtimePlaybackScrobbler(trakt: trakt.scrobbler, simkl: simkl.scrobbler),
-                enqueueWatchMutation: enqueueWatchMutation,
-                watchBridge: watchBridge,
-                identitySources: identitySources,
-                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
-                playRequest: $playRequest,
-                resumePrompt: $resumePrompt
-            )
-            .id(accountScopeKey)
-            }
-
-            // Conditional Music tab: present only when at least one signed-in
-            // account exposes a music library. Video-only users see no tab and no
-            // mini-player — the app is byte-for-byte unchanged for them.
-            if musicAvailability.hasMusic {
-                Tab("Music", systemImage: "music.note", value: MainTab.music) {
-                MusicTabView(
-                    accounts: musicAvailability.detectedAccounts,
-                    visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
-                    controller: audioController,
-                    authenticatedHTTPResolver: authenticatedHTTPResolver,
-                    appTheme: themeModel.theme,
-                    musicPlayer: musicPlayerModel,
-                    showNowPlaying: $showNowPlaying
-                )
-                }
-            }
-
-            Tab("Settings", systemImage: "gearshape.fill", value: MainTab.settings) {
+    /// Extracted from `body` deliberately. `SettingsView` takes 65 arguments,
+    /// and leaving that call inside the `TabView` expression pushed the whole
+    /// body past the Swift type-checker's budget — the build failed outright
+    /// with "unable to type-check this expression in reasonable time" as soon
+    /// as anything else in the body grew. Naming it gives the checker a fixed
+    /// point and keeps the tab list readable.
+    private var settingsTabContent: some View {
             SettingsView(
                 subtitleBehavior: subtitleBehaviorModel,
                 spoilers: spoilerModel,
@@ -430,6 +345,123 @@ struct MainTabView: View {
                 metadataSettings: metadataSettings
             )
             .background { SettingsPageBackground() }
+    }
+
+
+    /// Extracted from `body`: the `HomeTab` initializer takes ~40 arguments and,
+    /// inside the `TabView` expression, it is a large part of why this body sat
+    /// on the Swift type-checker's budget.
+    private var homeTabContent: some View {
+            HomeTab(
+                accounts: accounts,
+                detailSnapshotCache: detailSnapshotCache,
+                authenticatedHTTPResolver: authenticatedHTTPResolver,
+                seer: seer,
+                activeSeerrUserID: activeProfile.seerrUserID,
+                activeSeerrUserName: activeProfile.seerrUserName,
+                confirmAdminRequest: profiles.count > 1,
+                homeVisibility: homeVisibility,
+                homeLayoutStore: homeLayoutStore,
+                homeContentStore: homeContentStore,
+                heroSettings: heroSettingsModel,
+                heroBackground: heroBackgroundModel,
+                heroTrailerController: heroTrailerController,
+                heroRuntime: homeHeroRuntime,
+                navigationStyle: navigationStyle,
+                behavior: subtitleBehaviorModel.settings,
+                style: subtitleStyleModel.style,
+                playbackSettings: playbackModel.settings,
+                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(behavior: subtitleBehaviorModel.settings),
+                audioPolicy: audioPolicyModel.resolvedPolicy(settings: playbackModel.settings),
+                seriesTrackStore: seriesTrackStore,
+                spoilerSettings: spoilerModel.settings,
+                showDiagnostics: diagnosticsModel.settings.isEnabled,
+                // Home performance HUD, gated on the Help & Diagnostics toggle
+                // (Diagnostics ▸ Home Performance Overlay). Off by default and opt-in
+                // per profile. Remote env-gated PLZPERF capture also remains available.
+                homePerfOverlayEnabled: diagnosticsModel.settings.homePerformanceOverlayEnabled,
+                themePalette: resolvedPalette,
+                ratingsProvider: ratingsProvider,
+                scrobbler: RealtimePlaybackScrobbler(trakt: trakt.scrobbler, simkl: simkl.scrobbler),
+                enqueueWatchMutation: enqueueWatchMutation,
+                watchBridge: watchBridge,
+                identitySources: identitySources,
+                pendingWatchMutations: pendingWatchMutations,
+                appliedWatchRecency: appliedWatchRecency,
+                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
+                playRequest: $playRequest,
+                resumePrompt: $resumePrompt,
+                runtime: homeRuntime
+            )
+            .id(accountScopeKey)
+    }
+
+    /// Extracted for the same reason as ``homeTabContent`` — see there.
+    private var searchTabContent: some View {
+            SearchTab(
+                accounts: accounts,
+                detailSnapshotCache: detailSnapshotCache,
+                authenticatedHTTPResolver: authenticatedHTTPResolver,
+                seer: seer,
+                activeSeerrUserID: activeProfile.seerrUserID,
+                activeSeerrUserName: activeProfile.seerrUserName,
+                confirmAdminRequest: profiles.count > 1,
+                homeVisibility: homeVisibility,
+                behavior: subtitleBehaviorModel.settings,
+                style: subtitleStyleModel.style,
+                playbackSettings: playbackModel.settings,
+                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(behavior: subtitleBehaviorModel.settings),
+                audioPolicy: audioPolicyModel.resolvedPolicy(settings: playbackModel.settings),
+                seriesTrackStore: seriesTrackStore,
+                spoilerSettings: spoilerModel.settings,
+                showDiagnostics: diagnosticsModel.settings.isEnabled,
+                themePalette: resolvedPalette,
+                ratingsProvider: ratingsProvider,
+                scrobbler: RealtimePlaybackScrobbler(trakt: trakt.scrobbler, simkl: simkl.scrobbler),
+                enqueueWatchMutation: enqueueWatchMutation,
+                watchBridge: watchBridge,
+                identitySources: identitySources,
+                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
+                playRequest: $playRequest,
+                resumePrompt: $resumePrompt
+            )
+            .id(accountScopeKey)
+    }
+
+    var body: some View {
+        TabView(selection: selectedTab) {
+            Tab("Home", systemImage: "house.fill", value: MainTab.home) {
+            homeTabContent
+            }
+
+            Tab("Search", systemImage: "magnifyingglass", value: MainTab.search) {
+            searchTabContent
+            }
+
+            // Conditional Music tab: present only when at least one signed-in
+            // account exposes a music library. Video-only users see no tab and no
+            // mini-player — the app is byte-for-byte unchanged for them.
+            if musicAvailability.hasMusic {
+                Tab("Music", systemImage: "music.note", value: MainTab.music) {
+                // The availability model is handed over by REFERENCE and read
+                // inside the Music tab, not unpacked here. Reading
+                // `detectedAccounts` / `visibleLibraryIDs` in this body made the
+                // whole tab tree a subscriber of them, so the first cache seed
+                // after launch re-ran this body and took the Home tab's `@State`
+                // — and its entire in-flight four-account load — down with it.
+                MusicAvailabilityScope(
+                    availability: musicAvailability,
+                    controller: audioController,
+                    authenticatedHTTPResolver: authenticatedHTTPResolver,
+                    appTheme: themeModel.theme,
+                    musicPlayer: musicPlayerModel,
+                    showNowPlaying: $showNowPlaying
+                )
+                }
+            }
+
+            Tab("Settings", systemImage: "gearshape.fill", value: MainTab.settings) {
+            settingsTabContent
             }
         }
         .plozzTabStyle(navigationStyle)

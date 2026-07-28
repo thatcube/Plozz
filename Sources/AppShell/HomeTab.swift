@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreNetworking
 import CoreUI
 import FeatureHome
 import FeatureHomeCore
@@ -74,10 +75,6 @@ struct HomeTab: View {
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
-    /// The pending Top Shelf deep link, carried by **reference**. This view
-    /// never reads `itemID` — only ``DeepLinkPlayRouter`` does — so carrying it
-    /// costs nothing. As a `Binding` it cost 1,619 body passes in 50 seconds.
-    let pendingPlay: PendingPlayRequest
     /// Snapshot of the durable outbox's not-yet-confirmed plays, folded into the
     /// Continue Watching row so a reload reflects in-app plays the servers haven't
     /// recorded yet (r8-cw-outbox-patch).
@@ -97,12 +94,8 @@ struct HomeTab: View {
     @Binding var resumePrompt: MediaItem?
 
     @State private var path = NavigationPath()
-    /// Builds the Home view model once per tab identity instead of once per
-    /// `body` pass. `HomeView` keeps it in `@State` and ignores every later
-    /// value, so building it inline here was pure waste — and expensive waste:
-    /// it captures a dozen escaping closures and reads the cached Home snapshot
-    /// off disk. See ``LazyViewState``.
-    @State private var homeViewModel = LazyViewState<HomeViewModel>()
+    /// Handles owned above the tab so tab re-hosting cannot destroy them.
+    let runtime: HomeTabRuntime
     /// Lets a detail page tell whether a child page is pushed on top of it.
     /// See `DetailStackDepth`.
     @State private var detailStackDepth = DetailStackDepth()
@@ -123,10 +116,10 @@ struct HomeTab: View {
     }
 
     var body: some View {
-        if MainThreadStallProbe.printsChanges { let _ = Self._printChanges() }
-        return NavigationStack(path: $path) {
+        let _ = plozzPrintChanges { Self._printChanges() }
+        NavigationStack(path: $path) {
             HomeView(
-                viewModel: homeViewModel.value {
+                viewModel: runtime.homeViewModel.value(forKey: runtime.scopeKey) {
                     HomeViewModel(
                         accounts: accounts,
                         layoutStore: homeLayoutStore,
@@ -345,7 +338,7 @@ struct HomeTab: View {
         // The leaf reads it and renders nothing, so the invalidation is free.
         .background {
             DeepLinkPlayRouter(
-                pendingPlay: pendingPlay,
+                pendingPlay: runtime.pendingPlay,
                 accounts: accounts,
                 onResolved: { requestPlay($0) }
             )

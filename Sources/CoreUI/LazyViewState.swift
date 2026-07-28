@@ -35,14 +35,32 @@ import SwiftUI
 @MainActor
 public final class LazyViewState<Value> {
     private var stored: Value?
+    private var storedKey: AnyHashable?
 
     public init() {}
 
     /// The held value, building it with `make` on first use only.
     public func value(_ make: () -> Value) -> Value {
-        if let stored { return stored }
+        value(forKey: 0, make)
+    }
+
+    /// The held value, rebuilt only when `key` changes.
+    ///
+    /// Use this when the box is owned **above** the view that consumes it. Held
+    /// as `@State` on the consuming view, SwiftUI's own identity decides the
+    /// lifetime — but that is exactly what proved unreliable here: a `TabView`
+    /// re-hosting its tabs discarded the Home tab's `@State` and restarted a
+    /// four-account load that was already seconds in, and it did so for whatever
+    /// unrelated observable happened to change first (music availability one
+    /// launch, theme-music settings the next). Hoisting the box to a stable
+    /// owner and giving it an explicit key makes the lifetime say what it means:
+    /// rebuild when the account/profile scope changes, and at no other time.
+    public func value(forKey key: some Hashable, _ make: () -> Value) -> Value {
+        let key = AnyHashable(key)
+        if let stored, storedKey == key { return stored }
         let built = make()
         stored = built
+        storedKey = key
         return built
     }
 }

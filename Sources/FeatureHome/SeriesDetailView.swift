@@ -208,8 +208,8 @@ struct SeriesDetailView: View {
     private static let seasonBarSpace = "seasonBarViewport"
 
     var body: some View {
-        if MainThreadStallProbe.printsChanges { let _ = Self._printChanges() }
-        return scrollContent
+        let _ = plozzPrintChanges { Self._printChanges() }
+        scrollContent
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
             // Let the hero bleed into the top overscan inset instead of the

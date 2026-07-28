@@ -7,6 +7,7 @@ import AppRuntime
 import CoreModels
 import CoreNetworking
 import CoreUI
+import FeatureHomeCore
 import CrashReporting
 import FeatureAuth
 import FeatureDiscovery
@@ -42,6 +43,11 @@ public struct RootView: View {
     @State private var showSyncReceive = false
     @State private var showSyncReceiveFromSettings = false
     @State private var showSyncSend = false
+    /// Home's view model, owned here because this is the highest view whose
+    /// identity is genuinely stable for the signed-in session. Kept out of the
+    /// tab tree so a `TabView` re-host cannot discard it mid-load; see
+    /// ``LazyViewState`` for the measurements that forced this.
+    @State private var homeViewModelBox = LazyViewState<HomeViewModel>()
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
     /// The reader's text size. Feeds `PlozzMetrics` so the shared type/geometry
@@ -138,8 +144,18 @@ public struct RootView: View {
         )
     }
 
+    /// The identity of the whole signed-in subtree. Logged under the diagnostic
+    /// flag because a change here throws away every `@State` below it — including
+    /// Home's view model and its in-flight load.
+    private var rootScopeIdentity: String {
+        HomeRuntimeScope.identityKey(
+            profileID: appState.profilesModel.activeProfileID,
+            plexIdentityGeneration: appState.plexHomeUsers.plexIdentityGeneration
+        )
+    }
+
     public var body: some View {
-        if MainThreadStallProbe.printsChanges { let _ = Self._printChanges() }
+        let _ = plozzPrintChanges { Self._printChanges() }
         // Read the PIN request HERE so the @Observable system registers it
         // as a dependency of body. The sheet's Binding closures aren't
         // tracked, so without this body never re-evaluates when the request
@@ -255,7 +271,11 @@ public struct RootView: View {
                         profiles: appState.profilesModel.profiles,
                         activeProfile: appState.profilesModel.activeProfile,
                         askProfileOnStartup: appState.profilesModel.askProfileOnStartup,
-                        pendingPlay: appState.pendingPlay,
+                        homeRuntime: HomeTabRuntime(
+                            homeViewModel: homeViewModelBox,
+                            scopeKey: HomeRuntimeScope.accountScopeKey(accounts.map(\.account)),
+                            pendingPlay: appState.pendingPlay
+                        ),
                         isAccountIncludedInActiveProfile: { appState.profileFlow.isAccountIncludedInActiveProfile($0) },
                         onSetAccountIncluded: { appState.profileFlow.setAccount($0, includedInActiveProfile: $1) },
                         onSetAskProfileOnStartup: { appState.profileFlow.setAskProfileOnStartup($0) },
@@ -279,17 +299,19 @@ public struct RootView: View {
                         onSetUpAnotherDevice: { showSyncSend = true },
                         syncEnabled: appState.syncSetup.isEnabled,
                         onSetSyncEnabled: { appState.setSyncSetupEnabled($0) },
-                        syncStatusSummary: Self.syncStatusText(appState.cloudSyncStatus),
+                        // A closure, so the CloudSyncStatus properties are read
+                        // in the Settings row that shows them. Reading them here
+                        // subscribed the ROOT of the app to a model that ticks
+                        // through every sync, and a root re-render dirties every
+                        // view below it — the widest possible invalidation.
+                        syncStatusSummary: SyncStatusProvider { Self.syncStatusText(appState.cloudSyncStatus) },
                         onSyncNow: { appState.syncCloudNow() },
                         syncRepair: syncRepairActions,
                         pendingSyncedServers: appState.cloudSyncUI.pendingSyncedServers,
                         onIgnorePendingServer: { appState.ignorePendingSyncedServer($0) },
                         onSetUpFromAnotherDevice: { showSyncReceiveFromSettings = true }
                     )
-                    .id(HomeRuntimeScope.identityKey(
-                        profileID: appState.profilesModel.activeProfileID,
-                        plexIdentityGeneration: appState.plexHomeUsers.plexIdentityGeneration
-                    ))
+                    .id(rootScopeIdentity)
                     .transition(.opacity)
                     }
                     }

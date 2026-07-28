@@ -165,8 +165,8 @@ public struct ItemDetailView: View {
     }
 
     public var body: some View {
-        if MainThreadStallProbe.printsChanges { let _ = Self._printChanges() }
-        return ContentStateView(
+        let _ = plozzPrintChanges { Self._printChanges() }
+        ContentStateView(
             state: viewModel.state,
             onRetry: { Task { await viewModel.load() } }
         ) { detail in

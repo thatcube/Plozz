@@ -71,6 +71,19 @@ private extension Duration {
     var milliseconds: Int { Int(components.seconds * 1000 + components.attoseconds / 1_000_000_000_000_000) }
 }
 
+/// Runs `dump` (normally `Self._printChanges()`) only when the diagnostic flag
+/// is set.
+///
+/// Written to be called as `let _ = plozzPrintChanges { … }` inside a `body`.
+/// The obvious `if flag { Self._printChanges() }; return someView` form is a
+/// trap: an explicit `return` **disables the `ViewBuilder`**, so the whole view
+/// tree becomes one expression and the Swift type-checker gives up on any body
+/// of real size.
+@inlinable
+public func plozzPrintChanges(_ dump: () -> Void) {
+    if MainThreadStallProbe.printsChanges { dump() }
+}
+
 public extension View {
     /// Names the screen a main-thread stall should be attributed to. No-op
     /// unless the probe is armed.

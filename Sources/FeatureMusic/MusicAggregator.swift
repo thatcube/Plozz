@@ -79,6 +79,17 @@ public final class MusicAvailabilityModel {
 
     public init(store: MusicAvailabilityStoring = MusicAvailabilityStore()) {
         self.store = store
+        // Decide tab PRESENCE on the very first frame, from the persisted map
+        // alone (a UserDefaults read; no accounts, no visibility, no network).
+        //
+        // `seedFromCache` below does the accurate job but runs from a `.task`,
+        // which is one render too late. The Music tab therefore appeared *after*
+        // the tab set had already been built — and adding a tab re-assigns
+        // SwiftUI identity to its siblings, tearing down the Home tab's `@State`
+        // mid-launch. Measured on device: every cold launch ran TWO complete
+        // four-account Home fan-outs (~2.5s each) and threw the first away,
+        // along with Home's navigation path and scroll position.
+        hasMusic = !store.load().isEmpty
     }
 
     /// Synchronously shows the Music tab on the first frame using the last
@@ -88,12 +99,15 @@ public final class MusicAvailabilityModel {
     public func seedFromCache(accounts: [ResolvedAccount], visibility: HomeLibraryVisibility) {
         guard !didProbe else { return }
         let stored = store.load()
-        guard !stored.isEmpty else { return }
         let resolved = Self.resolve(accounts: accounts, rawLibraries: stored, visibility: visibility)
-        guard !resolved.detected.isEmpty else { return }
         detectedAccounts = resolved.detected
         visibleLibraryIDs = resolved.visible
-        hasMusic = true
+        // Authoritative over the provisional value `init` set from the raw map:
+        // the persisted libraries may no longer resolve against the signed-in
+        // accounts, or may all be hidden. Correcting here — one render in —
+        // keeps a stale cache from leaving an empty Music tab up until the
+        // network probe returns.
+        hasMusic = !resolved.detected.isEmpty
     }
 
     /// Probes every account's `musicLibraries()` **in parallel**, persists the raw

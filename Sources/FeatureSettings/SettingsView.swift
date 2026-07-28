@@ -133,7 +133,7 @@ public struct SettingsView: View {
     private let syncEnabled: Bool
     private let onSetSyncEnabled: ((Bool) -> Void)?
     /// Live status summary line for the iCloud Sync page, and a manual sync action.
-    private let syncStatusSummary: Text?
+    private let syncStatusSummary: SyncStatusProvider?
     private let onSyncNow: (() -> Void)?
     private let syncRepair: SyncRepairActions?
     /// Synced servers this device isn't signed into yet, plus ignore + set-up actions.
@@ -199,7 +199,7 @@ public struct SettingsView: View {
         onSetUpAnotherDevice: (() -> Void)? = nil,
         syncEnabled: Bool = false,
         onSetSyncEnabled: ((Bool) -> Void)? = nil,
-        syncStatusSummary: Text? = nil,
+        syncStatusSummary: SyncStatusProvider? = nil,
         onSyncNow: (() -> Void)? = nil,
         syncRepair: SyncRepairActions? = nil,
         pendingSyncedServers: [SyncedAccountDescriptor] = [],
@@ -965,7 +965,12 @@ public struct SettingsView: View {
                         if syncEnabled, let syncStatusSummary {
                             LabeledSettingRow("Status", labelWidth: 160) {
                                 HStack(spacing: 16) {
-                                    syncStatusSummary
+                                    // Evaluated HERE, inside a leaf view, not at
+                                    // the root. Building this line in
+                                    // `RootView.body` made the whole app a
+                                    // subscriber of `CloudSyncStatus`, so every
+                                    // sync tick dirtied the entire view tree.
+                                    SyncStatusLine(provider: syncStatusSummary)
                                         .font(.callout)
                                         .plozzForeground(.secondary)
                                     Spacer(minLength: 0)

@@ -177,6 +177,10 @@ public final class HomeViewModel {
     /// disable/enable or a merged↔unmerged flip correctly forces a re-aggregation,
     /// since both change what Home fetches and renders.
     private var lastLoadedVisibility: HomeLibraryVisibility?
+    /// A load is running right now. See ``load(showLoadingState:)``.
+    @ObservationIgnored private var isLoading = false
+    /// A load was requested while one was already running; run once more after.
+    @ObservationIgnored private var wantsReloadAfterCurrent = false
 
     public init(
         accounts: [ResolvedAccount],
@@ -271,6 +275,26 @@ public final class HomeViewModel {
     /// loaded rows stay on screen until the fresh content swaps in, so there's no
     /// skeleton flash or focus reset for a background update.
     public func load(showLoadingState: Bool) async {
+        // Coalesce concurrent loads. A load is a fan-out across every signed-in
+        // account — measured at ~2.5s per account on a cold launch — so two
+        // overlapping ones cost double the network and CPU for one result. They
+        // really do overlap: Home's first appearance calls `loadIfNeeded`, and a
+        // `.mediaItemDidMutate` notification arriving during launch asks for a
+        // full reload on top of it. Rather than drop the request (the caller may
+        // know about a change this load started too early to see), remember it
+        // and run exactly once more when the current pass finishes.
+        guard !isLoading else {
+            wantsReloadAfterCurrent = true
+            return
+        }
+        isLoading = true
+        defer {
+            isLoading = false
+            if wantsReloadAfterCurrent {
+                wantsReloadAfterCurrent = false
+                Task { await load(showLoadingState: false) }
+            }
+        }
         PlozzLog.boot("HomeVM.load START vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) accounts=\(accounts.count) state=\(String(describing: state)) silent=\(!showLoadingState)")
         if showLoadingState { state = .loading }
 

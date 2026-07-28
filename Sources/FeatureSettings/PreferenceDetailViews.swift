@@ -514,14 +514,14 @@ struct PlaybackDetailView: View {
                         SettingsStepper(
                             options: SkipInterval.allCases,
                             selection: $playback.settings.skipBackwardInterval,
-                            title: { $0.title }
+                            verbatimTitle: { $0.title }
                         )
                     }
                     LabeledSettingRow("Forward") {
                         SettingsStepper(
                             options: SkipInterval.allCases,
                             selection: $playback.settings.skipForwardInterval,
-                            title: { $0.title }
+                            verbatimTitle: { $0.title }
                         )
                     }
                 }
@@ -540,7 +540,7 @@ struct PlaybackDetailView: View {
                     SettingsStepper(
                         options: ResumeRewindInterval.allCases,
                         selection: $playback.settings.resumeRewindInterval,
-                        title: { $0.title }
+                        verbatimTitle: { $0.title }
                     )
                     Text(playback.settings.resumeRewindInterval.effectDescription)
                         .font(.callout)
@@ -580,7 +580,7 @@ struct PlaybackDetailView: View {
                             SettingsStepper(
                                 options: PlaybackSettings.upNextLeadSecondsOptions,
                                 selection: $playback.settings.upNextLeadSeconds,
-                                title: { "\($0)s" }
+                                verbatimTitle: { Duration.seconds($0).formatted(.units(allowed: [.seconds], width: .narrow)) }
                             )
                         }
                     }

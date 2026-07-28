@@ -61,11 +61,20 @@ final class ResumeRewindSettingsTests: XCTestCase {
         XCTAssertEqual(ResumeRewindInterval.off.effectDescription, "Rewind on resume is off.")
     }
 
+    /// One resource with the count as an argument, so the singular form lives in
+    /// the catalog's plural variations rather than in a Swift branch. The
+    /// assertions build the resource the same way instead of comparing rendered
+    /// English: the test host has no catalog, so rendering here would only ever
+    /// produce the "other" wording.
     func testEffectDescriptionForEachRewind() {
-        XCTAssertEqual(ResumeRewindInterval.one.effectDescription, "Media will resume 1 second earlier.")
-        XCTAssertEqual(ResumeRewindInterval.five.effectDescription, "Media will resume 5 seconds earlier.")
-        XCTAssertEqual(ResumeRewindInterval.thirty.effectDescription, "Media will resume 30 seconds earlier.")
-        XCTAssertEqual(ResumeRewindInterval.sixty.effectDescription, "Media will resume 60 seconds earlier.")
+        XCTAssertEqual(ResumeRewindInterval.one.effectDescription,
+                       "Media will resume \(1) seconds earlier.")
+        XCTAssertEqual(ResumeRewindInterval.five.effectDescription,
+                       "Media will resume \(5) seconds earlier.")
+        XCTAssertEqual(ResumeRewindInterval.thirty.effectDescription,
+                       "Media will resume \(30) seconds earlier.")
+        XCTAssertEqual(ResumeRewindInterval.sixty.effectDescription,
+                       "Media will resume \(60) seconds earlier.")
     }
 
     // MARK: - applied(to:) maths

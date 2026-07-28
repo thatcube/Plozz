@@ -279,7 +279,7 @@ struct CustomizeHomeDetailView: View {
                                 SettingsStepper(
                                     options: Array(HeroSettings.autoAdvanceRange),
                                     selection: $hero.settings.autoAdvanceSeconds,
-                                    title: { "\($0)s" }
+                                    verbatimTitle: { Duration.seconds($0).formatted(.units(allowed: [.seconds], width: .narrow)) }
                                 )
                             }
                         }

@@ -186,10 +186,12 @@ final class NightShiftModelTests: XCTestCase {
         XCTAssertTrue(model.isActiveNow)
     }
 
+    /// `Duration`'s abbreviations, not hand-built "m"/"h" — those were English,
+    /// and "1.5h" also assumed a period as the decimal separator.
     func testFadeLabel() {
-        XCTAssertEqual(NightShiftSettingsModel.fadeLabel(minutes: 45), "45m")
-        XCTAssertEqual(NightShiftSettingsModel.fadeLabel(minutes: 60), "1h")
-        XCTAssertEqual(NightShiftSettingsModel.fadeLabel(minutes: 90), "1.5h")
+        XCTAssertEqual(NightShiftSettingsModel.fadeLabel(minutes: 45), "45 min")
+        XCTAssertEqual(NightShiftSettingsModel.fadeLabel(minutes: 60), "1 hr")
+        XCTAssertEqual(NightShiftSettingsModel.fadeLabel(minutes: 90), "1 hr, 30 min")
     }
 
     func testScheduleSummaryReflectsState() {

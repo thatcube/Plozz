@@ -202,12 +202,14 @@ public final class NightShiftSettingsModel {
     /// Short human label for the current fade duration, e.g. "90m", "1h", "1.5h".
     public var fadeDescription: String { Self.fadeLabel(minutes: settings.fadeMinutes) }
 
+    /// Formatted by `Duration` rather than hand-built: "m" and "h" are English
+    /// abbreviations, and the decimal separator is a comma in most of Europe.
     public static func fadeLabel(minutes: Int) -> String {
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = Double(minutes) / 60
-        return hours == hours.rounded()
-            ? "\(Int(hours))h"
-            : String(format: "%.1fh", hours)
+        let allowed: Set<Duration.UnitsFormatStyle.Unit> =
+            minutes < 60 ? [.minutes] : [.hours, .minutes]
+        return Duration.seconds(minutes * 60).formatted(
+            .units(allowed: allowed, width: .abbreviated, zeroValueUnits: .hide)
+        )
     }
 
     /// Formats a minutes-since-midnight value as a clock time in `timeZone`.

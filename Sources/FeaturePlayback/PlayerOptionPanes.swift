@@ -128,7 +128,7 @@ struct SpeedPaneView: View {
                         set: { actions.setPlaybackSpeed(PlayerControls.speedGridValue($0)) }
                     ),
                     compact: true,
-                    title: { PlayerControls.speedLabel(PlayerControls.speedGridValue($0)) }
+                    verbatimTitle: { PlayerControls.speedLabel(PlayerControls.speedGridValue($0)) }
                 )
                 Spacer(minLength: 0)
             }

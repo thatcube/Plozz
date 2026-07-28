@@ -24,7 +24,7 @@ public enum SkipInterval: Int, Codable, CaseIterable, Hashable, Sendable {
     /// Formatted rather than translated: `Duration`'s units style already knows
     /// how every locale abbreviates seconds, so this needs no catalog entry and
     /// can't drift from the platform's own wording.
-    public var title: String {
+    public var title: String {   // l10n:content — formatted by Duration, not translated
         Duration.seconds(rawValue).formatted(
             .units(allowed: [.seconds], width: .abbreviated)
         )

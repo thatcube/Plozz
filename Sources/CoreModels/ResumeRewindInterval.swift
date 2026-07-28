@@ -44,18 +44,22 @@ public enum ResumeRewindInterval: Int, Codable, CaseIterable, Hashable, Sendable
     /// Human-readable label for the settings stepper (e.g. "5 sec"). `.off` reads
     /// "0 sec" so the preset ladder is unambiguously **0 to 60 seconds** rather
     /// than an opaque "Off" that looks like a separate switch.
-    public var title: String { "\(rawValue) sec" }
+    /// `Duration` rather than a literal "sec": the abbreviation and the space
+    /// before it are both locale-dependent.
+    public var title: String {   // l10n:content — formatted by Duration, not translated
+        Duration.seconds(rawValue).formatted(.units(allowed: [.seconds], width: .abbreviated))
+    }
 
     /// A cohesive one-line summary of the *effect* of the current value, shown as
     /// live helper text beneath the stepper so the setting explains itself as you
     /// dial it. `.off` states it's off; every other value says how much earlier
     /// playback resumes (with correct singular/plural at 1 second).
-    public var effectDescription: String {
-        switch rawValue {
-        case 0:  return "Rewind on resume is off."
-        case 1:  return "Media will resume 1 second earlier."
-        default: return "Media will resume \(rawValue) seconds earlier."
-        }
+    public var effectDescription: LocalizedStringResource {
+        guard rawValue > 0 else { return "Rewind on resume is off." }
+        // One resource with the count as a placeholder: the singular/plural split
+        // belongs in the catalog, where a language with more than two forms can
+        // express it.
+        return "Media will resume \(rawValue) seconds earlier."
     }
 
     /// Applies the rewind to a resume position, returning where playback should

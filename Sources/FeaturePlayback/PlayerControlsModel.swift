@@ -453,9 +453,11 @@ public struct SkipSeekLanding: Equatable, Sendable {
 /// even when consecutive notices share the same `label`.
 public struct AutoSkipNotice: Equatable, Identifiable, Sendable {
     public let id: UUID
-    public let label: String   // l10n:content — media/track metadata from the server
+    /// Our own wording ("Intro Skipped"), not server metadata — an earlier
+    /// `l10n:content` marker here was simply wrong and kept it out of the catalog.
+    public let label: LocalizedStringResource
 
-    public init(label: String) {   // l10n:content — media/track metadata from the server
+    public init(label: LocalizedStringResource) {
         self.id = UUID()
         self.label = label
     }

@@ -82,7 +82,7 @@ private struct CircadianDetail: View {
                                 get: { clampedFade },
                                 set: { model.settings.fadeMinutes = $0 }
                             ),
-                            title: { NightShiftSettingsModel.fadeLabel(minutes: $0) }
+                            verbatimTitle: { NightShiftSettingsModel.fadeLabel(minutes: $0) }
                         )
                     }
                     .tvOSFocusSection()
@@ -297,7 +297,7 @@ private struct NightShiftScheduleControl: View {
                 set: { commit($0) }
             ),
             wraps: true,
-            title: { model.clockLabel(minutes: $0) }
+            verbatimTitle: { model.clockLabel(minutes: $0) }
         )
     }
 

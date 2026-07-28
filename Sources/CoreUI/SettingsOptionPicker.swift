@@ -16,7 +16,7 @@ import SwiftUI
 public struct SettingsOptionPicker<Option: Hashable>: View {
     private let options: [Option]
     @Binding private var selection: Option
-    private let title: (Option) -> String
+    private let title: (Option) -> LocalizedStringResource
     private let icon: (Option) -> String?
     private let onFocusChange: ((Bool) -> Void)?
 
@@ -38,7 +38,7 @@ public struct SettingsOptionPicker<Option: Hashable>: View {
         selection: Binding<Option>,
         icon: @escaping (Option) -> String? = { _ in nil },
         onFocusChange: ((Bool) -> Void)? = nil,
-        title: @escaping (Option) -> String
+        title: @escaping (Option) -> LocalizedStringResource
     ) {
         self.options = options
         self._selection = selection

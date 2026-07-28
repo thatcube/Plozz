@@ -20,7 +20,7 @@ public enum NightShiftWarmth: String, CaseIterable, Identifiable, Codable, Senda
 
     public var id: String { rawValue }
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
         case .none: return "None"
         case .light: return "Kinda Warm"
@@ -80,7 +80,7 @@ public enum NightShiftDimness: String, CaseIterable, Identifiable, Codable, Send
 
     public var id: String { rawValue }
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
         case .none: return "None"
         case .subtle: return "Low"
@@ -116,7 +116,7 @@ public enum NightShiftScheduleMode: String, CaseIterable, Identifiable, Codable,
 
     public var id: String { rawValue }
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
         case .solar: return "Auto"
         case .manual: return "Manual"

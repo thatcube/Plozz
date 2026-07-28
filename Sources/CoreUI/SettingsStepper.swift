@@ -12,7 +12,7 @@ import SwiftUI
 public struct SettingsStepper<Value: Hashable>: View {
     public let options: [Value]
     @Binding public var selection: Value
-    public let title: (Value) -> String
+    public let title: (Value) -> Text
     /// Compact styling for tight surfaces (e.g. the in-player Speed menu): smaller
     /// − / + buttons and a body-size value that matches the preset rows beside it,
     /// so the stepper doesn't tower over the list. Defaults to the roomy style used
@@ -40,7 +40,34 @@ public struct SettingsStepper<Value: Hashable>: View {
         compact: Bool = false,
         wraps: Bool = false,
         onFocusChange: ((Bool) -> Void)? = nil,
-        title: @escaping (Value) -> String
+        title: @escaping (Value) -> LocalizedStringResource
+    ) {
+        self.init(options: options, selection: selection, compact: compact, wraps: wraps,
+                  onFocusChange: onFocusChange, title: { Text(title($0)) })
+    }
+
+    /// A stepper whose values are formatted CONTENT rather than copy — playback
+    /// speeds, times, sizes. Spelled separately so content cannot drift into the
+    /// catalog by accident.
+    public init(
+        options: [Value],
+        selection: Binding<Value>,
+        compact: Bool = false,
+        wraps: Bool = false,
+        onFocusChange: ((Bool) -> Void)? = nil,
+        verbatimTitle: @escaping (Value) -> String
+    ) {
+        self.init(options: options, selection: selection, compact: compact, wraps: wraps,
+                  onFocusChange: onFocusChange, title: { Text(verbatim: verbatimTitle($0)) })
+    }
+
+    private init(
+        options: [Value],
+        selection: Binding<Value>,
+        compact: Bool,
+        wraps: Bool,
+        onFocusChange: ((Bool) -> Void)?,
+        title: @escaping (Value) -> Text
     ) {
         self.options = options
         self._selection = selection
@@ -102,8 +129,8 @@ public struct SettingsStepper<Value: Hashable>: View {
         }
     }
 
-    private func valueLabel(_ text: String) -> some View {
-        Text(text)
+    private func valueLabel(_ text: Text) -> some View {
+        text
             .font(valueFont)
             .monospacedDigit()
             .lineLimit(1)

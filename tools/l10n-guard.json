@@ -16,6 +16,11 @@
   "auditedPaths": [
     "Sources/AppShell",
     "Sources/AppShelliOS",
+    "Sources/CoreModels/MediaSegment.swift",
+    "Sources/CoreModels/NightShiftSettings.swift",
+    "Sources/CoreModels/ResumeRewindInterval.swift",
+    "Sources/CoreModels/SettingsCopy.swift",
+    "Sources/CoreModels/SkipInterval.swift",
     "Sources/CoreUI",
     "Sources/FeatureAuth",
     "Sources/FeatureDiscovery",
@@ -28,8 +33,7 @@
     "Sources/FeatureSearchCore",
     "Sources/FeatureSettings",
     "Sources/FeatureShareOnboarding",
-    "Sources/FeatureSyncSetup",
-    "Sources/CoreModels/SettingsCopy.swift"
+    "Sources/FeatureSyncSetup"
   ],
   "copyPropertyNames": [
     "title",

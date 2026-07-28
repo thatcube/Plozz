@@ -25,7 +25,7 @@ public struct MediaSegment: Codable, Equatable, Sendable, Identifiable {
         case unknown
 
         /// The label shown on the in-player skip button for this kind.
-        public var skipActionLabel: String {
+        public var skipActionLabel: LocalizedStringResource {
             switch self {
             case .intro: return "Skip Intro"
             case .credits: return "Skip Credits"
@@ -39,7 +39,7 @@ public struct MediaSegment: Codable, Equatable, Sendable, Identifiable {
         /// The transient, past-tense label shown after this kind is skipped
         /// automatically (Auto (instant)) — the skip already happened, so it reads
         /// as a confirmation, e.g. "Intro Skipped".
-        public var autoSkippedLabel: String {
+        public var autoSkippedLabel: LocalizedStringResource {
             switch self {
             case .intro: return "Intro Skipped"
             case .credits: return "Credits Skipped"

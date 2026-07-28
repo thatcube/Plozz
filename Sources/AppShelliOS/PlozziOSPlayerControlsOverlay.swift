@@ -186,7 +186,7 @@ struct PlozziOSPlayerControlsOverlay: View {
         }
     }
 
-    private var skipTitle: String {
+    private var skipTitle: LocalizedStringResource {
         viewModel.controls.activeSkipSegment?.kind.skipActionLabel ?? "Skip"
     }
 

@@ -1,5 +1,6 @@
 #if os(iOS)
 import AppRuntime
+import CoreNetworking
 import CoreUI
 import Foundation
 import MediaTransportFTP
@@ -201,7 +202,8 @@ struct PlozziOSAddFTPShareView: View {
             errorMessage = Text("Couldn’t reach this FTP server.")
         case let .failed(reason):
             isVerified = false
-            errorMessage = Text(verbatim: reason)
+            PlozzLog.networking.error("FTP folder listing failed: \(reason)")
+            errorMessage = Text("Couldn’t connect to this FTP server.")
         case .cancelled:
             isVerified = false
             errorMessage = Text("The connection was cancelled.")

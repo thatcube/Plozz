@@ -149,7 +149,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
     @State private var playbackRequest: PlozziOSPlaybackRequest?
     @State private var downloadRecord: DownloadedMediaRecord?
     @State private var downloadError: String?
-    @State private var requestError: String?
+    @State private var requestError: LocalizedStringResource?
     @State private var isRequesting = false
     @State private var requestConfirmationItem: MediaItem?
     @State private var requestConfirmationSeasons: [Int]?
@@ -282,7 +282,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(verbatim: requestError ?? "")
+            requestError.map { Text($0) } ?? Text(verbatim: "")
         }
         .fullScreenCover(item: $playbackRequest) {
             if let playbackProvider = appModel.provider(for: $0.item) {
@@ -810,7 +810,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
         return "\(detail.item.id):\(seasons):\(seerService?.isConfigured == true)"
     }
 
-    private func requestFailureMessage(_ reason: SeerRequestFailure) -> String {
+    private func requestFailureMessage(_ reason: SeerRequestFailure) -> LocalizedStringResource {
         reason.userMessage
     }
 
@@ -947,7 +947,7 @@ private struct PlozziOSSourceVersionControls: View {
                     showsBackground: false
                 )
             }
-            Text(source?.displayName ?? "Server")
+            source.map { Text(verbatim: $0.displayName) } ?? Text("Server")
         }
     }
 
@@ -1015,7 +1015,7 @@ private struct PlozziOSRequestAction: View {
     let item: MediaItem
     let availability: MediaAvailabilityStatus
     let isRequesting: Bool
-    let errorMessage: String?
+    let errorMessage: LocalizedStringResource?
     let actingName: String?
     let onRequest: (MediaItem) -> Void
 
@@ -1208,7 +1208,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
     let onDownloadSeason: (MediaItem, [MediaItem]) async throws -> Int
     let seasonRequestAvailability: MediaRequestAvailability?
     let isRequestingSeasons: Bool
-    let seasonRequestError: String?
+    let seasonRequestError: LocalizedStringResource?
     let onRequestSeasons: ([Int]) -> Void
 
     init(
@@ -1224,7 +1224,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
             @escaping (MediaItem, [MediaItem]) async throws -> Int,
         seasonRequestAvailability: MediaRequestAvailability?,
         isRequestingSeasons: Bool,
-        seasonRequestError: String?,
+        seasonRequestError: LocalizedStringResource?,
         onRequestSeasons: @escaping ([Int]) -> Void
     ) {
         self.viewModel = viewModel
@@ -1771,7 +1771,7 @@ private struct PlozziOSInlineEpisodeEntry: View {
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(downloadError ?? "")
+            Text(verbatim: downloadError ?? "")
         }
     }
 

@@ -94,7 +94,7 @@ public enum TopShelfPosterComposer {
     /// otherwise a plain title-card placeholder is produced.
     public static func placeholderPosterURL(
         id: String,
-        title: String,
+        title: String,  // l10n:content — media title, drawn onto the placeholder poster via Core Graphics
         progress: Double?
     ) -> URL? {
         #if canImport(UIKit)
@@ -161,7 +161,7 @@ public enum TopShelfPosterComposer {
     /// artwork, mirroring the in-app `PosterCardView.neutralPlaceholder`: a faint
     /// fill, a centred `play.rectangle` glyph and the title. The resume bar is
     /// burned in when `progress` is in the `(0.01, 0.99)` band.
-    private static func renderPlaceholder(title: String, progress: CGFloat?) -> Data? {
+    private static func renderPlaceholder(title: String, progress: CGFloat?) -> Data? {  // l10n:content — media title, drawn onto the placeholder poster via Core Graphics
         let size = CGSize(width: 400, height: 600)
         let width = size.width
         let height = size.height

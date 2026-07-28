@@ -208,7 +208,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     /// title fallback for identifier-less person hubs: the very recognizable
     /// "Top <Movies|Shows> with/by <person>" phrasing. Genre / similar / top-rated
     /// / recently-released hubs match none of these.
-    static func isPersonHub(identifier: String?, context: String?, title: String? = nil) -> Bool {
+    static func isPersonHub(identifier: String?, context: String?, title: String? = nil) -> Bool {  // l10n:content — server-supplied Plex hub title, used only for heuristic matching
         let haystack = [identifier ?? "", context ?? ""].joined(separator: " ").lowercased()
         let roleTokens = ["actor", "director", "writer", "producer", "cast", "crew"]
         if roleTokens.contains(where: { haystack.contains($0) }) { return true }
@@ -230,7 +230,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     /// never a legitimate discovery hub (genre / similar / top-rated / person hubs
     /// don't contain these phrases). "Start Watching" (top *unwatched*) is a genuine
     /// discovery hub and deliberately matches none of the tokens below.
-    static func isBaseDuplicateHub(identifier: String?, context: String?, title: String? = nil) -> Bool {
+    static func isBaseDuplicateHub(identifier: String?, context: String?, title: String? = nil) -> Bool {  // l10n:content — server-supplied Plex hub title, used only for heuristic matching
         let haystack = [identifier ?? "", context ?? ""].joined(separator: " ").lowercased()
         // Structural identifier/context tokens for the rows we render ourselves.
         let idTokens = ["recentlyadded", "ondeck", "continue", "inprogress", "resume", "keepwatching"]
@@ -1410,7 +1410,7 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     /// We treat all three as evidence and append a normalized `Atmos` / `DTS:X`
     /// token to the stream profile so `MediaBadges.audioBadges` can surface the
     /// correct headline format regardless of which signal the server emits.
-    static func audioProfile(
+    static func audioProfile(  // l10n:content — normalized audio-codec profile token (e.g. "dts x"), not user-facing prose
         streamProfile: String?,
         streamDisplayTitles: [String?],
         mediaAudioProfile: String?

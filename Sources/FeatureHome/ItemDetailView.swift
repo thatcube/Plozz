@@ -114,8 +114,7 @@ public struct ItemDetailView: View {
     private struct RequestFailureAlert: Identifiable {
         let id = UUID()
         let title: LocalizedStringResource
-        /// Server-supplied detail — content, so rendered verbatim.
-        let message: String?   // l10n:content — Seerr's own error text
+        let message: MediaRequestActionResult.FailureMessage?
     }
 
     private struct PendingRequestIntent {
@@ -304,7 +303,12 @@ public struct ItemDetailView: View {
         .alert(item: $requestFailure) { failure in
             Alert(
                 title: Text(failure.title),
-                message: failure.message.map(Text.init),
+                message: failure.message.map { detail in
+                    switch detail {
+                    case let .copy(resource): Text(resource)
+                    case let .serverText(text): Text(verbatim: text)
+                    }
+                },
                 dismissButton: .default(Text("OK"))
             )
         }

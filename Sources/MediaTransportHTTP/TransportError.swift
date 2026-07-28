@@ -29,7 +29,7 @@ public enum TransportError: Error, Equatable, Sendable {
 }
 
 extension TransportError: CustomStringConvertible {
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing diagnostic (case-name only; reason text is deliberately excluded, see doc comment above)
         switch self {
         case .invalidOrigin: return "invalidOrigin"
         case .crossOriginRedirectRejected: return "crossOriginRedirectRejected"

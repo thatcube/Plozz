@@ -136,7 +136,7 @@ public actor OverviewRouter {
     /// A single search-scoped extract call: `generator=search` finds the best page
     /// for "<title> [<year>] film" and `prop=extracts` returns its plain-text intro
     /// in the *same* request — accurate (search-ranked, not title-guessed) and cheap.
-    private static func wikipediaOverview(for query: MetadataQuery) async -> String? {
+    private static func wikipediaOverview(for query: MetadataQuery) async -> String? {  // l10n:content — plot/overview text sourced from Wikipedia, rendered verbatim like MediaItem.overview
         var search = query.title
         if let year = query.year { search += " \(year)" }
         // A gentle hint toward the film/series article without hard-filtering, so a

@@ -39,7 +39,7 @@ struct LastFmSessionResponse: Decodable, Equatable {
 /// returns these both as HTTP 200 bodies and behind 403 responses.
 public struct LastFmAPIError: Error, Equatable {
     public let code: Int
-    public let message: String
+    public let message: String  // l10n:content — Last.fm API error text; never read by callers (only `.isPendingAuthorization`/`.isTokenExpired` via `code` are checked)
 
     /// The request token has not yet been authorized by the user — keep polling.
     public var isPendingAuthorization: Bool { code == 14 }

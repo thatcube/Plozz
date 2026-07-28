@@ -21,10 +21,10 @@ public struct TopShelfSnapshot: Codable, Equatable, Sendable {
         /// Stable identifier for the section (e.g. "continue", "latest").
         public var id: String
         /// User-facing carousel title (e.g. "Continue Watching").
-        public var title: String
+        public var title: String  // l10n:content — already-resolved section title text; must cross the App Group process boundary as plain text (see TopShelfPublisher.resolved)
         public var items: [Item]
 
-        public init(id: String, title: String, items: [Item]) {
+        public init(id: String, title: String, items: [Item]) {  // l10n:content — see `title` above
             self.id = id
             self.title = title
             self.items = items
@@ -34,8 +34,8 @@ public struct TopShelfSnapshot: Codable, Equatable, Sendable {
     public struct Item: Codable, Equatable, Identifiable, Sendable {
         /// Stable identifier — the Jellyfin item id, used for the play deep link.
         public var id: String
-        public var title: String
-        public var subtitle: String?
+        public var title: String  // l10n:content — server-supplied media title
+        public var subtitle: String?  // l10n:content — server-supplied media subtitle (e.g. episode label)
         /// Poster artwork (2:3) for the shelf card. Usually a remote Jellyfin
         /// poster URL, but for a mid-playback Continue-Watching item it's a
         /// **local file URL** in the shared App Group container pointing at a
@@ -48,8 +48,8 @@ public struct TopShelfSnapshot: Codable, Equatable, Sendable {
 
         public init(
             id: String,
-            title: String,
-            subtitle: String? = nil,
+            title: String,  // l10n:content — server-supplied media title
+            subtitle: String? = nil,  // l10n:content — server-supplied media subtitle
             imageURL: URL? = nil,
             playbackProgress: Double? = nil
         ) {

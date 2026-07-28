@@ -7,7 +7,7 @@ import CoreModels
 /// concrete persistence actor.
 struct PendingEnrichment: Sendable, Equatable {
     var itemID: String
-    var title: String
+    var title: String  // l10n:content — media title from the pending item
     var year: Int?
     var isMovie: Bool
     var isAnime: Bool
@@ -27,7 +27,7 @@ struct EnrichmentRecord: Sendable, Equatable {
     /// The resolved canonical show/movie title (e.g. "Avatar: The Last
     /// Airbender"), overlaid over a generic folder-derived display title at read
     /// time. Persisted in the `title` enrichment column so it survives re-scans.
-    var title: String?
+    var title: String?  // l10n:content — resolved canonical media title from external provider
     var provenance = MetadataProvenance()
 
     static func sourced(

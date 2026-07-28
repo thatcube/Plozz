@@ -23,7 +23,11 @@ public struct PlozzAttributionLicense: Hashable, Identifiable, Sendable {
 }
 
 public struct PlozzAttribution: Identifiable, Sendable {
-    public let title: String  // l10n:content — legal/attribution copy: third-party project name + license text, deliberately verbatim
+    /// The whole attributions page is deliberately English, headings included:
+    /// it is trademark and licence language, where a well-meaning translation
+    /// can change the legal meaning. Kept together so the page doesn't read as
+    /// half-translated.
+    public let title: String  // l10n:content — legal/attribution page, deliberately English
     public let detail: String
     public let licenses: [PlozzAttributionLicense]
 
@@ -37,6 +41,9 @@ public struct PlozzAttribution: Identifiable, Sendable {
         self.licenses = licenses
     }
 
+    /// Identity is the heading only because the page is deliberately never
+    /// translated. If that ever changes, this has to become a stable id first —
+    /// identity derived from display text changes with the language.
     public var id: String { title }
 }
 

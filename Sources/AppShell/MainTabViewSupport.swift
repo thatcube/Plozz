@@ -120,35 +120,37 @@ func seerRequestResult(_ outcome: SeerRequestOutcome, actingName: String?) -> Me
         case .noDefaults:
             return .failure(
                 title: "No Default Server",
-                message: "\(actingName ?? "Your Seerr user") has no default quality profile or server set. Set one in the Seerr web app, then try again."
+                message: .copy("\(actingName ?? "Your Seerr user") has no default quality profile or server set. Set one in the Seerr web app, then try again.")
             )
         case .noPermission:
             return .failure(
                 title: "Not Allowed",
-                message: "\(who) doesn’t have permission to request this. Check the user’s permissions in Seerr."
+                message: .copy("\(who) doesn’t have permission to request this. Check the user’s permissions in Seerr.")
             )
         case .quotaExceeded:
             return .failure(
                 title: "Request Limit Reached",
-                message: "\(who) has reached the request limit. Try again later or adjust the quota in Seerr."
+                message: .copy("\(who) has reached the request limit. Try again later or adjust the quota in Seerr.")
             )
         case .alreadyRequested:
             return .failure(
                 title: "Already Requested",
-                message: "This title has already been requested."
+                message: .copy("This title has already been requested.")
             )
         case .invalidActingUser:
             return .failure(
                 title: "Seerr User Not Found",
-                message: "The linked Seerr user no longer exists. Re-link this profile in Settings ▸ This Apple TV ▸ Seerr."
+                message: .copy("The linked Seerr user no longer exists. Re-link this profile in Settings ▸ This Apple TV ▸ Seerr.")
             )
         case .unreachable:
             return .failure(
                 title: "Can’t Reach Seerr",
-                message: "Couldn’t reach the Seerr server. Check your connection and try again."
+                message: .copy("Couldn’t reach the Seerr server. Check your connection and try again.")
             )
         case let .unknown(message):
-            return .failure(title: "Request Failed", message: message)
+            // `map`, not `?? ""`: with no server message the alert should have no
+            // body at all, rather than an empty one under the title.
+            return .failure(title: "Request Failed", message: message.map { .serverText($0) })
         }
     }
 }

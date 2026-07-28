@@ -77,7 +77,7 @@ struct PlexHub: Decodable {
     let context: String?
     /// Display heading, already humanised by Plex ("Recently Added Movies",
     /// "More in Drama", "Because you watched Inception").
-    let title: String?
+    let title: String?  // l10n:content — server-supplied hub display title
     /// The hub's item type ("movie", "show", "episode", "clip", "mixed", …).
     let type: String?
     /// Whether more items exist beyond those inlined here.
@@ -92,7 +92,7 @@ struct PlexHub: Decodable {
 /// A library section (`/library/sections`).
 struct PlexDirectory: Decodable {
     let key: String?
-    let title: String?
+    let title: String?  // l10n:content — server-supplied library section title
     let type: String?          // "movie", "show", "artist", "photo"
     let thumb: String?
     let art: String?
@@ -123,7 +123,7 @@ struct PlexMetadata: Decodable {
     let type: String?          // "movie", "show", "season", "episode", "clip"
     /// For extras/clips, the kind of extra, e.g. "trailer", "behindTheScenes".
     let subtype: String?
-    let title: String?
+    let title: String?  // l10n:content — server-supplied media item title
     /// Original-language title (`originalTitle`), present when distinct from the
     /// localised `title`. Used as an extra cross-server discovery query.
     let originalTitle: String?
@@ -487,7 +487,7 @@ struct PlexSubtitleSearchResponse: Decodable {
 /// them inconsistently (JSON number vs string vs bool).
 struct PlexSubtitleSearchStream: Decodable {
     let key: String?
-    let title: String?
+    let title: String?  // l10n:content — provider-supplied subtitle release title
     let language: String?
     let languageCode: String?
     let format: String?
@@ -531,7 +531,7 @@ struct PlexUserDTO: Decodable {
     let id: Int?
     let uuid: String?
     let username: String?
-    let title: String?
+    let title: String?  // l10n:content — server-supplied Plex account display name
     let email: String?
     let thumb: String?
 }
@@ -547,7 +547,7 @@ struct PlexHomeUsersDTO: Decodable {
 struct PlexHomeUserDTO: Decodable {
     let id: Int?
     let uuid: String?
-    let title: String?
+    let title: String?  // l10n:content — server-supplied Plex Home user display name
     let username: String?
     let admin: Bool?
     let restricted: Bool?

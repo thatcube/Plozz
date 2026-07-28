@@ -35,9 +35,9 @@ public enum PasswordChallengeScheme: String, Sendable, CaseIterable {
 /// already established.
 public struct PasswordAuthPolicy: Sendable, Equatable {
     public let acceptedSchemes: Set<PasswordChallengeScheme>
-    private let label: String
+    private let label: String  // l10n:content — internal debug label ("automatic"/"digestOnly"/…), used only in description
 
-    private init(acceptedSchemes: Set<PasswordChallengeScheme>, label: String) {
+    private init(acceptedSchemes: Set<PasswordChallengeScheme>, label: String) {  // l10n:content — internal debug label, never displayed
         self.acceptedSchemes = acceptedSchemes
         self.label = label
     }
@@ -77,7 +77,7 @@ public enum WebDAVCredential: Sendable {
 extension WebDAVCredential: CustomStringConvertible {
     /// Redacted description safe to log — never includes the password or
     /// token value.
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing debug description, never localized
         switch self {
         case .anonymous:
             return "WebDAVCredential.anonymous"

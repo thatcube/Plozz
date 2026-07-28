@@ -173,17 +173,15 @@ struct SeerDetailView: View {
 
     // MARK: - Connected
 
-    private func connectionPanel(summary: String) -> some View {
+    private func connectionPanel(summary: LocalizedStringResource) -> some View {
         SettingsPanel(title: "Connection") {
             VStack(alignment: .leading, spacing: 18) {
                 Label("Connected", systemImage: "checkmark.seal.fill")
                     .font(.headline)
                     .foregroundStyle(.green)
-                if !summary.isEmpty {
-                    Text(summary)
-                        .font(.callout)
-                        .plozzForeground(.secondary)
-                }
+                Text(summary)
+                    .font(.callout)
+                    .plozzForeground(.secondary)
                 if let host = seer.savedBaseURLString {
                     Text(host)
                         .font(.footnote)
@@ -255,7 +253,7 @@ struct SeerDetailView: View {
             ProfileAvatarView(profile: profile, size: 40)
             Text(profile.name)
             Spacer()
-            Text(mappedName ?? "Admin — unrestricted")
+            mappedName.map { Text(verbatim: $0) } ?? Text("Admin — unrestricted")
                 .foregroundStyle(mappedName == nil ? .secondary : .primary)
             Image(systemName: "chevron.right").font(.caption).plozzForeground(.tertiary)
         }
@@ -322,8 +320,8 @@ struct SeerUserPickerView: View {
                 ) {
                     VStack(spacing: 14) {
                         row(
-                            title: "Admin — unrestricted",
-                            subtitle: "Requests as the admin; no per-user quota or approval.",
+                            title: Text("Admin — unrestricted"),
+                            subtitle: Text("Requests as the admin; no per-user quota or approval."),
                             isSelected: selectedUserID == nil
                         ) {
                             onSelect(nil)
@@ -358,8 +356,8 @@ struct SeerUserPickerView: View {
                                 .padding(.top, 6)
                             ForEach(list) { user in
                                 row(
-                                    title: user.name,
-                                    subtitle: user.subtitle,
+                                    title: Text(verbatim: user.name),
+                                    subtitle: user.subtitle.map { Text(verbatim: $0) },
                                     isSelected: user.id == selectedUserID
                                 ) {
                                     onSelect(user)
@@ -399,13 +397,16 @@ struct SeerUserPickerView: View {
     }
 
     @ViewBuilder
-    private func row(title: String, subtitle: String?, isSelected: Bool, action: @escaping () -> Void) -> some View {   // l10n:content — Seerr user name and detail
+    /// Pre-built `Text` so each caller says whether it is passing our own wording
+    /// or a Seerr user's name. Typed `String` and marked content, it was right
+    /// for the user rows and wrong for the "Admin" row above them.
+    private func row(title: Text, subtitle: Text?, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                    if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle).font(.caption).plozzForeground(.secondary)
+                    title
+                    if let subtitle {
+                        subtitle.font(.caption).plozzForeground(.secondary)
                     }
                 }
                 Spacer()

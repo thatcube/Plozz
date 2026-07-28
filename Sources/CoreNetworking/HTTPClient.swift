@@ -53,7 +53,7 @@ public extension HTTPClient {
 }
 
 enum HTTPDecodeDiagnostics {
-    static func failureDescription(_ error: Error) -> String {
+    static func failureDescription(_ error: Error) -> String {  // l10n:content — developer-facing decode diagnostic, only ever logged
         switch error {
         case let DecodingError.keyNotFound(key, context):
             return "keyNotFound(\(key.stringValue)) at \(codingPath(context.codingPath))"

@@ -100,7 +100,7 @@ public struct WikidataArtworkProvider: ArtworkProvider {
         return response?.query?.search?.first?.title
     }
 
-    private func searchQIDByTitle(_ title: String) async -> String? {
+    private func searchQIDByTitle(_ title: String) async -> String? {  // l10n:content — media title used as a Wikidata lookup key
         guard let escaped = metadataEscaped(title),
               let url = URL(string: "https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&language=en&uselang=en&type=item&limit=1&search=\(escaped)")
         else { return nil }
@@ -257,7 +257,7 @@ public struct WikidataArtworkProvider: ArtworkProvider {
     struct SearchResponse: Decodable {
         let query: Query?
         struct Query: Decodable { let search: [Hit]? }
-        struct Hit: Decodable { let title: String? }
+        struct Hit: Decodable { let title: String? }  // l10n:content — Wikidata entity label, not user-facing prose
     }
 
     struct WBSearchResponse: Decodable {

@@ -33,7 +33,7 @@ enum NFORootKind: String, Sendable, Equatable {
 /// or network work — see `ShareNFOParser`.
 struct ParsedNFO: Sendable, Equatable {
     var root: NFORootKind
-    var title: String?
+    var title: String?  // l10n:content — media title parsed from local NFO metadata file
     var originalTitle: String?
     var sortTitle: String?
     var year: Int?
@@ -132,7 +132,7 @@ private final class NFODelegate: NSObject, XMLParserDelegate {
     private var elementStack: [String] = []
     private var textBuffer = ""
 
-    private var title: String?
+    private var title: String?  // l10n:content — media title parsed from local NFO metadata file
     private var originalTitle: String?
     private var sortTitle: String?
     private var year: Int?

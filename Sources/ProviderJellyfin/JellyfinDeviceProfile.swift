@@ -27,7 +27,7 @@ public struct JellyfinDeviceProfile: Sendable, Hashable {
     ///
     /// When `token` is present it's appended as `Token="…"`. The full value is
     /// sensitive and must be redacted before logging (see `PlozzLog`).
-    public func authorizationHeaderValue(token: String? = nil) -> String {
+    public func authorizationHeaderValue(token: String? = nil) -> String {  // l10n:content — HTTP header value, not user-facing text
         var parts = [
             "Client=\(quoted(client))",
             "Device=\(quoted(device))",

@@ -68,7 +68,7 @@ public struct TMDbRatingsProvider: ExternalRatingsProviding {
         )
     }
 
-    private func search(title: String, year: Int?, kind: Kind) async -> Score? {
+    private func search(title: String, year: Int?, kind: Kind) async -> Score? {  // l10n:content — media title used as a TMDb search query parameter
         var query = [URLQueryItem(name: "query", value: title)]
         if let year {
             // TMDb names the year filter differently per media type, and passing

@@ -396,7 +396,7 @@ actor ShareCatalogStore {
         _ = sqlite3_step(stmt)
     }
 
-    func meta(_ key: String) -> String? {
+    func meta(_ key: String) -> String? {  // l10n:content — SQL query text embedded in the function body, not user-facing prose
         ensureOpen()
         guard db != nil else { return nil }
         var stmt: OpaquePointer?
@@ -1496,7 +1496,7 @@ actor ShareCatalogStore {
     /// requirement for a `movie.nfo` there to apply — return that group's
     /// representative (`MIN(rel_path)`) file, else `nil` (no movies, or more than
     /// one distinct group: ambiguous).
-    func unambiguousMovieGroupRepresentative(inDirectory dir: String) -> String? {
+    func unambiguousMovieGroupRepresentative(inDirectory dir: String) -> String? {  // l10n:content — SQL query text embedded in the function body, not user-facing prose
         ensureOpen()
         guard db != nil else { return nil }
         var repsByGroup: [String: String] = [:]
@@ -1514,7 +1514,7 @@ actor ShareCatalogStore {
     /// The movie group's representative (`MIN(rel_path)`) file for ANY member's
     /// relPath — the id local movie writes always target (mirrors the external
     /// enrichment convention, which projection reads only via this same id).
-    func movieGroupRepresentativeRelPath(forMemberRelPath relPath: String) -> String {
+    func movieGroupRepresentativeRelPath(forMemberRelPath relPath: String) -> String {  // l10n:content — SQL query text embedded in the function body, not user-facing prose
         ensureOpen()
         guard db != nil else { return relPath }
         var groupKey: String?
@@ -1531,7 +1531,7 @@ actor ShareCatalogStore {
 
     /// The series whose persisted `metadata_root` equals `root` — how a
     /// `tvshow.nfo` resolves to its series.
-    func seriesKey(forMetadataRoot root: String) -> String? {
+    func seriesKey(forMetadataRoot root: String) -> String? {  // l10n:content — SQL query text embedded in the function body, not user-facing prose
         ensureOpen()
         guard db != nil else { return nil }
         var key: String?

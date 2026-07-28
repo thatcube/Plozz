@@ -83,8 +83,8 @@ struct CustomizeHomeDetailView: View {
     @ViewBuilder private var homeRowsDetail: some View {
         VStack(alignment: .leading, spacing: 24) {
             HomeRowsGroupCard(
-                title: "Shared rows",
-                subtitle: "Combined across all your libraries",
+                title: Text("Shared rows"),
+                subtitle: Text("Combined across all your libraries"),
                 systemIcon: "rectangle.stack.fill"
             ) {
                 SettingsCheckList(
@@ -126,7 +126,7 @@ struct CustomizeHomeDetailView: View {
                 let libraries = homeVisibleLibraries
                 if libraries.isEmpty {
                     HomeRowsGroupCard(
-                        title: "No libraries shown on Home",
+                        title: Text("No libraries shown on Home"),
                         systemIcon: "rectangle.on.rectangle.slash"
                     ) {
                         Text("Enable a library on Your Libraries to give it its own rows.")
@@ -138,8 +138,8 @@ struct CustomizeHomeDetailView: View {
                 } else {
                     ForEach(libraries) { library in
                         HomeRowsGroupCard(
-                            title: library.library.title,
-                            subtitle: library.serverName,
+                            title: Text(verbatim: library.library.title),
+                            subtitle: Text(verbatim: library.serverName),
                             providerKind: library.providerKind,
                             transportKind: library.transportKind
                         ) {
@@ -391,8 +391,14 @@ struct CustomizeHomeDetailView: View {
 /// server. The border + small header make each source read as its own group
 /// instead of a flat, repeating list.
 private struct HomeRowsGroupCard<Content: View>: View {
-    let title: String   // l10n:content — library name from the server
-    var subtitle: String? = nil   // l10n:content — server name
+    /// Pre-built `Text` rather than a String, because this card heads BOTH kinds
+    /// of group: the "Shared rows" card, whose header is our own copy, and a
+    /// library card, whose header is a library and server name from the server.
+    /// It was typed `String` and marked as server content, which was true for one
+    /// of the three callers — so the two that pass copy rendered verbatim and
+    /// never reached the catalog at all.
+    let title: Text
+    var subtitle: Text? = nil
     /// When set, the header shows this provider's brand logo (library cards).
     var providerKind: ProviderKind? = nil
     /// For a media-share library, the transport shown as a badge on its drive icon.
@@ -418,13 +424,13 @@ private struct HomeRowsGroupCard<Content: View>: View {
                 // the title reads prominent, the server name trails as a lighter
                 // qualifier separated by a mid-dot.
                 HStack(spacing: 8) {
-                    Text(title)
+                    title
                         .font(.headline.weight(.semibold))
                     if let subtitle {
                         Text(verbatim: "·")
                             .font(.subheadline)
                             .plozzForeground(.tertiary)
-                        Text(subtitle)
+                        subtitle
                             .font(.subheadline)
                             .plozzForeground(.secondary)
                     }

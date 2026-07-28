@@ -1,6 +1,7 @@
 #if os(iOS)
 import AppRuntime
 import CoreModels
+import CoreNetworking
 import CoreUI
 import FeatureAuthCore
 import Foundation
@@ -167,7 +168,8 @@ struct PlozziOSAddSFTPShareView: View {
         case .authenticationFailed:
             errorMessage = Text("The SFTP credentials were rejected.")
         case let .failed(reason):
-            errorMessage = Text(verbatim: reason)
+            PlozzLog.networking.error("SFTP host-key capture failed: \(reason)")
+            errorMessage = Text("Couldn’t connect to this SFTP server.")
         case .cancelled:
             errorMessage = Text("The connection was cancelled.")
         }
@@ -196,7 +198,8 @@ struct PlozziOSAddSFTPShareView: View {
         case .unreachable:
             errorMessage = Text("Couldn’t reach this SFTP server.")
         case let .failed(reason):
-            errorMessage = Text(verbatim: reason)
+            PlozzLog.networking.error("SFTP folder listing failed: \(reason)")
+            errorMessage = Text("Couldn’t connect to this SFTP server.")
         case .cancelled:
             errorMessage = Text("The connection was cancelled.")
         }

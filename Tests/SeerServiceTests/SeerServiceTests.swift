@@ -540,7 +540,8 @@ final class SeerServiceTests: XCTestCase {
 
         await service.connect(baseURL: seerBaseURL, apiKey: "KEY")
 
-        XCTAssertEqual(service.phase, .connected(summary: "Version 1.33.2"))
+        let version = "1.33.2"
+        XCTAssertEqual(service.phase, .connected(summary: "Version \(version)"))
         XCTAssertTrue(service.isConfigured)
         XCTAssertEqual(store.load()?.apiKey, "KEY")
     }

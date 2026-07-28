@@ -188,7 +188,7 @@ public struct MetadataProviderRuntime: Sendable {
         await breakerRegistry.resetBreakers(credentialID: credentialID)
     }
 
-    private static func describe(_ kind: ProviderFailureKind) -> String {
+    private static func describe(_ kind: ProviderFailureKind) -> String {  // l10n:content — developer-facing diagnostic label, currently unused
         switch kind {
         case .transient: return "unavailable"
         case .unauthorized: return "unauthorized"

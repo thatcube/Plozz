@@ -43,7 +43,7 @@ struct AniListClient: Sendable {
     // MARK: - OAuth token exchange
 
     /// Exchanges an authorization code for an access token (code grant flow).
-    func exchangeCode(_ code: String) async throws -> String {
+    func exchangeCode(_ code: String) async throws -> String {  // l10n:content — returns an OAuth token; the AppError.unknown(...) diagnostic text inside is never surfaced (see AppError.userMessage)
         guard let clientID = config.clientID, let clientSecret = config.clientSecret else {
             throw AppError.unknown("AniList: missing client credentials")
         }
@@ -67,7 +67,7 @@ struct AniListClient: Sendable {
     // MARK: - Media lookup
 
     /// Looks up an anime by its AniList ID, MAL ID, or title.
-    func findAnime(anilistID: Int?, malID: Int?, title: String?, accessToken: String) async throws -> Int? {
+    func findAnime(anilistID: Int?, malID: Int?, title: String?, accessToken: String) async throws -> Int? {  // l10n:content — media title used as an AniList lookup key
         // Prefer direct AniList ID
         if let id = anilistID { return id }
 

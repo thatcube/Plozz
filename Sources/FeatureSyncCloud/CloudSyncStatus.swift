@@ -51,7 +51,7 @@ public final class CloudSyncStatus {
 
     /// Record an error, but only surface it after a grace period — so a blip that
     /// the engine immediately resolves (a following idle) never shows red.
-    func setError(_ message: String, diagnostic: String?) {
+    func setError(_ message: String, diagnostic: String?) {  // l10n:content — OS/CloudKit-supplied, already-localized error text
         pendingErrorTask?.cancel()
         pendingErrorTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 3_500_000_000)

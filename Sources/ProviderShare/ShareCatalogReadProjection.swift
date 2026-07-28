@@ -378,7 +378,7 @@ enum ShareCatalogReadProjection {
 
     /// Build a series item from already-decoded row values. Pure: the store
     /// composes the query and supplies the columns; this only shapes a `MediaItem`.
-    static func seriesItem(key: String, title: String, library: CatalogLibrary, year: Int?) -> MediaItem {
+    static func seriesItem(key: String, title: String, library: CatalogLibrary, year: Int?) -> MediaItem {  // l10n:content — media title, feeds MediaItem.title
         MediaItem(
             id: ShareCatalogID.series(key),
             title: title,

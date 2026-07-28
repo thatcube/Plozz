@@ -415,7 +415,7 @@ struct CatalogReadQueries {
     /// The explicit TheTVDB id a series' folder/filenames declared via a
     /// `[tvdb-####]` tag, or nil. Read from a sample rel_path — the enricher uses it
     /// to resolve metadata authoritatively by id instead of an ambiguous title search.
-    func seriesEmbeddedTVDBID(seriesKey: String) -> String? {
+    func seriesEmbeddedTVDBID(seriesKey: String) -> String? {  // l10n:content — SQL query text embedded in the function body, not user-facing prose
         guard db != nil else { return nil }
         var relPath: String?
         query("""
@@ -516,7 +516,7 @@ struct CatalogReadQueries {
     private func movieItem(key: String) -> MediaItem? {
         let groupKey = resolvedMovieGroupKey(key)
         var files: [(relPath: String, basename: String, size: Int64)] = []
-        var title: String?
+        var title: String?  // l10n:content — parsed media title from the local library scan
         var year: Int?
         query("""
         SELECT rel_path, basename, size, title, year FROM assets
@@ -549,7 +549,7 @@ struct CatalogReadQueries {
     /// The best default file to play for a logical movie when the caller named no
     /// specific version (play-from-card, before the detail's version picker set
     /// one): the highest parsed resolution, then the largest file.
-    func defaultMovieRelPath(forKey key: String) -> String? {
+    func defaultMovieRelPath(forKey key: String) -> String? {  // l10n:content — SQL query text embedded in the function body, not user-facing prose
         guard db != nil else { return nil }
         let groupKey = resolvedMovieGroupKey(key)
         var best: (rel: String, height: Int, size: Int64)?
@@ -572,7 +572,7 @@ struct CatalogReadQueries {
     /// Canonical watch-state id for a leaf id: a movie file (`f:<rel>`) folds into
     /// its logical `movie:<key>` so resume/played is unified across versions; an
     /// episode file or an un-keyed movie keeps its own id.
-    func canonicalItemID(_ id: String) -> String {
+    func canonicalItemID(_ id: String) -> String {  // l10n:content — SQL query text embedded in the function body, not user-facing prose
         guard db != nil else { return id }
         if let key = ShareCatalogID.movieKey(forMovieID: id) {
             return ShareCatalogID.movie(resolvedMovieGroupKey(key))
@@ -635,7 +635,7 @@ struct CatalogReadQueries {
     /// Resolve a pre-grouping `movie:<movie_key>` id to its persisted logical
     /// group. Keeps v3 Continue Watching records, deep links, and queued watch
     /// writes working after v4 combines adjacent-year variants.
-    func resolvedMovieGroupKey(_ key: String) -> String {
+    func resolvedMovieGroupKey(_ key: String) -> String {  // l10n:content — SQL query text embedded in the function body, not user-facing prose
         guard db != nil else { return key }
         var resolved: String?
         query("""
@@ -655,7 +655,7 @@ struct CatalogReadQueries {
         return movieAliasGroup(for: key) ?? key
     }
 
-    private func movieAliasGroup(for aliasID: String) -> String? {
+    private func movieAliasGroup(for aliasID: String) -> String? {  // l10n:content — SQL query text embedded in the function body, not user-facing prose
         var group: String?
         query("SELECT group_key FROM movie_alias WHERE alias_id=? LIMIT 1;",
               bind: { self.bindText($0, 1, aliasID) }) { stmt in
@@ -1070,7 +1070,7 @@ struct CatalogReadQueries {
 
     /// The enrichment row id for a movie item: the group's representative file id
     /// for a logical `movie:<key>`, else the id unchanged (a legacy `f:` movie).
-    private func movieEnrichmentKey(forID id: String) -> String {
+    private func movieEnrichmentKey(forID id: String) -> String {  // l10n:content — SQL query text embedded in the function body, not user-facing prose
         guard let mkey = ShareCatalogID.movieKey(forMovieID: id) else { return id }
         let groupKey = resolvedMovieGroupKey(mkey)
         var rep: String?

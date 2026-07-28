@@ -32,7 +32,7 @@ struct AniListGraphQLResponse<T: Decodable>: Decodable {
 }
 
 struct AniListGraphQLError: Decodable {
-    let message: String
+    let message: String  // l10n:content — server-supplied GraphQL error text; only reaches AppError.unknown(...), which discards it
     let status: Int?
 }
 

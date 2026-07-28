@@ -84,7 +84,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     }
     #endif
 
-    public func deviceID() -> String {
+    public func deviceID() -> String {  // l10n:content — stable device UUID identifier, not user-facing text
         Self.processMutationLock.lock()
         defer { Self.processMutationLock.unlock() }
         lock.lock()

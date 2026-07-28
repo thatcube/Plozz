@@ -11,7 +11,7 @@ public struct ProviderNextEpisode: Sendable, Equatable, Hashable {
     public var seasonNumber: Int?
     public var episodeNumber: Int?
     public var absoluteEpisodeNumber: Int?
-    public var title: String?
+    public var title: String?  // l10n:content — episode title from an external provider
     public var airDate: Date
     public var datePrecision: AirDatePrecision
     public var sourceURL: URL?
@@ -20,7 +20,7 @@ public struct ProviderNextEpisode: Sendable, Equatable, Hashable {
         seasonNumber: Int? = nil,
         episodeNumber: Int? = nil,
         absoluteEpisodeNumber: Int? = nil,
-        title: String? = nil,
+        title: String? = nil,  // l10n:content — episode title from an external provider
         airDate: Date,
         datePrecision: AirDatePrecision,
         sourceURL: URL? = nil

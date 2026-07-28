@@ -90,7 +90,7 @@ public enum WebDAVPathPolicy {
     /// base per RFC 3986). Returns the normalized, root-relative path on
     /// success and throws if the href is cross-origin, malformed, or escapes
     /// the configured root.
-    public static func resolve(href rawHref: String, root: WebDAVRoot, requestPath: String) throws -> String {
+    public static func resolve(href rawHref: String, root: WebDAVRoot, requestPath: String) throws -> String {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         guard !rawHref.isEmpty else {
             throw TransportError.malformedMultistatus(reason: "response href is empty")
         }

@@ -170,7 +170,7 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, @unchecked Sendable {
         }
     }
 
-    func realPath(_ path: String) async throws -> String {
+    func realPath(_ path: String) async throws -> String {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         let body = try await request { id, allocator in
             SFTP.encodeRealPath(id: id, path: path, allocator: allocator)
         }

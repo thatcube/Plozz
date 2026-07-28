@@ -98,14 +98,17 @@ struct Finding {
 
 final class Analyzer: SyntaxVisitor {
     private let config: Config
+    private let catalogKeys: Set<String>
     private let relativePath: String
     private let converter: SourceLocationConverter
     private let isAudited: Bool
     private let lines: [String]
     private(set) var findings: [Finding] = []
 
-    init(config: Config, relativePath: String, source: String, tree: SourceFileSyntax, isAudited: Bool) {
+    init(config: Config, catalogKeys: Set<String>, relativePath: String, source: String,
+         tree: SourceFileSyntax, isAudited: Bool) {
         self.config = config
+        self.catalogKeys = catalogKeys
         self.relativePath = relativePath
         self.converter = SourceLocationConverter(fileName: relativePath, tree: tree)
         self.isAudited = isAudited
@@ -155,6 +158,43 @@ final class Analyzer: SyntaxVisitor {
             record("key-from-variable", node,
                    "LocalizedStringKey built from a runtime value.",
                    "A key must be a literal. For content use Text(verbatim:); for copy use a LocalizedStringResource.")
+        }
+
+        // Rule 8 — prose passed at a copy-shaped label that never reached the
+        // catalog. This is the one check that works from the OUTSIDE: it does not
+        // care why the string was missed, only that it is not there.
+        //
+        // It exists because `copy-typed-as-string` can be silenced by an
+        // `l10n:content` marker, and a marker can be wrong. `HomeRowsGroupCard`
+        // was typed `String` and marked "library name from the server" — true for
+        // one of its three callers. The other two passed our own copy, which
+        // rendered verbatim and was invisible to the catalog and to this tool.
+        if isAudited, !catalogKeys.isEmpty, !isMarkedContent(node) {
+            let isCopySink = config.appCopySinks.contains(callee)
+            for argument in node.arguments {
+                let label = argument.label?.text
+                if label == "verbatim" { continue }
+                // Either a copy-shaped argument label anywhere, or ANY argument of
+                // a known copy sink. The second case matters: `Text(name ?? "Admin
+                // — unrestricted")` has no label at all, and the literal is buried
+                // in a `??`, so a rule that only reads whole arguments misses it.
+                //
+                // KNOWN LIMIT: this proves a string EXISTS in the catalog, not
+                // that THIS site extracts it. If the same words are also written
+                // somewhere that does extract, an occurrence that renders
+                // verbatim here looks fine. Telling those apart needs types, so
+                // it stays out of scope — see the note at the top of this file.
+                let interesting = isCopySink || label.map(config.copyPropertyNames.contains) == true
+                guard interesting else { continue }
+                for literal in proseLiterals(in: argument.expression)
+                where !catalogKeys.contains(literal) {
+                    record("copy-not-in-catalog", argument,
+                           "\(callee)(…\"\(literal.prefix(48))\") is not in the catalog.",
+                           "It renders verbatim, so no translator can reach it — usually a copy "
+                           + "parameter typed String. Type it LocalizedStringResource (or Text), or "
+                           + "mark it `// l10n:content` if it really is content.")
+                }
+            }
         }
 
         guard config.appCopySinks.contains(callee) else { return .visitChildren }
@@ -258,6 +298,20 @@ final class Analyzer: SyntaxVisitor {
                 let type = parts[1].trimmingCharacters(in: .whitespaces)
                 return config.copyPropertyNames.contains(label) && type == "String"
             }
+    }
+
+    /// Every plain prose literal inside an expression, including ones nested in a
+    /// `??` or a ternary. Interpolated literals are skipped: they are a format
+    /// string, and the catalog key would be the specifier form, not this text.
+    private func proseLiterals(in expr: ExprSyntax) -> [String] {
+        expr.tokens(viewMode: .sourceAccurate).compactMap { token -> String? in
+            guard case let .stringSegment(text) = token.tokenKind,
+                  looksLikeProse(text),
+                  token.parent?.parent?.as(StringLiteralExprSyntax.self)?
+                      .segments.count == 1
+            else { return nil }
+            return text
+        }
     }
 
     /// A literal with a space and a lowercase letter reads as a sentence rather
@@ -419,6 +473,18 @@ else {
     exit(2)
 }
 
+/// The catalog's key set, for rule 8. Empty (rule disabled) rather than fatal if
+/// the catalog can't be read: the guard must still work in a checkout where the
+/// catalog is mid-edit, and a missing catalog is caught by l10n-sync anyway.
+let catalogKeys: Set<String> = {
+    let path = "\(repoRoot)/App/Resources/Localizable.xcstrings"
+    guard let data = FileManager.default.contents(atPath: path),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let strings = json["strings"] as? [String: Any]
+    else { return [] }
+    return Set(strings.keys)
+}()
+
 let sourcesRoot = "\(repoRoot)/Sources"
 guard let walker = FileManager.default.enumerator(atPath: sourcesRoot) else {
     FileHandle.standardError.write(Data("✗ Could not read \(sourcesRoot)\n".utf8))
@@ -436,8 +502,8 @@ for case let path as String in walker where path.hasSuffix(".swift") {
 
     let isAudited = config.auditedPaths.contains { relative == $0 || relative.hasPrefix($0 + "/") }
     let tree = Parser.parse(source: source)
-    let analyzer = Analyzer(config: config, relativePath: relative, source: source,
-                            tree: tree, isAudited: isAudited)
+    let analyzer = Analyzer(config: config, catalogKeys: catalogKeys, relativePath: relative,
+                            source: source, tree: tree, isAudited: isAudited)
     analyzer.walk(tree)
     findings += analyzer.findings
 }

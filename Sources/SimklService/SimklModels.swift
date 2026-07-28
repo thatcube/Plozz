@@ -64,13 +64,13 @@ struct SimklIDs: Encodable, Equatable {
 }
 
 struct SimklHistoryMovie: Encodable, Equatable {
-    var title: String?
+    var title: String?  // l10n:content — media title sent to Simkl, sourced from our own item metadata
     var year: Int?
     var ids: SimklIDs
 }
 
 struct SimklHistoryShow: Encodable, Equatable {
-    var title: String?
+    var title: String?  // l10n:content — media title sent to Simkl, sourced from our own item metadata
     var year: Int?
     var ids: SimklIDs
 }
@@ -86,7 +86,7 @@ struct SimklHistoryBody: Encodable, Equatable {
 }
 
 struct SimklHistoryMovieEntry: Encodable, Equatable {
-    var title: String?
+    var title: String?  // l10n:content — media title sent to Simkl, sourced from our own item metadata
     var year: Int?
     var ids: SimklIDs
     var watchedAt: String?
@@ -98,7 +98,7 @@ struct SimklHistoryMovieEntry: Encodable, Equatable {
 }
 
 struct SimklHistoryShowEntry: Encodable, Equatable {
-    var title: String?
+    var title: String?  // l10n:content — media title sent to Simkl, sourced from our own item metadata
     var year: Int?
     var ids: SimklIDs
     var seasons: [SimklSeasonEntry]
@@ -134,13 +134,13 @@ struct SimklScrobbleBody: Encodable, Equatable {
 }
 
 struct SimklScrobbleMovieRef: Encodable, Equatable {
-    var title: String?
+    var title: String?  // l10n:content — media title sent to Simkl, sourced from our own item metadata
     var year: Int?
     var ids: SimklIDs
 }
 
 struct SimklScrobbleShowRef: Encodable, Equatable {
-    var title: String?
+    var title: String?  // l10n:content — media title sent to Simkl, sourced from our own item metadata
     var year: Int?
     var ids: SimklIDs
 }

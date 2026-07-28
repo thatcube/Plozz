@@ -308,7 +308,7 @@ final class WebDAVMediaTransportFileSystem: MediaTransportFileSystem, @unchecked
     /// Builds the absolute, root-anchored WebDAV path for a transport-relative
     /// path, and asserts it is normalized and contained by the configured root
     /// (defense-in-depth on top of `NetworkFileLocator`/scanner normalization).
-    private func absolutePath(forRelative relativePath: String) throws -> String {
+    private func absolutePath(forRelative relativePath: String) throws -> String {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         let rootBase = trimmedRoot()
         let relative = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let absolute: String
@@ -328,7 +328,7 @@ final class WebDAVMediaTransportFileSystem: MediaTransportFileSystem, @unchecked
 
     /// Strips the configured root prefix off an absolute (server-resolved)
     /// path to produce the transport-relative path `RemoteFileEntry` expects.
-    private func relativeUnderRoot(_ absolutePath: String) throws -> String {
+    private func relativeUnderRoot(_ absolutePath: String) throws -> String {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         var path = absolutePath
         if path.count > 1, path.hasSuffix("/") { path.removeLast() }
         let rootBase = trimmedRoot()

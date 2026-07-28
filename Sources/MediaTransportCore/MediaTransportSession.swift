@@ -49,7 +49,7 @@ public struct MediaTransportEndpointIdentity: Hashable, Sendable, CustomStringCo
         return "\(transportIdentifier)://\(displayedHost)\(portText)\(rootPath)"
     }
 
-    private static func normalizeRoot(_ value: String) throws -> String {
+    private static func normalizeRoot(_ value: String) throws -> String {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         let replaced = value.replacingOccurrences(of: "\\", with: "/")
         guard replaced.hasPrefix("/"), !replaced.contains("\0") else {
             throw MediaTransportError.invalidInput(reason: "invalid root")
@@ -86,7 +86,7 @@ public struct MediaTransportSessionKey: Hashable, Sendable, CustomStringConverti
         self.role = role
     }
 
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing debug description, never localized
         "MediaTransportSessionKey(account: \(accountID), endpoint: \(endpoint), role: \(role.rawValue), " +
         "credentialRevision: \(credentialRevision.rawValue.uuidString), trustRevision: \(trustRevision.uuidString))"
     }

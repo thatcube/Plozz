@@ -280,7 +280,7 @@ public actor CloudConfigSyncService {
         }
     }
 
-    static func describe(_ error: Error) -> String {
+    static func describe(_ error: Error) -> String {  // l10n:content — developer-facing CloudKit diagnostic (NSError domain/code dump), logged only
         let ns = error as NSError
         var parts = ["\(ns.domain) code=\(ns.code): \(ns.localizedDescription)"]
         if let ck = error as? CKError {

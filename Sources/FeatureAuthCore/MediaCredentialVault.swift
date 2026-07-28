@@ -85,7 +85,7 @@ public enum MediaShareAuthentication: Equatable, Sendable {
 }
 
 extension MediaShareAuthentication: CustomStringConvertible, CustomDebugStringConvertible {
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing debug description, never localized
         "MediaShareAuthentication(kind: \(kind.rawValue))"
     }
 
@@ -189,7 +189,7 @@ public struct MediaShareCredentialEnvelope: Equatable, Sendable {
 }
 
 extension MediaShareCredentialEnvelope: CustomStringConvertible, CustomDebugStringConvertible {
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing debug description, never localized
         let hasTrust = trust.tlsLeafCertificateSHA256 != nil
             || trust.sshHostKeySHA256 != nil
         return "MediaShareCredentialEnvelope(transport: \(transport.rawValue), authentication: \(authentication.kind.rawValue), trust: \(hasTrust ? "pinned" : "system/default"))"

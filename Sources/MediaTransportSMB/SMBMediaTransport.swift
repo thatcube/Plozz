@@ -1032,7 +1032,7 @@ private func validateSMBRepresentation(
     }
 }
 
-private func normalizedRelativePath(
+private func normalizedRelativePath(  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
     _ path: String,
     allowEmpty: Bool = false
 ) throws -> String {

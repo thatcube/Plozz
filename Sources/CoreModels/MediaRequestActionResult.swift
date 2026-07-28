@@ -104,9 +104,22 @@ public struct MediaRequestActionResult: Sendable, Equatable {
     /// on success. Non-nil signals the UI to present a failure alert.
     public var failureTitle: LocalizedStringResource?
     /// An optional longer explanation shown under `failureTitle`.
-    public var failureMessage: String?
+    ///
+    /// Modelled rather than typed `String` because it is BOTH: most failures
+    /// carry our own wording, and one carries whatever Seerr sent back. It was a
+    /// String marked as server text, which was true for exactly one of five
+    /// cases — the other four rendered our copy verbatim and never reached the
+    /// catalog. An enum makes each caller say which it is.
+    public enum FailureMessage: Equatable, Sendable {
+        /// Plozz's own wording — translatable.
+        case copy(LocalizedStringResource)
+        /// Text the Seerr server sent us — rendered verbatim, never translated.
+        case serverText(String)
+    }
 
-    public init(status: MediaAvailabilityStatus? = nil, failureTitle: LocalizedStringResource? = nil, failureMessage: String? = nil) {
+    public var failureMessage: FailureMessage?
+
+    public init(status: MediaAvailabilityStatus? = nil, failureTitle: LocalizedStringResource? = nil, failureMessage: FailureMessage? = nil) {
         self.status = status
         self.failureTitle = failureTitle
         self.failureMessage = failureMessage
@@ -119,9 +132,8 @@ public struct MediaRequestActionResult: Sendable, Equatable {
         MediaRequestActionResult(status: status)
     }
 
-    /// `message` stays a `String`: it is usually text the Seerr server sent us,
-    /// i.e. content, and is rendered verbatim.
-    public static func failure(title: LocalizedStringResource, message: String? = nil) -> MediaRequestActionResult {  // l10n:content — message is Seerr server text
+    public static func failure(title: LocalizedStringResource,
+                               message: FailureMessage? = nil) -> MediaRequestActionResult {
         MediaRequestActionResult(failureTitle: title, failureMessage: message)
     }
 }

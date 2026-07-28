@@ -223,7 +223,7 @@ public enum SMBShareEnumerator {
         case timedOut
         case failed(String)
 
-        public var description: String {
+        public var description: String {  // l10n:content — CustomStringConvertible for logging only; no call site reads .description (all 3 consumers pattern-match the case and supply their own LocalizedStringResource copy instead — see UnifiedAddShareModel/AddShareViewModel/PlozziOSAddSMBShareView)
             switch self {
             case .authenticationRequired: return "authentication required"
             case .credentialsRejected: return "incorrect username or password"

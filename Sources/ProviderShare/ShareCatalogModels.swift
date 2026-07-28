@@ -41,7 +41,7 @@ struct CatalogAsset: Sendable, Equatable {
     var kind: CatalogAssetKind
     var library: CatalogLibrary
     /// Movie title, or episode title (falls back to `S·E` when the name carried none).
-    var title: String
+    var title: String  // l10n:content — media title parsed from filename/folder
     var year: Int?
     // Episode-only:
     var seriesTitle: String?
@@ -158,7 +158,7 @@ enum ShareCatalogID {
     /// plus its year, so two files of the SAME film collapse to one logical movie
     /// while a same-title different-year film stays distinct. Never contains a
     /// colon. Deterministic and independent of enrichment (see `CatalogAsset`).
-    static func movieKey(fromTitle title: String, year: Int?) -> String {
+    static func movieKey(fromTitle title: String, year: Int?) -> String {  // l10n:content — media title used to derive a stable grouping key
         let base = seriesKey(fromTitle: title)
         let stem = base.isEmpty ? "untitled" : base
         if let year { return "\(stem)-\(year)" }
@@ -168,7 +168,7 @@ enum ShareCatalogID {
     /// User-facing library sort key, matching the common Plex/Jellyfin convention:
     /// ignore a leading standalone English article "The" while leaving the
     /// displayed title untouched (`The Batman` sorts under B; `Theodore` under T).
-    static func sortTitle(from title: String) -> String {
+    static func sortTitle(from title: String) -> String {  // l10n:content — media title used to derive a sort key
         let words = title.split(whereSeparator: \.isWhitespace)
         guard words.count > 1, words[0].caseInsensitiveCompare("the") == .orderedSame else {
             return title.lowercased()
@@ -198,7 +198,7 @@ enum ShareCatalogID {
     /// no tag is present this is exactly `seriesKey(fromTitle:)`, so ordinary shows
     /// are unaffected and a show tagged in only some folders errs toward a harmless
     /// extra card rather than a wrong merge.
-    static func seriesKey(fromTitle title: String, providerTag: String?) -> String {
+    static func seriesKey(fromTitle title: String, providerTag: String?) -> String {  // l10n:content — media title used to derive a stable grouping key
         let base = seriesKey(fromTitle: title)
         guard let tag = providerTag, !tag.isEmpty else { return base }
         let safeTag = seriesKey(fromTitle: tag)   // normalize the tag to the same alphabet
@@ -214,7 +214,7 @@ enum ShareCatalogID {
     /// conventions (accent/case fold, punctuation stripped) so a share series keys
     /// the same way Plex/Jellyfin ones do. Never contains a colon (so
     /// `seasonComponents` can split safely).
-    static func seriesKey(fromTitle title: String) -> String {
+    static func seriesKey(fromTitle title: String) -> String {  // l10n:content — media title used to derive a stable grouping key
         // Fold accents + case, then DELETE apostrophes in place (so "Handmaid's" →
         // "handmaids", not "handmaid s") before mapping other punctuation to spaces.
         let folded = title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)

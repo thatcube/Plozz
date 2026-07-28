@@ -13,7 +13,7 @@ import Foundation
 /// about the user's library layout and never expires, and it stays valid if the
 /// pinned folder is relocated wholesale.
 public struct PinnedMediaSnapshot: Codable, Sendable, Hashable {
-    public var title: String
+    public var title: String  // l10n:content — server-supplied media title
     public var kind: MediaItemKind
     public var year: Int?
     public var sourceAccountID: String?
@@ -40,7 +40,7 @@ public struct PinnedMediaSnapshot: Codable, Sendable, Hashable {
     public var providerIDs: [String: String]
 
     public init(
-        title: String,
+        title: String,  // l10n:content — server-supplied media title
         kind: MediaItemKind,
         year: Int? = nil,
         sourceAccountID: String? = nil,

@@ -352,7 +352,7 @@ private func withMappedSFTPError<Value>(
 /// Path normalization shared across the SFTP filesystem. Rejects traversal and
 /// NUL, and canonicalizes the server-resolved root.
 enum SFTPPathPolicy {
-    static func normalizedRelative(_ path: String, allowEmpty: Bool = false) throws -> String {
+    static func normalizedRelative(_ path: String, allowEmpty: Bool = false) throws -> String {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         guard !path.contains("\0") else {
             throw MediaTransportError.invalidInput(reason: "invalid SFTP path")
         }
@@ -380,7 +380,7 @@ enum SFTPPathPolicy {
 
     /// Normalizes an absolute server path (from `REALPATH`): must be absolute,
     /// NUL-free, traversal-free, and without a trailing slash (except root).
-    static func normalizedAbsoluteRoot(_ path: String) throws -> String {
+    static func normalizedAbsoluteRoot(_ path: String) throws -> String {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         guard path.hasPrefix("/"), !path.contains("\0") else {
             throw MediaTransportError.invalidInput(reason: "invalid SFTP root")
         }

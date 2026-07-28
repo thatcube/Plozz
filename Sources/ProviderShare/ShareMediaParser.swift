@@ -132,7 +132,7 @@ enum ShareMediaParser {
         var season: Int
         var episode: Int
         /// Episode title when the name carried one after the SxxEyy token.
-        var title: String?
+        var title: String?  // l10n:content — episode title parsed from filename
         /// Release year of the SERIES, recovered from the filename/folder (e.g.
         /// `Show (2024)`), used to disambiguate same-name shows at enrichment.
         var year: Int?
@@ -145,7 +145,7 @@ enum ShareMediaParser {
     }
 
     struct Movie: Equatable {
-        var title: String
+        var title: String  // l10n:content — media title parsed from filename
         var year: Int?
     }
 
@@ -367,7 +367,7 @@ enum ShareMediaParser {
     /// Pickers 2022" or a broken "American Pickers S2022E" does NOT (the extra is a
     /// year / date-episode token) — those are date organisation of the SAME show and
     /// must fold into the parent. Case/punctuation-insensitive.
-    static func titleStrictlyExtends(_ title: String, base: String) -> Bool {
+    static func titleStrictlyExtends(_ title: String, base: String) -> Bool {  // l10n:content — compares parsed filename titles, not user-facing prose
         let a = seriesMatchKey(title)
         let b = seriesMatchKey(base)
         guard !b.isEmpty, a != b, a.hasPrefix(b + " ") else { return false }
@@ -509,7 +509,7 @@ enum ShareMediaParser {
         return title(parsed.title, containsStandaloneNumber: number)
     }
 
-    private static func title(_ title: String, containsStandaloneNumber number: Int) -> Bool {
+    private static func title(_ title: String, containsStandaloneNumber number: Int) -> Bool {  // l10n:content — inspects a parsed filename title, not user-facing prose
         title.components(separatedBy: CharacterSet.decimalDigits.inverted)
             .compactMap(Int.init)
             .contains(number)

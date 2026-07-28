@@ -20,7 +20,7 @@ struct SeerDiscoverPage: Decodable {
 struct SeerDiscoverResult: Decodable {
     var id: Int
     var mediaType: String
-    var title: String?
+    var title: String?  // l10n:content — server-supplied media title (movies)
     var name: String?
     var originalTitle: String?
     var originalName: String?
@@ -56,7 +56,7 @@ struct SeerDiscoverResult: Decodable {
     init(
         id: Int,
         mediaType: String,
-        title: String? = nil,
+        title: String? = nil,  // l10n:content — server-supplied media title (movies)
         name: String? = nil,
         originalTitle: String? = nil,
         originalName: String? = nil,
@@ -407,7 +407,7 @@ struct SeerUserDTO: Decodable {
 /// Overseerr's JSON error envelope (`{ "message": "..." }`), decoded from a
 /// non-2xx request response so we can turn it into a specific ``SeerRequestFailure``.
 struct SeerErrorBody: Decodable {
-    var message: String?
+    var message: String?  // l10n:content — Overseerr's raw error text; only used for SeerRequestFailure.classify's pattern matching
 
     enum CodingKeys: String, CodingKey { case message }
 

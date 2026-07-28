@@ -14,7 +14,7 @@ import MetadataKit
 /// Resolves strong external ids (with provenance) for a title.
 protocol ShareExternalIDResolving: Sendable {
     func sourcedExternalIDs(
-        title: String,
+        title: String,  // l10n:content — media title used as an external-provider lookup key
         year: Int?,
         isAnime: Bool,
         isTV: Bool
@@ -84,7 +84,7 @@ struct ShareExternalMetadataClients: Sendable {
 /// Wraps the keyless id resolver.
 private struct KeylessIDResolverClient: ShareExternalIDResolving {
     func sourcedExternalIDs(
-        title: String,
+        title: String,  // l10n:content — media title used as an external-provider lookup key
         year: Int?,
         isAnime: Bool,
         isTV: Bool

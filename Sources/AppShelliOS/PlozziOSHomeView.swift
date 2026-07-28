@@ -26,7 +26,7 @@ struct PlozziOSHomeView: View {
     @State private var heroRequestStatusSetAt: [String: Date] = [:]
     @State private var heroRequestConfirmItem: MediaItem?
     @State private var heroRequestConfirmSeasons: [Int]?
-    @State private var heroRequestError: String?
+    @State private var heroRequestError: LocalizedStringResource?
     private let appModel: PlozziOSAppModel
     private let onAddServer: () -> Void
     private let onShowSettings: () -> Void
@@ -192,7 +192,7 @@ struct PlozziOSHomeView: View {
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(heroRequestError ?? "")
+            heroRequestError.map { Text($0) } ?? Text(verbatim: "")
         }
     }
 

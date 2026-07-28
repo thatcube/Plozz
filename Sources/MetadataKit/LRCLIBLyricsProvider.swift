@@ -48,7 +48,7 @@ public struct LRCLIBLyricsProvider: Sendable {
     /// the exact `/get` endpoint then `/search`, returning the first synced hit
     /// and falling back to plain text only if nothing synced is found anywhere.
     public func lyrics(
-        title: String,
+        title: String,  // l10n:content — track title used as an LRCLIB lookup key
         artist: String,
         album: String?,
         duration: TimeInterval?,
@@ -69,7 +69,7 @@ public struct LRCLIBLyricsProvider: Sendable {
     /// the device is simply offline — a missing answer in that case is
     /// transport noise, not a real verdict.
     public func lyricsWithStatus(
-        title: String,
+        title: String,  // l10n:content — track title used as an LRCLIB lookup key
         artist: String,
         album: String?,
         duration: TimeInterval?,
@@ -213,7 +213,7 @@ public struct LRCLIBLyricsProvider: Sendable {
     /// (e.g. "Soft Rock" → "So", "Lift Me Up" → "Li", "Defeat the Villain" →
     /// "De"), spawning a garbage second query that wastes rate-limited requests
     /// and can even match a different same-artist song.
-    static func cleanedTitle(_ title: String) -> String {
+    static func cleanedTitle(_ title: String) -> String {  // l10n:content — track title used as an LRCLIB lookup key
         var result = title
         result = result.replacingOccurrences(of: "\\([^)]*\\)", with: "", options: .regularExpression)
         result = result.replacingOccurrences(of: "\\[[^\\]]*\\]", with: "", options: .regularExpression)
@@ -232,7 +232,7 @@ public struct LRCLIBLyricsProvider: Sendable {
     /// closest-length record for the title+artist, which is exactly the right
     /// recording when several versions of differing length share a title.
     private func exactMatch(
-        title: String,
+        title: String,  // l10n:content — track title used as an LRCLIB lookup key
         artist: String,
         duration: TimeInterval?
     ) async -> (record: LRCLIBRecord?, reachable: Bool) {
@@ -249,7 +249,7 @@ public struct LRCLIBLyricsProvider: Sendable {
         return (result.value, result.reachable)
     }
 
-    private func search(title: String, artist: String, duration: TimeInterval?) async -> (record: LRCLIBRecord?, reachable: Bool) {
+    private func search(title: String, artist: String, duration: TimeInterval?) async -> (record: LRCLIBRecord?, reachable: Bool) {  // l10n:content — track title used as an LRCLIB lookup key
         let items = [
             URLQueryItem(name: "track_name", value: title),
             URLQueryItem(name: "artist_name", value: artist)
@@ -268,7 +268,7 @@ public struct LRCLIBLyricsProvider: Sendable {
     /// within a tight window of the playing track. Without an artist match,
     /// duration is the only safeguard against unrelated songs that merely share
     /// a title, so the tolerance is deliberately small.
-    private func searchByTitleOnly(title: String, duration: TimeInterval) async -> (record: LRCLIBRecord?, reachable: Bool) {
+    private func searchByTitleOnly(title: String, duration: TimeInterval) async -> (record: LRCLIBRecord?, reachable: Bool) {  // l10n:content — track title used as an LRCLIB lookup key
         let items = [URLQueryItem(name: "track_name", value: title)]
         guard let url = makeURL(path: "/search", queryItems: items) else { return (nil, false) }
         await Self.rateLimiter.acquire()

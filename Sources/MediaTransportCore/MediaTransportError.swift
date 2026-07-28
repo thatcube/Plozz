@@ -21,7 +21,7 @@ public enum MediaTransportError: Error, Equatable, Sendable {
 }
 
 extension MediaTransportError: CustomStringConvertible {
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing diagnostic (case-name only; reason text is deliberately excluded, see doc comment above)
         switch self {
         case .invalidInput: return "invalidInput"
         case .unsupportedCapability: return "unsupportedCapability"

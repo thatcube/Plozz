@@ -5,7 +5,7 @@ import MetadataKit
 /// A request to enrich one logical share item (movie or series).
 struct ShareEnrichRequest: Sendable, Equatable {
     var itemID: String
-    var title: String
+    var title: String  // l10n:content — media title used for external enrichment lookup
     var year: Int?
     var isMovie: Bool
     var isAnime: Bool

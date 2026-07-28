@@ -13,7 +13,7 @@ public enum SeerConnectionPhase: Equatable, Sendable {
     /// A connect/test attempt is in flight.
     case connecting
     /// Connected; `summary` is a short label (server version) for the UI.
-    case connected(summary: String)
+    case connected(summary: LocalizedStringResource)
     /// A connect/test attempt failed; the message is user-facing.
     case failed(LocalizedStringResource)
 }
@@ -180,7 +180,7 @@ public final class SeerService {
         }
     }
 
-    private static func summary(from status: SeerStatus) -> String {
+    private static func summary(from status: SeerStatus) -> LocalizedStringResource {
         if let version = status.version, !version.isEmpty {
             return "Version \(version)"
         }
@@ -359,10 +359,11 @@ public final class SeerService {
     ) -> SeerRequestOutcome {
         guard response?.id != nil else {
             let snippet = rawBody?.prefix(300).trimmingCharacters(in: .whitespacesAndNewlines)
-            return .failure(.unknown(
+            PlozzLog.networking.error(
                 "Seerr accepted the call (HTTP \(status)) but created no request. Response: "
                     + (snippet?.isEmpty == false ? snippet! : "empty")
-            ))
+            )
+            return .failure(.unknown(nil))
         }
         if let raw = response?.media?.status,
            let mediaStatus = MediaAvailabilityStatus(rawValue: raw) {

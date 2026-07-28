@@ -11,12 +11,12 @@ public struct SeerUser: Identifiable, Equatable, Sendable {
     public let name: String
     /// A secondary line for disambiguation in the picker (email or username),
     /// when it differs from `name`.
-    public let subtitle: String?
+    public let subtitle: String?  // l10n:content — server-supplied email/username, not app copy
     /// Fully-resolved avatar URL (relative Overseerr paths are resolved against
     /// the server base URL; absolute URLs like Gravatar pass through).
     public let avatarURL: URL?
 
-    public init(id: Int, name: String, subtitle: String? = nil, avatarURL: URL? = nil) {
+    public init(id: Int, name: String, subtitle: String? = nil, avatarURL: URL? = nil) {  // l10n:content — see `subtitle` above
         self.id = id
         self.name = name
         self.subtitle = subtitle
@@ -98,7 +98,7 @@ public enum SeerRequestFailure: Equatable, Sendable {
     /// `actingUserSent` indicates whether the request carried an `X-API-User`
     /// header — a 401 is only an *invalid acting user* when one was actually sent;
     /// on the admin path (no header) a 401 means a bad/expired admin API key.
-    static func classify(status: Int, message: String?, actingUserSent: Bool) -> SeerRequestFailure {
+    static func classify(status: Int, message: String?, actingUserSent: Bool) -> SeerRequestFailure {  // l10n:content — `message` is Overseerr's raw diagnostic text, used only for case-classification pattern matching
         let lowered = message?.lowercased() ?? ""
         func mentions(_ needles: String...) -> Bool { needles.contains { lowered.contains($0) } }
 
@@ -126,7 +126,7 @@ public enum SeerRequestFailure: Equatable, Sendable {
     /// A user-facing explanation for the failure, shared by every request
     /// surface (detail hero, Home hero, season menu) so the copy stays
     /// consistent.
-    public var userMessage: String {
+    public var userMessage: LocalizedStringResource {
         switch self {
         case .noDefaults:
             return "No default server or quality profile is configured for this user."
@@ -141,7 +141,10 @@ public enum SeerRequestFailure: Equatable, Sendable {
         case .unreachable:
             return "Couldn’t reach the Seerr server."
         case let .unknown(message):
-            return message ?? "The request failed."
+            if let message, !message.isEmpty {
+                return "The request failed: \(message)"
+            }
+            return "The request failed."
         }
     }
 }

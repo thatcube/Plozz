@@ -24,8 +24,7 @@ public struct MetadataQuery: Sendable, Hashable {
     public let kind: MediaItemKind
     /// The title to search by. For an episode/season this is the *series* title
     /// (providers resolve show-level art, never an episode name).
-    public let title: String
-    /// Alternate/original title (e.g. romaji), tried when the primary misses.
+    public let title: String  // l10n:content — media title used as an external-provider lookup key
     public let alternateTitle: String?
     public let year: Int?
     public let seasonNumber: Int?
@@ -37,7 +36,7 @@ public struct MetadataQuery: Sendable, Hashable {
     public init(
         contentType: ContentType,
         kind: MediaItemKind,
-        title: String,
+        title: String,  // l10n:content — media title used as an external-provider lookup key
         alternateTitle: String?,
         year: Int?,
         seasonNumber: Int?,

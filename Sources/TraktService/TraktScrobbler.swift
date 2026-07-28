@@ -142,7 +142,7 @@ public actor TraktScrobbler: TraktScrobbling {
 
     /// Returns a usable access token, refreshing (and persisting) an expired one.
     /// `nil` means "not connected" or "refresh failed" — caller no-ops.
-    private func validAccessToken() async -> String? {
+    private func validAccessToken() async -> String? {  // l10n:content — returns an OAuth access token; string literals inside are developer diagnostics only
         let generation = profileGeneration.current
         guard let tokens = tokenStore.load() else { return nil }
         guard tokens.isExpired else { return tokens.accessToken }

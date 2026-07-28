@@ -35,7 +35,7 @@ struct SyncSetupReceiveView: View {
             get: { applyError != nil }, set: { if !$0 { applyError = nil } }
         )) {
             Button("OK", role: .cancel) {}
-        } message: { Text(applyError ?? "") }
+        } message: { Text(verbatim: applyError ?? "") }
     }
 
     @ViewBuilder

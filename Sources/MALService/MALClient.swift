@@ -115,7 +115,7 @@ struct MALClient: Sendable {
     /// `GET /v2/anime?q=…` — searches MAL's catalog, returning the top match's id.
     /// Fallback for anime whose AniDB id isn't in the ARM map (e.g. brand-new
     /// seasons), so a MAL-only user still gets list updates.
-    func searchAnimeID(title: String, accessToken: String) async throws -> Int? {
+    func searchAnimeID(title: String, accessToken: String) async throws -> Int? {  // l10n:content — media title used as a MyAnimeList search query parameter
         let endpoint = Endpoint(
             method: .get,
             path: "/anime",

@@ -32,7 +32,7 @@ final class DetailSnapshotPruneCoordinator: @unchecked Sendable {
     private var pending: DispatchWorkItem?
 
     init(
-        label: String = "com.thatcube.Plozz.DetailSnapshotCache.prune",
+        label: String = "com.thatcube.Plozz.DetailSnapshotCache.prune",  // l10n:content — internal DispatchQueue label, never shown to the user
         qos: DispatchQoS = .background,
         debounce: DispatchTimeInterval = .milliseconds(500),
         perform: @escaping @Sendable () -> Void

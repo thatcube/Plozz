@@ -20,7 +20,7 @@ public struct KeylessIDResolver: Sendable {
 
     /// Resolve external IDs for a title. `isAnime` routes to AniList; otherwise a
     /// TV title uses TVmaze. Movies (`isTV == false`, non-anime) return empty.
-    public func externalIDs(title: String, year: Int?, isAnime: Bool, isTV: Bool) async -> [String: String] {
+    public func externalIDs(title: String, year: Int?, isAnime: Bool, isTV: Bool) async -> [String: String] {  // l10n:content — media title used as an external-provider lookup key
         await sourcedExternalIDs(
             title: title,
             year: year,
@@ -30,7 +30,7 @@ public struct KeylessIDResolver: Sendable {
     }
 
     public func sourcedExternalIDs(
-        title: String,
+        title: String,  // l10n:content — media title used as an external-provider lookup key
         year _: Int?,
         isAnime: Bool,
         isTV: Bool
@@ -48,7 +48,7 @@ public struct KeylessIDResolver: Sendable {
 
     // MARK: - Anime (AniList)
 
-    private func animeIDs(title: String) async -> [String: SourcedValue<String>] {
+    private func animeIDs(title: String) async -> [String: SourcedValue<String>] {  // l10n:content — media title used as an external-provider lookup key
         let document = """
         query ($search: String) {
           Media(search: $search, type: ANIME) { id idMal }
@@ -85,7 +85,7 @@ public struct KeylessIDResolver: Sendable {
 
     // MARK: - TV (TVmaze)
 
-    private func tvIDs(title: String) async -> [String: SourcedValue<String>] {
+    private func tvIDs(title: String) async -> [String: SourcedValue<String>] {  // l10n:content — media title used as an external-provider lookup key
         guard let escaped = title.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed),
               let url = URL(string: "https://api.tvmaze.com/singlesearch/shows?q=\(escaped)"),
               let show = await MetadataHTTP.get(TVmazeShow.self, url: url) else { return [:] }

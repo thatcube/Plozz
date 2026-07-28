@@ -364,7 +364,7 @@ public struct MediaBadgeChip: View {
                     .font(Self.dtsSuffixFont)
                     .foregroundStyle(dtsHDColor)
             } else {
-                Text((parts.separator ?? "") + (parts.suffix ?? ""))
+                Text(verbatim: (parts.separator ?? "") + (parts.suffix ?? ""))
                     .font(Self.dtsSuffixFont)
                     .foregroundStyle(dtsHDColor)
             }

@@ -105,7 +105,7 @@ struct ShareSeriesReconciler {
     // MARK: - Canonical selection
 
     /// A representative display title for a series key (any episode's `series_title`).
-    private func seriesDisplayTitle(forKey key: String) -> String {
+    private func seriesDisplayTitle(forKey key: String) -> String {  // l10n:content — media title parsed from filenames, not user-facing prose
         var title = key
         connection.query("""
         SELECT series_title FROM assets

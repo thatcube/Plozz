@@ -101,13 +101,13 @@ struct TraktIDs: Encodable, Equatable {
 }
 
 struct TraktMovieRef: Encodable, Equatable {
-    var title: String?
+    var title: String?  // l10n:content — media title sent to Trakt, sourced from our own item metadata
     var year: Int?
     var ids: TraktIDs
 }
 
 struct TraktShowRef: Encodable, Equatable {
-    var title: String?
+    var title: String?  // l10n:content — media title sent to Trakt, sourced from our own item metadata
     var year: Int?
     var ids: TraktIDs
 }

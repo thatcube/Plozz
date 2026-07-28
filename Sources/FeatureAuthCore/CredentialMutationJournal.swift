@@ -33,7 +33,7 @@ public struct CredentialMutationEntry: Codable, Equatable, Sendable {
 }
 
 extension CredentialMutationEntry: CustomStringConvertible, CustomDebugStringConvertible {
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing debug description, never localized
         "CredentialMutationEntry(kind: \(kind.rawValue), phase: \(phase.rawValue), childItems: \(pendingChildItemIDs.count))"
     }
 

@@ -7,7 +7,7 @@ public enum MediaShareAccountConfigurationError: LocalizedError, Equatable {
     case invalidAddress
     case invalidShare
 
-    public var errorDescription: String? {
+    public var errorDescription: LocalizedStringResource? {
         switch self {
         case .invalidAddress:
             "Invalid network-share address."

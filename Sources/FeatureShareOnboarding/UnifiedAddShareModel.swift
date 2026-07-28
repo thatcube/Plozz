@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import AppRuntime
 import CoreModels
+import CoreNetworking
 import FeatureAuthCore
 import ProviderShare
 import MediaTransportHTTP
@@ -542,7 +543,8 @@ public final class UnifiedAddShareModel {
             case .unreachable:
                 self.connectError = "Couldn’t reach that server. Check the address and network."
             case .failed(let message):
-                self.connectError = "Couldn’t connect: \(message)"
+                PlozzLog.networking.error("SFTP host-key capture failed: \(message)")
+                self.connectError = "Couldn’t connect to this SFTP server."
             case .cancelled:
                 break
             }
@@ -579,7 +581,8 @@ public final class UnifiedAddShareModel {
         case .unreachable:
             locationLoad = .unreachable
         case .failed(let message):
-            locationLoad = .failed("Couldn’t load locations: \(message)")
+            PlozzLog.networking.error("SFTP folder listing failed: \(message)")
+            locationLoad = .failed("Couldn’t connect to this SFTP server.")
         case .cancelled:
             break
         }
@@ -669,7 +672,8 @@ public final class UnifiedAddShareModel {
             case .unreachable:
                 self.connectError = "Couldn’t reach that server. Check the address and network."
             case .failed(let message):
-                self.connectError = "Couldn’t connect: \(message)"
+                PlozzLog.networking.error("FTP folder browse failed: \(message)")
+                self.connectError = "Couldn’t connect to this FTP server."
             case .cancelled:
                 break
             }
@@ -706,7 +710,8 @@ public final class UnifiedAddShareModel {
         case .unreachable:
             locationLoad = .unreachable
         case .failed(let message):
-            locationLoad = .failed("Couldn’t load locations: \(message)")
+            PlozzLog.networking.error("FTP folder listing failed: \(message)")
+            locationLoad = .failed("Couldn’t connect to this FTP server.")
         case .cancelled:
             break
         }

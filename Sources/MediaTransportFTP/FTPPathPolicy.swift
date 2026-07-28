@@ -9,7 +9,7 @@ import MediaTransportCore
 public enum FTPPathPolicy {
     /// Normalizes a configured root into an absolute, `..`-free path beginning
     /// with `/` and without a trailing slash (except the bare root `/`).
-    public static func normalizeRoot(_ rawRoot: String) throws -> String {
+    public static func normalizeRoot(_ rawRoot: String) throws -> String {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         let replaced = rawRoot.replacingOccurrences(of: "\\", with: "/")
         var components: [String] = []
         for component in replaced.split(separator: "/", omittingEmptySubsequences: true) {
@@ -24,7 +24,7 @@ public enum FTPPathPolicy {
 
     /// Builds the absolute server path for a transport-relative path, anchored
     /// under `root`, and asserts it is normalized and contained by `root`.
-    public static func absolutePath(root: String, relative: String) throws -> String {
+    public static func absolutePath(root: String, relative: String) throws -> String {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         let rootBase = try normalizeRoot(root)
         let trimmedRelative = relative.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         var components: [String] = []
@@ -44,7 +44,7 @@ public enum FTPPathPolicy {
     }
 
     /// Joins a parent transport-relative path with a child name from a listing.
-    public static func childRelativePath(parent: String, name: String) throws -> String {
+    public static func childRelativePath(parent: String, name: String) throws -> String {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         guard !name.isEmpty, name != ".", name != "..",
               !name.contains("/"), !name.contains("\0"),
               !name.contains("\r"), !name.contains("\n") else {

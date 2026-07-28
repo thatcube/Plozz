@@ -12,11 +12,11 @@ public struct TVDBMetadata: Sendable, Equatable {
     public var year: Int?
     /// The show's canonical name as TheTVDB records it ("Avatar: The Last
     /// Airbender"), used to upgrade a generic folder-derived title ("Avatar").
-    public var title: String?
+    public var title: String?  // l10n:content — media title from TheTVDB
 
     public init(tvdbID: String? = nil, imdbID: String? = nil, tmdbID: String? = nil,
                 overview: String? = nil, posterURL: URL? = nil, genres: [String] = [], year: Int? = nil,
-                title: String? = nil) {
+                title: String? = nil) {  // l10n:content — media title from TheTVDB
         self.tvdbID = tvdbID
         self.imdbID = imdbID
         self.tmdbID = tmdbID
@@ -36,8 +36,8 @@ public struct TVDBMetadata: Sendable, Equatable {
 public struct SeriesEpisodeHint: Sendable, Equatable {
     public let season: Int
     public let episode: Int
-    public let title: String
-    public init(season: Int, episode: Int, title: String) {
+    public let title: String  // l10n:content — episode title parsed from the local library, used to disambiguate a title collision
+    public init(season: Int, episode: Int, title: String) {  // l10n:content — episode title parsed from the local library
         self.season = season
         self.episode = episode
         self.title = title
@@ -68,7 +68,7 @@ public actor TVDBClient {
     /// collision by content when the year is unknown. Returns `nil` when
     /// unconfigured or unmatched.
     public func resolve(
-        title: String,
+        title: String,  // l10n:content — media title used as a TheTVDB lookup key
         year: Int?,
         isMovie: Bool,
         episodeHints: [SeriesEpisodeHint] = []
@@ -211,7 +211,7 @@ public actor TVDBClient {
     /// then reads the title's extended record and picks the largest landscape
     /// artwork. TheTVDB has rich fanart for most TV + film, so this fills heroes
     /// that would otherwise have no wide art. Never throws.
-    public func backdropURL(title: String, year: Int?, isMovie: Bool, tvdbID: String?) async -> URL? {
+    public func backdropURL(title: String, year: Int?, isMovie: Bool, tvdbID: String?) async -> URL? {  // l10n:content — media title used as a TheTVDB lookup key
         guard config.isConfigured else { return nil }
         let id: String?
         if let tvdbID, !tvdbID.isEmpty {
@@ -349,7 +349,7 @@ public actor TVDBClient {
     /// normalized-equal, or one a word-prefix of the other ("Avatar" ⊂ "Avatar The
     /// Last Airbender"). A resolved title that resembles the query is trusted as-is;
     /// one that doesn't is likely a foreign primary name to be replaced with English.
-    static func titleResembles(_ title: String?, _ query: String) -> Bool {
+    static func titleResembles(_ title: String?, _ query: String) -> Bool {  // l10n:content — media title comparison, not user-facing prose
         guard let title else { return false }
         let a = normalizedTitleKey(title)
         let b = normalizedTitleKey(query)

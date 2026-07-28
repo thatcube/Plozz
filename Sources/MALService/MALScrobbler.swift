@@ -96,7 +96,7 @@ public actor MALScrobbler: MALScrobbling {
     }
 
     /// Returns a usable access token, refreshing an expired one.
-    private func validAccessToken() async -> String? {
+    private func validAccessToken() async -> String? {  // l10n:content — returns an OAuth access token; string literals inside are developer diagnostics only
         guard let tokens = tokenStore.load() else { return nil }
         guard tokens.isExpired else { return tokens.accessToken }
         do {

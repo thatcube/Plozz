@@ -3,7 +3,7 @@ import Foundation
 /// One labelled fact shown on the Developer Mode "Device & Build" panel.
 public struct DeveloperInfoItem: Identifiable, Equatable, Sendable {
     public let id: String
-    public let label: String  // l10n:content — developer-facing diagnostic (hidden Developer Mode / bug-report panel)
+    public let label: String   // l10n:content — developer-facing diagnostic panel, deliberately English  // l10n:content — developer-facing diagnostic (hidden Developer Mode / bug-report panel)
     public let value: String
 
     public init(id: String, label: String, value: String) {  // l10n:content — developer-facing diagnostic

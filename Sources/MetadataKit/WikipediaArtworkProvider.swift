@@ -75,7 +75,7 @@ public struct WikipediaArtworkProvider: ArtworkProvider {
 
     /// The disambiguating search term (`<title> television series` / `<title> <year>
     /// film`) shared by the image and QID queries.
-    static func searchTerm(title: String, year: Int?, isTV: Bool) -> String? {
+    static func searchTerm(title: String, year: Int?, isTV: Bool) -> String? {  // l10n:content — media title used as a Wikipedia search query, not user-facing prose
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         var search = trimmed
@@ -91,7 +91,7 @@ public struct WikipediaArtworkProvider: ArtworkProvider {
 
     /// Builds the search-generator + pageimages request. A type hint
     /// (`film` / `television series`) disambiguates same-named works.
-    static func searchURL(title: String, year: Int?, isTV: Bool) -> URL? {
+    static func searchURL(title: String, year: Int?, isTV: Bool) -> URL? {  // l10n:content — media title used as a Wikipedia lookup key
         guard let search = searchTerm(title: title, year: year, isTV: isTV),
               let escaped = metadataEscaped(search) else { return nil }
         let string = "https://en.wikipedia.org/w/api.php?action=query&format=json"
@@ -102,7 +102,7 @@ public struct WikipediaArtworkProvider: ArtworkProvider {
 
     /// Builds the search-generator + `pageprops` request that yields the matched
     /// article's Wikidata QID (`wikibase_item`), used to resolve a keyless logo.
-    static func qidSearchURL(title: String, year: Int?, isTV: Bool) -> URL? {
+    static func qidSearchURL(title: String, year: Int?, isTV: Bool) -> URL? {  // l10n:content — media title used as a Wikipedia lookup key
         guard let search = searchTerm(title: title, year: year, isTV: isTV),
               let escaped = metadataEscaped(search) else { return nil }
         let string = "https://en.wikipedia.org/w/api.php?action=query&format=json"

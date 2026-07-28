@@ -79,8 +79,12 @@ struct PlozziOSSeerrSettingsView: View {
         case .unconfigured:
             connectionFields
         case let .connected(summary):
-            Label(summary, systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+            Label {
+                Text(summary)
+            } icon: {
+                Image(systemName: "checkmark.circle.fill")
+            }
+            .foregroundStyle(.green)
             if let savedURL = appModel.seerService.savedBaseURLString {
                 Text(savedURL)
                     .font(.footnote)
@@ -194,7 +198,7 @@ struct PlozziOSSeerrSettingsView: View {
                         .tag(Optional<Int>.none)
                     if let currentID = profile.seerrUserID,
                        !users.contains(where: { $0.id == currentID }) {
-                        Text(profile.seerrUserName ?? "Unavailable user")
+                        (profile.seerrUserName.map { Text(verbatim: $0) } ?? Text("Unavailable user"))
                             .tag(Optional(currentID))
                     }
                     ForEach(users) { user in

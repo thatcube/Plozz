@@ -21,23 +21,23 @@ public struct PlozzLogger: Sendable {
         self.logger = Logger(subsystem: PlozzLog.subsystem, category: category)
     }
 
-    public func debug(_ message: String) {
+    public func debug(_ message: String) {  // l10n:content — developer-facing log message, never localized
         logger.debug("\(message, privacy: .public)")
         PlozzLog.record(.debug, category: category, message: message)
     }
-    public func info(_ message: String) {
+    public func info(_ message: String) {  // l10n:content — developer-facing log message, never localized
         logger.info("\(message, privacy: .public)")
         PlozzLog.record(.info, category: category, message: message)
     }
-    public func error(_ message: String) {
+    public func error(_ message: String) {  // l10n:content — developer-facing log message, never localized
         logger.error("\(message, privacy: .public)")
         PlozzLog.record(.error, category: category, message: message)
     }
     #else
     init(category: String) { self.category = category }
-    public func debug(_ message: String) { PlozzLog.record(.debug, category: category, message: message) }
-    public func info(_ message: String) { PlozzLog.record(.info, category: category, message: message) }
-    public func error(_ message: String) { PlozzLog.record(.error, category: category, message: message) }
+    public func debug(_ message: String) { PlozzLog.record(.debug, category: category, message: message) }  // l10n:content — developer-facing log message, never localized
+    public func info(_ message: String) { PlozzLog.record(.info, category: category, message: message) }  // l10n:content — developer-facing log message, never localized
+    public func error(_ message: String) { PlozzLog.record(.error, category: category, message: message) }  // l10n:content — developer-facing log message, never localized
     #endif
 }
 
@@ -62,7 +62,7 @@ public enum PlozzLog {
     private static let bootMirrorsStdout: Bool =
         ProcessInfo.processInfo.environment["PLZBOOT_STDOUT"] == "1"
 
-    public static func boot(_ message: String) {
+    public static func boot(_ message: String) {  // l10n:content — developer-facing boot telemetry, never localized
         app.info("PLZBOOT \(message)")
         if bootMirrorsStdout {
             try? FileHandle.standardOutput.write(contentsOf: Data(("PLZBOOT " + message + "\n").utf8))
@@ -118,7 +118,7 @@ public enum PlozzLog {
         public let date: Date
         public let level: Level
         public let category: String
-        public let message: String
+        public let message: String  // l10n:content — developer-facing captured log line, never localized
     }
 
     /// Fixed-capacity, lock-guarded ring of the most recent log lines. Lets the
@@ -151,7 +151,7 @@ public enum PlozzLog {
 
     private static let ring = RingBuffer(capacity: 500)
 
-    static func record(_ level: Level, category: String, message: String) {
+    static func record(_ level: Level, category: String, message: String) {  // l10n:content — developer-facing log message, never localized
         ring.append(LogEntry(id: UUID(), date: Date(), level: level, category: category, message: message))
         guard mirrorsStandardOut else { return }
         standardOutLock.lock()

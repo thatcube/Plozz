@@ -61,7 +61,7 @@ public struct ArtworkEnrichmentAdapter: MetadataEnrichmentProvider {
 public protocol TVDBEnriching: Sendable {
     func resolve(byTVDBID id: String, isMovie: Bool) async -> TVDBMetadata?
     func resolve(titles: [String], year: Int?, isMovie: Bool, episodeHints: [SeriesEpisodeHint]) async -> TVDBMetadata?
-    func backdropURL(title: String, year: Int?, isMovie: Bool, tvdbID: String?) async -> URL?
+    func backdropURL(title: String, year: Int?, isMovie: Bool, tvdbID: String?) async -> URL?  // l10n:content — media title used as a TheTVDB lookup key
     /// The series' next scheduled episode by a known TheTVDB id. TheTVDB's `nextAired`
     /// is a bare calendar day (`dateOnly`); the season/episode/title are filled
     /// best-effort by matching that day against the series' episode list. Returns

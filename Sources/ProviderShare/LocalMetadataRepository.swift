@@ -67,7 +67,7 @@ struct LocalMetadataRepository {
         return out
     }
 
-    func sidecarStatus(relPath: String) -> String? {
+    func sidecarStatus(relPath: String) -> String? {  // l10n:content — internal sidecar-processing state token (e.g. "pending"), not user-facing
         var status: String?
         query("SELECT status FROM local_metadata_files WHERE rel_path=?;",
               bind: { self.bindText($0, 1, relPath) }) { stmt in status = self.columnText(stmt, 0) }

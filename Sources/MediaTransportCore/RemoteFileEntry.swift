@@ -68,7 +68,7 @@ public struct RemoteFileEntry: Hashable, Sendable {
         self.diagnostics = diagnostics
     }
 
-    private static func normalize(_ value: String) throws -> String {
+    private static func normalize(_ value: String) throws -> String {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         let replaced = value.replacingOccurrences(of: "\\", with: "/")
         guard !replaced.hasPrefix("/") else {
             throw MediaTransportError.invalidInput(reason: "path must be relative")
@@ -86,7 +86,7 @@ public struct RemoteFileEntry: Hashable, Sendable {
         return components.joined(separator: "/")
     }
 
-    private static func optionalIdentifier(_ value: String?) throws -> String? {
+    private static func optionalIdentifier(_ value: String?) throws -> String? {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.contains("\0"), trimmed.count <= 512 else {
@@ -95,7 +95,7 @@ public struct RemoteFileEntry: Hashable, Sendable {
         return trimmed
     }
 
-    private static func strongETag(_ value: String?) throws -> String? {
+    private static func strongETag(_ value: String?) throws -> String? {  // l10n:content — throw-reason text is a developer diagnostic. Onboarding-probe callers (SFTPOnboardingProbe/FTPOnboardingProbe.classify) now log the raw reason via PlozzLog and show generic translated copy instead of displaying it — see PlozziOSAddSFTPShareView/PlozziOSAddFTPShareView/UnifiedAddShareModel.
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("\""), trimmed.hasSuffix("\""),

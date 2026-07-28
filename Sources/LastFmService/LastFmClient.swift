@@ -115,7 +115,7 @@ struct LastFmClient: Sendable {
             (data, _) = try await http.send(endpoint, baseURL: baseURL)
         } catch AppError.unauthorized {
             // 403 during polling means the token isn't authorized yet.
-            throw LastFmAPIError(code: 14, message: "Token not authorized")
+            throw LastFmAPIError(code: 14, message: "Token not authorized")  // l10n:content — diagnostic only, never displayed
         }
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
     }

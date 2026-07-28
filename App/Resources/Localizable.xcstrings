@@ -1,6 +1,15 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    " ahead" : {
+
+    },
+    " free" : {
+
+    },
+    " of " : {
+
+    },
     "%@ (detected)" : {
 
     },
@@ -12,6 +21,17 @@
     },
     "%@ left" : {
 
+    },
+    "%@ of %@" : {
+      "comment" : "Share enrichment progress: items enriched so far out of the pass's total. `done` arrives pre-padded to a fixed width; `total` must stay ungrouped to match.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ of %2$@"
+          }
+        }
+      }
     },
     "%@ rating %@" : {
       "localizations" : {
@@ -66,6 +86,52 @@
     },
     "%lld" : {
 
+    },
+    "%lld channels" : {
+      "comment" : "Fallback wording for an audio track's channel count when it doesn't match a named layout convention (e.g. Stereo, 5.1, 7.1).",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld channel"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld channels"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld cues" : {
+      "comment" : "Live status suffix showing how many subtitle lines (cues) were loaded for the selected second subtitle track.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld cue"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld cues"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "%lld episodes • %@" : {
       "localizations" : {
@@ -144,6 +210,105 @@
                       "value" : "%lld seasons"
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld folders" : {
+      "comment" : "Share scan progress: directories walked so far, while scanning (shown before any media item has been found yet).",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld folder"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld folders"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld folders · %lld items" : {
+      "comment" : "Share scan progress: directories walked and media items found so far, while scanning.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@arg1@ · %#@arg2@"
+          },
+          "substitutions" : {
+            "arg1" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%lld folder"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%lld folders"
+                    }
+                  }
+                }
+              }
+            },
+            "arg2" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%lld item"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%lld items"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld items" : {
+      "comment" : "Share scan progress: media items found so far, while scanning (shown once at least one directory or item is known).",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld item"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld items"
                 }
               }
             }
@@ -402,7 +567,13 @@
     "A media share connects with the credentials you entered (or as a guest). Choose what shows on your Home under Profile › Your Libraries." : {
 
     },
+    "A rotating spotlight on titles from your libraries." : {
+      "comment" : "Explanation shown under the Random from Library hero source option in Settings."
+    },
     "A username, password, or token requires a secure (https://) address." : {
+
+    },
+    "AC-3 passthrough" : {
 
     },
     "API key" : {
@@ -435,6 +606,26 @@
     },
     "Account owner" : {
 
+    },
+    "Active now (%@). %@ sunrise %@ · %@ fade." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Active now (%1$@). %2$@ sunrise %3$@ · %4$@ fade."
+          }
+        }
+      }
+    },
+    "Active now (%@). Manual: on %@, off %@ · %@ fade." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Active now (%1$@). Manual: on %2$@, off %3$@ · %4$@ fade."
+          }
+        }
+      }
     },
     "Activity recorded during this app session will appear here." : {
 
@@ -536,6 +727,9 @@
     "Always On" : {
 
     },
+    "Always on. Tints the screen at full strength around the clock." : {
+
+    },
     "Amber" : {
 
     },
@@ -543,6 +737,9 @@
 
     },
     "Anonymous" : {
+
+    },
+    "App-local " : {
 
     },
     "Appearance" : {
@@ -584,6 +781,9 @@
 
     },
     "Ask who's watching on startup" : {
+
+    },
+    "Atmos present; route may fall back to %@" : {
 
     },
     "Attributions" : {
@@ -714,6 +914,9 @@
     "Box Opacity" : {
 
     },
+    "Bridged on-device (%@)" : {
+
+    },
     "Bring all of your media together into one unified experience. Free forever and open source." : {
 
     },
@@ -736,6 +939,9 @@
 
     },
     "Budgets cap on-disk caches; lowering a budget evicts immediately." : {
+
+    },
+    "Buffering" : {
 
     },
     "Build" : {
@@ -867,13 +1073,16 @@
 
     },
     "Choose a server" : {
-
+      "comment" : "Placeholder shown in Settings when no server is selected yet."
     },
     "Choose a share" : {
 
     },
     "Choose a share to add." : {
 
+    },
+    "Choose a version" : {
+      "comment" : "Placeholder shown in Settings when no playback version is selected yet."
     },
     "Choose an export" : {
 
@@ -972,6 +1181,9 @@
     },
     "Coming from a device that’s already signed in? Show a code here and scan it from your other phone, tablet, or Apple TV to sign this one in." : {
 
+    },
+    "Commentary" : {
+      "comment" : "Audio/subtitle track qualifier for a commentary track."
     },
     "Connect" : {
 
@@ -1157,6 +1369,9 @@
     "Crimson" : {
 
     },
+    "Critical (throttling)" : {
+
+    },
     "Current" : {
 
     },
@@ -1182,10 +1397,25 @@
     "Cyan" : {
 
     },
+    "DTS passthrough" : {
+
+    },
+    "DTS requires Plozzigen decode or a passthrough route" : {
+
+    },
+    "DTS-HD passthrough" : {
+
+    },
+    "DTS-HD requires Plozzigen decode or a passthrough route" : {
+
+    },
     "Dark" : {
 
     },
     "Darkness" : {
+
+    },
+    "Decoded by Apple TV" : {
 
     },
     "Default" : {
@@ -1277,6 +1507,12 @@
     "Dimness" : {
 
     },
+    "Direct Play" : {
+
+    },
+    "Direct Play (Plozzigen)" : {
+
+    },
     "Directed By" : {
 
     },
@@ -1285,6 +1521,9 @@
     },
     "Disabled" : {
 
+    },
+    "Disabled for %@" : {
+      "comment" : "Shown on the Second Track row when dual subtitles are disallowed because the primary subtitle is an image-based (bitmap) format like PGS or VobSub."
     },
     "Disabled libraries are hidden from Home and library browsing." : {
 
@@ -1330,6 +1569,9 @@
     },
     "Dolby" : {
 
+    },
+    "Don't turn subtitles on automatically." : {
+      "comment" : "Explanation shown beneath the subtitle mode option in Settings > Playback."
     },
     "Done" : {
 
@@ -1447,6 +1689,12 @@
     "Dual Subtitles" : {
 
     },
+    "E-AC-3 JOC Atmos passthrough expected" : {
+
+    },
+    "E-AC-3 passthrough" : {
+
+    },
     "EXTERNAL" : {
 
     },
@@ -1540,8 +1788,11 @@
     "Enter your server’s address — an IP or name like 192.168.1.10 or mynas.local, with a port if it uses one (192.168.68.71:8384). Plozz detects whether it’s SMB or WebDAV automatically." : {
 
     },
+    "Episode" : {
+      "comment" : "Placeholder title shown instead of the real title for a spoiler-protected (unwatched) episode whose episode number isn't known."
+    },
     "Episode %lld" : {
-
+      "comment" : "Placeholder title shown instead of the real title for a spoiler-protected (unwatched) episode, giving only its episode number."
     },
     "Episode titles, summaries, and artwork can be hidden until you watch them." : {
 
@@ -1616,6 +1867,9 @@
     "Failed" : {
 
     },
+    "Fair" : {
+
+    },
     "Fantasy & Sci-Fi" : {
 
     },
@@ -1637,8 +1891,8 @@
     "Find movies, TV shows, and episodes across your servers." : {
 
     },
-    "Finding artwork & details · %@" : {
-
+    "Finding artwork & details" : {
+      "comment" : "Server detail row: label for a share currently having its metadata/artwork enriched, followed by a live progress count."
     },
     "Finding artwork & details…" : {
 
@@ -1680,7 +1934,7 @@
 
     },
     "Forced" : {
-
+      "comment" : "Subtitle track qualifier — the track only shows forced (foreign-language-passage) lines."
     },
     "Forced subtitles" : {
 
@@ -1735,6 +1989,9 @@
 
     },
     "HTTP sends reusable credentials without encryption. Prefer HTTPS." : {
+
+    },
+    "Healthy" : {
 
     },
     "Hearing impaired" : {
@@ -1836,6 +2093,26 @@
     },
     "Idle" : {
 
+    },
+    "Idle until %@. Manual · %@ fade." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Idle until %1$@. Manual · %2$@ fade."
+          }
+        }
+      }
+    },
+    "Idle until sunset (%@) in %@ · %@ fade." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Idle until sunset (%1$@) in %2$@ · %3$@ fade."
+          }
+        }
+      }
     },
     "If this share needs a different account, enter a username and password and try again." : {
 
@@ -2175,6 +2452,12 @@
     "Never" : {
 
     },
+    "Never show forced subtitles." : {
+      "comment" : "Explanation shown under the Only Non-Forced subtitle search option."
+    },
+    "Never show subtitles for the deaf or hard-of-hearing." : {
+      "comment" : "Explanation shown under the Only Non-SDH subtitle search option."
+    },
     "New Profile" : {
 
     },
@@ -2340,8 +2623,14 @@
     "No, they're different" : {
 
     },
+    "Nominal" : {
+
+    },
     "None" : {
 
+    },
+    "None available" : {
+      "comment" : "Shown on the Second Track row when there are no eligible tracks to show as a second subtitle line."
     },
     "None yet" : {
 
@@ -2418,6 +2707,7 @@
 
     },
     "Off" : {
+      "comment" : "Turns a subtitle line off in the subtitle track picker.",
       "localizations" : {
         "es" : {
           "stringUnit" : {
@@ -2426,6 +2716,29 @@
           }
         }
       }
+    },
+    "Off. %@: sunset %@, sunrise %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Off. %1$@: sunset %2$@, sunrise %3$@."
+          }
+        }
+      }
+    },
+    "Off. Manual: on %@, off %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Off. Manual: on %1$@, off %2$@."
+          }
+        }
+      }
+    },
+    "Off. Set to always on." : {
+
     },
     "Offline" : {
 
@@ -2470,6 +2783,18 @@
     "Online" : {
 
     },
+    "Only Forced" : {
+      "comment" : "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+    },
+    "Only Non-Forced" : {
+      "comment" : "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+    },
+    "Only Non-SDH" : {
+      "comment" : "Subtitle search preference option for hearing-impaired (SDH) subtitles."
+    },
+    "Only SDH" : {
+      "comment" : "Subtitle search preference option for hearing-impaired (SDH) subtitles."
+    },
     "Only approve if this matches your server. Approving pins this exact certificate; a change requires re-approval." : {
 
     },
@@ -2478,6 +2803,12 @@
     },
     "Only approve this if the SHA-256 fingerprint matches your server. Approving pins this exact certificate; a future change will require re-approval." : {
 
+    },
+    "Only show forced subtitles for foreign-language passages." : {
+      "comment" : "Explanation that only forced (foreign-language-passage) subtitles are shown; used for both the subtitle display mode and the subtitle search preference."
+    },
+    "Only show subtitles for the deaf or hard-of-hearing (SDH)." : {
+      "comment" : "Explanation shown under the Only SDH subtitle search option."
     },
     "Opacity" : {
 
@@ -2604,6 +2935,9 @@
     },
     "Pick a theme for this profile. You can change it any time." : {
 
+    },
+    "Pick up where you left off, front and centre." : {
+      "comment" : "Explanation shown under the Continue Watching hero source option in Settings."
     },
     "Picture" : {
 
@@ -2736,6 +3070,18 @@
     },
     "Position" : {
 
+    },
+    "Prefer Forced" : {
+      "comment" : "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+    },
+    "Prefer Non-Forced" : {
+      "comment" : "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+    },
+    "Prefer Non-SDH" : {
+      "comment" : "Subtitle search preference option for hearing-impaired (SDH) subtitles."
+    },
+    "Prefer SDH" : {
+      "comment" : "Subtitle search preference option for hearing-impaired (SDH) subtitles."
     },
     "Prefer local artwork" : {
 
@@ -2984,6 +3330,9 @@
     "Removing a sign-in affects every profile on this %@." : {
 
     },
+    "Remux (server, lossless)" : {
+
+    },
     "Repeat All" : {
 
     },
@@ -3199,6 +3548,9 @@
     "Rust" : {
 
     },
+    "SDH" : {
+      "comment" : "Subtitle/audio track qualifier for a hearing-impaired (SDH) track."
+    },
     "SFTP server" : {
 
     },
@@ -3271,8 +3623,8 @@
     "Scan with your phone or tablet" : {
 
     },
-    "Scanning · %@" : {
-
+    "Scanning" : {
+      "comment" : "Server detail row: label for a share currently being scanned, followed by a live folder/item count."
     },
     "Scanning…" : {
 
@@ -3378,6 +3730,9 @@
 
     },
     "Separate offline downloads for every profile" : {
+
+    },
+    "Serious (throttling)" : {
 
     },
     "Server" : {
@@ -3549,11 +3904,26 @@
     "Show each library's own rows" : {
 
     },
+    "Show forced (foreign-passage-only) subtitles at the top of the list." : {
+      "comment" : "Explanation shown under the Prefer Forced subtitle search option."
+    },
+    "Show forced (foreign-passage-only) subtitles lower in the list." : {
+      "comment" : "Explanation shown under the Prefer Non-Forced subtitle search option."
+    },
+    "Show full subtitles in your preferred language." : {
+      "comment" : "Explanation shown beneath the subtitle mode option in Settings > Playback."
+    },
     "Show hero" : {
 
     },
     "Show subtitles" : {
 
+    },
+    "Show subtitles for the deaf or hard-of-hearing at the top of the list." : {
+      "comment" : "Explanation shown under the Prefer SDH subtitle search option."
+    },
+    "Show subtitles for the deaf or hard-of-hearing lower in the list." : {
+      "comment" : "Explanation shown under the Prefer Non-SDH subtitle search option."
     },
     "Show the hero on Home" : {
 
@@ -3901,6 +4271,9 @@
 
     },
     "Subtitles show %@s later than the audio" : {
+
+    },
+    "Sunrise/sunset unavailable at this location today." : {
 
     },
     "Support" : {
@@ -4400,11 +4773,17 @@
     "Time before the end" : {
 
     },
+    "Titles you've saved to watch later." : {
+      "comment" : "Explanation shown under the Watchlist hero source option in Settings."
+    },
     "Toasty" : {
 
     },
     "Token" : {
 
+    },
+    "Track %lld" : {
+      "comment" : "Fallback label for an audio/subtitle track with no resolved language or meaningful provider title, showing its index."
     },
     "Track anime and manga progress on your AniList profile." : {
 
@@ -4431,16 +4810,28 @@
     "Trakt, Simkl, AniList, MyAnimeList, Last.fm" : {
 
     },
+    "Transcode (server)" : {
+
+    },
     "Travel & Hobbies" : {
 
     },
     "Trending" : {
 
     },
+    "Trending titles available to stream (requires Seerr)." : {
+      "comment" : "Explanation shown under the Featured hero source option in Settings."
+    },
     "Troubleshoot" : {
 
     },
     "Troubleshooting overlays stay on this device and are off by default." : {
+
+    },
+    "TrueHD Atmos is not AVPlayer-compatible" : {
+
+    },
+    "TrueHD is not AVPlayer-compatible" : {
 
     },
     "Trust & Browse" : {
@@ -4528,6 +4919,9 @@
     "Unavailable with %@ image subtitles." : {
 
     },
+    "Unknown" : {
+
+    },
     "Unlinked profiles request as the administrator. Linked profiles use that user’s permissions, quotas, and defaults." : {
 
     },
@@ -4541,7 +4935,7 @@
 
     },
     "Up Next" : {
-
+      "comment" : "Eyebrow label above the episode name on the in-player Up Next card."
     },
     "Up Next lead time" : {
 
@@ -4644,7 +5038,7 @@
 
     },
     "Version" : {
-
+      "comment" : "Generic label for a playback version/source with no distinguishing facts (resolution, edition, etc.) known."
     },
     "Version %@ (Build %@)" : {
       "localizations" : {
@@ -4840,6 +5234,9 @@
     "You’re not signed in to any servers yet." : {
 
     },
+    "auto" : {
+      "comment" : "Subtitle track qualifier appended when the shown language was guessed from the file's content rather than tagged by the provider."
+    },
     "cardStyle.borderless" : {
       "comment" : "Artwork card-style option in Settings > Appearance.",
       "localizations" : {
@@ -5020,6 +5417,54 @@
     "e.g. Living Room NAS" : {
 
     },
+    "episodeRelease.badge.airedGracePeriod" : {
+      "comment" : "Badge shown on an episode that aired earlier today but may not be in the library yet.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Aired today"
+          }
+        }
+      }
+    },
+    "episodeRelease.badge.airedMissing" : {
+      "comment" : "Badge shown on an episode that has aired but has not appeared in the library.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Not in your library"
+          }
+        }
+      }
+    },
+    "episodeRelease.badge.requested" : {
+      "comment" : "Badge shown on an episode that has been requested via Seerr/Overseerr.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Requested"
+          }
+        }
+      }
+    },
+    "episodeRelease.badge.upcoming" : {
+      "comment" : "Badge shown on an episode that is scheduled but hasn't aired yet.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Airing soon"
+          }
+        }
+      }
+    },
     "error.cancelled" : {
       "comment" : "Shown when the user cancelled the operation.",
       "localizations" : {
@@ -5198,6 +5643,9 @@
           }
         }
       }
+    },
+    "full timeline" : {
+
     },
     "heroBackground.detail.off" : {
       "comment" : "One-line explanation shown under the hero-background picker.",
@@ -5483,6 +5931,9 @@
           }
         }
       }
+    },
+    "loading…" : {
+      "comment" : "Live status suffix shown next to the selected second subtitle track while its sidecar is being fetched."
     },
     "mediaAction.addToWatchlist" : {
       "comment" : "Context-menu action adding an item to the user's watchlist.",
@@ -5820,6 +6271,9 @@
         }
       }
     },
+    "no lines" : {
+      "comment" : "Live status suffix shown when the selected second subtitle track loaded successfully but contained no lines for this file."
+    },
     "on another device" : {
 
     },
@@ -5834,6 +6288,42 @@
     },
     "or enter this code" : {
 
+    },
+    "playbackQuality.lossless" : {
+      "comment" : "Audio quality badge: direct-play, no quality lost.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Lossless"
+          }
+        }
+      }
+    },
+    "playbackQuality.original" : {
+      "comment" : "Audio quality badge: direct-play lossy source, not further degraded.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Original"
+          }
+        }
+      }
+    },
+    "playbackQuality.transcoding" : {
+      "comment" : "Audio quality badge: the stream is being re-encoded/reduced.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Transcoding"
+          }
+        }
+      }
     },
     "player.category.audio" : {
       "comment" : "Tab in the in-player options panel listing audio tracks.",
@@ -6104,6 +6594,9 @@
         }
       }
     },
+    "server window " : {
+
+    },
     "settings.nav.attributions" : {
       "comment" : "Navigation row for the screen crediting third-party software and data sources.",
       "localizations" : {
@@ -6134,6 +6627,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bibliotecas"
+          }
+        }
+      }
+    },
+    "shareScan.phase.enriching" : {
+      "comment" : "Phase label shown while a media share's metadata/artwork is being enriched.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Updating artwork"
+          }
+        }
+      }
+    },
+    "shareScan.phase.scanning" : {
+      "comment" : "Phase label shown while a media share is being scanned.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Scanning"
           }
         }
       }
@@ -6230,6 +6747,102 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "On"
+          }
+        }
+      }
+    },
+    "sortDirection.ascending" : {
+      "comment" : "Library sort direction option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Ascending"
+          }
+        }
+      }
+    },
+    "sortDirection.descending" : {
+      "comment" : "Library sort direction option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Descending"
+          }
+        }
+      }
+    },
+    "sortField.communityRating" : {
+      "comment" : "Library sort menu option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Rating"
+          }
+        }
+      }
+    },
+    "sortField.dateAdded" : {
+      "comment" : "Library sort menu option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Date Added"
+          }
+        }
+      }
+    },
+    "sortField.name" : {
+      "comment" : "Library sort menu option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Name"
+          }
+        }
+      }
+    },
+    "sortField.random" : {
+      "comment" : "Library sort menu option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Random"
+          }
+        }
+      }
+    },
+    "sortField.releaseDate" : {
+      "comment" : "Library sort menu option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Release Date"
+          }
+        }
+      }
+    },
+    "sortField.runtime" : {
+      "comment" : "Library sort menu option.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Runtime"
           }
         }
       }
@@ -6929,6 +7542,9 @@
           }
         }
       }
+    },
+    "unavailable" : {
+      "comment" : "Live status suffix shown when the selected second subtitle track's sidecar could not be fetched or decoded."
     },
     "v%@" : {
 

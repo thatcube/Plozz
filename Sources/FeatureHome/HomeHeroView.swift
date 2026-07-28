@@ -237,6 +237,14 @@ struct HomeHeroView: View {
     private static let resumeAfterIdle: Double = 2.5
 
     @Environment(\.colorScheme) private var colorScheme
+    /// Read so the imperative UIKit foreground's plain-`String` title can be
+    /// resolved with the in-app language override rather than the device's
+    /// system locale. `HomeHeroView`'s body re-evaluates whenever this
+    /// environment value changes (see `AppLanguageScope`), so re-resolving here
+    /// on every call — never cached — tracks a live language switch exactly the
+    /// way `Text` does; it is not the eager, resolve-once-and-freeze pattern the
+    /// l10n guard forbids elsewhere.
+    @Environment(\.locale) private var locale
 
     #if DEBUG
     /// Debug-only live override for the hero foreground renderer, so the two
@@ -897,10 +905,7 @@ struct HomeHeroView: View {
                     // the next visit but never pops into an already-settled slide.
                     presentationPolicy: .onArrival(maximumWait: 0.2)
                 ) {
-                    Text(HeroForegroundModelBuilder.titleText(
-                        for: item,
-                        maskedTitle: hideText ? spoilerSettings.maskedTitle(for: item) : nil
-                    ))
+                    heroTitleText(for: item, hideText: hideText)
                         .font(.system(size: 64, weight: .bold))
                         .lineLimit(2)
                         .minimumScaleFactor(0.5)
@@ -1048,11 +1053,29 @@ struct HomeHeroView: View {
         .offset(y: receded ? -Self.recedeContentLift : 0)
     }
 
+    /// SwiftUI-only counterpart to `HeroForegroundModelBuilder.titleText`: same
+    /// parentTitle → masked → item.title precedence, but composes a `Text`
+    /// directly so the masked branch (our own copy) stays a live-translatable
+    /// resource instead of being flattened through `Text(String)` — which
+    /// always renders verbatim and would otherwise permanently freeze the
+    /// mask in English. Not used by the imperative UIKit foreground, which
+    /// can only hold a plain `String` (see `foregroundModel(for:...)` below).
+    private func heroTitleText(for item: MediaItem, hideText: Bool) -> Text {
+        if item.kind == .episode,
+           let parentTitle = item.parentTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !parentTitle.isEmpty {
+            return Text(verbatim: parentTitle)
+        }
+        if hideText {
+            return Text(spoilerSettings.maskedTitle(for: item))
+        }
+        return Text(verbatim: item.title)
+    }
+
     /// Builds the current slide's ``HeroForegroundModel`` from the view's already
     /// resolved focus/selection/CTA/spoiler state (pure mapping lives in
     /// ``HeroForegroundModelBuilder``).
     private func foregroundModel(for item: MediaItem) -> HeroForegroundModel {
-        // Only the fronted slide carries the live auto-advance dwell so its active
         // paging pill can render the "time until next page" gauge; neighbours are
         // built neutral and re-applied with the real dwell when they front.
         foregroundModel(
@@ -1080,7 +1103,23 @@ struct HomeHeroView: View {
         dotsPausedAt: Date? = nil
     ) -> HeroForegroundModel {
         let hideText = spoilerSettings.shouldHideText(for: item)
-        let masked = hideText ? spoilerSettings.maskedTitle(for: item) : nil
+        // `HeroForegroundModel.title` is a plain `String` fed to a `UILabel`
+        // (see its declaration) — the imperative UIKit foreground can't hold a
+        // `Text`/`LocalizedStringResource`. Resolving with the SwiftUI `locale`
+        // environment (not the device's `Locale.current`) here is safe, not the
+        // eager-resolution anti-pattern: `foregroundModel(for:)` is only ever
+        // called from this view's own `body`/`uikitContent`, which re-evaluates
+        // whenever that environment value changes (see `AppLanguageScope`), so
+        // this resolves fresh on every relevant render rather than being cached
+        // once and frozen.
+        let masked: String?
+        if hideText {
+            var resource = spoilerSettings.maskedTitle(for: item)
+            resource.locale = locale
+            masked = String(localized: resource)   // l10n:content — resolves into the UILabel-only `HeroForegroundModel.title` String sink using the live SwiftUI locale env, re-run every render (see comment above), not a frozen eager resolution
+        } else {
+            masked = nil
+        }
         let slideIndex = items.firstIndex(where: { $0.id == item.id }) ?? index
         return HeroForegroundModelBuilder.model(
             item: item,

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import CoreModels
 
 /// Spoiler-safe, decision-first text and state for the series episode browser.
@@ -19,7 +20,18 @@ public struct EpisodeColumnPresentation: Equatable, Sendable, CustomDebugStringC
 
     public static let hiddenOverviewLabel = "Overview hidden to avoid spoilers"
 
-    public let titleLine: String
+    /// The title row shown on the card. `Text`, not `String`: the spoiler-hidden
+    /// case composes `SpoilerSettings.maskedTitle` (copy) while the normal case
+    /// keeps the pre-existing, unmigrated plain-title/"E# ·" composition
+    /// verbatim (unchanged behaviour — out of scope for this pass).
+    public let titleLine: Text
+    /// A plain-string mirror of `titleLine`'s wording, used only by the flat,
+    /// already-unlocalized `accessibilityLabel`/`debugDescription` strings below
+    /// (pre-existing gap, not part of this pass — computed independently here
+    /// rather than by eagerly resolving `titleLine`'s resource, so it can't drift
+    /// out of sync with the real (English) wording without both call sites
+    /// changing together).
+    private let titleLinePlain: String
     public let metadataText: String?
     public let progress: Double?
     public let isWatched: Bool
@@ -36,17 +48,37 @@ public struct EpisodeColumnPresentation: Equatable, Sendable, CustomDebugStringC
             .nonEmpty
 
         if hidesText {
-            titleLine = spoilerSettings.maskedTitle(for: item)
+            titleLine = Text(spoilerSettings.maskedTitle(for: item))
+            // Inlined (not a separate `-> String` helper) to match the existing,
+            // pre-existing, out-of-scope shape of the non-masked branch below —
+            // this mirrors `SpoilerSettings.maskedTitle`'s English wording for
+            // `titleLinePlain`'s already-unlocalized accessibility/debug pipeline.
+            if let number = item.episodeNumber {
+                titleLinePlain = "Episode \(number)"
+            } else {
+                titleLinePlain = "Episode"
+            }
         } else {
             let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let plain: String
             if let number = item.episodeNumber {
-                titleLine = title.isEmpty ? "Episode \(number)" : "E\(number) · \(title)"
+                plain = title.isEmpty ? "Episode \(number)" : "E\(number) · \(title)"
             } else {
-                titleLine = title.isEmpty ? "Episode" : title
+                plain = title.isEmpty ? "Episode" : title
             }
+            titleLinePlain = plain
+            titleLine = Text(verbatim: plain)
         }
 
-        metadataText = item.cardRuntimeText
+        if let runtime = item.cardRuntimeText?.trimmingCharacters(in: .whitespacesAndNewlines), !runtime.isEmpty {
+            // `cardRuntimeText` is bare ("20m"); this struct is a plain String-based
+            // presentation model (not a View), so the "left" suffix is composed
+            // here as plain interpolation, matching this file's existing
+            // not-yet-localized `String`-based accessibility text below.
+            metadataText = item.cardRuntimeIsRemaining ? "\(runtime) left" : runtime
+        } else {
+            metadataText = nil
+        }
         progress = item.resumeProgressFraction
         isWatched = item.isPlayed && progress == nil
 
@@ -69,7 +101,7 @@ public struct EpisodeColumnPresentation: Equatable, Sendable, CustomDebugStringC
             visibleOverview = nil
         }
 
-        var accessibilityParts = [titleLine]
+        var accessibilityParts = [titleLinePlain]
         if let metadataText { accessibilityParts.append(metadataText) }
         if let progress {
             accessibilityParts.append("\(Int((progress * 100).rounded())) percent watched")
@@ -90,7 +122,7 @@ public struct EpisodeColumnPresentation: Equatable, Sendable, CustomDebugStringC
     }
 
     public var debugDescription: String {   // l10n:content — debug description
-        "EpisodeColumnPresentation(titleLine: \(titleLine.debugDescription), metadataText: \(metadataText.debugDescription), progress: \(progress.debugDescription), isWatched: \(isWatched), artworkTreatment: \(artworkTreatment), overviewTreatment: \(overviewTreatment), visibleOverview: \(visibleOverview.debugDescription), accessibilityLabel: \(accessibilityLabel.debugDescription))"
+        "EpisodeColumnPresentation(titleLine: \(titleLinePlain.debugDescription), metadataText: \(metadataText.debugDescription), progress: \(progress.debugDescription), isWatched: \(isWatched), artworkTreatment: \(artworkTreatment), overviewTreatment: \(overviewTreatment), visibleOverview: \(visibleOverview.debugDescription), accessibilityLabel: \(accessibilityLabel.debugDescription))"
     }
 }
 

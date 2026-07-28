@@ -35,7 +35,7 @@ public struct UserSession: Codable, Hashable, Sendable {
 
 extension UserSession: CustomStringConvertible {
     /// Redacts the access token so a session can be logged safely.
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing diagnostic
         "UserSession(server: \(server.name), user: \(userName), token: <redacted>)"
     }
 }

@@ -90,7 +90,7 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
 
 extension Account: CustomStringConvertible {
     /// Account identities carry no secret, but keep logging terse and stable.
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing diagnostic
         "Account(id: \(id), server: \(server.name), user: \(userName))"
     }
 }

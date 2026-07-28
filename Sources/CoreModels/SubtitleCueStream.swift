@@ -48,7 +48,7 @@ public struct SubtitleStreamMetadata: Sendable, Equatable {
     /// BCP-47 / ISO language code if known (e.g. `en`, `jpn`).
     public var language: String?
     /// Human label for the menu (e.g. "English (SDH)", "Signs & Songs").
-    public var title: String?
+    public var title: String?  // l10n:content — subtitle track title from the file/provider
     /// The provider/engine track id this stream was decoded from, so selection
     /// and the menu can map the rendered stream back to its `MediaTrack`.
     public var sourceTrackID: Int?
@@ -67,7 +67,7 @@ public struct SubtitleStreamMetadata: Sendable, Equatable {
     public init(
         format: SubtitleFormat,
         language: String? = nil,
-        title: String? = nil,
+        title: String? = nil,  // l10n:content — subtitle track title from the file/provider
         sourceTrackID: Int? = nil,
         isForced: Bool = false,
         isHearingImpaired: Bool = false,

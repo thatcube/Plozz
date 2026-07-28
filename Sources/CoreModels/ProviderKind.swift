@@ -16,7 +16,7 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable {
     /// backend would hand us. See docs/media-share-proposal.md.
     case mediaShare
 
-    public var displayName: String {
+    public var displayName: String {  // l10n:content — brand/format name (Jellyfin/Emby/Plex), never translated; "Media Share" is grouped in for a uniform type
         switch self {
         case .jellyfin: return "Jellyfin"
         case .emby: return "Emby"

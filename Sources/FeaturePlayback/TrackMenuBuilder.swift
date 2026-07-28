@@ -1,4 +1,5 @@
 import CoreModels
+import SwiftUI
 
 /// Pure construction of the audio / subtitle / secondary-subtitle picker menus
 /// shown in `PlayerControls`, plus the small selection/eligibility decisions
@@ -52,7 +53,7 @@ enum TrackMenuBuilder {
         tracks.sortedByPreferredLanguage(preferred).map { track in
             PlayerTrackOption(
                 id: track.id,
-                title: TrackLabeling.audioLabel(
+                title: text(for: TrackLabeling.audioLabel(
                     displayTitle: track.displayTitle,
                     language: track.language,
                     codec: track.codec,
@@ -60,7 +61,7 @@ enum TrackMenuBuilder {
                     isAtmos: track.isAtmos,
                     isCommentary: track.isCommentary,
                     trackID: track.id
-                ),
+                )),
                 isSelected: track.id == selectedID
             )
         }
@@ -76,7 +77,7 @@ enum TrackMenuBuilder {
         detectedLanguages: [Int: String]
     ) -> [PlayerTrackOption] {
         guard !tracks.isEmpty else { return [] }
-        var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: "Off", isSelected: selectedID == nil)]
+        var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: Text("Off", comment: "Turns a subtitle line off in the subtitle track picker."), isSelected: selectedID == nil)]
         options.append(contentsOf: tracks.sortedByPreferredLanguage(preferred).map { track in
             PlayerTrackOption(
                 id: track.id,
@@ -98,7 +99,7 @@ enum TrackMenuBuilder {
         detectedLanguages: [Int: String]
     ) -> [PlayerTrackOption] {
         guard !eligible.isEmpty else { return [] }
-        var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: "Off", isSelected: selectedID == nil)]
+        var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: Text("Off", comment: "Turns a subtitle line off in the subtitle track picker."), isSelected: selectedID == nil)]
         options.append(contentsOf: eligible.sortedByPreferredLanguage(preferred).map { track in
             PlayerTrackOption(
                 id: track.id,
@@ -171,8 +172,8 @@ enum TrackMenuBuilder {
         return primary
     }
 
-    private static func subtitleLabel(_ track: MediaTrack, detectedLanguages: [Int: String]) -> String {
-        TrackLabeling.subtitleLabel(
+    private static func subtitleLabel(_ track: MediaTrack, detectedLanguages: [Int: String]) -> Text {
+        text(for: TrackLabeling.subtitleLabel(
             displayTitle: track.displayTitle,
             language: track.language,
             codec: track.codec,
@@ -182,6 +183,52 @@ enum TrackMenuBuilder {
             isCommentary: track.isCommentary,
             detectedLanguage: detectedLanguages[track.id],
             trackID: track.id
-        )
+        ))
+    }
+
+    /// Composes a structured ``TrackLabel`` (base + qualifiers) into the final
+    /// menu-row `Text`: base, then `" ("`, the qualifiers joined with `", "`,
+    /// then `")"`. The separators are punctuation, not copy, so they're kept
+    /// verbatim; each qualifier is resolved to either a real localized `Text`
+    /// (Plozz's own words) or `Text(verbatim:)` (content — a codec/format
+    /// token). `base`/qualifiers are never joined into a plain `String` first,
+    /// which is exactly what would hide the copy from the catalog.
+    private static func text(for label: TrackLabel) -> Text {
+        let base: Text
+        switch label.base {
+        case .content(let value):
+            base = Text(verbatim: value)
+        case .trackNumber(let number):
+            base = Text(
+                "Track \(number)",
+                comment: "Fallback label for an audio/subtitle track with no resolved language or meaningful provider title, showing its index."
+            )
+        }
+        guard !label.qualifiers.isEmpty else { return base }
+        let qualifierTexts = label.qualifiers.map(qualifierText)
+        let joined = qualifierTexts.dropFirst().reduce(qualifierTexts[0]) { accumulated, next in
+            accumulated + Text(verbatim: ", ") + next
+        }
+        return base + Text(verbatim: " (") + joined + Text(verbatim: ")")
+    }
+
+    private static func qualifierText(_ qualifier: TrackLabel.Qualifier) -> Text {
+        switch qualifier {
+        case .forced:
+            return Text("Forced", comment: "Subtitle track qualifier — the track only shows forced (foreign-language-passage) lines.")
+        case .hearingImpaired:
+            return Text("SDH", comment: "Subtitle/audio track qualifier for a hearing-impaired (SDH) track.")
+        case .commentary:
+            return Text("Commentary", comment: "Audio/subtitle track qualifier for a commentary track.")
+        case .autoDetected:
+            return Text("auto", comment: "Subtitle track qualifier appended when the shown language was guessed from the file's content rather than tagged by the provider.")
+        case .format(let value):
+            return Text(verbatim: value)
+        case .channelCount(let channels):
+            return Text(
+                "\(channels) channels",
+                comment: "Fallback wording for an audio track's channel count when it doesn't match a named layout convention (e.g. Stereo, 5.1, 7.1)."
+            )
+        }
     }
 }

@@ -625,14 +625,16 @@ public struct HomeView: View {
 
     /// The pill's secondary line: the current phase plus any live count.
     ///
-    /// The phase and its detail come from the scan itself, so they stay verbatim;
-    /// only the multi-library placeholder is ours to translate.
+    /// The phase and the detail's "folders"/"items"/"of" words are all our own
+    /// copy (real `LocalizedStringResource`s); only the counts they carry are
+    /// runtime facts. See `CoreUI.scanProgressDetailText(_:)`.
     private static func pillSubtitle(_ state: ShareScanState, multi: Bool) -> Text? {
         if multi { return Text("Updating…") }
-        let phase = state.phase
-        guard !phase.isEmpty else { return nil }
-        if let detail = state.progressDetail { return Text(verbatim: "\(phase) · \(detail)") }
-        return Text(verbatim: phase)
+        guard let phase = state.phase else { return nil }
+        if let detail = state.progressDetail {
+            return Text(phase) + Text(verbatim: " · ") + scanProgressDetailText(detail)
+        }
+        return Text(phase)
     }
 
     /// A flattened, spoken description of the pill for VoiceOver.
@@ -1169,7 +1171,7 @@ private struct LibraryCardView: View {
                 )
 
             BorderlessCardCaption(
-                title: aggregated.library.title,
+                title: Text(verbatim: aggregated.library.title),
                 subtitle: subtitle.isEmpty ? nil : subtitle,
                 horizontalInset: metrics.landscapeCaptionInset
             )

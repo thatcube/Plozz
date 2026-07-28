@@ -81,7 +81,7 @@ public struct MusicArtist: Codable, Hashable, Identifiable, Sendable {
 /// An album (Jellyfin `MusicAlbum`, Plex parent `album`).
 public struct MusicAlbum: Codable, Hashable, Identifiable, Sendable {
     public var id: String
-    public var title: String
+    public var title: String  // l10n:content — album title from the server
     public var artistName: String?
     public var artistID: String?
     public var year: Int?
@@ -100,7 +100,7 @@ public struct MusicAlbum: Codable, Hashable, Identifiable, Sendable {
 
     public init(
         id: String,
-        title: String,
+        title: String,  // l10n:content — album title from the server
         artistName: String? = nil,
         artistID: String? = nil,
         year: Int? = nil,
@@ -136,7 +136,7 @@ public struct MusicAlbum: Codable, Hashable, Identifiable, Sendable {
 /// A single playable audio track (Jellyfin `Audio`, Plex leaf `track`).
 public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
     public var id: String
-    public var title: String
+    public var title: String  // l10n:content — track title from the server
     public var albumTitle: String?
     public var albumID: String?
     public var artistName: String?
@@ -153,7 +153,7 @@ public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
 
     public init(
         id: String,
-        title: String,
+        title: String,  // l10n:content — track title from the server
         albumTitle: String? = nil,
         albumID: String? = nil,
         artistName: String? = nil,
@@ -184,7 +184,7 @@ public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
     }
 
     /// A human-friendly subtitle line, e.g. `Artist · Album`.
-    public var subtitle: String? {
+    public var subtitle: String? {  // l10n:content — composed from artist/album content, not copy
         switch (artistName, albumTitle) {
         case let (artist?, album?): return "\(artist) · \(album)"
         case let (artist?, nil): return artist
@@ -225,7 +225,7 @@ public enum RecentlyPlayedItem: Codable, Hashable, Identifiable, Sendable {
 /// A user playlist of tracks.
 public struct MusicPlaylist: Codable, Hashable, Identifiable, Sendable {
     public var id: String
-    public var title: String
+    public var title: String  // l10n:content — playlist title (user- or server-named)
     public var artworkURL: URL?
     public var trackCount: Int?
     public var totalDuration: TimeInterval?
@@ -239,7 +239,7 @@ public struct MusicPlaylist: Codable, Hashable, Identifiable, Sendable {
 
     public init(
         id: String,
-        title: String,
+        title: String,  // l10n:content — playlist title (user- or server-named)
         artworkURL: URL? = nil,
         trackCount: Int? = nil,
         totalDuration: TimeInterval? = nil,

@@ -60,14 +60,15 @@ struct UpNextCardView: View {
                 thumbnail(for: info)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(info.eyebrow.uppercased())
+                    info.eyebrow
                         .font(.caption.weight(.heavy))
                         .tracking(1.4)
+                        .textCase(.uppercase)
                         .foregroundStyle(focused ? Color.black.opacity(0.6) : Color.white.opacity(0.65))
                     // Show name leads. It's highly variable (short sitcoms →
                     // very long anime titles), so it shrinks a step, then wraps to
                     // two lines, then truncates — always staying readable.
-                    Text(info.showName)
+                    info.showName
                         .font(.title3.weight(.bold))
                         .foregroundStyle(focused ? Color.black : Color.white)
                         .lineLimit(2)

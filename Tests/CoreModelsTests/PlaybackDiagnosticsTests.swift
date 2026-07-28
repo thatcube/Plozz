@@ -127,6 +127,9 @@ final class PlaybackDiagnosticsHDRTests: XCTestCase {
         )
 
         let stereoRoute = MediaCapabilities(maxOutputChannels: 2, supportsAtmos: false)
+        // Built the same way `audioOutputDescription` builds it (content
+        // interpolated into the copy sentence), so this proves the resource
+        // structurally matches rather than just its English resolution.
         XCTAssertEqual(
             PlaybackDiagnostics.audioOutputDescription(
                 codec: "eac3",
@@ -134,7 +137,7 @@ final class PlaybackDiagnosticsHDRTests: XCTestCase {
                 channels: 6,
                 capabilities: stereoRoute
             ),
-            "Atmos present; route may fall back to 5.1"
+            LocalizedStringResource("Atmos present; route may fall back to \("5.1")")
         )
     }
 }
@@ -224,7 +227,7 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
         XCTAssertEqual(PlaybackDiagnostics.bufferStatus(seconds: 0.5), "Buffering")
         XCTAssertEqual(PlaybackDiagnostics.bufferStatus(seconds: 5), "Low")
         XCTAssertEqual(PlaybackDiagnostics.bufferStatus(seconds: 30), "Healthy")
-        XCTAssertEqual(PlaybackDiagnostics.bufferStatus(seconds: nil), "—")
+        XCTAssertNil(PlaybackDiagnostics.bufferStatus(seconds: nil))
     }
 
     func testLanguageDisplayName() {
@@ -274,7 +277,7 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
         XCTAssertEqual(d.hdr, .dolbyVision)
         XCTAssertEqual(d.videoLineText, "HEVC · Dolby Vision · 1920×1080 · 4.8 Mbps · 24.00 fps")
         XCTAssertEqual(d.audioLineText, "Dolby Atmos · 48 kHz · 5.1 · 768 Kbps")
-        XCTAssertEqual(d.audioOutputText, "E-AC-3 JOC Atmos passthrough expected")
+        XCTAssertEqual(d.audioOutputDescription, "E-AC-3 JOC Atmos passthrough expected")
         XCTAssertEqual(d.subtitleText, "SubRip · English")
         XCTAssertEqual(d.mode, .directPlay)
         // Enriched diagnostics fields.
@@ -303,21 +306,22 @@ final class PlaybackDiagnosticsEnrichedTests: XCTestCase {
         XCTAssertEqual(PlaybackDiagnostics.formatTimecode(.infinity), "—")
     }
 
-    func testFormatSeekWindowFlagsFullTimelineVsServerWindow() {
+    func testSeekWindowFactsFlagsFullTimelineVsServerWindow() {
         // A true app-owned remux: the whole movie is seekable.
-        XCTAssertEqual(
-            PlaybackDiagnostics.formatSeekWindow(start: 0, end: 7104, duration: 7104),
-            "0:00–1:58:24 of 1:58:24 · full timeline"
-        )
+        let full = PlaybackDiagnostics.seekWindowFacts(start: 0, end: 7104, duration: 7104)
+        XCTAssertEqual(full?.window, "0:00–1:58:24")
+        XCTAssertEqual(full?.totalDuration, "1:58:24")
+        XCTAssertEqual(full?.coversWholeTimeline, true)
+        XCTAssertNil(full?.trailingWindowSeconds)
+
         // A throttled server HLS window: only a short trailing span is seekable.
-        XCTAssertEqual(
-            PlaybackDiagnostics.formatSeekWindow(start: 30, end: 51, duration: 7104),
-            "0:30–0:51 of 1:58:24 · server window 21s"
-        )
-        XCTAssertEqual(
-            PlaybackDiagnostics.formatSeekWindow(start: nil, end: nil, duration: 7104),
-            "—"
-        )
+        let trailing = PlaybackDiagnostics.seekWindowFacts(start: 30, end: 51, duration: 7104)
+        XCTAssertEqual(trailing?.window, "0:30–0:51")
+        XCTAssertEqual(trailing?.totalDuration, "1:58:24")
+        XCTAssertEqual(trailing?.coversWholeTimeline, false)
+        XCTAssertEqual(trailing?.trailingWindowSeconds, 21)
+
+        XCTAssertNil(PlaybackDiagnostics.seekWindowFacts(start: nil, end: nil, duration: 7104))
     }
 
     func testDolbyVisionDescription() {
@@ -355,23 +359,26 @@ final class PlaybackDiagnosticsEnrichedTests: XCTestCase {
         XCTAssertNil(PlaybackDiagnostics.colorDescription(bitDepth: nil, transfer: nil, rangeType: nil))
     }
 
-    func testStreamTransportSummaryFlagsLocalAndStripsTokens() {
+    func testStreamTransportFactsFlagsLocalAndStripsTokens() {
         let local = URL(string: "http://127.0.0.1:52344/remux/master.m3u8?token=secret")!
-        XCTAssertEqual(
-            PlaybackDiagnostics.streamTransportSummary(url: local),
-            "App-local 127.0.0.1:52344 · HLS"
-        )
+        let localFacts = PlaybackDiagnostics.streamTransportFacts(url: local)
+        XCTAssertEqual(localFacts?.isLocal, true)
+        XCTAssertEqual(localFacts?.hostAndPort, "127.0.0.1:52344")
+        XCTAssertEqual(localFacts?.container, "HLS")
+
         let server = URL(string: "https://media.example.com/video/start.m3u8?X-Plex-Token=abc123")!
-        XCTAssertEqual(
-            PlaybackDiagnostics.streamTransportSummary(url: server),
-            "media.example.com · HLS"
-        )
+        let serverFacts = PlaybackDiagnostics.streamTransportFacts(url: server)
+        XCTAssertEqual(serverFacts?.isLocal, false)
+        XCTAssertEqual(serverFacts?.hostAndPort, "media.example.com")
+        XCTAssertEqual(serverFacts?.container, "HLS")
+
         let progressive = URL(string: "http://127.0.0.1:8888/stream.mp4")!
-        XCTAssertEqual(
-            PlaybackDiagnostics.streamTransportSummary(url: progressive),
-            "App-local 127.0.0.1:8888 · fMP4/MP4"
-        )
-        XCTAssertNil(PlaybackDiagnostics.streamTransportSummary(url: nil))
+        let progressiveFacts = PlaybackDiagnostics.streamTransportFacts(url: progressive)
+        XCTAssertEqual(progressiveFacts?.isLocal, true)
+        XCTAssertEqual(progressiveFacts?.hostAndPort, "127.0.0.1:8888")
+        XCTAssertEqual(progressiveFacts?.container, "fMP4/MP4")
+
+        XCTAssertNil(PlaybackDiagnostics.streamTransportFacts(url: nil))
     }
 
     func testCodecTagFlagsHev1BlackScreenRisk() {
@@ -391,7 +398,10 @@ final class PlaybackDiagnosticsEnrichedTests: XCTestCase {
         d.seekableStartSeconds = 0
         d.seekableEndSeconds = 7104
         XCTAssertEqual(d.positionText, "12:34 / 1:58:24")
-        XCTAssertEqual(d.seekWindowText, "0:00–1:58:24 of 1:58:24 · full timeline")
+        let facts = d.seekWindowFacts
+        XCTAssertEqual(facts?.window, "0:00–1:58:24")
+        XCTAssertEqual(facts?.totalDuration, "1:58:24")
+        XCTAssertEqual(facts?.coversWholeTimeline, true)
     }
 }
 

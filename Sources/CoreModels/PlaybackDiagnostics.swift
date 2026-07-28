@@ -26,7 +26,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         case transcode
         case unknown
 
-        public var displayName: String {
+        public var displayName: LocalizedStringResource {
             switch self {
             case .directPlay: return "Direct Play"
             case .remux: return "Remux (server, lossless)"
@@ -46,7 +46,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         case dolbyVision
         case unknown
 
-        public var displayName: String {
+        public var displayName: String {  // l10n:content — brand/format names (HDR/HLG/PQ/Dolby Vision), never translated
             switch self {
             case .sdr: return "SDR"
             case .hlg: return "HDR (HLG)"
@@ -59,7 +59,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
 
         /// Compact label for inline use in the video line. `nil` for unknown so
         /// it can be omitted.
-        public var shortName: String? {
+        public var shortName: String? {  // l10n:content — brand/format names, never translated
             switch self {
             case .sdr: return "SDR"
             case .hlg: return "HLG"
@@ -115,7 +115,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         case serious
         case critical
 
-        public var displayName: String {
+        public var displayName: LocalizedStringResource {
             switch self {
             case .nominal: return "Nominal"
             case .fair: return "Fair"
@@ -147,7 +147,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var audioBitrate: Double?
     /// Expected output handling for the current audio route, e.g. Atmos passthrough
     /// vs. a route that may collapse to channel-bed audio.
-    public var audioOutputDescription: String?
+    public var audioOutputDescription: LocalizedStringResource?
     /// One-line subtitle description, e.g. `SubRip · English`.
     public var subtitleDescription: String?
     public var container: String?
@@ -207,11 +207,10 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var colorTransfer: String?
     /// Specific HDR range token, e.g. `DOVI`, `HDR10`, `DOVIWithHDR10`.
     public var videoRangeType: String?
-    /// Compact, token-stripped summary of the URL AVPlayer is actually playing,
-    /// e.g. `App-local 127.0.0.1:52344 · HLS` for an app-owned local remux vs.
-    /// `media.server · HLS` for a server stream. The query string (auth tokens) is
-    /// never included.
-    public var streamTransport: String?
+    /// Compact, token-stripped facts about the URL AVPlayer is actually playing —
+    /// e.g. local app-owned remux (`127.0.0.1:52344` · `HLS`) vs. a server stream
+    /// (`media.server` · `HLS`). The query string (auth tokens) is never included.
+    public var streamTransport: StreamTransportFacts?
     /// Total media duration in seconds, when the player knows it.
     public var durationSeconds: Double?
     /// Current playhead position in seconds.
@@ -240,7 +239,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         audioChannelLayout: String? = nil,
         audioSampleRate: Int? = nil,
         audioBitrate: Double? = nil,
-        audioOutputDescription: String? = nil,
+        audioOutputDescription: LocalizedStringResource? = nil,
         subtitleDescription: String? = nil,
         container: String? = nil,
         mode: PlaybackMode = .unknown,
@@ -266,7 +265,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         dolbyVisionProfile: Int? = nil,
         colorTransfer: String? = nil,
         videoRangeType: String? = nil,
-        streamTransport: String? = nil,
+        streamTransport: StreamTransportFacts? = nil,
         durationSeconds: Double? = nil,
         positionSeconds: Double? = nil,
         seekableStartSeconds: Double? = nil,
@@ -412,7 +411,7 @@ public extension PlaybackDiagnostics {
 
     /// Friendly container name for the diagnostics overlay, e.g. `mkv` →
     /// `Matroska`, `mp4` → `MP4`.
-    static func friendlyContainerName(_ container: String?) -> String? {
+    static func friendlyContainerName(_ container: String?) -> String? {  // l10n:content — container/format brand names (Matroska, Windows Media, ...), never translated
         guard let raw = container?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
         switch raw.lowercased() {
         case "mkv": return "Matroska"
@@ -443,7 +442,7 @@ public extension PlaybackDiagnostics {
 
     /// Best display name for an audio track, preferring a descriptive spatial
     /// profile (Dolby Atmos, DTS:X) over the bare codec name.
-    static public func friendlyAudioName(codec: String?, profile: String?) -> String? {
+    static public func friendlyAudioName(codec: String?, profile: String?) -> String? {  // l10n:content — audio codec/spatial-format brand names (Dolby Atmos, DTS:X, ...), never translated
         if let profile = profile?.trimmingCharacters(in: .whitespaces), !profile.isEmpty {
             let lower = profile.lowercased()
             if lower.contains("atmos") { return "Dolby Atmos" }
@@ -458,14 +457,17 @@ public extension PlaybackDiagnostics {
     /// Human-readable expectation for what leaves the Apple TV on the active
     /// route. This is intentionally explicit for Atmos so diagnostics can show the
     /// difference between "Atmos bitstream is present" and "the current route is
-    /// likely only receiving the 5.1 channel bed".
+    /// likely only receiving the 5.1 channel bed". Every branch is one of our own
+    /// fixed sentences (the only interpolated values are brand/format labels —
+    /// "5.1", "lossless FLAC" — never arbitrary server content), so this
+    /// translates like any other resource.
     static func audioOutputDescription(
         codec: String?,
         profile: String?,
         channels: Int?,
         capabilities: MediaCapabilities,
         mode: PlaybackMode = .unknown
-    ) -> String? {
+    ) -> LocalizedStringResource? {
         let token = (codec ?? "").lowercased().replacingOccurrences(of: "_", with: "-")
         let profileText = (profile ?? "").lowercased()
         let isAtmos = profileText.contains("atmos")
@@ -530,7 +532,7 @@ public extension PlaybackDiagnostics {
 
     /// Human-readable codec name for common FourCC tags, falling back to the
     /// uppercased raw tag for anything unrecognised.
-    static func friendlyCodecName(_ fourCC: String?) -> String? {
+    static func friendlyCodecName(_ fourCC: String?) -> String? {  // l10n:content — codec brand/format names (H.264, HEVC, Dolby Vision, AV1, ...), never translated
         guard let raw = fourCC?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
         switch raw.lowercased() {
         case "avc1", "h264", "x264": return "H.264"
@@ -609,28 +611,68 @@ public extension PlaybackDiagnostics {
         return String(format: "%d:%02d", minutes, secs)
     }
 
-    /// Formats the player's seekable window against the full duration — the single
-    /// most diagnostic line for the seek bug. A true app-owned remux should report
-    /// the **whole** timeline as seekable (`… · full timeline`); a throttled server
-    /// HLS stream reports only a small trailing window (`… · server window 21s`),
-    /// which is exactly why seek-ahead 404s.
-    static func formatSeekWindow(start: Double?, end: Double?, duration: Double?) -> String {
+    /// The player's seekable window against the full duration — the single most
+    /// diagnostic fact for the seek bug. A true app-owned remux should report the
+    /// **whole** timeline as seekable; a throttled server HLS stream reports only
+    /// a small trailing window, which is exactly why seek-ahead 404s.
+    ///
+    /// Facts only: the wall-clock window/duration are content, `coversWholeTimeline`
+    /// and `trailingWindowSeconds` let the caller choose between our two copy
+    /// phrases ("full timeline" vs. "server window …") without us baking English
+    /// into a `String` here.
+    public struct SeekWindowFacts: Equatable, Sendable {
+        /// The seekable range as wall-clock timecodes, e.g. `0:30–0:51`.
+        public let window: String
+        /// Full media duration as a wall-clock timecode, e.g. `1:58:24`. `nil`
+        /// when duration isn't known yet — the window is shown on its own then.
+        public let totalDuration: String?
+        /// `true` when the seekable window covers the whole timeline (the
+        /// healthy, expected case for an app-owned remux).
+        public let coversWholeTimeline: Bool
+        /// Width of a throttled trailing seek window, in seconds. Only set when
+        /// `coversWholeTimeline` is `false`.
+        public let trailingWindowSeconds: Double?
+    }
+
+    /// `nil` when nothing is seekable yet (the caller shows the placeholder).
+    static func seekWindowFacts(start: Double?, end: Double?, duration: Double?) -> SeekWindowFacts? {
         guard let start, let end, start.isFinite, end.isFinite, end >= start else {
-            return placeholder
+            return nil
         }
         let window = "\(formatTimecode(start))–\(formatTimecode(end))"
-        guard let duration, duration.isFinite, duration > 0 else { return window }
+        guard let duration, duration.isFinite, duration > 0 else {
+            return SeekWindowFacts(window: window, totalDuration: nil, coversWholeTimeline: true, trailingWindowSeconds: nil)
+        }
         let coversWholeTimeline = end >= duration - 5 && start <= 5
-        let tag = coversWholeTimeline
-            ? "full timeline"
-            : String(format: "server window %.0fs", max(0, end - start))
-        return "\(window) of \(formatTimecode(duration)) · \(tag)"
+        return SeekWindowFacts(
+            window: window,
+            totalDuration: formatTimecode(duration),
+            coversWholeTimeline: coversWholeTimeline,
+            trailingWindowSeconds: coversWholeTimeline ? nil : max(0, end - start)
+        )
+    }
+
+    /// Buffer health facts. `status` is our own copy word ("Buffering" / "Low" /
+    /// "Healthy"), `secondsAhead` is a formatted figure; the overlay composes
+    /// the "… ahead" qualifier as `Text` around it.
+    public struct BufferStatusFacts: Equatable, Sendable {
+        /// `nil` when no buffer sample is available yet.
+        public let status: LocalizedStringResource?
+        /// Formatted seconds-ahead figure, e.g. `72.6s`. `nil` when not available.
+        public let secondsAhead: String?
+    }
+
+    /// Disk space facts. Both figures are content (formatted byte counts); the
+    /// overlay supplies the "… free" copy word around them.
+    public struct DiskSpaceFacts: Equatable, Sendable {
+        public let freeText: String
+        public let totalText: String?
     }
 
     /// Human-readable Dolby Vision profile, calling out the make-or-break facts:
     /// Profile 5 has **no** HDR10 fallback (a wrong sample entry = no picture),
     /// Profile 8 is HDR10-compatible, Profile 7 is dual-layer (stays on Plozzigen).
-    static func dolbyVisionDescription(profile: Int?) -> String? {
+    static func dolbyVisionDescription(profile: Int?) -> String? {  // l10n:content — Dolby Vision brand name + technical profile description, never translated
         guard let profile else { return nil }
         switch profile {
         case 5: return "Profile 5 (single-layer · no HDR10 fallback)"
@@ -675,7 +717,25 @@ public extension PlaybackDiagnostics {
     /// (`.m3u8` ⇒ `HLS`, progressive `.mp4`/`.m4v`/`.mov` ⇒ `fMP4/MP4`), which is
     /// far more useful on the overlay than the bare scheme; when the container
     /// can't be inferred a remote host falls back to its scheme.
-    static func streamTransportSummary(url: URL?) -> String? {
+    ///
+    /// Facts only: `hostAndPort`/`container`/`scheme` are content; `isLocal` lets
+    /// the caller prefix its own "App-local" copy word.
+    public struct StreamTransportFacts: Equatable, Sendable {
+        /// `true` when AVPlayer is pulling from the app's own local server
+        /// rather than the media server.
+        public let isLocal: Bool
+        /// Host (and port, if present), e.g. `127.0.0.1:52344` or
+        /// `media.example.com`. `nil` when the host is empty and not local.
+        public let hostAndPort: String?
+        /// Recognised transport/container label, e.g. `HLS`, `fMP4/MP4`.
+        public let container: String?
+        /// Scheme fallback used only when `container` isn't recognisable,
+        /// e.g. `HTTPS`.
+        public let scheme: String?
+    }
+
+    /// `nil` when there's no URL, or nothing at all to report about it.
+    static func streamTransportFacts(url: URL?) -> StreamTransportFacts? {
         guard let url else { return nil }
         let host = (url.host ?? "").lowercased()
         let scheme = (url.scheme ?? "").uppercased()
@@ -683,13 +743,18 @@ public extension PlaybackDiagnostics {
         let isLocal = host == "127.0.0.1" || host == "localhost" || host == "::1"
         if isLocal {
             let port = url.port.map { ":\($0)" } ?? ""
-            let base = "App-local \(host)\(port)"
-            return container.map { "\(base) · \($0)" } ?? base
+            return StreamTransportFacts(
+                isLocal: true,
+                hostAndPort: "\(host)\(port)",
+                container: container,
+                scheme: scheme.isEmpty ? nil : scheme
+            )
         }
         if host.isEmpty {
-            return container ?? (scheme.isEmpty ? nil : scheme)
+            guard container != nil || !scheme.isEmpty else { return nil }
+            return StreamTransportFacts(isLocal: false, hostAndPort: nil, container: container, scheme: scheme.isEmpty ? nil : scheme)
         }
-        return "\(host) · \(container ?? scheme)"
+        return StreamTransportFacts(isLocal: false, hostAndPort: host, container: container, scheme: scheme.isEmpty ? nil : scheme)
     }
 
     /// Best-effort delivery/container label from a stream URL's path extension.
@@ -739,9 +804,10 @@ public extension PlaybackDiagnostics {
     }
 
     /// A coarse health label for the playback buffer, mirroring Infuse's "Buffer
-    /// status" row.
-    static func bufferStatus(seconds: Double?) -> String {
-        guard let seconds, seconds.isFinite, seconds >= 0 else { return placeholder }
+    /// status" row. `nil` when there's no buffered-ahead reading yet — the
+    /// caller shows the placeholder, same convention as everywhere else here.
+    static func bufferStatus(seconds: Double?) -> LocalizedStringResource? {
+        guard let seconds, seconds.isFinite, seconds >= 0 else { return nil }
         switch seconds {
         case ..<2: return "Buffering"
         case 2..<8: return "Low"
@@ -820,10 +886,6 @@ public extension PlaybackDiagnostics {
         ])
     }
 
-    var audioOutputText: String {
-        audioOutputDescription ?? Self.placeholder
-    }
-
     var audioChannelsText: String {
         Self.channelDescription(layout: audioChannelLayout, channels: audioChannels) ?? Self.placeholder
     }
@@ -841,7 +903,7 @@ public extension PlaybackDiagnostics {
     var sourceProviderText: String { sourceProvider?.displayName ?? Self.placeholder }
 
     /// Container codec tag, annotating the AVPlayer-hostile `hev1` case.
-    var videoCodecTagText: String {
+    var videoCodecTagText: String {  // l10n:content — developer-facing diagnostic annotation (AVPlayer/hvc1 compatibility caveat)
         guard let tag = videoCodecTag?.trimmingCharacters(in: .whitespaces), !tag.isEmpty else {
             return Self.placeholder
         }
@@ -862,9 +924,6 @@ public extension PlaybackDiagnostics {
         Self.dolbyVisionDescription(profile: dolbyVisionProfile) ?? Self.placeholder
     }
 
-    /// Token-stripped transport summary of what AVPlayer is actually playing.
-    var streamTransportText: String { streamTransport ?? Self.placeholder }
-
     /// Selected source filename, or a placeholder when the provider cannot expose
     /// one. Whitespace-only values are suppressed.
     var sourceFileNameText: String {
@@ -884,8 +943,8 @@ public extension PlaybackDiagnostics {
     }
 
     /// Seekable window vs. duration — the key seek diagnostic.
-    var seekWindowText: String {
-        Self.formatSeekWindow(start: seekableStartSeconds, end: seekableEndSeconds, duration: durationSeconds)
+    var seekWindowFacts: SeekWindowFacts? {
+        Self.seekWindowFacts(start: seekableStartSeconds, end: seekableEndSeconds, duration: durationSeconds)
     }
 
     /// Live player state, e.g. `Ready · Playing`.
@@ -894,11 +953,15 @@ public extension PlaybackDiagnostics {
     /// Subtitle line, e.g. `SubRip · English`, or a placeholder when none.
     var subtitleText: String { subtitleDescription ?? Self.placeholder }
 
-    /// Buffer health + seconds ahead, e.g. `Healthy · 72.6s ahead`.
-    var bufferStatusText: String {
+    /// Buffer health + seconds ahead, e.g. `Healthy · 72.6s ahead`. Facts only —
+    /// `status` is our own copy word, `secondsAhead` is a formatted figure; the
+    /// overlay composes the "… ahead" qualifier as `Text` around it.
+    var bufferStatusFacts: BufferStatusFacts {
         let status = Self.bufferStatus(seconds: bufferedSecondsAhead)
-        guard let seconds = bufferedSecondsAhead, seconds.isFinite, seconds >= 0 else { return status }
-        return "\(status) · \(Self.formatBuffer(seconds)) ahead"
+        guard let seconds = bufferedSecondsAhead, seconds.isFinite, seconds >= 0 else {
+            return BufferStatusFacts(status: status, secondsAhead: nil)
+        }
+        return BufferStatusFacts(status: status, secondsAhead: Self.formatBuffer(seconds))
     }
 
     /// Device line, e.g. `Apple TV 4K · 3.88 GB`.
@@ -906,13 +969,11 @@ public extension PlaybackDiagnostics {
         Self.joinParts([deviceModel, Self.formatBytes(deviceMemoryBytes)])
     }
 
-    /// Disk line, e.g. `90.26 GB free / 118.88 GB`.
-    var diskText: String {
-        guard let free = Self.formatBytes(freeDiskBytes) else { return Self.placeholder }
-        if let total = Self.formatBytes(totalDiskBytes) {
-            return "\(free) free / \(total)"
-        }
-        return "\(free) free"
+    /// Disk line, e.g. `90.26 GB free / 118.88 GB`. Facts only — both figures
+    /// are content; the overlay supplies the "… free" copy word around them.
+    var diskSpaceFacts: DiskSpaceFacts? {
+        guard let free = Self.formatBytes(freeDiskBytes) else { return nil }
+        return DiskSpaceFacts(freeText: free, totalText: Self.formatBytes(totalDiskBytes))
     }
 
     /// Process memory line, e.g. `412.5 MB`. Watch it across playbacks: a steady
@@ -921,9 +982,10 @@ public extension PlaybackDiagnostics {
         Self.formatBytes(memoryFootprintBytes) ?? Self.placeholder
     }
 
-    /// System thermal pressure, e.g. `Serious (throttling)`.
-    var thermalText: String {
-        thermalState?.displayName ?? Self.placeholder
+    /// System thermal pressure, e.g. `Serious (throttling)`. `nil` when no
+    /// thermal sample is available yet — the caller shows a placeholder.
+    var thermalResource: LocalizedStringResource? {
+        thermalState?.displayName
     }
 
     /// Live-instance line, e.g. `Players 1 · AVPlayer 1`. Outside the player both
@@ -933,7 +995,7 @@ public extension PlaybackDiagnostics {
     /// over-construction (throwaway instances built on the render path).
     /// `Players` counts live `PlayerViewModel`s; `AVPlayer` counts
     /// `NativeVideoEngine`s.
-    var liveInstancesText: String {
+    var liveInstancesText: String {  // l10n:content — developer-facing diagnostic (leak-detection instrumentation, not meant for translation)
         guard liveViewModels != nil || liveNativeEngines != nil else {
             return Self.placeholder
         }

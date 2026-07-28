@@ -756,7 +756,7 @@ public struct NowPlayingView: View {
                     Text(quality.headline)
                         .font(.system(size: 11, weight: .semibold))
                     if let detail = quality.detail {
-                        Text(detail)
+                        Text(verbatim: detail)
                             .font(.system(size: 11))
                             .plozzForeground(.secondary)
                     }

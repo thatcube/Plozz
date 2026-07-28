@@ -110,10 +110,25 @@ public extension SpoilerSettings {
         return Self.isSpoilerCandidate(item)
     }
 
-    /// A spoiler-safe display title for a hidden episode, e.g. `Episode 5`.
-    func maskedTitle(for item: MediaItem) -> String {
-        if let number = item.episodeNumber { return "Episode \(number)" }
-        return "Episode"
+    /// A spoiler-safe display resource for a hidden episode, e.g. `Episode 5`.
+    /// Genuinely our own copy — not provider content. Returns a
+    /// `LocalizedStringResource` rather than a `String`/`Text`: `CoreModels`
+    /// can't import SwiftUI, so the caller (which can) composes the final
+    /// `Text(maskedTitle(for: item))`, choosing it in place of the real
+    /// (content) title whenever it has separately decided to hide the item's
+    /// text (`shouldHideText`). `"Episode \(number)"` is a count-bearing phrase
+    /// that needs a plural catalog variant.
+    func maskedTitle(for item: MediaItem) -> LocalizedStringResource {
+        if let number = item.episodeNumber {
+            return LocalizedStringResource(
+                "Episode \(number)",
+                comment: "Placeholder title shown instead of the real title for a spoiler-protected (unwatched) episode, giving only its episode number."
+            )
+        }
+        return LocalizedStringResource(
+            "Episode",
+            comment: "Placeholder title shown instead of the real title for a spoiler-protected (unwatched) episode whose episode number isn't known."
+        )
     }
 
     /// Hide external ratings for a movie or episode until it has been fully

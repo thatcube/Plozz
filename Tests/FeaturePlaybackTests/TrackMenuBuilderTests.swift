@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 import CoreModels
 @testable import FeaturePlayback
 
@@ -111,7 +112,7 @@ final class TrackMenuBuilderTests: XCTestCase {
             tracks: tracks, selectedID: nil, preferred: ["eng"], detectedLanguages: [:]
         )
         XCTAssertEqual(options.first?.id, PlayerTrackOption.offID)
-        XCTAssertEqual(options.first?.title, "Off")
+        XCTAssertEqual(options.first?.title, Text("Off"))
         XCTAssertTrue(options.first!.isSelected)         // "Off" is selected when primary is off
         XCTAssertEqual(options.dropFirst().map(\.id), [1, 2]) // eng first
     }

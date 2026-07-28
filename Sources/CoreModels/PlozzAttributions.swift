@@ -11,10 +11,10 @@ public struct PlozzAttributionLicense: Hashable, Identifiable, Sendable {
         case api
     }
 
-    public let label: String
+    public let label: String  // l10n:content — third-party license identifier (e.g. "MIT", "LGPL-3.0"), never translated
     public let family: Family
 
-    public init(_ label: String, family: Family) {
+    public init(_ label: String, family: Family) {  // l10n:content — third-party license identifier
         self.label = label
         self.family = family
     }
@@ -23,12 +23,12 @@ public struct PlozzAttributionLicense: Hashable, Identifiable, Sendable {
 }
 
 public struct PlozzAttribution: Identifiable, Sendable {
-    public let title: String
+    public let title: String  // l10n:content — legal/attribution copy: third-party project name + license text, deliberately verbatim
     public let detail: String
     public let licenses: [PlozzAttributionLicense]
 
     public init(
-        title: String,
+        title: String,  // l10n:content — legal/attribution copy: third-party project name + license text, deliberately verbatim
         detail: String,
         licenses: [PlozzAttributionLicense] = []
     ) {

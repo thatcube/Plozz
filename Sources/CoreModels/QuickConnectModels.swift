@@ -17,7 +17,7 @@ public struct QuickConnectChallenge: Hashable, Sendable {
 
 extension QuickConnectChallenge: CustomStringConvertible {
     /// Redacts the secret; the user code is safe to show.
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing diagnostic
         "QuickConnectChallenge(code: \(userCode), authenticated: \(isAuthenticated), secret: <redacted>)"
     }
 }

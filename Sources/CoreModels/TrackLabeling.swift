@@ -45,7 +45,7 @@ public enum TrackLabeling {
     /// information beyond an index/codec ("Track 8", "Subtitle 3 (pgssub)",
     /// "subrip"). Such titles are dropped in favour of a resolved language name
     /// or a clean "Track N".
-    public static func isGenericTitle(_ title: String?) -> Bool {
+    public static func isGenericTitle(_ title: String?) -> Bool {  // l10n:content — `title` is a provider/demuxer track title
         guard let raw = title?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return true }
         var token = raw.lowercased()
         // Strip a trailing "(codec)" annotation, e.g. "track 8 (pgssub)".
@@ -68,7 +68,7 @@ public enum TrackLabeling {
     }
 
     /// Hearing-impaired / SDH heuristic from a provider title (we have no flag).
-    public static func isHearingImpaired(_ title: String?) -> Bool {
+    public static func isHearingImpaired(_ title: String?) -> Bool {  // l10n:content — `title` is a provider track title
         let token = (title ?? "").lowercased()
         return token.contains("sdh")
             || token.contains("hearing impaired")
@@ -80,7 +80,7 @@ public enum TrackLabeling {
     /// "DTS 7.1", "Dolby TrueHD 5.1", "AAC Stereo", or "Dolby Atmos". Lets an
     /// untagged track read as "Track 1 (DTS 7.1)" instead of a bare "Track 1".
     /// Returns `nil` only when neither codec nor channel count is known.
-    public static func audioFormatHint(codec: String?, channels: Int?, isAtmos: Bool) -> String? {
+    public static func audioFormatHint(codec: String?, channels: Int?, isAtmos: Bool) -> String? {  // l10n:content — composed brand/format hint ("Dolby Atmos", "DTS 7.1"), never translated
         let codecName = audioCodecName(codec)
         // Atmos is object-based; the bed channel count is misleading, so surface
         // the format alone (matching how Plex/AppleTV present it).
@@ -95,7 +95,7 @@ public enum TrackLabeling {
     }
 
     /// Recognizable display name for a libavcodec/container audio codec token.
-    private static func audioCodecName(_ codec: String?) -> String? {
+    private static func audioCodecName(_ codec: String?) -> String? {  // l10n:content — codec brand names ("Dolby Digital", "DTS", ...), never translated
         guard let token = codec?.lowercased(), !token.isEmpty else { return nil }
         switch token {
         case "ac3": return "Dolby Digital"
@@ -116,8 +116,12 @@ public enum TrackLabeling {
     }
 
     /// Friendly channel-layout label for a channel count (`2` → "Stereo",
-    /// `6` → "5.1"). `nil`/`0` yields no label.
-    private static func channelLayoutName(_ channels: Int?) -> String? {
+    /// `6` → "5.1"). `nil`, `0`, or a count with no named convention (9+
+    /// channels — no consumer file has ever actually hit this) yields no label;
+    /// callers that need to say something for that rare case use
+    /// `TrackLabel.Qualifier.channelCount` instead of hand-abbreviating "N ch"
+    /// here, since that would be a hand-built, unlocalized number format.
+    private static func channelLayoutName(_ channels: Int?) -> String? {  // l10n:content — technical channel-layout token (e.g. "5.1"), never translated
         guard let channels, channels > 0 else { return nil }
         switch channels {
         case 1: return "Mono"
@@ -128,7 +132,7 @@ public enum TrackLabeling {
         case 6: return "5.1"
         case 7: return "6.1"
         case 8: return "7.1"
-        default: return "\(channels) ch"
+        default: return nil
         }
     }
 
@@ -137,6 +141,15 @@ public enum TrackLabeling {
     /// meaningful provider title, else "Track N". Appends qualifiers in
     /// parentheses: Forced, SDH, an image-format hint, and "auto" when the
     /// language came only from on-device content detection.
+    ///
+    /// Returns a structured ``TrackLabel`` rather than an assembled `String` —
+    /// the base can be resolved *content* (a language name or a provider title)
+    /// while the qualifiers are our *own words* ("Forced"/"SDH"/"Commentary"/
+    /// "auto") or brand/format content ("PGS"). CoreModels can't import SwiftUI,
+    /// so the caller (`FeaturePlayback/TrackMenuBuilder`, which can) composes the
+    /// final `Text`, choosing `Text(verbatim:)` for content pieces and a real
+    /// localized `Text` for the copy pieces — never joining them into one string
+    /// first, which would hide the copy from the catalog forever.
     public static func subtitleLabel(
         displayTitle: String,
         language: String?,
@@ -147,32 +160,31 @@ public enum TrackLabeling {
         isCommentary: Bool = false,
         detectedLanguage: String? = nil,
         trackID: Int
-    ) -> String {
+    ) -> TrackLabel {
         let providerName = languageName(forCode: language)
         let detectedName = providerName == nil ? languageName(forCode: detectedLanguage) : nil
-        let base: String
+        let base: TrackLabel.Base
         if let providerName {
-            base = providerName
+            base = .content(providerName)
         } else if let detectedName {
-            base = detectedName
+            base = .content(detectedName)
         } else if !isGenericTitle(displayTitle) {
-            base = displayTitle
+            base = .content(displayTitle)
         } else {
-            base = "Track \(trackID)"
+            base = .trackNumber(trackID)
         }
 
-        var qualifiers: [String] = []
-        if isForced { qualifiers.append("Forced") }
+        var qualifiers: [TrackLabel.Qualifier] = []
+        if isForced { qualifiers.append(.forced) }
         // Prefer the reliable container flag; fall back to the title-text heuristic.
-        if isHearingImpaired || Self.isHearingImpaired(displayTitle) { qualifiers.append("SDH") }
-        if isCommentary { qualifiers.append("Commentary") }
+        if isHearingImpaired || Self.isHearingImpaired(displayTitle) { qualifiers.append(.hearingImpaired) }
+        if isCommentary { qualifiers.append(.commentary) }
         if let hint = subtitleFormatHint(codec: codec, isImageBased: isImageBased) {
-            qualifiers.append(hint)
+            qualifiers.append(.format(hint))
         }
-        if providerName == nil, detectedName != nil { qualifiers.append("auto") }
+        if providerName == nil, detectedName != nil { qualifiers.append(.autoDetected) }
 
-        guard !qualifiers.isEmpty else { return base }
-        return "\(base) (\(qualifiers.joined(separator: ", ")))"
+        return TrackLabel(base: base, qualifiers: qualifiers)
     }
 
     /// Builds the audio menu label. Leads with the resolved **language** (like
@@ -184,6 +196,9 @@ public enum TrackLabeling {
     /// language leads and is annotated with the audio format ("DTS 7.1") and a
     /// Commentary marker. Falls back to a meaningful title, then "Track N", only
     /// when no language resolves.
+    ///
+    /// Returns a structured ``TrackLabel`` for the same reason as
+    /// `subtitleLabel` — see that method's doc comment.
     public static func audioLabel(
         displayTitle: String,
         language: String?,
@@ -192,34 +207,98 @@ public enum TrackLabeling {
         isAtmos: Bool = false,
         isCommentary: Bool = false,
         trackID: Int
-    ) -> String {
+    ) -> TrackLabel {
         let languageNm = languageName(forCode: language)
 
         // A provider title that already names the language is a complete label.
         if let languageNm,
            !isGenericTitle(displayTitle),
            displayTitle.range(of: languageNm, options: .caseInsensitive) != nil {
-            return displayTitle
+            return TrackLabel(base: .content(displayTitle))
         }
 
-        let base: String
+        let base: TrackLabel.Base
         if let languageNm {
-            base = languageNm
+            base = .content(languageNm)
         } else if !isGenericTitle(displayTitle) {
             // No language, but the title says something real — trust it as-is.
-            return displayTitle
+            return TrackLabel(base: .content(displayTitle))
         } else {
-            base = "Track \(trackID)"
+            base = .trackNumber(trackID)
         }
 
-        var qualifiers: [String] = []
+        var qualifiers: [TrackLabel.Qualifier] = []
         if let hint = audioFormatHint(codec: codec, channels: channels, isAtmos: isAtmos) {
-            qualifiers.append(hint)
+            qualifiers.append(.format(hint))
         }
-        if isCommentary { qualifiers.append("Commentary") }
+        // `audioFormatHint`/`channelLayoutName` say nothing for a channel count
+        // with no named convention (9+ channels — vanishingly rare, no known
+        // file has ever hit this) rather than hand-abbreviating "N ch", which
+        // would be an unlocalized number format. Surface it as its own
+        // count-bearing qualifier instead, resolved into a real resource by the
+        // caller, so the fact isn't silently dropped for the rare file that does.
+        if !isAtmos, channelLayoutName(channels) == nil, let channels, channels > 0 {
+            qualifiers.append(.channelCount(channels))
+        }
+        if isCommentary { qualifiers.append(.commentary) }
 
-        guard !qualifiers.isEmpty else { return base }
-        return "\(base) (\(qualifiers.joined(separator: ", ")))"
+        return TrackLabel(base: base, qualifiers: qualifiers)
+    }
+}
+
+/// A structured, unformatted track menu label: a base name plus an ordered list
+/// of qualifiers meant to be shown in parentheses after it.
+///
+/// Kept in `CoreModels` (Foundation-only) so `TrackLabeling` can stay
+/// unit-testable without SwiftUI, but the label is never assembled into one
+/// `String` here — `base` and `.format` qualifiers are resolved *content*
+/// (a language name, a provider title, a codec/format token) while the other
+/// qualifiers are Plozz's *own words* ("Forced", "SDH", "Commentary", "auto").
+/// Joining those into a single `String` up front would permanently hide the
+/// copy from the localization catalog. The caller (`TrackMenuBuilder`, in
+/// `FeaturePlayback`, which can import SwiftUI) composes the final `Text`,
+/// using `Text(verbatim:)` for content and a real localized `Text` for copy.
+public struct TrackLabel: Equatable, Sendable {
+    /// The lead segment of the label.
+    public enum Base: Equatable, Sendable {
+        /// A resolved language name, or a provider/demuxer title that already
+        /// reads as a complete, meaningful label — content, rendered verbatim.
+        case content(String)
+        /// No usable language or title; Plozz's own numbered fallback wording,
+        /// e.g. "Track 4" — copy, count-bearing (needs plural variations).
+        case trackNumber(Int)
+    }
+
+    /// A qualifier appended in parentheses after the base, in a fixed,
+    /// caller-defined order, joined with ", ".
+    public enum Qualifier: Equatable, Sendable {
+        /// "Forced" — copy.
+        case forced
+        /// "SDH" — copy (Plozz's own wording for a hearing-impaired track; not
+        /// a code/token from the file).
+        case hearingImpaired
+        /// "Commentary" — copy.
+        case commentary
+        /// "auto" — copy, appended when the language came only from on-device
+        /// content detection rather than a provider/container tag.
+        case autoDetected
+        /// A pre-composed brand/format hint — a codec name, a standard
+        /// channel-layout token ("Stereo", "5.1", "7.1"), a subtitle image
+        /// format ("PGS", "VobSub", "Image"), or "Dolby Atmos" — content, never
+        /// translated, rendered verbatim.
+        case format(String)
+        /// Fallback wording for an audio track whose channel count has no named
+        /// layout convention (9+ channels; no known file has ever hit this) —
+        /// copy, count-bearing (needs plural variations).
+        case channelCount(Int)
+    }
+
+    public var base: Base
+    public var qualifiers: [Qualifier]
+
+    public init(base: Base, qualifiers: [Qualifier] = []) {
+        self.base = base
+        self.qualifiers = qualifiers
     }
 }
 

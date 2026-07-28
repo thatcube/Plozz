@@ -861,6 +861,17 @@ private struct PlozziOSCanonicalItemDetailView: View {
     }
 }
 
+/// Renders a `MediaVersion` title: the joined technical facts (or provider
+/// name) verbatim when known, otherwise our own generic "Version" copy —
+/// kept as a real resource here rather than baked into a `String` so it
+/// translates like everything else.
+private func versionTitleText(_ displayLabel: String?) -> Text {
+    if let displayLabel {
+        return Text(verbatim: displayLabel)
+    }
+    return Text("Version", comment: "Generic label for a playback version/source with no distinguishing facts (resolution, edition, etc.) known.")
+}
+
 private struct PlozziOSSourceVersionControls: View {
     let sources: [MediaSourceRef]
     let selectedSourceID: String?
@@ -894,10 +905,11 @@ private struct PlozziOSSourceVersionControls: View {
                 Button {
                     isVersionPickerPresented = true
                 } label: {
-                    Label(
-                        selectedVersion.displayLabel,
-                        systemImage: "film.stack"
-                    )
+                    Label {
+                        versionTitleText(selectedVersion.displayLabel)
+                    } icon: {
+                        Image(systemName: "film.stack")
+                    }
                 }
                 .buttonStyle(.bordered)
                 .popover(
@@ -979,7 +991,7 @@ private struct PlozziOSVersionPickerPopover: View {
                                 .frame(width: 18)
                                 .opacity(version.id == selectedVersionID ? 1 : 0)
                                 .accessibilityHidden(version.id != selectedVersionID)
-                            Text(version.displayLabel)
+                            versionTitleText(version.displayLabel)
                                 .multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
                         }

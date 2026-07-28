@@ -72,7 +72,7 @@ public enum FanoutDiagnostics {
     /// (a) Identity-index state: how many identities are indexed and how many span
     /// more than one account (a cross-server union). `crossServer == 0` ⇒ the index
     /// never warmed a union ⇒ nothing can fan out (the H1 bug class).
-    public static func indexStateLine(_ snapshot: IdentityIndexSnapshot, phase: String) -> String {
+    public static func indexStateLine(_ snapshot: IdentityIndexSnapshot, phase: String) -> String {  // l10n:content — developer-facing diagnostic
         let accountIDs = snapshot.indexedAccountIDs.sorted()
         return "\(phase): identities=\(snapshot.identityCount) "
             + "crossServer=\(snapshot.crossServerIdentityCount) "
@@ -82,8 +82,8 @@ public enum FanoutDiagnostics {
     /// (b)+(c) The stop event: the played item's resolved identity, the index union
     /// found for it, and the mutation's final target set. `union`/`targets` of 1 ⇒
     /// origin-only ⇒ no fan-out for this title.
-    public static func stopLine(
-        title: String,
+    public static func stopLine(  // l10n:content — developer-facing diagnostic
+        title: String,  // l10n:content — developer-facing diagnostic
         kind: MediaItemKind,
         itemID: String,
         originAccountID: String?,
@@ -112,7 +112,7 @@ public enum FanoutDiagnostics {
     }
 
     /// (d) Drain header for one mutation, before its targets are written.
-    public static func drainHeaderLine(
+    public static func drainHeaderLine(  // l10n:content — developer-facing diagnostic
         canonicalMediaID: String,
         played: Bool?,
         resumePosition: TimeInterval?,
@@ -129,7 +129,7 @@ public enum FanoutDiagnostics {
 
     /// (d) Per-target write outcome. `outcome` is a short verb phrase such as
     /// `setPlayed=OK setResume=OK`, `deferred(live)`, or `setPlayed=THROW(...)`.
-    public static func drainTargetLine(_ target: WatchMutationTarget, outcome: String) -> String {
+    public static func drainTargetLine(_ target: WatchMutationTarget, outcome: String) -> String {  // l10n:content — developer-facing diagnostic
         "drain.target acct=\(target.accountID) item=\(target.itemID) "
             + "kind=\(target.providerKind?.rawValue ?? "?") -> \(outcome)"
     }
@@ -137,7 +137,7 @@ public enum FanoutDiagnostics {
     /// (d) Drain summary after one mutation pass. Surfaces every tracker mirror's
     /// pending flag (not just Trakt) so a stuck Simkl/AniList/MAL scrobble is
     /// visible at a glance alongside the server targets.
-    public static func drainDoneLine(
+    public static func drainDoneLine(  // l10n:content — developer-facing diagnostic
         canonicalMediaID: String,
         remainingTargets: Int,
         fullyApplied: Bool,
@@ -159,7 +159,7 @@ public enum FanoutDiagnostics {
     /// pinpointable on device. Logs the title + the catalogue ids being sent (imdb /
     /// tmdb / tvdb / mal / anilist — never tokens), since a present-but-wrong id
     /// (e.g. an episode id used as a show id) is the subtle failure to catch.
-    public static func scrobbleLine(tracker: String, item: MediaItem, outcome: String) -> String {
+    public static func scrobbleLine(tracker: String, item: MediaItem, outcome: String) -> String {  // l10n:content — developer-facing diagnostic
         let se = item.kind == .episode
             ? " s\(item.seasonNumber.map(String.init) ?? "?")e\(item.episodeNumber.map(String.init) ?? "?")"
             : ""

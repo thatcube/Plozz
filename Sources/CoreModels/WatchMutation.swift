@@ -47,10 +47,10 @@ public struct EpisodeOrigin: Codable, Hashable, Sendable {
 /// replayed at launch by whatever scrobbler the app wires in.
 public struct TraktScrobbleIntent: Codable, Hashable, Sendable {
     public var kind: MediaItemKind
-    public var title: String?
+    public var title: String?  // l10n:content — media title
     /// Series title for episodes, so anime trackers can title-search brand-new
     /// shows that public id maps (ARM) haven't indexed yet. Nil for movies.
-    public var seriesTitle: String?
+    public var seriesTitle: String?  // l10n:content — media title
     public var year: Int?
     public var seasonNumber: Int?
     public var episodeNumber: Int?
@@ -61,7 +61,7 @@ public struct TraktScrobbleIntent: Codable, Hashable, Sendable {
 
     public init(
         kind: MediaItemKind,
-        title: String?,
+        title: String?,  // l10n:content — media title
         seriesTitle: String? = nil,
         year: Int?,
         seasonNumber: Int?,
@@ -320,7 +320,7 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     ///    which is correct because they could not have merged across them either).
     public static func canonicalMediaID(
         providerIDs: [String: String],
-        title: String? = nil,
+        title: String? = nil,  // l10n:content — media title used only for identity hashing
         year: Int? = nil,
         kind: MediaItemKind? = nil,
         fallback: String

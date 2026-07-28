@@ -4,13 +4,13 @@ import Foundation
 public struct MediaSeasonRequestState: Identifiable, Sendable, Equatable {
     public var id: Int { number }
     public let number: Int
-    public let title: String
+    public let title: String  // l10n:content — season title from the media server
     public var status: MediaAvailabilityStatus
     public var requestFailed: Bool
 
     public init(
         number: Int,
-        title: String,
+        title: String,  // l10n:content — season title from the media server
         status: MediaAvailabilityStatus,
         requestFailed: Bool = false
     ) {
@@ -121,7 +121,7 @@ public struct MediaRequestActionResult: Sendable, Equatable {
 
     /// `message` stays a `String`: it is usually text the Seerr server sent us,
     /// i.e. content, and is rendered verbatim.
-    public static func failure(title: LocalizedStringResource, message: String? = nil) -> MediaRequestActionResult {
+    public static func failure(title: LocalizedStringResource, message: String? = nil) -> MediaRequestActionResult {  // l10n:content — message is Seerr server text
         MediaRequestActionResult(failureTitle: title, failureMessage: message)
     }
 }

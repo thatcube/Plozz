@@ -42,7 +42,7 @@ public extension MediaItem {
     /// Drops a trailing "Trailer"/"Teaser" token (with any preceding separator)
     /// from a title, e.g. `"Mary Poppins Returns — Trailer"` → `"Mary Poppins
     /// Returns"`. Leaves titles that merely contain the word elsewhere untouched.
-    static func strippingTrailerSuffix(from title: String) -> String {
+    static func strippingTrailerSuffix(from title: String) -> String {  // l10n:content — `title` is a media title (provider content); the return value trims a punctuation/whitespace CharacterSet, not prose
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = trimmed.lowercased()
         for token in ["trailer", "teaser"] where lowered.hasSuffix(token) {
@@ -60,7 +60,7 @@ public extension MediaItem {
     /// any other leaf.
     static func youTubeTrailer(
         videoID: String,
-        title: String,
+        title: String,  // l10n:content — media title (MediaItem.title)
         parentTitle: String? = nil,
         runtime: TimeInterval? = nil,
         posterURL: URL? = nil
@@ -84,7 +84,7 @@ public extension MediaItem {
     /// YouTube trailer provider.
     static func youTubeTrailer(
         fromURL urlString: String,
-        title: String,
+        title: String,  // l10n:content — media title (MediaItem.title)
         parentTitle: String? = nil,
         posterURL: URL? = nil
     ) -> MediaItem? {

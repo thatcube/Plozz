@@ -311,6 +311,7 @@ final class MediaBadgesTests: XCTestCase {
     func testCardRuntimeTextShowsOverallRuntimeWhenNotInProgress() {
         let item = MediaItem(id: "1", title: "Movie", kind: .movie, runtime: 5400)
         XCTAssertEqual(item.cardRuntimeText, "1h 30m")
+        XCTAssertFalse(item.cardRuntimeIsRemaining)
     }
 
     func testCardRuntimeTextShowsRemainingWhenResumePositionExists() {
@@ -321,7 +322,8 @@ final class MediaBadgesTests: XCTestCase {
             runtime: 7200,
             resumePosition: 1800
         )
-        XCTAssertEqual(item.cardRuntimeText, "1h 30m left")
+        XCTAssertEqual(item.cardRuntimeText, "1h 30m")
+        XCTAssertTrue(item.cardRuntimeIsRemaining)
     }
 
     func testCardRuntimeTextShowsRemainingWhenOnlyPercentageExists() {
@@ -332,7 +334,8 @@ final class MediaBadgesTests: XCTestCase {
             runtime: 1800,
             playedPercentage: 0.5
         )
-        XCTAssertEqual(item.cardRuntimeText, "15m left")
+        XCTAssertEqual(item.cardRuntimeText, "15m")
+        XCTAssertTrue(item.cardRuntimeIsRemaining)
     }
 
     func testCardRuntimeTextUsesOverallWhenMarkedPlayed() {
@@ -345,6 +348,7 @@ final class MediaBadgesTests: XCTestCase {
             isPlayed: true
         )
         XCTAssertEqual(item.cardRuntimeText, "2h")
+        XCTAssertFalse(item.cardRuntimeIsRemaining)
     }
 
     func testCardRuntimeTextNilForUnsupportedKinds() {

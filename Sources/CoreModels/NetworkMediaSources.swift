@@ -676,7 +676,7 @@ public enum PlaybackSource: Hashable, Sendable {
         return source.url
     }
 
-    public var redactedLabel: String {
+    public var redactedLabel: String {  // l10n:content — developer-facing diagnostic
         switch self {
         case .publicURL(let source):
             return source.description

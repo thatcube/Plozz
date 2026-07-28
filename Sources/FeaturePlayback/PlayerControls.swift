@@ -1166,7 +1166,7 @@ struct PlayerControls: View {
             TrackRow(
                 id: index,
                 header: nil,
-                title: Text(verbatim: option.title),
+                title: option.title,
                 subtitle: nil,
                 isSelected: option.isSelected,
                 isToggle: false,
@@ -1187,7 +1187,7 @@ struct PlayerControls: View {
             rows.append(TrackRow(
                 id: index,
                 header: nil,
-                title: Text(verbatim: option.title),
+                title: option.title,
                 subtitle: nil,
                 isSelected: option.isSelected,
                 isToggle: false,

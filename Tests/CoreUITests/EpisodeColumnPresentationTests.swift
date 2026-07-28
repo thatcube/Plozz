@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import XCTest
+import SwiftUI
 import CoreModels
 @testable import CoreUI
 
@@ -10,7 +11,7 @@ final class EpisodeColumnPresentationTests: XCTestCase {
             spoilerSettings: .default
         )
 
-        XCTAssertEqual(presentation.titleLine, "E4 · The Hidden Room")
+        XCTAssertEqual(presentation.titleLine, Text(verbatim: "E4 · The Hidden Room"))
         XCTAssertEqual(presentation.metadataText, "45m")
         XCTAssertNil(presentation.progress)
         XCTAssertFalse(presentation.isWatched)
@@ -45,12 +46,16 @@ final class EpisodeColumnPresentationTests: XCTestCase {
     }
 
     func testBlurModeDoesNotLeakHiddenTextToPresentationOutputs() {
+        let spoilerSettings = SpoilerSettings(isEnabled: true, mode: .blur)
+        let item = episode()
         let presentation = EpisodeColumnPresentation(
-            item: episode(),
-            spoilerSettings: SpoilerSettings(isEnabled: true, mode: .blur)
+            item: item,
+            spoilerSettings: spoilerSettings
         )
 
-        XCTAssertEqual(presentation.titleLine, "Episode 4")
+        // Built the same way `EpisodeColumnPresentation` builds it, so this
+        // proves the resource (not just its English resolution) matches.
+        XCTAssertEqual(presentation.titleLine, Text(spoilerSettings.maskedTitle(for: item)))
         XCTAssertEqual(presentation.artworkTreatment, .blurred)
         XCTAssertEqual(presentation.overviewTreatment, .blurred)
         XCTAssertNil(presentation.visibleOverview)
@@ -85,7 +90,7 @@ final class EpisodeColumnPresentationTests: XCTestCase {
             spoilerSettings: .default
         )
 
-        XCTAssertEqual(presentation.titleLine, "Episode")
+        XCTAssertEqual(presentation.titleLine, Text(verbatim: "Episode"))
         XCTAssertNil(presentation.metadataText)
         XCTAssertEqual(presentation.overviewTreatment, .missing)
         XCTAssertNil(presentation.visibleOverview)

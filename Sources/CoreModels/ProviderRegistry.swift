@@ -41,7 +41,7 @@ public struct ProviderResolutionContext: Equatable, Sendable {
 }
 
 extension ProviderResolutionContext: CustomStringConvertible {
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing diagnostic
         let profile = localMediaContext?.profileID ?? "<none>"
         return "ProviderResolutionContext(account: \(accountID), revision: \(credentialRevision.rawValue), profile: \(profile), session: <redacted>)"
     }

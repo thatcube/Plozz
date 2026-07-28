@@ -144,7 +144,7 @@ public struct PosterCardView: View {
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(primaryText)
+                primaryText
                     .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
@@ -193,7 +193,7 @@ public struct PosterCardView: View {
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(primaryText)
+                primaryText
                     .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
@@ -369,25 +369,35 @@ public struct PosterCardView: View {
     /// Primary line. For episodes this is always the *series* title (never the
     /// episode's own name), which is both more useful in rails like Continue
     /// Watching and inherently spoiler-safe.
-    private var primaryText: String {
+    ///
+    /// `Text`, not `String`: the spoiler-hidden case is our own copy
+    /// (`SpoilerSettings.maskedTitle`) while the other two cases are real
+    /// (content) media titles rendered verbatim — mixing them into one `String`
+    /// first would hide the copy from the catalog.
+    private var primaryText: Text {
         if item.kind == .episode, let series = item.parentTitle, !series.isEmpty {
-            return series
+            return Text(verbatim: series)
         }
-        if hideText { return spoilerSettings.maskedTitle(for: item) }
-        return item.title
+        if hideText { return Text(spoilerSettings.maskedTitle(for: item)) }
+        return Text(verbatim: item.title)
     }
 
     /// Secondary line — subtitle facts plus card runtime/remaining when available.
     /// The runtime/"… left" is dropped when the resume chip is shown, since the
     /// chip already carries the time on the artwork (no need to repeat it here).
-    private var subtitleText: String? {
+    private var subtitleText: String? {  // l10n:content — composes CoreModels content (subtitle/runtime) with a "left" qualifier word; joined plain-String pipeline (see comment below), not a Text-rendered LSR
         var parts: [String] = []
         if let subtitle = item.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !subtitle.isEmpty {
             parts.append(subtitle)
         }
         if !showsResumeChip,
            let runtime = item.cardRuntimeText?.trimmingCharacters(in: .whitespacesAndNewlines), !runtime.isEmpty {
-            parts.append(runtime)
+            // `cardRuntimeText` is bare ("20m"); `subtitleText` is a plain String
+            // joined with `·` and passed through `BorderlessCardCaption.subtitle`
+            // (already `// l10n:content`, not a translated `Text`), so the "left"
+            // suffix is composed here as plain interpolation rather than via
+            // `String(localized:)`, which the guard flags as eager resolution.
+            parts.append(item.cardRuntimeIsRemaining ? "\(runtime) left" : runtime)
         }
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: " · ")

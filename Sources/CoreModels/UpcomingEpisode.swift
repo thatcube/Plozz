@@ -43,7 +43,7 @@ public struct UpcomingEpisode: Codable, Sendable, Equatable, Hashable {
     /// Kept separate from `(seasonNumber, episodeNumber)` and never converted.
     public var absoluteEpisodeNumber: Int?
     /// The episode title, when known. Hidden by the spoiler settings in the UI.
-    public var title: String?
+    public var title: String?  // l10n:content — provider-supplied episode title
     /// When the episode is expected to air. Interpret with `datePrecision`.
     public var airDate: Date
     /// Whether `airDate` carries a meaningful time-of-day.
@@ -60,7 +60,7 @@ public struct UpcomingEpisode: Codable, Sendable, Equatable, Hashable {
         seasonNumber: Int? = nil,
         episodeNumber: Int? = nil,
         absoluteEpisodeNumber: Int? = nil,
-        title: String? = nil,
+        title: String? = nil,  // l10n:content — provider-supplied episode title
         airDate: Date,
         datePrecision: AirDatePrecision,
         source: MetadataSource,

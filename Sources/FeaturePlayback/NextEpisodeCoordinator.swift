@@ -2,6 +2,7 @@
 import CoreModels
 import CoreNetworking
 import Foundation
+import SwiftUI
 
 /// Seam back to the owner (``PlayerViewModel``) for the surrounding-playback
 /// state the next-episode machinery reads. The coordinator holds a *weak*
@@ -338,8 +339,14 @@ final class NextEpisodeCoordinator {
         // The show/series name leads the card — never a spoiler (you're watching
         // it) and reliably readable. Fall back to the (spoiler-aware) episode title
         // only when the series title is unknown.
-        let showName = next.parentTitle
-            ?? (hideText ? spoilerSettings.maskedTitle(for: next) : next.title)
+        let showName: Text
+        if let parentTitle = next.parentTitle {
+            showName = Text(verbatim: parentTitle)
+        } else if hideText {
+            showName = Text(spoilerSettings.maskedTitle(for: next))
+        } else {
+            showName = Text(verbatim: next.title)
+        }
         let metaLine = Self.upNextMeta(for: next)
 
         // Placeholder mode never loads the real still: fall back to spoiler-safe

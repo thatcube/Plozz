@@ -982,12 +982,16 @@ private struct PlozziOSShareScanSection: View {
     var body: some View {
         SettingsSectionGroup("Library") {
             if let state, state.isBusy {
-                LabeledContent(state.phase) {
+                LabeledContent {
                     if let detail = state.progressDetail {
-                        Text(detail)
+                        scanProgressDetailText(detail)
                             .monospacedDigit()
                     } else {
                         ProgressView()
+                    }
+                } label: {
+                    if let phase = state.phase {
+                        Text(phase)
                     }
                 }
                 if let fraction = state.enrichFraction {

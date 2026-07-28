@@ -344,14 +344,40 @@ public enum SortField: String, CaseIterable, Codable, Sendable {
     case random
 
     /// A short, human-readable label for a sort menu.
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .name: return "Name"
-        case .dateAdded: return "Date Added"
-        case .releaseDate: return "Release Date"
-        case .communityRating: return "Rating"
-        case .runtime: return "Runtime"
-        case .random: return "Random"
+        case .name:
+            return LocalizedStringResource("sortField.name", defaultValue: "Name", comment: "Library sort menu option.")
+        case .dateAdded:
+            return LocalizedStringResource(
+                "sortField.dateAdded",
+                defaultValue: "Date Added",
+                comment: "Library sort menu option."
+            )
+        case .releaseDate:
+            return LocalizedStringResource(
+                "sortField.releaseDate",
+                defaultValue: "Release Date",
+                comment: "Library sort menu option."
+            )
+        case .communityRating:
+            return LocalizedStringResource(
+                "sortField.communityRating",
+                defaultValue: "Rating",
+                comment: "Library sort menu option."
+            )
+        case .runtime:
+            return LocalizedStringResource(
+                "sortField.runtime",
+                defaultValue: "Runtime",
+                comment: "Library sort menu option."
+            )
+        case .random:
+            return LocalizedStringResource(
+                "sortField.random",
+                defaultValue: "Random",
+                comment: "Library sort menu option."
+            )
         }
     }
 
@@ -369,10 +395,20 @@ public enum SortDirection: String, CaseIterable, Codable, Sendable {
     case descending
 
     /// A short, human-readable label for a sort menu.
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .ascending: return "Ascending"
-        case .descending: return "Descending"
+        case .ascending:
+            return LocalizedStringResource(
+                "sortDirection.ascending",
+                defaultValue: "Ascending",
+                comment: "Library sort direction option."
+            )
+        case .descending:
+            return LocalizedStringResource(
+                "sortDirection.descending",
+                defaultValue: "Descending",
+                comment: "Library sort direction option."
+            )
         }
     }
 }

@@ -705,7 +705,7 @@ public struct DetailInformationSections: View {
         to facts: inout [InformationFact]
     ) {
         guard let value = nonempty(value) else { return }
-        if !alwaysInclude, selectedVersion?.displayLabel.localizedCaseInsensitiveContains(value) == true {
+        if !alwaysInclude, selectedVersion?.displayLabel?.localizedCaseInsensitiveContains(value) == true {
             return
         }
         facts.append(InformationFact(id: id, label: label, value: value))

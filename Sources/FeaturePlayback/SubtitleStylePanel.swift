@@ -362,18 +362,24 @@ struct SubtitleStylePanel: View {
         // instead of a silent blank second line. When the primary is a bitmap sub,
         // dual mode is disallowed (a PGS/DVD line can't be positioned), so say so
         // explicitly rather than the ambiguous "None available".
-        let baseValue: String
+        let baseValue: Text
         if let format = model.secondarySubtitleImagePrimaryFormat {
-            baseValue = "Disabled for \(format)"
+            baseValue = Text(
+                "Disabled for \(format)",
+                comment: "Shown on the Second Track row when dual subtitles are disallowed because the primary subtitle is an image-based (bitmap) format like PGS or VobSub."
+            )
         } else if secOptions.isEmpty {
-            baseValue = "None available"
+            baseValue = Text(
+                "None available",
+                comment: "Shown on the Second Track row when there are no eligible tracks to show as a second subtitle line."
+            )
         } else {
             baseValue = secOptions[currentIdx].title
         }
         let trackValue = hasTrack ? baseValue + Self.secondaryStatusSuffix(model.secondarySubtitleStatus) : baseValue
         var rows: [StyleRowSpec] = [
             StyleRowSpec(slot: 0, title: "Second Track", kind: .choice(
-                value: Text(verbatim: trackValue),
+                value: trackValue,
                 prev: { step(-1) },
                 next: { step(1) }
             )),
@@ -395,16 +401,41 @@ struct SubtitleStylePanel: View {
         return rows
     }
 
-    /// A short suffix annotating the selected second track with its load state.
-    /// Always shows the outcome (loading / cue count / no lines / unavailable) so a
-    /// track that fetched cues but still won't draw is distinguishable on-screen
-    /// from one that genuinely returned nothing.
-    private static func secondaryStatusSuffix(_ status: SecondarySubtitleStatus) -> String {   // l10n:content — generated status fragment
+    /// A short suffix annotating the selected second track with its live load
+    /// state. Always shows the outcome (loading / cue count / no lines /
+    /// unavailable) so a track that fetched cues but still won't draw is
+    /// distinguishable on-screen from one that genuinely returned nothing.
+    ///
+    /// Returns `Text`, not a `String`: "loading…"/"no lines"/"unavailable" are
+    /// Plozz's own copy, and "N cues" is a count that needs plural variations —
+    /// composing them into a plain string first (as this used to) would hide
+    /// that copy from the catalog. The leading "  ·  " separator is punctuation,
+    /// kept verbatim.
+    private static func secondaryStatusSuffix(_ status: SecondarySubtitleStatus) -> Text {
+        let separator = Text(verbatim: "  ·  ")
         switch status {
-        case .idle: return ""
-        case .loading: return "  ·  loading…"
-        case .loaded(let n): return n > 0 ? "  ·  \(n) cues" : "  ·  no lines"
-        case .unavailable: return "  ·  unavailable"
+        case .idle:
+            return Text(verbatim: "")
+        case .loading:
+            return separator + Text(
+                "loading…",
+                comment: "Live status suffix shown next to the selected second subtitle track while its sidecar is being fetched."
+            )
+        case .loaded(let n) where n > 0:
+            return separator + Text(
+                "\(n) cues",
+                comment: "Live status suffix showing how many subtitle lines (cues) were loaded for the selected second subtitle track."
+            )
+        case .loaded:
+            return separator + Text(
+                "no lines",
+                comment: "Live status suffix shown when the selected second subtitle track loaded successfully but contained no lines for this file."
+            )
+        case .unavailable:
+            return separator + Text(
+                "unavailable",
+                comment: "Live status suffix shown when the selected second subtitle track's sidecar could not be fetched or decoded."
+            )
         }
     }
 

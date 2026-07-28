@@ -2,26 +2,49 @@
 import Foundation
 import CoreGraphics
 import Observation
+import SwiftUI
 import CoreModels
 
 /// A selectable audio or subtitle option for the in-player track menu.
 ///
 /// `id` is the option's index within its `AVMediaSelectionGroup`; the special
 /// id `PlayerTrackOption.offID` represents "Off" (subtitles only).
+///
+/// `title` is `Text`, not `String`: `TrackMenuBuilder` composes it from a
+/// structured ``TrackLabel`` (see `CoreModels/TrackLabeling.swift`) that mixes
+/// resolved content (a language name, a provider title) with Plozz's own
+/// qualifier words ("Forced"/"SDH"/"Commentary"/"auto"); only `Text` can carry
+/// that mix without collapsing the copy back into an unlocalized `String`.
+/// `Text` conforms to `Equatable` but not `Hashable`, so `Hashable` conformance
+/// is written by hand below, hashing on `id` (+ the other genuinely-Hashable
+/// fields) — never on the display text, which must not drive identity.
 public struct PlayerTrackOption: Identifiable, Hashable, Sendable {
     public static let offID = -1
     public var id: Int
-    public var title: String   // l10n:content — media/track metadata from the server
+    public var title: Text
     public var isSelected: Bool
     /// `true` for an external (downloaded / sidecar) subtitle, so the menu can mark
     /// it apart from the media's embedded tracks.
     public var isExternal: Bool
 
-    public init(id: Int, title: String, isSelected: Bool, isExternal: Bool = false) {   // l10n:content — media/track metadata from the server
+    public init(id: Int, title: Text, isSelected: Bool, isExternal: Bool = false) {
         self.id = id
         self.title = title
         self.isSelected = isSelected
         self.isExternal = isExternal
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+            && lhs.title == rhs.title
+            && lhs.isSelected == rhs.isSelected
+            && lhs.isExternal == rhs.isExternal
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(isSelected)
+        hasher.combine(isExternal)
     }
 }
 
@@ -472,14 +495,17 @@ public struct UpNextInfo: Equatable, Sendable {
     /// `playEpisode` for the in-place VM swap (never a seek-to-end, so the next
     /// episode never flashes the series page).
     public let episode: MediaItem
-    /// Eyebrow line above the title (always "Up Next").
-    public let eyebrow: String
+    /// Eyebrow line above the title (always "Up Next"). `Text` since this is our
+    /// own copy (not content), unlike `showName` above which mixes copy (the
+    /// masked-episode fallback) with content (the series/episode title).
+    public let eyebrow: Text
     /// The **show** name (series title) — the card's prominent line. The show is
     /// never a spoiler (you're already watching it) and stays readable where a
     /// long, often-obscure episode title would just truncate. Falls back to the
     /// episode title (spoiler-masked when needed) only when the series title is
-    /// unknown.
-    public let showName: String
+    /// unknown. `Text`, not `String`: the fallback mixes copy
+    /// (`SpoilerSettings.maskedTitle`) with content (the series/episode title).
+    public let showName: Text
     /// Secondary meta line, e.g. "S2 · E3 · 48m" (season/episode + runtime).
     /// Season/episode numbers and runtime are never spoilers, so this shows even
     /// when the thumbnail is masked.
@@ -493,8 +519,8 @@ public struct UpNextInfo: Equatable, Sendable {
 
     public init(
         episode: MediaItem,
-        eyebrow: String = "Up Next",
-        showName: String,
+        eyebrow: Text = Text("Up Next", comment: "Eyebrow label above the episode name on the in-player Up Next card."),
+        showName: Text,
         metaLine: String?,
         thumbnailURLs: [URL],
         blurThumbnail: Bool

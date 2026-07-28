@@ -385,7 +385,7 @@ private struct ShareLibraryStatusPanel: View {
                                 .progressViewStyle(.circular)
                                 .controlSize(.small)
                         }
-                        Text(Self.busyStatusText(state))
+                        Self.busyStatusText(state)
                             .monospacedDigit()
                             .plozzForeground(.secondary)
                     } else {
@@ -410,16 +410,27 @@ private struct ShareLibraryStatusPanel: View {
         }
     }
 
-    /// Whole sentences per branch. Building this as `"\(phase) · \(detail)"` made
-    /// the phase a placeholder, which both left it untranslated and produced the
-    /// catalog key "%@ · %@" — a key with no words in it.
-    private static func busyStatusText(_ state: ShareScanState) -> LocalizedStringResource {
+    /// Whole sentences per branch when idle (no detail yet): kept as full,
+    /// distinct literals so a translator sees the complete sentence rather than
+    /// a fragment glued to an ellipsis. Once a detail is known, the phase and
+    /// the detail's own copy words (`CoreUI.scanProgressDetailText`) are each
+    /// real resources, so composing them with `Text` — not interpolating one
+    /// into the other — keeps both independently translatable and the counts
+    /// pluralizable, without the "%@ · %@" no-words-in-the-key trap.
+    private static func busyStatusText(_ state: ShareScanState) -> Text {
         guard let detail = state.progressDetail else {
-            return state.isScanning ? "Scanning…" : "Finding artwork & details…"
+            return state.isScanning ? Text("Scanning…") : Text("Finding artwork & details…")
         }
-        return state.isScanning
-            ? "Scanning · \(detail)"
-            : "Finding artwork & details · \(detail)"
+        let phase = state.isScanning
+            ? Text(
+                "Scanning",
+                comment: "Server detail row: label for a share currently being scanned, followed by a live folder/item count."
+            )
+            : Text(
+                "Finding artwork & details",
+                comment: "Server detail row: label for a share currently having its metadata/artwork enriched, followed by a live progress count."
+            )
+        return phase + Text(verbatim: " · ") + scanProgressDetailText(detail)
     }
 
     private static func lastScannedText(_ date: Date?) -> LocalizedStringResource {

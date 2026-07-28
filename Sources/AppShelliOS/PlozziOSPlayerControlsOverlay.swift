@@ -439,9 +439,9 @@ private struct PlozziOSPlaybackOptionsMenu: View, Equatable {
                             onSelectAudio(option.id)
                         } label: {
                             if option.isSelected {
-                                Label(option.title, systemImage: "checkmark")
+                                Label { option.title } icon: { Image(systemName: "checkmark") }
                             } else {
-                                Text(option.title)
+                                option.title
                             }
                         }
                     }
@@ -686,7 +686,7 @@ private struct PlozziOSSubtitleOptionsSheet: View {
                         viewModel.selectSubtitleOption(id: option.id)
                     } label: {
                         HStack {
-                            Text(option.title)
+                            option.title
                             Spacer()
                             if option.isSelected {
                                 Image(systemName: "checkmark")
@@ -712,7 +712,7 @@ private struct PlozziOSSubtitleOptionsSheet: View {
                         viewModel.selectSecondarySubtitleOption(id: option.id)
                     } label: {
                         HStack {
-                            Text(option.title)
+                            option.title
                             Spacer()
                             if option.isSelected {
                                 Image(systemName: "checkmark")
@@ -1169,7 +1169,7 @@ private struct PlozziOSSubtitleDualView: View {
                             viewModel.selectSecondarySubtitleOption(id: option.id)
                         } label: {
                             HStack {
-                                Text(option.title)
+                                option.title
                                 Spacer()
                                 if option.isSelected {
                                     Image(systemName: "checkmark")
@@ -1551,10 +1551,10 @@ private struct PlozziOSUpNextCard: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(info.eyebrow)
+                info.eyebrow
                     .font(.caption.weight(.semibold))
                     .plozzForeground(.secondary)
-                Text(info.showName)
+                info.showName
                     .font(.headline)
                     .lineLimit(1)
                 if let metaLine = info.metaLine {

@@ -111,7 +111,7 @@ public struct DurableLocalStateKey: Hashable, Sendable {
 }
 
 extension DurableLocalStateKey: CustomStringConvertible, CustomDebugStringConvertible {
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing diagnostic
         "DurableLocalStateKey(collection: \(collection.rawValue), scope: \(scope.kind))"
     }
 

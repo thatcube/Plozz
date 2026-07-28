@@ -22,8 +22,13 @@ struct HeroForegroundModel: Equatable {
     let itemID: String
     /// The show title. Always present as the reliable text baseline; drawn as a
     /// `UILabel` when no logo image is available (mirrors the SwiftUI hero's text
-    /// fallback inside ``HeroLogoArtwork``).
-    let title: String   // l10n:content — media title from the server
+    /// fallback inside ``HeroLogoArtwork``). Usually the server-provided media
+    /// title (content), but can also carry the resolved spoiler mask (our own
+    /// copy) when the caller hides the real title — see `HomeHeroView
+    /// .foregroundModel(for:...)`, which resolves that resource against the
+    /// live in-app-language environment on every call rather than caching it,
+    /// since a plain `UILabel` can't hold a `Text`/`LocalizedStringResource`.
+    let title: String   // l10n:content — server media title, or a caller-resolved spoiler mask (see above); UILabel can't hold Text
     /// Optional provider/router logo art URL. The POC renderer loads the **raw**
     /// cached image (the CoreUI background-removal logo pipeline is internal), so a
     /// slide with a logo shows the image, otherwise the title text.

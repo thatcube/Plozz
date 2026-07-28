@@ -204,8 +204,15 @@ final class SpoilerSettingsTests: XCTestCase {
     }
 
     func testMaskedTitleUsesEpisodeNumber() {
-        XCTAssertEqual(enabled.maskedTitle(for: episode(number: 7)), "Episode 7")
-        XCTAssertEqual(enabled.maskedTitle(for: episode(number: nil)), "Episode")
+        // `maskedTitle` returns a `LocalizedStringResource` built with the
+        // episode number interpolated in ("Episode %lld" + arg), so it is not
+        // `Equatable` to a plain `"Episode 7"` literal (that's key "Episode 7"
+        // with no format args — a different resource). Compare the resolved
+        // `String(localized:)` output instead, which is fine in a test (unlike
+        // in production code, this doesn't freeze a live-displayed value) and
+        // still proves the count is interpolated correctly.
+        XCTAssertEqual(String(localized: enabled.maskedTitle(for: episode(number: 7))), "Episode 7")
+        XCTAssertEqual(String(localized: enabled.maskedTitle(for: episode(number: nil))), "Episode")
     }
 
     // MARK: - Hide ratings until watched

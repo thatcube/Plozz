@@ -461,7 +461,7 @@ extension Profile {
 
 extension Profile: CustomStringConvertible {
     /// Profiles carry no secret; keep logging terse and stable.
-    public var description: String {
+    public var description: String {  // l10n:content — developer-facing diagnostic
         "Profile(id: \(id), name: \(name))"
     }
 }

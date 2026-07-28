@@ -328,7 +328,7 @@ def plural_problems(strings: dict) -> list[str]:
     # Counts that are identifiers or measurements, not quantities of a noun.
     exempt = {
         "%lld", "%lld%%", "%lld of %lld", "Items: %lld", ":%lld", "%lld sec",
-        "Episode %lld", "Downloading %lld%%", "Downloading %lld percent",
+        "Episode %lld", "Track %lld", "Downloading %lld%%", "Downloading %lld percent",
         "Left %lld%%", "Right %lld%%", "%lld queued", "%lld unavailable",
         "+ %lld more", "· +%lld more",
         "The media server returned HTTP %lld instead of a media file.",

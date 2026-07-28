@@ -1,7 +1,7 @@
 import Foundation
 
 public enum GenreDisplayFormatter {
-    public static func displayName(for genre: String) -> String {
+    public static func displayName(for genre: String) -> String {  // l10n:content — provider genre passthrough; only normalizes one synonym's casing into a fixed label (see report)
         let trimmed = genre.trimmingCharacters(in: .whitespacesAndNewlines)
         let key = trimmed.lowercased().unicodeScalars
             .filter(CharacterSet.alphanumerics.contains)
@@ -78,16 +78,16 @@ public struct MediaBadge: Hashable, Sendable, Identifiable {
         case dts
     }
 
-    public var label: String
+    public var label: String  // l10n:content — technical spec/brand name (e.g. "4K", "Dolby Vision"), never translated
     public var style: Style
     /// Optional trailing detail rendered as plain text after a logo-style badge
     /// (`.dolby`/`.dts`) — e.g. the channel layout `5.1`/`7.1`, so the format
     /// logo and its channel count read as one unit with no separate pill.
-    public var detail: String?
+    public var detail: String?  // l10n:content — technical spec (e.g. channel layout), never translated
 
     public var id: String { "\(style.rawValue):\(label):\(detail ?? "")" }
 
-    public init(_ label: String, style: Style = .spec, detail: String? = nil) {
+    public init(_ label: String, style: Style = .spec, detail: String? = nil) {  // l10n:content — technical spec/brand name, never translated
         self.label = label
         self.style = style
         self.detail = detail
@@ -95,7 +95,7 @@ public struct MediaBadge: Hashable, Sendable, Identifiable {
 
     /// A spoken/described form combining the label with any trailing detail
     /// (e.g. `Dolby Digital+ 5.1`).
-    public var accessibilityText: String {
+    public var accessibilityText: String {  // l10n:content — composed from brand/spec labels, never translated
         guard let detail, !detail.isEmpty else { return label }
         return "\(label) \(detail)"
     }
@@ -103,7 +103,7 @@ public struct MediaBadge: Hashable, Sendable, Identifiable {
     /// For `.dolby` badges, the format word(s) after the leading "Dolby " (e.g.
     /// `Vision`, `Atmos`, `Digital+`) — the logo conveys the "Dolby". For any
     /// other style this is just the full label.
-    public var dolbyFormatWord: String {
+    public var dolbyFormatWord: String {  // l10n:content — brand/format name, never translated
         guard style == .dolby else { return label }
         let prefix = "Dolby "
         if label.hasPrefix(prefix) {
@@ -130,7 +130,7 @@ public extension MediaSourceMetadata {
         ) else {
             return nil
         }
-        let label: String
+        let label: String  // l10n:content — technical spec (resolution tier), never translated
         switch lines {
         case 2000...: label = "4K"
         case 1400..<2000: label = "1440p"
@@ -347,7 +347,7 @@ public extension MediaVersion {
                 if let label = resolutionLabel { return MediaBadge(label, style: .prominent) }
                 return nil
             }
-            let label: String
+            let label: String  // l10n:content — technical spec (resolution tier), never translated
             switch lines {
             case 2000...: label = "4K"
             case 1400..<2000: label = "1440p"
@@ -456,15 +456,28 @@ public extension MediaItem {
 
     /// Runtime text for poster/landscape cards:
     /// - overall runtime for movies/TV when not started;
-    /// - remaining runtime (`"… left"`) while in progress.
+    /// - remaining runtime while in progress.
+    ///
+    /// Bare duration only (e.g. `20m`) — this is a formatted quantity, not copy.
+    /// When ``cardRuntimeIsRemaining`` is `true`, callers compose their own
+    /// localized "… left" suffix (e.g. `Text("\(text) left")`); CoreModels
+    /// cannot own that composition without importing SwiftUI.
     ///
     /// Hidden for non-video kinds and when runtime is unknown.
-    var cardRuntimeText: String? {
+    var cardRuntimeText: String? {  // l10n:content — formatted duration, not copy
         guard cardRuntimeEligible, let runtime, runtime > 0 else { return nil }
-        if let remaining = remainingCardRuntimeText(for: runtime) {
+        if let remaining = remainingRuntimeLabel(for: runtime) {
             return remaining
         }
         return runtime.runtimeBadgeText
+    }
+
+    /// Whether ``cardRuntimeText`` holds a REMAINING duration (in-progress item)
+    /// rather than the full runtime. Callers append their own localized "left"
+    /// suffix when this is `true`.
+    var cardRuntimeIsRemaining: Bool {
+        guard cardRuntimeEligible, let runtime, runtime > 0 else { return false }
+        return remainingRuntimeLabel(for: runtime) != nil
     }
 
     /// In-progress fraction (`0..<1`) for a resumable item, or `nil` when it has
@@ -474,8 +487,9 @@ public extension MediaItem {
 
     /// Bare remaining-time text for an in-progress item (e.g. `20m`), or `nil`
     /// when it is not resumable. Shown inside the detail Play button (the cards
-    /// use the longer "… left" form via `remainingCardRuntimeText`).
-    var resumeRemainingText: String? {
+    /// use the longer "… left" form composed by the caller from
+    /// ``cardRuntimeText``/``cardRuntimeIsRemaining``).
+    var resumeRemainingText: String? {  // l10n:content — formatted duration, not copy
         guard let runtime, runtime > 0 else { return nil }
         return remainingRuntimeLabel(for: runtime)
     }
@@ -483,7 +497,7 @@ public extension MediaItem {
     /// The dotted metadata line components for the detail hero, in order:
     /// production year, formatted runtime, then up to `maxGenres` genres. The UI
     /// joins these with a `·` separator. Empty entries are omitted.
-    func metadataComponents(maxGenres: Int = 3) -> [String] {
+    func metadataComponents(maxGenres: Int = 3) -> [String] {  // l10n:content — production year + formatted duration + provider genre text, not copy
         var parts: [String] = []
         if let productionYear { parts.append(String(productionYear)) }
         if let runtimeText = runtime?.runtimeBadgeText { parts.append(runtimeText) }
@@ -515,15 +529,10 @@ public extension MediaItem {
         return nil
     }
 
-    private func remainingCardRuntimeText(for runtime: TimeInterval) -> String? {
-        guard let label = remainingRuntimeLabel(for: runtime) else { return nil }
-        return "\(label) left"
-    }
-
     /// The bare rounded remaining-time label (e.g. `20m`) for an in-progress item,
     /// or `nil` when it is not partially watched. The shared basis for both the
-    /// card's "… left" text and the Play button's compact remaining time.
-    private func remainingRuntimeLabel(for runtime: TimeInterval) -> String? {
+    /// card's remaining text and the Play button's compact remaining time.
+    private func remainingRuntimeLabel(for runtime: TimeInterval) -> String? {  // l10n:content — formatted duration, not copy
         guard let progress = cardProgressFraction, progress > 0, progress < 1 else {
             return nil
         }
@@ -619,7 +628,7 @@ public extension MediaSourceMetadata {
         badges.map { dynamicRangeRank($0.label) }.max() ?? 0
     }
 
-    private static func resolutionRank(_ label: String) -> Int {
+    private static func resolutionRank(_ label: String) -> Int {  // l10n:content — technical spec label, never translated
         switch label {
         case "4K": return 5
         case "1440p": return 4
@@ -630,7 +639,7 @@ public extension MediaSourceMetadata {
         }
     }
 
-    private static func dynamicRangeRank(_ label: String) -> Int {
+    private static func dynamicRangeRank(_ label: String) -> Int {  // l10n:content — brand/format name, never translated
         switch label {
         case "Dolby Vision": return 5
         case "HDR10+": return 4
@@ -641,7 +650,7 @@ public extension MediaSourceMetadata {
         }
     }
 
-    private static func audioFormatRank(_ label: String) -> Int {
+    private static func audioFormatRank(_ label: String) -> Int {  // l10n:content — brand/format name, never translated
         switch label {
         case "Dolby Atmos": return 6
         case "DTS:X": return 5
@@ -653,7 +662,7 @@ public extension MediaSourceMetadata {
         }
     }
 
-    private static func channelRank(_ label: String) -> Int {
+    private static func channelRank(_ label: String) -> Int {  // l10n:content — technical spec label, never translated
         switch label {
         case "7.1": return 2
         case "5.1": return 1
@@ -661,7 +670,7 @@ public extension MediaSourceMetadata {
         }
     }
 
-    private static func formatImpliesSurround(_ label: String) -> Bool {
+    private static func formatImpliesSurround(_ label: String) -> Bool {  // l10n:content — brand/format name, never translated
         label == "Dolby Atmos" || label == "DTS:X" || label == "Dolby TrueHD"
     }
 }
@@ -669,7 +678,7 @@ public extension MediaSourceMetadata {
 public extension TimeInterval {
     /// A compact human runtime label, e.g. `2h 28m`, `47m`, or `1h`. Returns
     /// `nil` for non-positive durations (unknown runtime).
-    var runtimeBadgeText: String? {
+    var runtimeBadgeText: String? {  // l10n:content — hand-built duration format, not copy (see report re: Duration.formatted)
         guard self > 0 else { return nil }
         let totalMinutes = Int((self / 60).rounded())
         guard totalMinutes > 0 else { return nil }

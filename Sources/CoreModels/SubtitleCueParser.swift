@@ -34,7 +34,7 @@ public enum SubtitleCueParser {
         _ text: String,
         id: Int = 0,
         language: String? = nil,
-        title: String? = nil,
+        title: String? = nil,  // l10n:content — subtitle track/file-derived label, not our copy
         sourceTrackID: Int? = nil,
         isForced: Bool = false,
         isHearingImpaired: Bool = false

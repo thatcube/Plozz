@@ -162,9 +162,9 @@ final class ShareMovieGroupingTests: XCTestCase {
             return XCTFail("grouped movie must resolve")
         }
         XCTAssertEqual(detail.versions.count, 2)
-        XCTAssertTrue(detail.versions.contains { $0.displayLabel.contains("1080p") })
+        XCTAssertTrue(detail.versions.contains { $0.displayLabel?.contains("1080p") == true })
         XCTAssertTrue(detail.versions.contains {
-            $0.displayLabel.contains("4K") && $0.displayLabel.contains("Dolby Vision")
+            $0.displayLabel?.contains("4K") == true && $0.displayLabel?.contains("Dolby Vision") == true
         })
         XCTAssertFalse(detail.versions.contains { $0.displayLabel == "Version" })
 
@@ -214,7 +214,7 @@ final class ShareMovieGroupingTests: XCTestCase {
         let movies = await store.movies(offset: 0, limit: 10)
         let detail = await store.item(id: movies.first!.id)
         XCTAssertEqual(detail?.versions.count, 1)
-        XCTAssertTrue(detail?.versions.first?.displayLabel.contains("4K") ?? false)
+        XCTAssertTrue(detail?.versions.first?.displayLabel?.contains("4K") ?? false)
         XCTAssertNotEqual(detail?.versions.first?.displayLabel, "Version")
         XCTAssertFalse(detail?.hasMultipleVersions ?? true)
     }
@@ -277,8 +277,8 @@ final class ShareMovieGroupingTests: XCTestCase {
 
         let legacy = await store.item(id: ShareCatalogID.file(path))
         XCTAssertEqual(legacy?.versions.count, 1)
-        XCTAssertTrue(legacy?.versions[0].displayLabel.contains("4K") ?? false)
-        XCTAssertTrue(legacy?.versions[0].displayLabel.contains("Dolby Vision") ?? false)
+        XCTAssertTrue(legacy?.versions[0].displayLabel?.contains("4K") ?? false)
+        XCTAssertTrue(legacy?.versions[0].displayLabel?.contains("Dolby Vision") ?? false)
         XCTAssertNotEqual(legacy?.versions[0].displayLabel, "Version")
     }
 

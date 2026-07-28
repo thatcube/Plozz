@@ -33,7 +33,7 @@ final class MediaVersionTests: XCTestCase {
         let hdr10Plus = MediaVersion(id: "3", height: 2160, videoRange: "HDR10Plus")
         XCTAssertTrue(hdr10Plus.isHDR)
         XCTAssertEqual(hdr10Plus.hdrLabel, "HDR10+")
-        XCTAssertTrue(hdr10Plus.displayLabel.contains("HDR10+"))
+        XCTAssertTrue(hdr10Plus.displayLabel?.contains("HDR10+") == true)
         XCTAssertEqual(hdr10Plus.technicalBadges.map(\.label), ["4K", "HDR10+"])
     }
 
@@ -87,9 +87,9 @@ final class MediaVersionTests: XCTestCase {
 
     func testDisplayLabelPrefersDerivedFactsThenName() {
         let derived = MediaVersion(id: "1", height: 2160, sizeBytes: 12_000_000_000, videoRange: "HDR10")
-        XCTAssertTrue(derived.displayLabel.contains("4K"))
-        XCTAssertTrue(derived.displayLabel.contains("HDR10"))
-        XCTAssertTrue(derived.displayLabel.contains("12 GB"))
+        XCTAssertTrue(derived.displayLabel?.contains("4K") == true)
+        XCTAssertTrue(derived.displayLabel?.contains("HDR10") == true)
+        XCTAssertTrue(derived.displayLabel?.contains("12 GB") == true)
 
         // A name that names a source-quality token now surfaces that token (the
         // edition/source recovery the picker needs) rather than echoing the raw
@@ -98,7 +98,9 @@ final class MediaVersionTests: XCTestCase {
         // A name with no recognised edition/source/quality still falls back whole.
         XCTAssertEqual(MediaVersion(id: "2b", name: "Server Copy").displayLabel, "Server Copy")
 
-        XCTAssertEqual(MediaVersion(id: "3").displayLabel, "Version")
+        // No facts and no name: displayLabel is nil — the caller supplies its
+        // own "Version" copy fallback rather than us baking English in here.
+        XCTAssertNil(MediaVersion(id: "3").displayLabel)
     }
 
     func testRichMenuFactsKeepFileNameSeparate() {

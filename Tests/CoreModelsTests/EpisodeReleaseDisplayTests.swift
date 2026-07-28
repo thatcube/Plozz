@@ -15,11 +15,14 @@ final class EpisodeReleaseDisplayTests: XCTestCase {
 
     func testUpcomingBadgeNumberAndDate() {
         let d = EpisodeReleaseDisplay.make(for: .upcoming(western()), spoilersEnabled: false, locale: enUS, timeZone: utc)
-        XCTAssertEqual(d.badge, "Airing soon")
+        XCTAssertEqual(
+            d.badge,
+            LocalizedStringResource("episodeRelease.badge.upcoming", defaultValue: "Airing soon"))
         XCTAssertEqual(d.numberLabel, "S1 E2")
         XCTAssertEqual(d.title, "Chapter 5")
         XCTAssertTrue(d.isExpectedNotGuaranteed)
-        XCTAssertTrue(d.summaryLine.hasPrefix("Airing soon · S1 E2 · "))
+        XCTAssertTrue(String(localized: d.summaryLineParts.badge!).contains("Airing soon"))
+        XCTAssertEqual(d.summaryLineParts.numberLabel, "S1 E2")
     }
 
     func testSpoilersHideTitleButKeepNumberAndDate() {
@@ -47,9 +50,15 @@ final class EpisodeReleaseDisplayTests: XCTestCase {
 
     func testBadgesPerState() {
         let up = western()
-        XCTAssertEqual(EpisodeReleaseDisplay.make(for: .airedGracePeriod(up), spoilersEnabled: false, locale: enUS, timeZone: utc).badge, "Aired today")
-        XCTAssertEqual(EpisodeReleaseDisplay.make(for: .airedMissing(up), spoilersEnabled: false, locale: enUS, timeZone: utc).badge, "Not in your library")
-        XCTAssertEqual(EpisodeReleaseDisplay.make(for: .requested(up), spoilersEnabled: false, locale: enUS, timeZone: utc).badge, "Requested")
+        XCTAssertEqual(
+            EpisodeReleaseDisplay.make(for: .airedGracePeriod(up), spoilersEnabled: false, locale: enUS, timeZone: utc).badge,
+            LocalizedStringResource("episodeRelease.badge.airedGracePeriod", defaultValue: "Aired today"))
+        XCTAssertEqual(
+            EpisodeReleaseDisplay.make(for: .airedMissing(up), spoilersEnabled: false, locale: enUS, timeZone: utc).badge,
+            LocalizedStringResource("episodeRelease.badge.airedMissing", defaultValue: "Not in your library"))
+        XCTAssertEqual(
+            EpisodeReleaseDisplay.make(for: .requested(up), spoilersEnabled: false, locale: enUS, timeZone: utc).badge,
+            LocalizedStringResource("episodeRelease.badge.requested", defaultValue: "Requested"))
         var item = MediaItem(id: "x", title: "Ep", kind: .episode)
         item.seasonNumber = 1; item.episodeNumber = 2
         let present = EpisodeReleaseDisplay.make(for: .present(item: item), spoilersEnabled: false, locale: enUS, timeZone: utc)

@@ -18,7 +18,7 @@ public enum SubtitleFontFamily: String, Codable, Sendable, Equatable, CaseIterab
     case fredoka
     case openDyslexic
 
-    public var displayName: String {
+    public var displayName: String {  // l10n:content — bundled font family names (proper nouns), never translated
         switch self {
         case .atkinson: return "Atkinson Hyperlegible"
         case .system: return "System (SF)"

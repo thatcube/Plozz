@@ -1549,11 +1549,15 @@ private struct PlozziOSDetailHeroForeground: View {
                 )
             ) {
                 ForEach(versions.sortedForPicker()) { version in
-                    Text(version.displayLabel)
+                    versionTitleText(version.displayLabel)
                         .tag(version.id)
                 }
             } label: {
-                Label(selectedVersion.displayLabel, systemImage: "film.stack")
+                Label {
+                    versionTitleText(selectedVersion.displayLabel)
+                } icon: {
+                    Image(systemName: "film.stack")
+                }
             }
             .pickerStyle(.menu)
         }
@@ -1566,6 +1570,17 @@ private struct PlozziOSDetailHeroForeground: View {
 
     private var selectedVersion: MediaVersion? {
         versions.first { $0.id == selectedVersionID } ?? versions.first
+    }
+
+    /// Renders a `MediaVersion` title: the joined technical facts (or provider
+    /// name) verbatim when known, otherwise our own generic "Version" copy —
+    /// kept as a real resource here rather than baked into a `String` so it
+    /// translates like everything else.
+    private func versionTitleText(_ displayLabel: String?) -> Text {
+        if let displayLabel {
+            return Text(verbatim: displayLabel)
+        }
+        return Text("Version", comment: "Generic label for a playback version/source with no distinguishing facts (resolution, edition, etc.) known.")
     }
 
     private func seasonEpisodeText(for item: MediaItem) -> String? {

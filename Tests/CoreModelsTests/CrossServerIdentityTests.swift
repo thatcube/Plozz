@@ -660,8 +660,8 @@ final class EditionParserTests: XCTestCase {
     func testEditionLeadsDisplayLabelSoSameQualityFilesDiffer() {
         let extended = MediaVersion(id: "1", name: "Avatar (2009) Extended BluRay-2160p", height: 2160)
         let theatrical = MediaVersion(id: "2", name: "Avatar (2009) Theatrical BluRay-2160p", height: 2160)
-        XCTAssertTrue(extended.displayLabel.hasPrefix("Extended"))
-        XCTAssertTrue(theatrical.displayLabel.hasPrefix("Theatrical"))
+        XCTAssertTrue(extended.displayLabel?.hasPrefix("Extended") == true)
+        XCTAssertTrue(theatrical.displayLabel?.hasPrefix("Theatrical") == true)
         XCTAssertNotEqual(extended.displayLabel, theatrical.displayLabel,
                           "Two 4K BluRay files must be distinguishable by edition")
     }
@@ -669,6 +669,6 @@ final class EditionParserTests: XCTestCase {
     func testExplicitEditionWinsOverParsedName() {
         let v = MediaVersion(id: "1", name: "Movie Theatrical", edition: "Director's Cut", height: 2160)
         XCTAssertEqual(v.editionLabel, "Director's Cut")
-        XCTAssertTrue(v.displayLabel.hasPrefix("Director's Cut"))
+        XCTAssertTrue(v.displayLabel?.hasPrefix("Director's Cut") == true)
     }
 }

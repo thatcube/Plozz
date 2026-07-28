@@ -42,10 +42,12 @@ final class ShareScanStatusModelTests: XCTestCase {
         XCTAssertEqual(state?.enrichDone, 50)
         XCTAssertEqual(state?.enrichTotal, 200)
         XCTAssertEqual(state?.enrichFraction, 0.25)
-        XCTAssertEqual(state?.phase, "Updating artwork")
+        XCTAssertEqual(
+            state?.phase,
+            LocalizedStringResource("shareScan.phase.enriching", defaultValue: "Updating artwork"))
         // `done` is left-padded (figure space) to the width of `total` for a stable
         // pill width — 50 → "\u{2007}50" against a 3-digit total.
-        XCTAssertEqual(state?.progressDetail, "\u{2007}50 of 200")
+        XCTAssertEqual(state?.progressDetail, .enriching(done: "\u{2007}50", total: 200))
 
         model.enrichFinished(shareID: "s1")
         XCTAssertNil(model.state(forShareID: "s1")?.enrichFraction, "finished clears the pass totals")
@@ -62,8 +64,8 @@ final class ShareScanStatusModelTests: XCTestCase {
         var widths = Set<Int>()
         for done in [1, 9, 42, 137, 900] {
             model.enrichProgress(shareID: "s1", done: done)
-            if let detail = model.state(forShareID: "s1")?.progressDetail {
-                widths.insert(detail.count)
+            if case let .enriching(paddedDone, _) = model.state(forShareID: "s1")?.progressDetail {
+                widths.insert(paddedDone.count)
             }
         }
         XCTAssertEqual(widths.count, 1, "every progress string is the same width for the pass")
@@ -74,7 +76,7 @@ final class ShareScanStatusModelTests: XCTestCase {
         model.scanStarted(shareID: "s1", name: "Brando NAS")
         model.scanProgress(shareID: "s1", directoriesScanned: 88, itemsFound: 1234)
         XCTAssertEqual(model.busyStates.map(\.name), ["Brando NAS"])
-        XCTAssertEqual(model.busyStates.first?.progressDetail, "88 folders · 1,234 items")
+        XCTAssertEqual(model.busyStates.first?.progressDetail, .foldersAndItems(folders: 88, items: 1234))
         XCTAssertTrue(model.isBusy(shareNamed: "Brando NAS"))
         XCTAssertFalse(model.isBusy(shareNamed: "Other"))
         XCTAssertFalse(model.isBusy(shareNamed: ""), "an empty name never matches")

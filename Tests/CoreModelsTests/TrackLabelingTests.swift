@@ -44,7 +44,7 @@ final class TrackLabelingTests: XCTestCase {
             displayTitle: "Track 3", language: "eng", codec: "subrip",
             isForced: false, isImageBased: false, trackID: 3
         )
-        XCTAssertEqual(label, "English")
+        XCTAssertEqual(label, TrackLabel(base: .content("English")))
     }
 
     func testSubtitleLabelAppendsForced() {
@@ -52,7 +52,7 @@ final class TrackLabelingTests: XCTestCase {
             displayTitle: "English", language: "en", codec: "subrip",
             isForced: true, isImageBased: false, trackID: 1
         )
-        XCTAssertEqual(label, "English (Forced)")
+        XCTAssertEqual(label, TrackLabel(base: .content("English"), qualifiers: [.forced]))
     }
 
     func testSubtitleLabelImageGetsFormatHint() {
@@ -60,7 +60,7 @@ final class TrackLabelingTests: XCTestCase {
             displayTitle: "Spanish", language: "spa", codec: "pgssub",
             isForced: false, isImageBased: true, trackID: 4
         )
-        XCTAssertEqual(label, "Spanish (PGS)")
+        XCTAssertEqual(label, TrackLabel(base: .content("Spanish"), qualifiers: [.format("PGS")]))
     }
 
     func testSubtitleLabelUntaggedImageStaysTrackNumberWithHint() {
@@ -68,7 +68,7 @@ final class TrackLabelingTests: XCTestCase {
             displayTitle: "Track 8 (pgssub)", language: nil, codec: "pgssub",
             isForced: false, isImageBased: true, trackID: 8
         )
-        XCTAssertEqual(label, "Track 8 (PGS)")
+        XCTAssertEqual(label, TrackLabel(base: .trackNumber(8), qualifiers: [.format("PGS")]))
     }
 
     func testSubtitleLabelUsesDetectedLanguageWithAutoMarker() {
@@ -76,7 +76,7 @@ final class TrackLabelingTests: XCTestCase {
             displayTitle: "Track 2", language: nil, codec: "subrip",
             isForced: false, isImageBased: false, detectedLanguage: "es", trackID: 2
         )
-        XCTAssertEqual(label, "Spanish (auto)")
+        XCTAssertEqual(label, TrackLabel(base: .content("Spanish"), qualifiers: [.autoDetected]))
     }
 
     func testSubtitleLabelPrefersProviderLanguageOverDetected() {
@@ -84,7 +84,7 @@ final class TrackLabelingTests: XCTestCase {
             displayTitle: "Track 2", language: "en", codec: "subrip",
             isForced: false, isImageBased: false, detectedLanguage: "es", trackID: 2
         )
-        XCTAssertEqual(label, "English")
+        XCTAssertEqual(label, TrackLabel(base: .content("English")))
     }
 
     func testSubtitleLabelDetectsSDHFromTitle() {
@@ -92,7 +92,26 @@ final class TrackLabelingTests: XCTestCase {
             displayTitle: "English (SDH)", language: "en", codec: "subrip",
             isForced: false, isImageBased: false, trackID: 5
         )
-        XCTAssertEqual(label, "English (SDH)")
+        XCTAssertEqual(label, TrackLabel(base: .content("English"), qualifiers: [.hearingImpaired]))
+    }
+
+    /// Qualifier ORDER is meaningful (the view joins them with ", " in whatever
+    /// order the array holds) and was previously unobservable — the old `String`
+    /// return type only let a test assert the fully-joined text, not that the
+    /// pieces themselves are correctly split and sequenced. This exercises every
+    /// subtitle qualifier at once and pins the order: Forced, SDH, Commentary,
+    /// format hint, then "auto".
+    func testSubtitleLabelQualifierOrder() {
+        let label = TrackLabeling.subtitleLabel(
+            displayTitle: "Track 9", language: nil, codec: "pgssub",
+            isForced: true, isImageBased: true,
+            isHearingImpaired: true, isCommentary: true,
+            detectedLanguage: "es", trackID: 9
+        )
+        XCTAssertEqual(label, TrackLabel(
+            base: .content("Spanish"),
+            qualifiers: [.forced, .hearingImpaired, .commentary, .format("PGS"), .autoDetected]
+        ))
     }
 
     // MARK: audio labels
@@ -101,7 +120,7 @@ final class TrackLabelingTests: XCTestCase {
         let label = TrackLabeling.audioLabel(
             displayTitle: "English - Dolby Digital - 5.1", language: "en", trackID: 1
         )
-        XCTAssertEqual(label, "English - Dolby Digital - 5.1")
+        XCTAssertEqual(label, TrackLabel(base: .content("English - Dolby Digital - 5.1")))
     }
 
     func testAudioLabelLeadsWithLanguageWhenTitleOmitsIt() {
@@ -113,21 +132,21 @@ final class TrackLabelingTests: XCTestCase {
                 displayTitle: "[HR] 5.1 Channels (Doc_Ramen)",
                 language: "ja", codec: "opus", channels: 6, trackID: 1
             ),
-            "Japanese (Opus 5.1)"
+            TrackLabel(base: .content("Japanese"), qualifiers: [.format("Opus 5.1")])
         )
         XCTAssertEqual(
             TrackLabeling.audioLabel(
                 displayTitle: "[HR] 5.1 Channels (Doc_Ramen)",
                 language: "en", codec: "opus", channels: 6, trackID: 2
             ),
-            "English (Opus 5.1)"
+            TrackLabel(base: .content("English"), qualifiers: [.format("Opus 5.1")])
         )
         XCTAssertEqual(
             TrackLabeling.audioLabel(
                 displayTitle: "[HR] 5.1 Channels (Doc_Ramen)",
                 language: "fr", codec: "opus", channels: 6, trackID: 3
             ),
-            "French (Opus 5.1)"
+            TrackLabel(base: .content("French"), qualifiers: [.format("Opus 5.1")])
         )
     }
 
@@ -137,18 +156,18 @@ final class TrackLabelingTests: XCTestCase {
             TrackLabeling.audioLabel(
                 displayTitle: "Japanese Commentary", language: "ja", codec: "aac", channels: 2, trackID: 1
             ),
-            "Japanese Commentary"
+            TrackLabel(base: .content("Japanese Commentary"))
         )
     }
 
     func testAudioLabelReplacesGenericWithLanguage() {
         XCTAssertEqual(
             TrackLabeling.audioLabel(displayTitle: "Track 2", language: "fra", trackID: 2),
-            "French"
+            TrackLabel(base: .content("French"))
         )
         XCTAssertEqual(
             TrackLabeling.audioLabel(displayTitle: "Track 2", language: nil, trackID: 2),
-            "Track 2"
+            TrackLabel(base: .trackNumber(2))
         )
     }
 
@@ -175,18 +194,28 @@ final class TrackLabelingTests: XCTestCase {
     func testAudioLabelAppendsFormatToGenericTrack() {
         XCTAssertEqual(
             TrackLabeling.audioLabel(displayTitle: "Track 1", language: nil, codec: "dts", channels: 8, trackID: 1),
-            "Track 1 (DTS 7.1)"
+            TrackLabel(base: .trackNumber(1), qualifiers: [.format("DTS 7.1")])
         )
         XCTAssertEqual(
             TrackLabeling.audioLabel(displayTitle: "Track 3", language: "eng", codec: "ac3", channels: 6, trackID: 3),
-            "English (Dolby Digital 5.1)"
+            TrackLabel(base: .content("English"), qualifiers: [.format("Dolby Digital 5.1")])
         )
     }
 
     func testAudioLabelAppendsCommentary() {
         XCTAssertEqual(
             TrackLabeling.audioLabel(displayTitle: "Track 4", language: "eng", codec: "ac3", channels: 2, isCommentary: true, trackID: 4),
-            "English (Dolby Digital Stereo, Commentary)"
+            TrackLabel(base: .content("English"), qualifiers: [.format("Dolby Digital Stereo"), .commentary])
+        )
+    }
+
+    /// Exercises the rare 9+ channel fallback (no known media file has ever hit
+    /// this) together with format + commentary to pin the audio qualifier order:
+    /// format hint, then channel count, then Commentary.
+    func testAudioLabelQualifierOrderWithUnnamedChannelCount() {
+        XCTAssertEqual(
+            TrackLabeling.audioLabel(displayTitle: "Track 5", language: "eng", codec: "dts", channels: 10, isCommentary: true, trackID: 5),
+            TrackLabel(base: .content("English"), qualifiers: [.format("DTS"), .channelCount(10), .commentary])
         )
     }
 
@@ -196,7 +225,7 @@ final class TrackLabelingTests: XCTestCase {
             TrackLabeling.subtitleLabel(displayTitle: "English", language: "eng", codec: "subrip",
                                         isForced: false, isImageBased: false,
                                         isHearingImpaired: true, trackID: 3),
-            "English (SDH)"
+            TrackLabel(base: .content("English"), qualifiers: [.hearingImpaired])
         )
     }
 

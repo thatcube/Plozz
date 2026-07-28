@@ -1,6 +1,7 @@
 #if canImport(AVFoundation)
 import CoreModels
 import Foundation
+import SwiftUI
 import XCTest
 
 @testable import FeaturePlayback
@@ -278,7 +279,7 @@ final class NextEpisodeCoordinatorTests: XCTestCase {
         let coord = NextEpisodeCoordinator(
             host: host, controls: controls, playbackSettings: settings, spoilerSettings: .default,
             engineFactory: .native)
-        controls.upNext = UpNextInfo(episode: host.nextEpisodeCandidate!, showName: "x",
+        controls.upNext = UpNextInfo(episode: host.nextEpisodeCandidate!, showName: Text(verbatim: "x"),
                                      metaLine: nil, thumbnailURLs: [], blurThumbnail: false)
         coord.updateUpNextCard()
         XCTAssertNil(controls.upNext, "a disabled card is cleared")

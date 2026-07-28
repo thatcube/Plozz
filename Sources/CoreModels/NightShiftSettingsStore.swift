@@ -315,7 +315,9 @@ public final class NightShiftSettingsModel {
     // MARK: Schedule summary
 
     /// A human-readable status line for Settings, covering both schedule modes.
-    public func scheduleSummary(now: Date = Date()) -> String {
+    /// City names and formatted clock times/percentages are content interpolated
+    /// into our own sentence copy.
+    public func scheduleSummary(now: Date = Date()) -> LocalizedStringResource {
         let fade = fadeDescription
         switch settings.scheduleMode {
         case .alwaysOn:
@@ -331,8 +333,8 @@ public final class NightShiftSettingsModel {
                 return "Off. Manual: on \(on), off \(off)."
             }
             if isActiveNow {
-                let percent = Int((currentIntensity * 100).rounded())
-                return "Active now (\(percent)%). Manual: on \(on), off \(off) · \(fade) fade."
+                let percent = currentIntensity.formatted(.percent.precision(.fractionLength(0)))
+                return "Active now (\(percent)). Manual: on \(on), off \(off) · \(fade) fade."
             }
             return "Idle until \(on). Manual · \(fade) fade."
 
@@ -347,7 +349,8 @@ public final class NightShiftSettingsModel {
 
             let formatter = DateFormatter()
             formatter.timeZone = tz
-            formatter.dateFormat = "h:mm a"
+            formatter.locale = .current
+            formatter.setLocalizedDateFormatFromTemplate("jmm")
 
             let sunset = formatter.string(from: today.sunset)
             let sunrise = formatter.string(from: today.sunrise)
@@ -356,8 +359,8 @@ public final class NightShiftSettingsModel {
                 return "Off. \(region.name): sunset \(sunset), sunrise \(sunrise)."
             }
             if isActiveNow {
-                let percent = Int((currentIntensity * 100).rounded())
-                return "Active now (\(percent)%). \(region.name) sunrise \(sunrise) · \(fade) fade."
+                let percent = currentIntensity.formatted(.percent.precision(.fractionLength(0)))
+                return "Active now (\(percent)). \(region.name) sunrise \(sunrise) · \(fade) fade."
             }
             return "Idle until sunset (\(sunset)) in \(region.name) · \(fade) fade."
         }

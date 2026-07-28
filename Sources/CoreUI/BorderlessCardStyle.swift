@@ -70,7 +70,10 @@ private struct FocusHaloModifier: ViewModifier {
 /// Callers constrain the width (the card slot / artwork width); this fills it and
 /// stays leading-aligned.
 public struct BorderlessCardCaption: View {
-    private let title: String   // l10n:content — media title/subtitle from the server
+    /// The title. `Text`, not `String`, since this caption is also used to show
+    /// `PosterCardView`'s spoiler-masked episode title (our own copy) alongside
+    /// its normal (content) media-title use — see `PosterCardView.primaryText`.
+    private let title: Text
     private let subtitle: String?   // l10n:content — media title/subtitle from the server
     private let horizontalInset: CGFloat
     private let reservesSubtitleSpace: Bool
@@ -78,7 +81,7 @@ public struct BorderlessCardCaption: View {
     @Environment(\.plozzMetrics) private var metrics
 
     public init(
-        title: String,   // l10n:content — media title/subtitle from the server
+        title: Text,
         subtitle: String?,   // l10n:content — media title/subtitle from the server
         horizontalInset: CGFloat,
         reservesSubtitleSpace: Bool = true
@@ -91,7 +94,7 @@ public struct BorderlessCardCaption: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title)
+            title
                 .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)

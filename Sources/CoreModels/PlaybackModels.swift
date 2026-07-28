@@ -225,9 +225,9 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
     public struct SubtitleStream: Hashable, Sendable, Codable {
         public var codec: String?
         public var language: String?
-        public var title: String?
+        public var title: String?  // l10n:content — subtitle track title from the file/provider
 
-        public init(codec: String? = nil, language: String? = nil, title: String? = nil) {
+        public init(codec: String? = nil, language: String? = nil, title: String? = nil) {  // l10n:content — subtitle track title from the file/provider
             self.codec = codec
             self.language = language
             self.title = title

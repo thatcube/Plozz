@@ -32,7 +32,7 @@ public struct DiagnosticsReport {
         return "\(Self.platformName) \(number)"
     }
 
-    public var deviceModel: String {
+    public var deviceModel: String {  // l10n:content — developer-facing diagnostic (GitHub bug-report template)
         var info = utsname()
         uname(&info)
         let bytes = Mirror(reflecting: info.machine).children
@@ -43,7 +43,7 @@ public struct DiagnosticsReport {
         return model.isEmpty ? "Apple device" : model
     }
 
-    public var environmentBlock: String {
+    public var environmentBlock: String {  // l10n:content — developer-facing diagnostic (GitHub bug-report template)
         """
         - Plozz: \(appVersion) (build \(appBuild))
         - \(systemVersion)
@@ -52,7 +52,7 @@ public struct DiagnosticsReport {
         """
     }
 
-    public var newIssueURLString: String {
+    public var newIssueURLString: String {  // l10n:content — developer-facing diagnostic (GitHub bug-report template)
         let base = repoURL.hasSuffix("/") ? String(repoURL.dropLast()) : repoURL
         guard var components = URLComponents(string: base + "/issues/new") else {
             return base + "/issues/new"
@@ -74,7 +74,7 @@ public struct DiagnosticsReport {
         return base.replacingOccurrences(of: "https://", with: "") + "/issues/new"
     }
 
-    private var issueBody: String {
+    private var issueBody: String {  // l10n:content — developer-facing diagnostic (GitHub bug-report template)
         var body = """
         **What happened?**
 
@@ -104,7 +104,7 @@ public struct DiagnosticsReport {
         return body
     }
 
-    private static var platformName: String {
+    private static var platformName: String {  // l10n:content — developer-facing diagnostic (GitHub bug-report template)
         #if os(tvOS)
         "tvOS"
         #elseif os(iOS)

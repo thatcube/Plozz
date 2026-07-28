@@ -52,12 +52,28 @@ public enum HeroSourceKind: String, CaseIterable, Identifiable, Codable, Sendabl
     }
 
     /// One-line explanation shown under the option in Settings.
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
-        case .featured: return "Trending titles available to stream (requires Seerr)."
-        case .continueWatching: return "Pick up where you left off, front and centre."
-        case .randomFromLibrary: return "A rotating spotlight on titles from your libraries."
-        case .watchlist: return "Titles you've saved to watch later."
+        case .featured:
+            return LocalizedStringResource(
+                "Trending titles available to stream (requires Seerr).",
+                comment: "Explanation shown under the Featured hero source option in Settings."
+            )
+        case .continueWatching:
+            return LocalizedStringResource(
+                "Pick up where you left off, front and centre.",
+                comment: "Explanation shown under the Continue Watching hero source option in Settings."
+            )
+        case .randomFromLibrary:
+            return LocalizedStringResource(
+                "A rotating spotlight on titles from your libraries.",
+                comment: "Explanation shown under the Random from Library hero source option in Settings."
+            )
+        case .watchlist:
+            return LocalizedStringResource(
+                "Titles you've saved to watch later.",
+                comment: "Explanation shown under the Watchlist hero source option in Settings."
+            )
         }
     }
 

@@ -103,8 +103,8 @@ struct PlaybackDiagnosticsOverlay: View {
         section("SOURCE") {
             optionalRow("File", d.sourceFileNameText)
             optionalRow("Size", d.sourceFileSizeText)
-            row("Delivery", sourceText(d))
-            optionalRow("Stream", d.streamTransportText)
+            row("Delivery", d.mode.displayName)
+            optionalRow("Stream", streamTransportText(d.streamTransport))
             optionalRow("Container", d.containerText)
         }
     }
@@ -132,7 +132,7 @@ struct PlaybackDiagnosticsOverlay: View {
             optionalRow("Channels", d.audioChannelsText)
             optionalRow("Sample Rate", d.audioSampleRateText)
             optionalRow("Bitrate", d.audioBitrateText)
-            optionalRow("Output", d.audioOutputText)
+            optionalRow("Output", d.audioOutputDescription)
         }
     }
 
@@ -151,9 +151,9 @@ struct PlaybackDiagnosticsOverlay: View {
         // PLAYBACK is just the session-state facts.
         section("PLAYBACK") {
             optionalRow("Position", d.positionText)
-            optionalRow("Seekable", d.seekWindowText)
+            optionalRow("Seekable", seekWindowText(d.seekWindowFacts))
             optionalRow("State", d.playbackStateText)
-            row("Buffer", d.bufferStatusText)
+            row("Buffer", bufferStatusText(d.bufferStatusFacts))
             row("Dropped", "\(d.droppedFramesText) frames")
         }
     }
@@ -162,9 +162,9 @@ struct PlaybackDiagnosticsOverlay: View {
     private func systemSection(_ d: PlaybackDiagnostics) -> some View {
         section("SYSTEM") {
             optionalRow("Device", d.deviceText)
-            optionalRow("Disk", d.diskText)
+            optionalRow("Disk", diskSpaceText(d.diskSpaceFacts))
             optionalRow("Memory", d.memoryText)
-            optionalRow("Thermal", d.thermalText)
+            optionalRow("Thermal", d.thermalResource)
             optionalRow("Instances", d.liveInstancesText)
         }
     }
@@ -186,10 +186,6 @@ struct PlaybackDiagnosticsOverlay: View {
 
     // MARK: - Rows
 
-    private func sourceText(_ d: PlaybackDiagnostics) -> String {
-        return d.mode.displayName
-    }
-
     @ViewBuilder
     private func optionalRow(_ label: String, _ value: String) -> some View {   // l10n:content — diagnostic values, developer-facing
         if value != PlaybackDiagnostics.placeholder {
@@ -198,17 +194,98 @@ struct PlaybackDiagnosticsOverlay: View {
     }
 
     private func row(_ label: String, _ value: String) -> some View {   // l10n:content — diagnostic values, developer-facing
+        row(label, Text(value))
+    }
+
+    /// Row overload for CoreModels-supplied copy resources (e.g. `PlaybackMode`,
+    /// `ThermalLevel`, `audioOutputDescription`) — kept distinct from the
+    /// `String` overload above so these values go through SwiftUI's catalog
+    /// lookup instead of being rendered verbatim.
+    private func row(_ label: String, _ value: LocalizedStringResource) -> some View {   // l10n:content — diagnostic row label, developer-facing
+        row(label, Text(value))
+    }
+
+    @ViewBuilder
+    private func optionalRow(_ label: String, _ value: LocalizedStringResource?) -> some View {   // l10n:content — diagnostic row label, developer-facing
+        if let value {
+            row(label, value)
+        }
+    }
+
+    @ViewBuilder
+    private func optionalRow(_ label: String, _ value: Text?) -> some View {   // l10n:content — diagnostic row label, developer-facing
+        if let value {
+            row(label, value)
+        }
+    }
+
+    private func row(_ label: String, _ value: Text) -> some View {   // l10n:content — diagnostic values, developer-facing
         GridRow {
             Text(label)
                 .font(.system(size: 14, design: .monospaced))
                 .foregroundStyle(palette.secondaryText)
                 .frame(width: 110, alignment: .leading)
                 .gridColumnAlignment(.leading)
-            Text(value)
+            value
                 .font(.system(size: 14, design: .monospaced).weight(.semibold))
                 .foregroundStyle(palette.primaryText)
                 .gridColumnAlignment(.leading)
         }
+    }
+
+    /// Composes the stream transport row from CoreModels facts: `hostAndPort`/
+    /// `container`/`scheme` are content, "App-local" is our own copy word
+    /// prefixed only when the facts say the delivery is local.
+    private func streamTransportText(_ facts: PlaybackDiagnostics.StreamTransportFacts?) -> Text? {
+        guard let facts else { return nil }
+        let tag = facts.container ?? facts.scheme
+        guard let host = facts.hostAndPort else {
+            return tag.map { Text(verbatim: $0) }
+        }
+        var text = facts.isLocal ? Text("App-local ") + Text(verbatim: host) : Text(verbatim: host)
+        if let tag {
+            text = text + Text(verbatim: " · ") + Text(verbatim: tag)
+        }
+        return text
+    }
+
+    /// Composes the seekable-window row from CoreModels facts: `window`/
+    /// `totalDuration` are content, "full timeline" / "server window …" are our
+    /// own copy words.
+    private func seekWindowText(_ facts: PlaybackDiagnostics.SeekWindowFacts?) -> Text? {
+        guard let facts else { return nil }
+        var text = Text(verbatim: facts.window)
+        guard let totalDuration = facts.totalDuration else { return text }
+        text = text + Text(" of ") + Text(verbatim: totalDuration) + Text(verbatim: " · ")
+        if facts.coversWholeTimeline {
+            return text + Text("full timeline")
+        }
+        if let trailingWindowSeconds = facts.trailingWindowSeconds {
+            let secondsText = Duration.seconds(Int(trailingWindowSeconds.rounded()))
+                .formatted(.units(allowed: [.seconds], width: .abbreviated))
+            return text + Text("server window ") + Text(verbatim: secondsText)
+        }
+        return text
+    }
+
+    /// Composes the buffer-health row from CoreModels facts: `status` is our own
+    /// copy word ("Buffering"/"Low"/"Healthy"), `secondsAhead` is content; the
+    /// "… ahead" qualifier is our own copy word too.
+    private func bufferStatusText(_ facts: PlaybackDiagnostics.BufferStatusFacts) -> Text {
+        let base = facts.status.map { Text($0) } ?? Text(verbatim: PlaybackDiagnostics.placeholder)
+        guard let secondsAhead = facts.secondsAhead else { return base }
+        return base + Text(verbatim: " · ") + Text(verbatim: secondsAhead) + Text(" ahead")
+    }
+
+    /// Composes the disk-space row from CoreModels facts: both figures are
+    /// content, "… free" is our own copy word.
+    private func diskSpaceText(_ facts: PlaybackDiagnostics.DiskSpaceFacts?) -> Text? {
+        guard let facts else { return nil }
+        var text = Text(verbatim: facts.freeText) + Text(" free")
+        if let totalText = facts.totalText {
+            text = text + Text(verbatim: " / ") + Text(verbatim: totalText)
+        }
+        return text
     }
 
     // MARK: - Helpers

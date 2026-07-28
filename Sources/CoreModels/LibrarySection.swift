@@ -26,9 +26,15 @@ public struct LibrarySection: Identifiable, Equatable, Sendable {
     /// row without colliding.
     public let id: String
 
-    /// The row heading shown above the cards (already localised/humanised by the
-    /// producer — e.g. "Recently Added", "More in Drama").
-    public let title: String
+    /// The row heading shown above the cards — always rendered `Text(verbatim:)`
+    /// today. Some producers pass pure provider content (Plex hub titles); the
+    /// Home aggregator's own "Recently Added in {library}" row mixes our copy
+    /// with the library's (content) name, baked into one `String` at
+    /// construction time. Because the same slot serves both, and every render
+    /// site already treats it as verbatim, it stays `String`/content here — the
+    /// aggregator's own wording is a real, reported localization gap, not a
+    /// mislabel.
+    public let title: String  // l10n:content — mixed producer field (provider hub titles + our own baked-in wording), see note above
 
     /// Poster vs landscape presentation.
     public let style: Style
@@ -38,7 +44,7 @@ public struct LibrarySection: Identifiable, Equatable, Sendable {
     /// row.
     public var items: [MediaItem]
 
-    public init(id: String, title: String, style: Style = .poster, items: [MediaItem] = []) {
+    public init(id: String, title: String, style: Style = .poster, items: [MediaItem] = []) {  // l10n:content — see `title` property doc
         self.id = id
         self.title = title
         self.style = style

@@ -40,37 +40,49 @@ public struct ShareScanState: Sendable, Equatable {
     /// Busy = actively scanning or enriching (the window the indicator shows).
     public var isBusy: Bool { isScanning || isEnriching }
 
-    /// A short human phase label — what the share is doing right now. Scanning wins
-    /// over enriching when (briefly) both are true, since the walk is the earlier,
-    /// more fundamental stage.
-    public var phase: String {
-        if isScanning { return "Scanning" }
-        if isEnriching { return "Updating artwork" }
-        return ""
+    /// A short human phase label — what the share is doing right now, or `nil`
+    /// when idle. Scanning wins over enriching when (briefly) both are true,
+    /// since the walk is the earlier, more fundamental stage.
+    public var phase: LocalizedStringResource? {
+        if isScanning {
+            return LocalizedStringResource(
+                "shareScan.phase.scanning",
+                defaultValue: "Scanning",
+                comment: "Phase label shown while a media share is being scanned."
+            )
+        }
+        if isEnriching {
+            return LocalizedStringResource(
+                "shareScan.phase.enriching",
+                defaultValue: "Updating artwork",
+                comment: "Phase label shown while a media share's metadata/artwork is being enriched."
+            )
+        }
+        return nil
     }
 
     /// The optional trailing progress detail (e.g. "1,234 items" while scanning,
-    /// "142 of 900" while enriching), or `nil` when there's no count worth showing.
-    /// During enrichment the `done`/`total` counters are rendered WITHOUT grouping
-    /// separators and `done` is left-padded (with figure spaces, which share the
-    /// tabular-digit width) to the width of `total` — so, paired with a
-    /// monospaced-digit font, the string is a **fixed width** for the whole pass and
-    /// the pill can't jitter as the counter flies. (Grouping commas are deliberately
-    /// dropped here: a comma is NOT tabular under `monospacedDigit`, so "999 of 1,000"
-    /// and "1,000 of 1,000" would differ in width at the thousands boundary.)
-    public var progressDetail: String? {
+    /// "142 of 900" while enriching), or `nil` when there's no count worth
+    /// showing. Pure facts — the counts, plus the enrich pass's pre-padded `done`
+    /// string (see `ScanProgressDetail`'s doc for the fixed-width constraint).
+    /// The "folders"/"items"/"of" copy words live at the call site, composed as
+    /// real `LocalizedStringResource`s, so they can be translated and the counts
+    /// can carry plural catalog variations — see `HomeView.pillSubtitle`,
+    /// `ServerDetailView.busyStatusText`, and `PlozziOSSettingsView`'s share
+    /// section (all via the shared `CoreUI.scanProgressDetailText(_:)`).
+    public var progressDetail: ScanProgressDetail? {
         if isScanning {
             if directoriesScanned > 0, itemsFound > 0 {
-                return "\(Self.decimal(directoriesScanned)) folders · \(Self.decimal(itemsFound)) items"
+                return .foldersAndItems(folders: directoriesScanned, items: itemsFound)
             }
-            if directoriesScanned > 0 { return "\(Self.decimal(directoriesScanned)) folders" }
-            return itemsFound > 0 ? "\(Self.decimal(itemsFound)) items" : nil
+            if directoriesScanned > 0 { return .folders(directoriesScanned) }
+            return itemsFound > 0 ? .items(itemsFound) : nil
         }
         if isEnriching, enrichTotal > 0 {
             let totalStr = String(enrichTotal)
             let doneStr = String(min(enrichDone, enrichTotal))
             let pad = String(repeating: "\u{2007}", count: max(0, totalStr.count - doneStr.count))
-            return "\(pad)\(doneStr) of \(totalStr)"
+            return .enriching(done: "\(pad)\(doneStr)", total: enrichTotal)
         }
         return nil
     }
@@ -81,13 +93,27 @@ public struct ShareScanState: Sendable, Equatable {
         guard isEnriching, enrichTotal > 0 else { return nil }
         return min(1, Double(enrichDone) / Double(enrichTotal))
     }
+}
 
-    private static func decimal(_ n: Int) -> String {
-        Self.decimalFormatter.string(from: NSNumber(value: n)) ?? "\(n)"
-    }
-    private static let decimalFormatter: NumberFormatter = {
-        let f = NumberFormatter(); f.numberStyle = .decimal; return f
-    }()
+/// Facts behind `ShareScanState.progressDetail` — no copy words, so this stays a
+/// plain CoreModels type. The view composes the actual sentence (see
+/// `CoreUI.scanProgressDetailText(_:)`), since the "folders"/"items"/"of"
+/// wording needs to be real, pluralizable `LocalizedStringResource`s.
+public enum ScanProgressDetail: Equatable, Sendable {
+    case foldersAndItems(folders: Int, items: Int)
+    case folders(Int)
+    case items(Int)
+    /// `done` arrives pre-padded: left-padded with figure spaces (which share
+    /// `monospacedDigit`'s tabular width) to the width of `total`, and neither
+    /// side carries a grouping separator. That keeps the "N of M" string a
+    /// **fixed width** for the whole enrichment pass, so the pill can't jitter
+    /// as the counter climbs — a comma is NOT tabular under `monospacedDigit`,
+    /// so "999 of 1,000" and "1,000 of 1,000" would differ in width right at
+    /// the thousands boundary. `total` stays a plain `Int` (not pre-formatted)
+    /// so it remains a real, pluralizable catalog substitution; the caller
+    /// must render it with grouping disabled (e.g. `.formatted(.number
+    /// .grouping(.never))`) to preserve `done`'s matching, ungrouped width.
+    case enriching(done: String, total: Int)
 }
 
 /// App-level observable holding per-share scan status. The scanner (an actor in

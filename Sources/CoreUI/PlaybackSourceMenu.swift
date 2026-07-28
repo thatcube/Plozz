@@ -456,7 +456,8 @@ private struct PlaybackSourceMenuPanel: View {
             drillInRow(
                 id: "root.servers",
                 title: "Server",
-                detail: selectedSource?.displayName ?? "Choose a server",
+                detail: selectedSource.map { Text(verbatim: $0.displayName) }
+                    ?? Text("Choose a server", comment: "Placeholder shown in Settings when no server is selected yet."),
                 destination: .servers
             ) {
                 // Carry the active server's provider brand up to the summary row
@@ -482,7 +483,8 @@ private struct PlaybackSourceMenuPanel: View {
             drillInRow(
                 id: "root.versions",
                 title: "Version",
-                detail: selectedVersion?.displayLabel ?? "Choose a version",
+                detail: selectedVersion.map { versionTitleText($0.displayLabel) }
+                    ?? Text("Choose a version", comment: "Placeholder shown in Settings when no playback version is selected yet."),
                 destination: .versions
             ) {
                 Image(systemName: "film.stack")
@@ -588,15 +590,20 @@ private struct PlaybackSourceMenuPanel: View {
             #if !os(tvOS)
             if index > 0 { rowSeparator }
             #endif
-            let title = version.displayLabel
-            let titleFacts = Set(title.components(separatedBy: " · "))
+            // `displayLabel` is `nil` only when no fact/name is known — used
+            // here just to de-dupe `menuFacts` against whatever the title
+            // already shows; the actual rendered title below branches on the
+            // Optional so the "Version" fallback stays a translatable resource
+            // rather than a `Text(String)` that would always render verbatim.
+            let titleForDedupe = version.displayLabel ?? ""
+            let titleFacts = Set(titleForDedupe.components(separatedBy: " · "))
             let supplementalFacts = version.menuFacts.filter { !titleFacts.contains($0) }
             menuRowButton(id: "version.\(version.id)") {
                 onSelectVersion(version.id)
             } label: {
                 HStack(alignment: .top, spacing: 14) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(title)
+                        versionTitleText(version.displayLabel)
                             .font(rowTitleFont)
                         if !supplementalFacts.isEmpty {
                             Text(supplementalFacts.joined(separator: " · "))
@@ -622,10 +629,21 @@ private struct PlaybackSourceMenuPanel: View {
         }
     }
 
+    /// Renders a `MediaVersion` title: the joined technical facts (or provider
+    /// name) verbatim when known, otherwise our own generic "Version" copy —
+    /// kept as a real resource here rather than baked into a `String` so it
+    /// translates like everything else.
+    private func versionTitleText(_ displayLabel: String?) -> Text {
+        if let displayLabel {
+            return Text(verbatim: displayLabel)
+        }
+        return Text("Version", comment: "Generic label for a playback version/source with no distinguishing facts (resolution, edition, etc.) known.")
+    }
+
     private func drillInRow<Icon: View>(
         id: String,
         title: LocalizedStringKey,
-        detail: String,
+        detail: Text,
         destination: PlaybackSourceMenuButtonPage,
         @ViewBuilder icon: () -> Icon
     ) -> some View {
@@ -641,7 +659,7 @@ private struct PlaybackSourceMenuPanel: View {
                        .textCase(.uppercase)
                        .tracking(0.8)
                        .settingsRowSecondary()
-                    Text(detail)
+                    detail
                        .font(rowTitleFont)
                        .lineLimit(2)
                 }

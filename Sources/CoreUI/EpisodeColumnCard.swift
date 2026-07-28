@@ -59,7 +59,7 @@ public struct EpisodeColumnCard: View {
                 )
 
             VStack(alignment: .leading, spacing: 0) {
-                Text(presentation.titleLine)
+                presentation.titleLine
                     .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)

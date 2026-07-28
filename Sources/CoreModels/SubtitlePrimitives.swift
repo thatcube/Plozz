@@ -130,14 +130,27 @@ public enum SubtitleMode: String, Codable, CaseIterable, Sendable {
     }
 
     /// One-line explanation shown beneath each option in settings.
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
         case .off:
-            return "Don't turn subtitles on automatically."
+            return LocalizedStringResource(
+                "Don't turn subtitles on automatically.",
+                comment: "Explanation shown beneath the subtitle mode option in Settings > Playback."
+            )
         case .all:
-            return "Show full subtitles in your preferred language."
+            return LocalizedStringResource(
+                "Show full subtitles in your preferred language.",
+                comment: "Explanation shown beneath the subtitle mode option in Settings > Playback."
+            )
         case .forcedOnly:
-            return "Only show forced subtitles for foreign-language passages."
+            // Natural key collides with `ForcedSubtitlePreference.onlyForced.detail`
+            // (same sentence, same real-world outcome — only forced/foreign-passage
+            // subtitles get used, whether the source is display-mode or search
+            // preference) — deliberately shared, single catalog entry.
+            return LocalizedStringResource(
+                "Only show forced subtitles for foreign-language passages.",
+                comment: "Explanation that only forced (foreign-language-passage) subtitles are shown; used for both the subtitle display mode and the subtitle search preference."
+            )
         }
     }
 }

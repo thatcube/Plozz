@@ -86,7 +86,7 @@ public struct MediaPerson: Codable, Hashable, Identifiable, Sendable {
 /// `Metadata`) onto this type so feature code never imports a provider module.
 public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public var id: String
-    public var title: String
+    public var title: String  // l10n:content — media title (server/provider content)
     /// The title in the work's original/production language, when the server
     /// records one distinct from the (often localised) display `title`. Foreign
     /// films routinely carry e.g. a Spanish display title with the original
@@ -308,7 +308,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public var explicitSourceSelection: Bool
     public init(
         id: String,
-        title: String,
+        title: String,  // l10n:content — media title (server/provider content)
         originalTitle: String? = nil,
         kind: MediaItemKind,
         overview: String? = nil,
@@ -728,7 +728,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     }
 
     /// A human-friendly subtitle line, e.g. `S1 · E3` or the production year.
-    public var subtitle: String? {
+    public var subtitle: String? {  // l10n:content — "S"/"E" abbreviations are hand-built formatting, not copy; parentTitle/year are content
         if let season = seasonNumber, let episode = episodeNumber {
             return "S\(season) · E\(episode)"
         }
@@ -751,7 +751,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
 /// A browsable library/collection root (Jellyfin "view").
 public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
     public var id: String
-    public var title: String
+    public var title: String  // l10n:content — library name from the server
     public var kind: MediaItemKind
     public var imageURL: URL?
 
@@ -781,7 +781,7 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
 
     public init(
         id: String,
-        title: String,
+        title: String,  // l10n:content — library name from the server
         kind: MediaItemKind,
         imageURL: URL? = nil,
         isMusic: Bool = false,

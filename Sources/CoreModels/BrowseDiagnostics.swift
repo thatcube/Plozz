@@ -98,7 +98,7 @@ public enum BrowseDiagnostics {
     /// and response-byte caches report their live usage.
     public static func startSampler(
         interval: TimeInterval = 2,
-        label: String,
+        label: String,  // l10n:content — developer-facing diagnostic (browse telemetry sampler tag)
         artworkCacheStats: (@Sendable () -> (
             count: Int,
             decodedMB: Double,

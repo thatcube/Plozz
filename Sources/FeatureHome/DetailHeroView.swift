@@ -1230,11 +1230,15 @@ struct DetailHeroView: View {
                     )
                 ) {
                     ForEach(versions.sortedForPicker()) { version in
-                        Text(version.displayLabel)
+                        versionTitleText(version.displayLabel)
                             .tag(version.id)
                     }
                 } label: {
-                    Label(currentVersion.displayLabel, systemImage: "film.stack")
+                    Label {
+                        versionTitleText(currentVersion.displayLabel)
+                    } icon: {
+                        Image(systemName: "film.stack")
+                    }
                 }
                 .pickerStyle(.menu)
             }
@@ -1401,10 +1405,14 @@ struct DetailHeroView: View {
         let resolvedTitle = seriesContextTitle == nil
             ? HeroPresentation.normalizedTitle(for: item)
             : item.title
-        let title = titleFallbackOverride
-            ?? (hideText
-                ? spoilerSettings.maskedTitle(for: item)
-                : resolvedTitle)
+        let title: Text
+        if let override = titleFallbackOverride {
+            title = Text(verbatim: override)
+        } else if hideText {
+            title = Text(spoilerSettings.maskedTitle(for: item))
+        } else {
+            title = Text(verbatim: resolvedTitle)
+        }
         return VStack(alignment: .leading, spacing: 4) {
             // The show's name above the episode's, quiet and small — the episode
             // is the subject of this page, the series is the context it sits in.
@@ -1420,7 +1428,7 @@ struct DetailHeroView: View {
                         .lineLimit(1)
                 }
             }
-            Text(title)
+            title
                 .font(.system(size: 64, weight: .bold))
                 .lineLimit(2)
                 .minimumScaleFactor(0.5)
@@ -1428,6 +1436,17 @@ struct DetailHeroView: View {
                 .frame(maxWidth: 1200, alignment: .leading)
                 .contentTransition(.opacity)
         }
+    }
+
+    /// Renders a `MediaVersion` title: the joined technical facts (or provider
+    /// name) verbatim when known, otherwise our own generic "Version" copy —
+    /// kept as a real resource here rather than baked into a `String` so it
+    /// translates like everything else.
+    private func versionTitleText(_ displayLabel: String?) -> Text {
+        if let displayLabel {
+            return Text(verbatim: displayLabel)
+        }
+        return Text("Version", comment: "Generic label for a playback version/source with no distinguishing facts (resolution, edition, etc.) known.")
     }
 
     /// The owning show's name, shown above the title when this page's subject is

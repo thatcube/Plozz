@@ -4,12 +4,12 @@ import Foundation
 public struct ThemeMusic: Hashable, Sendable {
     public var itemID: String
     public var playbackSource: PlaybackSource
-    public var title: String?
+    public var title: String?  // l10n:content — theme song title, provider/file-supplied
 
     public init(
         itemID: String,
         playbackSource: PlaybackSource,
-        title: String? = nil
+        title: String? = nil  // l10n:content — theme song title, provider/file-supplied
     ) {
         self.itemID = itemID
         self.playbackSource = playbackSource

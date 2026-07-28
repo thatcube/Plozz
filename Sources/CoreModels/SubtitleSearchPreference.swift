@@ -25,21 +25,53 @@ public enum HearingImpairedPreference: Int, Codable, CaseIterable, Sendable {
     /// The Plex `hearingImpaired` query value.
     public var plexParameterValue: Int { rawValue }
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .preferNonSDH: return "Prefer Non-SDH"
-        case .preferSDH: return "Prefer SDH"
-        case .onlySDH: return "Only SDH"
-        case .onlyNonSDH: return "Only Non-SDH"
+        case .preferNonSDH:
+            return LocalizedStringResource(
+                "Prefer Non-SDH",
+                comment: "Subtitle search preference option for hearing-impaired (SDH) subtitles."
+            )
+        case .preferSDH:
+            return LocalizedStringResource(
+                "Prefer SDH",
+                comment: "Subtitle search preference option for hearing-impaired (SDH) subtitles."
+            )
+        case .onlySDH:
+            return LocalizedStringResource(
+                "Only SDH",
+                comment: "Subtitle search preference option for hearing-impaired (SDH) subtitles."
+            )
+        case .onlyNonSDH:
+            return LocalizedStringResource(
+                "Only Non-SDH",
+                comment: "Subtitle search preference option for hearing-impaired (SDH) subtitles."
+            )
         }
     }
 
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
-        case .preferNonSDH: return "Show subtitles for the deaf or hard-of-hearing lower in the list."
-        case .preferSDH: return "Show subtitles for the deaf or hard-of-hearing at the top of the list."
-        case .onlySDH: return "Only show subtitles for the deaf or hard-of-hearing (SDH)."
-        case .onlyNonSDH: return "Never show subtitles for the deaf or hard-of-hearing."
+        case .preferNonSDH:
+            return LocalizedStringResource(
+                "Show subtitles for the deaf or hard-of-hearing lower in the list.",
+                comment: "Explanation shown under the Prefer Non-SDH subtitle search option."
+            )
+        case .preferSDH:
+            return LocalizedStringResource(
+                "Show subtitles for the deaf or hard-of-hearing at the top of the list.",
+                comment: "Explanation shown under the Prefer SDH subtitle search option."
+            )
+        case .onlySDH:
+            return LocalizedStringResource(
+                "Only show subtitles for the deaf or hard-of-hearing (SDH).",
+                comment: "Explanation shown under the Only SDH subtitle search option."
+            )
+        case .onlyNonSDH:
+            return LocalizedStringResource(
+                "Never show subtitles for the deaf or hard-of-hearing.",
+                comment: "Explanation shown under the Only Non-SDH subtitle search option."
+            )
         }
     }
 
@@ -81,21 +113,55 @@ public enum ForcedSubtitlePreference: Int, Codable, CaseIterable, Sendable {
 
     public var plexParameterValue: Int { rawValue }
 
-    public var displayName: String {
+    public var displayName: LocalizedStringResource {
         switch self {
-        case .preferNonForced: return "Prefer Non-Forced"
-        case .preferForced: return "Prefer Forced"
-        case .onlyForced: return "Only Forced"
-        case .onlyNonForced: return "Only Non-Forced"
+        case .preferNonForced:
+            return LocalizedStringResource(
+                "Prefer Non-Forced",
+                comment: "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+            )
+        case .preferForced:
+            return LocalizedStringResource(
+                "Prefer Forced",
+                comment: "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+            )
+        case .onlyForced:
+            return LocalizedStringResource(
+                "Only Forced",
+                comment: "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+            )
+        case .onlyNonForced:
+            return LocalizedStringResource(
+                "Only Non-Forced",
+                comment: "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+            )
         }
     }
 
-    public var detail: String {
+    public var detail: LocalizedStringResource {
         switch self {
-        case .preferNonForced: return "Show forced (foreign-passage-only) subtitles lower in the list."
-        case .preferForced: return "Show forced (foreign-passage-only) subtitles at the top of the list."
-        case .onlyForced: return "Only show forced subtitles for foreign-language passages."
-        case .onlyNonForced: return "Never show forced subtitles."
+        case .preferNonForced:
+            return LocalizedStringResource(
+                "Show forced (foreign-passage-only) subtitles lower in the list.",
+                comment: "Explanation shown under the Prefer Non-Forced subtitle search option."
+            )
+        case .preferForced:
+            return LocalizedStringResource(
+                "Show forced (foreign-passage-only) subtitles at the top of the list.",
+                comment: "Explanation shown under the Prefer Forced subtitle search option."
+            )
+        case .onlyForced:
+            // Natural key collides with `SubtitleMode.forcedOnly.detail` — deliberately
+            // shared, single catalog entry (see note there).
+            return LocalizedStringResource(
+                "Only show forced subtitles for foreign-language passages.",
+                comment: "Explanation that only forced (foreign-language-passage) subtitles are shown; used for both the subtitle display mode and the subtitle search preference."
+            )
+        case .onlyNonForced:
+            return LocalizedStringResource(
+                "Never show forced subtitles.",
+                comment: "Explanation shown under the Only Non-Forced subtitle search option."
+            )
         }
     }
 

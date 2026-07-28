@@ -199,10 +199,10 @@ final class NightShiftModelTests: XCTestCase {
         s.isEnabled = false
         s.scheduleMode = .manual
         let model = makeModel(s)
-        XCTAssertTrue(model.scheduleSummary().hasPrefix("Off."))
+        XCTAssertTrue(String(localized: model.scheduleSummary()).hasPrefix("Off."))
 
         model.settings.isEnabled = true
         // Active or idle, an enabled manual schedule mentions "Manual".
-        XCTAssertTrue(model.scheduleSummary().contains("Manual"))
+        XCTAssertTrue(String(localized: model.scheduleSummary()).contains("Manual"))
     }
 }

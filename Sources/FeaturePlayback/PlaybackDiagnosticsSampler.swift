@@ -96,7 +96,7 @@ public final class PlaybackDiagnosticsSampler {
         )
         base.engineName = engineName
         base.sourceFileName = sourceFileName
-        base.streamTransport = PlaybackDiagnostics.streamTransportSummary(url: streamURL)
+        base.streamTransport = PlaybackDiagnostics.streamTransportFacts(url: streamURL)
         Self.fillDeviceInfo(into: &base)
         staticDiagnostics = base
         latest = staticDiagnostics
@@ -199,7 +199,7 @@ public final class PlaybackDiagnosticsSampler {
 
             // Fall back to the live asset URL if the transport wasn't seeded at start.
             if diagnostics.streamTransport == nil, let urlAsset = item.asset as? AVURLAsset {
-                diagnostics.streamTransport = PlaybackDiagnostics.streamTransportSummary(url: urlAsset.url)
+                diagnostics.streamTransport = PlaybackDiagnostics.streamTransportFacts(url: urlAsset.url)
             }
         }
 

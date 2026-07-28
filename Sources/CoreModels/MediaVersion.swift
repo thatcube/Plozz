@@ -190,7 +190,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     /// `sourceMetadata` is present its authoritative classifier wins (it reads
     /// effective lines from width too, so a letterboxed 1920×804 file reads
     /// 1080p rather than 720p).
-    public var resolutionLabel: String? {
+    public var resolutionLabel: String? {  // l10n:content — technical resolution label, never translated
         if let sourceMetadata, let badge = sourceMetadata.resolutionBadge { return badge.label }
         guard let height else { return nil }
         switch height {
@@ -219,7 +219,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     /// A compact HDR badge label, e.g. `Dolby Vision`, `HDR10`, `HDR10+`, `HLG`,
     /// or `nil` for SDR/unknown — used in the version diff row. Prefers the
     /// authoritative `sourceMetadata` classification (so HDR10+ is preserved).
-    public var hdrLabel: String? {
+    public var hdrLabel: String? {  // l10n:content — brand/format name (Dolby Vision, HDR10, HLG), never translated
         if let sourceMetadata {
             let range = sourceMetadata.dynamicRangeBadges
             if range.contains(where: { $0.style == .dolby }) { return "Dolby Vision" }
@@ -247,7 +247,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
 
     /// A compact audio badge label, e.g. `Atmos`, `7.1`, `5.1`, `Stereo`.
     /// Prefers the authoritative `sourceMetadata` audio classification.
-    public var audioLabel: String? {
+    public var audioLabel: String? {  // l10n:content — brand/format name (Atmos, channel layout), never translated
         if let sourceMetadata, let headline = sourceMetadata.audioBadges.first {
             return headline.label
         }
@@ -262,12 +262,12 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     }
 
     /// A human-readable file size, e.g. `12.4 GB`, or `nil` when unknown.
-    public var sizeLabel: String? {
+    public var sizeLabel: String? {  // l10n:content — formatted byte count, not copy
         MediaFileSizeFormatter.string(fromByteCount: sizeBytes)
     }
 
     /// A compact overall bitrate, e.g. `80 Mbps`.
-    public var bitrateLabel: String? {
+    public var bitrateLabel: String? {  // l10n:content — hand-built bitrate format, not copy (see report re: .formatted)
         guard let bitrate, bitrate > 0 else { return nil }
         let megabits = Double(bitrate) / 1_000_000
         let value = megabits.formatted(.number.precision(.fractionLength(0...1)))
@@ -275,7 +275,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     }
 
     /// Runtime of this file in the app's compact duration style.
-    public var durationLabel: String? {
+    public var durationLabel: String? {  // l10n:content — formatted duration, not copy
         duration?.runtimeBadgeText
     }
 
@@ -284,7 +284,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     /// (Extended, Theatrical, Director's Cut, …). `nil` when neither names a cut.
     /// This is the signal that distinguishes two otherwise-identical "4K · 12 GB"
     /// files, so the picker leads with it.
-    public var editionLabel: String? {
+    public var editionLabel: String? {  // l10n:content — provider/filename-derived edition (Extended, Director's Cut, …)
         if let edition {
             let trimmed = edition.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { return trimmed }
@@ -295,7 +295,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     /// The source-quality token parsed from `name` (Remux, BluRay, WEB-DL, …), or
     /// `nil` when the name names no recognised source. Distinguishes a lossless
     /// Remux from a re-encoded WEB-DL that would otherwise read identically.
-    public var sourceQualityLabel: String? {
+    public var sourceQualityLabel: String? {  // l10n:content — parsed source/edition token (Remux, BluRay, WEB-DL, …), brand/format-like, never translated
         EditionParser.sourceQuality(from: name)
     }
 
@@ -303,8 +303,13 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     /// (the cut — the thing users actually choose between) when known, then the
     /// derived "4K · HDR · Remux · 12.4 GB" quality facts, so two files of the
     /// same resolution are never indistinguishable. Falls back to the provider's
-    /// own source `name`, then a generic "Version".
-    public var displayLabel: String {
+    /// own source `name`. `nil` only when none of that is known — the caller is
+    /// responsible for showing a generic "Version" fallback in that case, kept
+    /// out of this `String` deliberately: that word is our own copy, not
+    /// content, so it must be a real (translatable) resource at the call site,
+    /// never baked in here where it would render as permanent English via
+    /// `Text(String)`.
+    public var displayLabel: String? {  // l10n:content — joined technical facts, or the provider's source name; nil means "no facts known", so the caller supplies the (copy) "Version" fallback itself
         var parts: [String] = []
         if let editionLabel { parts.append(editionLabel) }
         if let resolutionLabel { parts.append(resolutionLabel) }
@@ -313,24 +318,26 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
         if let sizeLabel { parts.append(sizeLabel) }
         if !parts.isEmpty { return parts.joined(separator: " · ") }
         if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
-        return "Version"
+        return nil
     }
 
     /// First line of a rich version row. The edition/cut is the strongest
-    /// differentiator; resolution is the fallback.
-    public var menuTitle: String {
+    /// differentiator; resolution is the fallback. `nil` has the same meaning
+    /// as ``displayLabel``'s: no fact/name is known, so the caller shows its
+    /// own "Version" fallback resource instead.
+    public var menuTitle: String? {  // l10n:content — edition/resolution fact, or the provider's source name; nil means "no facts known", so the caller supplies the (copy) "Version" fallback itself
         if let editionLabel { return editionLabel }
         if let resolutionLabel { return resolutionLabel }
         if let name {
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { return trimmed }
         }
-        return "Version"
+        return nil
     }
 
     /// Technical facts that help distinguish files without claiming a playback
     /// outcome. Filename remains a separate tertiary line.
-    public var menuFacts: [String] {
+    public var menuFacts: [String] {  // l10n:content — list of technical facts, never translated
         var facts: [String] = []
         if menuTitle != resolutionLabel, let resolutionLabel { facts.append(resolutionLabel) }
         if let hdrLabel { facts.append(hdrLabel) }

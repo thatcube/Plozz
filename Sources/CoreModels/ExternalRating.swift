@@ -27,7 +27,11 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
     case critic
 
     /// Human-readable label for the badge.
-    public var displayName: String {
+    // Mostly brand/format names (IMDb, Rotten Tomatoes, RT Audience, Metacritic,
+    // Letterboxd, AniList, TMDB), never translated; "Community"/"Critics" are
+    // generic words folded into the same uniform `String` type for consistency
+    // with the brand cases (same judgment call as `ProviderKind.displayName`).
+    public var displayName: String {  // l10n:content — brand/format names, never translated
         switch self {
         case .imdb: return "IMDb"
         case .rottenTomatoes: return "Rotten Tomatoes"

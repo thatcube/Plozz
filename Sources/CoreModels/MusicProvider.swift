@@ -257,15 +257,31 @@ public struct PlaybackQuality: Hashable, Sendable {
     /// Short headline describing the tier:
     /// `"Lossless"` (direct-play lossless), `"Original"` (direct-play lossy
     /// source, not degraded), or `"Transcoding"` (re-encoded, reduced).
-    public var headline: String {
-        if !isDirectPlay { return "Transcoding" }
-        return isLossless ? "Lossless" : "Original"
+    public var headline: LocalizedStringResource {
+        if !isDirectPlay {
+            return LocalizedStringResource(
+                "playbackQuality.transcoding",
+                defaultValue: "Transcoding",
+                comment: "Audio quality badge: the stream is being re-encoded/reduced."
+            )
+        }
+        return isLossless
+            ? LocalizedStringResource(
+                "playbackQuality.lossless",
+                defaultValue: "Lossless",
+                comment: "Audio quality badge: direct-play, no quality lost."
+            )
+            : LocalizedStringResource(
+                "playbackQuality.original",
+                defaultValue: "Original",
+                comment: "Audio quality badge: direct-play lossy source, not further degraded."
+            )
     }
 
     /// One-line technical detail (codec + bit depth/sample rate or bitrate),
     /// e.g. `"FLAC · 24-bit/96kHz"`, `"ALAC · 44.1kHz"`, `"MP3 · 320 kbps"`.
     /// Returns `nil` when no facts are known.
-    public var detail: String? {
+    public var detail: String? {  // l10n:content — codec/technical facts + hand-built unit formatting, not copy
         let label = (isDirectPlay ? codec : transcodeCodec)?.uppercased()
         var parts: [String] = []
 

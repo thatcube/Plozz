@@ -190,7 +190,7 @@ struct MusicCard: View {
                 )
 
             BorderlessCardCaption(
-                title: title,
+                title: Text(verbatim: title),
                 subtitle: subtitle,
                 horizontalInset: metrics.landscapeCaptionInset
             )

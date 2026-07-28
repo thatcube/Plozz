@@ -1,4 +1,5 @@
 #if canImport(SwiftUI)
+import Observation
 import SwiftUI
 import CoreModels
 import CoreNetworking
@@ -54,6 +55,12 @@ public final class HomeHeroRuntimeState {
         let bare = mutation.itemIDs.sorted().joined(separator: ",")
         return "\(scoped)|\(bare)"
     }
+}
+
+@MainActor
+@Observable
+final class HomeHeroRecedeModel {
+    var isReceded = false
 }
 
 /// The Home screen: an optional cinematic **hero** carousel followed by
@@ -126,9 +133,8 @@ public struct HomeView: View {
     /// `.onScrollGeometryChange`). When set, the hero's backdrop artwork glides UP
     /// and the content column (logo/buttons/dots) plus the rows below lift toward
     /// the top — the Apple TV recede. Every lift is expressed as a cheap `.offset`
-    /// (a GPU transform, no relayout) rather than animated layout, so the motion
-    /// stays smooth even though the rows are a non-lazy VStack.
-    @State private var heroReceded = false
+    /// while the rows below remain vertically lazy.
+    @State private var heroRecedeModel = HomeHeroRecedeModel()
 
     /// How long the content/row recede lifts take. Slow and cinematic — the
     /// buttons and paging dots ease up rather than snapping. Because the lifts are
@@ -356,11 +362,11 @@ public struct HomeView: View {
                                 // observer still clears it as a backstop.)
                                 onFocusGained: {
                                     withAnimation(.smooth(duration: Self.recedeAnimationDuration)) {
-                                        heroReceded = false
+                                        heroRecedeModel.isReceded = false
                                         heroScrollProxy.scrollTo(Self.heroTopID, anchor: .top)
                                     }
                                 },
-                                receded: heroReceded
+                                recedeModel: heroRecedeModel
                             )
                             .id(Self.heroTopID)
                             // (touch-pan disabler lives as a sibling below so it is
@@ -378,7 +384,7 @@ public struct HomeView: View {
                                 .focusEffectDisabled()
                                 .accessibilityLabel("Loading featured content")
                         }
-                        VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+                        LazyVStack(alignment: .leading, spacing: metrics.rowSpacing) {
                             if content.mergeLibraries {
                                 // Merged: the classic ordered rows (Continue Watching,
                                 // Watchlist, Recently Added, Libraries tiles).
@@ -405,17 +411,22 @@ public struct HomeView: View {
                         // (Continue Watching) overlaps the hero's lower edge — the
                         // Apple TV look. Otherwise keep the classic top padding. This
                         // padding is STATIC (never animated) — the recede lift is a
-                        // separate `.offset` below so it never triggers a relayout of
-                        // the non-lazy rows VStack (the source of the recede stutter).
+                        // separate `.offset` below so it never changes row geometry.
+                        // The vertical stack is lazy, so off-screen glass rows stay
+                        // unmounted instead of joining every focus-scroll update.
                         .padding(.top, heroLayoutActive
                             ? -Self.heroRowOverlap
                             : PlozzTheme.Metrics.screenVerticalPadding)
                         .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
-                        // Recede lift for the rows, as a cheap transform (no relayout).
-                        // Focus does not change during the recede animation (it's
-                        // already on Continue Watching), so the focus engine never
-                        // re-evaluates scroll mid-lift — the offset is safe.
-                        .offset(y: heroActive && heroReceded ? -Self.recedeRowLift : 0)
+                        // tvOS focus scrolling already moves Continue Watching into
+                        // view; this finishing lift centers it under the receded hero.
+                        .modifier(
+                            HomeRowsRecedeModifier(
+                                active: heroActive,
+                                model: heroRecedeModel,
+                                lift: Self.recedeRowLift
+                            )
+                        )
                     }
                     // Span the hero and rows in one focus scope so the hero's
                     // Play button can be the scope's preferred default — tvOS
@@ -428,8 +439,8 @@ public struct HomeView: View {
                 // Drive the recede off the SCROLL, observed as a BOOL so this fires
                 // ONLY when the threshold is crossed — never on every scroll frame.
                 // (The old per-frame CGFloat capture wrote @State each frame, forcing
-                // a full HomeView re-evaluation — and thus a relayout of the non-lazy
-                // rows — dozens of times a second: a major cause of the recede
+                // a full HomeView re-evaluation — and thus broad row updates —
+                // dozens of times a second: a major cause of the recede
                 // stutter.) When focus moves DOWN to a lower row the tvOS focus
                 // engine instantly scrolls the page past this threshold in one frame;
                 // moving UP to the tab bar or LEFT to the sidebar never scrolls the
@@ -440,7 +451,7 @@ public struct HomeView: View {
                     heroActive && geometry.contentOffset.y > Self.recedeScrollThreshold
                 } action: { _, shouldRecede in
                     withAnimation(.smooth(duration: Self.recedeAnimationDuration)) {
-                        heroReceded = shouldRecede
+                        heroRecedeModel.isReceded = shouldRecede
                     }
                 }
                 // When the hero is active, let it bleed into the top overscan
@@ -551,12 +562,8 @@ public struct HomeView: View {
     /// via ``HomeHeroLayout`` so the loading skeleton pulls its rows up identically.
     private static let heroRowOverlap: CGFloat = HomeHeroLayout.rowOverlap
 
-    /// Extra upward lift (points) applied to the rows (Continue Watching et al.)
-    /// when the hero is receded, so the row rises a little higher on screen toward
-    /// a centered reading position (the artwork having receded above it). Added to
-    /// `heroRowOverlap` only while receded and animates with the recede. Row height
-    /// is user-variable, so this is a fixed nudge rather than an exact centering.
-    /// Tunable.
+    /// Extra upward lift applied to the rows when the hero recedes, placing
+    /// Continue Watching in its intended centered reading position.
     private static let recedeRowLift: CGFloat = 110
 
     /// Scroll anchor for the hero, so focus returning to it can snap the scroll
@@ -1221,6 +1228,17 @@ private final class ScrollPanDisablerController: UIViewController {
         return nil
     }
 }
+
+private struct HomeRowsRecedeModifier: ViewModifier {
+    let active: Bool
+    let model: HomeHeroRecedeModel
+    let lift: CGFloat
+
+    func body(content: Content) -> some View {
+        content.offset(y: active && model.isReceded ? -lift : 0)
+    }
+}
+
 #endif
 
 #endif

@@ -82,6 +82,10 @@ struct HomeHeroView: View {
     /// so Home can restore the full-screen hero and replay the enter transition.
     /// Not fired for interior button-to-button moves.
     var onFocusGained: () -> Void = {}
+    /// Leaf-owned recede state. Passing the model reference keeps the high-frequency
+    /// animation state out of `HomeView`'s observation surface, so moving between
+    /// the hero and Continue Watching no longer invalidates every Home row.
+    let recedeModel: HomeHeroRecedeModel
     /// Whether the hero is *receded*: the user has moved focus down onto the
     /// Continue Watching row. When true the content column (logo / metadata /
     /// action buttons / paging dots) lifts up via a transform and the full-bleed,
@@ -91,7 +95,7 @@ struct HomeHeroView: View {
     /// engine scrolls the page the instant focus lands on a lower row); the lifts
     /// here are `.offset` transforms, not layout changes, so the animation never
     /// fights the focus engine and never re-runs layout of the rows below.
-    var receded: Bool = false
+    private var receded: Bool { recedeModel.isReceded }
 
     /// Extra upward lift (points) applied to the hero's CONTENT column (logo,
     /// metadata, action buttons, paging dots) when the hero recedes, so the

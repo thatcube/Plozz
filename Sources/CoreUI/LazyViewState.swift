@@ -64,4 +64,46 @@ public final class LazyViewState<Value> {
         return built
     }
 }
+
+/// A tiny keyed cache for values that must survive `body` re-evaluation but come
+/// in more than one flavour at a time — a navigation stack's pages, typically.
+///
+/// ``LazyViewState`` holds a single value, which is wrong for a `NavigationStack`:
+/// while page B is on top, the destination closure for page A still re-runs, so a
+/// one-slot box would rebuild A and B alternately and be worse than no cache at
+/// all. This keeps the most recent few keys instead.
+///
+/// The problem it solves is the one in docs/performance-debugging.md §5: a view
+/// model built inside a `navigationDestination` closure is rebuilt on every render
+/// pass and thrown away, because the destination view keeps only the first in
+/// `@State`. Measured on the Apple TV: opening three detail pages constructed
+/// **13** `ItemDetailViewModel`s, each of which also resolves the item's
+/// cross-server sources.
+@MainActor
+public final class KeyedViewStateCache<Key: Hashable, Value> {
+    private var storage: [Key: Value] = [:]
+    private var order: [Key] = []
+    private let capacity: Int
+
+    /// - Parameter capacity: how many keys to retain. The default comfortably
+    ///   covers a detail stack (series → season → episode) plus the page you
+    ///   came from, which is what stops the alternating-rebuild thrash.
+    public init(capacity: Int = 4) {
+        self.capacity = max(1, capacity)
+    }
+
+    /// The value for `key`, building it with `make` only when absent.
+    public func value(forKey key: Key, _ make: () -> Value) -> Value {
+        if let existing = storage[key] {
+            return existing
+        }
+        let built = make()
+        storage[key] = built
+        order.append(key)
+        while order.count > capacity {
+            storage.removeValue(forKey: order.removeFirst())
+        }
+        return built
+    }
+}
 #endif

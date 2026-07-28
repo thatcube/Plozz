@@ -96,6 +96,12 @@ struct HomeTab: View {
     @State private var path = NavigationPath()
     /// Handles owned above the tab so tab re-hosting cannot destroy them.
     let runtime: HomeTabRuntime
+    /// Detail view models, kept across `navigationDestination` re-evaluations.
+    /// Those closures re-run on every render pass while their page is on the
+    /// stack, and `ItemDetailView` keeps only the first value in `@State` — so
+    /// building one inline meant constructing and discarding a view model (and
+    /// re-resolving the item's cross-server sources) several times per push.
+    @State private var detailViewModels = KeyedViewStateCache<String, ItemDetailViewModel>()
     /// Lets a detail page tell whether a child page is pushed on top of it.
     /// See `DetailStackDepth`.
     @State private var detailStackDepth = DetailStackDepth()
@@ -249,7 +255,9 @@ struct HomeTab: View {
             }
             .navigationDestination(for: EpisodeContextRoute.self) { route in
                 ItemDetailView(
-                    viewModel: ItemDetailViewModel(
+                    viewModel: detailViewModels.value(
+                        forKey: "episode:\(route.seriesID)#\(route.episode.id)"
+                    ) { ItemDetailViewModel(
                         provider: resolveProvider(route.sourceAccountID, in: accounts),
                         itemID: route.seriesID,
                         // Seed the hero from the tapped episode so first paint is
@@ -268,7 +276,7 @@ struct HomeTab: View {
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
                         relatedTitlesLoader: makeRelatedTitlesLoader(in: accounts),
                         snapshotCache: detailSnapshotCache
-                    ),
+                    ) },
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
@@ -289,7 +297,9 @@ struct HomeTab: View {
             }
             .navigationDestination(for: SeasonContextRoute.self) { route in
                 ItemDetailView(
-                    viewModel: ItemDetailViewModel(
+                    viewModel: detailViewModels.value(
+                        forKey: "season:\(route.seriesID)#\(route.season.id)"
+                    ) { ItemDetailViewModel(
                         provider: resolveProvider(route.sourceAccountID, in: accounts),
                         itemID: route.seriesID,
                         // Seed the hero from the tapped season so first paint is
@@ -305,7 +315,7 @@ struct HomeTab: View {
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
                         relatedTitlesLoader: makeRelatedTitlesLoader(in: accounts),
                         snapshotCache: detailSnapshotCache
-                    ),
+                    ) },
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
@@ -453,7 +463,9 @@ struct HomeTab: View {
         // playable detail page.
         let isDiscovery = item.isNotInLibraryDiscovery
         return ItemDetailView(
-            viewModel: detailEnvironment.makeViewModel(for: item, libraryOrigin: libraryOrigin),
+            viewModel: detailViewModels.value(forKey: "item:\(item.id)#\(libraryOrigin ?? "")") {
+                detailEnvironment.makeViewModel(for: item, libraryOrigin: libraryOrigin)
+            },
             spoilerSettings: spoilerSettings,
             onPlay: { requestPlay($0) },
             onSelectChild: { navigate($0, libraryOrigin: libraryOrigin) },

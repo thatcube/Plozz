@@ -157,7 +157,8 @@ public struct ShareScanStatusRow: View {
         )
     }
 
-    /// "Scanning · 1,204 folders · 8,930 items" / "Updating artwork · 142 of 900".
+    /// "Updating library · 1,204 folders · 8,930 items" while the walk is the
+    /// countable pass, "Updating library · 142 of 900" once enrichment is.
     private var detailLine: Text {
         guard let phase = state.phase else { return Text(verbatim: "") }
         guard let progress = state.progressDetail else { return Text(phase) }

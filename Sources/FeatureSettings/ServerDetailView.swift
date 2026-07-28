@@ -404,27 +404,18 @@ private struct ShareLibraryStatusPanel: View {
         }
     }
 
-    /// Whole sentences per branch when idle (no detail yet): kept as full,
-    /// distinct literals so a translator sees the complete sentence rather than
-    /// a fragment glued to an ellipsis. Once a detail is known, the phase and
-    /// the detail's own copy words (`CoreUI.scanProgressDetailText`) are each
-    /// real resources, so composing them with `Text` — not interpolating one
-    /// into the other — keeps both independently translatable and the counts
-    /// pluralizable, without the "%@ · %@" no-words-in-the-key trap.
+    /// One label plus, when there is one, a live count. The phase word comes from
+    /// ``ShareScanState/phase`` rather than being re-derived here — this used to
+    /// carry its own copy of the scanning/enriching rule and its own two strings,
+    /// which is exactly how the two surfaces would drift. The phase and the
+    /// detail's own copy words (`CoreUI.scanProgressDetailText`) are each real
+    /// resources, so composing them with `Text` — not interpolating one into the
+    /// other — keeps both independently translatable and the counts pluralizable,
+    /// without the "%@ · %@" no-words-in-the-key trap.
     private static func busyStatusText(_ state: ShareScanState) -> Text {
-        guard let detail = state.progressDetail else {
-            return state.isScanning ? Text("Scanning…") : Text("Finding artwork & details…")
-        }
-        let phase = state.isScanning
-            ? Text(
-                "Scanning",
-                comment: "Server detail row: label for a share currently being scanned, followed by a live folder/item count."
-            )
-            : Text(
-                "Finding artwork & details",
-                comment: "Server detail row: label for a share currently having its metadata/artwork enriched, followed by a live progress count."
-            )
-        return phase + Text(verbatim: " · ") + scanProgressDetailText(detail)
+        guard let phase = state.phase else { return Text(verbatim: "") }
+        guard let detail = state.progressDetail else { return Text(phase) }
+        return Text(phase) + Text(verbatim: " · ") + scanProgressDetailText(detail)
     }
 
     private static func lastScannedText(_ date: Date?) -> LocalizedStringResource {

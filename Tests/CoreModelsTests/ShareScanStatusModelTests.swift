@@ -44,7 +44,7 @@ final class ShareScanStatusModelTests: XCTestCase {
         XCTAssertEqual(state?.enrichFraction, 0.25)
         XCTAssertEqual(
             state?.phase,
-            LocalizedStringResource("shareScan.phase.enriching", defaultValue: "Updating artwork"))
+            LocalizedStringResource("shareScan.phase.updating", defaultValue: "Updating library"))
         // `done` is left-padded (figure space) to the width of `total` for a stable
         // pill width — 50 → "\u{2007}50" against a 3-digit total.
         XCTAssertEqual(state?.progressDetail, .enriching(done: "\u{2007}50", total: 200))
@@ -69,6 +69,47 @@ final class ShareScanStatusModelTests: XCTestCase {
             }
         }
         XCTAssertEqual(widths.count, 1, "every progress string is the same width for the pass")
+    }
+
+    func testOverlappingScanAndEnrichReportTheCountablePass() {
+        // The two passes are NOT sequential on an established share: a rescan
+        // starts while the previous enrichment backlog is still draining. The
+        // old rule named the walk and hid enrichment entirely — so the user was
+        // told the one thing that has no finish line. Now the label covers both
+        // and the numbers come from whichever pass can actually measure itself.
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.enrichStarted(shareID: "s1", total: 900)
+        model.enrichProgress(shareID: "s1", done: 142)
+        model.scanProgress(shareID: "s1", directoriesScanned: 1204, itemsFound: 8930)
+
+        let state = model.state(forShareID: "s1")
+        XCTAssertTrue(state?.isScanning == true)
+        XCTAssertTrue(state?.isEnriching == true)
+        XCTAssertEqual(
+            state?.phase,
+            LocalizedStringResource("shareScan.phase.updating", defaultValue: "Updating library"),
+            "one label covers both passes, so neither is hidden")
+        XCTAssertEqual(state?.progressDetail, .enriching(done: "142", total: 900))
+        XCTAssertEqual(state?.fraction, state?.enrichFraction,
+                       "the bar follows the same pass as the numbers under it")
+
+        // Enrichment done, walk still going: fall back to the walk's own measure.
+        model.enrichFinished(shareID: "s1")
+        let walking = model.state(forShareID: "s1")
+        XCTAssertEqual(walking?.progressDetail, .foldersAndItems(folders: 1204, items: 8930))
+        XCTAssertEqual(walking?.fraction, walking?.scanFraction)
+        XCTAssertNotNil(walking?.phase, "still busy, so still labelled")
+    }
+
+    func testIdleShareHasNoPhase() {
+        let model = ShareScanStatusModel()
+        model.scanStarted(shareID: "s1", name: "NAS")
+        model.scanFinished(shareID: "s1")
+        let state = model.state(forShareID: "s1")
+        XCTAssertNil(state?.phase)
+        XCTAssertNil(state?.progressDetail)
+        XCTAssertNil(state?.fraction)
     }
 
     func testBusyStatesAndSharedNameLookup() {

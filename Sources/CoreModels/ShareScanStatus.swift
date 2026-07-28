@@ -63,51 +63,74 @@ public struct ShareScanState: Sendable, Equatable, Identifiable {
     /// Busy = actively scanning or enriching (the window the indicator shows).
     public var isBusy: Bool { isScanning || isEnriching }
 
-    /// A short human phase label — what the share is doing right now, or `nil`
-    /// when idle. Scanning wins over enriching when (briefly) both are true,
-    /// since the walk is the earlier, more fundamental stage.
+    /// A short human label for the work in flight, or `nil` when idle.
+    ///
+    /// **One label, not one per pass.** The walk and the enrichment pass are not
+    /// sequential: only a brand-new share runs them in order. A rescan of an
+    /// established share starts while its enrichment backlog is still draining,
+    /// so any "which phase is this" rule has to name one pass and stay silent
+    /// about another that is genuinely running — the old rule said "Scanning"
+    /// and hid enrichment entirely.
+    ///
+    /// The split was ours anyway. From outside there is one job (make the
+    /// library current) and two questions: is it still working, and how far
+    /// along. ``progressDetail`` and ``fraction`` answer the second; this
+    /// answers the first, without claiming a stage boundary the user never
+    /// asked about. It also stops the label under-selling the work — enrichment
+    /// fetches cast, overview, genres, ratings and provider ids, not just the
+    /// artwork the old copy named.
     public var phase: LocalizedStringResource? {
-        if isScanning {
-            return LocalizedStringResource(
-                "shareScan.phase.scanning",
-                defaultValue: "Scanning",
-                comment: "Phase label shown while a media share is being scanned."
-            )
-        }
-        if isEnriching {
-            return LocalizedStringResource(
-                "shareScan.phase.enriching",
-                defaultValue: "Updating artwork",
-                comment: "Phase label shown while a media share's metadata/artwork is being enriched."
-            )
-        }
+        guard isBusy else { return nil }
+        return LocalizedStringResource(
+            "shareScan.phase.updating",
+            defaultValue: "Updating library",
+            comment: "Status label shown while a media share is being scanned and/or having its metadata fetched. Deliberately covers both passes, which overlap."
+        )
+    }
+
+    /// Which pass the numbers come from when both are running, or `nil` when
+    /// there is nothing countable to report.
+    ///
+    /// Enrichment wins whenever it knows its denominator, because it is the only
+    /// one of the two that can say how far along it is: a real "142 of 900" and
+    /// a determinate bar. The walk can only offer a running tally and a
+    /// self-correcting estimate. Under a single label the phase word no longer
+    /// carries this decision, so it lives here — and it is the opposite of the
+    /// old precedence, which showed the uncountable pass and suppressed the
+    /// countable one.
+    private var reportedPass: ReportedPass? {
+        if isEnriching, enrichTotal > 0 { return .enriching }
+        if isScanning { return .scanning }
         return nil
     }
 
-    /// The optional trailing progress detail (e.g. "1,234 items" while scanning,
+    private enum ReportedPass { case scanning, enriching }
+
+    /// The optional trailing progress detail (e.g. "1,234 items" during the walk,
     /// "142 of 900" while enriching), or `nil` when there's no count worth
     /// showing. Pure facts — the counts, plus the enrich pass's pre-padded `done`
     /// string (see `ScanProgressDetail`'s doc for the fixed-width constraint).
     /// The "folders"/"items"/"of" copy words live at the call site, composed as
     /// real `LocalizedStringResource`s, so they can be translated and the counts
-    /// can carry plural catalog variations — see `HomeView.pillSubtitle`,
-    /// `ServerDetailView.busyStatusText`, and `PlozziOSSettingsView`'s share
-    /// section (all via the shared `CoreUI.scanProgressDetailText(_:)`).
+    /// can carry plural catalog variations — see `ServerDetailView.busyStatusText`,
+    /// `ShareScanStatusRow`, and `PlozziOSSettingsView`'s share section (all via
+    /// the shared `CoreUI.scanProgressDetailText(_:)`).
     public var progressDetail: ScanProgressDetail? {
-        if isScanning {
+        switch reportedPass {
+        case .scanning:
             if directoriesScanned > 0, itemsFound > 0 {
                 return .foldersAndItems(folders: directoriesScanned, items: itemsFound)
             }
             if directoriesScanned > 0 { return .folders(directoriesScanned) }
             return itemsFound > 0 ? .items(itemsFound) : nil
-        }
-        if isEnriching, enrichTotal > 0 {
+        case .enriching:
             let totalStr = String(enrichTotal)
             let doneStr = String(min(enrichDone, enrichTotal))
             let pad = String(repeating: "\u{2007}", count: max(0, totalStr.count - doneStr.count))
             return .enriching(done: "\(pad)\(doneStr)", total: enrichTotal)
+        case nil:
+            return nil
         }
-        return nil
     }
 
     /// Enrichment completion in 0...1, or `nil` when no total is known (so the UI
@@ -131,11 +154,16 @@ public struct ShareScanState: Sendable, Equatable, Identifiable {
         return min(0.99, max(raw, scanFractionCeiling))
     }
 
-    /// The single 0...1 completion a progress bar should draw, following whichever
-    /// phase ``phase`` reports, or `nil` when neither has a usable measure yet.
+    /// The single 0...1 completion a progress bar should draw — from the same
+    /// pass ``progressDetail`` reports, so the bar and the numbers under it can
+    /// never describe different work. `nil` when neither pass has a usable
+    /// measure yet, which the bar renders as its indeterminate sweep.
     public var fraction: Double? {
-        if isScanning { return scanFraction }
-        return enrichFraction
+        switch reportedPass {
+        case .scanning: return scanFraction
+        case .enriching: return enrichFraction
+        case nil: return nil
+        }
     }
 }
 

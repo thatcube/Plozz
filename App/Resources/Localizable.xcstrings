@@ -365140,6 +365140,234 @@
         }
       }
     },
+    "shareScan.phase.updating": {
+      "comment": "Status label shown while a media share is being scanned and/or having its metadata fetched. Deliberately covers both passes, which overlap.",
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "bg": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Обновяване на медиатеката"
+          }
+        },
+        "ca": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "S'està actualitzant la biblioteca"
+          }
+        },
+        "cs": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aktualizace knihovny"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Opdaterer biblioteket"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Medienbibliothek wird aktualisiert"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Updating library"
+          }
+        },
+        "fi": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Päivitetään kirjastoa"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mise à jour de la bibliothèque"
+          }
+        },
+        "he": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "מעדכן את הספרייה"
+          }
+        },
+        "hr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ažuriranje knjižnice"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Memperbarui pustaka"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aggiornamento libreria in corso"
+          }
+        },
+        "ms": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mengemas kini pustaka media"
+          }
+        },
+        "nb": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Oppdaterer biblioteket"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Bibliotheek wordt bijgewerkt"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aktualizowanie biblioteki"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Atualizando biblioteca"
+          }
+        },
+        "ro": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se actualizează biblioteca"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Обновление медиатеки"
+          }
+        },
+        "sk": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aktualizácia knižnice"
+          }
+        },
+        "sl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Posodabljanje knjižnice"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Uppdaterar biblioteket"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "กำลังอัปเดตไลบรารี"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Kitaplık güncelleniyor"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Оновлення медіатеки"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "正在更新媒体库"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "جارٍ تحديث المكتبة"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Actualizando biblioteca multimedia"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "در حال به‌روزرسانی کتابخانه"
+          }
+        },
+        "hu": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Könyvtár frissítése"
+          }
+        },
+        "sr-Latn": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ažuriranje biblioteke"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Đang cập nhật thư viện"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "미디어 보관함 업데이트 중"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "正在更新媒體庫"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "ライブラリを更新中"
+          }
+        },
+        "el": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ενημέρωση βιβλιοθήκης"
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "लाइब्रेरी अपडेट हो रही है"
+          }
+        }
+      }
+    },
     "skipIntros.autoDelay": {
       "comment": "Skip-intro behaviour option in Settings > Playback.",
       "extractionState": "extracted_with_value",

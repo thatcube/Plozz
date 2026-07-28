@@ -203,7 +203,7 @@ public actor CloudConfigSyncService {
         engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
         await cleanupLegacyZonesIfNeeded()
         // Fetch before publish — the anti-clobber ordering.
-        do { try await engine.fetchChanges(); markServerStateConfirmed() }
+        do { try await fetchChangesDetached(engine); markServerStateConfirmed() }
         catch { setDiagnostic("activate fetch: \(Self.describe(error))") }
         // publishLocalChanges enforces the suspend / baseline / resync gates itself, so
         // a fresh device whose fetch failed simply no-ops instead of clobbering.
@@ -253,9 +253,9 @@ public actor CloudConfigSyncService {
         guard config.isEnabled(), await accountIsAvailable() else { return }
         ensureEngine()
         guard let engine else { return }
-        if (try? await engine.fetchChanges()) != nil { markServerStateConfirmed() }
+        if (try? await fetchChangesDetached(engine)) != nil { markServerStateConfirmed() }
         await publishLocalChanges()
-        try? await engine.sendChanges()
+        try? await sendChangesDetached(engine)
         reportRecordCount()
     }
 
@@ -267,10 +267,10 @@ public actor CloudConfigSyncService {
         guard let engine else { return }
         setStatus(.syncing)
         var syncError: Error?
-        do { try await engine.fetchChanges(); markServerStateConfirmed() }
+        do { try await fetchChangesDetached(engine); markServerStateConfirmed() }
         catch { syncError = error }
         await publishLocalChanges()
-        do { try await engine.sendChanges() } catch { if syncError == nil { syncError = error } }
+        do { try await sendChangesDetached(engine) } catch { if syncError == nil { syncError = error } }
         reportRecordCount()
         if let syncError {
             setDiagnostic("sync: \(Self.describe(syncError))")
@@ -376,7 +376,7 @@ public actor CloudConfigSyncService {
         var pending: [CKSyncEngine.PendingRecordZoneChange] = []
         for name in names { pending.append(.deleteRecord(CloudSyncSchema.recordID(forRecordName: name))) }
         engine.state.add(pendingRecordZoneChanges: pending)
-        try? await engine.sendChanges()
+        try? await sendChangesDetached(engine)
         ledger = SyncLedger()
         persist()
     }
@@ -393,7 +393,7 @@ public actor CloudConfigSyncService {
         // Server state is known (just emptied), so bypass the baseline gate to re-seed.
         await publishLocalChanges(bypassBaselineGate: true)
         do {
-            try await engine?.sendChanges()
+            if let engine { try await sendChangesDetached(engine) }
             setStatus(.idle, syncedNow: true)
             PlozzLog.sync.info("CloudSync: reset + reseeded from this device")
         } catch {
@@ -420,7 +420,7 @@ public actor CloudConfigSyncService {
         guard let engine else { isFullResyncing = false; setStatus(.error, error: "engine unavailable"); return }
         do {
             engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: CloudSyncSchema.zoneID))])
-            try await engine.fetchChanges()
+            try await fetchChangesDetached(engine)
             markServerStateConfirmed()
             // A fetch that omitted a record is NOT proof the record is gone: CloudKit
             // reads are eventually consistent, so a record a peer saved moments ago
@@ -447,7 +447,7 @@ public actor CloudConfigSyncService {
             var pending: [CKSyncEngine.PendingRecordZoneChange] = []
             pending += ledger.pendingUploads().map { .saveRecord(CloudSyncSchema.recordID(forRecordName: $0.recordName)) }
             pending += ledger.pendingDeletes().map { .deleteRecord(CloudSyncSchema.recordID(forRecordName: $0)) }
-            if !pending.isEmpty { engine.state.add(pendingRecordZoneChanges: pending); try await engine.sendChanges() }
+            if !pending.isEmpty { engine.state.add(pendingRecordZoneChanges: pending); try await sendChangesDetached(engine) }
             // Replay one publish for any genuine local edits made during the resync
             // (they were deferred by the isFullResyncing gate).
             await publishLocalChanges()
@@ -489,6 +489,43 @@ public actor CloudConfigSyncService {
         configuration.automaticallySync = true
         engine = CKSyncEngine(configuration)
         PlozzLog.sync.info("CloudSync: engine initialized (gen \(engineGeneration), resetState=\(resetState))")
+    }
+
+    // MARK: Engine entry points (CloudKit re-entrancy trap)
+    //
+    // CKSyncEngine TRAPS (SIGTRAP, not a throw) with
+    //   "BUG IN CLIENT OF CLOUDKIT: Cannot await a call into CKSyncEngine from within
+    //    a delegate callback … Try performing this in a detached Task."
+    // whenever `fetchChanges`/`sendChanges` is reached from a task that carries the
+    // task-local marker CloudKit sets for the duration of a delegate callback.
+    //
+    // That marker is INHERITED by every unstructured `Task { }` created while a
+    // callback is on the stack — and this service creates a lot of them indirectly:
+    // `handleEvent` awaits `config.applyRecords`, which mutates the app's stores on
+    // the MainActor, which fires Observation `onChange` handlers, which spawn tasks
+    // (debounced publish, the rendezvous poll loop) that later call back in here.
+    // None of those are structurally waiting on the callback — they merely inherited
+    // its context — so the trap is a false alarm, but it still kills the app. Worse,
+    // a long-lived task that inherits it once (the poll loop) poisons every fetch for
+    // the rest of the session.
+    //
+    // `Task.detached` starts with NO inherited task-locals, which is exactly the
+    // escape hatch CloudKit's own message prescribes. Routing every engine call
+    // through here makes the trap unreachable no matter which path leaked the
+    // context, and `.value` preserves the caller's ordering/awaiting semantics.
+    private func fetchChangesDetached(_ engine: CKSyncEngine) async throws {
+        try await Task.detached(priority: .userInitiated) { try await engine.fetchChanges() }.value
+    }
+
+    private func sendChangesDetached(_ engine: CKSyncEngine) async throws {
+        try await Task.detached(priority: .userInitiated) { try await engine.sendChanges() }.value
+    }
+
+    /// Run an app-facing callback outside the delegate-callback context (see above),
+    /// so tasks the app spawns while applying a change never inherit CloudKit's
+    /// marker in the first place. Still awaited, so ordering is unchanged.
+    private func outsideDelegateContext(_ body: @escaping @Sendable () async -> Void) async {
+        await Task.detached(priority: .userInitiated, operation: body).value
     }
 
     private func accountIsAvailable() async -> Bool {
@@ -759,7 +796,8 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
             ledger = SyncLedger()
             suspendPublishUntilFetch = true
             persist()
-            await config.onAccountSwitch()
+            let onAccountSwitch = config.onAccountSwitch
+            await outsideDelegateContext { await onAccountSwitch() }
         case .signOut:
             ledger = SyncLedger()
             suspendPublishUntilFetch = true
@@ -789,7 +827,8 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
         persist()
         reportRecordCount()
         if !changes.isEmpty {
-            await config.applyRecords(changes)
+            let applyRecords = config.applyRecords
+            await outsideDelegateContext { await applyRecords(changes) }
             PlozzLog.sync.info("CloudSync: applied \(changes.count) change(s) from \(incoming.count) fetched, \(deletedNames.count) deletion(s)")
         }
     }
@@ -856,7 +895,10 @@ extension CloudConfigSyncService: CKSyncEngineDelegate {
         if !retry.isEmpty { syncEngine.state.add(pendingRecordZoneChanges: retry) }
         persist()
         reportRecordCount()
-        if !applied.isEmpty { await config.applyRecords(applied) }
+        if !applied.isEmpty {
+            let applyRecords = config.applyRecords
+            await outsideDelegateContext { await applyRecords(applied) }
+        }
     }
 
     private func handleFetchedDatabaseChanges(_ event: CKSyncEngine.Event.FetchedDatabaseChanges) {

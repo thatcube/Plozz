@@ -67,9 +67,15 @@ public final class RelatedTitlesLoader {
         entries = []
         hasResolved = false
         isLoading = true
+        // Finalising is guarded on still being the current load. A superseded load
+        // can finish first — its searches were already in flight — and an
+        // unconditional finish would then mark the NEW page resolved while it is
+        // still working, collapsing its placeholder row to nothing.
         defer {
-            isLoading = false
-            hasResolved = true
+            if loadedSeedKey == key {
+                isLoading = false
+                hasResolved = true
+            }
         }
 
         let titles = await resolvedTitles(for: query, key: key)
@@ -118,6 +124,14 @@ public final class RelatedTitlesLoader {
                 next += 1
             }
             for await (index, hit) in group {
+                // Navigating away must stop the remaining searches, not just discard
+                // their results: each is a real query against every signed-in server,
+                // and a viewer moving through pages would otherwise leave a growing
+                // pile of them competing with the page actually on screen.
+                guard loadedSeedKey == seedKey else {
+                    group.cancelAll()
+                    return
+                }
                 if let hit { matched[index] = hit }
                 if next < ordered.count {
                     addTask(next)
@@ -130,7 +144,6 @@ public final class RelatedTitlesLoader {
                 // below the fold, so it fills while the viewer is still reading the
                 // synopsis. Rebuilt in candidate order each time, so entries never
                 // reshuffle as later ones arrive.
-                guard loadedSeedKey == seedKey else { return }
                 seenItemIDs.removeAll(keepingCapacity: true)
                 entries = ordered.enumerated()
                     .compactMap { index, related -> RelatedEntry? in

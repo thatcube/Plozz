@@ -109,4 +109,22 @@ final class SourceRichnessPreferenceTests: XCTestCase {
         )
         XCTAssertEqual(selection?.source.accountID, "plex")
     }
+    // MARK: Ids survive whichever copy wins
+
+    func testEveryMembersIDsSurviveWhenALaterCopyFronts() {
+        // The union skipped index 0, which was safe only while the primary was
+        // always the first member. Choosing by richness broke that: an anime shelf
+        // with AniList ids on the share and TMDb ids on the server would silently
+        // lose one side of its identity.
+        var share = item("series:silo", accountID: "share", providerKind: .mediaShare)
+        share.providerIDs = ["AniList": "12345"]
+        var plex = item("46124", accountID: "plex", providerKind: .plex, cast: [person])
+        plex.providerIDs = ["Tmdb": "125988"]
+
+        let merged = MediaItemMerger.mergeGroup([share, plex])
+        XCTAssertEqual(merged.id, "46124", "the server copy fronts the card")
+        XCTAssertEqual(merged.providerIDs["Tmdb"], "125988")
+        XCTAssertEqual(merged.providerIDs["AniList"], "12345", "the share's own id must survive")
+    }
+
 }

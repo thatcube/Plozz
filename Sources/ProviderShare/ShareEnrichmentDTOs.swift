@@ -64,6 +64,7 @@ struct EnrichmentRecord: Sendable, Equatable {
             backdropURL: backdropURL?.value,
             logoURL: logoURL?.value,
             title: title?.value,
+            cast: cast?.value ?? [],
             provenance: provenance
         )
     }
@@ -76,6 +77,10 @@ struct EnrichmentRecord: Sendable, Equatable {
         !providerIDs.isEmpty
             || (overview?.isEmpty == false)
             || posterURL != nil || backdropURL != nil || logoURL != nil
+            // A resolved cast is a real answer, so a pass that returned only that
+            // isn't a miss — treating it as one discarded the write entirely and
+            // left the field permanently empty.
+            || !cast.isEmpty
     }
 
     mutating func inferLegacyProvenanceForMissingFields() {

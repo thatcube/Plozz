@@ -85,9 +85,16 @@ public func relatedTitleLibrarySearch(
                 }
             }
             var pooled: [MediaItem] = []
+            // Scoped by account, because an item id is provider-LOCAL: two servers
+            // routinely use the same raw id for unrelated titles, so pooling on id
+            // alone let one server's fuzzy hit suppress another's correct one — and
+            // which survived depended on which search happened to finish first.
             var seen = Set<String>()
             for await hits in group {
-                for hit in hits where seen.insert(hit.id).inserted { pooled.append(hit) }
+                for hit in hits {
+                    let key = "\(hit.sourceAccountID ?? "_"):\(hit.id)"
+                    if seen.insert(key).inserted { pooled.append(hit) }
+                }
             }
             return pooled
         }

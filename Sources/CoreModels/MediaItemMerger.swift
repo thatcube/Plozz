@@ -351,8 +351,13 @@ public enum MediaItemMerger {
         }
 
         // Union external ids so the merged card carries every catalogue id.
+        //
+        // Every member is walked, not `dropFirst()`: the primary is chosen for its
+        // metadata rather than its position, so skipping index 0 would drop the ids
+        // of whichever member didn't win. An anime shelf holding AniList ids on the
+        // share copy and TMDb ids on the server copy would silently lose one side.
         var providerIDs = primary.providerIDs
-        for duplicate in duplicates.dropFirst() {
+        for duplicate in duplicates {
             for (key, value) in duplicate.providerIDs where providerIDs[key] == nil {
                 providerIDs[key] = value
             }

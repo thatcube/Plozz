@@ -194,6 +194,23 @@ final class NightShiftModelTests: XCTestCase {
         XCTAssertEqual(NightShiftSettingsModel.fadeLabel(minutes: 90), "1 hr, 30 min")
     }
 
+    func testFadeLabelUsesExplicitAppLocale() {
+        XCTAssertEqual(
+            NightShiftSettingsModel.fadeLabel(
+                minutes: 60,
+                locale: Locale(identifier: "de_DE")
+            ),
+            "1 Std."
+        )
+        XCTAssertEqual(
+            NightShiftSettingsModel.fadeLabel(
+                minutes: 60,
+                locale: Locale(identifier: "fr_FR")
+            ),
+            "1 h"
+        )
+    }
+
     func testScheduleSummaryReflectsState() {
         var s = NightShiftSettings.default
         s.isEnabled = false

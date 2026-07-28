@@ -55,6 +55,12 @@ final class ResumeRewindSettingsTests: XCTestCase {
         XCTAssertEqual(ResumeRewindInterval.twentyFive.title, "25 sec")
     }
 
+    func testFormattedIntervalTitlesUseExplicitAppLocale() {
+        let german = Locale(identifier: "de_DE")
+        XCTAssertEqual(SkipInterval.ten.title(locale: german), "10 Sek.")
+        XCTAssertEqual(ResumeRewindInterval.sixty.title(locale: german), "60 Sek.")
+    }
+
     // MARK: - effectDescription helper text
 
     func testEffectDescriptionOff() {

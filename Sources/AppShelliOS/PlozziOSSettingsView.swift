@@ -1533,6 +1533,7 @@ private struct PlozziOSDetailPageSettingsView: View {
 }
 
 private struct PlozziOSPlaybackSettingsView: View {
+    @Environment(\.locale) private var locale
     @Bindable var model: PlaybackSettingsModel
     @Bindable var audioPolicy: AudioPolicyModel
 
@@ -1552,17 +1553,17 @@ private struct PlozziOSPlaybackSettingsView: View {
                 }
                 Picker("Skip backward", selection: $model.settings.skipBackwardInterval) {
                     ForEach(SkipInterval.allCases, id: \.self) {
-                        Text($0.title).tag($0)
+                        Text(verbatim: $0.title(locale: locale)).tag($0)
                     }
                 }
                 Picker("Skip forward", selection: $model.settings.skipForwardInterval) {
                     ForEach(SkipInterval.allCases, id: \.self) {
-                        Text($0.title).tag($0)
+                        Text(verbatim: $0.title(locale: locale)).tag($0)
                     }
                 }
                 Picker("Resume rewind", selection: $model.settings.resumeRewindInterval) {
                     ForEach(ResumeRewindInterval.allCases, id: \.self) {
-                        Text($0.title).tag($0)
+                        Text(verbatim: $0.title(locale: locale)).tag($0)
                     }
                 }
             }
@@ -1806,6 +1807,7 @@ private struct PlozziOSSpoilerSettingsView: View {
 
 private struct PlozziOSNightShiftSettingsView: View {
     @Bindable var model: NightShiftSettingsModel
+    @Environment(\.locale) private var locale
 
     var body: some View {
         List {
@@ -1822,7 +1824,7 @@ private struct PlozziOSNightShiftSettingsView: View {
                     scheduleDetails
                 }
             } footer: {
-                Text(model.scheduleSummary())
+                Text(model.scheduleSummary(locale: locale))
             }
 
             if model.settings.isEnabled {

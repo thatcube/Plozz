@@ -25,8 +25,13 @@ public enum SkipInterval: Int, Codable, CaseIterable, Hashable, Sendable {
     /// how every locale abbreviates seconds, so this needs no catalog entry and
     /// can't drift from the platform's own wording.
     public var title: String {   // l10n:content — formatted by Duration, not translated
+        title(locale: .current)
+    }
+
+    public func title(locale: Locale) -> String {
         Duration.seconds(rawValue).formatted(
             .units(allowed: [.seconds], width: .abbreviated)
+                .locale(locale)
         )
     }
 

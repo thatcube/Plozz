@@ -219,6 +219,7 @@ struct DetailPageDetailView: View {
 }
 
 struct PlaybackDetailView: View {
+    @Environment(\.locale) private var locale
     @Bindable var playback: PlaybackSettingsModel
     /// The profile base subtitle mode/language now lives in `SubtitleBehavior`
     /// (behaviour half of the retired `CaptionSettings`).
@@ -518,14 +519,14 @@ struct PlaybackDetailView: View {
                         SettingsStepper(
                             options: SkipInterval.allCases,
                             selection: $playback.settings.skipBackwardInterval,
-                            verbatimTitle: { $0.title }
+                            verbatimTitle: { $0.title(locale: locale) }
                         )
                     }
                     LabeledSettingRow("Forward") {
                         SettingsStepper(
                             options: SkipInterval.allCases,
                             selection: $playback.settings.skipForwardInterval,
-                            verbatimTitle: { $0.title }
+                            verbatimTitle: { $0.title(locale: locale) }
                         )
                     }
                 }
@@ -548,7 +549,7 @@ struct PlaybackDetailView: View {
                     SettingsStepper(
                         options: ResumeRewindInterval.allCases,
                         selection: $playback.settings.resumeRewindInterval,
-                        verbatimTitle: { $0.title }
+                        verbatimTitle: { $0.title(locale: locale) }
                     )
                     Text(playback.settings.resumeRewindInterval.effectDescription)
                         .font(.callout)

@@ -200,20 +200,34 @@ public final class NightShiftSettingsModel {
     }
 
     /// Short human label for the current fade duration, e.g. "90m", "1h", "1.5h".
-    public var fadeDescription: String { Self.fadeLabel(minutes: settings.fadeMinutes) }
+    public var fadeDescription: String {
+        Self.fadeLabel(minutes: settings.fadeMinutes)
+    }
 
     /// Formatted by `Duration` rather than hand-built: "m" and "h" are English
     /// abbreviations, and the decimal separator is a comma in most of Europe.
-    public static func fadeLabel(minutes: Int) -> String {
+    public static func fadeLabel(
+        minutes: Int,
+        locale: Locale = .current
+    ) -> String {
         let allowed: Set<Duration.UnitsFormatStyle.Unit> =
             minutes < 60 ? [.minutes] : [.hours, .minutes]
         return Duration.seconds(minutes * 60).formatted(
-            .units(allowed: allowed, width: .abbreviated, zeroValueUnits: .hide)
+            .units(
+                allowed: allowed,
+                width: .abbreviated,
+                zeroValueUnits: .hide
+            )
+            .locale(locale)
         )
     }
 
     /// Formats a minutes-since-midnight value as a clock time in `timeZone`.
-    public func clockLabel(minutes: Int, timeZone: TimeZone = .current) -> String {
+    public func clockLabel(
+        minutes: Int,
+        timeZone: TimeZone = .current,
+        locale: Locale = .current
+    ) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         let normalized = ((minutes % 1440) + 1440) % 1440
@@ -221,7 +235,7 @@ public final class NightShiftSettingsModel {
         let date = calendar.date(byAdding: .minute, value: normalized, to: base) ?? base
         let formatter = DateFormatter()
         formatter.timeZone = timeZone
-        formatter.locale = .current
+        formatter.locale = locale
         formatter.setLocalizedDateFormatFromTemplate("jmm")
         return formatter.string(from: date)
     }
@@ -317,8 +331,14 @@ public final class NightShiftSettingsModel {
     /// A human-readable status line for Settings, covering both schedule modes.
     /// City names and formatted clock times/percentages are content interpolated
     /// into our own sentence copy.
-    public func scheduleSummary(now: Date = Date()) -> LocalizedStringResource {
-        let fade = fadeDescription
+    public func scheduleSummary(
+        now: Date = Date(),
+        locale: Locale = .current
+    ) -> LocalizedStringResource {
+        let fade = Self.fadeLabel(
+            minutes: settings.fadeMinutes,
+            locale: locale
+        )
         switch settings.scheduleMode {
         case .alwaysOn:
             if !settings.isEnabled {
@@ -327,13 +347,21 @@ public final class NightShiftSettingsModel {
             return "Always on. Tints the screen at full strength around the clock."
 
         case .manual:
-            let on = clockLabel(minutes: settings.manualOnMinutes)
-            let off = clockLabel(minutes: settings.manualOffMinutes)
+            let on = clockLabel(
+                minutes: settings.manualOnMinutes,
+                locale: locale
+            )
+            let off = clockLabel(
+                minutes: settings.manualOffMinutes,
+                locale: locale
+            )
             if !settings.isEnabled {
                 return "Off. Manual: on \(on), off \(off)."
             }
             if isActiveNow {
-                let percent = currentIntensity.formatted(.percent.precision(.fractionLength(0)))
+                let percent = currentIntensity.formatted(
+                    .percent.precision(.fractionLength(0)).locale(locale)
+                )
                 return "Active now (\(percent)). Manual: on \(on), off \(off) · \(fade) fade."
             }
             return "Idle until \(on). Manual · \(fade) fade."
@@ -349,7 +377,7 @@ public final class NightShiftSettingsModel {
 
             let formatter = DateFormatter()
             formatter.timeZone = tz
-            formatter.locale = .current
+            formatter.locale = locale
             formatter.setLocalizedDateFormatFromTemplate("jmm")
 
             let sunset = formatter.string(from: today.sunset)
@@ -359,7 +387,9 @@ public final class NightShiftSettingsModel {
                 return "Off. \(region.name): sunset \(sunset), sunrise \(sunrise)."
             }
             if isActiveNow {
-                let percent = currentIntensity.formatted(.percent.precision(.fractionLength(0)))
+                let percent = currentIntensity.formatted(
+                    .percent.precision(.fractionLength(0)).locale(locale)
+                )
                 return "Active now (\(percent)). \(region.name) sunrise \(sunrise) · \(fade) fade."
             }
             return "Idle until sunset (\(sunset)) in \(region.name) · \(fade) fade."

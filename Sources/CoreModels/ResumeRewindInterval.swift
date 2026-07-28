@@ -47,7 +47,14 @@ public enum ResumeRewindInterval: Int, Codable, CaseIterable, Hashable, Sendable
     /// `Duration` rather than a literal "sec": the abbreviation and the space
     /// before it are both locale-dependent.
     public var title: String {   // l10n:content — formatted by Duration, not translated
-        Duration.seconds(rawValue).formatted(.units(allowed: [.seconds], width: .abbreviated))
+        title(locale: .current)
+    }
+
+    public func title(locale: Locale) -> String {
+        Duration.seconds(rawValue).formatted(
+            .units(allowed: [.seconds], width: .abbreviated)
+                .locale(locale)
+        )
     }
 
     /// A cohesive one-line summary of the *effect* of the current value, shown as

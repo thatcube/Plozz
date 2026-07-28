@@ -66,6 +66,7 @@ struct CircadianSectionsBuilder {
 /// stepper's value).
 private struct CircadianDetail: View {
     @Bindable var model: NightShiftSettingsModel
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
@@ -82,7 +83,12 @@ private struct CircadianDetail: View {
                                 get: { clampedFade },
                                 set: { model.settings.fadeMinutes = $0 }
                             ),
-                            verbatimTitle: { NightShiftSettingsModel.fadeLabel(minutes: $0) }
+                            verbatimTitle: {
+                                NightShiftSettingsModel.fadeLabel(
+                                    minutes: $0,
+                                    locale: locale
+                                )
+                            }
                         )
                     }
                     .tvOSFocusSection()
@@ -163,6 +169,7 @@ private struct CircadianDetail: View {
 /// layout.
 private struct NightShiftScheduleControl: View {
     @Bindable var model: NightShiftSettingsModel
+    @Environment(\.locale) private var locale
 
     @State private var focusedMode: NightShiftMode?
 
@@ -297,7 +304,9 @@ private struct NightShiftScheduleControl: View {
                 set: { commit($0) }
             ),
             wraps: true,
-            verbatimTitle: { model.clockLabel(minutes: $0) }
+            verbatimTitle: {
+                model.clockLabel(minutes: $0, locale: locale)
+            }
         )
     }
 

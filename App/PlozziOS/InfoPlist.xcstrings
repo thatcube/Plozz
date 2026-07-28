@@ -118,6 +118,24 @@
             "state": "needs_review",
             "value": "Plozz folosește rețeaua ta locală pentru a găsi servere media și resurse de rețea partajate."
           }
+        },
+        "he": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz משתמשת ברשת המקומית שלך כדי למצוא שרתי מדיה ושיתופי רשת."
+          }
+        },
+        "sl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz uporablja lokalno omrežje za iskanje predstavnostnih strežnikov in omrežnih souporab."
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz ใช้เครือข่ายภายในของคุณเพื่อค้นหาเซิร์ฟเวอร์สื่อและโฟลเดอร์ที่แชร์บนเครือข่าย"
+          }
         }
       }
     },
@@ -237,6 +255,24 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Plozz folosește camera pentru a scana codul de configurare afișat pe celălalt dispozitiv al tău."
+          }
+        },
+        "he": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz משתמשת במצלמה כדי לסרוק את קוד ההגדרה שמוצג במכשיר האחר שלך."
+          }
+        },
+        "sl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz uporablja kamero za optično branje nastavitvene kode, prikazane na drugi napravi."
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz ใช้กล้องเพื่อสแกนรหัสตั้งค่าที่แสดงบนอุปกรณ์อีกเครื่องของคุณ"
           }
         }
       }

@@ -118,6 +118,24 @@
             "state": "needs_review",
             "value": "Plozz folosește rețeaua ta locală pentru a găsi automat servere Jellyfin și Emby și resurse media partajate."
           }
+        },
+        "he": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz משתמשת ברשת המקומית שלך כדי למצוא אוטומטית שרתי Jellyfin ו-Emby ושיתופי מדיה."
+          }
+        },
+        "sl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz uporablja lokalno omrežje za samodejno iskanje strežnikov Jellyfin in Emby ter predstavnostnih souporab."
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz ใช้เครือข่ายภายในของคุณเพื่อค้นหาเซิร์ฟเวอร์ Jellyfin และ Emby รวมถึงโฟลเดอร์สื่อที่แชร์โดยอัตโนมัติ"
+          }
         }
       }
     }

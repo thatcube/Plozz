@@ -39,6 +39,9 @@ struct RelatedRowView: View {
                 spoilerSettings: spoilerSettings,
                 leadingInset: leadingInset,
                 onFocusEntered: onFocusEntered,
+                statusCue: { item in
+                    continuationItemIDs.contains(item.id) ? "Continues" : nil
+                },
                 onSelect: onSelect
             )
             // `MediaRowView` carries the vertical rhythm a Home screen needs, where
@@ -84,5 +87,10 @@ struct RelatedRowView: View {
     private static let placeholderCount = 8
 
     private var items: [MediaItem] { entries.compactMap(\.libraryItem) }
+    private var continuationItemIDs: Set<String> {
+        Set(entries.compactMap { entry in
+            entry.isContinuation ? entry.libraryItem?.id : nil
+        })
+    }
 }
 #endif

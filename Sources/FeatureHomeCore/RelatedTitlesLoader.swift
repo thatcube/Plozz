@@ -16,6 +16,7 @@ public struct RelatedEntry: Sendable, Equatable, Identifiable {
 
     public var id: String { related.id }
     public var isInLibrary: Bool { libraryItem != nil }
+    public var isContinuation: Bool { related.isContinuation }
     public var title: String {  // l10n:content — provider/server-supplied media title
         libraryItem?.title ?? related.title
     }

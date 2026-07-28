@@ -69,6 +69,10 @@ public struct MediaRowView: View {
     /// `onFocusChange`, this is not settle-debounced and is intended for lightweight
     /// cosmetic state such as the series hero recede.
     private let onFocusEntered: (() -> Void)?
+    /// Optional localized cue drawn on selected card kinds (e.g. a Related row
+    /// marks sequels/spin-offs as "Continues"). The row owns card construction,
+    /// so callers need this seam rather than rebuilding the whole rail.
+    private let statusCue: ((MediaItem) -> LocalizedStringResource?)?
     /// Stable lookup tables so focus/prefetch hot paths avoid repeated linear scans.
     private let itemIDSet: Set<String>
     private let itemIndexByID: [String: Int]
@@ -118,6 +122,7 @@ public struct MediaRowView: View {
         leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
         onFocusEntered: (() -> Void)? = nil,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
+        statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
@@ -135,6 +140,7 @@ public struct MediaRowView: View {
             leadingInset: leadingInset,
             onFocusEntered: onFocusEntered,
             onFocusChange: onFocusChange,
+            statusCue: statusCue,
             playsOnSelect: playsOnSelect,
             onSelect: onSelect
         )
@@ -154,6 +160,7 @@ public struct MediaRowView: View {
         leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
         onFocusEntered: (() -> Void)? = nil,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
+        statusCue: ((MediaItem) -> LocalizedStringResource?)? = nil,
         playsOnSelect: Bool = false,
         onSelect: @escaping (MediaItem) -> Void
     ) {
@@ -170,6 +177,7 @@ public struct MediaRowView: View {
         self.leadingInset = leadingInset
         self.onFocusEntered = onFocusEntered
         self.onFocusChange = onFocusChange
+        self.statusCue = statusCue
         self.playsOnSelect = playsOnSelect
         self.onSelect = onSelect
         self.itemIDSet = Set(items.map(\.id))
@@ -360,6 +368,7 @@ public struct MediaRowView: View {
                     item: item,
                     style: .poster,
                     spoilerSettings: spoilerSettings,
+                    statusCue: statusCue?(item),
                     playsOnSelect: playsOnSelect
                 ) { onSelect(item) },
                 for: item
@@ -370,6 +379,7 @@ public struct MediaRowView: View {
                     item: item,
                     style: .landscape,
                     spoilerSettings: spoilerSettings,
+                    statusCue: statusCue?(item),
                     playsOnSelect: playsOnSelect
                 ) { onSelect(item) },
                 for: item

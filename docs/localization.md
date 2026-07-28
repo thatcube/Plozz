@@ -238,6 +238,16 @@ so it needs no package dependency — and checks five things:
 | `copy-typed-as-string` | a migrated file reverting a copy property to `String` |
 | `copy-returned-as-string` | a function or computed property **returning** prose as `String`; catches what the rule above misses, because that one only looks at copy-shaped *names* |
 | `hand-rolled-plural` | `"\(n) \(n == 1 ? "item" : "items")"` — a counted phrase built from fragments |
+| `copy-not-in-catalog` | prose passed at a copy-shaped label, or to a copy sink, that is **not a key in the catalog** — it renders verbatim and no translator can reach it |
+
+`copy-not-in-catalog` is the only rule that checks the *result* rather than the
+code: it asks whether a string actually reached the artifact translators receive,
+and does not care how it was missed. That is what makes it catch the wrong-marker
+case above, which by construction is invisible to every other rule. Its limit is
+the mirror image: it proves a string EXISTS in the catalog, not that a given site
+extracts it — so if the same words are also written somewhere that does extract,
+an occurrence rendering verbatim looks fine. `Text(name ?? "Admin — unrestricted")`
+is the shape to watch for, and it needs types to detect, so it stays manual.
 
 Rules 1–4 and `hand-rolled-plural` run repo-wide. The two `copy-…-as-string`
 rules run **only** on `auditedPaths` in `tools/l10n-guard.json` — add a path
@@ -280,6 +290,37 @@ let title: String   // l10n:content — provider-supplied media title
 ```
 
 Deliberately greppable: exempting content should be a visible decision.
+
+### The mistake this project keeps making
+
+A marker silences the guard, so **a wrong marker is worse than no marker**: the
+string stays English *and* becomes invisible. Every instance found so far has
+been the same shape — a **shared parameter** where the marker is true for one
+caller and false for the others:
+
+| Declaration | Marked | Actually |
+|---|---|---|
+| `HomeRowsGroupCard.title` | "library name from the server" | 2 of 3 callers passed our copy |
+| `MediaRequestActionResult.failure(message:)` | "Seerr server text" | 4 of 5 callers passed our copy |
+| `InfoPanelView.infoActionButton(title:)` | "playback diagnostic values" | all 5 callers passed our copy |
+| `SeerDetailView.row(title:subtitle:)` | "Seerr user name and detail" | 1 of 2 callers passed our copy |
+| `AutoSkipNotice.label` | "metadata from the server" | it was always our wording |
+
+So before marking a parameter as content, **check every call site**. If some
+pass server data and others pass string literals, the parameter is *both*, and
+the type has to say so rather than the comment:
+
+- Where SwiftUI is available, take a pre-built `Text` and let each caller choose
+  `Text("…")` or `Text(verbatim: …)`.
+- In a non-UI module, model it: an enum with a `copy(LocalizedStringResource)`
+  case and a `serverText(String)` case. `MediaRequestActionResult.FailureMessage`
+  and `TrackLabel` are the worked examples.
+
+The same applies to a *claim* in a marker. One pass marked 14 transport errors
+"never displayed", citing a doc comment that said the reason is excluded from
+`description`. That was true, and it was about logging — the onboarding probe
+pattern-matches the associated value out separately and hands it to the error
+banner. **Trace to the sink; do not infer from nearby prose.**
 
 ### Catalog validation
 

@@ -46,6 +46,10 @@ The residual conflict — Crowdin's branch vs. `main` when both change the catal
 — is inherent to a single-file format, not a Crowdin flaw. Expect to resolve it
 occasionally.
 
+A `crowdin.yml` is committed at the repo root, configured for the three
+catalogs and marked inactive. It is a decision written down, not a live
+integration — nothing is uploaded until a project exists.
+
 ### Verify before committing to it
 
 Three things are undocumented and must be checked on a throwaway project first.

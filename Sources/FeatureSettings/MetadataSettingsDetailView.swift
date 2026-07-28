@@ -739,36 +739,36 @@ private struct MetadataDiagnosticsOverviewPanel: View {
 
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
                     MetadataDiagnosticMetric(
-                        title: "Artwork cache",
-                        value: byteText(snapshot?.artworkCacheBytes)
+                        title: Text("Artwork cache"),
+                        value: Text(verbatim: byteText(snapshot?.artworkCacheBytes))
                     )
                     MetadataDiagnosticMetric(
-                        title: "URL cache",
-                        value: byteText(snapshot?.metadataCacheBytes)
+                        title: Text("URL cache"),
+                        value: Text(verbatim: byteText(snapshot?.metadataCacheBytes))
                     )
                     MetadataDiagnosticMetric(
-                        title: "Results",
-                        value: snapshot?.resultCacheEntryCount.map(String.init) ?? "—"
+                        title: Text("Results"),
+                        value: Text(verbatim: snapshot?.resultCacheEntryCount.map { $0.formatted() } ?? "—")
                     )
                     MetadataDiagnosticMetric(
-                        title: "Work",
-                        value: snapshot.map { String(localized: workText($0.work)) } ?? "—"
+                        title: Text("Work"),
+                        value: snapshot.map { Text(workText($0.work)) } ?? Text(verbatim: "—")
                     )
                 }
 
                 PlozzDivider()
                 MetadataDiagnosticMetric(
-                    title: "Provider health",
-                    value: String(localized: healthText)
+                    title: Text("Provider health"),
+                    value: healthText
                 )
             }
         }
     }
 
-    private var healthText: LocalizedStringResource {
-        guard let snapshot else { return "—" }
+    private var healthText: Text {
+        guard let snapshot else { return Text(verbatim: "—") }
         let count = snapshot.providerBreakers.lazy.filter(\.isTripped).count
-        return count == 0 ? "All sources healthy" : "\(count) unavailable"
+        return count == 0 ? Text("All sources healthy") : Text("\(count) unavailable")
     }
 
     private func byteText(_ bytes: Int?) -> String {
@@ -783,17 +783,20 @@ private struct MetadataDiagnosticsOverviewPanel: View {
     }
 }
 
+/// Both halves are pre-built `Text` so a row can mix our copy with a measured
+/// value without resolving either early — `String(localized:)` here would have
+/// frozen the wording at the language in effect when the panel was built.
 private struct MetadataDiagnosticMetric: View {
-    let title: String   // l10n:content — diagnostic metric label, developer-facing
-    let value: String
+    let title: Text
+    let value: Text
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
-            Text(title)
+            title
                 .font(.callout)
                 .plozzForeground(.secondary)
             Spacer(minLength: 12)
-            Text(value)
+            value
                 .font(.callout.weight(.medium).monospacedDigit())
                 .multilineTextAlignment(.trailing)
         }
@@ -819,8 +822,8 @@ private struct MetadataDiagnosticsSourcesPanel: View {
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                     ForEach(counts, id: \.source) { item in
                         MetadataDiagnosticMetric(
-                            title: displayName(item.source),
-                            value: item.count.formatted()
+                            title: Text(verbatim: displayName(item.source)),
+                            value: Text(verbatim: item.count.formatted())
                         )
                     }
                 }
@@ -834,8 +837,9 @@ private struct MetadataDiagnosticsSourcesPanel: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     ForEach(unavailable) { breaker in
                         MetadataDiagnosticMetric(
-                            title: displayName(breaker.source),
-                            value: (breaker.trippedReason ?? "Unavailable").capitalized
+                            title: Text(verbatim: displayName(breaker.source)),
+                            value: breaker.trippedReason.map { Text(verbatim: $0.capitalized) }
+                                ?? Text("Unavailable")
                         )
                     }
                 }
@@ -960,7 +964,7 @@ private struct ProviderRow: View {
         Button(action: onPrimary) {
             HStack(spacing: 14) {
                 if let rank {
-                    Text("\(rank)")
+                    Text(rank, format: .number)
                         .font(.callout.weight(.bold).monospacedDigit())
                         .frame(minWidth: 26, alignment: .trailing)
                 }

@@ -449,7 +449,7 @@ private struct PlozziOSAboutSettingsView: View {
 
     var body: some View {
         List {
-            SettingsSectionGroup("Plozz") {
+            SettingsSectionGroup(verbatim: "Plozz") {
                 LabeledContent("Version") {
                     Text(
                         Bundle.main.infoDictionary?[

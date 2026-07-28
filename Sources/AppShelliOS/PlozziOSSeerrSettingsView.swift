@@ -144,7 +144,7 @@ struct PlozziOSSeerrSettingsView: View {
                 }
             }
         }
-        TextField("Server address", text: $urlText, prompt: Text("192.168.1.20:5055"))
+        TextField("Server address", text: $urlText, prompt: Text(verbatim: "192.168.1.20:5055"))
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .keyboardType(.URL)

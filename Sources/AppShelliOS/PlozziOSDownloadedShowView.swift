@@ -63,7 +63,7 @@ struct PlozziOSDownloadedShowView: View {
             }
         }
         .confirmationDialog(
-            pendingBulkDeletion?.title ?? "",
+            pendingBulkDeletion.map { Text($0.title) } ?? Text(verbatim: ""),
             isPresented: Binding(
                 get: { pendingBulkDeletion != nil },
                 set: { if !$0 { pendingBulkDeletion = nil } }

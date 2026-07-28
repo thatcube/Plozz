@@ -101,7 +101,7 @@ public struct BorderlessCardCaption: View {
                     .foregroundStyle(Color.secondary)
                     .lineLimit(1)
             } else if reservesSubtitleSpace {
-                Text(" ")
+                Text(verbatim: " ")
                     .font(.system(size: metrics.cardSubtitleFontSize))
                     .hidden()
             }

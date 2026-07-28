@@ -202,7 +202,7 @@ public struct SkeletonCardView: View {
     private func capsuleLine(font: Font, width: CGFloat, height: CGFloat) -> some View {
         // The hidden text drives the line's height to match the real caption's
         // font metrics exactly; the capsule (shorter) is overlaid, leading-aligned.
-        Text(" ")
+        Text(verbatim: " ")
             .font(font)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -1601,7 +1601,7 @@ private struct DetailHeroCreditLine: View {
 
     private func text(_ values: [String]) -> some View {
         (
-            Text("\(label) ").foregroundStyle(palette.tertiaryText)
+            Text(verbatim: "\(label) ").foregroundStyle(palette.tertiaryText)
             + Text(values.joined(separator: ", "))
                 .foregroundStyle(palette.primaryText)
         )

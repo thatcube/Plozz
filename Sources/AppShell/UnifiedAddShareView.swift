@@ -173,7 +173,7 @@ struct UnifiedAddShareView: View {
     private var connectStep: some View {
         Group {
             headerRow(
-                title: Text(""),
+                title: Text(verbatim: ""),
                 showsTitle: false,
                 back: { viewModel.backToDevices() }
             ) { EmptyView() }

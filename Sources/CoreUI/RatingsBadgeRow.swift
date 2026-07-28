@@ -260,7 +260,7 @@ public struct RatingTile: View {
         // the About/info cards); a plain filled surface on iOS/iPadOS.
         .plozzFocusableCard(cornerRadius: cornerRadius)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(rating.source.displayName) \(rating.displayValue)")
+        .accessibilityLabel(Text(verbatim: "\(rating.source.displayName) \(rating.displayValue)"))
     }
 
     @ViewBuilder

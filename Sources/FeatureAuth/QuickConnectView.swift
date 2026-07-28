@@ -161,7 +161,7 @@ private struct ExpiryCountdown: View {
                     .trim(from: 0, to: fraction)
                     .stroke(tint, style: StrokeStyle(lineWidth: 8, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                Text("\(Int(remaining.rounded(.up)))")
+                Text(Int(remaining.rounded(.up)), format: .number)
                     .font(.system(size: 34, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(tint)

@@ -586,7 +586,7 @@ public struct HomeView: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.primary)
                     if let detail = Self.pillSubtitle(primary, multi: multi) {
-                        Text(detail)
+                        detail
                             .font(.caption2)
                             .monospacedDigit()
                             .plozzForeground(.secondary)
@@ -624,20 +624,28 @@ public struct HomeView: View {
     }
 
     /// The pill's secondary line: the current phase plus any live count.
-    private static func pillSubtitle(_ state: ShareScanState, multi: Bool) -> String? {
-        if multi { return "Updating…" }
+    ///
+    /// The phase and its detail come from the scan itself, so they stay verbatim;
+    /// only the multi-library placeholder is ours to translate.
+    private static func pillSubtitle(_ state: ShareScanState, multi: Bool) -> Text? {
+        if multi { return Text("Updating…") }
         let phase = state.phase
         guard !phase.isEmpty else { return nil }
-        if let detail = state.progressDetail { return "\(phase) · \(detail)" }
-        return phase
+        if let detail = state.progressDetail { return Text(verbatim: "\(phase) · \(detail)") }
+        return Text(verbatim: phase)
     }
 
     /// A flattened, spoken description of the pill for VoiceOver.
-    private static func pillAccessibilityLabel(_ states: [ShareScanState]) -> LocalizedStringResource {
-        guard let primary = states.first else { return "" }
-        if states.count > 1 { return "Updating \(states.count) libraries" }
-        let sub = pillSubtitle(primary, multi: false).map { ", \($0)" } ?? ""
-        return "\(pillTitle(primary))\(sub)"
+    ///
+    /// `Text` rather than a resource: the title and phase are library names and
+    /// server-supplied progress text, so joining them into a resource would have
+    /// produced the catalog key "%@%@" — nothing for a translator to translate,
+    /// and a placeholder order they could not fix anyway.
+    private static func pillAccessibilityLabel(_ states: [ShareScanState]) -> Text {
+        guard let primary = states.first else { return Text(verbatim: "") }
+        if states.count > 1 { return Text("Updating \(states.count) libraries") }
+        guard let sub = pillSubtitle(primary, multi: false) else { return pillTitle(primary) }
+        return pillTitle(primary) + Text(verbatim: ", ") + sub
     }
 
     /// How far the rows are pulled up so the first row (Continue Watching) peeks

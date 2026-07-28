@@ -46,17 +46,16 @@ public struct SeasonRequestMenuContent: View {
                     onRequest([season.number])
                 }
             } else {
-                Label(
-                    "\(season.title) — \(statusText(for: season))",
-                    systemImage: season.status == .processing
-                        ? "arrow.down.circle"
-                        : "clock"
-                )
+                Label {
+                    Text(verbatim: "\(season.title) — ") + Text(statusText(for: season))
+                } icon: {
+                    Image(systemName: season.status == .processing ? "arrow.down.circle" : "clock")
+                }
             }
         }
     }
 
-    private func statusText(for season: MediaSeasonRequestState) -> String {
+    private func statusText(for season: MediaSeasonRequestState) -> LocalizedStringResource {
         season.status == .processing ? "Processing" : "Requested"
     }
 }

@@ -1733,9 +1733,14 @@ struct HomeHeroView: View {
     }
 
     /// VoiceOver label for the row's currently-selected action.
-    private func accessibilityLabel(for item: MediaItem) -> LocalizedStringResource {
+    ///
+    /// `Text` rather than a resource: the media title is content and the action
+    /// name is copy, so a single resource would be the key "%@, %@" — nothing to
+    /// translate — and resolving the name eagerly to splice it in would freeze it
+    /// at the language in effect when the row was built.
+    private func accessibilityLabel(for item: MediaItem) -> Text {
         let itemButtons = buttons(for: item)
-        guard itemButtons.indices.contains(selectedButton) else { return "\(item.title)" }
+        guard itemButtons.indices.contains(selectedButton) else { return Text(verbatim: item.title) }
         let name: LocalizedStringResource
         switch itemButtons[selectedButton] {
         case .play: name = item.resumeProgressFraction != nil ? "Resume" : "Play"
@@ -1745,9 +1750,7 @@ struct HomeHeroView: View {
         case .watchlist: name = watchlistTarget(for: item).isFavorite ? "Remove from Watchlist" : "Add to Watchlist"
         case .next: name = "Next"
         }
-        // The media title is content; the action name is copy. Interpolating the
-        // resolved name keeps the separator translatable.
-        return "\(item.title), \(String(localized: name))"
+        return Text(verbatim: "\(item.title), ") + Text(name)
     }
 
     /// Adds a named VoiceOver action per visible pill so every hero action stays

@@ -332,7 +332,7 @@ private struct PosterPlaceholderView: View {
                 .frame(maxWidth: .infinity)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Loading").font(.headline)
-                Text(" ").font(.subheadline)
+                Text(verbatim: " ").font(.subheadline)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .redacted(reason: .placeholder)

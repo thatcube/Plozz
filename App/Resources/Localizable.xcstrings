@@ -1,20 +1,6 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "": {},
-    " ": {},
-    "%@": {},
-    "%@ ": {},
-    "%@ %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "%1$@ %2$@"
-          }
-        }
-      }
-    },
     "%@ (detected)": {},
     "%@ coming soon": {},
     "%@ free": {},
@@ -44,16 +30,6 @@
       }
     },
     "%@ used by downloads": {},
-    "%@ · %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "%1$@ · %2$@"
-          }
-        }
-      }
-    },
     "%@ · %@ detected": {
       "localizations": {
         "en": {
@@ -64,51 +40,8 @@
         }
       }
     },
-    "%@ — %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "%1$@ — %2$@"
-          }
-        }
-      }
-    },
     "%@ — Failed": {},
-    "%@%@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "%1$@%2$@"
-          }
-        }
-      }
-    },
-    "%@, %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "%1$@, %2$@"
-          }
-        }
-      }
-    },
     "%@, offline": {},
-    "%@. %@. %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "%1$@. %2$@. %3$@"
-          }
-        }
-      }
-    },
-    "%@×": {},
-    "%@…": {},
-    "%lld": {},
     "%lld episodes • %@": {
       "localizations": {
         "en": {
@@ -406,10 +339,8 @@
     "+ %lld more": {},
     "+50 ms": {},
     "+500 ms": {},
-    "-%@": {},
     "/volume/media": {},
     "/volume1/Media": {},
-    "192.168.1.20:5055": {},
     ":%lld": {},
     "A TMDB key is saved on this Apple TV.": {},
     "A TMDB key is saved on this device.": {},
@@ -474,7 +405,6 @@
     "Allow Cellular Downloads": {},
     "Already Requested": {},
     "Amber": {},
-    "AniList": {},
     "Animals": {},
     "Anonymous": {},
     "Appearance": {
@@ -527,6 +457,7 @@
     "Auto-advance": {},
     "Automatic subtitles": {},
     "Automatically download": {},
+    "Available": {},
     "Available Offline": {},
     "Available in your library": {},
     "Available offline • %@": {},
@@ -574,6 +505,28 @@
     "Can't connect": {},
     "Can't reach this server — it may be offline.": {},
     "Cancel": {},
+    "Cancel %lld Downloads": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Cancel %lld Download"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Cancel %lld Downloads"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Cancel Active Downloads": {},
     "Cancel Active Downloads?": {},
     "Can’t Reach Seerr": {},
@@ -932,7 +885,6 @@
     "Export path": {},
     "Exports": {},
     "External subtitle": {},
-    "FTP / FTPS": {},
     "FTP sends credentials and media without encryption.": {},
     "FTPS (Implicit TLS)": {},
     "FTPS uses TLS from connection start. Explicit TLS (AUTH TLS) is not supported.": {},
@@ -947,6 +899,8 @@
     "Find More": {},
     "Find Shares": {},
     "Find movies, TV shows, and episodes across your servers.": {},
+    "Finding artwork & details · %@": {},
+    "Finding artwork & details…": {},
     "Finding shares…": {},
     "Finding your Plex servers…": {},
     "Finding your libraries…": {},
@@ -1056,7 +1010,6 @@
     "Last scanned": {},
     "Last scanned %@": {},
     "Last scanned just now": {},
-    "Last.fm": {},
     "Layout": {},
     "Leave all selected to use every library on Home.": {},
     "Leave both fields empty for a guest share.": {},
@@ -1123,9 +1076,7 @@
     "Music & Audio": {},
     "Music Player": {},
     "Mute trailer": {},
-    "MyAnimeList": {},
     "NEARBY": {},
-    "NFS": {},
     "NFS server": {},
     "Name (optional)": {},
     "Nature & Sky": {},
@@ -1360,7 +1311,6 @@
     "Plex User": {},
     "Plex shares one sign-in across the household. Each profile picks its own Plex user and libraries under Profile › Your Libraries.": {},
     "Plex sign-in finds every server linked to your account.": {},
-    "Plozz": {},
     "Plozz is only available in English for now. More languages are on the way.": {},
     "Plozz picks the best source for each field automatically.": {},
     "Plozz pins the server’s SSH host key after you approve its fingerprint.": {},
@@ -1392,6 +1342,8 @@
     "Primary Track": {},
     "Primary account": {},
     "Priority": {},
+    "Processing": {},
+    "Profile": {},
     "Profile created automatically": {},
     "Profile name": {},
     "Profiles": {
@@ -1446,6 +1398,29 @@
       }
     },
     "Remove %@?": {},
+    "Remove %lld Episodes": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Remove %lld Episode"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Remove %lld Episodes"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Remove All": {},
     "Remove All Downloads?": {},
     "Remove Download": {},
     "Remove Everywhere": {},
@@ -1542,9 +1517,7 @@
     "Running": {},
     "Runtime": {},
     "Rust": {},
-    "SFTP": {},
     "SFTP server": {},
-    "SMB": {},
     "SMB server": {},
     "SSH Host Key SHA-256": {},
     "Salmon": {},
@@ -1568,6 +1541,7 @@
     "Scan to view the\nGitHub repo": {},
     "Scan with your phone": {},
     "Scan with your phone or tablet": {},
+    "Scanning · %@": {},
     "Scanning…": {},
     "Schedule": {},
     "Scrobble and sync your Jellyfin watch history to Trakt.": {},
@@ -1804,7 +1778,6 @@
     "Signs out and removes this server.": {},
     "Signs out every account on %@.": {},
     "Silver": {},
-    "Simkl": {},
     "Simulated time": {},
     "Size": {},
     "Skip Intervals": {},
@@ -2154,7 +2127,6 @@
     },
     "Tracks": {},
     "Trailer": {},
-    "Trakt": {},
     "Trakt, Simkl, AniList, MyAnimeList, Last.fm": {},
     "Travel & Hobbies": {},
     "Trending": {},
@@ -2226,6 +2198,7 @@
         }
       }
     },
+    "Updating…": {},
     "Uploads the full log below so it can be read on a computer instead of scrolling here. Sent anonymously — no logins, tokens, servers, or titles are included.": {},
     "Use Password": {},
     "Use Profiles": {},
@@ -2272,7 +2245,8 @@
     "Watching as": {},
     "We created this profile from your %@ account. You can rename it or change the photo here, or any time in Settings.": {},
     "We created this profile from your first media account.": {},
-    "WebDAV": {},
+    "We found your server": {},
+    "We found your setup": {},
     "WebDAV server": {},
     "Weight": {},
     "Welcome to Plozz": {},
@@ -4441,9 +4415,7 @@
         }
       }
     },
-    "·": {},
     "· +%lld more": {},
-    "—": {},
     "“%@” is set up on another device. Sign in to watch it here — your login stays private to each device. You can also find it later under Settings ▸ iCloud Sync.": {},
     "“%@” will also be removed from your other devices signed in to iCloud.": {},
     "− shows subtitles earlier\n+ shows them later": {},

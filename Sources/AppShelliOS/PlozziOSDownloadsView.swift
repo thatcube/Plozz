@@ -47,7 +47,7 @@ struct PlozziOSDownloadsView: View {
             }
         }
         .confirmationDialog(
-            pendingBulkDeletion?.title ?? "",
+            pendingBulkDeletion.map { Text($0.title) } ?? Text(verbatim: ""),
             isPresented: Binding(
                 get: { pendingBulkDeletion != nil },
                 set: { if !$0 { pendingBulkDeletion = nil } }
@@ -610,7 +610,7 @@ struct PlozziOSDownloadSettingsView: View {
         .settingsPageSurface()
         .navigationTitle("Downloads")
         .confirmationDialog(
-            pendingBulkDeletion?.title ?? "",
+            pendingBulkDeletion.map { Text($0.title) } ?? Text(verbatim: ""),
             isPresented: Binding(
                 get: { pendingBulkDeletion != nil },
                 set: { if !$0 { pendingBulkDeletion = nil } }
@@ -730,7 +730,7 @@ struct PlozziOSDownloadsBulkDeletion: Identifiable {
     let id: String
     let title: LocalizedStringResource
     let message: LocalizedStringResource
-    let confirmLabel: String
+    let confirmLabel: LocalizedStringResource
     let records: [DownloadedMediaRecord]
     /// When true, the confirm handler should re-derive the currently-active
     /// transfers instead of trusting `records` — so a download that completes

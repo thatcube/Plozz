@@ -1290,7 +1290,7 @@ private struct PlozziOSDetailHeroForeground: View {
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(downloadError ?? "")
+            Text(verbatim: downloadError ?? "")
         }
     }
 
@@ -2016,7 +2016,7 @@ private struct PlozziOSDetailCredits: View {
     private func credit(_ label: LocalizedStringResource, values: [String]) -> some View {
         let capped = Array(values.prefix(3))
         return (
-            Text("\(label) ")
+            Text(verbatim: "\(label) ")
                 .foregroundStyle(palette.secondaryText)
             + Text(capped.joined(separator: ", "))
                 .foregroundStyle(palette.primaryText)
@@ -2149,12 +2149,12 @@ struct PlozziOSHeroPagingIndicator: View {
         )
     }
 
-    private var accessibilityValue: LocalizedStringResource {
+    private var accessibilityValue: Text {
         guard let selectedItemID,
               let index = itemIDs.firstIndex(of: selectedItemID) else {
-            return ""
+            return Text(verbatim: "")
         }
-        return "\(index + 1) of \(itemIDs.count)"
+        return Text("\(index + 1) of \(itemIDs.count)")
     }
 }
 

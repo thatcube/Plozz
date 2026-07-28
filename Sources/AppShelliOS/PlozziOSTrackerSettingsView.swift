@@ -23,19 +23,19 @@ struct PlozziOSTrackerSettingsView: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
 
-            SettingsSectionGroup("Trakt") {
+            SettingsSectionGroup(verbatim: "Trakt") {
                 TraktSettingsContent(service: appModel.traktService)
             }
 
-            SettingsSectionGroup("Simkl") {
+            SettingsSectionGroup(verbatim: "Simkl") {
                 SimklSettingsContent(service: appModel.simklService)
             }
 
-            SettingsSectionGroup("AniList") {
+            SettingsSectionGroup(verbatim: "AniList") {
                 AniListSettingsContent(service: appModel.anilistService)
             }
 
-            SettingsSectionGroup("MyAnimeList") {
+            SettingsSectionGroup(verbatim: "MyAnimeList") {
                 MALSettingsContent(service: appModel.malService)
             }
         }

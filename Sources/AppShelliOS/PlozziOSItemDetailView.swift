@@ -282,7 +282,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(requestError ?? "")
+            Text(verbatim: requestError ?? "")
         }
         .fullScreenCover(item: $playbackRequest) {
             if let playbackProvider = appModel.provider(for: $0.item) {
@@ -454,7 +454,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
             heroPullDistance = pullDistance
         }
         .ignoresSafeArea(.container, edges: .top)
-        .navigationTitle("")
+        .navigationTitle(Text(verbatim: ""))
         .task(id: seasonRequestLookupID(for: detail)) {
             await loadSeasonRequestAvailability(for: detail)
         }
@@ -1085,12 +1085,11 @@ private struct PlozziOSSeasonRequestMenu: View {
                         onRequest([season.number])
                     }
                 } else {
-                    Label(
-                        "\(season.title) — \(statusText(for: season))",
-                        systemImage: season.status == .processing
-                            ? "arrow.down.circle"
-                            : "clock"
-                    )
+                    Label {
+                        Text(verbatim: "\(season.title) — ") + Text(statusText(for: season))
+                    } icon: {
+                        Image(systemName: season.status == .processing ? "arrow.down.circle" : "clock")
+                    }
                 }
             }
         } label: {
@@ -1109,7 +1108,7 @@ private struct PlozziOSSeasonRequestMenu: View {
         .accessibilityLabel("Request missing seasons")
     }
 
-    private func statusText(for season: MediaSeasonRequestState) -> String {
+    private func statusText(for season: MediaSeasonRequestState) -> LocalizedStringResource {
         switch season.status {
         case .processing:
             "Processing"
@@ -1333,10 +1332,10 @@ private struct PlozziOSInlineSeriesBrowser: View {
             ) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(seasonDownloadError ?? "")
+                Text(verbatim: seasonDownloadError ?? "")
             }
             .confirmationDialog(
-                seasonDownloadPrompt?.title ?? "",
+                seasonDownloadPrompt.map { Text($0.title) } ?? Text(verbatim: ""),
                 isPresented: Binding(
                     get: { seasonDownloadPrompt != nil },
                     set: { if !$0 { seasonDownloadPrompt = nil } }

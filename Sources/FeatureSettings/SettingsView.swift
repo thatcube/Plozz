@@ -928,7 +928,7 @@ public struct SettingsView: View {
                 let overflow = max(0, watchedServerGroups.count - visible.count)
                 ForEach(Array(visible.enumerated()), id: \.element.serverKey) { idx, group in
                     if idx > 0 {
-                        Text("·")
+                        Text(verbatim: "·")
                             .font(.footnote)
                             .settingsRowSecondary()
                     }

@@ -95,7 +95,7 @@ struct PlozziOSHomeView: View {
                 loadedContent(content)
             }
         }
-        .navigationTitle("")
+        .navigationTitle(Text(verbatim: ""))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {

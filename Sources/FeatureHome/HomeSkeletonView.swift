@@ -129,7 +129,7 @@ struct HomeSkeletonView: View {
             // overlaid. Matching the title height is load-bearing: a shorter title
             // bar makes the cards sit higher, so the whole row drops when the real
             // (taller) title loads in.
-            Text(" ")
+            Text(verbatim: " ")
                 .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .hidden()

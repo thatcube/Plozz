@@ -55,7 +55,7 @@ struct PlozziOSMetadataDiagnosticsView: View {
             metricRow(Text("URL cache"), Text(verbatim: byteText(snapshot?.metadataCacheBytes)))
             metricRow(Text("Results"), Text(verbatim: snapshot?.resultCacheEntryCount.map { $0.formatted() } ?? "—"))
             metricRow(Text("Work"), snapshot.map { Text(workText($0.work)) } ?? Text(verbatim: "—"))
-            metricRow(Text("Provider health"), Text(healthText))
+            metricRow(Text("Provider health"), healthText)
             Button {
                 Task { await refresh() }
             } label: {
@@ -148,10 +148,10 @@ struct PlozziOSMetadataDiagnosticsView: View {
             .map { (source: $0.key, count: $0.value) }
     }
 
-    private var healthText: LocalizedStringResource {
-        guard let snapshot else { return "—" }
+    private var healthText: Text {
+        guard let snapshot else { return Text(verbatim: "—") }
         let count = snapshot.providerBreakers.lazy.filter(\.isTripped).count
-        return count == 0 ? "All sources healthy" : "\(count) unavailable"
+        return count == 0 ? Text("All sources healthy") : Text("\(count) unavailable")
     }
 
     @MainActor

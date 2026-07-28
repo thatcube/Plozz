@@ -315,7 +315,7 @@ public struct PosterCardView: View {
                 .foregroundStyle(subtitleColor)
                 .lineLimit(1)
         } else if reservesSubtitleSpace {
-            Text(" ")
+            Text(verbatim: " ")
                 .font(.system(size: metrics.cardSubtitleFontSize))
                 .hidden()
         }

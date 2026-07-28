@@ -126,13 +126,13 @@ struct ServerDetailView: View {
     }
 
     /// Title for the sign-out/remove confirmation, derived from the pending account.
-    private func pendingSignOutTitle(_ pending: PendingSignOut?) -> LocalizedStringResource {
-        guard let pending else { return "" }
+    private func pendingSignOutTitle(_ pending: PendingSignOut?) -> Text {
+        guard let pending else { return Text(verbatim: "") }
         let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
         let isCredentialFree = transport == .nfs
         let trimmedUser = pending.account.userName.trimmingCharacters(in: .whitespaces)
-        if isCredentialFree || trimmedUser.isEmpty { return "Remove \(pending.serverName)?" }
-        return "Sign out \(trimmedUser)?"
+        if isCredentialFree || trimmedUser.isEmpty { return Text("Remove \(pending.serverName)?") }
+        return Text("Sign out \(trimmedUser)?")
     }
 
     /// Primary button label when sync is off (a credential-free share reads "Remove").
@@ -410,10 +410,16 @@ private struct ShareLibraryStatusPanel: View {
         }
     }
 
+    /// Whole sentences per branch. Building this as `"\(phase) · \(detail)"` made
+    /// the phase a placeholder, which both left it untranslated and produced the
+    /// catalog key "%@ · %@" — a key with no words in it.
     private static func busyStatusText(_ state: ShareScanState) -> LocalizedStringResource {
-        let phase = state.isScanning ? "Scanning" : "Finding artwork & details"
-        if let detail = state.progressDetail { return "\(phase) · \(detail)" }
-        return "\(phase)…"
+        guard let detail = state.progressDetail else {
+            return state.isScanning ? "Scanning…" : "Finding artwork & details…"
+        }
+        return state.isScanning
+            ? "Scanning · \(detail)"
+            : "Finding artwork & details · \(detail)"
     }
 
     private static func lastScannedText(_ date: Date?) -> LocalizedStringResource {

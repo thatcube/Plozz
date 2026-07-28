@@ -178,7 +178,7 @@ struct PlozziOSHomeHeroSkeleton: View {
     /// were what made the content jump when the real hero replaced it — they
     /// only matched at the smallest text size.
     private func textBar(font: Font, width: CGFloat) -> some View {
-        Text(" ")
+        Text(verbatim: " ")
             .font(font)
             .hidden()
             .frame(width: width)
@@ -188,7 +188,7 @@ struct PlozziOSHomeHeroSkeleton: View {
     }
 
     private func pill(width: CGFloat) -> some View {
-        Text(" ")
+        Text(verbatim: " ")
             .font(.headline.weight(.semibold))
             .hidden()
             .padding(.vertical, 12)

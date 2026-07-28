@@ -1430,10 +1430,12 @@ struct SeasonRequestMenu<MenuLabel: View>: View {
                 } else {
                     Button {
                     } label: {
-                        Label(
-                            "\(season.title) — \(season.status == .processing ? "Processing" : "Requested")",
-                            systemImage: season.status == .processing ? "arrow.down.circle" : "clock"
-                        )
+                        Label {
+                            Text(verbatim: "\(season.title) — ")
+                                + Text(season.status == .processing ? "Processing" : "Requested")
+                        } icon: {
+                            Image(systemName: season.status == .processing ? "arrow.down.circle" : "clock")
+                        }
                     }
                     .disabled(true)
                 }

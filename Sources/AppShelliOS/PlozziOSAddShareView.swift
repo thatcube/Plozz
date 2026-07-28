@@ -11,13 +11,15 @@ struct PlozziOSAddShareView: View {
     private enum ShareProtocol: String, Hashable, CaseIterable, Identifiable {
         case smb, nfs, webdav, sftp, ftp
         var id: String { rawValue }
-        var title: LocalizedStringResource {
+        /// Protocol names are brands, never translated. A translator handed "SMB"
+        /// in a catalog has no way to know that, and some would translate it.
+        var title: Text {
             switch self {
-            case .smb: return "SMB"
-            case .nfs: return "NFS"
-            case .webdav: return "WebDAV"
-            case .sftp: return "SFTP"
-            case .ftp: return "FTP / FTPS"
+            case .smb: return Text(verbatim: "SMB")
+            case .nfs: return Text(verbatim: "NFS")
+            case .webdav: return Text(verbatim: "WebDAV")
+            case .sftp: return Text(verbatim: "SFTP")
+            case .ftp: return Text(verbatim: "FTP / FTPS")
             }
         }
         var systemImage: String {
@@ -43,7 +45,7 @@ struct PlozziOSAddShareView: View {
                         selectedProtocol = proto
                     } label: {
                         HStack(spacing: 12) {
-                            Label(proto.title, systemImage: proto.systemImage)
+                            Label { proto.title } icon: { Image(systemName: proto.systemImage) }
                             Spacer(minLength: 0)
                             Image(systemName: "chevron.right")
                                 .font(.footnote.weight(.semibold))

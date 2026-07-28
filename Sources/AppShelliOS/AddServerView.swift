@@ -364,7 +364,7 @@ private struct PlozziOSQuickConnectCountdown: View {
                         style: StrokeStyle(lineWidth: 6, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
-                Text("\(Int(remaining.rounded(.up)))")
+                Text(Int(remaining.rounded(.up)), format: .number)
                     .font(.title3.monospacedDigit().bold())
                     .foregroundStyle(tint)
                     .contentTransition(.numericText())

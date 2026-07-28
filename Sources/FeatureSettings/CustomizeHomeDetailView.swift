@@ -421,7 +421,7 @@ private struct HomeRowsGroupCard<Content: View>: View {
                     Text(title)
                         .font(.headline.weight(.semibold))
                     if let subtitle {
-                        Text("·")
+                        Text(verbatim: "·")
                             .font(.subheadline)
                             .plozzForeground(.tertiary)
                         Text(subtitle)

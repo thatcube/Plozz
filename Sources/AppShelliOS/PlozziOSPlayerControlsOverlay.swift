@@ -532,7 +532,7 @@ private struct PlozziOSPlayerTransport: View {
             HStack {
                 Text(playbackTime(displayedSeconds))
                 Spacer()
-                Text("-\(playbackTime(max(viewModel.controls.duration - displayedSeconds, 0)))")
+                Text(verbatim: "-\(playbackTime(max(viewModel.controls.duration - displayedSeconds, 0)))")
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(.white.opacity(0.85))
@@ -1409,7 +1409,7 @@ private struct PlozziOSPlaybackSpeedSheet: View {
                             viewModel.setPlaybackSpeed(rate)
                         } label: {
                             HStack {
-                                Text("\(rate, format: .number)×")
+                                Text(verbatim: "\(rate.formatted(.number))×")
                                 Spacer()
                                 if abs(viewModel.controls.playbackSpeed - rate) < 0.01 {
                                     Image(systemName: "checkmark")
@@ -1587,7 +1587,7 @@ private struct PlozziOSUpNextCard: View {
                                     style: StrokeStyle(lineWidth: 3, lineCap: .round)
                                 )
                                 .rotationEffect(.degrees(-90))
-                            Text("\(Int(ceil(countdownRemaining)))")
+                            Text(Int(ceil(countdownRemaining)), format: .number)
                                 .font(.caption2.monospacedDigit().bold())
                         } else {
                             Image(systemName: "play.fill")

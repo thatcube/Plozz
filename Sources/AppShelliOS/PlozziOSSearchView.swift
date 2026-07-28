@@ -50,7 +50,7 @@ struct PlozziOSSearchView: View {
             horizontalSizeClass == .compact ? .hidden : .visible,
             for: .navigationBar
         )
-        .navigationTitle(horizontalSizeClass == .compact ? "" : "Search")
+        .navigationTitle(horizontalSizeClass == .compact ? Text(verbatim: "") : Text("Search"))
         .navigationBarTitleDisplayMode(.inline)
         .task(id: viewModel.query) {
             await viewModel.search()

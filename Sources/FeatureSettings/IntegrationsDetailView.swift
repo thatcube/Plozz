@@ -37,7 +37,7 @@ struct IntegrationsDetailView: View {
         let trackers = SettingsSplitSection(id: "trackers", header: "Trackers", rows: [
             SettingsSplitRow(
                 id: "trakt",
-                title: "Trakt",
+                verbatimTitle: "Trakt",
                 description: "Scrobble and sync your Jellyfin watch history to Trakt.",
             ) {
                 if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
@@ -60,7 +60,7 @@ struct IntegrationsDetailView: View {
             },
             SettingsSplitRow(
                 id: "simkl",
-                title: "Simkl",
+                verbatimTitle: "Simkl",
                 description: "Sync your watch history and track what to watch next with Simkl.",
             ) {
                 if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
@@ -83,7 +83,7 @@ struct IntegrationsDetailView: View {
             },
             SettingsSplitRow(
                 id: "anilist",
-                title: "AniList",
+                verbatimTitle: "AniList",
                 description: "Track anime and manga progress on your AniList profile.",
             ) {
                 if case .awaitingToken = anilist.phase {
@@ -99,7 +99,7 @@ struct IntegrationsDetailView: View {
             },
             SettingsSplitRow(
                 id: "mal",
-                title: "MyAnimeList",
+                verbatimTitle: "MyAnimeList",
                 description: "Track anime and manga progress on your MyAnimeList profile.",
             ) {
                 if case .awaitingAuthorizationCode = mal.phase {
@@ -115,7 +115,7 @@ struct IntegrationsDetailView: View {
             },
             SettingsSplitRow(
                 id: "lastfm",
-                title: "Last.fm",
+                verbatimTitle: "Last.fm",
                 description: "Scrobble the music you play in Plozz to your Last.fm profile.",
             ) {
                 if case let .connecting(authURL, _) = lastfm.phase {
@@ -546,7 +546,7 @@ private struct AttributionCard: View {
         .padding(24)
         .plozzFocusableCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title). \(licenses.map(\.label).joined(separator: ", ")). \(text)")
+        .accessibilityLabel(Text(verbatim: "\(title). " + licenses.map(\.label).joined(separator: ", ") + ". \(text)"))
     }
 
     private func licenseBadge(_ license: PlozzAttributionLicense) -> some View {

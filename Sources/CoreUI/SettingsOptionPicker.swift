@@ -68,7 +68,7 @@ public struct SettingsOptionPicker<Option: Hashable>: View {
                     }
                     .buttonStyle(PlozzSeasonTabStyle(isSelected: selection == option))
                     .focused($focusedOption, equals: option)
-                    .accessibilityValue(selection == option ? "Selected" : "")
+                    .accessibilityValue(selection == option ? Text("Selected") : Text(verbatim: ""))
                 }
             }
             // Padding so a focused chip's scale lift is never clipped by the

@@ -314,6 +314,57 @@ def infoplist_problems() -> list[str]:
     return problems
 
 
+def report_coverage() -> None:
+    """Per-language coverage — the input to the release-readiness decision.
+
+    `AppLanguage.releaseReady` decides which languages the picker offers, and
+    that has to be a judgement rather than "an .lproj exists": a bundled
+    localization only means SOME strings were translated. Spanish sat at 6% with
+    its folder present, and offering that shows a mostly-English UI to someone
+    who asked for Spanish.
+
+    Counts a key as needing translation unless it opts out with
+    `shouldTranslate: false`, and counts it done only in the `translated` state.
+    `needs_review` deliberately does NOT count, which is what stops a
+    machine-translated seed from passing itself off as finished work.
+    """
+    catalog = json.loads(CATALOG.read_text())
+    strings = catalog.get("strings", {})
+    source = catalog.get("sourceLanguage", "en")
+
+    translatable = {k: v for k, v in strings.items() if v.get("shouldTranslate") is not False}
+    languages = {
+        language
+        for entry in translatable.values()
+        for language in entry.get("localizations", {})
+        if language != source
+    }
+
+    total = len(translatable)
+    print(f"\u25b8 {total} translatable key(s); source language {source}")
+    if not languages:
+        print("  (no translations yet)")
+        return
+
+    for language in sorted(languages):
+        states: dict[str, int] = defaultdict(int)
+        for entry in translatable.values():
+            localization = entry.get("localizations", {}).get(language)
+            if localization is None:
+                states["missing"] += 1
+                continue
+            if localization.get("stringUnit") is None:
+                # A variations-only entry (plurals) counts as present.
+                states["translated"] += 1
+            else:
+                states[localization["stringUnit"].get("state", "new")] += 1
+
+        done = states["translated"]
+        percent = 100 * done / total if total else 0
+        detail = ", ".join(f"{state} {count}" for state, count in sorted(states.items())
+                           if state != "translated")
+        print(f"  {language:<8} {percent:5.1f}%  ({done}/{total})" + (f"  [{detail}]" if detail else ""))
+
 def plural_problems(strings: dict) -> list[str]:
     """Flag counts that no translator can fix from the catalog.
 
@@ -412,6 +463,8 @@ def main() -> int:
                         help="Reuse the previous extraction build.")
     parser.add_argument("--validate-only", action="store_true",
                         help="Check the committed catalog without extracting anything (for CI).")
+    parser.add_argument("--coverage", action="store_true",
+                        help="Report per-language translation coverage and exit.")
     parser.add_argument("--clean", action="store_true",
                         help="Wipe the localization DerivedData first.")
     parser.add_argument("--quiet", action="store_true", default=True,
@@ -426,6 +479,10 @@ def main() -> int:
     # no extraction. That is what makes it usable on a fresh CI runner, where
     # there is no DerivedData to reuse and a full --check would mean building
     # both platforms again purely to prove freshness.
+    if args.coverage:
+        report_coverage()
+        return 0
+
     if args.validate_only:
         problems = validate_catalog()
         if problems:

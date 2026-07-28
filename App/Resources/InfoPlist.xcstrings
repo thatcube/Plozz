@@ -70,6 +70,30 @@
             "state": "needs_review",
             "value": "Plozz använder ditt lokala nätverk för att automatiskt hitta Jellyfin- och Emby-servrar samt mediedelningar."
           }
+        },
+        "hr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz koristi lokalnu mrežu za automatsko pronalaženje poslužitelja Jellyfin i Emby te dijeljenja medija."
+          }
+        },
+        "ms": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz menggunakan rangkaian setempat anda untuk mengesan pelayan Jellyfin dan Emby serta perkongsian media secara automatik."
+          }
+        },
+        "sk": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz používa miestnu sieť na automatické vyhľadanie serverov Jellyfin a Emby a zdieľaní médií."
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz використовує локальну мережу, щоб автоматично знаходити сервери Jellyfin і Emby та медіаресурси."
+          }
         }
       }
     }

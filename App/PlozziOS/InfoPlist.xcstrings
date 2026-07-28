@@ -70,6 +70,30 @@
             "state": "needs_review",
             "value": "Plozz använder ditt lokala nätverk för att hitta medieservrar och nätverksdelningar."
           }
+        },
+        "hr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz koristi lokalnu mrežu za pronalaženje medijskih poslužitelja i mrežnih dijeljenja."
+          }
+        },
+        "ms": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz menggunakan rangkaian setempat anda untuk mengesan pelayan media dan perkongsian rangkaian."
+          }
+        },
+        "sk": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz používa miestnu sieť na vyhľadanie mediálnych serverov a sieťových zdieľaní."
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz використовує локальну мережу, щоб знаходити медіасервери й мережеві ресурси."
+          }
         }
       }
     },
@@ -141,6 +165,30 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Plozz använder kameran för att skanna konfigurationskoden som visas på din andra enhet."
+          }
+        },
+        "hr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz koristi kameru za skeniranje koda za postavljanje prikazanog na drugom uređaju."
+          }
+        },
+        "ms": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz menggunakan kamera untuk mengimbas kod persediaan yang dipaparkan pada peranti anda yang lain."
+          }
+        },
+        "sk": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz používa fotoaparát na naskenovanie nastavovacieho kódu zobrazeného na druhom zariadení."
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz використовує камеру, щоб сканувати код налаштування, показаний на іншому пристрої."
           }
         }
       }

@@ -92,12 +92,16 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
         "da",
         "de",
         "fr",
+        "hr",
         "it",
+        "ms",
         "nl",
         "pl",
         "pt-BR",
         "ru",
+        "sk",
         "sv",
+        "uk",
     ]
 
     /// Every language the picker should show: `.system` plus the release-ready

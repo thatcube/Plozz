@@ -305,6 +305,39 @@ python3 tools/l10n-sync.py --check          # the above, plus proves the catalog
 > obligation — run `tools/l10n-sync.py` and commit the catalog whenever you add
 > or change a string.
 
+### Pseudolocalization
+
+Before a language ships, run the UI under Apple's pseudolanguages. They need no
+translations and no `.lproj` — the system generates them from the base language,
+so this works today, with an untranslated catalog.
+
+```sh
+tools/deploy-tv.sh --branded --pseudo       # en-XA: accented and lengthened
+tools/deploy-tv.sh --branded --pseudo-rtl   # ar-XB: the above, plus mirrored
+```
+
+On iPhone/iPad `tools/deploy-ios.sh` installs but doesn't launch, so pass the
+arguments to the launch yourself:
+
+```sh
+xcrun devicectl device process launch --device <udid> <bundle-id> \
+  -- -AppleLanguages "(en-XA)" -AppleLocale "en-XA"
+```
+
+They are launch arguments, so the device's own language is untouched and the
+next ordinary launch is normal.
+
+What to look for:
+
+- **Text that is still plain ASCII never reached the catalog.** This is the one
+  check that finds copy the guard cannot: a `String` built at runtime, a string
+  in a module nobody audited, text baked into an image.
+- **Text that clips or truncates.** German and Finnish run 30–40% longer than
+  English; `en-XA` approximates that. tvOS focus rows and the tab bar are the
+  usual casualties.
+- **Under `ar-XB`, anything that doesn't mirror.** That is a hard-coded
+  `.leading`/`.trailing` assumption, or a chevron pointing the wrong way.
+
 ### Plurals
 
 Anything that counts something needs plural variations in the catalog, because

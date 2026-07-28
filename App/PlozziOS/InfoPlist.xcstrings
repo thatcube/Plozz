@@ -136,6 +136,30 @@
             "state": "needs_review",
             "value": "Plozz ใช้เครือข่ายภายในของคุณเพื่อค้นหาเซิร์ฟเวอร์สื่อและโฟลเดอร์ที่แชร์บนเครือข่าย"
           }
+        },
+        "bg": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz използва локалната ви мрежа, за да открива медийни сървъри и мрежови ресурси."
+          }
+        },
+        "fi": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz käyttää lähiverkkoasi mediapalvelinten ja verkkojakojen löytämiseen."
+          }
+        },
+        "nb": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz bruker det lokale nettverket ditt til å finne medieservere og nettverksdelinger."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz 使用您的本地网络查找媒体服务器和网络共享。"
+          }
         }
       }
     },
@@ -273,6 +297,30 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Plozz ใช้กล้องเพื่อสแกนรหัสตั้งค่าที่แสดงบนอุปกรณ์อีกเครื่องของคุณ"
+          }
+        },
+        "bg": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz използва камерата, за да сканира кода за настройка, показан на другото ви устройство."
+          }
+        },
+        "fi": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz käyttää kameraa toisella laitteellasi näkyvän käyttöönottokoodin skannaamiseen."
+          }
+        },
+        "nb": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz bruker kameraet til å skanne oppsettkoden som vises på den andre enheten din."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz 使用摄像头扫描您另一台设备上显示的设置码。"
           }
         }
       }

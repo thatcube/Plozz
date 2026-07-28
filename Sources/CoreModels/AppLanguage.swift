@@ -88,16 +88,19 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
     /// Adding a language: translate it, check it against the pseudolocalization
     /// pass, then add its tag here.
     public static let releaseReady: [String] = [
+        "bg",
         "ca",
         "cs",
         "da",
         "de",
         "fr",
+        "fi",
         "he",
         "hr",
         "id",
         "it",
         "ms",
+        "nb",
         "nl",
         "pl",
         "pt-BR",
@@ -109,6 +112,7 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
         "th",
         "tr",
         "uk",
+        "zh-Hans",
     ]
 
     /// Every language the picker should show: `.system` plus the release-ready

@@ -17,6 +17,7 @@ private struct FakeTVDB: TVDBEnriching {
     }
     func resolve(titles: [String], year: Int?, isMovie: Bool, episodeHints: [SeriesEpisodeHint]) async -> TVDBMetadata? {
         log.record("byTitle:\(titles.joined(separator: "|"))")
+        log.record("hints:\(episodeHints.map(\.title).joined(separator: "|"))")
         return byTitle
     }
     func backdropURL(title: String, year: Int?, isMovie: Bool, tvdbID: String?) async -> URL? {
@@ -128,6 +129,43 @@ final class EnrichmentProviderAdapterTests: XCTestCase {
         let out = await provider.enrich(query(.movie), missing: [.title])
         XCTAssertEqual(out.externalIDs["Tvdb"]?.value, "77")
         XCTAssertEqual(fake.log.all.first, "byTitle:Show")
+    }
+
+    func testTVDBTitleSearchCarriesTheCallersDisambiguationEvidence() async {
+        // A share scans files itself and knows the episode titles on disk and the
+        // richer titles the filenames use. Both exist to settle a same-name
+        // collision, and both were being dropped here — so a folder named "Lucky"
+        // was matched on relevance order alone.
+        let fake = FakeTVDB(byID: nil, byTitle: TVDBMetadata(tvdbID: "77"), backdrop: nil)
+        let provider = TVDBEnrichmentProvider(client: fake)
+        let asked = query(.tvShow, kind: .series).offering(
+            episodeHints: [
+                SeriesEpisodeHint(season: 1, episode: 1, title: "No Shortcuts"),
+                SeriesEpisodeHint(season: 1, episode: 2, title: "Make em Dance"),
+            ],
+            titleAlternates: ["Show The Real Subtitle"]
+        )
+        _ = await provider.enrich(asked, missing: [.title])
+
+        XCTAssertEqual(
+            fake.log.all.first,
+            "byTitle:Show The Real Subtitle|Show",
+            "The more specific filename title must be tried first"
+        )
+        XCTAssertEqual(fake.log.all.dropFirst().first, "hints:No Shortcuts|Make em Dance")
+    }
+
+    func testDisambiguationEvidenceIsNotPartOfAQuerysIdentity() {
+        // Two queries for the same show are the same query whether or not the caller
+        // could offer help, so gathering hints must not split a cache entry.
+        let plain = query(.tvShow, kind: .series)
+        let helped = plain.offering(
+            episodeHints: [SeriesEpisodeHint(season: 1, episode: 1, title: "Pilot")],
+            titleAlternates: ["Something Else"]
+        )
+        XCTAssertEqual(plain, helped)
+        XCTAssertEqual(plain.hashValue, helped.hashValue)
+        XCTAssertEqual(plain.enrichmentCacheKey, helped.enrichmentCacheKey)
     }
 
     // MARK: TMDb candidate set

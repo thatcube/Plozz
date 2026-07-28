@@ -33,6 +33,14 @@ public struct MetadataQuery: Sendable, Hashable {
     public let animeIDs: AnimeIDs
     /// The full provider-id bag (TMDb/IMDb/TVDB/SeriesTmdb/…) for direct lookups.
     public let providerIDs: [String: String]
+    /// On-disk episode titles, when the caller scanned files itself. Lets a provider
+    /// settle a same-name collision by content — the only evidence available for a
+    /// show whose year is unknown, which is most of them (a series folder carries no
+    /// year). Empty for a server-backed item, which already resolved its own identity.
+    public let episodeHints: [SeriesEpisodeHint]
+    /// Extra, usually more specific titles to try before ``title`` (a generic folder
+    /// "Avatar" alongside the filenames' "Avatar The Last Airbender").
+    public let titleAlternates: [String]
 
     public init(
         contentType: ContentType,
@@ -43,7 +51,9 @@ public struct MetadataQuery: Sendable, Hashable {
         seasonNumber: Int?,
         episodeNumber: Int?,
         animeIDs: AnimeIDs,
-        providerIDs: [String: String]
+        providerIDs: [String: String],
+        episodeHints: [SeriesEpisodeHint] = [],
+        titleAlternates: [String] = []
     ) {
         self.contentType = contentType
         self.kind = kind
@@ -54,6 +64,51 @@ public struct MetadataQuery: Sendable, Hashable {
         self.episodeNumber = episodeNumber
         self.animeIDs = animeIDs
         self.providerIDs = providerIDs
+        self.episodeHints = episodeHints
+        self.titleAlternates = titleAlternates
+    }
+
+    /// Identity deliberately excludes ``episodeHints`` and ``titleAlternates``: they
+    /// describe how to break a tie, not what is being asked for. Two queries for the
+    /// same show are the same query whether or not the caller could offer help, so
+    /// gathering more hints must never split a cache entry or a dedupe key.
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.contentType == rhs.contentType && lhs.kind == rhs.kind && lhs.title == rhs.title
+            && lhs.alternateTitle == rhs.alternateTitle && lhs.year == rhs.year
+            && lhs.seasonNumber == rhs.seasonNumber && lhs.episodeNumber == rhs.episodeNumber
+            && lhs.animeIDs == rhs.animeIDs && lhs.providerIDs == rhs.providerIDs
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(contentType)
+        hasher.combine(kind)
+        hasher.combine(title)
+        hasher.combine(alternateTitle)
+        hasher.combine(year)
+        hasher.combine(seasonNumber)
+        hasher.combine(episodeNumber)
+        hasher.combine(animeIDs)
+        hasher.combine(providerIDs)
+    }
+
+    /// A copy carrying on-disk disambiguation evidence a file-scanning caller holds.
+    public func offering(
+        episodeHints: [SeriesEpisodeHint] = [],
+        titleAlternates: [String] = []
+    ) -> Self {
+        Self(
+            contentType: contentType,
+            kind: kind,
+            title: title,
+            alternateTitle: alternateTitle,
+            year: year,
+            seasonNumber: seasonNumber,
+            episodeNumber: episodeNumber,
+            animeIDs: animeIDs,
+            providerIDs: providerIDs,
+            episodeHints: episodeHints,
+            titleAlternates: titleAlternates
+        )
     }
 
     /// Normalizes a ``MediaItem`` into a query: classifies its content type and

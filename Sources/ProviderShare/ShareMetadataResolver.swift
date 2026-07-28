@@ -271,7 +271,14 @@ struct PipelineShareResolver: ShareMetadataResolving {
             genres: request.isAnime ? ["Anime"] : [],
             providerIDs: ids
         )
-        let query = MetadataQuery(item)
+        // A share scanned these files itself, so it holds evidence no server-backed
+        // item does: the episode titles on disk, and the (often more specific) titles
+        // the filenames use. Both exist to settle a same-name collision, and dropping
+        // them here left the matcher taking TheTVDB's relevance order on trust.
+        let query = MetadataQuery(item).offering(
+            episodeHints: request.isMovie ? [] : request.episodeHints,
+            titleAlternates: request.titleAlternates
+        )
 
         let enrichment = await pipeline.enrich(
             query,

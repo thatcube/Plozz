@@ -90,9 +90,15 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
     /// the single next episode, and their 30-day positive TTL would otherwise serve
     /// that for a month: the hero would name the next date while the rail stayed
     /// empty, because the two read different fields of the same response.
+    ///
+    /// `version: 3` — a title search now receives the caller's episode-title
+    /// evidence, so it can answer with a different (correct) series than before.
+    /// Disambiguation evidence is deliberately not part of the cache key — the same
+    /// show must not occupy two entries — which means a wrong match cached under
+    /// version 2 would keep being served without the provider ever running again.
     public init(
         client: any TVDBEnriching,
-        policy: ProviderPolicy = ProviderPolicy(version: 2)
+        policy: ProviderPolicy = ProviderPolicy(version: 3)
     ) {
         self.client = client
         self.policy = policy
@@ -115,7 +121,14 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
             if let known = knownTVDB, let byID = await client.resolve(byTVDBID: known, isMovie: isMovie) {
                 meta = byID
             } else if knownTVDB == nil {
-                meta = await client.resolve(titles: [query.title], year: query.year, isMovie: isMovie, episodeHints: [])
+                // Most specific title first, then the stored one — a generic folder
+                // still finds the right series through its filenames.
+                meta = await client.resolve(
+                    titles: query.titleAlternates + [query.title],
+                    year: query.year,
+                    isMovie: isMovie,
+                    episodeHints: query.episodeHints
+                )
             }
         }
 

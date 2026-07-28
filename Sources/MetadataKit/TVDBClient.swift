@@ -515,6 +515,28 @@ public actor TVDBClient {
         return String(mapped).split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
     }
 
+    /// Whether a candidate's name is the searched title, allowing for the trailing
+    /// year TheTVDB appends to disambiguate a re-used name ("Lucky (2026)").
+    ///
+    /// That convention marks the *newer* namesake, so comparing raw names quietly
+    /// favours the older one — the entry that keeps the bare title. Both belong in
+    /// the scored window; which is right is then decided on episode evidence.
+    static func namesQueriedTitle(_ name: String?, query normalizedQuery: String) -> Bool {
+        guard let name, !normalizedQuery.isEmpty else { return false }
+        let key = normalizedTitleKey(name)
+        if key == normalizedQuery { return true }
+        return normalizedTitleKey(stripTrailingYear(name)) == normalizedQuery
+    }
+
+    /// Drops a trailing parenthesised 4-digit year: "Lucky (2026)" → "Lucky".
+    static func stripTrailingYear(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasSuffix(")"), let open = trimmed.lastIndex(of: "(") else { return trimmed }
+        let inner = trimmed[trimmed.index(after: open)..<trimmed.index(before: trimmed.endIndex)]
+        guard inner.count == 4, inner.allSatisfy(\.isNumber) else { return trimmed }
+        return String(trimmed[trimmed.startIndex..<open]).trimmingCharacters(in: .whitespaces)
+    }
+
     // MARK: - Episode-title disambiguation
 
     /// Picks the search candidate whose episode titles best match the on-disk
@@ -540,12 +562,19 @@ public actor TVDBClient {
         // "O Caçador", whose English name is also "Outlander"), so a fixed top-N by
         // relevance alone could skip the real show. Bounded to keep the episode
         // fetches modest.
+        //
+        // The order within each group is TheTVDB's relevance, held explicitly by
+        // index: `sorted(by:)` is not stable, so ranking on exact-match alone left
+        // the other ~50 candidates in arbitrary order and the real show could fall
+        // outside the scored window by luck. "Lucky" returns 50 results with the
+        // right one third — worth keeping there.
         let q = Self.normalizedTitleKey(query)
-        let ordered = results.sorted { a, b in
-            let ea = Self.normalizedTitleKey(a.name ?? "") == q
-            let eb = Self.normalizedTitleKey(b.name ?? "") == q
-            return ea && !eb
+        let ranked = results.enumerated().map { index, result in
+            (result: result, isExact: Self.namesQueriedTitle(result.name, query: q), index: index)
         }
+        let ordered = ranked.sorted { a, b in
+            a.isExact == b.isExact ? a.index < b.index : a.isExact
+        }.map(\.result)
         for candidate in ordered.prefix(8) {
             guard let id = candidate.tvdb_id else { continue }
             let names = await episodeNames(seriesID: id, token: token)

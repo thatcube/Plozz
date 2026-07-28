@@ -91,6 +91,44 @@ public struct MetadataQuery: Sendable, Hashable {
         hasher.combine(providerIDs)
     }
 
+    /// The same query asked about the **show** rather than one of its episodes.
+    ///
+    /// A Continue Watching slide is an episode, but "when is the next one" is a
+    /// property of the series. Left as-is, the episode's season/episode numbers land
+    /// in the cache key (`…|s2e10`), so it would neither reuse the schedule the
+    /// series detail page already fetched nor store anything the show could use —
+    /// one cache entry per episode, all of them answering the same question.
+    ///
+    /// Series-scoped ids are promoted over the episode's own, which identify the
+    /// episode and would resolve to the wrong record entirely.
+    public var seriesScoped: Self {
+        guard kind == .season || kind == .episode else { return self }
+        var ids = providerIDs
+        for (series, base) in Self.seriesIDPromotions {
+            if let value = ids.providerID(series) { ids[base.canonicalKey] = value }
+        }
+        return Self(
+            contentType: contentType,
+            kind: .series,
+            title: title,
+            alternateTitle: alternateTitle,
+            year: year,
+            seasonNumber: nil,
+            episodeNumber: nil,
+            animeIDs: animeIDs,
+            providerIDs: ids,
+            episodeHints: episodeHints,
+            titleAlternates: titleAlternates
+        )
+    }
+
+    /// Series-scoped id namespaces and the show-level namespace each supplies.
+    private static let seriesIDPromotions: [(ProviderIDNamespace, ProviderIDNamespace)] = [
+        (.seriesImdb, .imdb), (.seriesTmdb, .tmdb), (.seriesTvdb, .tvdb),
+        (.seriesTvmaze, .tvmaze), (.seriesAniList, .aniList),
+        (.seriesMal, .myAnimeList), (.seriesAniDB, .aniDB),
+    ]
+
     /// A copy carrying on-disk disambiguation evidence a file-scanning caller holds.
     public func offering(
         episodeHints: [SeriesEpisodeHint] = [],

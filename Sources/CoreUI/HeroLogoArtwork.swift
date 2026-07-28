@@ -183,18 +183,11 @@ private struct LoadedLogo<TextFallback: View>: View {
     /// logo's aspect ratio, the gap above and below the logo changed from title to
     /// title. Sizing the frame from the image's own ratio removes the slack.
     private func fittedSize(for image: UIImage) -> CGSize {
-        let size = image.size
-        guard size.width > 0, size.height > 0 else {
-            return CGSize(width: maxWidth, height: maxHeight)
-        }
-        let ratio = size.width / size.height
-        var height = min(maxHeight, maxWidth / ratio)
-        var width = height * ratio
-        if width > maxWidth {
-            width = maxWidth
-            height = width / ratio
-        }
-        return CGSize(width: width, height: height)
+        HeroLogoFit.fittedSize(
+            for: image.size,
+            maxWidth: maxWidth,
+            maxHeight: maxHeight
+        )
     }
 
     /// Renders the resolved logo. Most logos draw as-is with an adaptive contrast

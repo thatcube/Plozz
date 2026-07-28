@@ -232,7 +232,9 @@ public struct TVmazeClient: TVmazeEnriching {
             } else {
                 return nil
             }
-            guard airDate >= today else { return nil }
+            guard ScheduleEntryPolicy.isRegularEpisode(seasonNumber: ep.season),
+                  airDate >= today
+            else { return nil }
             return ProviderNextEpisode(
                 seasonNumber: ep.season,
                 episodeNumber: ep.number,
@@ -380,10 +382,11 @@ public struct TVmazeEnrichmentProvider: MetadataEnrichmentProvider {
     /// were cached, so admitting anime changed nothing until this bump. v4: stopped
     /// binding a title search to a show whose ids contradict the query's, and started
     /// resolving by TVDB id where one is known, so any same-title mismatch already
-    /// cached has to be dropped.
+    /// cached has to be dropped. v5: season-0 specials are no longer returned as
+    /// upcoming episodes.
     public init(
         client: any TVmazeEnriching = TVmazeClient(),
-        policy: ProviderPolicy = ProviderPolicy(version: 4)
+        policy: ProviderPolicy = ProviderPolicy(version: 5)
     ) {
         self.client = client
         self.policy = policy

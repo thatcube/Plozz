@@ -220,7 +220,9 @@ public actor TVDBClient {
         let sourceURL = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(trimmed)/extended")
         let upcoming = (episodes ?? [])
             .compactMap { ep -> ProviderNextEpisode? in
-                guard let day = ScheduleDateParsing.calendarDate(ep.aired), day >= today else { return nil }
+                guard ScheduleEntryPolicy.isRegularEpisode(seasonNumber: ep.seasonNumber),
+                      let day = ScheduleDateParsing.calendarDate(ep.aired), day >= today
+                else { return nil }
                 return ProviderNextEpisode(
                     seasonNumber: ep.seasonNumber,
                     episodeNumber: ep.number,
@@ -344,15 +346,30 @@ public actor TVDBClient {
         return Self.bestBackdrop(response.data?.artworks ?? [])
     }
 
-    /// Pick the highest-resolution genuinely-landscape artwork (a background/fanart
-    /// rather than a poster or square), by aspect + area — avoids relying on
-    /// TheTVDB's per-content artwork *type* ids, which differ series vs movie.
-    private static func bestBackdrop(_ artworks: [Artwork]) -> URL? {
+    /// Pick the best genuinely-landscape artwork (a background/fanart rather than a
+    /// poster, square, or banner), by aspect then language then area — avoids
+    /// relying on TheTVDB's per-content artwork *type* ids, which differ series vs
+    /// movie.
+    ///
+    /// The upper aspect bound is what keeps **banners** out. A background is around
+    /// 16:9; a banner is nearer 5:1 and always carries the show's name burned into
+    /// it, which then sits behind the wordmark the hero draws on top — the same
+    /// title twice.
+    ///
+    /// Language is a weaker signal here than it is on TMDb, where an untagged image
+    /// reliably means "no text". TheTVDB contributors often leave a texted
+    /// background untagged, so this only breaks ties rather than filtering.
+    static func bestBackdrop(_ artworks: [Artwork]) -> URL? {
         let landscape = artworks.filter { art in
-            guard let w = art.width, let h = art.height, h > 0 else { return false }
-            return Double(w) / Double(h) >= 1.4
+            guard let w = art.width, let h = art.height, h > 0, w > 0 else { return false }
+            let ratio = Double(w) / Double(h)
+            return ratio >= 1.4 && ratio <= 3.0
         }
-        let best = landscape.max { (($0.width ?? 0) * ($0.height ?? 0)) < (($1.width ?? 0) * ($1.height ?? 0)) }
+        let best = landscape.max { lhs, rhs in
+            let (lu, ru) = (lhs.isLanguageNeutral, rhs.isLanguageNeutral)
+            if lu != ru { return ru }
+            return lhs.pixelArea < rhs.pixelArea
+        }
         guard let image = best?.image, !image.isEmpty else { return nil }
         return Self.imageURL(image)
     }
@@ -710,11 +727,17 @@ public actor TVDBClient {
         }
     }
 
-    private struct Artwork: Decodable {
+    struct Artwork: Decodable {
         let image: String?
         let width: Int?
         let height: Int?
         let type: Int?
+        /// Absent/empty on art carrying no burned-in text — by convention, not by
+        /// enforcement, so it ranks candidates rather than excluding them.
+        var language: String?
+
+        var isLanguageNeutral: Bool { (language ?? "").isEmpty }
+        var pixelArea: Int { (width ?? 0) * (height ?? 0) }
     }
 
     private struct SearchResponse: Decodable {

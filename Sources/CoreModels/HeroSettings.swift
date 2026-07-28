@@ -105,7 +105,7 @@ public struct HeroSettings: Codable, Equatable, Sendable {
         }
         self.init(
             isEnabled: value(Bool.self, .isEnabled, d.isEnabled),
-            sources: value([HeroSourceKind].self, .sources, d.sources),
+            sources: HeroSettings.adoptingNewSources(value([HeroSourceKind].self, .sources, d.sources)),
             maxItems: value(Int.self, .maxItems, d.maxItems),
             trailersEnabled: value(Bool.self, .trailersEnabled, d.trailersEnabled),
             hideWatched: value(Bool.self, .hideWatched, d.hideWatched),
@@ -114,6 +114,30 @@ public struct HeroSettings: Codable, Equatable, Sendable {
             autoAdvanceSeconds: value(Int.self, .autoAdvanceSeconds, d.autoAdvanceSeconds)
         )
     }
+
+    /// Sources introduced after a stored selection was written, appended to it.
+    ///
+    /// Settings persist the exact list the user chose, so a source added in a later
+    /// version would stay invisible forever to everyone who already has settings —
+    /// the people most likely to want it. A case they never saw can't be one they
+    /// turned off, so adopting it matches intent; anything they *did* switch off is
+    /// still absent from `allCases`-minus-stored only if it's genuinely new, because
+    /// a disabled existing source is remembered separately below.
+    ///
+    /// Deliberately skipped when the stored list is empty: that means "hero off by
+    /// source", and quietly repopulating it would switch the hero back on.
+    static func adoptingNewSources(_ stored: [HeroSourceKind]) -> [HeroSourceKind] {
+        guard !stored.isEmpty else { return stored }
+        let known = Set(stored)
+        return stored + HeroSourceKind.allCases.filter {
+            !known.contains($0) && introducedAfterInitialRelease.contains($0)
+        }
+    }
+
+    /// Sources added after the original four. Only these are adopted into an
+    /// existing selection — the first four predate any stored settings, so their
+    /// absence is always a deliberate choice.
+    static let introducedAfterInitialRelease: Set<HeroSourceKind> = [.recentlyAdded]
 
     /// Whether the given source is currently enabled.
     public func isEnabled(_ source: HeroSourceKind) -> Bool {

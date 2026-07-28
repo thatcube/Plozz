@@ -33,6 +33,9 @@ struct HeroForegroundModel: Equatable {
     let metadataText: String?
     /// Content-rating badge text (e.g. `TV-14`), or `nil`.
     let ratingBadgeText: String?
+    /// The air-schedule badge above the title ("New episode every Wednesday"), or
+    /// `nil` when the slide isn't a series with something truthful to say.
+    let scheduleLine: String?
     /// The hero's description line (already spoiler-gated by the caller): the
     /// item's short marketing tagline when it has one, otherwise its long
     /// overview as a fallback. `nil` only when neither exists / text is hidden.
@@ -249,6 +252,7 @@ enum HeroForegroundModelBuilder {
         heroFocused: Bool,
         slideCount: Int,
         slideIndex: Int,
+        scheduleLine: String? = nil,
         dotsAutoAdvance: Bool = false,
         dotsDwellStart: Date? = nil,
         dotsDwellDuration: Double = 0,
@@ -273,6 +277,7 @@ enum HeroForegroundModelBuilder {
             logoURL: item.logoURL,
             metadataText: metadataText(for: item),
             ratingBadgeText: ratingBadgeText(for: item),
+            scheduleLine: scheduleLine,
             overview: overviewVisible
                 ? HeroContentPolicy.homeDescription(
                     for: HeroPresentation(

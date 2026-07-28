@@ -608,6 +608,7 @@ struct PlozziOSHomeView: View {
             settings: settings,
             continueWatching: content.continueWatching,
             watchlist: content.watchlist,
+            recentlyAdded: content.latest,
             randomLibraries: randomLibraries,
             watchMutations: pendingMutations,
             featuredProvider: { limit in

@@ -274,6 +274,7 @@ public struct HomeView: View {
                 settings: heroSettings?.settings,
                 continueWatching: content.continueWatching,
                 watchlist: content.watchlist,
+                recentlyAdded: content.latest,
                 curator: heroCurator
             )
             let heroSlotState = HomeHeroSlotState.resolve(
@@ -722,6 +723,7 @@ public struct HomeView: View {
                 settings: settings,
                 continueWatching: content.continueWatching,
                 watchlist: content.watchlist,
+                recentlyAdded: content.latest,
                 randomLibraries: randomLibraries,
                 watchMutations: durableWatchMutations + heroRuntime.watchMutations,
                 featuredProvider: heroFeaturedProvider,
@@ -1020,8 +1022,9 @@ enum HomeHeroSlotState: Equatable {
 ///    by an in-flight external-history refresh — reconcile them against the live
 ///    watch overlays and show those. This keeps the async Featured/Random slides
 ///    and preserves focus while a just-watched title still drops out.
-/// 2. Otherwise seed synchronously from the already-loaded Continue Watching +
-///    Watchlist sources so the hero renders in the same frame as the rows — but
+/// 2. Otherwise seed synchronously from the already-loaded Continue Watching,
+///    Watchlist and Recently Added sources so the hero renders in the same frame
+///    as the rows — but
 ///    hold that seed back until durable (offline) watch intents have hydrated when
 ///    Hide Watched is on, so a seen title can't flash in before it's filtered.
 enum HomeHeroDisplayResolver {
@@ -1032,6 +1035,7 @@ enum HomeHeroDisplayResolver {
         settings: HeroSettings?,
         continueWatching: [MediaItem],
         watchlist: [MediaItem],
+        recentlyAdded: [MediaItem] = [],
         curator: HeroCurator
     ) -> [MediaItem] {
         let watchMutations = runtime.durableWatchMutations + runtime.watchMutations
@@ -1054,6 +1058,7 @@ enum HomeHeroDisplayResolver {
                 settings: $0,
                 continueWatching: continueWatching,
                 watchlist: watchlist,
+                recentlyAdded: recentlyAdded,
                 watchMutations: watchMutations
             )
         } ?? []

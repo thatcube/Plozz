@@ -24,17 +24,17 @@ enum CurrentMetadataPriority {
         artwork(.anime, .thumbnail, [.tmdb]),
         artwork(.anime, .logo, [.tmdb, .wikidata, .wikipedia]),
 
-        artwork(.tvShow, .hero, [.tvdb, .tmdb, .wikidata, .wikipedia]),
+        artwork(.tvShow, .hero, [.tmdb, .tvdb, .wikidata, .wikipedia]),
         artwork(.tvShow, .poster, [.tmdb, .tvmaze, .tvdb, .wikidata, .wikipedia]),
         artwork(.tvShow, .thumbnail, [.tmdb, .tvmaze]),
         artwork(.tvShow, .logo, [.tmdb, .wikidata, .wikipedia]),
 
-        artwork(.movie, .hero, [.tvdb, .tmdb, .wikidata, .wikipedia]),
+        artwork(.movie, .hero, [.tmdb, .tvdb, .wikidata, .wikipedia]),
         artwork(.movie, .poster, [.tmdb, .tvdb, .wikidata, .wikipedia]),
         artwork(.movie, .thumbnail, [.tmdb]),
         artwork(.movie, .logo, [.tmdb, .wikidata, .wikipedia]),
 
-        artwork(.unknown, .hero, [.tvdb, .tmdb, .wikidata, .wikipedia]),
+        artwork(.unknown, .hero, [.tmdb, .tvdb, .wikidata, .wikipedia]),
         artwork(.unknown, .poster, [.tmdb, .tvdb, .wikidata, .wikipedia]),
         artwork(.unknown, .thumbnail, [.tmdb]),
         artwork(.unknown, .logo, [.tmdb, .wikidata, .wikipedia]),

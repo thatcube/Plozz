@@ -18,7 +18,7 @@ public struct SeriesScheduleRecord: Codable, Sendable, Equatable {
     /// written while TheTVDB's own enrichment cache still held pre-list responses,
     /// so they carry the new fields but empty. v4 picks up TVmaze's listing, which
     /// covers series with no known TheTVDB id.
-    public static let currentSchemaVersion = 11
+    public static let currentSchemaVersion = 12
 
     /// The schema version this record was written with; `1` for records persisted
     /// before the field existed.

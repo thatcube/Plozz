@@ -25,6 +25,32 @@ public enum ProviderIDNamespace: Sendable {
     case musicBrainzTrack
     case musicBrainzArtist
 
+    /// The key to *write* an id under so ``providerID(_:)`` finds it again. Lookup
+    /// is alias- and punctuation-insensitive, so this only has to normalize to one
+    /// of ``aliases`` — it uses the spelling the rest of the app already writes.
+    public var canonicalKey: String {
+        switch self {
+        case .imdb: return "Imdb"
+        case .tmdb: return "Tmdb"
+        case .tvdb: return "Tvdb"
+        case .tvmaze: return "TvMaze"
+        case .aniList: return "AniList"
+        case .myAnimeList: return "Mal"
+        case .aniDB: return "AniDB"
+        case .seriesImdb: return "SeriesImdb"
+        case .seriesTmdb: return "SeriesTmdb"
+        case .seriesTvdb: return "SeriesTvdb"
+        case .seriesTvmaze: return "SeriesTvMaze"
+        case .seriesAniList: return "SeriesAniList"
+        case .seriesMal: return "SeriesMal"
+        case .seriesAniDB: return "SeriesAniDB"
+        case .musicBrainzReleaseGroup: return "MusicBrainzReleaseGroup"
+        case .musicBrainzRelease: return "MusicBrainzRelease"
+        case .musicBrainzTrack: return "MusicBrainzTrack"
+        case .musicBrainzArtist: return "MusicBrainzArtist"
+        }
+    }
+
     fileprivate var aliases: [String] {
         switch self {
         case .imdb: return ["imdb"]

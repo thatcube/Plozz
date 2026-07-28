@@ -39,8 +39,8 @@ public struct HeroCurator: Sendable {
 
     /// Produces the ordered hero items.
     ///
-    /// - `continueWatching` / `watchlist`: already-aggregated Home content
-    ///   (both providers, cross-server merged) — passed in, not fetched.
+    /// - `continueWatching` / `watchlist` / `recentlyAdded`: already-aggregated Home
+    ///   content (both providers, cross-server merged) — passed in, not fetched.
     /// - `featuredProvider`: the Seerr seam — returns `[]` until Seerr exists.
     /// - `randomLibraries`: the already-loaded, settings-filtered library containers
     ///   available to the Random source.
@@ -53,6 +53,7 @@ public struct HeroCurator: Sendable {
         settings: HeroSettings,
         continueWatching: [MediaItem],
         watchlist: [MediaItem],
+        recentlyAdded: [MediaItem] = [],
         randomLibraries: [HeroRandomLibrary] = [],
         watchMutations: [MediaItemMutation] = [],
         featuredProvider: FeaturedContentProviding = HeroFeaturedProvider.none,
@@ -79,6 +80,7 @@ public struct HeroCurator: Sendable {
             switch source {
             case .featured: return featured
             case .continueWatching: return continueWatching
+            case .recentlyAdded: return recentlyAdded
             case .randomFromLibrary: return random
             case .watchlist: return watchlist
             }
@@ -112,6 +114,7 @@ public struct HeroCurator: Sendable {
         settings: HeroSettings,
         continueWatching: [MediaItem],
         watchlist: [MediaItem],
+        recentlyAdded: [MediaItem] = [],
         watchMutations: [MediaItemMutation] = []
     ) -> [MediaItem] {
         guard settings.isActive else { return [] }
@@ -119,6 +122,10 @@ public struct HeroCurator: Sendable {
             switch source {
             case .featured, .randomFromLibrary: return []
             case .continueWatching: return continueWatching
+            // Already aggregated for the Recently Added rail, so unlike Featured and
+            // Random this source needs no fetch and can join the instant seed —
+            // the hero shows it in the first frame rather than popping in later.
+            case .recentlyAdded: return recentlyAdded
             case .watchlist: return watchlist
             }
         }.map {
@@ -343,18 +350,60 @@ enum HeroDedupe {
     /// an exact same-server twin). Two items are "the same" when any token
     /// overlaps.
     static func tokens(for item: MediaItem) -> Set<String> {
+        // Every token is scoped by kind so a film and a series of the same name stay
+        // apart. A show's own parts must NOT be separated that way, though: the hero
+        // shows one slide per *show*, and Continue Watching offers an episode where
+        // Watchlist offers the series, so scoping by kind let the same show appear
+        // twice — once with "Play S3, E1", once with a bookmark.
+        let scope = showScope(for: item)
         let accountScope = item.sourceAccountID ?? "unscoped"
-    var tokens: Set<String> = ["id:\(item.kind.rawValue):\(accountScope):\(item.id)"]
+        var tokens: Set<String> = ["id:\(scope):\(accountScope):\(item.id)"]
         for identity in MediaItemIdentity.identities(for: item) {
             switch identity {
             case let .external(source, value):
-                tokens.insert("ext:\(item.kind.rawValue):\(source):\(value)")
+                tokens.insert("ext:\(scope):\(source):\(value)")
             case let .title(normalizedTitle, year, kind):
-                tokens.insert("title:\(normalizedTitle):\(year.map(String.init) ?? "?"):\(kind.rawValue)")
+                tokens.insert("title:\(normalizedTitle):\(year.map(String.init) ?? "?"):\(showScope(for: kind))")
             case let .sameItemID(value):
-                tokens.insert("id:\(item.kind.rawValue):\(value)")
+                tokens.insert("id:\(scope):\(value)")
+            }
+        }
+        // An episode or season also answers for the show it belongs to, so it
+        // collides with a series slide even when neither carries a shared external
+        // id — the common case, since a resumable episode is identified by its own
+        // ids, not its series'.
+        if item.kind == .season || item.kind == .episode {
+            if let seriesID = item.seriesID?.nonEmptyToken {
+                tokens.insert("id:\(seriesScope):\(accountScope):\(seriesID)")
+                tokens.insert("id:\(seriesScope):\(seriesID)")
+            }
+            if let showTitle = item.parentTitle?.nonEmptyToken {
+                tokens.insert("title:\(MediaItemIdentity.normalizedTitle(showTitle)):?:\(seriesScope)")
             }
         }
         return tokens
+    }
+
+    /// The token scope for a kind: every part of a show shares one scope, so a
+    /// series, its seasons and its episodes all collapse to a single hero slide.
+    private static func showScope(for kind: MediaItemKind) -> String {
+        switch kind {
+        case .series, .season, .episode: return seriesScope
+        default: return kind.rawValue
+        }
+    }
+
+    private static func showScope(for item: MediaItem) -> String {
+        showScope(for: item.kind)
+    }
+
+    private static let seriesScope = "show"
+}
+
+private extension String {
+    /// The trimmed value, or `nil` when it carries nothing to match on.
+    var nonEmptyToken: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

@@ -20,6 +20,8 @@ final class HeroForegroundUIView: UIView {
     private let ratingLabel = PaddedLabel()
     private let metadataLabel = UILabel()
     private let overviewLabel = UILabel()
+    /// The air-schedule badge above the logo ("New episode every Wednesday").
+    private let scheduleLabel = PaddedLabel()
     private let ratingsHost = UIHostingController(
         rootView: AnyView(EmptyView())
     )
@@ -92,6 +94,8 @@ final class HeroForegroundUIView: UIView {
 
     // MARK: Metrics (mirror the SwiftUI hero)
     private let columnSpacing: CGFloat = 12
+    /// Extra room under the wordmark, on top of `columnSpacing`.
+    private let logoBottomSpacing: CGFloat = 14
     /// Extra breathing room above the action-pill row (on top of `columnSpacing`).
     private let pillsTopPadding: CGFloat = 16
     /// Extra margin between the paging dots and the action-pill row above them: the
@@ -107,6 +111,8 @@ final class HeroForegroundUIView: UIView {
     /// Cap the logo to the same width as the description text column, so a wide
     /// wordmark spans the full text width rather than a narrower box.
     private let logoMaxWidth: CGFloat = 496
+    /// Nominal wordmark height; `HeroLogoFit` may exceed it for a tall logo.
+    private let logoMaxHeight: CGFloat = 160
     private let dotsGlassHPad: CGFloat = 0
     private let dotsGlassVPad: CGFloat = 0
     private let bottomMargin: CGFloat = 24
@@ -141,6 +147,22 @@ final class HeroForegroundUIView: UIView {
         metadataLabel.font = .systemFont(ofSize: 23, weight: .medium)
         metadataLabel.numberOfLines = 1
 
+        // Chrome matched to the flat idle pill rather than the detail hero's
+        // material: this renderer exists because live blur re-samples the moving
+        // backdrop every transition frame, and a badge that sampled would give back
+        // exactly the hitch the flat styles were introduced to remove.
+        scheduleLabel.font = .systemFont(ofSize: 24, weight: .semibold)
+        scheduleLabel.insets = UIEdgeInsets(top: 0, left: 18, bottom: 0, right: 18)
+        scheduleLabel.fixedHeight = 52
+        scheduleLabel.textAlignment = .center
+        scheduleLabel.layer.cornerRadius = 14
+        scheduleLabel.layer.cornerCurve = .continuous
+        // Without this the fill keeps its square corners and only the border is
+        // rounded, so the backdrop shows through each corner.
+        scheduleLabel.clipsToBounds = true
+        scheduleLabel.layer.borderWidth = HeroForegroundGlass.borderWidth
+        scheduleLabel.isHidden = true
+
         overviewLabel.font = .systemFont(ofSize: 22)
         overviewLabel.numberOfLines = 3
         ratingsHost.view!.backgroundColor = .clear
@@ -157,7 +179,7 @@ final class HeroForegroundUIView: UIView {
         applyThemeColors()
 
         for v in [logoImageView, titleLabel, ratingLabel, metadataLabel,
-                  overviewLabel, ratingsHost.view!, pillsContainer, dotsContainer] {
+                  overviewLabel, scheduleLabel, ratingsHost.view!, pillsContainer, dotsContainer] {
             addSubview(v)
         }
         dotsContainer.clipsToBounds = true
@@ -195,8 +217,12 @@ final class HeroForegroundUIView: UIView {
         metadataLabel.textColor = secondary
         overviewLabel.textColor = secondary
 
+        scheduleLabel.textColor = primary
+        scheduleLabel.backgroundColor = HeroForegroundGlass.flatFill()
         let resolvedPrimary = primary.resolvedColor(with: traitCollection)
         ratingLabel.layer.borderColor = resolvedPrimary.withAlphaComponent(0.65).cgColor
+        scheduleLabel.layer.borderColor = HeroForegroundGlass.flatBorder()
+            .resolvedColor(with: traitCollection).cgColor
         let shadow = traitCollection.userInterfaceStyle == .light ? UIColor.white : UIColor.black
         for label in [titleLabel, ratingLabel, metadataLabel, overviewLabel] {
             label.layer.shadowColor = shadow.cgColor
@@ -237,6 +263,9 @@ final class HeroForegroundUIView: UIView {
 
         metadataLabel.text = model.metadataText
         metadataLabel.isHidden = (model.metadataText ?? "").isEmpty
+
+        scheduleLabel.text = model.scheduleLine
+        scheduleLabel.isHidden = (model.scheduleLine ?? "").isEmpty
 
         overviewLabel.text = model.overview
         overviewLabel.isHidden = (model.overview ?? "").isEmpty
@@ -508,7 +537,7 @@ final class HeroForegroundUIView: UIView {
     /// hero fades logo/metadata/overview + pills together; dots stay visible).
     private var fadeViews: [UIView] {
         [logoImageView, titleLabel, ratingLabel, metadataLabel,
-         overviewLabel, ratingsHost.view!, pillsContainer]
+         overviewLabel, scheduleLabel, ratingsHost.view!, pillsContainer]
     }
 
     private func applyFade(metadataVisible: Bool, slideChanged: Bool) {
@@ -596,27 +625,46 @@ final class HeroForegroundUIView: UIView {
             y -= h + columnSpacing
         }
 
-        // Logo or title on top of the block.
+        // Logo or title on top of the block, with the schedule badge above it —
+        // the same order the detail hero uses, so a series reads identically on
+        // both screens.
+        // A wordmark is the slide's title, so it wants room beneath it rather than
+        // sitting straight on the description — the same breathing space the text
+        // title would get from its own line height.
+        y -= logoBottomSpacing
+
+        var logoTop = y
         if !logoImageView.isHidden, let image = logoImageView.image, image.size.width > 0 {
-            let cap = min(maxWidth, logoMaxWidth)
-            let maxH: CGFloat = 160
-            let aspect = image.size.height / image.size.width
-            // Fit within both the width cap and the height cap, preserving aspect and
-            // never upscaling. Crucially, size the frame to the ACTUAL fitted image —
-            // if the height cap binds we shrink the width too. Otherwise the frame
-            // stays wider than the scaled image and `.scaleAspectFit` centres it,
-            // making a tall/narrow logo look shifted right instead of left-aligned.
-            var w = min(cap, image.size.width)
-            var h = w * aspect
-            if h > maxH {
-                h = maxH
-                w = h / aspect
-            }
+            // Shared with the detail hero's `HeroLogoArtwork`, so one show's
+            // wordmark carries the same weight on both screens — and so a tall or
+            // very wide logo isn't shrunk for its shape.
+            //
+            // The frame is the ACTUAL fitted image, not the slot: `.scaleAspectFit`
+            // centres within its frame, so a frame wider than the drawn image would
+            // push a tall/narrow wordmark right instead of leaving it left-aligned.
+            let fitted = HeroLogoFit.fittedSize(
+                for: image.size,
+                maxWidth: min(maxWidth, logoMaxWidth),
+                maxHeight: logoMaxHeight
+            )
+            let (w, h) = (fitted.width, fitted.height)
             logoImageView.frame = CGRect(x: leading, y: y - h, width: w, height: h)
+            logoTop = y - h
         } else if !titleLabel.isHidden {
             let size = titleLabel.sizeThatFits(CGSize(width: min(maxWidth, 1000), height: .greatestFiniteMagnitude))
             let h = min(size.height, ceil(titleLabel.font.lineHeight * 2))
             titleLabel.frame = CGRect(x: leading, y: y - h, width: min(maxWidth, 1000), height: h)
+            logoTop = y - h
+        }
+
+        if !scheduleLabel.isHidden {
+            let size = scheduleLabel.intrinsicContentSize
+            scheduleLabel.frame = CGRect(
+                x: leading,
+                y: logoTop - columnSpacing - size.height,
+                width: min(size.width, maxWidth),
+                height: size.height
+            )
         }
     }
 

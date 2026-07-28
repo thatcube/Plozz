@@ -14,6 +14,8 @@ public enum HeroSourceKind: String, CaseIterable, Identifiable, Codable, Sendabl
     case featured
     /// Your in-progress, resumable titles presented in a featured format.
     case continueWatching
+    /// The newest titles to land in your libraries.
+    case recentlyAdded
     /// Random picks from your (chosen) libraries.
     case randomFromLibrary
     /// Titles you've saved to your watchlist.
@@ -26,6 +28,7 @@ public enum HeroSourceKind: String, CaseIterable, Identifiable, Codable, Sendabl
         switch self {
         case .featured: return "Featured"
         case .continueWatching: return "Continue Watching"
+        case .recentlyAdded: return "Recently Added"
         case .randomFromLibrary: return "Random from Library"
         case .watchlist: return "Watchlist"
         }
@@ -36,6 +39,7 @@ public enum HeroSourceKind: String, CaseIterable, Identifiable, Codable, Sendabl
         switch self {
         case .featured: return "Trending titles available to stream (requires Seerr)."
         case .continueWatching: return "Pick up where you left off, front and centre."
+        case .recentlyAdded: return "The newest additions to your libraries, shown large."
         case .randomFromLibrary: return "A rotating spotlight on titles from your libraries."
         case .watchlist: return "Titles you've saved to watch later."
         }
@@ -46,6 +50,7 @@ public enum HeroSourceKind: String, CaseIterable, Identifiable, Codable, Sendabl
         switch self {
         case .featured: return "sparkles.tv"
         case .continueWatching: return "play.circle"
+        case .recentlyAdded: return "sparkles"
         case .randomFromLibrary: return "shuffle"
         case .watchlist: return "bookmark"
         }

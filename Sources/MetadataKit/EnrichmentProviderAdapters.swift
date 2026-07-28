@@ -91,6 +91,9 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
     /// that for a month: the hero would name the next date while the rail stayed
     /// empty, because the two read different fields of the same response.
     ///
+    /// `version: 4` — season-0 specials are no longer returned as upcoming
+    /// episodes, so a cached answer containing one has to be dropped.
+    ///
     /// `version: 3` — a title search now receives the caller's episode-title
     /// evidence, so it can answer with a different (correct) series than before.
     /// Disambiguation evidence is deliberately not part of the cache key — the same
@@ -98,7 +101,7 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
     /// version 2 would keep being served without the provider ever running again.
     public init(
         client: any TVDBEnriching,
-        policy: ProviderPolicy = ProviderPolicy(version: 3)
+        policy: ProviderPolicy = ProviderPolicy(version: 4)
     ) {
         self.client = client
         self.policy = policy

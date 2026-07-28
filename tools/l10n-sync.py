@@ -323,10 +323,14 @@ def report_coverage() -> None:
     its folder present, and offering that shows a mostly-English UI to someone
     who asked for Spanish.
 
-    Counts a key as needing translation unless it opts out with
-    `shouldTranslate: false`, and counts it done only in the `translated` state.
-    `needs_review` deliberately does NOT count, which is what stops a
-    machine-translated seed from passing itself off as finished work.
+    Reports two different facts instead of collapsing them into one percentage:
+
+    - available: the key has a localization and will render in that language;
+    - reviewed: every string unit is in Apple's `translated` state.
+
+    Model-produced `needs_review` text therefore counts as available but not
+    reviewed. This preserves honest provenance without reporting a complete,
+    usable model translation as 0% coverage.
     """
     catalog = json.loads(CATALOG.read_text())
     strings = catalog.get("strings", {})
@@ -348,22 +352,58 @@ def report_coverage() -> None:
 
     for language in sorted(languages):
         states: dict[str, int] = defaultdict(int)
+        available = 0
+        reviewed = 0
         for entry in translatable.values():
             localization = entry.get("localizations", {}).get(language)
             if localization is None:
                 states["missing"] += 1
                 continue
-            if localization.get("stringUnit") is None:
-                # A variations-only entry (plurals) counts as present.
+            available += 1
+            units = [
+                value
+                for value in walk_string_units(localization)
+                if isinstance(value, dict)
+            ]
+            unit_states = {unit.get("state", "new") for unit in units}
+            if unit_states == {"translated"}:
+                reviewed += 1
                 states["translated"] += 1
+            elif "needs_review" in unit_states:
+                states["needs_review"] += 1
             else:
-                states[localization["stringUnit"].get("state", "new")] += 1
+                states[", ".join(sorted(unit_states)) or "new"] += 1
 
-        done = states["translated"]
-        percent = 100 * done / total if total else 0
-        detail = ", ".join(f"{state} {count}" for state, count in sorted(states.items())
-                           if state != "translated")
-        print(f"  {language:<8} {percent:5.1f}%  ({done}/{total})" + (f"  [{detail}]" if detail else ""))
+        available_percent = 100 * available / total if total else 0
+        reviewed_percent = 100 * reviewed / total if total else 0
+        detail = ", ".join(
+            f"{state} {count}"
+            for state, count in sorted(states.items())
+            if state != "translated"
+        )
+        print(
+            f"  {language:<8} available {available_percent:5.1f}% "
+            f"({available}/{total}), reviewed {reviewed_percent:5.1f}% "
+            f"({reviewed}/{total})"
+            + (f"  [{detail}]" if detail else "")
+        )
+
+
+def walk_string_units(value: object) -> list[dict]:
+    """Every nested String Catalog stringUnit below *value*."""
+
+    result: list[dict] = []
+    if isinstance(value, dict):
+        unit = value.get("stringUnit")
+        if isinstance(unit, dict):
+            result.append(unit)
+        for key, child in value.items():
+            if key != "stringUnit":
+                result.extend(walk_string_units(child))
+    elif isinstance(value, list):
+        for child in value:
+            result.extend(walk_string_units(child))
+    return result
 
 def plural_problems(strings: dict) -> list[str]:
     """Flag counts that no translator can fix from the catalog.

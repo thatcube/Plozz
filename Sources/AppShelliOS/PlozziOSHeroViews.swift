@@ -254,6 +254,8 @@ struct PlozziOSDetailHeroSection: View {
     let playableItem: MediaItem?
     let downloadItem: MediaItem?
     let sources: [MediaSourceRef]
+    /// The air-schedule badge for a series, resolved by the detail page.
+    var scheduleLine: String? = nil
     let selectedSourceAccountID: String?
     let versions: [MediaVersion]
     let selectedVersionID: String?
@@ -303,6 +305,7 @@ struct PlozziOSDetailHeroSection: View {
                 playableItem: playableItem,
                 downloadItem: downloadItem,
                 sources: sources,
+                scheduleLine: scheduleLine,
                 selectedSourceAccountID: selectedSourceAccountID,
                 versions: versions,
                 selectedVersionID: selectedVersionID,
@@ -1113,6 +1116,8 @@ private struct PlozziOSDetailHeroForeground: View {
     let playableItem: MediaItem?
     let downloadItem: MediaItem?
     let sources: [MediaSourceRef]
+    /// The air-schedule badge for a series, resolved by the detail page.
+    var scheduleLine: String? = nil
     let selectedSourceAccountID: String?
     let versions: [MediaVersion]
     let selectedVersionID: String?
@@ -1234,7 +1239,8 @@ private struct PlozziOSDetailHeroForeground: View {
                 onTapBreadcrumb: parentNavigationEntry.map { entry in
                     { perform(entry) }
                 },
-                subjectTitle: presentsEpisodeStill ? item.title : nil
+                subjectTitle: presentsEpisodeStill ? item.title : nil,
+                scheduleLine: scheduleLine
             )
 
             // Progressive overflow: try every inline layout from "all buttons
@@ -1772,6 +1778,9 @@ private struct PlozziOSHeroMetadata: View {
     var onTapBreadcrumb: (() -> Void)? = nil
     /// The subject's own title, when it differs from `presentation.title`.
     var subjectTitle: String? = nil
+    /// The air-schedule badge above the title ("New episode every Wednesday"), or
+    /// `nil` when there is nothing truthful to say. Matches tvOS.
+    var scheduleLine: String? = nil
 
     var body: some View {
         VStack(
@@ -1808,6 +1817,9 @@ private struct PlozziOSHeroMetadata: View {
                     .lineLimit(2)
                     .accessibilityAddTraits(.isHeader)
             } else {
+                if let scheduleLine {
+                    scheduleBadge(scheduleLine)
+                }
                 HeroLogoArtwork(
                     references: presentation.logoReferences,
                     maxWidth: style == .compactPortrait ? 330 : 520,
@@ -1914,6 +1926,21 @@ private struct PlozziOSHeroMetadata: View {
                 root: rootPresentation
             )
         }
+    }
+
+    /// The air-schedule badge. Same shape and copy as the tvOS hero so a series
+    /// reads identically on both platforms, sized down for a phone.
+    @ViewBuilder
+    private func scheduleBadge(_ text: String) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        Text(text)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(palette.primaryText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background { shape.fill(.regularMaterial) }
+            .overlay { shape.stroke(palette.primaryText.opacity(0.16), lineWidth: 1) }
+            .accessibilityLabel(text)
     }
 
     private var effectiveRatingBadge: MediaBadge? {

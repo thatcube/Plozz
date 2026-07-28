@@ -6,6 +6,7 @@ import FeatureHomeCore
 import MediaDownloads
 import MetadataKit
 import SeerService
+import TraktService
 import SwiftUI
 
 struct PlozziOSItemDetailView: View {
@@ -142,6 +143,11 @@ private struct PlozziOSCanonicalItemDetailView: View {
     @Environment(\.themePalette) private var palette
     @Environment(HeroTrailerController.self) private var trailerController
     @Environment(PlozziOSAppModel.self) private var appModel
+    /// Pushes another title from the Related row. Read here rather than only in a
+    /// subview because a `navigationDestination` is hosted by the stack, so it
+    /// inherits the STACK's environment — the router has to be read where the page
+    /// itself is declared.
+    @Environment(\.mediaItemNavigator) private var itemNavigator
     @State private var viewModel: ItemDetailViewModel
     @State private var playbackRequest: PlozziOSPlaybackRequest?
     @State private var downloadRecord: DownloadedMediaRecord?
@@ -225,7 +231,17 @@ private struct PlozziOSCanonicalItemDetailView: View {
                     : crossServerSourceResolver(
                         in: accounts,
                         identitySources: identitySources
-                    )
+                    ),
+                // A discovery title isn't in the library, so there is nothing to
+                // relate it to that the viewer could actually open.
+                relatedTitlesLoader: isDiscoveryItem
+                    ? nil
+                    : relatedTitleLibrarySearch(in: accounts).map { search in
+                        RelatedTitlesLoader(
+                            resolver: .production(traktClientID: TraktConfig.resolved().clientID),
+                            search: search
+                        )
+                    }
             )
         )
     }
@@ -347,6 +363,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
                     playableItem: playableHeroTarget,
                     downloadItem: playableHeroTarget,
                     sources: options.sources,
+                    scheduleLine: upcomingHeroLine,
                     selectedSourceAccountID: options.selectedSourceAccountID,
                     versions: options.versions,
                     selectedVersionID: options.selectedVersionID,
@@ -409,6 +426,16 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         onRequest: { beginRequest($0) }
                     )
                     .padding(.horizontal, pageInset)
+                }
+
+                // Above the cast, matching tvOS: what else to watch is the decision
+                // being made now; who was in it is looked up afterwards.
+                if let entries = viewModel.relatedTitlesLoader?.entries, !entries.isEmpty {
+                    PlozziOSRelatedSection(
+                        entries: entries,
+                        inset: pageInset,
+                        onSelect: { itemNavigator?($0) }
+                    )
                 }
 
                 if !detail.item.people.filter(\.isCast).isEmpty {
@@ -480,6 +507,16 @@ private struct PlozziOSCanonicalItemDetailView: View {
             }
             try? await Task.sleep(for: transitional ? .seconds(4) : .seconds(20))
         }
+    }
+
+    /// The hero's air-schedule line ("New episode every Wednesday"), or `nil`.
+    private var upcomingHeroLine: String? {
+        guard let schedule = viewModel.state.value?.upcomingSchedule else { return nil }
+        return SeriesUpcoming.heroLine(
+            nextEpisode: schedule.upcomingEpisode,
+            cadence: schedule.cadence,
+            schedule: schedule.upcomingEpisodes
+        )
     }
 
     private var pageInset: CGFloat {
@@ -1359,11 +1396,36 @@ private struct PlozziOSInlineSeriesBrowser: View {
     }
 
     private var displayedEpisodes: [MediaItem]? {
+        guard let owned = ownedEpisodes else { return nil }
+        return owned + upcomingPlaceholders(after: owned)
+    }
+
+    private var ownedEpisodes: [MediaItem]? {
         if seasons.isEmpty {
             return looseEpisodes
         }
         guard let selectedSeasonID else { return nil }
         return viewModel.episodes(for: selectedSeasonID)
+    }
+
+    /// The selected season's unreleased episodes, appended after the owned ones as
+    /// non-playable entries — the same treatment tvOS gives them, so a show mid-run
+    /// shows what is still to come rather than ending at the last file on disk.
+    private func upcomingPlaceholders(after owned: [MediaItem]) -> [MediaItem] {
+        guard let schedule = viewModel.state.value?.upcomingSchedule,
+              !schedule.upcomingEpisodes.isEmpty else { return [] }
+        let seasonNumber = selectedSeasonID
+            .flatMap { id in seasons.first { $0.id == id } }?
+            .seasonNumber
+        guard let series = viewModel.state.value?.item else { return [] }
+        return SeriesUpcoming.placeholders(
+            for: seasonNumber,
+            seriesID: series.id,
+            seriesTitle: series.title,
+            ownedEpisodes: owned,
+            schedule: schedule.upcomingEpisodes,
+            seriesArtwork: series
+        )
     }
 
     private var pageInset: CGFloat {
@@ -1660,6 +1722,10 @@ private struct PlozziOSInlineEpisodeEntry: View {
                 episodeArtwork
             }
             .buttonStyle(.plain)
+            // An unreleased episode has no file behind it, so tapping it can only
+            // fail. It stays visible and legible — that IS the information — but
+            // is inert, and its actions menu is withdrawn since none apply.
+            .disabled(episode.isUpcomingUnaired)
             .overlay(alignment: .topLeading) {
                 Menu {
                     episodeMenuActions
@@ -1674,6 +1740,8 @@ private struct PlozziOSInlineEpisodeEntry: View {
                         .contentShape(Circle())
                 }
                 .accessibilityLabel("More actions for \(episode.title)")
+                .opacity(episode.isUpcomingUnaired ? 0 : 1)
+                .disabled(episode.isUpcomingUnaired)
             }
             .overlay(alignment: .topTrailing) {
                 MediaCardPlaybackIndicators(

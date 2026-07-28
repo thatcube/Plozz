@@ -313,4 +313,59 @@ final class SeriesScheduleTests: XCTestCase {
         XCTAssertFalse(current.isRefreshDue(), "A current-schema record still honours its TTL")
     }
 
+    func testASingleNextEpisodeLeavesTheScheduleOpenForAProviderThatCanList() {
+        // AniList leads the anime chain and reports an absolute episode number with
+        // no season, which can't be placed in a season's rail. The field must stay
+        // open so a per-season lister (TVmaze) is still asked.
+        var absoluteOnly = MetadataEnrichment()
+        absoluteOnly.upcomingEpisode = UpcomingEpisode(
+            seriesIdentity: .external(source: "anilist", value: "1"),
+            absoluteEpisodeNumber: 1087,
+            airDate: Date(),
+            datePrecision: .dateAndTime,
+            source: .anilist,
+            refreshedAt: Date()
+        )
+        XCTAssertFalse(
+            absoluteOnly.filledFields.contains(.nextAiringEpisode),
+            "A single next episode is a partial answer; the run is still missing"
+        )
+
+        var listed = MetadataEnrichment()
+        listed.upcomingEpisodes = [absoluteOnly.upcomingEpisode!]
+        XCTAssertTrue(listed.filledFields.contains(.nextAiringEpisode))
+    }
+
+    func testAListingProviderSupersedesASingleNextEpisode() {
+        var accumulated = MetadataEnrichment()
+        accumulated.upcomingEpisode = UpcomingEpisode(
+            seriesIdentity: .external(source: "anilist", value: "1"),
+            absoluteEpisodeNumber: 1087,
+            airDate: Date(timeIntervalSince1970: 1_900_000_000),
+            datePrecision: .dateAndTime,
+            source: .anilist,
+            refreshedAt: Date()
+        )
+
+        let perSeason = UpcomingEpisode(
+            seriesIdentity: .external(source: "tvmaze", value: "9"),
+            seasonNumber: 3,
+            episodeNumber: 5,
+            airDate: Date(timeIntervalSince1970: 1_900_100_000),
+            datePrecision: .dateOnly,
+            source: .tvmaze,
+            refreshedAt: Date()
+        )
+        var lister = MetadataEnrichment()
+        lister.upcomingEpisodes = [perSeason]
+        lister.upcomingEpisode = perSeason
+
+        accumulated.fillMissing(from: lister)
+        XCTAssertEqual(accumulated.upcomingEpisodes.count, 1)
+        XCTAssertEqual(
+            accumulated.upcomingEpisode?.source, .tvmaze,
+            "The next episode must come from the same source as the run, not be left absolute"
+        )
+    }
+
 }

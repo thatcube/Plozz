@@ -284,22 +284,42 @@ public struct TVmazeEnrichmentProvider: MetadataEnrichmentProvider {
     public let policy: ProviderPolicy
     private let client: any TVmazeEnriching
 
-    /// `version: 2` — TVmaze now returns a show's whole upcoming run plus its airing
-    /// days, not just the next episode. Entries cached under version 1 hold only the
-    /// single next episode and would otherwise be served for their full TTL.
+    /// `version: 3` — the cache is keyed per provider version, so a change to what
+    /// this provider *returns* has to invalidate it or the old answer is served
+    /// without the provider ever running.
+    ///
+    /// v2: started returning a show's whole upcoming run plus its airing days rather
+    /// than only the next episode. v3: started answering for anime schedules at all
+    /// — while it refused them it returned an empty enrichment, and those empties
+    /// were cached, so admitting anime changed nothing until this bump.
     public init(
         client: any TVmazeEnriching = TVmazeClient(),
-        policy: ProviderPolicy = ProviderPolicy(version: 2)
+        policy: ProviderPolicy = ProviderPolicy(version: 3)
     ) {
         self.client = client
         self.policy = policy
     }
 
     public func enrich(_ query: MetadataQuery, missing: Set<MetadataField>) async -> MetadataEnrichment {
-        guard query.contentType == .tvShow else { return MetadataEnrichment() }
+        // Anime is admitted for the SCHEDULE only. AniList owns anime identity, art
+        // and score and stays first in that chain — but it models a series as
+        // absolute-numbered with no season (an anime "season" is a separate AniList
+        // entry), and an episode with no season can't be placed in a season's rail.
+        // TVmaze numbers per season, matching how the library itself is organised,
+        // so it supplies the run while AniList still supplies the next episode.
+        //
+        // The configured priority already lists TVmaze as an anime schedule source
+        // (`schedule(.anime, [.anilist, .tvdb, .tvmaze])`); this guard was silently
+        // contradicting it.
+        let wantsSchedule = missing.contains(.nextAiringEpisode)
+        switch query.contentType {
+        case .tvShow: break
+        case .anime where wantsSchedule: break
+        default: return MetadataEnrichment()
+        }
         var out = MetadataEnrichment()
 
-        if missing.contains(.nextAiringEpisode) {
+        if wantsSchedule {
             let now = Date()
             // The full listing first — it fills the whole upcoming run and the
             // cadence in one pass. `nextEpisode` stays the fallback for a show whose

@@ -100,7 +100,14 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         if !backdropCandidates.isEmpty {
             fields.formUnion([.backdropURL, .homeHero, .detailBackdrop])
         }
-        if upcomingEpisode != nil { fields.insert(.nextAiringEpisode) }
+        // A schedule request wants the whole upcoming run, so the single next
+        // episode is only a partial answer and the field stays open for a provider
+        // that can list. This matters most for anime: AniList leads that chain and
+        // reports an absolute episode number with no season, which can't be placed
+        // in a season's rail — leaving the field open lets TVmaze, which numbers
+        // per season, still be asked. When no provider can list, every one is tried
+        // once (`triedForField` prevents repeats) and the singular survives.
+        if !upcomingEpisodes.isEmpty { fields.insert(.nextAiringEpisode) }
         return fields
     }
 
@@ -132,13 +139,19 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         if score == nil { score = other.score }
         // Schedule: first provider (in configured order) to report a next episode
         // wins, mirroring the priority-respecting merge used for fields above.
-        if upcomingEpisode == nil, !present.contains(.nextAiringEpisode) {
-            upcomingEpisode = other.upcomingEpisode
-            // The list and cadence travel with the episode that won: they describe
-            // the same provider's answer, so taking them from a later provider would
-            // pair one source's run with another's next episode.
-            upcomingEpisodes = other.upcomingEpisodes
-            cadence = other.cadence
+        if !present.contains(.nextAiringEpisode) {
+            if !other.upcomingEpisodes.isEmpty, upcomingEpisodes.isEmpty {
+                // A provider that lists the whole run supersedes one that reported
+                // only the next episode. Its singular is taken too: the list and the
+                // next episode must describe the same source, or a per-season run
+                // would be paired with an absolute-numbered next episode.
+                upcomingEpisodes = other.upcomingEpisodes
+                upcomingEpisode = other.upcomingEpisode ?? upcomingEpisode
+                cadence = other.cadence ?? cadence
+            } else if upcomingEpisode == nil {
+                upcomingEpisode = other.upcomingEpisode
+                cadence = other.cadence
+            }
         }
         // Keep the first non-empty candidate set (one response serves both screens),
         // unless the caller already has a backdrop from a higher-priority source.

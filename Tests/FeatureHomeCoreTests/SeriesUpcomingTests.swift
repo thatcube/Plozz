@@ -67,17 +67,83 @@ final class SeriesUpcomingTests: XCTestCase {
         XCTAssertTrue(items.isEmpty)
     }
 
-    func testDropsAbsoluteNumberedEntriesThatKnowNoSeason() {
-        // AniList reports an absolute episode number and no season; attributing it to
-        // a season would be a guess.
+    private func absolute(_ number: Int, daysFromNow: Int) -> UpcomingEpisode {
+        UpcomingEpisode(
+            seriesIdentity: .external(source: "anilist", value: "1"),
+            absoluteEpisodeNumber: number,
+            airDate: now.addingTimeInterval(Double(daysFromNow) * 86_400),
+            datePrecision: .dateAndTime,
+            source: .anilist,
+            refreshedAt: now
+        )
+    }
+
+    func testAcceptsAnAbsoluteEntryThatContinuesAnAbsoluteOrderedLibrary() {
+        // A library using absolute ordering (Plex's absolute mode, long-running
+        // shonen) shows E1086, so AniList's absolute 1087 is the next episode.
         let items = SeriesUpcoming.placeholders(
-            for: 3,
+            for: 1,
             seriesID: "s1",
             seriesTitle: "One Piece",
-            ownedEpisodes: [],
-            schedule: [upcoming(season: nil, episode: nil, daysFromNow: 3)]
+            ownedEpisodes: [owned(season: 1, episode: 1086)],
+            schedule: [absolute(1087, daysFromNow: 5)]
+        )
+        XCTAssertEqual(items.map(\.episodeNumber), [1087])
+    }
+
+    func testRejectsAnAbsoluteEntryAgainstAPerSeasonLibrary() {
+        // The same library organised per season shows E4; an "episode 1087" card
+        // beside it would be unrelated to what's on screen.
+        let items = SeriesUpcoming.placeholders(
+            for: 23,
+            seriesID: "s1",
+            seriesTitle: "One Piece",
+            ownedEpisodes: [owned(season: 23, episode: 4)],
+            schedule: [absolute(1087, daysFromNow: 5)]
         )
         XCTAssertTrue(items.isEmpty)
+    }
+
+    func testAcceptsAnAbsoluteEntryForASingleSeasonAnime() {
+        // Seasonal cour anime: absolute and per-season numbering coincide, so
+        // AniList's absolute 5 correctly continues a library showing E1–E4.
+        let items = SeriesUpcoming.placeholders(
+            for: 1,
+            seriesID: "s1",
+            seriesTitle: "Cour Anime",
+            ownedEpisodes: (1...4).map { owned(season: 1, episode: $0) },
+            schedule: [absolute(5, daysFromNow: 6)]
+        )
+        XCTAssertEqual(items.map(\.episodeNumber), [5])
+    }
+
+    func testRejectsAnAbsoluteEntryWhenNothingIsOwned() {
+        // With no episodes on screen there is no sequence to continue, so there is
+        // nothing to match against and the entry stays out rather than being guessed.
+        let items = SeriesUpcoming.placeholders(
+            for: 1,
+            seriesID: "s1",
+            seriesTitle: "Anime",
+            ownedEpisodes: [],
+            schedule: [absolute(5, daysFromNow: 3)]
+        )
+        XCTAssertTrue(items.isEmpty)
+    }
+
+    func testPerSeasonEntriesStillWinWhenBothNumberingsAreOffered() {
+        // AniList and TVmaze can both answer; the per-season entry matches the
+        // library's own shape and must not be crowded out by the absolute one.
+        let items = SeriesUpcoming.placeholders(
+            for: 1,
+            seriesID: "s1",
+            seriesTitle: "Anime",
+            ownedEpisodes: (1...4).map { owned(season: 1, episode: $0) },
+            schedule: [
+                upcoming(season: 1, episode: 5, daysFromNow: 6, title: "Per season"),
+                absolute(5, daysFromNow: 6),
+            ]
+        )
+        XCTAssertEqual(items.first?.title, "Per season")
     }
 
     func testPlaceholdersAreNeverPlayable() {

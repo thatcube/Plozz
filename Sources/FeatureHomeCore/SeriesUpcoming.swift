@@ -11,10 +11,24 @@ public enum SeriesUpcoming {
     /// Placeholder items for the episodes of `season` that haven't aired yet.
     ///
     /// Matched on season number rather than season id: a schedule provider knows
-    /// nothing about the ids on the user's server. Anime providers report only an
-    /// absolute episode number and no season (see ``UpcomingEpisode``), so those
-    /// entries can't be attributed to a season and are deliberately dropped here
-    /// rather than guessed into one.
+    /// nothing about the ids on the user's server.
+    ///
+    /// ## Two numbering conventions
+    /// Anime is split. Long-running shonen (One Piece, Detective Conan) is numbered
+    /// **absolutely** — "episode 1087", not "S23E17" — while seasonal cour anime and
+    /// western TV are numbered **per season**. Libraries follow suit: media servers
+    /// usually organise by season, but Plex has an explicit absolute mode. Providers
+    /// disagree too: AniList reports absolute numbers with no season, TVmaze and
+    /// TheTVDB report per-season.
+    ///
+    /// So neither form is "correct" — what matters is that a placeholder matches the
+    /// numbering **the library beside it is using**, or the card reads as unrelated
+    /// to the episodes it sits next to. Rather than guess a conversion (which
+    /// ``UpcomingEpisode`` explicitly forbids), an entry is accepted when it
+    /// *continues the sequence already on screen*: a per-season entry whose season
+    /// matches, or an absolute entry that carries on from the highest owned episode
+    /// number. A library showing E4 accepts absolute 5 and rejects absolute 1087;
+    /// one showing E1086 accepts 1087. Neither case invents a number.
     ///
     /// Entries already owned are filtered out: a server that carries an episode
     /// early (or a schedule that lags a release) must not produce a duplicate card
@@ -29,23 +43,28 @@ public enum SeriesUpcoming {
     ) -> [MediaItem] {
         guard let seasonNumber else { return [] }
         let ownedNumbers = Set(ownedEpisodes.compactMap(\.episodeNumber))
+        let highestOwned = ownedNumbers.max()
         return schedule
-            .filter { $0.seasonNumber == seasonNumber }
-            .filter { episode in
-                guard let number = episode.episodeNumber else { return false }
-                return !ownedNumbers.contains(number)
+            .compactMap { episode -> (UpcomingEpisode, Int)? in
+                guard let number = placedNumber(
+                    for: episode,
+                    seasonNumber: seasonNumber,
+                    highestOwned: highestOwned
+                ) else { return nil }
+                return ownedNumbers.contains(number) ? nil : (episode, number)
             }
-            .sorted { $0.airDate < $1.airDate }
-            .map { episode in
-                MediaItem(
+            .sorted { $0.0.airDate < $1.0.airDate }
+            .map { pair in
+                let (episode, number) = pair
+                return MediaItem(
                     // Namespaced so it can never collide with a real server id, and
                     // is stable across refreshes so focus survives a reload.
-                    id: "upcoming:\(seriesID ?? "series"):s\(seasonNumber)e\(episode.episodeNumber ?? 0)",
-                    title: episode.title ?? "Episode \(episode.episodeNumber ?? 0)",
+                    id: "upcoming:\(seriesID ?? "series"):s\(seasonNumber)e\(number)",
+                    title: episode.title ?? "Episode \(number)",
                     kind: .episode,
                     parentTitle: seriesTitle,
                     seasonNumber: seasonNumber,
-                    episodeNumber: episode.episodeNumber,
+                    episodeNumber: number,
                     seriesID: seriesID,
                     // The series' own LANDSCAPE artwork, never an episode still: an
                     // unaired episode rarely has one, and borrowing a neighbouring
@@ -62,6 +81,35 @@ public enum SeriesUpcoming {
                 )
             }
     }
+
+    /// The episode number this entry should carry in `seasonNumber`'s rail, or `nil`
+    /// when it belongs to another season or uses a numbering the library isn't.
+    ///
+    /// See ``placeholders(for:seriesID:seriesTitle:ownedEpisodes:schedule:seriesArtwork:)``
+    /// for why this is matched rather than converted.
+    static func placedNumber(
+        for episode: UpcomingEpisode,
+        seasonNumber: Int,
+        highestOwned: Int?
+    ) -> Int? {
+        // Per-season: the provider states a season, so it either matches or doesn't.
+        if let providerSeason = episode.seasonNumber {
+            guard providerSeason == seasonNumber, let number = episode.episodeNumber else { return nil }
+            return number
+        }
+        // Absolute (AniList): usable only where it continues what the library shows,
+        // which is exactly when the library is absolute-ordered too. With nothing
+        // owned there is no sequence to continue, so it stays out.
+        guard let absolute = episode.absoluteEpisodeNumber, let highestOwned else { return nil }
+        return absolute > highestOwned && absolute <= highestOwned + Self.maximumSequenceGap
+            ? absolute
+            : nil
+    }
+
+    /// How far past the highest owned episode an absolute number may sit and still
+    /// count as continuing the sequence. Covers a viewer a few episodes behind
+    /// without letting a wholly different numbering (E4 vs 1087) slip through.
+    static let maximumSequenceGap = 26
 
     /// The hero's air-schedule line, e.g. "New episodes Fridays" or
     /// "New episode Aug 5" — or `nil` when there is nothing truthful to say.

@@ -24,6 +24,7 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_CATALOG = REPO / "App/Resources/Localizable.xcstrings"
+GUARD_CONFIG = REPO / "tools/l10n-guard.json"
 INFO_CATALOGS = {
     "tvOS.NSLocalNetworkUsageDescription": (
         REPO / "App/Resources/InfoPlist.xcstrings",
@@ -57,6 +58,18 @@ LANGUAGE_TAG_RE = re.compile(
 
 class ImportErrorDetail(Exception):
     """One language file is structurally unsafe to import."""
+
+
+def never_translate_terms() -> list[str]:
+    config = load_json(GUARD_CONFIG)
+    terms = config.get("neverTranslate", [])
+    if not isinstance(terms, list) or not all(
+        isinstance(term, str) for term in terms
+    ):
+        raise ImportErrorDetail(
+            f"{GUARD_CONFIG.relative_to(REPO)}: neverTranslate must be a string list"
+        )
+    return sorted(terms, key=len, reverse=True)
 
 
 def parse_args() -> argparse.Namespace:
@@ -274,6 +287,7 @@ def validate_localization(
     source_entry: dict[str, Any],
     localization: Any,
     allow_translated_state: bool,
+    protected_terms: list[str] | None = None,
 ) -> tuple[int, int]:
     if not isinstance(localization, dict):
         raise ImportErrorDetail(
@@ -286,6 +300,7 @@ def validate_localization(
         )
 
     unchanged = 0
+    translated_values: list[str] = []
     for path, unit in units:
         value = unit.get("value")
         state = unit.get("state")
@@ -304,6 +319,28 @@ def validate_localization(
             )
         if value == source_text(key, source_entry):
             unchanged += 1
+        translated_values.append(value)
+
+    if protected_terms:
+        source_values = [
+            unit.get("value", "")
+            for _, unit in string_units(
+                source_entry.get("localizations", {}).get("en", {})
+            )
+        ]
+        source_values.append(source_text(key, source_entry))
+        source_blob = "\n".join(source_values)
+        translated_blob = "\n".join(translated_values)
+        missing_terms = [
+            term
+            for term in protected_terms
+            if term in source_blob and term not in translated_blob
+        ]
+        if missing_terms:
+            raise ImportErrorDetail(
+                f"{language}: {key!r}: protected term(s) changed or removed: "
+                + ", ".join(missing_terms)
+            )
 
     expected = expected_placeholder_types(key, source_entry)
     try:
@@ -322,6 +359,7 @@ def validate_language(
     path: Path,
     catalog_strings: dict[str, Any],
     allow_translated_state: bool,
+    protected_terms: list[str] | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, int]]:
     document = load_json(path)
     language = document.get("language")
@@ -363,6 +401,7 @@ def validate_language(
             source_entry,
             translations[key],
             allow_translated_state,
+            protected_terms,
         )
         unit_count += units
         unchanged += same
@@ -455,10 +494,14 @@ def main() -> int:
     }
     summaries: dict[str, dict[str, int]] = {}
     try:
+        protected_terms = never_translate_terms()
         for path in files:
             document = load_json(path)
             language, translations, summary = validate_language(
-                path, strings, args.allow_translated_state
+                path,
+                strings,
+                args.allow_translated_state,
+                protected_terms,
             )
             for key, localization in translations.items():
                 merged["strings"][key].setdefault("localizations", {})[

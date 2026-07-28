@@ -137,6 +137,49 @@ class TranslationImportTests(unittest.TestCase):
             path.write_text('{"language":"ja","value":"日本語"}', encoding="utf-8")
             self.assertEqual(l10n_import.load_json(path)["value"], "日本語")
 
+    def test_protected_brand_cannot_be_translated_or_removed(self) -> None:
+        source_entry = {
+            "localizations": {
+                "en": {
+                    "stringUnit": {
+                        "state": "translated",
+                        "value": "Connect to Plex",
+                    }
+                }
+            }
+        }
+        with self.assertRaisesRegex(
+            l10n_import.ImportErrorDetail, "protected term.*Plex"
+        ):
+            l10n_import.validate_localization(
+                "de",
+                "connect.plex",
+                source_entry,
+                unit("Mit dem Server verbinden"),
+                allow_translated_state=False,
+                protected_terms=["Plex"],
+            )
+
+    def test_protected_brand_can_move_with_grammar(self) -> None:
+        source_entry = {
+            "localizations": {
+                "en": {
+                    "stringUnit": {
+                        "state": "translated",
+                        "value": "Connect to Plex",
+                    }
+                }
+            }
+        }
+        l10n_import.validate_localization(
+            "de",
+            "connect.plex",
+            source_entry,
+            unit("Mit Plex verbinden"),
+            allow_translated_state=False,
+            protected_terms=["Plex"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

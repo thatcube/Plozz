@@ -1001,7 +1001,8 @@ struct SeriesDetailView: View {
         guard let schedule = viewModel.state.value?.upcomingSchedule else { return nil }
         return SeriesUpcoming.heroLine(
             nextEpisode: schedule.upcomingEpisode,
-            cadence: schedule.cadence
+            cadence: schedule.cadence,
+            schedule: schedule.upcomingEpisodes
         )
     }
 

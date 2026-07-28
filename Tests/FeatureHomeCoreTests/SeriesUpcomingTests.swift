@@ -261,4 +261,129 @@ final class SeriesUpcomingTests: XCTestCase {
     func testOrdinaryEpisodesHaveNoAirDateCaption() {
         XCTAssertNil(SeriesUpcoming.cardCaption(for: owned(season: 1, episode: 1), now: now, calendar: calendar))
     }
+    // MARK: Batch drops
+
+    func testNamesAFullSeasonDropRatherThanAPremiere() {
+        // Every upcoming episode of the season shares one date: the whole season
+        // lands at once, which is different news from a weekly premiere.
+        let batch = (1...8).map { upcoming(season: 7, episode: $0, daysFromNow: 40) }
+        let line = SeriesUpcoming.heroLine(
+            nextEpisode: batch[0],
+            cadence: nil,
+            schedule: batch,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(line?.hasPrefix("Full season releases"), true)
+        XCTAssertFalse(
+            line?.contains("available") == true,
+            "Plozz reads the viewer's own server; it can't promise the episodes will be in their library"
+        )
+    }
+
+    func testTreatsAMultiEpisodePremiereFollowedByWeeklyAsANewSeason() {
+        // Percy Jackson opens with two episodes on one day, then goes weekly. The
+        // ongoing cadence is what matters after opening night.
+        var run = [
+            upcoming(season: 3, episode: 1, daysFromNow: 40),
+            upcoming(season: 3, episode: 2, daysFromNow: 40),
+        ]
+        run += (3...8).map { upcoming(season: 3, episode: $0, daysFromNow: 40 + ($0 - 2) * 7) }
+        let line = SeriesUpcoming.heroLine(
+            nextEpisode: run[0],
+            cadence: nil,
+            schedule: run,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(line?.hasPrefix("New season"), true)
+    }
+
+    func testASingleKnownEpisodeIsNotABatch() {
+        // One dated episode says nothing about how the rest of the season lands.
+        let only = [upcoming(season: 4, episode: 1, daysFromNow: 30)]
+        let line = SeriesUpcoming.heroLine(
+            nextEpisode: only[0],
+            cadence: nil,
+            schedule: only,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(line?.hasPrefix("New season"), true)
+    }
+
+    func testABatchOfAnotherSeasonDoesNotChangeThisPremiere() {
+        let mixed = [
+            upcoming(season: 3, episode: 1, daysFromNow: 40),
+            upcoming(season: 4, episode: 1, daysFromNow: 200),
+            upcoming(season: 4, episode: 2, daysFromNow: 200),
+        ]
+        let line = SeriesUpcoming.heroLine(
+            nextEpisode: mixed[0],
+            cadence: nil,
+            schedule: mixed,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(line?.hasPrefix("New season"), true)
+    }
+
+    // MARK: Weekly runs
+
+    func testClaimsEveryFridayOnlyWhenTheDatesProveIt() {
+        // Three episodes, each a week apart: the pattern is visible in the data.
+        let run = (5...8).map { upcoming(season: 3, episode: $0, daysFromNow: ($0 - 5) * 7 + 10) }
+        let line = SeriesUpcoming.heroLine(
+            nextEpisode: run[0],
+            cadence: nil,
+            schedule: run,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(line?.hasPrefix("New episode every "), true)
+    }
+
+    func testDoesNotClaimEveryWeekFromASingleRemainingEpisode() {
+        // A lone finale says nothing about a continuing schedule.
+        let finale = [upcoming(season: 3, episode: 10, daysFromNow: 12)]
+        let line = SeriesUpcoming.heroLine(
+            nextEpisode: finale[0],
+            cadence: nil,
+            schedule: finale,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertFalse(line?.contains("every") == true)
+    }
+
+    func testDoesNotClaimEveryWeekAcrossAMidSeasonBreak() {
+        // A gap breaks the run, so the weekly claim would be wrong past the break.
+        let broken = [
+            upcoming(season: 3, episode: 5, daysFromNow: 10),
+            upcoming(season: 3, episode: 6, daysFromNow: 17),
+            upcoming(season: 3, episode: 7, daysFromNow: 45),
+        ]
+        let line = SeriesUpcoming.heroLine(
+            nextEpisode: broken[0],
+            cadence: nil,
+            schedule: broken,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertFalse(line?.contains("every") == true)
+    }
+
+    func testFallsBackToTheStatedDayWhenTheRunIsUnproven() {
+        // Only the provider's stated slot is known, so it is phrased without "every".
+        let sparse = [upcoming(season: 3, episode: 5, daysFromNow: 20)]
+        let line = SeriesUpcoming.heroLine(
+            nextEpisode: sparse[0],
+            cadence: AirCadence(weekdays: [6]),
+            schedule: sparse,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(line, "New episodes Fridays")
+    }
+
 }

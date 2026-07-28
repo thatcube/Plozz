@@ -366,7 +366,7 @@ struct DetailHeroView: View {
     /// button: there is nothing to press.
     @ViewBuilder
     private func scheduleBadge(_ text: String) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         Text(text)
             .font(.system(size: 24, weight: .semibold))
             .foregroundStyle(Color.primary)

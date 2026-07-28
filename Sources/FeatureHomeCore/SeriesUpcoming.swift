@@ -120,17 +120,37 @@ public enum SeriesUpcoming {
     public static func heroLine(
         nextEpisode: UpcomingEpisode?,
         cadence: AirCadence?,
+        schedule: [UpcomingEpisode] = [],
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> String? {
         guard let nextEpisode else { return nil }
         let isSeasonPremiere = nextEpisode.episodeNumber == 1
 
+        // A whole season landing at once is different news from a weekly run, so it
+        // is named as such. Deliberately says "releases", never "available": Plozz
+        // reads the viewer's own server, and after a release someone still has to
+        // acquire the episodes (or request them through Seerr) — "available" would
+        // promise something about their library that the app can't deliver.
+        if isSeasonPremiere, isFullSeasonDrop(schedule, premiere: nextEpisode) {
+            return "Full season releases \(formattedDate(nextEpisode.airDate, now: now, calendar: calendar))"
+        }
+
+        // "every Friday" is a claim about the *future*, so it is only made when the
+        // dated episodes prove it: consecutive upcoming episodes exactly a week
+        // apart. A provider's stated airing day describes intent and survives a
+        // mid-season break or a finale, so on its own it isn't evidence the pattern
+        // continues.
+        if !isSeasonPremiere, isWeeklyRun(schedule, from: nextEpisode, calendar: calendar) {
+            let weekday = calendar.component(.weekday, from: nextEpisode.airDate)
+            return "New episode every \(weekdayName(weekday))"
+        }
+
         if let cadence, cadence.isSingleWeekday, let weekday = cadence.weekdays.first,
            !isSeasonPremiere, !isWithinAWeek(nextEpisode.airDate, from: now, calendar: calendar) {
-            // A repeating cadence is the more useful phrasing, but only once the
-            // next episode is far enough out that naming the day isn't vaguer than
-            // naming the date — and never for a premiere, where the date is the news.
+            // Falls back to the provider's stated day when we can't see enough dated
+            // episodes to prove the run ourselves — phrased without "every", since
+            // this is the show's usual slot rather than a verified upcoming pattern.
             return "New episodes \(pluralWeekday(weekday))"
         }
 
@@ -139,6 +159,51 @@ public enum SeriesUpcoming {
             return "\(label) \(relative)"
         }
         return "\(label) \(formattedDate(nextEpisode.airDate, calendar: calendar))"
+    }
+
+    /// Whether the upcoming episodes prove a weekly run: at least two more after
+    /// `next`, each exactly seven days after the last.
+    ///
+    /// Requiring two gaps (three episodes) rather than one keeps a coincidence — a
+    /// finale a week after the penultimate episode — from being read as an ongoing
+    /// weekly schedule.
+    static func isWeeklyRun(
+        _ schedule: [UpcomingEpisode],
+        from next: UpcomingEpisode,
+        calendar: Calendar
+    ) -> Bool {
+        let upcoming = schedule
+            .filter { $0.airDate >= next.airDate }
+            .sorted { $0.airDate < $1.airDate }
+        guard upcoming.count >= 3 else { return false }
+        for (earlier, later) in zip(upcoming, upcoming.dropFirst()) {
+            let days = calendar.dateComponents(
+                [.day],
+                from: calendar.startOfDay(for: earlier.airDate),
+                to: calendar.startOfDay(for: later.airDate)
+            ).day
+            guard days == 7 else { return false }
+        }
+        return true
+    }
+
+    /// Whether the upcoming run is a single batch drop rather than a weekly release.
+    ///
+    /// Read from the dated episodes themselves rather than a provider's stated
+    /// cadence: every upcoming episode sharing the premiere's air date *is* a
+    /// full-season drop, whatever a schedule field claims.
+    ///
+    /// A premiere of two or three episodes followed by a weekly run (Percy Jackson
+    /// opens with S3E1 and S3E2 on one day, then goes weekly) is deliberately not
+    /// counted — the ongoing cadence is what matters after opening night, so it
+    /// keeps the "New season" phrasing.
+    static func isFullSeasonDrop(_ schedule: [UpcomingEpisode], premiere: UpcomingEpisode) -> Bool {
+        let season = schedule.filter { $0.seasonNumber == premiere.seasonNumber }
+        guard season.count > 1 else { return false }
+        let premiereDay = Calendar.current.startOfDay(for: premiere.airDate)
+        return season.allSatisfy {
+            Calendar.current.startOfDay(for: $0.airDate) == premiereDay
+        }
     }
 
     /// "today" / "tomorrow" / a weekday name inside the coming week, else `nil` so
@@ -173,6 +238,13 @@ public enum SeriesUpcoming {
     /// a `Calendar` built by identifier carries no locale, so its symbols are the
     /// *abbreviated* ones and this produced "Fris". Pluralising by appending "s" is
     /// English-shaped and is the fallback until the string is localized properly.
+    /// The full weekday name for a `Calendar` weekday index (1 = Sunday).
+    private static func weekdayName(_ weekday: Int) -> String {
+        let symbols = weekdayNameFormatter.weekdaySymbols ?? []
+        guard symbols.count == 7 else { return "" }
+        return symbols[max(0, min(6, weekday - 1))]
+    }
+
     private static func pluralWeekday(_ weekday: Int) -> String {
         let symbols = weekdayNameFormatter.weekdaySymbols ?? []
         guard symbols.count == 7 else { return "" }

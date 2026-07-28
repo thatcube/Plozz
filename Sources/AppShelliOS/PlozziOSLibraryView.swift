@@ -164,7 +164,7 @@ private struct PlozziOSLibraryCard: View {
                 cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
             )
 
-            Text(library.title)
+            library.displayName
                 .font(.headline)
                 .lineLimit(2)
                 .padding(.horizontal, metrics.landscapeCaptionInset)

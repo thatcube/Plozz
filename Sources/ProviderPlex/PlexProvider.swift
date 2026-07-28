@@ -111,6 +111,8 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
                 id: id,
                 title: dir.title ?? "Library",
                 kind: Self.kind(forSectionType: dir.type),
+                // A section with no name of its own gets ours, so it is copy.
+                synthesizedName: dir.title == nil ? .generic : nil,
                 imageURL: client.imageURL(path: dir.thumb ?? dir.composite, maxWidth: 400),
                 isMusic: dir.type == "artist"
             )

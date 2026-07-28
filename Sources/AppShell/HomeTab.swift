@@ -227,7 +227,7 @@ struct HomeTab: View {
                         containerKind: library.kind,
                         sourceAccountID: browse.sourceAccountID
                     ),
-                    title: library.title,
+                    title: library.displayName,
                     spoilerSettings: spoilerSettings,
                     onSelect: {
                         navigate(

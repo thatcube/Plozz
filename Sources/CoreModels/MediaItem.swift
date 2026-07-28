@@ -750,8 +750,39 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
 
 /// A browsable library/collection root (Jellyfin "view").
 public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
+    /// A library Plozz invented rather than read from a server.
+    ///
+    /// A file share has no library list, so the share provider derives buckets
+    /// from what it found; Plex and Jellyfin fall back to a generic name when a
+    /// section has none. In all of those cases the name is Plozz's own copy, and
+    /// `title` — which is otherwise a server-supplied name — is the wrong place
+    /// to translate. Views render the resource for this case and use `title`
+    /// only when it is `nil`.
+    ///
+    /// Deliberately an enum and not a `LocalizedStringResource`: this type is
+    /// `Codable` and `Hashable`, and a resource is neither hashable nor
+    /// something to persist. The enum stores which library it is; the wording
+    /// stays in the catalog and is resolved at render time.
+    public enum SynthesizedName: String, Codable, Hashable, Sendable {
+        case movies, tvShows, anime, generic
+
+        public var title: LocalizedStringResource {
+            switch self {
+            case .movies:  return "Movies"
+            case .tvShows: return "TV Shows"
+            case .anime:   return "Anime"
+            case .generic: return "Library"
+            }
+        }
+    }
+
     public var id: String
-    public var title: String  // l10n:content — library name from the server
+    /// The server's name for this library. Content — EXCEPT when
+    /// `synthesizedName` is set, in which case it is an English fallback for a
+    /// name Plozz made up, and the resource should be preferred.
+    public var title: String  // l10n:content — library name from the server; see synthesizedName
+    /// Set when `title` is Plozz's wording rather than the server's.
+    public var synthesizedName: SynthesizedName?
     public var kind: MediaItemKind
     public var imageURL: URL?
 
@@ -781,8 +812,9 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
 
     public init(
         id: String,
-        title: String,  // l10n:content — library name from the server
+        title: String,  // l10n:content — library name from the server; see synthesizedName
         kind: MediaItemKind,
+        synthesizedName: SynthesizedName? = nil,
         imageURL: URL? = nil,
         isMusic: Bool = false,
         sourceAccountID: String? = nil,
@@ -791,6 +823,7 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
     ) {
         self.id = id
         self.title = title
+        self.synthesizedName = synthesizedName
         self.kind = kind
         self.imageURL = imageURL
         self.isMusic = isMusic
@@ -837,6 +870,7 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, title, kind, imageURL, isMusic, sourceAccountID
         case additionalSourceAccountIDs, sourceContainerIDByAccount
+        case synthesizedName
     }
 
     /// Custom decoding so the cross-server fields (added after libraries were
@@ -845,6 +879,8 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
+        // Absent in anything persisted before synthesized names existed.
+        synthesizedName = try container.decodeIfPresent(SynthesizedName.self, forKey: .synthesizedName)
         kind = try container.decode(MediaItemKind.self, forKey: .kind)
         imageURL = try container.decodeIfPresent(URL.self, forKey: .imageURL)
         isMusic = try container.decodeIfPresent(Bool.self, forKey: .isMusic) ?? false

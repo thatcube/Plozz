@@ -126,6 +126,7 @@
     "Sources/ProviderShare/ShareMediaParser.swift",
     "Sources/ProviderShare/ShareMetadataResolver.swift",
     "Sources/ProviderShare/ShareNFOParser.swift",
+    "Sources/ProviderShare/ShareProvider.swift",
     "Sources/ProviderShare/ShareSeriesReconciler.swift",
     "Sources/RatingsService/TMDbRatingsProvider.swift",
     "Sources/SeerService/SeerModels.swift",

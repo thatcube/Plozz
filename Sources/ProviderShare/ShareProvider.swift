@@ -145,13 +145,16 @@ public struct ShareProvider: MediaProvider {
         let counts = await catalog.libraryCounts()
         var result: [MediaLibrary] = []
         if counts.movies > 0 {
-            result.append(MediaLibrary(id: ShareCatalogID.moviesLibrary, title: "Movies", kind: .movie))
+            result.append(MediaLibrary(id: ShareCatalogID.moviesLibrary, title: "Movies", kind: .movie,
+                                       synthesizedName: .movies))
         }
         if counts.tvSeries > 0 {
-            result.append(MediaLibrary(id: ShareCatalogID.tvLibrary, title: "TV Shows", kind: .series))
+            result.append(MediaLibrary(id: ShareCatalogID.tvLibrary, title: "TV Shows", kind: .series,
+                                       synthesizedName: .tvShows))
         }
         if counts.animeSeries > 0 {
-            result.append(MediaLibrary(id: ShareCatalogID.animeLibrary, title: "Anime", kind: .series))
+            result.append(MediaLibrary(id: ShareCatalogID.animeLibrary, title: "Anime", kind: .series,
+                                       synthesizedName: .anime))
         }
         // The raw browsable file tree, named after the share (not "Files").
         result.append(contentsOf: await store.libraries())

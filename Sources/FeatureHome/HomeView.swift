@@ -1127,7 +1127,7 @@ private struct LibraryCardView: View {
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(aggregated.library.title)
+                aggregated.library.displayName
                     .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
@@ -1171,7 +1171,7 @@ private struct LibraryCardView: View {
                 )
 
             BorderlessCardCaption(
-                title: Text(verbatim: aggregated.library.title),
+                title: aggregated.library.displayName,
                 subtitle: subtitle.isEmpty ? nil : subtitle,
                 horizontalInset: metrics.landscapeCaptionInset
             )

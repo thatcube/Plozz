@@ -28,7 +28,9 @@ public struct LibraryBrowseView: View {
     /// you're actually flying through content. Reset when the rail's eligibility
     /// goes away (a non-name sort) so re-entering name sort re-arms the reveal.
     @State private var railHasRevealed = false
-    private let title: String   // l10n:content — library name from the server
+    /// Pre-built so a synthesized library name ("Movies" on a file share) is
+    /// our translated copy while a server's own name stays verbatim.
+    private let title: Text
     private let spoilerSettings: SpoilerSettings
     private let onSelect: (MediaItem) -> Void
 
@@ -36,7 +38,7 @@ public struct LibraryBrowseView: View {
 
     public init(
         viewModel: LibraryBrowseViewModel,
-        title: String,   // l10n:content — library name from the server
+        title: Text,
         spoilerSettings: SpoilerSettings = .default,
         onSelect: @escaping (MediaItem) -> Void
     ) {
@@ -190,7 +192,7 @@ public struct LibraryBrowseView: View {
     /// sub-page.
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title)
+            title
                 .font(.largeTitle.bold())
             Spacer(minLength: PlozzTheme.Spacing.large)
             sortControl

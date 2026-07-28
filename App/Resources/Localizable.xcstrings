@@ -885,6 +885,9 @@
         }
       }
     },
+    "Anime" : {
+
+    },
     "Anonymous" : {
       "comment" : "Authentication-method option for FTP or WebDAV share setup that connects without signing in.",
       "localizations" : {
@@ -4134,6 +4137,9 @@
       }
     },
     "Move a provider here to stop using it." : {
+
+    },
+    "Movies" : {
 
     },
     "Movies & TV" : {
@@ -7832,6 +7838,9 @@
 
     },
     "TMDB v4 API Read Access Token" : {
+
+    },
+    "TV Shows" : {
 
     },
     "Tags" : {

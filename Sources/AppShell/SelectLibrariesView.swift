@@ -135,7 +135,7 @@ struct SelectLibrariesView: View {
                                         get: { appState.profileSettings.homeLibraryVisibilityModel.isEnabled(library.key) },
                                         set: { appState.profileSettings.homeLibraryVisibilityModel.setEnabled($0, for: library.key) }
                                     )) {
-                                        Text(library.library.title)
+                                        library.library.displayName
                                     }
                                     .toggleStyle(SettingsSwitchToggleStyle())
                                     .focused($focused, equals: .library(library.key))

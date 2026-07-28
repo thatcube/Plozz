@@ -138,7 +138,7 @@ struct CustomizeHomeDetailView: View {
                 } else {
                     ForEach(libraries) { library in
                         HomeRowsGroupCard(
-                            title: Text(verbatim: library.library.title),
+                            title: library.library.displayName,
                             subtitle: Text(verbatim: library.serverName),
                             providerKind: library.providerKind,
                             transportKind: library.transportKind
@@ -343,7 +343,7 @@ struct CustomizeHomeDetailView: View {
         } else {
             SettingsCheckList(
                 options: libraries,
-                title: { Text(verbatim: $0.library.title) },
+                title: { $0.library.displayName },
                 subtitle: { Text(verbatim: $0.serverName) },
                 isChecked: { isRandomLibraryOn($0.key, universe: libraries) },
                 onToggle: { toggleRandomLibrary($0.key, universe: libraries) }

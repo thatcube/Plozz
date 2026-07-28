@@ -69,6 +69,8 @@ public struct JellyfinProvider: MediaProvider {
                 id: dto.Id,
                 title: dto.Name ?? "Library",
                 kind: Self.kind(forCollectionType: dto.CollectionType),
+                // A view with no name of its own gets ours, so it is copy.
+                synthesizedName: dto.Name == nil ? .generic : nil,
                 imageURL: Self.imageURL(for: dto, kind: .primary, maxWidth: 400, client: client),
                 isMusic: dto.CollectionType == "music"
             )

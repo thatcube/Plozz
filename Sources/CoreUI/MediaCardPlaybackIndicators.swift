@@ -3,7 +3,16 @@ import CoreModels
 import SwiftUI
 
 public struct MediaCardPlaybackIndicators: View {
-    private let item: MediaItem
+    /// Only the four `MediaItem` fields this view actually renders.
+    ///
+    /// SwiftUI compares a view's stored inputs field-by-field to decide whether
+    /// to re-run its body, and `MediaItem` has 56 stored properties including
+    /// several arrays. Storing the whole item made every card pay a 56-field
+    /// deep comparison — plus a full struct copy — on every update pass. In a
+    /// Time Profiler trace of ordinary browsing, `MediaItem.__derived_struct_equals`
+    /// and `initializeWithCopy for MediaItem` were among the hottest symbols on
+    /// the main thread. Narrowing the input is Apple's prescribed fix.
+    private let playback: MediaPlaybackIndicatorState
     private let hidesStatus: Bool
     private let progressBarEnabled: Bool
     private let badgeInset: CGFloat
@@ -32,7 +41,7 @@ public struct MediaCardPlaybackIndicators: View {
         progressBottomInset: CGFloat = 0,
         downloadState: MediaDownloadBadgeState? = nil
     ) {
-        self.item = item
+        self.playback = MediaPlaybackIndicatorState(item)
         self.hidesStatus = hidesStatus
         self.progressBarEnabled = showsProgressBar
         self.badgeInset = badgeInset
@@ -73,7 +82,7 @@ public struct MediaCardPlaybackIndicators: View {
     }
 
     private var showsProgressBar: Bool {
-        MediaPlaybackIndicatorPresentation.showsProgress(for: item)
+        MediaPlaybackIndicatorPresentation.showsProgress(for: playback)
     }
 
     /// Any chrome along the card's bottom edge that needs the artwork darkened
@@ -84,7 +93,7 @@ public struct MediaCardPlaybackIndicators: View {
 
     @ViewBuilder
     private var statusIndicator: some View {
-        if PosterCardPresentation.showsWatchStatus(for: item.kind) {
+        if PosterCardPresentation.showsWatchStatus(for: playback.kind) {
             switch watchStatusIndicator {
             case .watched:
                 watchedBadge
@@ -97,7 +106,7 @@ public struct MediaCardPlaybackIndicators: View {
     @ViewBuilder
     private var watchedBadge: some View {
         if MediaPlaybackIndicatorPresentation.showsWatchedBadge(
-            for: item,
+            for: playback,
             hidesStatus: hidesStatus
         ) {
             let size = metrics.watchedBadgeSize
@@ -128,7 +137,7 @@ public struct MediaCardPlaybackIndicators: View {
     @ViewBuilder
     private var unwatchedCorner: some View {
         if MediaPlaybackIndicatorPresentation.showsUnwatchedFlag(
-            for: item,
+            for: playback,
             hidesStatus: hidesStatus
         ) {
             TopTrailingCornerFlag()
@@ -186,7 +195,7 @@ public struct MediaCardPlaybackIndicators: View {
 
     @ViewBuilder
     private var progressBar: some View {
-        if showsProgressBar, let percentage = item.playedPercentage {
+        if showsProgressBar, let percentage = playback.playedPercentage {
             let shadowRadius = progressHeight * 0.25
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
@@ -219,29 +228,46 @@ public struct MediaCardPlaybackIndicators: View {
     }
 }
 
+/// The watch-state facts a card's indicators draw from — four values lifted out
+/// of `MediaItem` so a card's comparison surface is bounded by what it shows.
+/// See ``MediaCardPlaybackIndicators``'s stored property for the measurements.
+public struct MediaPlaybackIndicatorState: Equatable, Sendable {
+    public let kind: MediaItemKind
+    public let isPlayed: Bool
+    public let playedPercentage: Double?
+    public let resumePosition: Double?
+
+    public init(_ item: MediaItem) {
+        kind = item.kind
+        isPlayed = item.isPlayed
+        playedPercentage = item.playedPercentage
+        resumePosition = item.resumePosition
+    }
+}
+
 enum MediaPlaybackIndicatorPresentation {
-    static func showsProgress(for item: MediaItem) -> Bool {
+    static func showsProgress(for item: MediaPlaybackIndicatorState) -> Bool {
         guard PosterCardPresentation.showsPlaybackIndicators(for: item.kind),
               let percentage = item.playedPercentage
         else { return false }
         return percentage > 0.01 && percentage < 0.99
     }
 
-    static func hasStartedPlayback(_ item: MediaItem) -> Bool {
+    static func hasStartedPlayback(_ item: MediaPlaybackIndicatorState) -> Bool {
         if let percentage = item.playedPercentage, percentage > 0 { return true }
         if let resume = item.resumePosition, resume > 0 { return true }
         return false
     }
 
     static func showsWatchedBadge(
-        for item: MediaItem,
+        for item: MediaPlaybackIndicatorState,
         hidesStatus: Bool
     ) -> Bool {
         item.isPlayed && !showsProgress(for: item) && !hidesStatus
     }
 
     static func showsUnwatchedFlag(
-        for item: MediaItem,
+        for item: MediaPlaybackIndicatorState,
         hidesStatus: Bool
     ) -> Bool {
         !item.isPlayed && !hasStartedPlayback(item) && !hidesStatus

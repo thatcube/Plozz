@@ -34,10 +34,10 @@ final class PosterCardPresentationTests: XCTestCase {
             isPlayed: true
         )
 
-        XCTAssertTrue(MediaPlaybackIndicatorPresentation.showsProgress(for: item))
+        XCTAssertTrue(MediaPlaybackIndicatorPresentation.showsProgress(for: MediaPlaybackIndicatorState(item)))
         XCTAssertFalse(
             MediaPlaybackIndicatorPresentation.showsWatchedBadge(
-                for: item,
+                for: MediaPlaybackIndicatorState(item),
                 hidesStatus: false
             )
         )
@@ -54,13 +54,13 @@ final class PosterCardPresentationTests: XCTestCase {
 
         XCTAssertTrue(
             MediaPlaybackIndicatorPresentation.showsUnwatchedFlag(
-                for: untouched,
+                for: MediaPlaybackIndicatorState(untouched),
                 hidesStatus: false
             )
         )
         XCTAssertFalse(
             MediaPlaybackIndicatorPresentation.showsUnwatchedFlag(
-                for: started,
+                for: MediaPlaybackIndicatorState(started),
                 hidesStatus: false
             )
         )

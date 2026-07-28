@@ -503,7 +503,11 @@ struct PlaybackDetailView: View {
     }
 
     private var skipIntervalsSection: SettingsSplitSection {
-        SettingsSplitSection(id: "skip-intervals", header: "Remote", rows: [
+        SettingsSplitSection(id: "skip-intervals", header: LocalizedStringResource(
+            "settings.section.remoteControl",
+            defaultValue: "Remote",
+            comment: "Settings section for how the Apple TV remote behaves, e.g. skip intervals. The physical remote control, not a remote server."
+        ), rows: [
             SettingsSplitRow(
                 id: "skip-intervals",
                 title: "Skip Intervals",
@@ -530,7 +534,11 @@ struct PlaybackDetailView: View {
     }
 
     private var resumeSection: SettingsSplitSection {
-        SettingsSplitSection(id: "resume", header: "Resume", rows: [
+        SettingsSplitSection(id: "resume", header: LocalizedStringResource(
+            "settings.section.resume",
+            defaultValue: "Resume",
+            comment: "Settings section heading for resume behaviour, e.g. how far to rewind when resuming. A noun naming the topic, not the Resume button that starts playback."
+        ), rows: [
             SettingsSplitRow(
                 id: "resume-rewind",
                 title: "Rewind on resume",

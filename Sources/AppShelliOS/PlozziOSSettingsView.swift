@@ -1583,7 +1583,11 @@ private struct PlozziOSPlaybackSettingsView: View {
                 )
             }
 
-            SettingsSectionGroup("Tracks") {
+            SettingsSectionGroup(LocalizedStringResource(
+                "settings.section.tracks",
+                defaultValue: "Tracks",
+                comment: "Settings section for default audio and subtitle track selection. Media streams inside a video file, not music tracks."
+            )) {
                 Picker("Preferred audio", selection: $model.settings.audioLanguagePreference) {
                     ForEach(Self.audioOptions, id: \.self) { preference in
                         Text(audioName(preference)).tag(preference)

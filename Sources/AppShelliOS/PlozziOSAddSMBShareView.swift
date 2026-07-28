@@ -42,7 +42,11 @@ struct PlozziOSAddSMBShareView: View {
                 Text("Leave both fields empty for a guest share.")
             }
 
-            SettingsSectionGroup("Share") {
+            SettingsSectionGroup(LocalizedStringResource(
+                "smbShare.section.share",
+                defaultValue: "Share",
+                comment: "Section header for the SMB share name when adding a network share. The noun for a shared network folder, not the verb 'to share'."
+            )) {
                 TextField("Share name", text: $share)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()

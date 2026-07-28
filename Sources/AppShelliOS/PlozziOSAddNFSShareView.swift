@@ -34,7 +34,11 @@ struct PlozziOSAddNFSShareView: View {
                 .disabled(!canProbe || isLoading)
             }
 
-            SettingsSectionGroup("Location") {
+            SettingsSectionGroup(LocalizedStringResource(
+                "nfsShare.section.location",
+                defaultValue: "Location",
+                comment: "Section header for the server address and export path when adding an NFS share. A filesystem location, not a geographic one."
+            )) {
                 TextField("Export path", text: $exportPath, prompt: Text("/volume/media"))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()

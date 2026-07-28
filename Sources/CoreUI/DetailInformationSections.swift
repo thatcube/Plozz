@@ -114,7 +114,11 @@ public struct DetailInformationSections: View {
     private var iPhoneStack: some View {
         VStack(alignment: .leading, spacing: sectionSpacing) {
             if hasAbout {
-                detailSection(title: "About") { aboutContent }
+                detailSection(title: LocalizedStringResource(
+                    "mediaDetail.section.about",
+                    defaultValue: "About",
+                    comment: "Header of the synopsis section on a movie or series detail page. A noun meaning 'about this title', not the Settings > About page."
+                )) { aboutContent }
             }
             if !item.ratings.isEmpty {
                 detailSection(title: "Ratings") { ratingsTiles }
@@ -146,7 +150,11 @@ public struct DetailInformationSections: View {
             if hasAbout || !item.ratings.isEmpty {
                 GridRow(alignment: .top) {
                     if hasAbout {
-                        headedSection(title: "About") { aboutContent }
+                        headedSection(title: LocalizedStringResource(
+                            "mediaDetail.section.about",
+                            defaultValue: "About",
+                            comment: "Header of the synopsis section on a movie or series detail page. A noun meaning 'about this title', not the Settings > About page."
+                        )) { aboutContent }
                             .gridCellColumns(4)
                     } else {
                         Color.clear.gridCellColumns(4)
@@ -190,7 +198,7 @@ public struct DetailInformationSections: View {
     }
 
     private func headedSection<Content: View>(
-        title: LocalizedStringKey,
+        title: LocalizedStringResource,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -596,7 +604,7 @@ public struct DetailInformationSections: View {
     }
 
     private func detailSection<Content: View>(
-        title: LocalizedStringKey,
+        title: LocalizedStringResource,
         contentSpacing: CGFloat = 14,
         @ViewBuilder content: () -> Content
     ) -> some View {

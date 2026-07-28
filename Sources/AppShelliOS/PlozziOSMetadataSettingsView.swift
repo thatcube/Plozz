@@ -271,7 +271,7 @@ struct PlozziOSMetadataSettingsView: View {
                     Text("Cache and provider health")
                         .font(.subheadline)
                         .plozzForeground(.secondary)
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                         .font(.caption.weight(.semibold))
                         .plozzForeground(.tertiary)
                 }

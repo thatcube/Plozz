@@ -381,7 +381,7 @@ struct DetailHeroView: View {
                 HStack(spacing: 8) {
                     Text(show)
                         .lineLimit(1)
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                         .font(.system(size: 24, weight: .semibold))
                 }
                 .font(.system(size: 30, weight: .semibold))

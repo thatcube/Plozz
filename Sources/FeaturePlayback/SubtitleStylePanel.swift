@@ -155,7 +155,7 @@ struct SubtitleStylePanel: View {
             case .number:
                 if isFocused { Image(systemName: "plus").font(.body.weight(.semibold)) }
             case .submenu:
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.forward")
                     .font(.footnote.weight(.semibold))
                     .playerMenuRowSecondary()
             default:

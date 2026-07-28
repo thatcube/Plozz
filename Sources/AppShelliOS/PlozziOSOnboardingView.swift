@@ -96,7 +96,7 @@ struct PlozziOSOnboardingView: View {
                     .font(.headline)
                     .foregroundStyle(palette.primaryText)
                 Spacer()
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.forward")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(palette.secondaryText)
             }

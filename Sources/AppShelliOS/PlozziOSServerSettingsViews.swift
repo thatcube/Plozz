@@ -77,7 +77,7 @@ struct PlozziOSServersSettingsView: View {
                 }
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
+            Image(systemName: "chevron.forward")
                 .font(.footnote.weight(.semibold))
                 .plozzForeground(.tertiary)
         }
@@ -128,7 +128,7 @@ private struct PlozziOSServerSettingsDetailView: View {
                                         .plozzForeground(.secondary)
                                 }
                                 Spacer(minLength: 0)
-                                Image(systemName: "chevron.right")
+                                Image(systemName: "chevron.forward")
                                     .font(.footnote.weight(.semibold))
                                     .plozzForeground(.tertiary)
                             }

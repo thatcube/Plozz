@@ -191,7 +191,7 @@ private struct ManagedServerDiscoverySection: View {
 
                             Spacer()
 
-                            Image(systemName: "arrow.up.left")
+                            Image(systemName: "arrow.up.backward")
                                 .plozzForeground(.tertiary)
                         }
                     }

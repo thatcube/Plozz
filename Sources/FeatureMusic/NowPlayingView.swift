@@ -37,6 +37,7 @@ public struct NowPlayingView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.layoutDirection) private var layoutDirection
     @State private var scrubModel = MusicScrubModel()
 
     /// Prominent colors of the current track's artwork, driving the morphing
@@ -603,7 +604,15 @@ public struct NowPlayingView: View {
             // centered against the large title cap height. The x shift keeps the
             // equalizer beside the first word even when a centered title wraps to
             // a wider second line (see `titleIndicatorInset`).
-            .offset(x: titleIndicatorInset, y: 1)
+            // `titleIndicatorInset` is a reading-order adjustment toward the
+            // first word of a centered, wrapping title. Positive x is correct in
+            // LTR, but moves away from the first word after the HStack mirrors.
+            .offset(
+                x: layoutDirection == .rightToLeft
+                    ? -titleIndicatorInset
+                    : titleIndicatorInset,
+                y: 1
+            )
             .opacity(controller.isPlaying ? 1 : 0)
             .animation(.easeInOut(duration: 0.3), value: controller.isPlaying)
             .allowsHitTesting(false)

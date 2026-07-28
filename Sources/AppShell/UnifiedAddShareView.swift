@@ -132,7 +132,7 @@ struct UnifiedAddShareView: View {
                     .plozzForeground(.secondary)
                 Text("Enter an address manually").font(.headline)
                 Spacer(minLength: 12)
-                Image(systemName: "chevron.right").plozzForeground(.tertiary)
+                Image(systemName: "chevron.forward").plozzForeground(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 14)
@@ -413,7 +413,7 @@ struct UnifiedAddShareView: View {
             if viewModel.currentPath != "/" {
                 Button {
                     loadFolders(path: parentPath(of: viewModel.currentPath))
-                } label: { Label("Up one level", systemImage: "arrow.up.left") }
+                } label: { Label("Up one level", systemImage: "arrow.up.backward") }
                 .buttonStyle(.bordered)
             }
             // Primary action pinned ABOVE the (bounded, scrollable) list, so
@@ -446,7 +446,7 @@ struct UnifiedAddShareView: View {
                                         .plozzForeground(.secondary)
                                     Text(item.name).font(.headline)
                                     Spacer(minLength: 12)
-                                    Image(systemName: "chevron.right").plozzForeground(.tertiary)
+                                    Image(systemName: "chevron.forward").plozzForeground(.tertiary)
                                 }
                                 .contentShape(Rectangle()).padding(.vertical, 10).padding(.horizontal, 12)
                             }

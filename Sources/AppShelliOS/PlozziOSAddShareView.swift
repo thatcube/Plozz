@@ -47,7 +47,7 @@ struct PlozziOSAddShareView: View {
                         HStack(spacing: 12) {
                             Label { proto.title } icon: { Image(systemName: proto.systemImage) }
                             Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
+                            Image(systemName: "chevron.forward")
                                 .font(.footnote.weight(.semibold))
                                 .plozzForeground(.tertiary)
                         }

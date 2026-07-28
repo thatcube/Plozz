@@ -146,7 +146,7 @@ struct PlozziOSDownloadedShowView: View {
                     artworkURL: model.artworkURL(for: record),
                     kind: record.snapshot.kind
                 )
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.forward")
                     .font(.caption.weight(.semibold))
                     .plozzForeground(.tertiary)
             }

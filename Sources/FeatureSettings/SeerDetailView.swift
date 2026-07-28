@@ -255,7 +255,7 @@ struct SeerDetailView: View {
             Spacer()
             mappedName.map { Text(verbatim: $0) } ?? Text("Admin — unrestricted")
                 .foregroundStyle(mappedName == nil ? .secondary : .primary)
-            Image(systemName: "chevron.right").font(.caption).plozzForeground(.tertiary)
+            Image(systemName: "chevron.forward").font(.caption).plozzForeground(.tertiary)
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 14)

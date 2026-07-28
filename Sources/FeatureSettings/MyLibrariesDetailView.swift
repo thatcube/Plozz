@@ -203,7 +203,7 @@ struct MyLibrariesDetailView: View {
                 Image(systemName: on ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(on ? .green : .secondary)
             case .chevron:
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.forward")
                     .font(.caption.weight(.semibold))
                     .settingsRowSecondary()
             case .none:

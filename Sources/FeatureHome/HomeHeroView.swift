@@ -1855,7 +1855,7 @@ struct HomeHeroView: View {
             }
         case .next:
             heroPill(selected: selected) {
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.forward")
                     .font(.system(size: 28, weight: .semibold))
                     .frame(width: 34, height: 34)
             }

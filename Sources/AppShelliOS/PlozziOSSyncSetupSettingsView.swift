@@ -212,7 +212,7 @@ struct PlozziOSSyncSetupSettingsView: View {
                                         .font(.footnote).plozzForeground(.secondary)
                                 }
                                 Spacer()
-                                Image(systemName: "chevron.right").plozzForeground(.secondary)
+                                Image(systemName: "chevron.forward").plozzForeground(.secondary)
                             }
                             .contentShape(Rectangle())
                         }

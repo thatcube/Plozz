@@ -1807,7 +1807,7 @@ private struct PlozziOSHeroMetadata: View {
                     HStack(spacing: 4) {
                         Text(seriesBreadcrumb)
                             .lineLimit(1)
-                        Image(systemName: "chevron.right")
+                        Image(systemName: "chevron.forward")
                             .font(.subheadline.weight(.semibold))
                     }
                     .font(.title3.weight(.semibold))

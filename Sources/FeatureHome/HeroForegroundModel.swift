@@ -236,7 +236,7 @@ enum HeroForegroundModelBuilder {
             )
         case .next:
             return HeroForegroundModel.Pill(
-                kind: .next, text: nil, systemImage: "chevron.right", progress: nil
+                kind: .next, text: nil, systemImage: "chevron.forward", progress: nil
             )
         }
     }

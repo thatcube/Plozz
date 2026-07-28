@@ -204,7 +204,7 @@ struct AddWebDAVShareView: View {
                 Button {
                     Task { await viewModel.loadFolders(at: Self.parentPath(of: viewModel.currentPath)) }
                 } label: {
-                    Label("Up one level", systemImage: "arrow.up.left")
+                    Label("Up one level", systemImage: "arrow.up.backward")
                 }
                 .buttonStyle(.bordered)
             }
@@ -227,7 +227,7 @@ struct AddWebDAVShareView: View {
                                     Image(systemName: "folder.fill").plozzForeground(.secondary)
                                     Text(folder.name).font(.headline)
                                     Spacer(minLength: 12)
-                                    Image(systemName: "chevron.right").plozzForeground(.tertiary)
+                                    Image(systemName: "chevron.forward").plozzForeground(.tertiary)
                                 }
                                 .contentShape(Rectangle())
                                 .padding(.vertical, 12)

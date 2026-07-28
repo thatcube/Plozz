@@ -180,7 +180,7 @@ struct HelpDiagnosticsDetailView: View {
                             .font(.subheadline)
                             .settingsRowSecondary()
                             .lineLimit(1)
-                        Image(systemName: "chevron.right")
+                        Image(systemName: "chevron.forward")
                             .font(.caption.weight(.semibold))
                             .settingsRowSecondary()
                     }

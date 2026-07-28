@@ -1111,7 +1111,7 @@ public struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.forward")
                     .font(.caption.weight(.semibold))
                     .settingsRowSecondary()
             }
@@ -1135,7 +1135,7 @@ public struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.forward")
                     .font(.caption.weight(.semibold))
                     .settingsRowSecondary()
             }
@@ -1255,7 +1255,7 @@ public struct SettingsView: View {
                             .settingsRowSecondary()
                             .lineLimit(1)
                     }
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                         .font(.caption.weight(.semibold))
                         .settingsRowSecondary()
                 }

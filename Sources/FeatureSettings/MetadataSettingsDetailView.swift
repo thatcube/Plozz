@@ -639,7 +639,7 @@ public struct MetadataSettingsDetailView: View {
                         .font(.subheadline)
                         .settingsRowSecondary()
                 } trailing: {
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                         .font(.caption.weight(.semibold))
                         .settingsRowSecondary()
                 }

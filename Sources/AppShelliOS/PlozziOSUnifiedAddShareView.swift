@@ -131,7 +131,7 @@ struct PlozziOSUnifiedAddShareView: View {
                         Image(systemName: "keyboard").foregroundStyle(palette.secondaryText)
                         Text("Enter an address manually")
                         Spacer()
-                        Image(systemName: "chevron.right").font(.footnote).foregroundStyle(palette.secondaryText)
+                        Image(systemName: "chevron.forward").font(.footnote).foregroundStyle(palette.secondaryText)
                     }
                     .contentShape(Rectangle())
                 }
@@ -154,7 +154,7 @@ struct PlozziOSUnifiedAddShareView: View {
                     .font(.footnote).foregroundStyle(palette.secondaryText)
             }
             Spacer()
-            Image(systemName: "chevron.right").font(.footnote).foregroundStyle(palette.secondaryText)
+            Image(systemName: "chevron.forward").font(.footnote).foregroundStyle(palette.secondaryText)
         }
         .contentShape(Rectangle())
     }
@@ -329,7 +329,7 @@ struct PlozziOSUnifiedAddShareView: View {
                 Section {
                     if viewModel.currentPath != "/" {
                         Button { loadFolders(path: parentPath(of: viewModel.currentPath)) } label: {
-                            Label("Up one level", systemImage: "arrow.up.left")
+                            Label("Up one level", systemImage: "arrow.up.backward")
                         }
                     }
                     Text(viewModel.currentPath)
@@ -352,7 +352,7 @@ struct PlozziOSUnifiedAddShareView: View {
                                     .foregroundStyle(palette.secondaryText)
                                 Text(item.name)
                                 Spacer()
-                                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(palette.secondaryText)
+                                Image(systemName: "chevron.forward").font(.footnote).foregroundStyle(palette.secondaryText)
                             }
                             .contentShape(Rectangle())
                         }

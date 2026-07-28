@@ -207,6 +207,7 @@ struct SeriesDetailView: View {
     /// us decide true visibility and the clipped edge for a minimal reveal.
     private static let seasonBarSpace = "seasonBarViewport"
 
+
     var body: some View {
         let _ = plozzPrintChanges { Self._printChanges() }
         scrollContent
@@ -468,7 +469,18 @@ struct SeriesDetailView: View {
                 guard !ignoresSystemFocusMoves else { return }
                 if focused {
                     recedeModel.restore()
-                    if reduceMotion {
+                    // ANIMATE only when the user moved focus back up to Play from
+                    // further down the page — there the glide explains where the
+                    // page went.
+                    //
+                    // On a fresh open it is wrong. The play target often resolves a
+                    // beat after the push, which claims focus for Play, which makes
+                    // tvOS scroll to frame a bottom-anchored button; animating the
+                    // correction turned that artifact into a visible slide of the
+                    // whole hero a second after arriving. The page is already where
+                    // it belongs, so put it back instantly and show nothing.
+                    let isSettlingAfterOpen = !hasUserDirectedFocus
+                    if reduceMotion || isSettlingAfterOpen {
                         proxy.scrollTo(Self.topAnchorID, anchor: .top)
                     } else {
                         withAnimation(.easeInOut(duration: 0.4)) {

@@ -107,6 +107,8 @@ public final class RelatedTitlesLoader {
         let ordered = Array(titles.prefix(Self.maximumLookups))
         var matched: [Int: MediaItem] = [:]
         var seenItemIDs = Set<String>()
+        let clock = ContinuousClock()
+        var lastPublish = clock.now
 
         await withTaskGroup(of: (Int, MediaItem?).self) { group in
             var next = 0
@@ -147,6 +149,20 @@ public final class RelatedTitlesLoader {
                 // below the fold, so it fills while the viewer is still reading the
                 // synopsis. Rebuilt in candidate order each time, so entries never
                 // reshuffle as later ones arrive.
+                //
+                // But publishing on EVERY match costs a full page layout each time.
+                // Measured on the Apple TV, a freshly opened series re-laid its
+                // detail page six times in a row as this filled in — one per match —
+                // which is a large part of why opening a title looked like it was
+                // still settling seconds after the push animation ended. Matches
+                // arrive in bursts, so coalescing on a short window collapses those
+                // six passes into one or two while keeping the row's early fill.
+                let now = clock.now
+                let isFinalMatch = matched.count == ordered.count
+                guard isFinalMatch || lastPublish.duration(to: now) >= Self.publishInterval else {
+                    continue
+                }
+                lastPublish = now
                 seenItemIDs.removeAll(keepingCapacity: true)
                 entries = ordered.enumerated()
                     .compactMap { index, related -> RelatedEntry? in
@@ -170,6 +186,12 @@ public final class RelatedTitlesLoader {
     /// verifies TMDb ids and not AniList ones, so a budget sized to the visible row
     /// would be spent entirely on candidates that can never match.
     static let maximumLookups = 24
+    /// How long to gather freshly matched related titles before republishing the
+    /// row. Long enough to collapse a burst of matches into one layout pass,
+    /// short enough that the row still fills visibly while the viewer reads the
+    /// synopsis. See the publish site for the measurements.
+    private static let publishInterval: Duration = .milliseconds(400)
+
     /// The most entries the row will show, once matching has filtered the rest.
     static let maximumEntries = 12
     /// Concurrent searches. Enough to fill the row promptly without burying a

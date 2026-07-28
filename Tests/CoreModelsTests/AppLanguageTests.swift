@@ -62,12 +62,11 @@ final class AppLanguageTests: XCTestCase {
         }
     }
 
-    /// DEBUG lifts the release gate so an in-progress translation can be reviewed
-    /// without changing the whole device's language. The release path must still
-    /// be driven by `releaseReady` alone — a bundled .lproj means only that SOME
-    /// strings were translated, and offering a 6%-complete language shows a
-    /// mostly-English UI to someone who explicitly asked for it.
-    func testDebugOffersShippedLocalizationsBeyondReleaseReady() throws {
+    /// DEBUG offers every bundled language so an uncommitted translation can be
+    /// reviewed without changing the whole device. In the committed tree the
+    /// catalog/release parity check means every bundled language is ready; the
+    /// extra DEBUG behavior is exercised only while a local artifact is in flight.
+    func testDebugOffersEveryShippedLocalization() throws {
         #if !DEBUG
         throw XCTSkip("Release builds offer only releaseReady languages.")
         #else
@@ -80,10 +79,14 @@ final class AppLanguageTests: XCTestCase {
             return code
         })
         XCTAssertEqual(offered, shipped)
-        // The point of the DEBUG branch: these are languages releaseReady omits.
-        XCTAssertFalse(shipped.isSubset(of: Set(AppLanguage.releaseReady)))
-        for code in shipped { XCTAssertTrue(AppLanguage.isInProgress(code)) }
         #endif
+    }
+
+    func testInProgressReflectsReleaseReadyMembership() {
+        for code in AppLanguage.releaseReady {
+            XCTAssertFalse(AppLanguage.isInProgress(code))
+        }
+        XCTAssertTrue(AppLanguage.isInProgress("zz"))
     }
 
     func testAvailableExcludesBaseLocalization() {

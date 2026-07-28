@@ -261,7 +261,7 @@ final class DetailSnapshotCacheTests: XCTestCase {
         // serial queue runs after every enqueued prune) instead of racing it.
         await cache.awaitPendingPrune()
         let files = (try? FileManager.default.contentsOfDirectory(
-            at: dir.appendingPathComponent("plozz-detail-cache-v5").appendingPathComponent("default"),
+            at: dir.appendingPathComponent(DetailSnapshotCache.schemaDirName).appendingPathComponent("default"),
             includingPropertiesForKeys: nil
         )) ?? []
         XCTAssertLessThanOrEqual(files.count, 2)
@@ -290,7 +290,7 @@ final class DetailSnapshotCacheTests: XCTestCase {
         }
         await cache.awaitPendingPrune()
         let files = (try? FileManager.default.contentsOfDirectory(
-            at: dir.appendingPathComponent("plozz-detail-cache-v5").appendingPathComponent("default"),
+            at: dir.appendingPathComponent(DetailSnapshotCache.schemaDirName).appendingPathComponent("default"),
             includingPropertiesForKeys: [.fileSizeKey]
         )) ?? []
         let totalBytes = files.reduce(0) { partial, file in
@@ -328,7 +328,7 @@ final class DetailSnapshotCacheTests: XCTestCase {
         )
         await reader.awaitPendingPrune()
         let files = (try? FileManager.default.contentsOfDirectory(
-            at: dir.appendingPathComponent("plozz-detail-cache-v5").appendingPathComponent("default"),
+            at: dir.appendingPathComponent(DetailSnapshotCache.schemaDirName).appendingPathComponent("default"),
             includingPropertiesForKeys: [.fileSizeKey]
         )) ?? []
         let totalBytes = files.reduce(0) { partial, file in

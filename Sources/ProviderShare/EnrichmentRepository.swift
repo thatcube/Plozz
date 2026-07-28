@@ -119,6 +119,7 @@ struct EnrichmentRepository {
         append(record.backdropURL, field: .backdropURL)
         append(record.logoURL, field: .logoURL)
         if record.title?.isEmpty == false { append(record.title, field: .title) }
+        if !record.cast.isEmpty { append(record.cast, field: .cast) }
         return values
     }
 
@@ -254,6 +255,10 @@ struct EnrichmentRepository {
         if let l = new.logoURL {
             out.logoURL = l
             out.provenance[.logoURL] = new.provenance[.logoURL]
+        }
+        if !new.cast.isEmpty {
+            out.cast = new.cast
+            out.provenance[.cast] = new.provenance[.cast]
         }
         if let t = new.title, !t.isEmpty {
             out.title = t

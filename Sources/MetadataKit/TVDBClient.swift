@@ -1,4 +1,5 @@
 import Foundation
+import CoreModels
 
 /// Resolved TheTVDB metadata for a title (the neutral result the share enricher
 /// consumes). All fields best-effort; a partial result still helps.
@@ -46,6 +47,26 @@ public struct SeriesEpisodeHint: Sendable, Equatable {
 
 /// Minimal client for **TheTVDB v4** — the bundled keyed metadata/artwork tier.
 ///
+/// A series' known future episodes plus its stated broadcast cadence.
+public struct TVDBUpcomingSchedule: Sendable, Equatable {
+    /// Not-yet-aired episodes, oldest first.
+    public var episodes: [ProviderNextEpisode]
+    /// The provider-stated release cadence, when it reports one.
+    public var cadence: AirCadence?
+    /// TheTVDB's series status (e.g. "Continuing", "Ended"), when reported.
+    public var seriesStatus: String?
+
+    public init(
+        episodes: [ProviderNextEpisode],
+        cadence: AirCadence? = nil,
+        seriesStatus: String? = nil
+    ) {
+        self.episodes = episodes
+        self.cadence = cadence
+        self.seriesStatus = seriesStatus
+    }
+}
+
 /// Flow: `POST /login` with the project api key → a JWT bearer (~1 month), cached
 /// in-memory; then `GET /search?query=…&type=movie|series` with that bearer.
 /// One search yields ids (TVDB + IMDb/TMDb from `remote_ids`), overview, a poster
@@ -176,6 +197,99 @@ public actor TVDBClient {
         )
     }
 
+    /// Every episode of `id` that has not aired yet, oldest first, plus the series'
+    /// stated broadcast cadence.
+    ///
+    /// The full episode listing is already fetched to resolve `nextAired`'s
+    /// season/episode — this keeps the future tail rather than discarding it, so a
+    /// series with nine unreleased episodes can show all nine instead of only the
+    /// next one. Costs one extra request (the series record, for cadence).
+    ///
+    /// "Not aired yet" is judged against the start of the current local day, so an
+    /// episode airing *today* still counts as upcoming until the day rolls over —
+    /// matching `dateOnly` precision, which cannot say whether it has aired yet.
+    public func upcomingEpisodes(byTVDBID id: String, limit: Int = 24) async -> TVDBUpcomingSchedule? {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard config.isConfigured, !trimmed.isEmpty, let token = await ensureToken() else { return nil }
+
+        async let seriesTask = seriesRecord(id: trimmed, token: token)
+        async let episodesTask = trailingEpisodes(seriesID: trimmed, token: token)
+        let (series, episodes) = await (seriesTask, episodesTask)
+
+        let today = Calendar.current.startOfDay(for: Date())
+        let sourceURL = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(trimmed)/extended")
+        let upcoming = (episodes ?? [])
+            .compactMap { ep -> ProviderNextEpisode? in
+                guard ScheduleEntryPolicy.isRegularEpisode(seasonNumber: ep.seasonNumber),
+                      let day = ScheduleDateParsing.calendarDate(ep.aired), day >= today
+                else { return nil }
+                return ProviderNextEpisode(
+                    seasonNumber: ep.seasonNumber,
+                    episodeNumber: ep.number,
+                    title: ep.name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
+                    airDate: day,
+                    datePrecision: .dateOnly,
+                    sourceURL: sourceURL
+                )
+            }
+            .sorted { $0.airDate < $1.airDate }
+            .prefix(limit)
+
+        let cadence = AirCadence(
+            weekdays: series?.airsDays?.weekdayIndices ?? [],
+            airsTime: series?.airsTime?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        )
+        guard !upcoming.isEmpty || !cadence.isEmpty else { return nil }
+        return TVDBUpcomingSchedule(
+            episodes: Array(upcoming),
+            cadence: cadence.isEmpty ? nil : cadence,
+            seriesStatus: series?.status?.name
+        )
+    }
+
+    /// The series record, for cadence + status.
+    private func seriesRecord(id: String, token: String) async -> SeriesExtended? {
+        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(id)/extended") else { return nil }
+        let (response, reachable) = await MetadataHTTP.getWithStatus(
+            SeriesExtendedResponse.self, url: url, headers: ["Authorization": "Bearer \(token)"]
+        )
+        if response == nil, !reachable { self.token = nil }
+        return response?.data
+    }
+
+    /// The tail of the series' default-order episode listing — the pages that can
+    /// contain not-yet-aired episodes.
+    ///
+    /// The listing is paged at 500 and ordered oldest-first, so for a long-running
+    /// series page 0 is *ancient history*: One Piece has 1234 episodes across three
+    /// pages, and page 0 ends in 2010. Reading only the first page therefore finds no
+    /// upcoming episodes at all for exactly the shows most likely to have them.
+    /// `links.total_items` lets us jump straight to the last page instead of walking
+    /// all of them; the page before it is also read so a run that straddles the
+    /// boundary stays whole.
+    private func trailingEpisodes(seriesID: String, token: String) async -> [EpisodesResponse.Episode]? {
+        guard let first = await episodePage(seriesID: seriesID, page: 0, token: token) else { return nil }
+        guard let last = first.links?.lastPageIndex, last > 0 else {
+            return first.data?.episodes
+        }
+        async let lastPageTask = episodePage(seriesID: seriesID, page: last, token: token)
+        async let penultimateTask: EpisodesResponse? = last > 1
+            ? episodePage(seriesID: seriesID, page: last - 1, token: token)
+            : nil
+        let (lastPage, penultimate) = await (lastPageTask, penultimateTask)
+        return (penultimate?.data?.episodes ?? []) + (lastPage?.data?.episodes ?? [])
+    }
+
+    private func episodePage(seriesID: String, page: Int, token: String) async -> EpisodesResponse? {
+        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(seriesID)/episodes/default?page=\(page)") else {
+            return nil
+        }
+        let (response, _) = await MetadataHTTP.getWithStatus(
+            EpisodesResponse.self, url: url, headers: ["Authorization": "Bearer \(token)"]
+        )
+        return response
+    }
+
     /// Finds the first episode whose `aired` day equals `day` in the series' default
     /// episode order. Best-effort — returns `nil` (leaving S/E/title unfilled) rather
     /// than guessing when nothing matches.
@@ -232,15 +346,30 @@ public actor TVDBClient {
         return Self.bestBackdrop(response.data?.artworks ?? [])
     }
 
-    /// Pick the highest-resolution genuinely-landscape artwork (a background/fanart
-    /// rather than a poster or square), by aspect + area — avoids relying on
-    /// TheTVDB's per-content artwork *type* ids, which differ series vs movie.
-    private static func bestBackdrop(_ artworks: [Artwork]) -> URL? {
+    /// Pick the best genuinely-landscape artwork (a background/fanart rather than a
+    /// poster, square, or banner), by aspect then language then area — avoids
+    /// relying on TheTVDB's per-content artwork *type* ids, which differ series vs
+    /// movie.
+    ///
+    /// The upper aspect bound is what keeps **banners** out. A background is around
+    /// 16:9; a banner is nearer 5:1 and always carries the show's name burned into
+    /// it, which then sits behind the wordmark the hero draws on top — the same
+    /// title twice.
+    ///
+    /// Language is a weaker signal here than it is on TMDb, where an untagged image
+    /// reliably means "no text". TheTVDB contributors often leave a texted
+    /// background untagged, so this only breaks ties rather than filtering.
+    static func bestBackdrop(_ artworks: [Artwork]) -> URL? {
         let landscape = artworks.filter { art in
-            guard let w = art.width, let h = art.height, h > 0 else { return false }
-            return Double(w) / Double(h) >= 1.4
+            guard let w = art.width, let h = art.height, h > 0, w > 0 else { return false }
+            let ratio = Double(w) / Double(h)
+            return ratio >= 1.4 && ratio <= 3.0
         }
-        let best = landscape.max { (($0.width ?? 0) * ($0.height ?? 0)) < (($1.width ?? 0) * ($1.height ?? 0)) }
+        let best = landscape.max { lhs, rhs in
+            let (lu, ru) = (lhs.isLanguageNeutral, rhs.isLanguageNeutral)
+            if lu != ru { return ru }
+            return lhs.pixelArea < rhs.pixelArea
+        }
         guard let image = best?.image, !image.isEmpty else { return nil }
         return Self.imageURL(image)
     }
@@ -403,6 +532,28 @@ public actor TVDBClient {
         return String(mapped).split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
     }
 
+    /// Whether a candidate's name is the searched title, allowing for the trailing
+    /// year TheTVDB appends to disambiguate a re-used name ("Lucky (2026)").
+    ///
+    /// That convention marks the *newer* namesake, so comparing raw names quietly
+    /// favours the older one — the entry that keeps the bare title. Both belong in
+    /// the scored window; which is right is then decided on episode evidence.
+    static func namesQueriedTitle(_ name: String?, query normalizedQuery: String) -> Bool {
+        guard let name, !normalizedQuery.isEmpty else { return false }
+        let key = normalizedTitleKey(name)
+        if key == normalizedQuery { return true }
+        return normalizedTitleKey(stripTrailingYear(name)) == normalizedQuery
+    }
+
+    /// Drops a trailing parenthesised 4-digit year: "Lucky (2026)" → "Lucky".
+    static func stripTrailingYear(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasSuffix(")"), let open = trimmed.lastIndex(of: "(") else { return trimmed }
+        let inner = trimmed[trimmed.index(after: open)..<trimmed.index(before: trimmed.endIndex)]
+        guard inner.count == 4, inner.allSatisfy(\.isNumber) else { return trimmed }
+        return String(trimmed[trimmed.startIndex..<open]).trimmingCharacters(in: .whitespaces)
+    }
+
     // MARK: - Episode-title disambiguation
 
     /// Picks the search candidate whose episode titles best match the on-disk
@@ -428,12 +579,19 @@ public actor TVDBClient {
         // "O Caçador", whose English name is also "Outlander"), so a fixed top-N by
         // relevance alone could skip the real show. Bounded to keep the episode
         // fetches modest.
+        //
+        // The order within each group is TheTVDB's relevance, held explicitly by
+        // index: `sorted(by:)` is not stable, so ranking on exact-match alone left
+        // the other ~50 candidates in arbitrary order and the real show could fall
+        // outside the scored window by luck. "Lucky" returns 50 results with the
+        // right one third — worth keeping there.
         let q = Self.normalizedTitleKey(query)
-        let ordered = results.sorted { a, b in
-            let ea = Self.normalizedTitleKey(a.name ?? "") == q
-            let eb = Self.normalizedTitleKey(b.name ?? "") == q
-            return ea && !eb
+        let ranked = results.enumerated().map { index, result in
+            (result: result, isExact: Self.namesQueriedTitle(result.name, query: q), index: index)
         }
+        let ordered = ranked.sorted { a, b in
+            a.isExact == b.isExact ? a.index < b.index : a.isExact
+        }.map(\.result)
         for candidate in ordered.prefix(8) {
             guard let id = candidate.tvdb_id else { continue }
             let names = await episodeNames(seriesID: id, token: token)
@@ -531,8 +689,31 @@ public actor TVDBClient {
         let remoteIds: [RemoteID]?
         /// A bare `yyyy-MM-dd` calendar day for the next scheduled episode (no time).
         let nextAired: String?
+        /// Broadcast cadence: the weekday(s) the series airs on, and its usual
+        /// time. Together these produce "New episodes Fridays" without inferring
+        /// a pattern from air dates (which misreads a batch drop as weekly).
+        let airsDays: AirsDays?
+        let airsTime: String?
+        let status: Status?
         struct Genre: Decodable { let name: String? }
         struct RemoteID: Decodable { let id: String?; let sourceName: String? }
+        struct Status: Decodable { let name: String? }
+        /// TheTVDB reports one flag per weekday rather than a list.
+        struct AirsDays: Decodable {
+            let sunday: Bool?
+            let monday: Bool?
+            let tuesday: Bool?
+            let wednesday: Bool?
+            let thursday: Bool?
+            let friday: Bool?
+            let saturday: Bool?
+
+            /// Weekday indices in `Calendar` terms (1 = Sunday), in week order.
+            var weekdayIndices: [Int] {
+                let flags = [sunday, monday, tuesday, wednesday, thursday, friday, saturday]
+                return flags.enumerated().compactMap { $1 == true ? $0 + 1 : nil }
+            }
+        }
     }
 
     /// TheTVDB v4 `/{type}/{id}/translations/{language}` payload — a single
@@ -546,11 +727,17 @@ public actor TVDBClient {
         }
     }
 
-    private struct Artwork: Decodable {
+    struct Artwork: Decodable {
         let image: String?
         let width: Int?
         let height: Int?
         let type: Int?
+        /// Absent/empty on art carrying no burned-in text — by convention, not by
+        /// enforcement, so it ranks candidates rather than excluding them.
+        var language: String?
+
+        var isLanguageNeutral: Bool { (language ?? "").isEmpty }
+        var pixelArea: Int { (width ?? 0) * (height ?? 0) }
     }
 
     private struct SearchResponse: Decodable {
@@ -560,13 +747,29 @@ public actor TVDBClient {
     /// TheTVDB v4 `/series/{id}/episodes/{seasonType}` payload (first page).
     private struct EpisodesResponse: Decodable {
         let data: DataField?
+        /// Paging metadata. `total_items` / `page_size` let a caller jump straight to
+        /// the last page instead of walking every page of a long-running series.
+        let links: Links?
         struct DataField: Decodable { let episodes: [Episode]? }
+        struct Links: Decodable {
+            let total_items: Int?
+            let page_size: Int?
+
+            /// The zero-based index of the final page, or `nil` when unknown.
+            var lastPageIndex: Int? {
+                guard let total = total_items, let size = page_size, size > 0, total > 0 else { return nil }
+                return (total - 1) / size
+            }
+        }
         struct Episode: Decodable {
             let number: Int?
             let seasonNumber: Int?
             let name: String?
             /// `yyyy-MM-dd` air day, matched against the series' `nextAired`.
             let aired: String?
+            let overview: String?
+            let runtime: Int?
+            let image: String?
         }
     }
 

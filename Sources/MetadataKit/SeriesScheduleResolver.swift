@@ -12,6 +12,14 @@ import CoreModels
 /// is triggered. It persists exactly one ``SeriesScheduleRecord`` per series and
 /// honors the schedule TTL policy, so a fresh record is never re-fetched.
 public actor SeriesScheduleResolver {
+    /// The app-wide resolver, self-configuring from the bundle exactly like
+    /// ``ArtworkRouter/shared`` — so a view can read a cached schedule without any
+    /// app wiring, and a refresh reuses the same provider set as every other
+    /// enrichment.
+    public static let shared = SeriesScheduleResolver(
+        pipeline: ProductionMetadataProviders.makePipeline()
+    )
+
     private let pipeline: MetadataEnrichmentPipeline
     private let store: SeriesScheduleStore
     private let now: @Sendable () -> Date
@@ -63,6 +71,8 @@ public actor SeriesScheduleResolver {
         let record = SeriesScheduleRecord(
             seriesKey: key,
             upcomingEpisode: upcoming,
+            upcomingEpisodes: enrichment.upcomingEpisodes,
+            cadence: enrichment.cadence,
             seriesEnded: seriesEnded,
             refreshedAt: refreshedAt,
             refreshDueAt: due

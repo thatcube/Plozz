@@ -150,15 +150,9 @@ public struct HomeView: View {
 
     @Environment(\.plozzMetrics) private var metrics
 
-    /// App-wide media-share scan/enrich status (optional so previews/tests that
-    /// don't inject it don't crash). Drives the "Updating library…" banner.
-    @Environment(ShareScanStatusModel.self) private var shareScanStatus: ShareScanStatusModel?
-    private let activeShareIDs: Set<String>
-
     public init(
         viewModel: HomeViewModel,
         visibility: HomeLibraryVisibilityModel,
-        activeShareIDs: Set<String>,
         spoilerSettings: SpoilerSettings = .default,
         heroSettings: HeroSettingsModel? = nil,
         heroBackground: HeroBackgroundSettingsModel,
@@ -193,7 +187,6 @@ public struct HomeView: View {
     ) {
         _viewModel = State(initialValue: viewModel)
         self.visibility = visibility
-        self.activeShareIDs = activeShareIDs
         self.spoilerSettings = spoilerSettings
         self.heroSettings = heroSettings
         self.heroBackground = heroBackground
@@ -274,6 +267,7 @@ public struct HomeView: View {
                 settings: heroSettings?.settings,
                 continueWatching: content.continueWatching,
                 watchlist: content.watchlist,
+                recentlyAdded: content.latest,
                 curator: heroCurator
             )
             let heroSlotState = HomeHeroSlotState.resolve(
@@ -428,16 +422,6 @@ public struct HomeView: View {
                     // then lands initial focus on the hero instead of a Continue
                     // Watching card, with no visible focus steal-back.
                     .focusScope(heroFocusScope)
-                    // The share scan/enrich status pill. Lives INSIDE the scroll
-                    // content (anchored to the content's top-trailing) so it sits in
-                    // the top-right corner and scrolls away with the page — over the
-                    // hero on hero pages, above the first row otherwise. Non-focusable
-                    // and hit-transparent so it never intercepts focus or taps.
-                    .overlay(alignment: .topTrailing) {
-                        scanBanner
-                            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                            .padding(.top, heroLayoutActive ? 56 : 12)
-                    }
                 }
                 // Never clip a focused card's lift, shadow or border.
                 .scrollClipDisabled()
@@ -558,98 +542,6 @@ public struct HomeView: View {
         heroSettings?.settings.requiresExternalWatchHistory ?? false
     }
 
-    /// A subtle, non-focusable status pill shown while a media share is scanning or
-    /// enriching, so the otherwise-invisible foreground work is legible. Names the
-    /// share, its current phase (Scanning / Updating artwork), and live progress
-    /// (items found, or "N of M" enriched). Floats over the top-right of the scroll
-    /// content (no layout reflow) and scrolls away with the page. Absent when idle.
-    @ViewBuilder
-    private var scanBanner: some View {
-        if let status = shareScanStatus {
-            let activeStates = status.busyStates(forShareIDs: activeShareIDs)
-            if let primary = activeStates.first {
-            let multi = activeStates.count > 1
-            HStack(spacing: 12) {
-                // Determinate ring during enrichment (we know N of M); otherwise an
-                // indeterminate spinner (the scan total is unknown as it walks).
-                if let fraction = primary.enrichFraction, !multi {
-                    ProgressView(value: fraction)
-                        .progressViewStyle(.circular)
-                        .controlSize(.small)
-                } else {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .controlSize(.small)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    (multi ? Text("\(activeStates.count) libraries") : Self.pillTitle(primary))
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    if let detail = Self.pillSubtitle(primary, multi: multi) {
-                        detail
-                            .font(.caption2)
-                            .monospacedDigit()
-                            .plozzForeground(.secondary)
-                    }
-                }
-                // The subtitle is padded to a fixed width per pass, so leading-align
-                // it and let it keep its own width — nothing reflows as the counter
-                // climbs.
-                .fixedSize(horizontal: true, vertical: false)
-            }
-            .padding(.leading, 18)
-            .padding(.trailing, 28)
-            .padding(.vertical, 10)
-            .background(.thinMaterial, in: Capsule())
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .allowsHitTesting(false)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Self.pillAccessibilityLabel(activeStates))
-            // Animate ONLY on structural changes (phase, share, single↔multi), never
-            // on each progress tick — otherwise every count update animates the
-            // pill's width and it slides side to side. With the fixed-width digits
-            // above, count updates don't change the width at all.
-            .animation(.easeInOut(duration: 0.25), value: primary.phase)
-            .animation(.easeInOut(duration: 0.25), value: primary.name)
-            .animation(.easeInOut(duration: 0.25), value: multi)
-            }
-        }
-    }
-
-    /// The pill's bold line: the share being updated (what media).
-    /// Text rather than a resource: the share's own name is content, and only
-    /// the unnamed fallback is copy.
-    private static func pillTitle(_ state: ShareScanState) -> Text {
-        state.name.isEmpty ? Text("Media library") : Text(verbatim: state.name)
-    }
-
-    /// The pill's secondary line: the current phase plus any live count.
-    ///
-    /// The phase and the detail's "folders"/"items"/"of" words are all our own
-    /// copy (real `LocalizedStringResource`s); only the counts they carry are
-    /// runtime facts. See `CoreUI.scanProgressDetailText(_:)`.
-    private static func pillSubtitle(_ state: ShareScanState, multi: Bool) -> Text? {
-        if multi { return Text("Updating…") }
-        guard let phase = state.phase else { return nil }
-        if let detail = state.progressDetail {
-            return Text(phase) + Text(verbatim: " · ") + scanProgressDetailText(detail)
-        }
-        return Text(phase)
-    }
-
-    /// A flattened, spoken description of the pill for VoiceOver.
-    ///
-    /// `Text` rather than a resource: the title and phase are library names and
-    /// server-supplied progress text, so joining them into a resource would have
-    /// produced the catalog key "%@%@" — nothing for a translator to translate,
-    /// and a placeholder order they could not fix anyway.
-    private static func pillAccessibilityLabel(_ states: [ShareScanState]) -> Text {
-        guard let primary = states.first else { return Text(verbatim: "") }
-        if states.count > 1 { return Text("Updating \(states.count) libraries") }
-        guard let sub = pillSubtitle(primary, multi: false) else { return pillTitle(primary) }
-        return pillTitle(primary) + Text(verbatim: ", ") + sub
-    }
-
     /// How far the rows are pulled up so the first row (Continue Watching) peeks
     /// in just below the hero's paging dots — the Apple TV look. Paired with
     /// `HomeHeroView.contentBottomInset` (132): pulling up by slightly less than
@@ -734,6 +626,7 @@ public struct HomeView: View {
                 settings: settings,
                 continueWatching: content.continueWatching,
                 watchlist: content.watchlist,
+                recentlyAdded: content.latest,
                 randomLibraries: randomLibraries,
                 watchMutations: durableWatchMutations + heroRuntime.watchMutations,
                 featuredProvider: heroFeaturedProvider,
@@ -864,8 +757,6 @@ public struct HomeView: View {
                         LibraryCardView(
                             aggregated: aggregated,
                             subtitle: Self.librarySubtitle(for: aggregated, in: libraries),
-                            isUpdating: aggregated.providerKind == .mediaShare
-                                && (shareScanStatus?.state(forShareID: aggregated.accountID)?.isBusy ?? false),
                             action: { onSelectLibrary(aggregated.library) }
                         )
                     }
@@ -1032,8 +923,9 @@ enum HomeHeroSlotState: Equatable {
 ///    by an in-flight external-history refresh — reconcile them against the live
 ///    watch overlays and show those. This keeps the async Featured/Random slides
 ///    and preserves focus while a just-watched title still drops out.
-/// 2. Otherwise seed synchronously from the already-loaded Continue Watching +
-///    Watchlist sources so the hero renders in the same frame as the rows — but
+/// 2. Otherwise seed synchronously from the already-loaded Continue Watching,
+///    Watchlist and Recently Added sources so the hero renders in the same frame
+///    as the rows — but
 ///    hold that seed back until durable (offline) watch intents have hydrated when
 ///    Hide Watched is on, so a seen title can't flash in before it's filtered.
 enum HomeHeroDisplayResolver {
@@ -1044,6 +936,7 @@ enum HomeHeroDisplayResolver {
         settings: HeroSettings?,
         continueWatching: [MediaItem],
         watchlist: [MediaItem],
+        recentlyAdded: [MediaItem] = [],
         curator: HeroCurator
     ) -> [MediaItem] {
         let watchMutations = runtime.durableWatchMutations + runtime.watchMutations
@@ -1066,6 +959,7 @@ enum HomeHeroDisplayResolver {
                 settings: $0,
                 continueWatching: continueWatching,
                 watchlist: watchlist,
+                recentlyAdded: recentlyAdded,
                 watchMutations: watchMutations
             )
         } ?? []
@@ -1198,22 +1092,6 @@ private struct LibraryCardView: View {
                 placeholder
             }
         }
-        // A media share still filling in shows a spinner CENTERED in the tile —
-        // right where the library glyph would sit (the glyph is hidden while
-        // updating, see `placeholder`) — a quiet "this is updating" hint that
-        // matches the Home status pill, without a repetitive text label on each card.
-        .overlay {
-            if isUpdating {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .controlSize(.large)
-                    .scaleEffect(1.1)
-                    .tint(palette.secondaryText.opacity(0.7))
-                    .transition(.opacity)
-                    .accessibilityHidden(true)
-            }
-        }
-        .animation(.easeInOut(duration: 0.25), value: isUpdating)
     }
 
     /// Themed empty-state for an imageless library: the shared ``ThemePalette/fill``
@@ -1230,13 +1108,9 @@ private struct LibraryCardView: View {
     private var placeholder: some View {
         ZStack {
             Color.clear
-            // The centered updating spinner takes the glyph's place, so hide the
-            // glyph while a share is updating (see `artwork`'s centered overlay).
-            if !isUpdating {
-                Image(systemName: librarySymbol)
-                    .font(.system(size: 64, weight: .semibold))
-                    .foregroundStyle(palette.tertiaryText)
-            }
+            Image(systemName: librarySymbol)
+                .font(.system(size: 64, weight: .semibold))
+                .foregroundStyle(palette.tertiaryText)
         }
     }
 

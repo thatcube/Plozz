@@ -25,19 +25,51 @@ public enum ProviderIDNamespace: Sendable {
     case musicBrainzTrack
     case musicBrainzArtist
 
+    /// The key to *write* an id under so ``providerID(_:)`` finds it again. Lookup
+    /// is alias- and punctuation-insensitive, so this only has to normalize to one
+    /// of ``aliases`` — it uses the spelling the rest of the app already writes.
+    public var canonicalKey: String {
+        switch self {
+        case .imdb: return "Imdb"
+        case .tmdb: return "Tmdb"
+        case .tvdb: return "Tvdb"
+        case .tvmaze: return "TvMaze"
+        case .aniList: return "AniList"
+        case .myAnimeList: return "Mal"
+        case .aniDB: return "AniDB"
+        case .seriesImdb: return "SeriesImdb"
+        case .seriesTmdb: return "SeriesTmdb"
+        case .seriesTvdb: return "SeriesTvdb"
+        case .seriesTvmaze: return "SeriesTvMaze"
+        case .seriesAniList: return "SeriesAniList"
+        case .seriesMal: return "SeriesMal"
+        case .seriesAniDB: return "SeriesAniDB"
+        case .musicBrainzReleaseGroup: return "MusicBrainzReleaseGroup"
+        case .musicBrainzRelease: return "MusicBrainzRelease"
+        case .musicBrainzTrack: return "MusicBrainzTrack"
+        case .musicBrainzArtist: return "MusicBrainzArtist"
+        }
+    }
+
     fileprivate var aliases: [String] {
         switch self {
-        case .imdb: return ["imdb"]
-        case .tmdb: return ["tmdb"]
-        case .tvdb: return ["tvdb", "thetvdb"]
+        // Spellings vary by whoever wrote the id. Jellyfin writes "Tmdb"; Shoko
+        // writes "TheMovieDb"; some agents append "ID" or ".com". Keys are
+        // normalized to lowercase alphanumerics before comparison, so each alias
+        // here is that normalized form. Missing one doesn't degrade a lookup — it
+        // makes the id invisible, which is how a Shoko-managed anime library
+        // appeared to carry no TMDb id at all.
+        case .imdb: return ["imdb", "imdbid"]
+        case .tmdb: return ["tmdb", "tmdbid", "themoviedb", "themoviedbcom", "moviedb"]
+        case .tvdb: return ["tvdb", "thetvdb", "tvdbid", "thetvdbcom"]
         case .tvmaze: return ["tvmaze", "tvmazeid"]
         case .aniList: return ["anilist", "anilistid"]
         case .myAnimeList: return ["myanimelist", "myanimelistid", "mal"]
         case .aniDB: return ["anidb", "anidbid"]
 
         case .seriesImdb: return ["seriesimdb"]
-        case .seriesTmdb: return ["seriestmdb"]
-        case .seriesTvdb: return ["seriestvdb"]
+        case .seriesTmdb: return ["seriestmdb", "seriesthemoviedb"]
+        case .seriesTvdb: return ["seriestvdb", "seriesthetvdb"]
         case .seriesTvmaze: return ["seriestvmaze"]
         case .seriesAniList: return ["seriesanilist"]
         case .seriesMal: return ["seriesmal", "seriesmyanimelist"]

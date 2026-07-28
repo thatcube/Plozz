@@ -132,9 +132,10 @@ Plozz serves all UI copy from one app-owned String Catalog. Adding a string mean
 writing it in Swift, running `tools/l10n-sync.py`, and committing both. The rules
 (and the traps) are in [`docs/localization.md`](docs/localization.md).
 
-Everything in the app is translatable, but no language ships yet. How
-translations are sourced, reviewed and gated — and how to help translate Plozz —
-is in [`docs/translations.md`](docs/translations.md).
+Plozz ships complete UI and permission-prompt catalogs for **36 languages**,
+including Arabic/Hebrew RTL layouts and full Slavic plural forms. How
+translations are produced, independently reviewed, structurally gated, and
+corrected is in [`docs/translations.md`](docs/translations.md).
 
 ## Releasing to TestFlight
 

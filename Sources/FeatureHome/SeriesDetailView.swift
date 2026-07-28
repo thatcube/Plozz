@@ -41,6 +41,8 @@ struct SeriesDetailView: View {
     /// still returns to wherever the user opened the show from. `nil` (e.g.
     /// previews, or a single-server show) hides the server picker.
     let onSelectServer: ((MediaSourceRef) -> Void)?
+    /// Opens another title from the Related row.
+    let onSelectRelated: (MediaItem) -> Void
     /// When the page was opened targeting a specific season, that season's id.
     let initialSeasonID: String?
     /// When the page was opened by tapping a specific episode, that episode. The
@@ -75,6 +77,19 @@ struct SeriesDetailView: View {
     /// once. It is declarative and re-evaluates on every appearance — including a
     /// pop — where it would override the returning user's focus.
     @State private var hasOpenedOnce = false
+    /// Latched once the opening claim on Play has been settled.
+    ///
+    /// `defaultFocus` fires when the page appears, but the hero's Play button only
+    /// EXISTS once `playTarget` resolves — and on a season page that's an async
+    /// load. Open before it lands and the action row's first focusable is whatever
+    /// else is there (the watched button), so tvOS gives entry focus to "Mark as
+    /// Watched" and the already-spent `defaultFocus` never reclaims it. Re-asserting
+    /// Play the moment it appears is what makes the page open on Play reliably.
+    @State private var hasSettledOpeningFocus = false
+    /// Set as soon as the user genuinely drives focus somewhere themselves (into
+    /// the rail or the season bar). It fences the re-assert above so a fast user
+    /// who has already moved on is never yanked back up to Play.
+    @State private var hasUserDirectedFocus = false
     /// True from the moment a pushed page pops until the rail has reclaimed
     /// focus. `hasChildOnTop` alone is too short a window: it clears the instant
     /// the pop completes, and tvOS then parks focus on the hero — restoring it
@@ -149,6 +164,7 @@ struct SeriesDetailView: View {
         isRequestingSeasons: Bool = false,
         onRequestSeasons: (([Int]) -> Void)? = nil,
         onSelectServer: ((MediaSourceRef) -> Void)? = nil,
+        onSelectRelated: @escaping (MediaItem) -> Void = { _ in },
         initialSeasonID: String? = nil,
         initialEpisode: MediaItem? = nil
     ) {
@@ -164,6 +180,7 @@ struct SeriesDetailView: View {
         self.isRequestingSeasons = isRequestingSeasons
         self.onRequestSeasons = onRequestSeasons
         self.onSelectServer = onSelectServer
+        self.onSelectRelated = onSelectRelated
         self.initialSeasonID = initialSeasonID
         self.initialEpisode = initialEpisode
         // When opened via "Go to Season", pre-select that season (and front it in
@@ -264,6 +281,19 @@ struct SeriesDetailView: View {
             // Only claim Play on a genuine open — see `hasOpenedOnce`.
             .defaultFocus($playFocused, !hasOpenedOnce)
             .onAppear { hasOpenedOnce = true }
+            // The Play button appears only once the play target resolves; until
+            // then there is nothing for `defaultFocus` to land on. Claim it the
+            // moment it exists — but only during the opening window, and never
+            // once the user has driven focus themselves.
+            .onChange(of: playTarget?.id) { _, resolved in
+                guard resolved != nil,
+                      !hasSettledOpeningFocus,
+                      !hasUserDirectedFocus,
+                      !hasChildOnTop
+                else { return }
+                hasSettledOpeningFocus = true
+                playFocused = true
+            }
             .onChange(of: hasChildOnTop) { _, covered in
                 // Returning from a pushed page. tvOS hands focus to the hero
                 // rather than back to the rail (verified on device: the rail
@@ -298,6 +328,7 @@ struct SeriesDetailView: View {
                         actionItem: playTarget,
                         seriesRecedeModel: recedeModel,
                         ignoresSystemFocusMoves: ignoresSystemFocusMoves,
+                        scheduleLine: upcomingHeroLine,
                         spoilerSettings: spoilerSettings,
                         playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
                         onPlay: playTarget.map { target in { onPlay(target.selectingVersion(effectivePlayVersionID)) } },
@@ -365,7 +396,7 @@ struct SeriesDetailView: View {
                         series: series,
                         recedeModel: recedeModel,
                         showsSeasons: !seasons.isEmpty || requestAvailability?.hasSeasonRequestContent == true,
-                        showsCast: !series.cast.isEmpty,
+                        showsTrailingContent: showsTrailingContent,
                         focusAnchorID: Self.browserFocusAnchorID,
                         seasonContent: {
                             // Keep the season chips + "request seasons" button hidden
@@ -402,7 +433,10 @@ struct SeriesDetailView: View {
                         seriesRecedeModel: recedeModel,
                         revealsSeriesCastWithoutBrowser: revealsCastWithoutBrowser,
                         suppressesFocus: ignoresSystemFocusMoves,
-                        onCastFocusEntered: { seasonBarEngaged = false }
+                        onCastFocusEntered: { seasonBarEngaged = false },
+                        relatedEntries: viewModel.relatedTitlesLoader?.entries ?? [],
+                        relatedHasResolved: viewModel.relatedTitlesLoader?.hasResolved ?? true,
+                        onSelectRelated: onSelectRelated
                     )
                         .padding(.top, 32)
                 }
@@ -567,6 +601,10 @@ struct SeriesDetailView: View {
                 // We're now inside the bar — open every chip to focus so left/right
                 // navigation between seasons works.
                 seasonBarEngaged = true
+                // User-driven focus: fence the opening Play claim (see
+                // `hasSettledOpeningFocus`) so it can't fire behind them.
+                hasUserDirectedFocus = true
+                hasSettledOpeningFocus = true
                 recedeModel.recede()
                 if isEntering { onFocusEntered() }
                 // Focus has genuinely left the episode rail (it's now on the bar), so
@@ -639,6 +677,8 @@ struct SeriesDetailView: View {
             if focused {
                 let isEntering = !seasonBarEngaged
                 seasonBarEngaged = true
+                hasUserDirectedFocus = true
+                hasSettledOpeningFocus = true
                 recedeModel.recede()
                 if isEntering { onFocusEntered() }
                 episodeRailResetToken += 1
@@ -758,7 +798,9 @@ struct SeriesDetailView: View {
     // MARK: Episode rail
 
     private func episodeRail(onFocusEntered: @escaping () -> Void) -> some View {
-        let episodes = currentEpisodes
+        // Owned episodes first, then the season's not-yet-aired ones so a viewer can
+        // see (and read about) the rest of the run without leaving the page.
+        let episodes = currentEpisodes + upcomingPlaceholders
         // The episode focus should land on when entering the rail / where it
         // pre-scrolls. We use the STABLE `railTargetID` (updated only on open,
         // season change, or a cross-server switch) rather than the live
@@ -787,6 +829,10 @@ struct SeriesDetailView: View {
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
             onFocusEntered: {
                 seasonBarEngaged = false
+                // The user has taken focus into the rail themselves — the opening
+                // Play claim must not fire behind them.
+                hasUserDirectedFocus = true
+                hasSettledOpeningFocus = true
                 recedeModel.recede()
                 onFocusEntered()
             },
@@ -796,7 +842,13 @@ struct SeriesDetailView: View {
             // leaves it alone. Focus was the wrong driver twice over: it made the
             // hero disagree with the fixed sections below it, and iPadOS has no
             // focus concept at all, so the behaviour could never exist there.
-            onSelect: onPlay
+            onSelect: { item in
+                // An unaired episode has nothing to play and no page worth opening,
+                // so selecting it is deliberately inert — it stays focusable purely
+                // so the rest of the run can be browsed and read.
+                guard !item.isUpcomingUnaired else { return }
+                onPlay(item)
+            }
         )
         .mediaItemActionContext(
             MediaItemActionContext(
@@ -968,6 +1020,44 @@ struct SeriesDetailView: View {
             return episodes
         }
         return seasons.isEmpty ? stampedLooseEpisodes : []
+    }
+
+    /// The selected season's unaired episodes, as non-playable rail entries.
+    private var upcomingPlaceholders: [MediaItem] {
+        guard let schedule = viewModel.state.value?.upcomingSchedule,
+              !schedule.upcomingEpisodes.isEmpty else { return [] }
+        let seasonNumber = selectedSeasonID
+            .flatMap { id in seasons.first { $0.id == id } }?
+            .seasonNumber
+        return SeriesUpcoming.placeholders(
+            for: seasonNumber,
+            seriesID: series.id,
+            seriesTitle: series.title,
+            ownedEpisodes: currentEpisodes,
+            schedule: schedule.upcomingEpisodes,
+            seriesArtwork: series
+        )
+    }
+
+    /// The hero's air-schedule line, e.g. "New episodes Fridays".
+    private var upcomingHeroLine: LocalizedStringResource? {
+        guard let schedule = viewModel.state.value?.upcomingSchedule else { return nil }
+        return SeriesUpcoming.heroLine(
+            nextEpisode: schedule.upcomingEpisode,
+            cadence: schedule.cadence,
+            schedule: schedule.upcomingEpisodes
+        )
+    }
+
+    /// Whether anything renders below the episode browser, so it doesn't need to
+    /// pad itself a scroll runway. A share copy of a show has no cast but can still
+    /// have a Related row, and padding as though the page ended left a void.
+    private var showsTrailingContent: Bool {
+        !series.cast.isEmpty
+            || !(viewModel.relatedTitlesLoader?.entries.isEmpty ?? true)
+            // Still resolving: the row reserves its space, so treat it as present
+            // rather than padding a runway that is about to be pushed off anyway.
+            || viewModel.relatedTitlesLoader?.hasResolved == false
     }
 
     private var revealsCastWithoutBrowser: Bool {

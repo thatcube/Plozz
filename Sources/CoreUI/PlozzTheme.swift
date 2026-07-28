@@ -228,14 +228,14 @@ public enum PlozzTheme {
         public static let cardStatusCueMinVerticalPadding: CGFloat = 5
         /// Resume-chip (play glyph + progress bar + "… left") drawn on landscape
         /// artwork. tvOS's tuned constants: read from ~10ft, so the glyph is large
-        /// and the bar is long. iOS derives its own from real text styles in
+        /// and the bar is comfortably readable without dominating the chip. iOS derives its own from real text styles in
         /// `PlozzMetrics` — applying these there would reproduce the caption bug
         /// (a tvOS constant that reads as secondary on a 29pt title but is larger
         /// than iOS's 15pt title).
         public static let resumeChipFontSize: CGFloat = 24
         public static let resumeChipInset: CGFloat = 18
-        public static let resumeChipBarWidth: CGFloat = 80
-        public static let resumeChipBarHeight: CGFloat = 6
+        public static let resumeChipBarWidth: CGFloat = 56
+        public static let resumeChipBarHeight: CGFloat = 8
         public static let resumeChipAccessorySize: CGFloat = 30
         /// Glyph size for the artwork "…" menu. Distinct from the download badge:
         /// the badge is a status readout, this is a HIT TARGET, so it's sized for

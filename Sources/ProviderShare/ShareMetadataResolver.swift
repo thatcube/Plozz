@@ -271,7 +271,14 @@ struct PipelineShareResolver: ShareMetadataResolving {
             genres: request.isAnime ? ["Anime"] : [],
             providerIDs: ids
         )
-        let query = MetadataQuery(item)
+        // A share scanned these files itself, so it holds evidence no server-backed
+        // item does: the episode titles on disk, and the (often more specific) titles
+        // the filenames use. Both exist to settle a same-name collision, and dropping
+        // them here left the matcher taking TheTVDB's relevance order on trust.
+        let query = MetadataQuery(item).offering(
+            episodeHints: request.isMovie ? [] : request.episodeHints,
+            titleAlternates: request.titleAlternates
+        )
 
         let enrichment = await pipeline.enrich(
             query,
@@ -289,7 +296,8 @@ struct PipelineShareResolver: ShareMetadataResolving {
             // the top (home-hero) candidate as its single backdrop today.
             backdropURL: enrichment.homeHero,
             logoURL: enrichment.logoURL,
-            title: enrichment.title
+            title: enrichment.title,
+            cast: enrichment.cast
         )
     }
 
@@ -308,6 +316,10 @@ struct PipelineShareResolver: ShareMetadataResolving {
             .title, .overview, .genres,
             .posterURL, .backdropURL, .homeHero, .detailBackdrop, .logoURL,
             .providerID("Imdb"), .providerID("Tvdb"), .providerID("Tmdb"),
+            // A share has only files, so its cast has to come from a provider —
+            // this is the one metadata a server-backed item always arrives with and
+            // a share never did.
+            .cast,
         ]
         if isAnime {
             fields.formUnion([.providerID("AniList"), .providerID("Mal")])

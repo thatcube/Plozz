@@ -217,7 +217,7 @@ final class HeroForegroundModelTests: XCTestCase {
     }
 
     func testNextPillIsChevron() {
-        XCTAssertEqual(Builder.pill(for: PillInput(kind: .next)).systemImage, "chevron.right")
+        XCTAssertEqual(Builder.pill(for: PillInput(kind: .next)).systemImage, "chevron.forward")
     }
 
     // MARK: - model(...)

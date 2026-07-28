@@ -65,7 +65,7 @@ public final class DetailSnapshotCache: Sendable {
     /// reclaims the orphaned files).
     ///
     /// v3 also introduced per-content-identity **scoping**: snapshots live under
-    /// `plozz-detail-cache-v3/<scope-digest>/…` so one profile / account / Plex
+    /// `<schema-dir>/<scope-digest>/…` so one profile / account / Plex
     /// Home-user identity can never read another's cached detail (which would leak
     /// the wrong sources or watch state). A nil scope maps to a single shared
     /// `default` subdirectory, preserving the unscoped behaviour for callers (tests,
@@ -80,7 +80,11 @@ public final class DetailSnapshotCache: Sendable {
     /// v6: Plex episodes cached before the `posterURL` fix hold the SHOW's poster
     /// where the episode's own still belongs, so a series page kept serving series
     /// artwork from cache while a freshly-fetched episode page looked right.
-    private static let schemaDirName = "plozz-detail-cache-v6"
+    ///
+    /// Exposed (not private) so tests assert against this single source of truth
+    /// rather than repeating the literal: a duplicated copy silently goes stale on
+    /// the next bump, which is exactly how a bump once broke the suite.
+    static let schemaDirName = "plozz-detail-cache-v6"
     private static let schemaDirPrefix = "plozz-detail-cache"
     private static let defaultScopeComponent = "default"
 
@@ -92,7 +96,7 @@ public final class DetailSnapshotCache: Sendable {
     private let directoryContents: DirectoryContents
 
     /// Resolves the on-disk directory for a base caches directory and an optional
-    /// scope digest: `<base>/plozz-detail-cache-v3/<scope-or-default>`.
+    /// scope digest: `<base>/<schemaDirName>/<scope-or-default>`.
     private static func resolvedDirectory(base: URL?, scope: String?) -> URL? {
         base.map {
             $0.appendingPathComponent(schemaDirName, isDirectory: true)

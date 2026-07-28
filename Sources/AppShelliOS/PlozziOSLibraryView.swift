@@ -179,21 +179,31 @@ private struct PlozziOSLibraryCard: View {
 
 struct PlozziOSLibraryGridView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.plozzMetrics) private var metrics
+    /// Per-profile card presentation. Decides how far a grid card insets its
+    /// artwork, which is what the banner's edges have to match.
+    @Environment(\.plozzCardStyle) private var cardStyle
     @State private var viewModel: LibraryBrowseViewModel
     private let title: String   // l10n:content — library name from the server
     private let provider: any MediaProvider
     private let settings: PlozziOSSettingsModel
+    /// App-wide media-share scan/enrich status, feeding the banner above the grid.
+    /// Passed rather than read from the environment so the pushed destination
+    /// carries it explicitly, like every other dependency on this route.
+    private let scanStatus: ShareScanStatusModel?
 
     init(
         viewModel: LibraryBrowseViewModel,
         title: String,   // l10n:content — library name from the server
         provider: any MediaProvider,
-        settings: PlozziOSSettingsModel
+        settings: PlozziOSSettingsModel,
+        scanStatus: ShareScanStatusModel? = nil
     ) {
         _viewModel = State(initialValue: viewModel)
         self.title = title
         self.provider = provider
         self.settings = settings
+        self.scanStatus = scanStatus
     }
 
     var body: some View {
@@ -214,6 +224,7 @@ struct PlozziOSLibraryGridView: View {
                     )
                 } else {
                     ScrollView {
+                        scanBanner
                         LazyVGrid(
                             columns: settings.density.density.iOSPosterGridColumns(
                                 horizontalSizeClass: horizontalSizeClass
@@ -254,6 +265,36 @@ struct PlozziOSLibraryGridView: View {
         }
         .task { await viewModel.loadFirstPageIfNeeded() }
     }
+
+    /// Live scan/enrich progress for the media share backing THIS library, above
+    /// the grid so it explains a wall that's short or still growing. Renders
+    /// nothing for a server-backed library or an idle share, and does its own
+    /// status lookup so progress ticks never reach the grid.
+    ///
+    /// Horizontally it lines up with the poster ARTWORK below it, not the grid's
+    /// column edges: a card insets its artwork inside its own surface, so matching
+    /// only the grid padding leaves the banner overhanging every poster by that
+    /// inset. Matches the tvOS treatment exactly.
+    @ViewBuilder
+    private var scanBanner: some View {
+        if viewModel.isMediaShare {
+            ShareScanProgressBanner(
+                status: scanStatus,
+                shareID: viewModel.sourceServerID
+            )
+            .padding(.horizontal, Self.gridInset + posterArtworkInset)
+            .padding(.top, Self.gridInset)
+        }
+    }
+
+    /// How far a grid card insets its artwork inside its own footprint.
+    private var posterArtworkInset: CGFloat {
+        cardStyle == .framed ? metrics.cardInset : metrics.borderlessCardSideMargin
+    }
+
+    /// The grid's own `.padding()` — matched so the banner starts from the same
+    /// edge before the artwork inset is added.
+    private static let gridInset: CGFloat = 16
 
     private var sortControl: some View {
         Menu {

@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import FeatureHomeCore
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -30,6 +31,13 @@ struct DetailExtrasView: View {
     /// back, visibly, before the episode rail reclaims it.
     var suppressesFocus = false
     var onCastFocusEntered: (() -> Void)? = nil
+    /// Titles related to this one that the viewer actually has. Empty until
+    /// resolved, and empty for good on a title no provider covers.
+    var relatedEntries: [RelatedEntry] = []
+    /// Whether related resolution has finished, so the row can hold its space while
+    /// it is still working instead of appearing late and shoving the cast down.
+    var relatedHasResolved: Bool = true
+    var onSelectRelated: ((MediaItem) -> Void)? = nil
 
     /// Extra gap below the cast row on tvOS so a 3-line name wrapping out
     /// of its circle doesn't overlap the About header below.
@@ -41,8 +49,34 @@ struct DetailExtrasView: View {
         #endif
     }
 
+    /// Whether the series hero has receded, so the rows beneath it are on screen.
+    ///
+    /// ``SeriesCastRevealModifier`` hides an unrevealed row with opacity and an
+    /// offset, which leaves it occupying its full height. That is deliberate for the
+    /// cast — the episode browser's scroll runway is sized assuming the cast is
+    /// there (see `trailingRunwayHeight`) — but it means every additional row costs
+    /// its height in dead space on a route where the hero starts full-screen.
+    ///
+    /// Opening a season goes straight into the browser, so the hero is already
+    /// receded and everything reads correctly. Arriving from search or the hero's
+    /// info button leaves focus on the hero, and that is where the reserved space
+    /// shows up as a void.
+    private var seriesContentRevealed: Bool {
+        (seriesRecedeModel?.isReceded ?? true) || revealsSeriesCastWithoutBrowser
+    }
+
+    /// Related is **removed** from the layout until the hero recedes, rather than
+    /// hidden in place like the cast. It is not load-bearing for the browser's
+    /// runway, so reserving its height buys nothing and costs a second empty block
+    /// on exactly the route where the first one is already visible.
+    private var showsRelated: Bool {
+        guard onSelectRelated != nil, seriesContentRevealed else { return false }
+        return !relatedEntries.isEmpty || !relatedHasResolved
+    }
+
     private var hasContent: Bool {
-        !item.cast.isEmpty
+        showsRelated
+            || !item.cast.isEmpty
             || item.overview != nil
             || !item.ratings.isEmpty
             || item.productionYear != nil
@@ -60,6 +94,19 @@ struct DetailExtrasView: View {
     var body: some View {
         if hasContent {
             VStack(alignment: .leading, spacing: castBottomSpacing) {
+                // Above the cast: "what else is like this" is a browsing decision,
+                // and the viewer is making it now. Who was in it is reference
+                // material they look up afterwards.
+                if showsRelated, let onSelectRelated {
+                    RelatedRowView(
+                        entries: relatedEntries,
+                        hasResolved: relatedHasResolved,
+                        leadingInset: leadingInset,
+                        onSelect: onSelectRelated
+                    )
+                    .environment(\.plozzMetrics, .standard)
+                    .disabled(suppressesFocus)
+                }
                 if !item.cast.isEmpty {
                     CastRowView(
                         people: item.cast,

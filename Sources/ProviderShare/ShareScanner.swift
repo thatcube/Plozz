@@ -369,7 +369,15 @@ actor ShareScanner {
                     let now = progressClock.now
                     if dirsWalked == 1
                         || lastProgressReport.duration(to: now) >= .milliseconds(250) {
-                        reporter.scanDetailedProgress(shareID, dirsWalked, filesFound)
+                        // Everything still queued: this level's undispatched tail
+                        // plus the children discovered so far. Walked vs walked +
+                        // pending is the walk's REAL completion — the frontier is
+                        // the only honest denominator a breadth-first walk has
+                        // (the tree's size isn't knowable until it's walked).
+                        let pending = (frontier.count - index) + nextFrontier.count
+                        reporter.scanFrontierProgress(
+                            shareID, dirsWalked, max(0, pending), filesFound
+                        )
                         lastProgressReport = now
                     }
                     if Task.isCancelled { continue }   // stop dispatching; let in-flight drain
@@ -410,7 +418,7 @@ actor ShareScanner {
                 scanGeneration: scanGeneration
             )
         }
-        reporter.scanDetailedProgress(shareID, dirsWalked, filesFound)
+        reporter.scanFrontierProgress(shareID, dirsWalked, 0, filesFound)
 
         // Completed a full pass. Only prune (drop assets no longer on the share) when
         // EVERY directory listed cleanly — a partial walk (some listing failed) must

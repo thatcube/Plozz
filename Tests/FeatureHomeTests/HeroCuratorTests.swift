@@ -492,6 +492,85 @@ final class HeroCuratorTests: XCTestCase {
 
         XCTAssertEqual(result.map(\.id), ["new"])
     }
+
+    // MARK: One slide per show
+
+    func testAResumableEpisodeAndItsWatchlistedSeriesShareOneSlide() async {
+        // Continue Watching offers the episode you're mid-way through; Watchlist
+        // offers the series. Scoping identity by `kind` kept them apart, so the same
+        // show took two slides — once reading "Play S3, E1", once with a bookmark.
+        let episode = MediaItem(
+            id: "reacher-s3e1",
+            title: "Reacher",
+            kind: .episode,
+            parentTitle: "Reacher",
+            seasonNumber: 3,
+            episodeNumber: 1,
+            seriesID: "reacher-show",
+            backdropURL: URL(string: "https://example.com/reacher-ep.jpg")
+        )
+        let series = MediaItem(
+            id: "reacher-show",
+            title: "Reacher",
+            kind: .series,
+            backdropURL: URL(string: "https://example.com/reacher.jpg")
+        )
+        let curated = await HeroCurator().curate(
+            settings: settings(sources: [.continueWatching, .watchlist]),
+            continueWatching: [episode],
+            watchlist: [series]
+        )
+        XCTAssertEqual(curated.count, 1)
+        XCTAssertEqual(curated.first?.id, "reacher-s3e1", "Continue Watching leads, so its episode wins the slide")
+    }
+
+    func testASeasonCollapsesIntoItsSeriesToo() async {
+        let season = MediaItem(
+            id: "silo-s2",
+            title: "Silo",
+            kind: .season,
+            parentTitle: "Silo",
+            seasonNumber: 2,
+            seriesID: "silo-show",
+            backdropURL: URL(string: "https://example.com/silo-s2.jpg")
+        )
+        let series = MediaItem(
+            id: "silo-show",
+            title: "Silo",
+            kind: .series,
+            backdropURL: URL(string: "https://example.com/silo.jpg")
+        )
+        let curated = await HeroCurator().curate(
+            settings: settings(sources: [.watchlist, .continueWatching]),
+            continueWatching: [series],
+            watchlist: [season]
+        )
+        XCTAssertEqual(curated.count, 1)
+    }
+
+    func testAFilmAndASeriesSharingATitleStillGetTheirOwnSlides() async {
+        // Folding a show's parts together must not fold *unrelated* titles together:
+        // "Fargo" the film and "Fargo" the series are different things.
+        let film = MediaItem(
+            id: "fargo-film",
+            title: "Fargo",
+            kind: .movie,
+            backdropURL: URL(string: "https://example.com/fargo-film.jpg")
+        )
+        let show = MediaItem(
+            id: "fargo-series",
+            title: "Fargo",
+            kind: .series,
+            backdropURL: URL(string: "https://example.com/fargo-series.jpg")
+        )
+        let curated = await HeroCurator().curate(
+            settings: settings(sources: [.continueWatching, .watchlist]),
+            continueWatching: [film],
+            watchlist: [show]
+        )
+        XCTAssertEqual(curated.count, 2)
+    }
+
 }
 
 final class HomeHeroSlotStateTests: XCTestCase {

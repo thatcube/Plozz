@@ -30,6 +30,14 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
     /// its own ``UpcomingEpisode/source``), so it is stored directly rather than as a
     /// ``SourcedValue``. Filled only when a caller requests ``MetadataField/nextAiringEpisode``.
     public var upcomingEpisode: UpcomingEpisode?
+    /// Every known future episode, oldest first, when the provider lists more than
+    /// the next one (TheTVDB). Empty for single-next providers (AniList, TVmaze).
+    public var upcomingEpisodes: [UpcomingEpisode]
+    /// Billed cast, best-first. Only a file-based share resolves this externally;
+    /// a media server sends its people with the item.
+    public var cast: SourcedValue<[MediaPerson]>?
+    /// The provider-stated release cadence, when reported. Never inferred.
+    public var cadence: AirCadence?
 
     public init(
         externalIDs: [String: SourcedValue<String>] = [:],
@@ -43,7 +51,9 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         bannerURL: SourcedValue<URL>? = nil,
         score: SourcedValue<Double>? = nil,
         backdropCandidates: [SourcedValue<URL>] = [],
-        upcomingEpisode: UpcomingEpisode? = nil
+        upcomingEpisode: UpcomingEpisode? = nil,
+        upcomingEpisodes: [UpcomingEpisode] = [],
+        cadence: AirCadence? = nil
     ) {
         self.externalIDs = externalIDs
         self.title = title
@@ -57,6 +67,8 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         self.score = score
         self.backdropCandidates = backdropCandidates
         self.upcomingEpisode = upcomingEpisode
+        self.upcomingEpisodes = upcomingEpisodes
+        self.cadence = cadence
     }
 
     public var isEmpty: Bool {
@@ -91,7 +103,15 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         if !backdropCandidates.isEmpty {
             fields.formUnion([.backdropURL, .homeHero, .detailBackdrop])
         }
-        if upcomingEpisode != nil { fields.insert(.nextAiringEpisode) }
+        // A schedule request wants the whole upcoming run, so the single next
+        // episode is only a partial answer and the field stays open for a provider
+        // that can list. This matters most for anime: AniList leads that chain and
+        // reports an absolute episode number with no season, which can't be placed
+        // in a season's rail — leaving the field open lets TVmaze, which numbers
+        // per season, still be asked. When no provider can list, every one is tried
+        // once (`triedForField` prevents repeats) and the singular survives.
+        if !upcomingEpisodes.isEmpty { fields.insert(.nextAiringEpisode) }
+        if cast != nil { fields.insert(.cast) }
         return fields
     }
 
@@ -117,14 +137,26 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         fill(&posterURL, from: other.posterURL, field: .posterURL, present: present)
         fill(&logoURL, from: other.logoURL, field: .logoURL, present: present)
         fill(&episodeStillURL, from: other.episodeStillURL, field: .episodeThumbnail, present: present)
+        fill(&cast, from: other.cast, field: .cast, present: present)
         // Banner and score have no dedicated MetadataField (bonus art/metadata);
         // still first-writer-wins, and never blocked by `present`.
         if bannerURL == nil { bannerURL = other.bannerURL }
         if score == nil { score = other.score }
         // Schedule: first provider (in configured order) to report a next episode
         // wins, mirroring the priority-respecting merge used for fields above.
-        if upcomingEpisode == nil, !present.contains(.nextAiringEpisode) {
-            upcomingEpisode = other.upcomingEpisode
+        if !present.contains(.nextAiringEpisode) {
+            if !other.upcomingEpisodes.isEmpty, upcomingEpisodes.isEmpty {
+                // A provider that lists the whole run supersedes one that reported
+                // only the next episode. Its singular is taken too: the list and the
+                // next episode must describe the same source, or a per-season run
+                // would be paired with an absolute-numbered next episode.
+                upcomingEpisodes = other.upcomingEpisodes
+                upcomingEpisode = other.upcomingEpisode ?? upcomingEpisode
+                cadence = other.cadence ?? cadence
+            } else if upcomingEpisode == nil {
+                upcomingEpisode = other.upcomingEpisode
+                cadence = other.cadence
+            }
         }
         // Keep the first non-empty candidate set (one response serves both screens),
         // unless the caller already has a backdrop from a higher-priority source.

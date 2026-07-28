@@ -28,6 +28,8 @@ struct EnrichmentRecord: Sendable, Equatable {
     /// Airbender"), overlaid over a generic folder-derived display title at read
     /// time. Persisted in the `title` enrichment column so it survives re-scans.
     var title: String?  // l10n:content — resolved canonical media title from external provider
+    /// Billed cast, best-first. Empty when no provider supplied one.
+    var cast: [MediaPerson] = []
     var provenance = MetadataProvenance()
 
     static func sourced(
@@ -38,7 +40,8 @@ struct EnrichmentRecord: Sendable, Equatable {
         posterURL: SourcedValue<URL>? = nil,
         backdropURL: SourcedValue<URL>? = nil,
         logoURL: SourcedValue<URL>? = nil,
-        title: SourcedValue<String>? = nil
+        title: SourcedValue<String>? = nil,
+        cast: SourcedValue<[MediaPerson]>? = nil
     ) -> EnrichmentRecord {
         var provenance = MetadataProvenance()
         for (namespace, value) in providerIDs {
@@ -51,6 +54,7 @@ struct EnrichmentRecord: Sendable, Equatable {
         provenance.set(backdropURL, for: .backdropURL)
         provenance.set(logoURL, for: .logoURL)
         provenance.set(title, for: .title)
+        provenance.set(cast, for: .cast)
         return EnrichmentRecord(
             providerIDs: providerIDs.mapValues(\.value),
             overview: overview?.value,
@@ -60,6 +64,7 @@ struct EnrichmentRecord: Sendable, Equatable {
             backdropURL: backdropURL?.value,
             logoURL: logoURL?.value,
             title: title?.value,
+            cast: cast?.value ?? [],
             provenance: provenance
         )
     }
@@ -72,6 +77,10 @@ struct EnrichmentRecord: Sendable, Equatable {
         !providerIDs.isEmpty
             || (overview?.isEmpty == false)
             || posterURL != nil || backdropURL != nil || logoURL != nil
+            // A resolved cast is a real answer, so a pass that returned only that
+            // isn't a miss — treating it as one discarded the write entirely and
+            // left the field permanently empty.
+            || !cast.isEmpty
     }
 
     mutating func inferLegacyProvenanceForMissingFields() {

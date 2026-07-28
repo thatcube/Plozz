@@ -172,6 +172,24 @@ private struct LoadedLogo<TextFallback: View>: View {
         .task(id: taskKey) { await resolve() }
     }
 
+    /// The exact size a logo renders at inside the `maxWidth` × `maxHeight` box.
+    ///
+    /// `.resizable().aspectRatio(contentMode: .fit).frame(maxWidth:maxHeight:)` does
+    /// **not** shrink the frame to the fitted artwork: a resizable image has no
+    /// intrinsic size, so it accepts the full proposal and the frame stays the full
+    /// max height with the artwork centred inside it. Measured on device: a
+    /// 784 × 141 wordmark rendered ~111pt tall inside a frame reporting 200pt, so
+    /// ~89pt of empty frame sat around it — and because the leftover depends on each
+    /// logo's aspect ratio, the gap above and below the logo changed from title to
+    /// title. Sizing the frame from the image's own ratio removes the slack.
+    private func fittedSize(for image: UIImage) -> CGSize {
+        HeroLogoFit.fittedSize(
+            for: image.size,
+            maxWidth: maxWidth,
+            maxHeight: maxHeight
+        )
+    }
+
     /// Renders the resolved logo. Most logos draw as-is with an adaptive contrast
     /// halo, applied *only* to logos that need it (`needsHalo`): a soft light glow
     /// behind dark logos, a soft dark shadow behind light ones — used only when the
@@ -189,19 +207,22 @@ private struct LoadedLogo<TextFallback: View>: View {
     /// so it is guaranteed to contrast with what sits behind it.
     @ViewBuilder
     private func logo(_ processed: ProcessedLogo) -> some View {
+        let fitted = fittedSize(for: processed.image)
         if processed.isMonochrome {
             let tintLight = colorScheme == .dark   // dark mode → light (white) logo
             Image(uiImage: processed.image)
                 .renderingMode(.template)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: alignment)
+                .frame(width: fitted.width, height: fitted.height)
+                .frame(maxWidth: maxWidth, alignment: alignment)
                 .foregroundStyle(tintLight ? Color.white : Color.black)
         } else {
             Image(uiImage: processed.image)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: alignment)
+                .frame(width: fitted.width, height: fitted.height)
+                .frame(maxWidth: maxWidth, alignment: alignment)
                 .modifier(LogoLegibilityHalo(isDark: processed.isDark, active: processed.needsHalo))
         }
     }

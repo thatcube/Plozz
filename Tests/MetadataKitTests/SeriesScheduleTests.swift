@@ -9,6 +9,9 @@ private struct FakeScheduleTVmaze: TVmazeEnriching {
     var next: TVmazeNextEpisode?
     func resolve(_ query: MetadataQuery, wantEpisodeStill: Bool, wantOverview: Bool) async -> TVmazeResolved? { resolved }
     func nextEpisode(_ query: MetadataQuery) async -> TVmazeNextEpisode? { next }
+    /// Defaults to "no listing" so these tests keep exercising the single-next path.
+    var upcomingListing: TVmazeUpcoming?
+    func upcomingEpisodes(_ query: MetadataQuery, limit: Int) async -> TVmazeUpcoming? { upcomingListing }
 }
 
 private struct FakeScheduleTVDB: TVDBEnriching {
@@ -21,6 +24,12 @@ private struct FakeScheduleTVDB: TVDBEnriching {
     }
     func backdropURL(title: String, year: Int?, isMovie: Bool, tvdbID: String?) async -> URL? { nil }
     func nextAired(byTVDBID id: String) async -> ProviderNextEpisode? { calls.record("nextAired:\(id)"); return next }
+    /// Defaults to "no listing" so these tests keep exercising the single-next path.
+    var upcoming: TVDBUpcomingSchedule?
+    func upcomingEpisodes(byTVDBID id: String, limit: Int) async -> TVDBUpcomingSchedule? {
+        calls.record("upcomingEpisodes:\(id)")
+        return upcoming
+    }
 }
 
 private struct FakeScheduleAniList: AniListEnriching {
@@ -133,7 +142,48 @@ final class SeriesScheduleTests: XCTestCase {
         XCTAssertEqual(up?.seasonNumber, 3)
         XCTAssertEqual(up?.episodeNumber, 8)
         XCTAssertEqual(up?.seriesIdentity, .external(source: "tvdb", value: "555"))
-        XCTAssertEqual(fake.calls.all, ["nextAired:555"], "Schedule-only must use nextAired by id, never a resolve")
+        // The point is that a schedule-only request stays on cheap by-id lookups and
+        // never falls back to a title `resolve`. Both schedule calls are by-id, so
+        // assert the absence of a resolve rather than an exact call list — which
+        // would otherwise fail whenever a second by-id source is added.
+        XCTAssertFalse(
+            fake.calls.all.contains { $0.hasPrefix("byTitle") || $0.hasPrefix("byID") },
+            "Schedule-only must never trigger a resolve"
+        )
+        XCTAssertTrue(fake.calls.all.contains("nextAired:555"))
+    }
+
+    func testTVDBPrefersTheFullUpcomingListingOverTheSingleNext() async throws {
+        // A series with several unreleased episodes lists all of them, so the rail
+        // can show the whole run rather than only the next one.
+        // `offset` is typed explicitly: inferred from `episodeNumber:` it becomes
+        // `Int?`, and interpolating that yields "Optional(1)" — silently building an
+        // unparseable date string rather than failing at the point of the mistake.
+        let listed = try (1...3).map { (offset: Int) in
+            ProviderNextEpisode(
+                seasonNumber: 3,
+                episodeNumber: offset,
+                title: "Ep \(offset)",
+                airDate: try XCTUnwrap(ScheduleDateParsing.calendarDate("2030-05-0\(offset)")),
+                datePrecision: .dateOnly
+            )
+        }
+        var fake = FakeScheduleTVDB(next: nil)
+        fake.upcoming = TVDBUpcomingSchedule(
+            episodes: listed,
+            cadence: AirCadence(weekdays: [6], airsTime: "21:00")
+        )
+        let provider = TVDBEnrichmentProvider(client: fake)
+        let out = await provider.enrich(seriesQuery(.tvShow, ids: ["Tvdb": "555"]), missing: [.nextAiringEpisode])
+
+        XCTAssertEqual(out.upcomingEpisodes.count, 3)
+        XCTAssertEqual(out.upcomingEpisode?.episodeNumber, 1, "The single-next stays the first of the list")
+        XCTAssertEqual(out.cadence?.weekdays, [6])
+        XCTAssertTrue(out.cadence?.isSingleWeekday == true)
+        XCTAssertFalse(
+            fake.calls.all.contains("nextAired:555"),
+            "A full listing makes the single-next fallback unnecessary"
+        )
     }
 
     func testTVDBScheduleInertWithoutKnownID() async {
@@ -242,4 +292,80 @@ final class SeriesScheduleTests: XCTestCase {
         _ = await resolver.refresh(query, tier: .idleBacklog, force: true)
         XCTAssertEqual(spy.calls, 2)
     }
+    func testARecordFromAnOlderSchemaIsAlwaysDueForRefresh() {
+        // A record written before `upcomingEpisodes` existed still satisfies its
+        // TTL, so without this it would be served — with an empty list — for hours.
+        let stale = SeriesScheduleRecord(
+            seriesKey: "k",
+            upcomingEpisode: nil,
+            refreshedAt: Date(),
+            refreshDueAt: Date().addingTimeInterval(6 * 60 * 60),
+            schemaVersion: 1
+        )
+        XCTAssertTrue(stale.isRefreshDue(), "An older-schema record can't supply new fields")
+
+        let current = SeriesScheduleRecord(
+            seriesKey: "k",
+            upcomingEpisode: nil,
+            refreshedAt: Date(),
+            refreshDueAt: Date().addingTimeInterval(6 * 60 * 60)
+        )
+        XCTAssertFalse(current.isRefreshDue(), "A current-schema record still honours its TTL")
+    }
+
+    func testASingleNextEpisodeLeavesTheScheduleOpenForAProviderThatCanList() {
+        // AniList leads the anime chain and reports an absolute episode number with
+        // no season, which can't be placed in a season's rail. The field must stay
+        // open so a per-season lister (TVmaze) is still asked.
+        var absoluteOnly = MetadataEnrichment()
+        absoluteOnly.upcomingEpisode = UpcomingEpisode(
+            seriesIdentity: .external(source: "anilist", value: "1"),
+            absoluteEpisodeNumber: 1087,
+            airDate: Date(),
+            datePrecision: .dateAndTime,
+            source: .anilist,
+            refreshedAt: Date()
+        )
+        XCTAssertFalse(
+            absoluteOnly.filledFields.contains(.nextAiringEpisode),
+            "A single next episode is a partial answer; the run is still missing"
+        )
+
+        var listed = MetadataEnrichment()
+        listed.upcomingEpisodes = [absoluteOnly.upcomingEpisode!]
+        XCTAssertTrue(listed.filledFields.contains(.nextAiringEpisode))
+    }
+
+    func testAListingProviderSupersedesASingleNextEpisode() {
+        var accumulated = MetadataEnrichment()
+        accumulated.upcomingEpisode = UpcomingEpisode(
+            seriesIdentity: .external(source: "anilist", value: "1"),
+            absoluteEpisodeNumber: 1087,
+            airDate: Date(timeIntervalSince1970: 1_900_000_000),
+            datePrecision: .dateAndTime,
+            source: .anilist,
+            refreshedAt: Date()
+        )
+
+        let perSeason = UpcomingEpisode(
+            seriesIdentity: .external(source: "tvmaze", value: "9"),
+            seasonNumber: 3,
+            episodeNumber: 5,
+            airDate: Date(timeIntervalSince1970: 1_900_100_000),
+            datePrecision: .dateOnly,
+            source: .tvmaze,
+            refreshedAt: Date()
+        )
+        var lister = MetadataEnrichment()
+        lister.upcomingEpisodes = [perSeason]
+        lister.upcomingEpisode = perSeason
+
+        accumulated.fillMissing(from: lister)
+        XCTAssertEqual(accumulated.upcomingEpisodes.count, 1)
+        XCTAssertEqual(
+            accumulated.upcomingEpisode?.source, .tvmaze,
+            "The next episode must come from the same source as the run, not be left absolute"
+        )
+    }
+
 }

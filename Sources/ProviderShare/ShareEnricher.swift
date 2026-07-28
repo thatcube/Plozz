@@ -60,7 +60,17 @@ actor ShareEnricher {
     /// their retry budget that way are excluded from the backlog forever at their
     /// version, so the correction has to be a bump: this is precisely the "re-enrich
     /// everything once the sources improve" mechanism, and the sources did improve.
-    static let version = 15
+    /// v17: a series' on-disk episode titles and filename-derived title alternates
+    /// were gathered for every item and then dropped at the pipeline boundary, so
+    /// content-based disambiguation never ran once and every same-name collision was
+    /// settled on TheTVDB's relevance order alone. "Lucky" resolved to a 2022
+    /// documentary that ended rather than the 2026 drama whose episodes were on disk.
+    /// Everything matched by title needs another look now that the evidence arrives.
+    /// (16 was spent by the diagnostic build that found this, so it is skipped.)
+    /// v18: cast. A share's detail page had no cast at all — the record had no
+    /// field for it, so no provider was ever asked — while a Jellyfin/Plex copy of
+    /// the same show showed a full one.
+    static let version = 18
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving

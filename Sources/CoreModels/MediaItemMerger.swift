@@ -70,10 +70,12 @@ public struct UnifiedWatchState: Sendable, Hashable {
 /// possible — the old `additionalSourceAccountIDs` only remembered *which*
 /// accounts also held the title, not how to actually address it there.
 ///
-/// Determinism: the **first** occurrence of a duplicate set stays primary (so the
-/// aggregator's interleave/relevance order is respected), `providerIDs` are
-/// unioned, and `sources`/`additionalSourceAccountIDs` list the primary first
-/// then the de-duplicated alternates in first-seen order.
+/// Determinism: the primary is the member whose own metadata is richest (a managed
+/// server's copy over a plain file share's — see ``richestMember(of:)``), falling
+/// back to the first occurrence, so the aggregator's interleave/relevance order is
+/// respected among equals. `providerIDs` are unioned across **every** member, and
+/// `sources`/`additionalSourceAccountIDs` list the primary first then the
+/// de-duplicated alternates in first-seen order.
 public enum MediaItemMerger {
     /// Collapses duplicate items referring to the same title across providers into
     /// a single merged item, preserving the input order.
@@ -90,6 +92,44 @@ public enum MediaItemMerger {
     ///     Browse, Search and the watch fan-out all read one consistent set
     ///     regardless of entry path. Defaults to a no-op so cold-start / existing
     ///     callers behave exactly as before.
+    /// The member whose metadata should front the merged card.
+    ///
+    /// Account order decided this before, which meant a plain file share could
+    /// front a title a managed server also holds — and the card then showed
+    /// whatever Plozz synthesised from filenames rather than the server's curated
+    /// record. Silo opened that way had no cast at all while the Plex copy had 163
+    /// people, and the empty cast went on to distort the page's layout.
+    ///
+    /// Only the *display* member changes. Every copy still contributes its ids,
+    /// versions and watch state, and playback still chooses by locality first (see
+    /// ``CrossSourceSelection``), so a local share is still played from even when a
+    /// remote server fronts the card.
+    ///
+    /// Ties keep the earlier member, so ordering stays deterministic.
+    static func richestMember(of duplicates: [MediaItem]) -> MediaItem {
+        guard duplicates.count > 1 else { return duplicates[0] }
+        var best = duplicates[0]
+        var bestRank = displayRichness(of: best)
+        for member in duplicates.dropFirst() {
+            let rank = displayRichness(of: member)
+            if rank > bestRank {
+                best = member
+                bestRank = rank
+            }
+        }
+        return best
+    }
+
+    /// How complete a member's own metadata is, for fronting a merged card. The
+    /// backend tier dominates — a managed server curates the whole record — with
+    /// present cast as a secondary signal, so a share that HAS been enriched isn't
+    /// demoted below a server copy that somehow has nothing.
+    private static func displayRichness(of item: MediaItem) -> Int {
+        let backend = (item.sources.first { $0.accountID == item.sourceAccountID }?.providerKind)
+            .map(\.metadataRichnessRank) ?? 1
+        return backend * 2 + (item.cast.isEmpty ? 0 : 1)
+    }
+
     public static func merge(
         _ items: [MediaItem],
         serverInfo: (String) -> SourceServerInfo? = { _ in nil },
@@ -285,9 +325,10 @@ public enum MediaItemMerger {
         serverInfo: (String) -> SourceServerInfo? = { _ in nil },
         identitySources: (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) -> MediaItem {
-        guard var primary = duplicates.first else {
+        guard !duplicates.isEmpty else {
             preconditionFailure("mergeGroup requires at least one item")
         }
+        var primary = richestMember(of: duplicates)
 
         // The eager index's known servers for this title (origin-agnostic SSOT),
         // resolved from the primary's identities. Folded in below so even a
@@ -312,8 +353,13 @@ public enum MediaItemMerger {
         }
 
         // Union external ids so the merged card carries every catalogue id.
+        //
+        // Every member is walked, not `dropFirst()`: the primary is chosen for its
+        // metadata rather than its position, so skipping index 0 would drop the ids
+        // of whichever member didn't win. An anime shelf holding AniList ids on the
+        // share copy and TMDb ids on the server copy would silently lose one side.
         var providerIDs = primary.providerIDs
-        for duplicate in duplicates.dropFirst() {
+        for duplicate in duplicates {
             for (key, value) in duplicate.providerIDs where providerIDs[key] == nil {
                 providerIDs[key] = value
             }
@@ -329,7 +375,18 @@ public enum MediaItemMerger {
             guard seenSourceIDs.insert(ref.id).inserted else { return }
             sources.append(ref)
         }
-        for duplicate in duplicates {
+        // The PRIMARY's refs lead, then the rest in their original order.
+        //
+        // "Primary first" is a documented invariant of this list — `sources.first`
+        // is the fallback "current server" in the playback picker, and the selector
+        // treats a lower index as the preferred candidate at equal rank. Choosing
+        // the primary by metadata rather than position broke that: the card would
+        // front the server's copy while the picker highlighted the share's.
+        // Relative order is otherwise untouched, so re-merging stays idempotent.
+        let orderedMembers = [primary] + duplicates.filter {
+            !($0.id == primary.id && $0.sourceAccountID == primary.sourceAccountID)
+        }
+        for duplicate in orderedMembers {
             // Sanitize each member's *own carried* sources against the merged kind
             // before folding them in: a member rehydrated from a stale on-disk cache
             // can carry a cross-kind twin (the episode↔movie bug), and its own

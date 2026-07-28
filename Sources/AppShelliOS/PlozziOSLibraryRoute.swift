@@ -51,7 +51,8 @@ extension View {
                     ),
                     title: route.title,
                     provider: provider,
-                    settings: appModel.settings
+                    settings: appModel.settings,
+                    scanStatus: appModel.shareScanStatus
                 )
             } else {
                 ContentUnavailableView(

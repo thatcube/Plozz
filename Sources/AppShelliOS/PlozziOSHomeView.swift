@@ -610,6 +610,7 @@ struct PlozziOSHomeView: View {
             settings: settings,
             continueWatching: content.continueWatching,
             watchlist: content.watchlist,
+            recentlyAdded: content.latest,
             randomLibraries: randomLibraries,
             watchMutations: pendingMutations,
             featuredProvider: { limit in
@@ -1492,7 +1493,12 @@ private struct PlozziOSHomeMediaCard: View {
             // independently controlled.
             showsResumeChip: isLandscape,
             downloadState: liveDownloadRecord?.badgeState,
-            showsActionsMenu: isLandscape
+            // No visible "…" while browsing: the actions people actually reach for
+            // live on the detail page, which is far more discoverable than a tiny
+            // glyph on artwork. Press-and-hold still opens the menu here. The
+            // episode cards on a show's page keep their explicit menu, where the
+            // per-episode actions have nowhere else to live.
+            showsActionsMenu: false
         )
         .task(id: "\(item.id)|\(item.selectedVersionID ?? "")") {
             downloadRecord = await appModel.downloads.record(forSelectedVersionOf: item)

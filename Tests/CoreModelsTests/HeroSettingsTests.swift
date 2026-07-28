@@ -96,4 +96,33 @@ final class HeroSettingsTests: XCTestCase {
         store.save(s)
         XCTAssertEqual(store.load(), s)
     }
+    // MARK: Adopting a newly-added source
+
+    func testAnExistingProfilePicksUpASourceAddedLater() {
+        // Settings store the exact list chosen, so a source added in a later version
+        // would stay invisible to everyone who already has settings — the people
+        // most likely to want it. A case never shown can't be one they declined.
+        let legacy = #"{"isEnabled":true,"sources":["continueWatching","watchlist"],"maxItems":6}"#
+        let decoded = try? JSONDecoder().decode(HeroSettings.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded?.sources, [.continueWatching, .watchlist, .recentlyAdded])
+    }
+
+    func testASourceTheUserSwitchedOffStaysOff() {
+        // The decisive case: once a blob records the generation it was offered,
+        // "absent" means declined rather than unseen. Without that, turning Recently
+        // Added off would switch itself back on at the next load.
+        var settings = HeroSettings.default
+        settings.sources = [.continueWatching, .watchlist]
+        let data = try? JSONEncoder().encode(settings)
+        let reloaded = data.flatMap { try? JSONDecoder().decode(HeroSettings.self, from: $0) }
+        XCTAssertEqual(reloaded?.sources, [.continueWatching, .watchlist])
+    }
+
+    func testAnEmptySelectionIsNotRepopulated() {
+        // No sources means "hero off by source"; adding one would switch it back on.
+        let legacy = #"{"isEnabled":true,"sources":[],"maxItems":6}"#
+        let decoded = try? JSONDecoder().decode(HeroSettings.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded?.sources, [])
+    }
+
 }

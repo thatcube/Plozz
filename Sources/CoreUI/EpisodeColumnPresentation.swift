@@ -39,8 +39,12 @@ public struct EpisodeColumnPresentation: Equatable, Sendable, CustomDebugStringC
     public let overviewTreatment: OverviewTreatment
     public let visibleOverview: String?
     public let accessibilityLabel: String
+    /// Whether this entry is a not-yet-aired episode, which the card renders dimmed
+    /// so it reads as unavailable rather than merely unwatched.
+    public let isUpcoming: Bool
 
     public init(item: MediaItem, spoilerSettings: SpoilerSettings) {
+        isUpcoming = item.isUpcomingUnaired
         let hidesText = spoilerSettings.shouldHideText(for: item)
         let hidesArtwork = spoilerSettings.shouldHideThumbnail(for: item)
         let trimmedOverview = item.overview?
@@ -70,7 +74,9 @@ public struct EpisodeColumnPresentation: Equatable, Sendable, CustomDebugStringC
             titleLine = Text(verbatim: plain)
         }
 
-        if let runtime = item.cardRuntimeText?.trimmingCharacters(in: .whitespacesAndNewlines), !runtime.isEmpty {
+        if let runtime = item.cardRuntimeText?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !runtime.isEmpty {
             // `cardRuntimeText` is bare ("20m"); this struct is a plain String-based
             // presentation model (not a View), so the "left" suffix is composed
             // here as plain interpolation, matching this file's existing

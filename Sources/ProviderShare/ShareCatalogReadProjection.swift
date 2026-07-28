@@ -42,6 +42,8 @@ enum ShareCatalogReadProjection {
             return CatalogJSON.decode(URL.self, valueJSON) == record.backdropURL
         case .logoURL:
             return CatalogJSON.decode(URL.self, valueJSON) == record.logoURL
+        case .cast:
+            return CatalogJSON.decode([MediaPerson].self, valueJSON) == record.cast
         default:
             let prefix = "providerID."
             guard field.rawValue.hasPrefix(prefix) else { return false }
@@ -61,7 +63,10 @@ enum ShareCatalogReadProjection {
     /// (no enrichment row matched the LEFT JOIN); `title` is a supplementary 8th
     /// column not counted in that emptiness check.
     static func enrichmentRecord(fromColumns stmt: OpaquePointer?, startingAt base: Int32) -> EnrichmentRecord? {
-        let allNull = (0..<7).allSatisfy { sqlite3_column_type(stmt, base + $0) == SQLITE_NULL }
+        // Spans every value column, cast included. Stopping at 7 meant a record
+        // whose only content was cast read as entirely empty and was discarded at
+        // decode — the row was on disk and simply never came back.
+        let allNull = (0..<9).allSatisfy { sqlite3_column_type(stmt, base + $0) == SQLITE_NULL }
         if allNull { return nil }
         var rec = EnrichmentRecord()
         rec.providerIDs = CatalogJSON.decode([String: String].self, CatalogConnection.columnText(stmt, base + 0)) ?? [:]
@@ -72,6 +77,7 @@ enum ShareCatalogReadProjection {
         rec.backdropURL = CatalogConnection.columnText(stmt, base + 5).flatMap(URL.init(string:))
         rec.logoURL = CatalogConnection.columnText(stmt, base + 6).flatMap(URL.init(string:))
         rec.title = CatalogConnection.columnText(stmt, base + 7)
+        rec.cast = CatalogJSON.decode([MediaPerson].self, CatalogConnection.columnText(stmt, base + 8)) ?? []
         return rec
     }
 
@@ -325,6 +331,12 @@ enum ShareCatalogReadProjection {
         if copy.genres.isEmpty, !rec.genres.isEmpty {
             copy.genres = rec.genres
             adopt(.genres)
+        }
+        // Cast belongs to the show/film, so an episode inherits its series' people
+        // rather than carrying none — the same way it inherits show artwork.
+        if copy.people.isEmpty, !rec.cast.isEmpty {
+            copy.people = rec.cast
+            adopt(.cast)
         }
         if copy.runtime == nil, let rt = rec.runtime, item.kind == .movie {
             copy.runtime = rt

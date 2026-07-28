@@ -80,25 +80,32 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
     /// Languages this build is prepared to OFFER, in the order shown.
     ///
     /// Deliberately an explicit list rather than "whatever `.lproj` folders exist".
-    /// A bundled localization only means *some* strings were translated — Spanish
-    /// sat at ~8% while its folder was present, and offering that would show a
-    /// mostly-English UI to someone who asked for Spanish. Readiness is a release
-    /// decision, so it is stated here and reviewed when a language actually ships.
+    /// A bundled localization only means *some* strings were translated. Readiness
+    /// is a release decision, and CI requires this list to match the complete app
+    /// and permission catalogs exactly so the OS cannot expose a partial language.
     ///
     /// Adding a language: translate it, check it against the pseudolocalization
     /// pass, then add its tag here.
     public static let releaseReady: [String] = [
+        "ar",
         "bg",
         "ca",
         "cs",
         "da",
         "de",
-        "fr",
+        "el",
+        "es",
+        "fa",
         "fi",
+        "fr",
         "he",
+        "hi",
         "hr",
+        "hu",
         "id",
         "it",
+        "ja",
+        "ko",
         "ms",
         "nb",
         "nl",
@@ -108,11 +115,14 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
         "ru",
         "sk",
         "sl",
+        "sr-Latn",
         "sv",
         "th",
         "tr",
         "uk",
+        "vi",
         "zh-Hans",
+        "zh-Hant",
     ]
 
     /// Every language the picker should show: `.system` plus the release-ready

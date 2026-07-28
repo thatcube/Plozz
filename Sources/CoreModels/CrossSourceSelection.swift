@@ -46,6 +46,8 @@ public enum CrossSourceSelector {
         var hasVersions: Bool
         var qualityScore: Int
         var isPreferred: Bool
+        /// Managed server vs plain file share; see `metadataRichnessRank`.
+        var richnessRank: Int
     }
 
     /// The default server+version to play for `item`, or `nil` when `item` has no
@@ -93,7 +95,8 @@ public enum CrossSourceSelector {
                     nativeCompatible: best.compatibility(with: capabilities) == .directPlay,
                     hasVersions: true,
                     qualityScore: best.qualityScore,
-                    isPreferred: isPreferred
+                    isPreferred: isPreferred,
+                    richnessRank: source.providerKind?.metadataRichnessRank ?? 0
                 )
             }
             return Candidate(
@@ -104,7 +107,8 @@ public enum CrossSourceSelector {
                 nativeCompatible: false,
                 hasVersions: false,
                 qualityScore: Int.min,
-                isPreferred: isPreferred
+                isPreferred: isPreferred,
+                richnessRank: source.providerKind?.metadataRichnessRank ?? 0
             )
         }
 
@@ -115,6 +119,12 @@ public enum CrossSourceSelector {
             }
             if lhs.hasVersions != rhs.hasVersions { return !lhs.hasVersions && rhs.hasVersions }
             if lhs.qualityScore != rhs.qualityScore { return lhs.qualityScore < rhs.qualityScore }
+            // A managed server outranks a plain file share when everything above is
+            // equal. Both copies play identically; the server's is the better *page*
+            // — it has cast, canonical titles and curated artwork, where a share has
+            // whatever Plozz could synthesise from filenames. Silo opened from a
+            // share showed no cast at all while the Plex copy had 163 people.
+            if lhs.richnessRank != rhs.richnessRank { return lhs.richnessRank < rhs.richnessRank }
             // Soft origin/library preference: only breaks an otherwise-exact tie.
             if lhs.isPreferred != rhs.isPreferred { return !lhs.isPreferred && rhs.isPreferred }
             // Lower order (primary) should win the tie → it must be the "max".

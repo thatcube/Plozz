@@ -69,7 +69,6 @@ final class ProfileFlowModelTests: XCTestCase {
 
     func testPrepareLaunchPickerShownWhenAskOnStartupWithMultipleProfiles() {
         let (model, profiles) = makeModel()
-        profiles.enableProfiles()
         _ = profiles.add(name: "Second", avatarSymbol: "person", colorIndex: 1)
         profiles.setAskProfileOnStartup(true)
 

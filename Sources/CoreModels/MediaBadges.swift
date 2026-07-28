@@ -464,6 +464,34 @@ public extension MediaItem {
     /// cannot own that composition without importing SwiftUI.
     ///
     /// Hidden for non-video kinds and when runtime is unknown.
+    /// When an unaired episode is expected, for the card slot that would otherwise
+    /// show a runtime. `nil` for every ordinary item.
+    ///
+    /// The card's release label, e.g. "Releases Friday" — spelled out so it can't
+    /// read as an air date that has already passed.
+    var upcomingReleaseText: LocalizedStringResource? {
+        guard let date = scheduledAirDate else { return nil }
+        let calendar = Calendar.current
+        let days = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: Date()),
+            to: calendar.startOfDay(for: date)
+        ).day ?? 0
+        switch days {
+        case ..<0: return nil
+        case 0: return "Releases today"
+        case 1: return "Releases tomorrow"
+        case 2...6:
+            return "Releases \(date, format: .dateTime.weekday(.wide))"
+        default:
+            let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: Date())
+            if sameYear {
+                return "Releases \(date, format: .dateTime.month(.abbreviated).day())"
+            }
+            return "Releases \(date, format: .dateTime.month(.abbreviated).day().year())"
+        }
+    }
+
     var cardRuntimeText: String? {  // l10n:content — formatted duration, not copy
         guard cardRuntimeEligible, let runtime, runtime > 0 else { return nil }
         if let remaining = remainingRuntimeLabel(for: runtime) {

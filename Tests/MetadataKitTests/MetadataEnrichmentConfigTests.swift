@@ -39,7 +39,7 @@ final class MetadataEnrichmentConfigTests: XCTestCase {
         let backdrop = config.orderedSources(for: .backdropURL, query: query)
         XCTAssertEqual(hero, detail)
         XCTAssertEqual(hero, backdrop)
-        XCTAssertEqual(hero.first, .tvdb, "TV hero chain leads with TheTVDB backdrop")
+        XCTAssertEqual(hero.first, .tmdb, "TV hero chain leads with TMDb backdrop")
     }
 
     func testDisabledRoleRemovesSourceEverywhere() {

@@ -43,7 +43,7 @@ extension MediaItem {
     /// a container resolves to many files rather than one. Both must open their
     /// detail page instead of being handed to the player.
     var isPlayableNow: Bool {
-        guard !isNotInLibraryDiscovery else { return false }
+        guard !isNotInLibraryDiscovery, !isUpcomingUnaired else { return false }
         switch kind {
         case .movie, .episode, .video, .series: return true
         default: return false

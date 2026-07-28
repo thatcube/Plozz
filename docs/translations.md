@@ -14,7 +14,7 @@ models, then treated as untrusted batch input. They never edit
    Apple plural/substitution structure.
 2. One translator agent owns one language file outside Git. Agents work in
    parallel without sharing the catalog.
-3. A different model reviews all 1,620 entries against the source and comments,
+3. A different model reviews all 1,640 entries against the source and comments,
    fixes terminology/grammar/context, and adds the three system permission
    prompts.
 4. `tools/l10n-import.py` requires exact key coverage, nonempty values,
@@ -53,17 +53,19 @@ release blocker. A later native-speaker correction changes the unit to
 
 ## Languages
 
-The first wave targets broad Apple/Jellyfin/Plex reach and deliberately includes
-hard grammar/layout cases:
+Plozz ships 36 non-English languages:
 
-- Spanish, French, German, Italian, Brazilian Portuguese, Dutch
-- Polish, Russian, Ukrainian, Turkish
-- Simplified Chinese, Traditional Chinese, Japanese, Korean
-- Arabic and Hindi
+- Arabic, Bulgarian, Catalan, Croatian, Czech, Danish, Dutch
+- Finnish, French, German, Greek, Hebrew, Hindi, Hungarian
+- Indonesian, Italian, Japanese, Korean, Malay, Norwegian Bokmål
+- Polish, Brazilian Portuguese, Romanian, Russian
+- Serbian (Latin), Slovak, Slovenian, Spanish, Swedish, Thai, Turkish
+- Ukrainian, Vietnamese, Simplified Chinese, Traditional Chinese, Persian
 
-Follow-up waves add more languages through the same isolated pipeline. German
-stresses long labels; Polish/Russian/Ukrainian exercise multi-form plurals;
-Arabic exercises right-to-left layout and logical navigation symbols.
+This set deliberately covers hard engineering cases, not just reach. German
+stresses long labels; Polish/Russian/Ukrainian/Czech/Slovak exercise multi-form
+plurals; Slovenian exercises the dual; Arabic/Hebrew/Persian exercise
+right-to-left layout and logical navigation symbols.
 
 ## Quality gate
 

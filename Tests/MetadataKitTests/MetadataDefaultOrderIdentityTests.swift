@@ -17,9 +17,9 @@ final class MetadataDefaultOrderIdentityTests: XCTestCase {
         switch (field, type) {
         // artwork.hero  (backdropURL / homeHero / detailBackdrop / banner)
         case (.backdropURL, .anime), (.homeHero, .anime), (.detailBackdrop, .anime), (.banner, .anime): return [.tmdb, .anilist, .kitsu]
-        case (.backdropURL, .tvShow), (.homeHero, .tvShow), (.detailBackdrop, .tvShow), (.banner, .tvShow): return [.tvdb, .tmdb, .wikidata, .wikipedia]
-        case (.backdropURL, .movie), (.homeHero, .movie), (.detailBackdrop, .movie), (.banner, .movie): return [.tvdb, .tmdb, .wikidata, .wikipedia]
-        case (.backdropURL, .unknown), (.homeHero, .unknown), (.detailBackdrop, .unknown), (.banner, .unknown): return [.tvdb, .tmdb, .wikidata, .wikipedia]
+        case (.backdropURL, .tvShow), (.homeHero, .tvShow), (.detailBackdrop, .tvShow), (.banner, .tvShow): return [.tmdb, .tvdb, .wikidata, .wikipedia]
+        case (.backdropURL, .movie), (.homeHero, .movie), (.detailBackdrop, .movie), (.banner, .movie): return [.tmdb, .tvdb, .wikidata, .wikipedia]
+        case (.backdropURL, .unknown), (.homeHero, .unknown), (.detailBackdrop, .unknown), (.banner, .unknown): return [.tmdb, .tvdb, .wikidata, .wikipedia]
         // artwork.poster (posterURL / seasonPoster)
         case (.posterURL, .anime), (.seasonPoster, .anime): return [.anilist, .kitsu, .tmdb]
         case (.posterURL, .tvShow), (.seasonPoster, .tvShow): return [.tmdb, .tvmaze, .tvdb, .wikidata, .wikipedia]
@@ -117,9 +117,13 @@ final class MetadataDefaultOrderIdentityTests: XCTestCase {
             config.orderedSources(for: .posterURL, query: makeQuery(.movie)),
             [.tmdb, .tvdb, .wikidata, .wikipedia, .anilist, .tvmaze, .kitsu, .omdb, .deezer, .musicbrainz]
         )
+        // TMDb leads every hero: an untagged image there reliably means "no text"
+        // (a moderated convention), whereas TheTVDB contributors routinely leave a
+        // texted background untagged — so its art won with the wordmark baked in and
+        // the hero then drew that same wordmark on top of it.
         XCTAssertEqual(
             config.orderedSources(for: .backdropURL, query: makeQuery(.tvShow)),
-            [.tvdb, .tmdb, .wikidata, .wikipedia, .anilist, .tvmaze, .kitsu, .omdb, .deezer, .musicbrainz]
+            [.tmdb, .tvdb, .wikidata, .wikipedia, .anilist, .tvmaze, .kitsu, .omdb, .deezer, .musicbrainz]
         )
         XCTAssertEqual(
             config.orderedSources(for: .posterURL, query: makeQuery(.anime)),

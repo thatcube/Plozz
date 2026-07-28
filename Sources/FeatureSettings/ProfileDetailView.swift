@@ -7,9 +7,8 @@ import FeatureProfiles
 /// Settings → Profile detail.
 ///
 /// Profile-level controls only: switch profile, edit the *currently selected*
-/// profile, toggle the launch picker, and (for single-profile households)
-/// turn profiles off entirely. Per-server membership lives in Servers &
-/// Libraries — this page intentionally does not duplicate that.
+/// profile, and toggle the launch picker. Per-server membership lives in
+/// Servers & Libraries — this page intentionally does not duplicate that.
 struct ProfileDetailView: View {
     let context: SettingsContext
     let appVersion: String
@@ -37,9 +36,6 @@ struct ProfileDetailView: View {
                     subtitle: "Each profile keeps its own settings — theme, playback, subtitles, spoilers, trackers, and Home layout. Only your servers are shared."
                 )
                 profilesListPanel
-                if context.profiles.count == 1 {
-                    disablePanel
-                }
             }
             .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
@@ -131,14 +127,5 @@ struct ProfileDetailView: View {
         .padding(.vertical, 2)
     }
 
-    private var disablePanel: some View {
-        SettingsPanel(
-            footer: "Hide all profile UI for solo use. You can re-enable Profiles anytime."
-        ) {
-            Button(role: .destructive, action: context.onDisableProfiles) {
-                Label("Turn Profiles Off", systemImage: "person.crop.circle.badge.minus")
-            }
-        }
-    }
 }
 #endif

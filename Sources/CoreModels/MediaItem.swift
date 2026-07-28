@@ -189,6 +189,17 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// Available for a **featured** item without importing the Seerr module.
     public var availability: MediaAvailabilityStatus?
 
+    /// When this episode is expected to air, for an episode that has **not aired
+    /// yet** and therefore exists nowhere in the user's library.
+    ///
+    /// Set only on schedule-derived placeholder entries (see
+    /// ``isUpcomingUnaired``). `nil` on every real library item — including an
+    /// owned episode that happens to have aired recently.
+    public var scheduledAirDate: Date?
+    /// Whether ``scheduledAirDate`` carries a meaningful time of day. Providers
+    /// differ: TheTVDB reports a bare calendar day, AniList an exact instant.
+    public var scheduledAirDateHasTime: Bool
+
     /// Aggregate download progress (`0..<1`) for a not-yet-available **featured**
     /// title currently being fetched by the discovery backend's downloaders
     /// (Seerr → Radarr/Sonarr queue), or `nil` when nothing is downloading. Lets
@@ -351,8 +362,12 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         sources: [MediaSourceRef] = [],
         lastPlayedAt: Date? = nil,
         selectedSourceAccountID: String? = nil,
-        explicitSourceSelection: Bool = false
+        explicitSourceSelection: Bool = false,
+        scheduledAirDate: Date? = nil,
+        scheduledAirDateHasTime: Bool = false
     ) {
+        self.scheduledAirDate = scheduledAirDate
+        self.scheduledAirDateHasTime = scheduledAirDateHasTime
         self.id = id
         self.title = title
         self.originalTitle = originalTitle
@@ -416,6 +431,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         case downloadProgress
         case sourceAccountID, additionalSourceAccountIDs, versions, isFavorite
         case sources, lastPlayedAt, libraryID
+        case scheduledAirDate, scheduledAirDateHasTime
     }
 
     /// Custom decoding so `additionalSourceAccountIDs` (added after items were
@@ -466,6 +482,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         mediaInfo = try container.decodeIfPresent(MediaSourceMetadata.self, forKey: .mediaInfo)
         sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
         additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []
+        scheduledAirDate = try container.decodeIfPresent(Date.self, forKey: .scheduledAirDate)
+        scheduledAirDateHasTime = try container.decodeIfPresent(Bool.self, forKey: .scheduledAirDateHasTime) ?? false
         libraryID = try container.decodeIfPresent(String.self, forKey: .libraryID)
         versions = try container.decodeIfPresent([MediaVersion].self, forKey: .versions) ?? []
         isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false

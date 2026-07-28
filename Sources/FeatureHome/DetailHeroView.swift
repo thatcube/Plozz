@@ -70,6 +70,9 @@ struct DetailHeroView: View {
     /// receded hero's invisible focus proxy must ignore those — see
     /// `SeriesHeroFocusProxy`.
     var ignoresSystemFocusMoves: Bool = false
+    /// A short air-schedule line for a still-airing series, e.g. "New episodes
+    /// Fridays" or "New season Aug 5". `nil` when nothing is known.
+    var scheduleLine: LocalizedStringResource? = nil
     let spoilerSettings: SpoilerSettings
     /// Title for the Play/Resume button, or `nil` to omit the button entirely
     /// (e.g. a season with no resolved episodes yet).
@@ -284,6 +287,9 @@ struct DetailHeroView: View {
     private var scrimTone: Color { colorScheme == .dark ? .black : .white }
 
     private var heroLogoHeight: CGFloat { 200 }
+    /// Width cap for the hero logo, sized to the hero's text column so the wordmark
+    /// never runs wider than the overview beneath it.
+    private var heroLogoWidth: CGFloat { 620 }
 
     // MARK: - Visible item actions (discoverability)
 
@@ -351,6 +357,34 @@ struct DetailHeroView: View {
         guard offersParentNavigation, navigator != nil else { return nil }
         return (actionHandler?.actions(for: backdrop, context: actionContext) ?? [])
             .first { $0.isNavigation && !$0.navigatesToSelf }
+    }
+
+    /// The air-schedule badge above the title, e.g. "New episodes Fridays".
+    ///
+    /// Styled to match the hero's glass action buttons so it reads as a property of
+    /// the series rather than a line of metadata — but it is deliberately not a
+    /// button: there is nothing to press.
+    @ViewBuilder
+    private func scheduleBadge(_ text: LocalizedStringResource) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        Text(text)
+            .font(.system(size: 24, weight: .semibold))
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background {
+                if #available(tvOS 26.0, *) {
+                    shape.fill(.regularMaterial)
+                } else {
+                    shape.fill(.ultraThinMaterial)
+                }
+            }
+            .overlay {
+                shape.stroke(Color.primary.opacity(0.16), lineWidth: 1)
+            }
+            .padding(.bottom, 6)
+            .contentTransition(.opacity)
+            .accessibilityLabel(text)
     }
 
     @ViewBuilder
@@ -611,6 +645,9 @@ struct DetailHeroView: View {
             //
             // An episode page skips the wordmark entirely: it names the show in a
             // breadcrumb above the episode's own title instead.
+            if let scheduleLine {
+                scheduleBadge(scheduleLine)
+            }
             if presentsEpisodeStill {
                 titleText(hideText: hideText)
             } else {
@@ -618,25 +655,41 @@ struct DetailHeroView: View {
                     references: backdrop.artworkReferences(for: .logo),
                     asyncFallbackURL: tmdbLogoFallback,
                     backgroundSample: heroBackgroundSample,
+                    // Cap the WIDTH as well as the height, matching the Home hero.
+                    // With only a height cap a wide, short wordmark fits against an
+                    // unbounded width and then floats inside the full 200pt frame,
+                    // so the gap above and below it varied with each logo's aspect
+                    // ratio. Bounding the width makes such a logo hit that limit
+                    // first and shrink its own height to match, leaving no slack.
+                    maxWidth: heroLogoWidth,
                     maxHeight: heroLogoHeight
                 ) {
                     titleText(hideText: hideText)
                 }
+                // The frame is now exactly the artwork, so breathing room has to be
+                // asked for rather than inherited from leftover frame slack — which
+                // is what made it vary by logo. On top of the stack's own 12pt.
+                .padding(.vertical, 16)
             }
-            ZStack(alignment: .leading) {
-                // The season/episode ("S{n} · E{m}") is now shown only in the Play
-                // button, so it's omitted here for episodes to avoid a redundant
-                // line. Non-episode subtitles (e.g. a movie's collection/parent
-                // title) still show.
-                if let subtitle = item.subtitle,
-                   !isYearOnlySubtitle(subtitle),
-                   item.kind != .episode {
-                    Text(subtitle)
-                        .font(.system(size: 26, weight: .medium))
-                        .plozzForeground(.secondary)
-                        .lineLimit(1)
-                        .contentTransition(.opacity)
-                }
+            // The season/episode ("S{n} · E{m}") is now shown only in the Play
+            // button, so it's omitted here for episodes to avoid a redundant line.
+            // Non-episode subtitles (e.g. a movie's collection/parent title) still
+            // show.
+            //
+            // The condition is hoisted OUT of the container rather than sitting
+            // inside it: an empty view still takes a spacing gap on each side of a
+            // VStack, so a title with no subtitle was paying 12pt for a line that
+            // renders nothing — and the gap under the logo therefore changed with
+            // whichever lines a given title happened to have.
+            if let subtitle = item.subtitle,
+               !isYearOnlySubtitle(subtitle),
+               item.kind != .episode {
+                Text(subtitle)
+                    .font(.system(size: 26, weight: .medium))
+                    .plozzForeground(.secondary)
+                    .lineLimit(1)
+                    .contentTransition(.opacity)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             let comps = HeroContentPolicy.detailFacts(
                 focused: focusedPresentation
@@ -650,22 +703,23 @@ struct DetailHeroView: View {
             let factParts = comps
             let showRatings = !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item)
 
-            // Line 1: content-rating certificate + genres.
-            ZStack(alignment: .leading) {
-                if heroRatingBadge != nil || !genreParts.isEmpty {
-                    HStack(alignment: .center, spacing: 16) {
-                        if let badge = heroRatingBadge {
-                            MediaBadgeChip(badge: badge)
-                        }
-                        if !genreParts.isEmpty {
-                            Text(genreParts.joined(separator: "  ·  "))
-                                .font(.system(size: 23, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                                .contentTransition(.opacity)
-                        }
+            // Line 1: content-rating certificate + genres. Same hoisting as the
+            // subtitle above — an always-present container costs a spacing gap even
+            // with nothing in it.
+            if heroRatingBadge != nil || !genreParts.isEmpty {
+                HStack(alignment: .center, spacing: 16) {
+                    if let badge = heroRatingBadge {
+                        MediaBadgeChip(badge: badge)
+                    }
+                    if !genreParts.isEmpty {
+                        Text(genreParts.joined(separator: "  ·  "))
+                            .font(.system(size: 23, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .contentTransition(.opacity)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Description directly beneath the genres line.
             SpoilerSafeOverviewText(

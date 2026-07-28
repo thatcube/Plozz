@@ -207,6 +207,7 @@ public struct ItemDetailView: View {
                         // override; this brings series to parity.
                         Task { await viewModel.switchToSource(accountID: source.accountID) }
                     },
+                    onSelectRelated: onSelectChild,
                     initialSeasonID: initialSeasonID ?? viewModel.preselectedSeasonID ?? initialEpisode?.seasonID,
                     initialEpisode: initialEpisode
                 )
@@ -590,7 +591,10 @@ public struct ItemDetailView: View {
                             ? nil
                             : effectiveVersions.first { $0.id == effectiveVersionID }
                                 ?? MediaVersion.synthesized(from: detail.item),
-                        leadingInset: PlozzTheme.Metrics.heroLeadingPadding
+                        leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
+                        relatedEntries: viewModel.relatedTitlesLoader?.entries ?? [],
+                        relatedHasResolved: viewModel.relatedTitlesLoader?.hasResolved ?? true,
+                        onSelectRelated: onSelectChild
                     )
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
@@ -640,6 +644,8 @@ public struct ItemDetailView: View {
     }
 
     private func isPlayable(_ item: MediaItem) -> Bool {
+        // An unaired episode has no file on any server yet.
+        guard !item.isUpcomingUnaired else { return false }
         switch item.kind {
         case .movie, .episode, .video: return true
         default: return false

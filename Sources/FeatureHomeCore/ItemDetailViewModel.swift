@@ -40,6 +40,13 @@ public final class ItemDetailViewModel {
         /// be distinguished from "still loading"). Leaf items — which never have
         /// children — are considered loaded immediately.
         public var childrenLoaded: Bool = false
+        /// The series' cached upcoming-episode schedule, when one is known.
+        ///
+        /// Carried here rather than as its own observable property so it costs
+        /// nothing against this type's tracked-property budget: `state` already
+        /// invalidates readers, and the schedule only ever changes alongside a
+        /// re-publish of it.
+        public var upcomingSchedule: SeriesScheduleRecord?
     }
 
     public private(set) var state: LoadState<Detail> = .idle
@@ -71,6 +78,7 @@ public final class ItemDetailViewModel {
     /// render already sees the settled value. Tracking it would spend one of this
     /// type's observable-property budget for no additional invalidation.
     @ObservationIgnored public private(set) var serverResumeEpisode: MediaItem?
+
 
     /// empty array — cached deliberately, so a season that genuinely cannot be
     /// read does not re-request on every focus change — but that empty list is a
@@ -449,6 +457,10 @@ public final class ItemDetailViewModel {
     /// (item + children + episodes + cross-server sources). On a revisit `load()`
     /// paints the last-known snapshot instantly, then refreshes it from the
     /// network — so a show you've opened before never shows a cold spinner.
+    /// Resolves titles related to this one. `nil` in contexts that don't show the
+    /// row (previews, tests), which makes the whole feature inert rather than
+    /// conditional at every call site.
+    public let relatedTitlesLoader: RelatedTitlesLoader?
     private let snapshotCache: DetailSnapshotCache
     /// Stable per-title key for ``snapshotCache``. Scoped by owning account so the
     /// same id on two servers caches independently. All routes to a series share a
@@ -470,8 +482,10 @@ public final class ItemDetailViewModel {
         initialSources: [MediaSourceRef] = [],
         alternateProviderResolver: @escaping (String) -> (any MediaProvider)? = { _ in nil },
         crossServerSourceResolver: (@Sendable (MediaItem) async -> [MediaSourceRef])? = nil,
+        relatedTitlesLoader: RelatedTitlesLoader? = nil,
         snapshotCache: DetailSnapshotCache = .ephemeral
     ) {
+        self.relatedTitlesLoader = relatedTitlesLoader
         self.provider = provider
         self.itemID = itemID
         self.activeProvider = provider
@@ -699,6 +713,11 @@ public final class ItemDetailViewModel {
                 guard !Task.isCancelled, isCurrent() else { return }
                 serverResumeEpisode = resume
                 state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged), childrenLoaded: true))
+                // Deliberately after the state publish: the schedule is decoration,
+                // and must never hold up the page. Cache read first (instant), then
+                // a background refresh that repaints only if it finds something new.
+                loadUpcomingSchedule(for: taggedItem)
+                loadRelatedTitles(for: taggedItem)
                 // The selected server returned nothing for a container title. If
                 // another known server hosts it, switch to that one in place (its
                 // reload takes over) rather than stranding an empty episode browser.
@@ -1544,6 +1563,47 @@ public final class ItemDetailViewModel {
     /// Best-effort: a failure leaves ``serverResumeEpisode`` nil and the page
     /// falls back to inferring from the loaded season, which is what it did
     /// before. Never blocks first paint — it runs after children are published.
+    /// Resolves the Related row, when a loader was supplied.
+    ///
+    /// Never awaited by the caller and always last: the row sits below the fold,
+    /// costs a provider call plus a library search per title, and must not delay
+    /// anything the viewer is actually looking at.
+    private func loadRelatedTitles(for item: MediaItem) {
+        guard let relatedTitlesLoader else { return }
+        Task { await relatedTitlesLoader.load(for: item) }
+    }
+
+    /// Fills ``upcomingSchedule`` from cache, then refreshes it in the background.
+    ///
+    /// Series only — a movie has no schedule — and never awaited by the caller, so
+    /// neither the cache read nor the network refresh can delay the detail page.
+    private func loadUpcomingSchedule(for item: MediaItem) {
+        guard item.kind == .series else { return }
+        // Series-scoped so a share copy and a server copy of the same show resolve
+        // to one cache entry once ids land, instead of each holding its own.
+        let query = MetadataQuery(item).seriesScoped
+        Task { [weak self] in
+            guard let self else { return }
+            if let cached = await SeriesScheduleResolver.shared.cachedRecord(for: query) {
+                await MainActor.run { self.applyUpcomingSchedule(cached) }
+            }
+            // Refresh regardless: a fresh record short-circuits inside the resolver
+            // with no network, and a stale one advances to the next episode once the
+            // current one airs.
+            // `foregroundFill`: the user is looking at this series right now, so it
+            // goes ahead of the passive backlog.
+            let refreshed = await SeriesScheduleResolver.shared.refresh(query, tier: .foregroundFill)
+            await MainActor.run { self.applyUpcomingSchedule(refreshed) }
+        }
+    }
+
+    /// Republishes `state` with the schedule attached, leaving everything else as-is.
+    private func applyUpcomingSchedule(_ record: SeriesScheduleRecord) {
+        guard var detail = state.value, detail.upcomingSchedule != record else { return }
+        detail.upcomingSchedule = record
+        state = .loaded(detail)
+    }
+
     private func fetchServerResumeEpisode(
         for item: MediaItem,
         provider: any MediaProvider

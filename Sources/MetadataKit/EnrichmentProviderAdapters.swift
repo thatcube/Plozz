@@ -67,6 +67,10 @@ public protocol TVDBEnriching: Sendable {
     /// best-effort by matching that day against the series' episode list. Returns
     /// `nil` when unconfigured (keyless) or the series has no scheduled next episode.
     func nextAired(byTVDBID id: String) async -> ProviderNextEpisode?
+    /// Every not-yet-aired episode plus the series' stated cadence. Preferred over
+    /// ``nextAired(byTVDBID:)`` because it fills the whole upcoming run in one pass;
+    /// falls back to the single-next path when it yields nothing.
+    func upcomingEpisodes(byTVDBID id: String, limit: Int) async -> TVDBUpcomingSchedule?
 }
 
 extension TVDBClient: TVDBEnriching {}
@@ -81,7 +85,24 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
     public let policy: ProviderPolicy
     private let client: any TVDBEnriching
 
-    public init(client: any TVDBEnriching, policy: ProviderPolicy = ProviderPolicy()) {
+    /// `version: 2` — TheTVDB now returns a series' whole upcoming run plus its
+    /// cadence, not just the next episode. Entries cached under version 1 hold only
+    /// the single next episode, and their 30-day positive TTL would otherwise serve
+    /// that for a month: the hero would name the next date while the rail stayed
+    /// empty, because the two read different fields of the same response.
+    ///
+    /// `version: 4` — season-0 specials are no longer returned as upcoming
+    /// episodes, so a cached answer containing one has to be dropped.
+    ///
+    /// `version: 3` — a title search now receives the caller's episode-title
+    /// evidence, so it can answer with a different (correct) series than before.
+    /// Disambiguation evidence is deliberately not part of the cache key — the same
+    /// show must not occupy two entries — which means a wrong match cached under
+    /// version 2 would keep being served without the provider ever running again.
+    public init(
+        client: any TVDBEnriching,
+        policy: ProviderPolicy = ProviderPolicy(version: 4)
+    ) {
         self.client = client
         self.policy = policy
     }
@@ -103,7 +124,14 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
             if let known = knownTVDB, let byID = await client.resolve(byTVDBID: known, isMovie: isMovie) {
                 meta = byID
             } else if knownTVDB == nil {
-                meta = await client.resolve(titles: [query.title], year: query.year, isMovie: isMovie, episodeHints: [])
+                // Most specific title first, then the stored one — a generic folder
+                // still finds the right series through its filenames.
+                meta = await client.resolve(
+                    titles: query.titleAlternates + [query.title],
+                    year: query.year,
+                    isMovie: isMovie,
+                    episodeHints: query.episodeHints
+                )
             }
         }
 
@@ -140,13 +168,27 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
         }
 
         if missing.contains(.nextAiringEpisode), query.isTV,
-           let tvdbID = meta?.tvdbID ?? knownTVDB,
-           let next = await client.nextAired(byTVDBID: tvdbID) {
-            out.upcomingEpisode = next.upcomingEpisode(
-                seriesIdentity: .external(source: "tvdb", value: tvdbID),
-                source: .tvdb,
-                refreshedAt: Date()
-            )
+           let tvdbID = meta?.tvdbID ?? knownTVDB {
+            let identity = MediaIdentity.external(source: "tvdb", value: tvdbID)
+            let now = Date()
+            // The full listing first: it fills the whole upcoming run and the
+            // cadence in one pass. `nextAired` remains the fallback for a series
+            // whose listing is unavailable but whose next date is known.
+            if let schedule = await client.upcomingEpisodes(byTVDBID: tvdbID, limit: 24),
+               !schedule.episodes.isEmpty {
+                let mapped = schedule.episodes.map {
+                    $0.upcomingEpisode(seriesIdentity: identity, source: .tvdb, refreshedAt: now)
+                }
+                out.upcomingEpisodes = mapped
+                out.upcomingEpisode = mapped.first
+                out.cadence = schedule.cadence
+            } else if let next = await client.nextAired(byTVDBID: tvdbID) {
+                out.upcomingEpisode = next.upcomingEpisode(
+                    seriesIdentity: identity,
+                    source: .tvdb,
+                    refreshedAt: now
+                )
+            }
         }
         return out
     }
@@ -164,6 +206,7 @@ public protocol TMDbEnriching: Sendable {
     var isEnabled: Bool { get }
     func backdropURLs(for query: MetadataQuery, limit: Int) async -> [URL]
     func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL?
+    func cast(for query: MetadataQuery, limit: Int) async -> [MediaPerson]
 }
 
 extension TMDbMetadataProvider: TMDbEnriching {}
@@ -173,7 +216,7 @@ extension TMDbMetadataProvider: TMDbEnriching {}
 /// poster, clear logo, and per-episode stills. Inert when TMDb isn't configured.
 public struct TMDbEnrichmentProvider: MetadataEnrichmentProvider {
     public let id: MetadataSource = .tmdb
-    public let capabilities: Set<MetadataCapability> = [.poster, .backdrop, .logo, .episodeStill]
+    public let capabilities: Set<MetadataCapability> = [.poster, .backdrop, .logo, .episodeStill, .cast]
     public let policy: ProviderPolicy
     private let provider: any TMDbEnriching
     private let backdropLimit: Int
@@ -199,6 +242,10 @@ public struct TMDbEnrichmentProvider: MetadataEnrichmentProvider {
         }
         if missing.contains(.episodeThumbnail), let url = await provider.artworkURL(.thumbnail, for: query) {
             out.episodeStillURL = SourcedValue(value: url, source: .tmdb)
+        }
+        if missing.contains(.cast) {
+            let people = await provider.cast(for: query, limit: 40)
+            if !people.isEmpty { out.cast = SourcedValue(value: people, source: .tmdb) }
         }
         return out
     }

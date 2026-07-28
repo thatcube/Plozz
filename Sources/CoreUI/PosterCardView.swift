@@ -101,6 +101,10 @@ public struct PosterCardView: View {
 
     public var body: some View {
         cardBody
+            // Hand this card's focus to the shared chrome drawn on its artwork
+            // (progress bar, resume chip) so it settles at rest and comes to full
+            // strength on focus. No-op off tvOS.
+            .plozzChromeFocused(isFocused)
             .mediaItemContextMenu(for: item)
     }
 
@@ -134,9 +138,10 @@ public struct PosterCardView: View {
                         hidesStatus: hideThumbnail,
                         showsProgressBar: !showsResumeChip,
                         badgeInset: 8,
-                        progressHeight: 12,
+                        progressHeight: metrics.progressBarHeight,
                         progressHorizontalInset: 16,
-                        progressBottomInset: 16
+                        progressBottomInset: 16,
+                        downloadState: showsResumeChip ? nil : downloadState
                     )
                 }
                 .overlay { resumeChip }
@@ -183,9 +188,10 @@ public struct PosterCardView: View {
                         hidesStatus: hideThumbnail,
                         showsProgressBar: !showsResumeChip,
                         badgeInset: 8,
-                        progressHeight: 12,
+                        progressHeight: metrics.progressBarHeight,
                         progressHorizontalInset: 16,
-                        progressBottomInset: 16
+                        progressBottomInset: 16,
+                        downloadState: showsResumeChip ? nil : downloadState
                     )
                 }
                 .overlay { resumeChip }
@@ -269,7 +275,8 @@ public struct PosterCardView: View {
                     badgeInset: borderlessBadgeInset,
                     progressHeight: metrics.progressBarHeight,
                     progressHorizontalInset: borderlessProgressInset,
-                    progressBottomInset: borderlessProgressInset
+                    progressBottomInset: borderlessProgressInset,
+                    downloadState: showsResumeChip ? nil : downloadState
                 )
             }
             .overlay { resumeChip }
@@ -403,13 +410,17 @@ public struct PosterCardView: View {
         return parts.joined(separator: " · ")
     }
 
-    // MARK: Resume chip (immediate-play cards)
+    // MARK: Resume chip
 
-    /// Whether to show the shared resume/runtime chip (the same overlay episode
-    /// cards use). Only immediate-play cards (`playsOnSelect`) with runtime to show
-    /// qualify, so a card that opens a detail page never grows a play button. Also
-    /// suppresses the plain full-width progress bar + the subtitle runtime, since
-    /// the chip carries that info on the artwork.
+    /// The full resume chip — ▶ + progress bar + time remaining — reserved for
+    /// cards that start playback the moment they're selected (Continue Watching,
+    /// landscape library rows), plus hosts that explicitly opt in.
+    ///
+    /// Browsing cards deliberately do NOT get it. A ▶ would promise instant
+    /// playback they can't deliver, and the time text can't fit beside a download
+    /// badge on a poster. They show the shared full-width progress bar instead
+    /// (see ``MediaCardPlaybackIndicators``), which needs no runtime metadata — so
+    /// every in-progress card looks the same whether or not its runtime is known.
     private var showsResumeChip: Bool {
         (playsOnSelect || showsResumeChipOverride)
             && !hideThumbnail

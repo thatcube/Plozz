@@ -14,6 +14,8 @@ public enum HeroSourceKind: String, CaseIterable, Identifiable, Codable, Sendabl
     case featured
     /// Your in-progress, resumable titles presented in a featured format.
     case continueWatching
+    /// The newest titles to land in your libraries.
+    case recentlyAdded
     /// Random picks from your (chosen) libraries.
     case randomFromLibrary
     /// Titles you've saved to your watchlist.
@@ -34,6 +36,12 @@ public enum HeroSourceKind: String, CaseIterable, Identifiable, Codable, Sendabl
             return LocalizedStringResource(
                 "heroSource.continueWatching",
                 defaultValue: "Continue Watching",
+                comment: "Home hero content-source option in Settings."
+            )
+        case .recentlyAdded:
+            return LocalizedStringResource(
+                "heroSource.recentlyAdded",
+                defaultValue: "Recently Added",
                 comment: "Home hero content-source option in Settings."
             )
         case .randomFromLibrary:
@@ -64,6 +72,11 @@ public enum HeroSourceKind: String, CaseIterable, Identifiable, Codable, Sendabl
                 "Pick up where you left off, front and centre.",
                 comment: "Explanation shown under the Continue Watching hero source option in Settings."
             )
+        case .recentlyAdded:
+            return LocalizedStringResource(
+                "The newest additions to your libraries, shown large.",
+                comment: "Explanation shown under the Recently Added hero source option in Settings."
+            )
         case .randomFromLibrary:
             return LocalizedStringResource(
                 "A rotating spotlight on titles from your libraries.",
@@ -82,6 +95,7 @@ public enum HeroSourceKind: String, CaseIterable, Identifiable, Codable, Sendabl
         switch self {
         case .featured: return "sparkles.tv"
         case .continueWatching: return "play.circle"
+        case .recentlyAdded: return "sparkles"
         case .randomFromLibrary: return "shuffle"
         case .watchlist: return "bookmark"
         }

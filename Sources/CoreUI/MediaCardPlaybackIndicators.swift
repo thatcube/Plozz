@@ -10,10 +10,17 @@ public struct MediaCardPlaybackIndicators: View {
     private let progressHeight: CGFloat
     private let progressHorizontalInset: CGFloat
     private let progressBottomInset: CGFloat
+    /// Offline state for this item, drawn bottom-trailing. Lives here (rather than
+    /// only inside the resume chip) because "is this downloaded?" is wanted on
+    /// EVERY card, including plain browsing posters that carry no chip.
+    private let downloadState: MediaDownloadBadgeState?
 
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.plozzWatchStatusIndicator) private var watchStatusIndicator
     @Environment(\.themePalette) private var palette
+    /// Published by the hosting card so this chrome can settle back at rest and
+    /// come to full strength on focus (tvOS only — see ``PlozzMediaChrome``).
+    @Environment(\.plozzChromeIsFocused) private var isFocused
 
     public init(
         item: MediaItem,
@@ -22,7 +29,8 @@ public struct MediaCardPlaybackIndicators: View {
         badgeInset: CGFloat,
         progressHeight: CGFloat = 0,
         progressHorizontalInset: CGFloat = 0,
-        progressBottomInset: CGFloat = 0
+        progressBottomInset: CGFloat = 0,
+        downloadState: MediaDownloadBadgeState? = nil
     ) {
         self.item = item
         self.hidesStatus = hidesStatus
@@ -31,10 +39,25 @@ public struct MediaCardPlaybackIndicators: View {
         self.progressHeight = progressHeight
         self.progressHorizontalInset = progressHorizontalInset
         self.progressBottomInset = progressBottomInset
+        self.downloadState = downloadState
     }
 
     public var body: some View {
         Color.clear
+            // One scrim for ALL bottom chrome, drawn beneath it. Shared with the
+            // resume chip (``MediaArtworkChromeScrim``) so a card's bottom edge
+            // darkens identically whichever treatment it carries.
+            //
+            // It used to live inside `progressBar`, which meant a downloaded but
+            // unstarted card had its badge floating on bare artwork, and the ramp
+            // was a full-length linear fade whose darkening was so spread out it
+            // was hard to see at all. The shared scrim holds clear until ~62% and
+            // then ramps, so the darkening is concentrated where the chrome is.
+            .overlay {
+                if hasBottomChrome {
+                    MediaArtworkChromeScrim(top: false, bottom: true)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 statusIndicator
             }
@@ -43,11 +66,20 @@ public struct MediaCardPlaybackIndicators: View {
                     progressBar
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                downloadBadge
+            }
             .allowsHitTesting(false)
     }
 
     private var showsProgressBar: Bool {
         MediaPlaybackIndicatorPresentation.showsProgress(for: item)
+    }
+
+    /// Any chrome along the card's bottom edge that needs the artwork darkened
+    /// behind it — the progress bar, the download badge, or both.
+    private var hasBottomChrome: Bool {
+        (progressBarEnabled && showsProgressBar) || downloadState != nil
     }
 
     @ViewBuilder
@@ -113,42 +145,76 @@ public struct MediaCardPlaybackIndicators: View {
         }
     }
 
+    /// Offline indicator, pinned to ONE fixed spot in the bottom-trailing corner.
+    /// It never moves for the progress bar — a badge that shifts depending on
+    /// whether an item happens to be part-watched reads as a glitch across a wall
+    /// of cards. The bar yields to it instead (see ``progressTrailingInset``).
+    @ViewBuilder
+    private var downloadBadge: some View {
+        if let downloadState {
+            // Same size the resume chip drew it at, so a downloaded card's badge
+            // doesn't change scale depending on which chrome path it takes. The
+            // larger `watchedBadgeSize` would eat half an 86pt poster.
+            MediaDownloadBadge(state: downloadState, size: downloadBadgeSize)
+                .padding(.trailing, progressHorizontalInset)
+                .padding(.bottom, downloadBadgeBottomInset)
+                .shadow(color: .black.opacity(0.45), radius: 4, y: 1)
+        }
+    }
+
+    private var downloadBadgeSize: CGFloat { metrics.resumeChipAccessorySize }
+
+    /// Centres the badge on the bar's line rather than sharing its baseline — the
+    /// badge is taller than the bar, so a shared baseline leaves its mass sitting
+    /// above the line. Derived only from constants, so the badge lands in the
+    /// identical spot on every card whether or not a bar is drawn.
+    private var downloadBadgeBottomInset: CGFloat {
+        max(0, progressBottomInset - (downloadBadgeSize - progressHeight) / 2)
+    }
+
+    /// The bar runs from the leading edge to just before the download badge, so
+    /// the two sit on one line and neither is obscured. With no badge it reaches
+    /// the card's normal inset.
+    ///
+    /// The gap it leaves before the badge is the SAME value as the bar's own edge
+    /// inset, so the whole strip is evenly spaced: inset · bar · inset · badge ·
+    /// inset.
+    private var progressTrailingInset: CGFloat {
+        guard downloadState != nil else { return progressHorizontalInset }
+        return progressHorizontalInset * 2 + downloadBadgeSize
+    }
+
     @ViewBuilder
     private var progressBar: some View {
         if showsProgressBar, let percentage = item.playedPercentage {
-            let scrimReach = progressHeight * 7.5
             let shadowRadius = progressHeight * 0.25
-            ZStack(alignment: .bottom) {
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.6)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: progressHeight + scrimReach)
-                .frame(maxWidth: .infinity)
-
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Capsule(style: .continuous)
-                            .fill(.white.opacity(0.22))
-                        Capsule(style: .continuous)
-                            .fill(ThemePalette.brandBlue)
-                            .frame(
-                                width: max(
-                                    progressHeight,
-                                    geometry.size.width * percentage
-                                )
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    // Matches ``ResumeProgressCapsule`` — the same white bar the
+                    // resume chip and the detail Play button draw — so progress
+                    // reads identically wherever it appears. Deliberately not the
+                    // brand blue: colour is reserved for specific moments, and a
+                    // white bar sits better over arbitrary artwork.
+                    Capsule(style: .continuous)
+                        .fill(PlozzMediaChrome.track(isFocused: isFocused))
+                    Capsule(style: .continuous)
+                        .fill(PlozzMediaChrome.foreground(isFocused: isFocused))
+                        .frame(
+                            width: max(
+                                progressHeight,
+                                geometry.size.width * percentage
                             )
-                            .shadow(
-                                color: .black.opacity(0.35),
-                                radius: shadowRadius
-                            )
-                    }
+                        )
+                        .shadow(
+                            color: .black.opacity(0.35),
+                            radius: shadowRadius
+                        )
                 }
-                .frame(height: progressHeight)
-                .padding(.horizontal, progressHorizontalInset)
-                .padding(.bottom, progressBottomInset)
             }
+            .frame(height: progressHeight)
+            .padding(.leading, progressHorizontalInset)
+            .padding(.trailing, progressTrailingInset)
+            .padding(.bottom, progressBottomInset)
         }
     }
 }

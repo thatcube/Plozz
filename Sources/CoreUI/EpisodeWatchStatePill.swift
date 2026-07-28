@@ -23,6 +23,8 @@ public struct EpisodeWatchStatePill: View {
     private let barHeight: CGFloat
     private let playGlyphHeight: CGFloat?
 
+    @Environment(\.plozzChromeIsFocused) private var isFocused
+
     public init(
         item: MediaItem,
         showsRuntimeWhenIdle: Bool = true,
@@ -64,7 +66,7 @@ public struct EpisodeWatchStatePill: View {
     public var body: some View {
         if let state {
             content(for: state)
-                .foregroundStyle(.white)
+                .foregroundStyle(PlozzMediaChrome.foreground(isFocused: isFocused))
                 .lineLimit(1)
                 // Flat. Legibility is the scrim's job (`MediaArtworkChromeScrim`);
                 // a shadow here made the chip read as a sticker on the artwork
@@ -174,29 +176,48 @@ public struct ResumeChipOverlay: View {
                 }
             .allowsHitTesting(showsMenu)
             .overlay(alignment: .bottom) {
-                HStack(alignment: .center, spacing: metrics.resumeChipInset * 0.5) {
-                    if item.cardRuntimeText != nil {
-                        EpisodeWatchStatePill(
-                            item: item,
-                            showsRuntimeWhenIdle: true,
-                            showsWatched: false,
-                            showsBackground: false,
-                            barWidth: metrics.resumeChipBarWidth,
-                            barHeight: metrics.resumeChipBarHeight
-                        )
-                        .font(.system(size: metrics.resumeChipFontSize, weight: .semibold))
+                // The bar is sized against the CARD, not a constant. At its full
+                // 80pt it fits a landscape thumbnail comfortably, but a poster in a
+                // dense grid can be ~86pt wide, where a fixed bar plus the time
+                // text would overflow the card. Reading the host's width keeps the
+                // wide cards pixel-identical and only shrinks where it must.
+                GeometryReader { geometry in
+                    let barWidth = min(
+                        metrics.resumeChipBarWidth,
+                        max(20, geometry.size.width * 0.42)
+                    )
+                    HStack(alignment: .center, spacing: metrics.resumeChipInset * 0.5) {
+                        if item.cardRuntimeText != nil {
+                            EpisodeWatchStatePill(
+                                item: item,
+                                showsRuntimeWhenIdle: true,
+                                showsWatched: false,
+                                showsBackground: false,
+                                barWidth: barWidth,
+                                barHeight: metrics.resumeChipBarHeight
+                            )
+                            .font(.system(size: metrics.resumeChipFontSize, weight: .semibold))
+                            // Last-resort guard for a very narrow card with a long
+                            // remaining string ("1h 12m"): shrink rather than clip.
+                            .minimumScaleFactor(0.75)
+                        }
+                        // Keeps the download badge pinned trailing whether or not
+                        // the pill is present, so it never drifts to the leading edge.
+                        Spacer(minLength: metrics.resumeChipInset * 0.5)
+                        if let downloadState {
+                            MediaDownloadBadge(
+                                state: downloadState,
+                                size: metrics.resumeChipAccessorySize
+                            )
+                        }
                     }
-                    // Keeps the download badge pinned trailing whether or not the
-                    // pill is present, so it never drifts to the leading edge.
-                    Spacer(minLength: metrics.resumeChipInset * 0.5)
-                    if let downloadState {
-                        MediaDownloadBadge(
-                            state: downloadState,
-                            size: metrics.resumeChipAccessorySize
-                        )
-                    }
+                    .padding(metrics.resumeChipInset)
+                    .frame(
+                        width: geometry.size.width,
+                        height: geometry.size.height,
+                        alignment: .bottom
+                    )
                 }
-                .padding(metrics.resumeChipInset)
                 .allowsHitTesting(false)
             }
         }

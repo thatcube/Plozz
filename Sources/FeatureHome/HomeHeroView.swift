@@ -198,6 +198,10 @@ struct HomeHeroView: View {
     @State private var trailerSourceCache: [String: HeroTrailerSource] = [:]
     @State private var noFastTrailerIDs: Set<String> = []
     /// Drives the first-appearance fade-in, matching the detail hero's polish.
+    /// Air-schedule badges for the hero's series slides. Populated cache-first, so
+    /// a returning viewer sees them on the first frame and only the slide actually
+    /// on screen ever costs a request.
+    @State private var schedules = HeroScheduleLines()
     @State private var heroVisible = false
     /// Optimistic watchlist state the user just toggled from the hero, keyed by
     /// ``watchlistKey(accountID:itemID:)``. Flips the button instantly on press
@@ -602,6 +606,18 @@ struct HomeHeroView: View {
         .task(id: artworkSetToken) {
             await warmHeroPreviews()
         }
+        // Every schedule already on disk, published before a single request — a
+        // returning viewer's badges are there on the first frame.
+        .task(id: artworkSetToken) {
+            await schedules.loadCached(items)
+        }
+        // Only the slide on screen is fetched. The carousel advances on its own, so
+        // the rest fill in as they front rather than firing a burst of requests at
+        // first paint, when Home has better things to be doing.
+        .task(id: current?.id) {
+            guard let item = current else { return }
+            await schedules.refreshFronted(item)
+        }
         // Provider logos are much smaller than backdrops, but still require a
         // network fetch plus decode/analysis. Warm them in likely paging order so
         // each slide arrives with its final identity instead of replacing a settled
@@ -891,6 +907,9 @@ struct HomeHeroView: View {
             // buttons opaque and focusable throughout the transition pins focus and
             // the scroll in place.
             VStack(alignment: .leading, spacing: 12) {
+                if let scheduleLine = schedules.line(for: item) {
+                    scheduleBadge(scheduleLine)
+                }
                 HeroLogoArtwork(
                     references: item.artworkReferences(for: .logo),
                     asyncFallbackURL: logoFallback(for: item),
@@ -917,6 +936,8 @@ struct HomeHeroView: View {
                         .contentTransition(.opacity)
                 }
                 .id("logo-\(item.id)")
+                // Matches the UIKit foreground's extra room under the wordmark.
+                .padding(.bottom, 14)
 
                 metadataLine(for: item)
                     .modifier(HeroTextLegibilityShadow(colorScheme: colorScheme))
@@ -1120,6 +1141,13 @@ struct HomeHeroView: View {
         } else {
             masked = nil
         }
+        let resolvedScheduleLine: String?
+        if var resource = schedules.line(for: item) {
+            resource.locale = locale
+            resolvedScheduleLine = String(localized: resource)   // l10n:content — UILabel boundary; resolved with the live app locale on every render
+        } else {
+            resolvedScheduleLine = nil
+        }
         let slideIndex = items.firstIndex(where: { $0.id == item.id }) ?? index
         return HeroForegroundModelBuilder.model(
             item: item,
@@ -1131,6 +1159,7 @@ struct HomeHeroView: View {
             heroFocused: heroFocused,
             slideCount: items.count,
             slideIndex: slideIndex,
+            scheduleLine: resolvedScheduleLine,
             dotsAutoAdvance: dotsAutoAdvance,
             dotsDwellStart: dotsDwellStart,
             dotsDwellDuration: dotsDwellDuration,
@@ -1254,6 +1283,29 @@ struct HomeHeroView: View {
             }
         }
         return result
+    }
+
+    /// The air-schedule badge above the logo. Mirrors the detail hero's badge so a
+    /// series reads the same on both screens; this is the SwiftUI fallback path,
+    /// with the UIKit renderer drawing its own flat equivalent.
+    @ViewBuilder
+    private func scheduleBadge(_ text: LocalizedStringResource) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        Text(text)
+            .font(.system(size: 24, weight: .semibold))
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background {
+                if #available(tvOS 26.0, *) {
+                    shape.fill(.regularMaterial)
+                } else {
+                    shape.fill(.ultraThinMaterial)
+                }
+            }
+            .overlay { shape.stroke(Color.primary.opacity(0.16), lineWidth: 1) }
+            .contentTransition(.opacity)
+            .accessibilityLabel(text)
     }
 
     @ViewBuilder

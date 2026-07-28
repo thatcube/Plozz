@@ -2125,17 +2125,23 @@ actor ShareCatalogStore {
 
         guard exec("BEGIN IMMEDIATE;") else { return false }
         var stmt: OpaquePointer?
+        // A catalog whose migration failed never gained `cast_json`; naming it would
+        // fail the whole write, so such a catalog keeps persisting everything else.
+        let hasCastColumn = connection.hasColumn(table: "enrichment", column: "cast_json")
+        let castColumns = hasCastColumn ? ", cast_json" : ""
+        let castPlaceholder = hasCastColumn ? ",?" : ""
+        let castAssignment = hasCastColumn ? ", cast_json=excluded.cast_json" : ""
         let sql = """
         INSERT INTO enrichment
-          (item_id, provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, enriched_at, enrich_version, attempts, title)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+          (item_id, provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, enriched_at, enrich_version, attempts, title\(castColumns))
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?\(castPlaceholder))
         ON CONFLICT(item_id) DO UPDATE SET
           provider_ids_json=excluded.provider_ids_json, overview=excluded.overview,
           genres_json=excluded.genres_json, runtime=excluded.runtime,
           poster_url=excluded.poster_url, backdrop_url=excluded.backdrop_url,
           logo_url=excluded.logo_url, enriched_at=excluded.enriched_at,
           enrich_version=excluded.enrich_version, attempts=excluded.attempts,
-          title=excluded.title;
+          title=excluded.title\(castAssignment);
         """
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             _ = exec("ROLLBACK;")
@@ -2153,6 +2159,9 @@ actor ShareCatalogStore {
         sqlite3_bind_int64(stmt, 10, Int64(version))
         sqlite3_bind_int64(stmt, 11, Int64(attempts))
         bindOptText(stmt, 12, merged.title)
+        if hasCastColumn {
+            bindOptText(stmt, 13, encodeJSON(merged.cast.isEmpty ? nil : merged.cast))
+        }
         let projectionWritten = sqlite3_step(stmt) == SQLITE_DONE
         sqlite3_finalize(stmt)
         let normalizedWritten = projectionWritten && enrichmentRepo.writeMetadataValues(

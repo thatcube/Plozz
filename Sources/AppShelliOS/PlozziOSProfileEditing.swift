@@ -16,11 +16,6 @@ struct PlozziOSSettingsAvatarButton: View {
 
     var body: some View {
         let profile = appModel.profiles.activeProfile
-        let showsRealProfile = appModel.profiles.profilesEnabled
-            || appModel.profiles.hasRememberedSelection
-        let displayedProfile = showsRealProfile
-            ? profile
-            : Self.genericProfile
         Button(action: action) {
             // Minimal label: the avatar already frames + circle-clips itself, so
             // hand the toolbar a plain circular button and let IT own the glass
@@ -30,23 +25,11 @@ struct PlozziOSSettingsAvatarButton: View {
             // explicit `.contentShape`) opted out of that system treatment and
             // clamped taps to just the avatar. `.buttonBorderShape(.circle)`
             // keeps the pill round.
-            ProfileAvatarView(profile: displayedProfile, size: size)
+            ProfileAvatarView(profile: profile, size: size)
         }
         .buttonBorderShape(.circle)
-        .accessibilityLabel(
-            showsRealProfile
-                ? Text("Settings for \(profile.name)")
-                : Text("Settings")
-        )
+        .accessibilityLabel(Text("Settings for \(profile.name)"))
     }
-
-    private static let genericProfile = Profile(
-        id: "generic-profile",
-        name: "Profile",
-        avatarSymbol: "person.fill",
-        colorIndex: 33,
-        createdAt: .distantPast
-    )
 }
 
 /// Thin host wrapping the shared `ProfileEditorView` for iOS create / edit /

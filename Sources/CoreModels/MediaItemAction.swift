@@ -28,8 +28,14 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     case markUnwatched
     /// Mark every episode up to and including this one watched.
     case markWatchedUpToHere
-    /// Navigate from this episode to its owning season's page. A pure navigation
-    /// action (no provider mutation) handled by the view layer's router.
+    /// Navigate from this episode up to its show. A pure navigation action (no
+    /// provider mutation) handled by the view layer's router.
+    ///
+    /// Labelled "Go to Show" because that's where it actually lands: the SERIES
+    /// detail page with this episode's season pre-selected (see
+    /// ``MediaItem/seasonNavigationTarget``). Only when the series id is unknown
+    /// does it fall back to a bare season page. The case keeps its original name
+    /// so persisted raw values stay valid.
     case goToSeason
     /// Navigate from a movie card (Continue Watching, Recently Added, Search) to
     /// the movie's own detail page instead of playing it. A pure navigation
@@ -42,6 +48,10 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     /// episode cards stay deliberately sparse, so this is the only place to
     /// inspect a *different* episode's file before playing it. A pure navigation
     /// action handled by the view layer's router.
+    ///
+    /// Labelled "Go to Episode" (it was "Episode Info"): it opens the item's OWN
+    /// page, exactly like ``goToMovie``, so the two read as one family alongside
+    /// ``goToSeason``'s jump to the parent show.
     case goToEpisode
     /// Add this item to the user's Watchlist (Jellyfin Favorites / Plex
     /// Watchlist). Offered only when the owning provider conforms to
@@ -92,8 +102,8 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .goToSeason:
             return LocalizedStringResource(
                 "mediaAction.goToSeason",
-                defaultValue: "Go to Season",
-                comment: "Context-menu action navigating to the season this episode belongs to."
+                defaultValue: "Go to Show",
+                comment: "Context-menu action navigating to the show this episode belongs to."
             )
         case .goToMovie:
             return LocalizedStringResource(
@@ -104,7 +114,7 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .goToEpisode:
             return LocalizedStringResource(
                 "mediaAction.goToEpisode",
-                defaultValue: "Episode Info",
+                defaultValue: "Go to Episode",
                 comment: "Context-menu action opening the episode's detail page."
             )
         case .addToWatchlist:
@@ -158,9 +168,9 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .markWatched: return "checkmark.circle"
         case .markUnwatched: return "arrow.uturn.backward.circle"
         case .markWatchedUpToHere: return "checkmark.circle.fill"
-        case .goToSeason: return "rectangle.stack"
+        case .goToSeason: return "play.rectangle.on.rectangle"
         case .goToMovie: return "film"
-        case .goToEpisode: return "info.circle"
+        case .goToEpisode: return "play.rectangle"
         case .addToWatchlist: return "bookmark"
         case .removeFromWatchlist: return "bookmark.slash"
         case .refreshMetadata: return "arrow.clockwise"

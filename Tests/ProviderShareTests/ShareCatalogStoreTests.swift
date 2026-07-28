@@ -1088,4 +1088,59 @@ final class ShareCatalogStoreTests: XCTestCase {
         let settled = await store.pendingEnrichment(version: 3, limit: 10)
         XCTAssertTrue(settled.isEmpty)
     }
+    // MARK: Cast
+
+    func testCastSurvivesTheRoundTripToDiskAndBack() async throws {
+        // The feature shipped inert once: provenance was recorded but the value was
+        // dropped when the record was built, so every share persisted an empty cast
+        // while builds and tests stayed green.
+        let directory = tempDir()
+        let store = ShareCatalogStore(accountKey: "cast", directory: directory)
+        await store.upsert([
+            movie("Movies/Silo (2023).mkv", title: "Silo", year: 2023)
+        ], scanID: 1)
+        let people = [
+            MediaPerson(id: "tmdb:person:1", name: "Rebecca Ferguson", role: "Juliette", kind: "Actor"),
+            MediaPerson(id: "tmdb:person:2", name: "Common", role: "Robert Sims", kind: "Actor"),
+        ]
+        let saved = await store.saveEnrichment(
+            itemID: "f:Movies/Silo (2023).mkv",
+            .sourced(cast: SourcedValue(value: people, source: .tmdb)),
+            version: 18
+        )
+        XCTAssertTrue(saved)
+
+        let fetched = await store.item(id: "f:Movies/Silo (2023).mkv")
+        let loaded = try XCTUnwrap(fetched)
+        XCTAssertEqual(loaded.people.map(\.name), ["Rebecca Ferguson", "Common"])
+        XCTAssertEqual(loaded.people.first?.role, "Juliette")
+        XCTAssertEqual(loaded.metadataProvenance[.cast]?.source, .tmdb)
+    }
+
+    func testASecondEnrichmentPassAdoptsCastItDidNotHaveBefore() async {
+        // Re-enriching at the same version merges into the existing record, so a
+        // record written before cast existed has to be able to gain it.
+        let directory = tempDir()
+        let store = ShareCatalogStore(accountKey: "cast2", directory: directory)
+        await store.upsert([
+            movie("Movies/Silo (2023).mkv", title: "Silo", year: 2023)
+        ], scanID: 1)
+        _ = await store.saveEnrichment(
+            itemID: "f:Movies/Silo (2023).mkv",
+            .sourced(overview: SourcedValue(value: "A silo.", source: .tmdb)),
+            version: 18
+        )
+        _ = await store.saveEnrichment(
+            itemID: "f:Movies/Silo (2023).mkv",
+            .sourced(cast: SourcedValue(
+                value: [MediaPerson(id: "p", name: "Rebecca Ferguson")],
+                source: .tmdb
+            )),
+            version: 18
+        )
+        let loaded = await store.item(id: "f:Movies/Silo (2023).mkv")
+        XCTAssertEqual(loaded?.people.map(\.name), ["Rebecca Ferguson"])
+        XCTAssertEqual(loaded?.overview, "A silo.", "the earlier pass's values survive")
+    }
+
 }

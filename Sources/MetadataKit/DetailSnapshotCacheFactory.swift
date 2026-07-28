@@ -8,7 +8,7 @@ import Foundation
 /// the *same* cache instance — the caches are not reconstructed on each view
 /// re-render, and a burst of detail opens under one identity share one prune
 /// lifecycle. Asking for a *different* scope lazily creates a new cache rooted at
-/// that scope's own `plozz-detail-cache-v3/<digest>` subdirectory, so identities
+/// that scope's own `<schema-dir>/<digest>` subdirectory, so identities
 /// stay isolated on disk.
 ///
 /// `@MainActor`-isolated: the memoization map is mutated only from the main actor

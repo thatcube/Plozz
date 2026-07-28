@@ -37,6 +37,24 @@ public protocol TVmazeEnriching: Sendable {
     /// the resolved show id so the adapter can key a series identity. `nil` when the
     /// show can't be resolved or has no scheduled next episode (ended/on hiatus).
     func nextEpisode(_ query: MetadataQuery) async -> TVmazeNextEpisode?
+    /// Every not-yet-aired episode plus the show's stated airing days. Keyless and
+    /// resolved by title/IMDb like the rest of TVmaze, so it works for a series no
+    /// TheTVDB id is known for — which is most of them, since the schedule request
+    /// deliberately never runs a title resolve to find one.
+    func upcomingEpisodes(_ query: MetadataQuery, limit: Int) async -> TVmazeUpcoming?
+}
+
+/// TVmaze's future episodes for a show, plus its airing cadence.
+public struct TVmazeUpcoming: Sendable, Equatable {
+    public var showID: Int
+    public var episodes: [ProviderNextEpisode]
+    public var cadence: AirCadence?
+
+    public init(showID: Int, episodes: [ProviderNextEpisode], cadence: AirCadence? = nil) {
+        self.showID = showID
+        self.episodes = episodes
+        self.cadence = cadence
+    }
 }
 
 /// TVmaze's next scheduled episode plus the show id it belongs to.
@@ -80,15 +98,101 @@ public struct TVmazeClient: TVmazeEnriching {
     }
 
     private func fetchShow(for query: MetadataQuery) async -> Show? {
-        if let imdb = query.providerIDs.providerID(.imdb), !imdb.isEmpty,
-           let url = URL(string: "https://api.tvmaze.com/lookup/shows?imdb=\(imdb)"),
-           let show = await MetadataHTTP.get(Show.self, url: url) {
-            return show
+        let known = Self.showIdentity(for: query)
+        // An id lookup is exact, so it settles identity outright — no title, no year,
+        // no ambiguity. TVmaze answers it with a 301 to the show, which URLSession
+        // follows. Both id kinds are tried: a library can carry either.
+        for url in Self.lookupURLs(for: known) {
+            if let show = await MetadataHTTP.get(Show.self, url: url) { return show }
         }
         guard let escaped = metadataEscaped(query.title),
-              let url = URL(string: "https://api.tvmaze.com/singlesearch/shows?q=\(escaped)")
+              let url = URL(string: "https://api.tvmaze.com/singlesearch/shows?q=\(escaped)"),
+              let candidate = await MetadataHTTP.get(Show.self, url: url)
         else { return nil }
-        return await MetadataHTTP.get(Show.self, url: url)
+        // Falling back to a title search, which matches on the title alone. Two shows
+        // can share a name: "Lucky!" (2022, ended) and "Lucky" (2026, airing weekly)
+        // both answer to the same query, and taking the wrong one would attach a live
+        // weekly schedule to a series that finished years ago.
+        guard Self.isConsistentIdentity(
+            candidateIMDb: candidate.externals?.imdb,
+            candidateTVDB: candidate.externals?.thetvdb,
+            known: known
+        ) else { return nil }
+        return candidate
+    }
+
+    /// Exact-lookup URLs for whichever ids the query carries, most reliable first.
+    static func lookupURLs(for known: ShowIdentity) -> [URL] {
+        var urls: [URL] = []
+        if let imdb = known.imdb, isIMDbID(imdb),
+           let url = URL(string: "https://api.tvmaze.com/lookup/shows?imdb=\(imdb)") {
+            urls.append(url)
+        }
+        // Only a numeric TVDB id: a stored slug would 404 and cost a request.
+        if let tvdb = known.tvdb, Int(tvdb) != nil,
+           let url = URL(string: "https://api.tvmaze.com/lookup/shows?thetvdb=\(tvdb)") {
+            urls.append(url)
+        }
+        return urls
+    }
+
+    /// The **show-level** external ids a query carries.
+    ///
+    /// A season or episode item's own `Imdb`/`Tvdb` values identify that episode,
+    /// not its series, so reading them here would compare an episode's id against a
+    /// show's and reject every candidate. Those kinds read the series-scoped
+    /// namespaces instead, which is also a better lookup key than a title search.
+    static func showIdentity(for query: MetadataQuery) -> ShowIdentity {
+        let ids = query.providerIDs
+        switch query.kind {
+        case .season, .episode:
+            return ShowIdentity(
+                imdb: ids.providerID(.seriesImdb)?.nonEmptyOrNil,
+                tvdb: ids.providerID(.seriesTvdb)?.nonEmptyOrNil
+            )
+        default:
+            return ShowIdentity(
+                imdb: ids.providerID(.imdb)?.nonEmptyOrNil,
+                tvdb: ids.providerID(.tvdb)?.nonEmptyOrNil
+            )
+        }
+    }
+
+    struct ShowIdentity: Equatable {
+        var imdb: String?
+        var tvdb: String?
+    }
+
+    /// Whether a title-searched candidate can be the show the query names.
+    ///
+    /// Rejects only on a **conflict** — a well-formed id of the same kind with a
+    /// different value. An absent id proves nothing (TVmaze cross-references some
+    /// shows and not others), so a candidate it can't corroborate is still accepted;
+    /// the server's own ids are treated as authoritative when both sides have one.
+    ///
+    /// Ill-formed ids are ignored rather than treated as conflicts. Servers store a
+    /// TVDB *slug* ("lucky") as often as a numeric id, and a slug can never equal
+    /// TVmaze's integer — comparing them would reject every candidate and silently
+    /// disable TVmaze for those libraries.
+    static func isConsistentIdentity(
+        candidateIMDb: String?,
+        candidateTVDB: Int?,
+        known: ShowIdentity
+    ) -> Bool {
+        if let mine = known.imdb, let theirs = candidateIMDb?.nonEmptyOrNil,
+           Self.isIMDbID(mine), Self.isIMDbID(theirs),
+           mine.caseInsensitiveCompare(theirs) != .orderedSame {
+            return false
+        }
+        if let mine = known.tvdb.flatMap(Int.init), let theirs = candidateTVDB, mine != theirs {
+            return false
+        }
+        return true
+    }
+
+    static func isIMDbID(_ value: String) -> Bool {
+        value.count > 2 && value.lowercased().hasPrefix("tt")
+            && value.dropFirst(2).allSatisfy(\.isNumber)
     }
 
     private func fetchEpisode(showID: Int, season: Int, episode: Int) async -> Episode? {
@@ -96,6 +200,72 @@ public struct TVmazeClient: TVmazeEnriching {
             return nil
         }
         return await MetadataHTTP.get(Episode.self, url: url)
+    }
+
+    public func upcomingEpisodes(_ query: MetadataQuery, limit: Int = 24) async -> TVmazeUpcoming? {
+        guard query.contentType == .tvShow || query.contentType == .anime,
+              let showID = await fetchShowID(for: query) else { return nil }
+
+        async let listingTask = MetadataHTTP.get(
+            [ListedEpisode].self,
+            url: URL(string: "https://api.tvmaze.com/shows/\(showID)/episodes")!
+        )
+        async let showTask = MetadataHTTP.get(
+            ShowWithSchedule.self,
+            url: URL(string: "https://api.tvmaze.com/shows/\(showID)")!
+        )
+        let (listing, show) = await (listingTask, showTask)
+
+        // Compared against the start of today so an episode airing *today* still
+        // counts as upcoming — a date-only schedule can't say whether it has aired.
+        let today = Calendar.current.startOfDay(for: Date())
+        let sourceURL = URL(string: "https://api.tvmaze.com/shows/\(showID)")
+        let upcoming = (listing ?? []).compactMap { ep -> ProviderNextEpisode? in
+            let airDate: Date
+            let precision: AirDatePrecision
+            if let stamp = ScheduleDateParsing.instant(ep.airstamp) {
+                airDate = stamp
+                precision = .dateAndTime
+            } else if let day = ScheduleDateParsing.calendarDate(ep.airdate) {
+                airDate = day
+                precision = .dateOnly
+            } else {
+                return nil
+            }
+            guard ScheduleEntryPolicy.isRegularEpisode(seasonNumber: ep.season),
+                  airDate >= today
+            else { return nil }
+            return ProviderNextEpisode(
+                seasonNumber: ep.season,
+                episodeNumber: ep.number,
+                title: ep.name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyOrNil,
+                airDate: airDate,
+                datePrecision: precision,
+                sourceURL: sourceURL
+            )
+        }
+        .sorted { $0.airDate < $1.airDate }
+        .prefix(limit)
+
+        let cadence = AirCadence(
+            weekdays: Self.weekdayIndices(from: show?.schedule?.days),
+            airsTime: show?.schedule?.time?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyOrNil
+        )
+        guard !upcoming.isEmpty || !cadence.isEmpty else { return nil }
+        return TVmazeUpcoming(
+            showID: showID,
+            episodes: Array(upcoming),
+            cadence: cadence.isEmpty ? nil : cadence
+        )
+    }
+
+    /// TVmaze names its airing days ("Friday"); map them to `Calendar` weekday
+    /// indices (1 = Sunday) so cadence is provider-neutral.
+    static func weekdayIndices(from days: [String]?) -> [Int] {
+        let order = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+        return (days ?? []).compactMap { day in
+            order.firstIndex(of: day.lowercased()).map { $0 + 1 }
+        }.sorted()
     }
 
     public func nextEpisode(_ query: MetadataQuery) async -> TVmazeNextEpisode? {
@@ -147,6 +317,27 @@ public struct TVmazeClient: TVmazeEnriching {
         let image: Image?
     }
 
+    /// A show's full episode listing entry (`/shows/{id}/episodes`), which includes
+    /// not-yet-aired episodes.
+    private struct ListedEpisode: Decodable {
+        let season: Int?
+        let number: Int?
+        let name: String?
+        let airdate: String?
+        let airstamp: String?
+    }
+
+    /// The show record's `schedule` block: the weekdays it airs on.
+    private struct ShowSchedule: Decodable {
+        let days: [String]?
+        let time: String?
+    }
+
+    private struct ShowWithSchedule: Decodable {
+        let id: Int
+        let schedule: ShowSchedule?
+    }
+
     private struct ShowWithNext: Decodable {
         let embedded: Embedded?
         enum CodingKeys: String, CodingKey {
@@ -181,21 +372,65 @@ public struct TVmazeEnrichmentProvider: MetadataEnrichmentProvider {
     public let policy: ProviderPolicy
     private let client: any TVmazeEnriching
 
-    public init(client: any TVmazeEnriching = TVmazeClient(), policy: ProviderPolicy = ProviderPolicy()) {
+    /// `version: 3` — the cache is keyed per provider version, so a change to what
+    /// this provider *returns* has to invalidate it or the old answer is served
+    /// without the provider ever running.
+    ///
+    /// v2: started returning a show's whole upcoming run plus its airing days rather
+    /// than only the next episode. v3: started answering for anime schedules at all
+    /// — while it refused them it returned an empty enrichment, and those empties
+    /// were cached, so admitting anime changed nothing until this bump. v4: stopped
+    /// binding a title search to a show whose ids contradict the query's, and started
+    /// resolving by TVDB id where one is known, so any same-title mismatch already
+    /// cached has to be dropped. v5: season-0 specials are no longer returned as
+    /// upcoming episodes.
+    public init(
+        client: any TVmazeEnriching = TVmazeClient(),
+        policy: ProviderPolicy = ProviderPolicy(version: 5)
+    ) {
         self.client = client
         self.policy = policy
     }
 
     public func enrich(_ query: MetadataQuery, missing: Set<MetadataField>) async -> MetadataEnrichment {
-        guard query.contentType == .tvShow else { return MetadataEnrichment() }
+        // Anime is admitted for the SCHEDULE only. AniList owns anime identity, art
+        // and score and stays first in that chain — but it models a series as
+        // absolute-numbered with no season (an anime "season" is a separate AniList
+        // entry), and an episode with no season can't be placed in a season's rail.
+        // TVmaze numbers per season, matching how the library itself is organised,
+        // so it supplies the run while AniList still supplies the next episode.
+        //
+        // The configured priority already lists TVmaze as an anime schedule source
+        // (`schedule(.anime, [.anilist, .tvdb, .tvmaze])`); this guard was silently
+        // contradicting it.
+        let wantsSchedule = missing.contains(.nextAiringEpisode)
+        switch query.contentType {
+        case .tvShow: break
+        case .anime where wantsSchedule: break
+        default: return MetadataEnrichment()
+        }
         var out = MetadataEnrichment()
 
-        if missing.contains(.nextAiringEpisode), let schedule = await client.nextEpisode(query) {
-            out.upcomingEpisode = schedule.next.upcomingEpisode(
-                seriesIdentity: .external(source: "tvmaze", value: String(schedule.showID)),
-                source: .tvmaze,
-                refreshedAt: Date()
-            )
+        if wantsSchedule {
+            let now = Date()
+            // The full listing first — it fills the whole upcoming run and the
+            // cadence in one pass. `nextEpisode` stays the fallback for a show whose
+            // listing is unavailable but whose next episode is known.
+            if let listed = await client.upcomingEpisodes(query, limit: 24), !listed.episodes.isEmpty {
+                let identity = MediaIdentity.external(source: "tvmaze", value: String(listed.showID))
+                let mapped = listed.episodes.map {
+                    $0.upcomingEpisode(seriesIdentity: identity, source: .tvmaze, refreshedAt: now)
+                }
+                out.upcomingEpisodes = mapped
+                out.upcomingEpisode = mapped.first
+                out.cadence = listed.cadence
+            } else if let schedule = await client.nextEpisode(query) {
+                out.upcomingEpisode = schedule.next.upcomingEpisode(
+                    seriesIdentity: .external(source: "tvmaze", value: String(schedule.showID)),
+                    source: .tvmaze,
+                    refreshedAt: now
+                )
+            }
         }
 
         // The remaining TVmaze capabilities need the show resolve; skip it entirely

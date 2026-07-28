@@ -111,12 +111,18 @@ public struct MediaArtworkChromeScrim: View {
             .allowsHitTesting(false)
     }
 
+    /// The bottom stop has to be dark enough that chrome sitting on it reads the
+    /// SAME on a black poster and a white one. The chrome's own tones are fixed
+    /// (see ``PlozzMediaChrome``), so any variance left in this backdrop shows up
+    /// directly as the text looking bright on one card and washed out on the next
+    /// — which is exactly what a translucent 0.58 did over pale artwork. Deeper,
+    /// and starting its ramp higher, gives a consistent bed to read against.
     private var stops: [Gradient.Stop] {
         [
             .init(color: .black.opacity(hasTopChrome ? 0.5 : 0), location: 0),
             .init(color: .clear, location: 0.34),
-            .init(color: .clear, location: 0.62),
-            .init(color: .black.opacity(hasBottomChrome ? 0.58 : 0), location: 1),
+            .init(color: .clear, location: 0.52),
+            .init(color: .black.opacity(hasBottomChrome ? 0.78 : 0), location: 1),
         ]
     }
 }

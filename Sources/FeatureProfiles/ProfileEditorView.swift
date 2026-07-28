@@ -734,7 +734,10 @@ public struct ProfileEditorView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 34, weight: .bold))
                 .symbolRenderingMode(.palette)
-                .foregroundStyle(.white, palette.accent)
+                // Check glyph first, accent circle behind it. The accent is
+                // monochrome, so the glyph takes the palette's inverse rather
+                // than a hardcoded white that would disappear on a white circle.
+                .foregroundStyle(palette.onAccent, palette.accent)
                 .background(Circle().fill(.white).padding(5))
                 .offset(x: 4, y: 4)
         }

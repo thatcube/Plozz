@@ -160,6 +160,72 @@
             "state": "needs_review",
             "value": "Plozz 使用您的本地网络自动检测 Jellyfin 和 Emby 服务器及网络共享。"
           }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "يستخدم Plozz شبكتك المحلية لاكتشاف خوادم Jellyfin وEmby ومشاركات الوسائط تلقائيًا."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz usa tu red local para descubrir automáticamente servidores Jellyfin y Emby y recursos compartidos multimedia."
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz از شبکه محلی شما برای یافتن خودکار سرورهای Jellyfin و Emby و اشتراک‌های رسانه استفاده می‌کند."
+          }
+        },
+        "hu": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "A Plozz a helyi hálózatot használja a Jellyfin és Emby szerverek, valamint a médiamegosztások automatikus felismeréséhez."
+          }
+        },
+        "sr-Latn": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz koristi vašu lokalnu mrežu za automatsko pronalaženje Jellyfin i Emby servera i mrežnih resursa za medije."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz dùng mạng cục bộ của bạn để tự động tìm máy chủ Jellyfin, Emby và các thư mục chia sẻ phương tiện."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz는 로컬 네트워크를 사용하여 Jellyfin 및 Emby 서버와 미디어 공유를 자동으로 검색합니다."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz 會使用你的本機網路，自動探索 Jellyfin 與 Emby 伺服器及媒體共享。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozzはローカルネットワークを使用して、JellyfinおよびEmbyサーバとメディア共有を自動的に検出します。"
+          }
+        },
+        "el": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Το Plozz χρησιμοποιεί το τοπικό σας δίκτυο για να εντοπίζει αυτόματα διακομιστές Jellyfin και Emby, καθώς και κοινόχρηστους φακέλους πολυμέσων."
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz अपने आप Jellyfin और Emby सर्वर व मीडिया शेयर खोजने के लिए आपके स्थानीय नेटवर्क का उपयोग करता है।"
+          }
         }
       }
     }

@@ -376,18 +376,12 @@ private struct ShareLibraryStatusPanel: View {
                     .plozzForeground(.secondary)
                 HStack(spacing: 12) {
                     if let state, state.isBusy {
-                        if let fraction = state.enrichFraction {
-                            ProgressView(value: fraction)
-                                .progressViewStyle(.circular)
-                                .controlSize(.small)
-                        } else {
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                                .controlSize(.small)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Self.busyStatusText(state)
+                                .monospacedDigit()
+                                .plozzForeground(.secondary)
+                            ShareScanProgressBar(fraction: state.fraction, height: 8)
                         }
-                        Self.busyStatusText(state)
-                            .monospacedDigit()
-                            .plozzForeground(.secondary)
                     } else {
                         Image(systemName: "checkmark.circle")
                             .plozzForeground(.secondary)

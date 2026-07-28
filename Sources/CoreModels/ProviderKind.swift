@@ -25,6 +25,26 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable {
         }
     }
 
+    /// Rank for choosing between two copies of the same title that are otherwise
+    /// equal — same locality, same playability, same quality.
+    ///
+    /// A managed server curates its library: cast, artwork, canonical titles,
+    /// episode ordering. A media share is files on disk, and Plozz synthesises the
+    /// rest, so the same show can arrive with no cast and a folder-derived title.
+    /// Given the choice, the curated copy is the better page — this is the tier
+    /// ``ProviderKind/mediaShare``'s own "deliberately second-class" note describes,
+    /// made explicit so selection can act on it.
+    ///
+    /// Deliberately the LAST tie-break, below locality and playability: a local
+    /// share still beats a remote Jellyfin, because a copy that plays instantly
+    /// beats a richer one that buffers.
+    public var metadataRichnessRank: Int {
+        switch self {
+        case .jellyfin, .emby, .plex: return 1
+        case .mediaShare: return 0
+        }
+    }
+
     /// Jellyfin and Emby share the MediaBrowser API lineage and intentionally use
     /// the same provider implementation so every supported feature stays in parity.
     public var usesMediaBrowserAPI: Bool {

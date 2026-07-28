@@ -98,15 +98,86 @@ public struct TVmazeClient: TVmazeEnriching {
     }
 
     private func fetchShow(for query: MetadataQuery) async -> Show? {
-        if let imdb = query.providerIDs.providerID(.imdb), !imdb.isEmpty,
+        let known = Self.showIdentity(for: query)
+        if let imdb = known.imdb,
            let url = URL(string: "https://api.tvmaze.com/lookup/shows?imdb=\(imdb)"),
            let show = await MetadataHTTP.get(Show.self, url: url) {
             return show
         }
         guard let escaped = metadataEscaped(query.title),
-              let url = URL(string: "https://api.tvmaze.com/singlesearch/shows?q=\(escaped)")
+              let url = URL(string: "https://api.tvmaze.com/singlesearch/shows?q=\(escaped)"),
+              let candidate = await MetadataHTTP.get(Show.self, url: url)
         else { return nil }
-        return await MetadataHTTP.get(Show.self, url: url)
+        // TVmaze's id lookup only covers part of its catalogue, so a title search is
+        // the usual path — and it matches on the title alone, ignoring year and ids.
+        // Two shows can share a name: "Lucky!" (2022, ended) and "Lucky" (2026,
+        // airing weekly) both answer to the same query, and taking the wrong one
+        // would attach a live weekly schedule to a series that finished years ago.
+        guard Self.isConsistentIdentity(
+            candidateIMDb: candidate.externals?.imdb,
+            candidateTVDB: candidate.externals?.thetvdb,
+            known: known
+        ) else { return nil }
+        return candidate
+    }
+
+    /// The **show-level** external ids a query carries.
+    ///
+    /// A season or episode item's own `Imdb`/`Tvdb` values identify that episode,
+    /// not its series, so reading them here would compare an episode's id against a
+    /// show's and reject every candidate. Those kinds read the series-scoped
+    /// namespaces instead, which is also a better lookup key than a title search.
+    static func showIdentity(for query: MetadataQuery) -> ShowIdentity {
+        let ids = query.providerIDs
+        switch query.kind {
+        case .season, .episode:
+            return ShowIdentity(
+                imdb: ids.providerID(.seriesImdb)?.nonEmptyOrNil,
+                tvdb: ids.providerID(.seriesTvdb)?.nonEmptyOrNil
+            )
+        default:
+            return ShowIdentity(
+                imdb: ids.providerID(.imdb)?.nonEmptyOrNil,
+                tvdb: ids.providerID(.tvdb)?.nonEmptyOrNil
+            )
+        }
+    }
+
+    struct ShowIdentity: Equatable {
+        var imdb: String?
+        var tvdb: String?
+    }
+
+    /// Whether a title-searched candidate can be the show the query names.
+    ///
+    /// Rejects only on a **conflict** — a well-formed id of the same kind with a
+    /// different value. An absent id proves nothing (TVmaze cross-references some
+    /// shows and not others), so a candidate it can't corroborate is still accepted;
+    /// the server's own ids are treated as authoritative when both sides have one.
+    ///
+    /// Ill-formed ids are ignored rather than treated as conflicts. Servers store a
+    /// TVDB *slug* ("lucky") as often as a numeric id, and a slug can never equal
+    /// TVmaze's integer — comparing them would reject every candidate and silently
+    /// disable TVmaze for those libraries.
+    static func isConsistentIdentity(
+        candidateIMDb: String?,
+        candidateTVDB: Int?,
+        known: ShowIdentity
+    ) -> Bool {
+        if let mine = known.imdb, let theirs = candidateIMDb?.nonEmptyOrNil,
+           Self.isIMDbID(mine), Self.isIMDbID(theirs),
+           mine.caseInsensitiveCompare(theirs) != .orderedSame {
+            return false
+        }
+        if let mine = known.tvdb.flatMap(Int.init), let theirs = candidateTVDB, mine != theirs {
+            return false
+        }
+        return true
+    }
+
+    private static func isIMDbID(_ value: String) -> Bool {
+        value.count > 2 && value.lowercased().hasPrefix("tt")
+            && value.dropFirst(2).allSatisfy(\.isNumber)
     }
 
     private func fetchEpisode(showID: Int, season: Int, episode: Int) async -> Episode? {
@@ -291,10 +362,12 @@ public struct TVmazeEnrichmentProvider: MetadataEnrichmentProvider {
     /// v2: started returning a show's whole upcoming run plus its airing days rather
     /// than only the next episode. v3: started answering for anime schedules at all
     /// — while it refused them it returned an empty enrichment, and those empties
-    /// were cached, so admitting anime changed nothing until this bump.
+    /// were cached, so admitting anime changed nothing until this bump. v4: stopped
+    /// binding a title search to a show whose ids contradict the query's, so any
+    /// same-title mismatch already cached has to be dropped.
     public init(
         client: any TVmazeEnriching = TVmazeClient(),
-        policy: ProviderPolicy = ProviderPolicy(version: 3)
+        policy: ProviderPolicy = ProviderPolicy(version: 4)
     ) {
         self.client = client
         self.policy = policy

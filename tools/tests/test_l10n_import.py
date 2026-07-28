@@ -180,6 +180,30 @@ class TranslationImportTests(unittest.TestCase):
             protected_terms=["Plex"],
         )
 
+    def test_fragment_cannot_drop_boundary_space(self) -> None:
+        with self.assertRaisesRegex(
+            l10n_import.ImportErrorDetail, "boundary whitespace changed"
+        ):
+            l10n_import.validate_localization(
+                "de",
+                " ahead",
+                {"localizations": {}},
+                unit("voraus"),
+                allow_translated_state=False,
+            )
+
+    def test_multiline_copy_cannot_collapse_lines(self) -> None:
+        with self.assertRaisesRegex(
+            l10n_import.ImportErrorDetail, "newline count changed"
+        ):
+            l10n_import.validate_localization(
+                "de",
+                "First line\n\nSecond line",
+                {"localizations": {}},
+                unit("Erste Zeile Zweite Zeile"),
+                allow_translated_state=False,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

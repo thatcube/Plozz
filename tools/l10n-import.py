@@ -342,6 +342,43 @@ def validate_localization(
                 + ", ".join(missing_terms)
             )
 
+    # Direct strings preserve structural whitespace. Several catalog keys are
+    # fragments intentionally carrying a leading/trailing space (`" ahead"`,
+    # `" of "`), and multiline alerts rely on their line breaks. Dropping either
+    # does not crash and Apple accepts it, but produces glued words or a collapsed
+    # paragraph on screen.
+    english = source_entry.get("localizations", {}).get("en", {})
+    target_unit = localization.get("stringUnit")
+    if (
+        isinstance(target_unit, dict)
+        and not localization.get("variations")
+        and not localization.get("substitutions")
+        and not english.get("variations")
+        and not english.get("substitutions")
+    ):
+        expected_text = source_text(key, source_entry)
+        translated_text = target_unit.get("value", "")
+        expected_leading = re.match(r"^[ \t]*", expected_text).group()
+        actual_leading = re.match(r"^[ \t]*", translated_text).group()
+        expected_trailing = re.search(r"[ \t]*$", expected_text).group()
+        actual_trailing = re.search(r"[ \t]*$", translated_text).group()
+        if (actual_leading, actual_trailing) != (
+            expected_leading,
+            expected_trailing,
+        ):
+            raise ImportErrorDetail(
+                f"{language}: {key!r}: boundary whitespace changed: "
+                f"expected leading/trailing "
+                f"{expected_leading!r}/{expected_trailing!r}, got "
+                f"{actual_leading!r}/{actual_trailing!r}"
+            )
+        if translated_text.count("\n") != expected_text.count("\n"):
+            raise ImportErrorDetail(
+                f"{language}: {key!r}: newline count changed: expected "
+                f"{expected_text.count(chr(10))}, got "
+                f"{translated_text.count(chr(10))}"
+            )
+
     expected = expected_placeholder_types(key, source_entry)
     try:
         actual = translated_placeholder_types(localization)

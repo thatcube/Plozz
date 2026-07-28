@@ -41,6 +41,10 @@ struct HeroForegroundRepresentable: UIViewRepresentable {
 
     func makeUIView(context: Context) -> HeroForegroundUIView {
         let view = HeroForegroundUIView()
+        view.semanticContentAttribute =
+            context.environment.layoutDirection == .rightToLeft
+            ? .forceRightToLeft
+            : .forceLeftToRight
         context.coordinator.view = view
         context.coordinator.logoFallbacks = logoFallbacks
         context.coordinator.logoReferences = logoReferences
@@ -52,6 +56,10 @@ struct HeroForegroundRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: HeroForegroundUIView, context: Context) {
+        uiView.semanticContentAttribute =
+            context.environment.layoutDirection == .rightToLeft
+            ? .forceRightToLeft
+            : .forceLeftToRight
         context.coordinator.view = uiView
         context.coordinator.logoFallbacks = logoFallbacks
         context.coordinator.logoReferences = logoReferences

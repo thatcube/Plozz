@@ -12,12 +12,16 @@ struct PlozziOSPosterCard: View {
     var downloadState: MediaDownloadBadgeState?
     /// Visible "…" menu. Touch cards need it: press-and-hold is undiscoverable.
     var showsActionsMenu: Bool = false
+    /// Caller-owned context cue drawn on the artwork (e.g. "Continues" on a
+    /// Related entry that continues the story you're looking at).
+    var statusCue: LocalizedStringResource?
 
     var body: some View {
         PosterCardView(
             item: item ?? placeholderItem,
             style: style,
             reservesSubtitleSpace: false,
+            statusCue: statusCue,
             showsResumeChip: showsResumeChip,
             downloadState: downloadState,
             showsActionsMenu: showsActionsMenu,

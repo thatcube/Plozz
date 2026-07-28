@@ -138,10 +138,16 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
     public static func available(in bundle: Bundle = .main) -> [AppLanguage] {
         let shipped = Set(bundle.localizations)
         #if DEBUG
-        let candidates = shipped.subtracting(["Base", "en"])
+        var candidates = shipped.subtracting(["Base"])
         #else
-        let candidates = Set(releaseReady).intersection(shipped)
+        var candidates = Set(releaseReady).intersection(shipped)
         #endif
+        // English is the source localization, so Xcode may ship it only as the
+        // development-region fallback with no en.lproj and omit it from
+        // Bundle.localizations. It is intentionally absent from `releaseReady`
+        // (whose parity covers non-source catalog languages), but must always be
+        // selectable explicitly on a non-English device.
+        candidates.insert("en")
         let offered = candidates.sorted { lhs, rhs in
             localizedName(for: lhs).localizedCaseInsensitiveCompare(localizedName(for: rhs)) == .orderedAscending
         }
@@ -151,7 +157,7 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
     /// True when this language is offered only because the build is a DEBUG one
     /// — i.e. it is not release-ready and the picker should say so.
     public static func isInProgress(_ code: String) -> Bool {
-        !releaseReady.contains(code)
+        code != "en" && !releaseReady.contains(code)
     }
 
     /// The endonym for a specific language. `nil` for `.system`, whose label is

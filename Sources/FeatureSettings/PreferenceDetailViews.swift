@@ -288,9 +288,14 @@ struct PlaybackDetailView: View {
         )
     }
 
-    private func subtitleLanguageName(for code: String) -> String {   // l10n:content — language name resolved from Locale
-        guard !code.isEmpty else { return "Device Default" }
-        return SubtitleLanguageCatalog.languages.first(where: { $0.code == code })?.name ?? code
+    private func subtitleLanguageName(for code: String) -> Text {
+        guard !code.isEmpty else { return Text("Device Default") }
+        return Text(
+            verbatim: SubtitleLanguageCatalog.displayName(
+                forCode: code,
+                in: locale
+            ) ?? code
+        )
     }
 
     // MARK: Audio-language policy helpers
@@ -301,12 +306,19 @@ struct PlaybackDetailView: View {
         [.original, .device] + SubtitleLanguageCatalog.languages.map { .language($0.code) }
 
     /// Human-readable label for an audio-language preference.
-    private static func audioPreferenceName(_ preference: AudioLanguagePreference) -> String {
+    private func audioPreferenceName(
+        _ preference: AudioLanguagePreference
+    ) -> Text {
         switch preference {
-        case .original: return "Original"
-        case .device: return "Device"
+        case .original: return Text("Original")
+        case .device: return Text("Device")
         case .language(let code):
-            return SubtitleLanguageCatalog.languages.first(where: { $0.code == code })?.name ?? code
+            return Text(
+                verbatim: SubtitleLanguageCatalog.displayName(
+                    forCode: code,
+                    in: locale
+                ) ?? code
+            )
         }
     }
 
@@ -343,11 +355,15 @@ struct PlaybackDetailView: View {
         Menu {
             Picker("Audio language", selection: selection) {
                 ForEach(Self.audioPreferenceOptions, id: \.self) { preference in
-                    Text(Self.audioPreferenceName(preference)).tag(preference)
+                    audioPreferenceName(preference).tag(preference)
                 }
             }
         } label: {
-            Label(Self.audioPreferenceName(selection.wrappedValue), systemImage: "globe")
+            Label {
+                audioPreferenceName(selection.wrappedValue)
+            } icon: {
+                Image(systemName: "globe")
+            }
         }
         .menuStyle(.button)
     }
@@ -393,11 +409,17 @@ struct PlaybackDetailView: View {
                 Menu {
                     Picker("Subtitle language", selection: subtitleLanguageSelection) {
                         ForEach(subtitleLanguageOptions, id: \.self) { code in
-                            Text(subtitleLanguageName(for: code)).tag(code)
+                            subtitleLanguageName(for: code).tag(code)
                         }
                     }
                 } label: {
-                    Label(subtitleLanguageName(for: subtitleLanguageSelection.wrappedValue), systemImage: "globe")
+                    Label {
+                        subtitleLanguageName(
+                            for: subtitleLanguageSelection.wrappedValue
+                        )
+                    } icon: {
+                        Image(systemName: "globe")
+                    }
                 }
                 .menuStyle(.button)
             }

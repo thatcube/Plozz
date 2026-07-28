@@ -1556,7 +1556,7 @@ private struct PlozziOSPlaybackSettingsView: View {
             )) {
                 Picker("Preferred audio", selection: $model.settings.audioLanguagePreference) {
                     ForEach(Self.audioOptions, id: \.self) { preference in
-                        Text(audioName(preference)).tag(preference)
+                        audioName(preference).tag(preference)
                     }
                 }
                 Toggle("Different default per type", isOn: audioOverridesEnabled)
@@ -1567,7 +1567,7 @@ private struct PlozziOSPlaybackSettingsView: View {
                             selection: audioBinding(for: category)
                         ) {
                             ForEach(Self.audioOptions, id: \.self) { preference in
-                                Text(audioName(preference)).tag(preference)
+                                audioName(preference).tag(preference)
                             }
                         }
                     }
@@ -1609,16 +1609,19 @@ private struct PlozziOSPlaybackSettingsView: View {
         )
     }
 
-    private func audioName(_ preference: AudioLanguagePreference) -> String {   // l10n:content — language name resolved from Locale
+    private func audioName(_ preference: AudioLanguagePreference) -> Text {
         switch preference {
         case .original:
-            return "Original language"
+            return Text("Original language")
         case .device:
-            return "Device language"
+            return Text("Device language")
         case .language(let code):
-            return SubtitleLanguageCatalog.languages.first {
-                $0.code == code
-            }?.name ?? code
+            return Text(
+                verbatim: SubtitleLanguageCatalog.displayName(
+                    forCode: code,
+                    in: locale
+                ) ?? code
+            )
         }
     }
 }

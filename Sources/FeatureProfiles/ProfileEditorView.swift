@@ -445,7 +445,7 @@ public struct ProfileEditorView: View {
                 ProfileAvatarView(profile: previewProfile, size: 160)
                     .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
 
-                Text(previewName)
+                previewName
                     .font(.system(size: 32, weight: .bold))
                     .foregroundStyle(palette.primaryText)
                     .multilineTextAlignment(.center)
@@ -483,11 +483,12 @@ public struct ProfileEditorView: View {
         )
     }
 
-    private var previewName: String {   // l10n:content — profile name typed by the user
-        trimmedName.isEmpty ? (isEditing ? "Profile" : "New Profile") : trimmedName
+    private var previewName: Text {
+        guard trimmedName.isEmpty else { return Text(verbatim: trimmedName) }
+        return isEditing ? Text("Profile") : Text("New Profile")
     }
 
-    private var previewSubtitle: String {   // l10n:content — profile name typed by the user
+    private var previewSubtitle: LocalizedStringResource {
         switch avatarMode {
         case .photo:
             return effectiveImageURL != nil ? "Borrowed photo" : "No photo chosen yet"
@@ -925,8 +926,9 @@ public struct ProfileEditorView: View {
     /// section-header idiom) but with an explicit theme-aware colour so it stays
     /// legible in every theme even inside a sheet (a bare `.secondary` resolves
     /// to the wrong scheme here).
-    private func sectionHeader(_ text: String) -> some View {
-        Text(text.uppercased())
+    private func sectionHeader(_ text: LocalizedStringResource) -> some View {
+        Text(text)
+            .textCase(.uppercase)
             .font(.subheadline.weight(.bold))
             .tracking(1.8)
             .foregroundStyle(palette.secondaryText)
@@ -1059,8 +1061,8 @@ extension ProfileEditorView {
 fileprivate struct IOSProfilePreviewSection: View {
     let profileID: String
     let profileName: String
-    let displayName: String
-    let subtitle: String   // l10n:content — profile/server name
+    let displayName: Text
+    let subtitle: LocalizedStringResource
     let avatarSymbol: String
     let colorIndex: Int
     let avatarImageURL: String?
@@ -1082,7 +1084,7 @@ fileprivate struct IOSProfilePreviewSection: View {
         VStack(spacing: 12) {
             ProfileAvatarView(profile: profile, size: 104)
                 .shadow(color: .black.opacity(0.2), radius: 12, y: 5)
-            Text(displayName)
+            displayName
                 .font(.title2.weight(.bold))
                 .foregroundStyle(palette.primaryText)
                 .multilineTextAlignment(.center)
@@ -1095,7 +1097,13 @@ fileprivate struct IOSProfilePreviewSection: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("Preview: \(displayName), \(subtitle)"))
+        .accessibilityLabel(
+            Text("Preview")
+                + Text(verbatim: ": ")
+                + displayName
+                + Text(verbatim: ", ")
+                + Text(subtitle)
+        )
     }
 }
 
@@ -1903,12 +1911,13 @@ fileprivate struct IOSProfileSwatchRing: View {
 }
 
 fileprivate struct IOSProfileSectionHeader: View {
-    let text: String
+    let text: LocalizedStringResource
 
     @Environment(\.themePalette) private var palette
 
     var body: some View {
-        Text(text.uppercased())
+        Text(text)
+            .textCase(.uppercase)
             .font(.subheadline.weight(.bold))
             .tracking(1.4)
             .foregroundStyle(palette.secondaryText)

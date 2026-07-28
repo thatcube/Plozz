@@ -67,7 +67,11 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
     ///
     /// Adding a language: translate it, check it against the pseudolocalization
     /// pass, then add its tag here.
-    public static let releaseReady: [String] = []
+    public static let releaseReady: [String] = [
+        "nl",
+        "pl",
+        "pt-BR",
+    ]
 
     /// Every language the picker should show: `.system` plus the release-ready
     /// tags that are actually present in the bundle. The bundle check means a

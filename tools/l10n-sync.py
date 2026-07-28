@@ -63,6 +63,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 CATALOG = REPO / "App/Resources/Localizable.xcstrings"
+APP_LANGUAGE_SOURCE = REPO / "Sources/CoreModels/AppLanguage.swift"
 PROJECT = REPO / "Plozz.xcodeproj"
 
 # A dedicated DerivedData root. Kept separate from the normal build so a routine
@@ -255,6 +256,7 @@ def validate_catalog() -> int:
 
     problems += plural_problems(strings)
     problems += infoplist_problems()
+    problems += language_release_problems(strings)
 
     for problem in problems:
         print(f"  ✗ {problem}")
@@ -311,6 +313,98 @@ def infoplist_problems() -> list[str]:
         for key in catalog:
             if key not in plist:
                 problems.append(f"{catalog_path.name}: {key} is not in {plist_path.name}")
+    return problems
+
+
+def release_ready_languages() -> list[str]:
+    """The exact set the in-app picker promises in release builds."""
+
+    source = APP_LANGUAGE_SOURCE.read_text(encoding="utf-8")
+    match = re.search(
+        r"public\s+static\s+let\s+releaseReady:\s*\[String\]\s*=\s*\[(.*?)\]",
+        source,
+        re.DOTALL,
+    )
+    if match is None:
+        raise RuntimeError(
+            f"could not parse releaseReady from {APP_LANGUAGE_SOURCE.relative_to(REPO)}"
+        )
+    return re.findall(r'"([^"]+)"', match.group(1))
+
+
+def localized_languages(strings: dict) -> set[str]:
+    return {
+        language
+        for entry in strings.values()
+        for language in entry.get("localizations", {})
+        if language not in {"Base", "en"}
+    }
+
+
+def language_release_problems(
+    strings: dict,
+    release_ready: list[str] | None = None,
+    info_documents: dict[Path, dict] | None = None,
+) -> list[str]:
+    """Make the release gate equal the languages the OS actually sees.
+
+    `releaseReady` controls only Plozz's picker. iOS/tvOS and App Store inspect
+    bundled `.lproj` directories directly, so a partial language in the catalog
+    ships even when the picker hides it. The only safe invariant is exact parity:
+    every non-English catalog language is complete, permission-localized, and in
+    `releaseReady`; nothing else is bundled.
+    """
+
+    problems: list[str] = []
+    if release_ready is None:
+        try:
+            release_ready = release_ready_languages()
+        except RuntimeError as error:
+            return [str(error)]
+    release_set = set(release_ready)
+    if len(release_set) != len(release_ready):
+        problems.append("AppLanguage.releaseReady contains duplicate tags")
+
+    app_languages = localized_languages(strings)
+    if app_languages != release_set:
+        problems.append(
+            "app catalog languages must exactly match AppLanguage.releaseReady; "
+            f"catalog-only={sorted(app_languages - release_set)}, "
+            f"release-only={sorted(release_set - app_languages)}"
+        )
+
+    for language in sorted(app_languages):
+        missing = [
+            key
+            for key, entry in strings.items()
+            if language not in entry.get("localizations", {})
+        ]
+        if missing:
+            problems.append(
+                f"{language}: app catalog is missing {len(missing)} key(s), "
+                f"first: {missing[:5]}"
+            )
+
+    for catalog_path, _ in INFOPLIST_PAIRS:
+        document = (
+            info_documents[catalog_path]
+            if info_documents is not None
+            else json.loads((REPO / catalog_path).read_text(encoding="utf-8"))
+        )
+        info_strings = document.get("strings", {})
+        info_languages = localized_languages(info_strings)
+        if info_languages != release_set:
+            problems.append(
+                f"{catalog_path.name} languages must exactly match releaseReady; "
+                f"catalog-only={sorted(info_languages - release_set)}, "
+                f"release-only={sorted(release_set - info_languages)}"
+            )
+        for key, entry in info_strings.items():
+            missing = release_set - set(entry.get("localizations", {}))
+            if missing:
+                problems.append(
+                    f"{catalog_path.name}: {key} missing {sorted(missing)}"
+                )
     return problems
 
 

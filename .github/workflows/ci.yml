@@ -44,7 +44,7 @@ jobs:
       # categories disagreeing; unknown printf syntax; noncanonical locale tags;
       # and non-ASCII text failing a round trip.
       - name: Localization importer regression tests
-        run: python3 -m unittest tools/tests/test_l10n_import.py
+        run: python3 -m unittest discover -s tools/tests -p 'test_l10n_*.py'
 
       # Validates the artifact translators actually receive: brands marked
       # non-translatable, no keys without words in them, every counted string

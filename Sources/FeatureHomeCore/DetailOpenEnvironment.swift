@@ -40,6 +40,10 @@ public struct DetailOpenEnvironment {
     /// Refreshes a discovery (Seerr) title's request/availability. `nil` when Seerr
     /// isn't wired.
     public let discoveryStatusRefresh: (@Sendable (MediaItem) async -> (MediaAvailabilityStatus, Double?)?)?
+    /// Builds the Related row's loader. A closure rather than a value because the
+    /// loader holds per-page state, so each detail page needs its own.
+    /// `nil` leaves the row absent.
+    public let makeRelatedTitlesLoader: (@MainActor () -> RelatedTitlesLoader?)?
     /// Stale-while-revalidate detail snapshot cache (instant repaint on revisit).
     public let snapshotCache: DetailSnapshotCache
 
@@ -50,6 +54,7 @@ public struct DetailOpenEnvironment {
         crossServerSourceResolver: (@Sendable (MediaItem) async -> [MediaSourceRef])?,
         ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider(),
         discoveryStatusRefresh: (@Sendable (MediaItem) async -> (MediaAvailabilityStatus, Double?)?)? = nil,
+        makeRelatedTitlesLoader: (@MainActor () -> RelatedTitlesLoader?)? = nil,
         snapshotCache: DetailSnapshotCache = .ephemeral
     ) {
         self.resolveProvider = resolveProvider
@@ -58,6 +63,7 @@ public struct DetailOpenEnvironment {
         self.crossServerSourceResolver = crossServerSourceResolver
         self.ratingsProvider = ratingsProvider
         self.discoveryStatusRefresh = discoveryStatusRefresh
+        self.makeRelatedTitlesLoader = makeRelatedTitlesLoader
         self.snapshotCache = snapshotCache
     }
 
@@ -109,6 +115,7 @@ public struct DetailOpenEnvironment {
             initialSources: initialSources(for: item, isDiscovery: isDiscovery),
             alternateProviderResolver: resolveOptionalProvider,
             crossServerSourceResolver: isDiscovery ? nil : crossServerSourceResolver,
+            relatedTitlesLoader: makeRelatedTitlesLoader?(),
             snapshotCache: snapshotCache
         )
     }
@@ -133,6 +140,7 @@ public struct DetailOpenEnvironment {
             originSourceAccountID: originAccountID,
             alternateProviderResolver: resolveOptionalProvider,
             crossServerSourceResolver: crossServerSourceResolver,
+            relatedTitlesLoader: makeRelatedTitlesLoader?(),
             snapshotCache: snapshotCache
         )
     }

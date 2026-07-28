@@ -457,6 +457,10 @@ public final class ItemDetailViewModel {
     /// (item + children + episodes + cross-server sources). On a revisit `load()`
     /// paints the last-known snapshot instantly, then refreshes it from the
     /// network — so a show you've opened before never shows a cold spinner.
+    /// Resolves titles related to this one. `nil` in contexts that don't show the
+    /// row (previews, tests), which makes the whole feature inert rather than
+    /// conditional at every call site.
+    public let relatedTitlesLoader: RelatedTitlesLoader?
     private let snapshotCache: DetailSnapshotCache
     /// Stable per-title key for ``snapshotCache``. Scoped by owning account so the
     /// same id on two servers caches independently. All routes to a series share a
@@ -478,8 +482,10 @@ public final class ItemDetailViewModel {
         initialSources: [MediaSourceRef] = [],
         alternateProviderResolver: @escaping (String) -> (any MediaProvider)? = { _ in nil },
         crossServerSourceResolver: (@Sendable (MediaItem) async -> [MediaSourceRef])? = nil,
+        relatedTitlesLoader: RelatedTitlesLoader? = nil,
         snapshotCache: DetailSnapshotCache = .ephemeral
     ) {
+        self.relatedTitlesLoader = relatedTitlesLoader
         self.provider = provider
         self.itemID = itemID
         self.activeProvider = provider
@@ -711,6 +717,7 @@ public final class ItemDetailViewModel {
                 // and must never hold up the page. Cache read first (instant), then
                 // a background refresh that repaints only if it finds something new.
                 loadUpcomingSchedule(for: taggedItem)
+                loadRelatedTitles(for: taggedItem)
                 // The selected server returned nothing for a container title. If
                 // another known server hosts it, switch to that one in place (its
                 // reload takes over) rather than stranding an empty episode browser.
@@ -1556,6 +1563,16 @@ public final class ItemDetailViewModel {
     /// Best-effort: a failure leaves ``serverResumeEpisode`` nil and the page
     /// falls back to inferring from the loaded season, which is what it did
     /// before. Never blocks first paint — it runs after children are published.
+    /// Resolves the Related row, when a loader was supplied.
+    ///
+    /// Never awaited by the caller and always last: the row sits below the fold,
+    /// costs a provider call plus a library search per title, and must not delay
+    /// anything the viewer is actually looking at.
+    private func loadRelatedTitles(for item: MediaItem) {
+        guard let relatedTitlesLoader else { return }
+        Task { await relatedTitlesLoader.load(for: item) }
+    }
+
     /// Fills ``upcomingSchedule`` from cache, then refreshes it in the background.
     ///
     /// Series only — a movie has no schedule — and never awaited by the caller, so

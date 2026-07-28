@@ -62,8 +62,18 @@ enum SeriesEpisodeBrowserLayout {
 
     /// Cast already provides enough real trailing content to center the browser;
     /// only a no-Cast page needs invisible runway to reach the same position.
-    static func trailingRunwayHeight(showsSeasons: Bool, showsCast: Bool) -> CGFloat {
-        guard !showsCast else { return 0 }
+    /// Padding below the browser so the episode rail can still scroll to centre
+    /// when nothing follows it.
+    ///
+    /// `showsTrailingContent` is any section beneath the browser — cast, Related,
+    /// anything else — not the cast alone. That distinction became load-bearing
+    /// once a page could have Related but no cast: a file-based share carries no
+    /// cast, so the runway was still being added, and it landed as ~250pt of void
+    /// above a Related row that was perfectly capable of providing the scroll room
+    /// itself. The same show opened from a Plex copy has cast, took the zero-runway
+    /// path, and looked right — which is why the two routes disagreed.
+    static func trailingRunwayHeight(showsSeasons: Bool, showsTrailingContent: Bool) -> CGFloat {
+        guard !showsTrailingContent else { return 0 }
         let groupedHeight = recededLogoHeight
             + (showsSeasons ? seasonBarHeight : 0)
             + episodeRailHeight
@@ -79,7 +89,9 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
     let series: MediaItem
     let recedeModel: SeriesHeroRecedeModel
     let showsSeasons: Bool
-    let showsCast: Bool
+    /// Whether any section follows the browser (cast, Related, …). Drives whether
+    /// the trailing scroll runway is needed.
+    let showsTrailingContent: Bool
     let focusAnchorID: String
     @ViewBuilder let seasonContent: () -> SeasonContent
     @ViewBuilder let episodeContent: () -> EpisodeContent
@@ -121,7 +133,7 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
             Color.clear.frame(
                 height: SeriesEpisodeBrowserLayout.trailingRunwayHeight(
                     showsSeasons: showsSeasons,
-                    showsCast: showsCast
+                    showsTrailingContent: showsTrailingContent
                 )
             )
         }

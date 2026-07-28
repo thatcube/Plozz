@@ -41,6 +41,8 @@ struct SeriesDetailView: View {
     /// still returns to wherever the user opened the show from. `nil` (e.g.
     /// previews, or a single-server show) hides the server picker.
     let onSelectServer: ((MediaSourceRef) -> Void)?
+    /// Opens another title from the Related row.
+    let onSelectRelated: (MediaItem) -> Void
     /// When the page was opened targeting a specific season, that season's id.
     let initialSeasonID: String?
     /// When the page was opened by tapping a specific episode, that episode. The
@@ -149,6 +151,7 @@ struct SeriesDetailView: View {
         isRequestingSeasons: Bool = false,
         onRequestSeasons: (([Int]) -> Void)? = nil,
         onSelectServer: ((MediaSourceRef) -> Void)? = nil,
+        onSelectRelated: @escaping (MediaItem) -> Void = { _ in },
         initialSeasonID: String? = nil,
         initialEpisode: MediaItem? = nil
     ) {
@@ -164,6 +167,7 @@ struct SeriesDetailView: View {
         self.isRequestingSeasons = isRequestingSeasons
         self.onRequestSeasons = onRequestSeasons
         self.onSelectServer = onSelectServer
+        self.onSelectRelated = onSelectRelated
         self.initialSeasonID = initialSeasonID
         self.initialEpisode = initialEpisode
         // When opened via "Go to Season", pre-select that season (and front it in
@@ -366,7 +370,7 @@ struct SeriesDetailView: View {
                         series: series,
                         recedeModel: recedeModel,
                         showsSeasons: !seasons.isEmpty || requestAvailability?.hasSeasonRequestContent == true,
-                        showsCast: !series.cast.isEmpty,
+                        showsTrailingContent: showsTrailingContent,
                         focusAnchorID: Self.browserFocusAnchorID,
                         seasonContent: {
                             // Keep the season chips + "request seasons" button hidden
@@ -403,7 +407,10 @@ struct SeriesDetailView: View {
                         seriesRecedeModel: recedeModel,
                         revealsSeriesCastWithoutBrowser: revealsCastWithoutBrowser,
                         suppressesFocus: ignoresSystemFocusMoves,
-                        onCastFocusEntered: { seasonBarEngaged = false }
+                        onCastFocusEntered: { seasonBarEngaged = false },
+                        relatedEntries: viewModel.relatedTitlesLoader?.entries ?? [],
+                        relatedHasResolved: viewModel.relatedTitlesLoader?.hasResolved ?? true,
+                        onSelectRelated: onSelectRelated
                     )
                         .padding(.top, 32)
                 }
@@ -1004,6 +1011,17 @@ struct SeriesDetailView: View {
             cadence: schedule.cadence,
             schedule: schedule.upcomingEpisodes
         )
+    }
+
+    /// Whether anything renders below the episode browser, so it doesn't need to
+    /// pad itself a scroll runway. A share copy of a show has no cast but can still
+    /// have a Related row, and padding as though the page ended left a void.
+    private var showsTrailingContent: Bool {
+        !series.cast.isEmpty
+            || !(viewModel.relatedTitlesLoader?.entries.isEmpty ?? true)
+            // Still resolving: the row reserves its space, so treat it as present
+            // rather than padding a runway that is about to be pushed off anyway.
+            || viewModel.relatedTitlesLoader?.hasResolved == false
     }
 
     private var revealsCastWithoutBrowser: Bool {

@@ -26,6 +26,10 @@ public struct MetadataSource: RawRepresentable, Codable, Hashable, Sendable {
     public static let kitsu = Self(rawValue: "kitsu")
     public static let mal = Self(rawValue: "mal")
     public static let omdb = Self(rawValue: "omdb")
+    /// Trakt's community-curated related lists. Its client id is an app-level
+    /// registration bundled in every build and `related` is public data, so this
+    /// needs no user sign-in — signing in is only for a viewer's own history.
+    public static let trakt = Self(rawValue: "trakt")
     public static let deezer = Self(rawValue: "deezer")
     public static let musicbrainz = Self(rawValue: "musicbrainz")
     public static let legacyUnknown = Self(rawValue: "legacyUnknown")

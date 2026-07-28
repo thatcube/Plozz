@@ -1,0 +1,70 @@
+import Foundation
+
+/// A title related to another — a recommendation, or a direct continuation like a
+/// sequel or spin-off.
+///
+/// Carries external ids rather than a library item id, because a related title is
+/// resolved from a metadata provider that knows nothing about anyone's library.
+/// Binding it to something the viewer owns is a separate, id-verified step (see
+/// `RelatedTitleMatcher`): a title match alone is how a 2022 documentary ends up on
+/// a 2026 drama's page.
+public struct RelatedTitle: Codable, Sendable, Equatable, Identifiable, Hashable {
+    /// Why this title is related, which decides how it's presented and ordered.
+    public enum Relation: String, Codable, Sendable, Equatable, Hashable {
+        /// A direct continuation of the same story: sequel, prequel, or a season
+        /// released as its own series (Avatar → Seven Havens).
+        case continuation
+        /// A side story, spin-off, or alternate telling of the same material.
+        case sideStory
+        /// "If you liked this…" — similar in tone or subject, unrelated in story.
+        case recommendation
+    }
+
+    public let title: String
+    public let year: Int?
+    public let kind: MediaItemKind
+    public let relation: Relation
+    /// External ids (`Tmdb`, `Imdb`, `Tvdb`, `AniList`, `Mal`) in the app's usual
+    /// namespace spellings, so they can be compared against a library item's own.
+    public let providerIDs: [String: String]
+    /// Provider-supplied poster, used only until a library match supplies the
+    /// viewer's own artwork.
+    public let posterURL: URL?
+    public let source: MetadataSource
+
+    public init(
+        title: String,
+        year: Int? = nil,
+        kind: MediaItemKind,
+        relation: Relation = .recommendation,
+        providerIDs: [String: String] = [:],
+        posterURL: URL? = nil,
+        source: MetadataSource
+    ) {
+        self.title = title
+        self.year = year
+        self.kind = kind
+        self.relation = relation
+        self.providerIDs = providerIDs
+        self.posterURL = posterURL
+        self.source = source
+    }
+
+    /// Stable across providers where ids allow, so the same title resolved by two
+    /// providers de-duplicates instead of appearing twice.
+    public var id: String {
+        for namespace in [ProviderIDNamespace.tmdb, .imdb, .tvdb, .aniList, .myAnimeList] {
+            if let value = providerIDs.providerID(namespace) {
+                return "\(kind.rawValue):\(namespace.canonicalKey.lowercased()):\(value)"
+            }
+        }
+        return "\(kind.rawValue):title:\(title.lowercased()):\(year.map(String.init) ?? "?")"
+    }
+
+    /// Whether this is a continuation of the seed's own story rather than merely
+    /// something similar. Continuations lead the row: someone looking at a show
+    /// they love wants to know there's more of it before they want a lookalike.
+    public var isContinuation: Bool {
+        relation == .continuation || relation == .sideStory
+    }
+}

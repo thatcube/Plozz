@@ -261,6 +261,7 @@ struct HomeTab: View {
                         // the server list once the page settles.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
+                        relatedTitlesLoader: makeRelatedTitlesLoader(in: accounts),
                         snapshotCache: detailSnapshotCache
                     ),
                     spoilerSettings: spoilerSettings,
@@ -297,6 +298,7 @@ struct HomeTab: View {
                         // cross-server "…" picker a directly-opened series does.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
+                        relatedTitlesLoader: makeRelatedTitlesLoader(in: accounts),
                         snapshotCache: detailSnapshotCache
                     ),
                     spoilerSettings: spoilerSettings,
@@ -404,6 +406,7 @@ struct HomeTab: View {
             crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
             ratingsProvider: ratingsProvider,
             discoveryStatusRefresh: { await seer.availability(for: $0) },
+            makeRelatedTitlesLoader: { makeRelatedTitlesLoader(in: accounts) },
             snapshotCache: detailSnapshotCache
         )
     }

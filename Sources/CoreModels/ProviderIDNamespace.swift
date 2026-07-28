@@ -53,17 +53,23 @@ public enum ProviderIDNamespace: Sendable {
 
     fileprivate var aliases: [String] {
         switch self {
-        case .imdb: return ["imdb"]
-        case .tmdb: return ["tmdb"]
-        case .tvdb: return ["tvdb", "thetvdb"]
+        // Spellings vary by whoever wrote the id. Jellyfin writes "Tmdb"; Shoko
+        // writes "TheMovieDb"; some agents append "ID" or ".com". Keys are
+        // normalized to lowercase alphanumerics before comparison, so each alias
+        // here is that normalized form. Missing one doesn't degrade a lookup — it
+        // makes the id invisible, which is how a Shoko-managed anime library
+        // appeared to carry no TMDb id at all.
+        case .imdb: return ["imdb", "imdbid"]
+        case .tmdb: return ["tmdb", "tmdbid", "themoviedb", "themoviedbcom", "moviedb"]
+        case .tvdb: return ["tvdb", "thetvdb", "tvdbid", "thetvdbcom"]
         case .tvmaze: return ["tvmaze", "tvmazeid"]
         case .aniList: return ["anilist", "anilistid"]
         case .myAnimeList: return ["myanimelist", "myanimelistid", "mal"]
         case .aniDB: return ["anidb", "anidbid"]
 
         case .seriesImdb: return ["seriesimdb"]
-        case .seriesTmdb: return ["seriestmdb"]
-        case .seriesTvdb: return ["seriestvdb"]
+        case .seriesTmdb: return ["seriestmdb", "seriesthemoviedb"]
+        case .seriesTvdb: return ["seriestvdb", "seriesthetvdb"]
         case .seriesTvmaze: return ["seriestvmaze"]
         case .seriesAniList: return ["seriesanilist"]
         case .seriesMal: return ["seriesmal", "seriesmyanimelist"]

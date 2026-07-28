@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 
 /// TMDb-backed artwork (backdrops, posters, logos, per-episode stills) reached via
@@ -98,6 +99,43 @@ public struct TMDbMetadataProvider: ArtworkProvider {
 
     /// Resolves a TMDb id, preferring a stamped id (`Tmdb`, or `SeriesTmdb` for
     /// episodes/seasons) over a title search.
+    /// Titles TMDb considers related, best-first.
+    ///
+    /// Prefers `/recommendations` (personalised-style, curated from user behaviour)
+    /// and falls back to `/similar` (genre/keyword overlap), which is what a title
+    /// too obscure for recommendations still has.
+    public func relatedTitles(for query: MetadataQuery, limit: Int) async -> [RelatedTitle] {
+        guard isEnabled, limit > 0, let id = await resolveID(for: query) else { return [] }
+        let isTV = query.isTV
+        let path = "/3/\(isTV ? "tv" : "movie")/\(id)"
+        for endpoint in ["recommendations", "similar"] {
+            guard let url = url("\(path)/\(endpoint)") else { continue }
+            let page = await MetadataHTTP.get(RelatedResponse.self, url: url, headers: authHeaders)
+            let mapped = (page?.results ?? []).compactMap { result -> RelatedTitle? in
+                guard let name = (result.name ?? result.title)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty,
+                    let tmdbID = result.id
+                else { return nil }
+                return RelatedTitle(
+                    title: name,
+                    year: Self.year(from: result.first_air_date ?? result.release_date),
+                    kind: isTV ? .series : .movie,
+                    relation: .recommendation,
+                    providerIDs: [ProviderIDNamespace.tmdb.canonicalKey: String(tmdbID)],
+                    posterURL: result.poster_path.flatMap { URL(string: "\(imageBase)/w500\($0)") },
+                    source: .tmdb
+                )
+            }
+            if !mapped.isEmpty { return Array(mapped.prefix(limit)) }
+        }
+        return []
+    }
+
+    static func year(from date: String?) -> Int? {
+        guard let date, date.count >= 4 else { return nil }
+        return Int(date.prefix(4))
+    }
+
     private func resolveID(for query: MetadataQuery, forceTV: Bool = false) async -> String? {
         let isTV = forceTV || query.isTV
         if isTV, let series = query.providerIDs.providerID(.seriesTmdb), !series.isEmpty {
@@ -194,6 +232,17 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     struct SearchResult: Decodable {
         let id: Int?
         let poster_path: String?
+    }
+    struct RelatedResponse: Decodable {
+        let results: [RelatedResult]?
+    }
+    struct RelatedResult: Decodable {
+        let id: Int?
+        let name: String?
+        let title: String?
+        let poster_path: String?
+        let first_air_date: String?
+        let release_date: String?
     }
     struct ImagesResponse: Decodable {
         let backdrops: [Image]?

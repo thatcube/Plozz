@@ -61,3 +61,35 @@ public func crossServerSourceResolver(
         return merged
     }
 }
+
+/// A cross-account library search for the Related row: one query fanned out to
+/// every signed-in server, results pooled.
+///
+/// Pooled rather than per-account because a related title only has to exist
+/// *somewhere* the viewer can reach. Which server holds it is the detail page's
+/// problem once they open it, not this row's.
+///
+/// The same short deadline as the cross-server probe applies: a cold or unreachable
+/// server must not hold up a row that is, by design, supplementary.
+public func relatedTitleLibrarySearch(
+    in accounts: [ResolvedAccount]
+) -> (@Sendable (String, Int) async -> [MediaItem])? {
+    guard !accounts.isEmpty else { return nil }
+    let entries = accounts.map { ($0.account.id, $0.provider) }
+    return { query, limit in
+        await withTaskGroup(of: [MediaItem].self) { group in
+            for (accountID, provider) in entries {
+                group.addTask {
+                    await searchWithDeadline(provider, query: query, limit: limit, seconds: 4)
+                        .map { $0.taggingSource(accountID) }
+                }
+            }
+            var pooled: [MediaItem] = []
+            var seen = Set<String>()
+            for await hits in group {
+                for hit in hits where seen.insert(hit.id).inserted { pooled.append(hit) }
+            }
+            return pooled
+        }
+    }
+}

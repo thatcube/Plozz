@@ -83,19 +83,19 @@ final class MetadataKitTests: XCTestCase {
                 .logo: [.tmdb, .wikidata, .wikipedia]
             ],
             .tvShow: [
-                .hero: [.tvdb, .tmdb, .wikidata, .wikipedia],
+                .hero: [.tmdb, .tvdb, .wikidata, .wikipedia],
                 .poster: [.tmdb, .tvmaze, .tvdb, .wikidata, .wikipedia],
                 .thumbnail: [.tmdb, .tvmaze],
                 .logo: [.tmdb, .wikidata, .wikipedia]
             ],
             .movie: [
-                .hero: [.tvdb, .tmdb, .wikidata, .wikipedia],
+                .hero: [.tmdb, .tvdb, .wikidata, .wikipedia],
                 .poster: [.tmdb, .tvdb, .wikidata, .wikipedia],
                 .thumbnail: [.tmdb],
                 .logo: [.tmdb, .wikidata, .wikipedia]
             ],
             .unknown: [
-                .hero: [.tvdb, .tmdb, .wikidata, .wikipedia],
+                .hero: [.tmdb, .tvdb, .wikidata, .wikipedia],
                 .poster: [.tmdb, .tvdb, .wikidata, .wikipedia],
                 .thumbnail: [.tmdb],
                 .logo: [.tmdb, .wikidata, .wikipedia]

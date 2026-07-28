@@ -46,6 +46,30 @@
             "state": "needs_review",
             "value": "Plozz использует локальную сеть для поиска медиасерверов и сетевых ресурсов."
           }
+        },
+        "cs": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz používá místní síť k vyhledání mediálních serverů a síťových sdílení."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz verwendet dein lokales Netzwerk, um Medienserver und Netzwerkfreigaben zu finden."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz usa la rete locale per trovare server multimediali e condivisioni di rete."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz använder ditt lokala nätverk för att hitta medieservrar och nätverksdelningar."
+          }
         }
       }
     },
@@ -93,6 +117,30 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Plozz использует камеру для сканирования кода настройки, показанного на другом устройстве."
+          }
+        },
+        "cs": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz používá fotoaparát k naskenování nastavovacího kódu zobrazeného na druhém zařízení."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz verwendet die Kamera, um den Einrichtungscode auf deinem anderen Gerät zu scannen."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz usa la fotocamera per scansionare il codice di configurazione visualizzato sull’altro dispositivo."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz använder kameran för att skanna konfigurationskoden som visas på din andra enhet."
           }
         }
       }

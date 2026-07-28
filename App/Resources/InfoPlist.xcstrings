@@ -46,6 +46,30 @@
             "state": "needs_review",
             "value": "Plozz использует локальную сеть для автоматического поиска серверов Jellyfin и Emby, а также сетевых ресурсов с медиафайлами."
           }
+        },
+        "cs": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz používá místní síť k automatickému vyhledání serverů Jellyfin a Emby a sdílení médií."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz verwendet dein lokales Netzwerk, um Jellyfin- und Emby-Server sowie Medienfreigaben automatisch zu finden."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz usa la rete locale per trovare automaticamente i server Jellyfin ed Emby e le condivisioni multimediali."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz använder ditt lokala nätverk för att automatiskt hitta Jellyfin- och Emby-servrar samt mediedelningar."
+          }
         }
       }
     }

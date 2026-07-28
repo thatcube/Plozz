@@ -94,6 +94,18 @@
             "state": "needs_review",
             "value": "Plozz використовує локальну мережу, щоб знаходити медіасервери й мережеві ресурси."
           }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz menggunakan jaringan lokal Anda untuk menemukan server media dan folder bersama jaringan."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz, medya sunucularını ve ağ paylaşımlarını bulmak için yerel ağınızı kullanır."
+          }
         }
       }
     },
@@ -189,6 +201,18 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Plozz використовує камеру, щоб сканувати код налаштування, показаний на іншому пристрої."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz menggunakan kamera untuk memindai kode penyiapan yang ditampilkan di perangkat Anda yang lain."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz, diğer aygıtınızda gösterilen kurulum kodunu taramak için kameranızı kullanır."
           }
         }
       }

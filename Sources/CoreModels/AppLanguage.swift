@@ -93,6 +93,7 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
         "de",
         "fr",
         "hr",
+        "id",
         "it",
         "ms",
         "nl",
@@ -101,6 +102,7 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
         "ru",
         "sk",
         "sv",
+        "tr",
         "uk",
     ]
 

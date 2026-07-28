@@ -213,7 +213,7 @@ public actor TVDBClient {
         guard config.isConfigured, !trimmed.isEmpty, let token = await ensureToken() else { return nil }
 
         async let seriesTask = seriesRecord(id: trimmed, token: token)
-        async let episodesTask = allEpisodes(seriesID: trimmed, token: token)
+        async let episodesTask = trailingEpisodes(seriesID: trimmed, token: token)
         let (series, episodes) = await (seriesTask, episodesTask)
 
         let today = Calendar.current.startOfDay(for: Date())
@@ -255,15 +255,37 @@ public actor TVDBClient {
         return response?.data
     }
 
-    /// The series' default-order episode listing (first page).
-    private func allEpisodes(seriesID: String, token: String) async -> [EpisodesResponse.Episode]? {
-        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(seriesID)/episodes/default?page=0") else {
+    /// The tail of the series' default-order episode listing — the pages that can
+    /// contain not-yet-aired episodes.
+    ///
+    /// The listing is paged at 500 and ordered oldest-first, so for a long-running
+    /// series page 0 is *ancient history*: One Piece has 1234 episodes across three
+    /// pages, and page 0 ends in 2010. Reading only the first page therefore finds no
+    /// upcoming episodes at all for exactly the shows most likely to have them.
+    /// `links.total_items` lets us jump straight to the last page instead of walking
+    /// all of them; the page before it is also read so a run that straddles the
+    /// boundary stays whole.
+    private func trailingEpisodes(seriesID: String, token: String) async -> [EpisodesResponse.Episode]? {
+        guard let first = await episodePage(seriesID: seriesID, page: 0, token: token) else { return nil }
+        guard let last = first.links?.lastPageIndex, last > 0 else {
+            return first.data?.episodes
+        }
+        async let lastPageTask = episodePage(seriesID: seriesID, page: last, token: token)
+        async let penultimateTask: EpisodesResponse? = last > 1
+            ? episodePage(seriesID: seriesID, page: last - 1, token: token)
+            : nil
+        let (lastPage, penultimate) = await (lastPageTask, penultimateTask)
+        return (penultimate?.data?.episodes ?? []) + (lastPage?.data?.episodes ?? [])
+    }
+
+    private func episodePage(seriesID: String, page: Int, token: String) async -> EpisodesResponse? {
+        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(seriesID)/episodes/default?page=\(page)") else {
             return nil
         }
         let (response, _) = await MetadataHTTP.getWithStatus(
             EpisodesResponse.self, url: url, headers: ["Authorization": "Bearer \(token)"]
         )
-        return response?.data?.episodes
+        return response
     }
 
     /// Finds the first episode whose `aired` day equals `day` in the series' default
@@ -673,7 +695,20 @@ public actor TVDBClient {
     /// TheTVDB v4 `/series/{id}/episodes/{seasonType}` payload (first page).
     private struct EpisodesResponse: Decodable {
         let data: DataField?
+        /// Paging metadata. `total_items` / `page_size` let a caller jump straight to
+        /// the last page instead of walking every page of a long-running series.
+        let links: Links?
         struct DataField: Decodable { let episodes: [Episode]? }
+        struct Links: Decodable {
+            let total_items: Int?
+            let page_size: Int?
+
+            /// The zero-based index of the final page, or `nil` when unknown.
+            var lastPageIndex: Int? {
+                guard let total = total_items, let size = page_size, size > 0, total > 0 else { return nil }
+                return (total - 1) / size
+            }
+        }
         struct Episode: Decodable {
             let number: Int?
             let seasonNumber: Int?

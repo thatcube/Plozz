@@ -150,15 +150,18 @@ final class SeriesScheduleTests: XCTestCase {
         XCTAssertTrue(fake.calls.all.contains("nextAired:555"))
     }
 
-    func testTVDBPrefersTheFullUpcomingListingOverTheSingleNext() async {
+    func testTVDBPrefersTheFullUpcomingListingOverTheSingleNext() async throws {
         // A series with several unreleased episodes lists all of them, so the rail
         // can show the whole run rather than only the next one.
-        let listed = (1...3).map { offset in
+        // `offset` is typed explicitly: inferred from `episodeNumber:` it becomes
+        // `Int?`, and interpolating that yields "Optional(1)" — silently building an
+        // unparseable date string rather than failing at the point of the mistake.
+        let listed = try (1...3).map { (offset: Int) in
             ProviderNextEpisode(
                 seasonNumber: 3,
                 episodeNumber: offset,
                 title: "Ep \(offset)",
-                airDate: ScheduleDateParsing.calendarDate("2030-05-0\(offset)")!,
+                airDate: try XCTUnwrap(ScheduleDateParsing.calendarDate("2030-05-0\(offset)")),
                 datePrecision: .dateOnly
             )
         }

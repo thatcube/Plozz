@@ -459,6 +459,38 @@ public extension MediaItem {
     /// - remaining runtime (`"… left"`) while in progress.
     ///
     /// Hidden for non-video kinds and when runtime is unknown.
+    /// When an unaired episode is expected, for the card slot that would otherwise
+    /// show a runtime. `nil` for every ordinary item.
+    ///
+    /// "Today"/"Tomorrow"/a weekday inside the coming week, else a short date —
+    /// the near-term wording is what makes a rail scannable at a glance.
+    var upcomingAirText: String? {
+        guard let date = scheduledAirDate else { return nil }
+        let calendar = Calendar.current
+        let days = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: Date()),
+            to: calendar.startOfDay(for: date)
+        ).day ?? 0
+        switch days {
+        case ..<0: return nil
+        case 0: return "Today"
+        case 1: return "Tomorrow"
+        case 2...6:
+            let formatter = DateFormatter()
+            formatter.locale = .autoupdatingCurrent
+            guard let symbols = formatter.weekdaySymbols, symbols.count == 7 else { return nil }
+            return symbols[calendar.component(.weekday, from: date) - 1]
+        default:
+            let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: Date())
+            return date.formatted(
+                sameYear
+                    ? .dateTime.month(.abbreviated).day()
+                    : .dateTime.month(.abbreviated).day().year()
+            )
+        }
+    }
+
     var cardRuntimeText: String? {
         guard cardRuntimeEligible, let runtime, runtime > 0 else { return nil }
         if let remaining = remainingCardRuntimeText(for: runtime) {

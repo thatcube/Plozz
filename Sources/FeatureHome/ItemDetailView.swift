@@ -635,6 +635,8 @@ public struct ItemDetailView: View {
     }
 
     private func isPlayable(_ item: MediaItem) -> Bool {
+        // An unaired episode has no file on any server yet.
+        guard !item.isUpcomingUnaired else { return false }
         switch item.kind {
         case .movie, .episode, .video: return true
         default: return false

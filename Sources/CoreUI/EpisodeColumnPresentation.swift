@@ -46,7 +46,9 @@ public struct EpisodeColumnPresentation: Equatable, Sendable, CustomDebugStringC
             }
         }
 
-        metadataText = item.cardRuntimeText
+        // An unaired episode has no runtime or progress to report — when it airs is
+        // the only useful fact, so it takes the same slot.
+        metadataText = item.upcomingAirText ?? item.cardRuntimeText
         progress = item.resumeProgressFraction
         isWatched = item.isPlayed && progress == nil
 

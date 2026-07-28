@@ -72,6 +72,9 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         // *owned* featured titles (available/partiallyAvailable), which resolve to a
         // real library copy via the identity index and keep their working actions.
         guard !item.isNotInLibraryDiscovery else { return [] }
+        // An unaired episode exists on no server, so every action here — watch
+        // state, watchlist, refresh, download — would silently fail.
+        guard !item.isUpcomingUnaired else { return [] }
         let capabilities = capabilities(for: item)
         return MediaItemActionCatalog.actions(
             for: item,

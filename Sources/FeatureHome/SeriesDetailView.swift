@@ -298,6 +298,7 @@ struct SeriesDetailView: View {
                         actionItem: playTarget,
                         seriesRecedeModel: recedeModel,
                         ignoresSystemFocusMoves: ignoresSystemFocusMoves,
+                        scheduleLine: upcomingHeroLine,
                         spoilerSettings: spoilerSettings,
                         playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
                         onPlay: playTarget.map { target in { onPlay(target.selectingVersion(effectivePlayVersionID)) } },
@@ -758,7 +759,9 @@ struct SeriesDetailView: View {
     // MARK: Episode rail
 
     private func episodeRail(onFocusEntered: @escaping () -> Void) -> some View {
-        let episodes = currentEpisodes
+        // Owned episodes first, then the season's not-yet-aired ones so a viewer can
+        // see (and read about) the rest of the run without leaving the page.
+        let episodes = currentEpisodes + upcomingPlaceholders
         // The episode focus should land on when entering the rail / where it
         // pre-scrolls. We use the STABLE `railTargetID` (updated only on open,
         // season change, or a cross-server switch) rather than the live
@@ -968,6 +971,32 @@ struct SeriesDetailView: View {
             return episodes
         }
         return seasons.isEmpty ? stampedLooseEpisodes : []
+    }
+
+    /// The selected season's unaired episodes, as non-playable rail entries.
+    private var upcomingPlaceholders: [MediaItem] {
+        guard let schedule = viewModel.state.value?.upcomingSchedule,
+              !schedule.upcomingEpisodes.isEmpty else { return [] }
+        let seasonNumber = selectedSeasonID
+            .flatMap { id in seasons.first { $0.id == id } }?
+            .seasonNumber
+        return SeriesUpcoming.placeholders(
+            for: seasonNumber,
+            seriesID: series.id,
+            seriesTitle: series.title,
+            ownedEpisodes: currentEpisodes,
+            schedule: schedule.upcomingEpisodes,
+            seriesArtwork: series
+        )
+    }
+
+    /// The hero's air-schedule line, e.g. "New episodes Fridays".
+    private var upcomingHeroLine: String? {
+        guard let schedule = viewModel.state.value?.upcomingSchedule else { return nil }
+        return SeriesUpcoming.heroLine(
+            nextEpisode: schedule.upcomingEpisode,
+            cadence: schedule.cadence
+        )
     }
 
     private var revealsCastWithoutBrowser: Bool {

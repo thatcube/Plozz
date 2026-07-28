@@ -70,6 +70,9 @@ struct DetailHeroView: View {
     /// receded hero's invisible focus proxy must ignore those — see
     /// `SeriesHeroFocusProxy`.
     var ignoresSystemFocusMoves: Bool = false
+    /// A short air-schedule line for a still-airing series, e.g. "New episodes
+    /// Fridays" or "New season Aug 5". `nil` when nothing is known.
+    var scheduleLine: String? = nil
     let spoilerSettings: SpoilerSettings
     /// Title for the Play/Resume button, or `nil` to omit the button entirely
     /// (e.g. a season with no resolved episodes yet).
@@ -628,7 +631,15 @@ struct DetailHeroView: View {
                 // button, so it's omitted here for episodes to avoid a redundant
                 // line. Non-episode subtitles (e.g. a movie's collection/parent
                 // title) still show.
-                if let subtitle = item.subtitle,
+                if let scheduleLine {
+                    // Takes this slot on a still-airing series: when something new
+                    // is coming, that outranks a collection/parent title.
+                    Text(scheduleLine)
+                        .font(.system(size: 26, weight: .medium))
+                        .plozzForeground(.secondary)
+                        .lineLimit(1)
+                        .contentTransition(.opacity)
+                } else if let subtitle = item.subtitle,
                    !isYearOnlySubtitle(subtitle),
                    item.kind != .episode {
                     Text(subtitle)

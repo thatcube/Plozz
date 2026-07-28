@@ -21,7 +21,15 @@ def write(path: Path, value: object) -> None:
 
 
 class TranslationDeltaMergeTests(unittest.TestCase):
-    def fixture(self, root: Path, *, overlap: bool = False) -> tuple[Path, Path, Path]:
+    def fixture(
+        self,
+        root: Path,
+        *,
+        overlap: bool = False,
+        refresh_overlap: bool = False,
+        permission_prompt: bool = False,
+        permission_refresh: bool = True,
+    ) -> tuple[Path, Path, Path]:
         source = root / "source.json"
         translated = root / "translated.json"
         artifacts = root / "artifacts"
@@ -31,9 +39,14 @@ class TranslationDeltaMergeTests(unittest.TestCase):
             {
                 "catalogSHA256": "abc",
                 "entries": {
-                    "New copy": {},
+                    "New copy": {"requiresRefresh": refresh_overlap},
                     "Count %@": {},
                 },
+                "infoPlistEntries": (
+                    {"iOS.Prompt": {"requiresRefresh": permission_refresh}}
+                    if permission_prompt
+                    else {}
+                ),
             },
         )
         write(
@@ -41,6 +54,7 @@ class TranslationDeltaMergeTests(unittest.TestCase):
             {
                 "sourceCatalogSHA256": "abc",
                 "deltaKeys": ["New copy", "Count %@"],
+                "infoPlistKeys": ["iOS.Prompt"] if permission_prompt else [],
                 "languages": {
                     "de": {
                         "New copy": {
@@ -57,6 +71,11 @@ class TranslationDeltaMergeTests(unittest.TestCase):
                         },
                     }
                 },
+                "infoPlistLanguages": (
+                    {"de": {"iOS.Prompt": "Neue Berechtigung"}}
+                    if permission_prompt
+                    else {}
+                ),
             },
         )
         translations = {
@@ -80,6 +99,7 @@ class TranslationDeltaMergeTests(unittest.TestCase):
                 "language": "de",
                 "languageName": "Deutsch",
                 "translations": translations,
+                "infoPlist": {"iOS.Prompt": "Alte Berechtigung"},
             },
         )
         return source, translated, artifacts
@@ -127,6 +147,66 @@ class TranslationDeltaMergeTests(unittest.TestCase):
             result = self.run_tool(str(source), str(translated), str(artifacts))
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("already contains delta keys", result.stderr)
+
+    def test_source_changed_delta_key_is_refreshed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            source, translated, artifacts = self.fixture(
+                Path(temp),
+                overlap=True,
+                refresh_overlap=True,
+            )
+            result = self.run_tool(
+                str(source),
+                str(translated),
+                str(artifacts),
+                "--apply",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            artifact = json.loads((artifacts / "de.json").read_text())
+            self.assertEqual(
+                artifact["translations"]["New copy"]["stringUnit"]["value"],
+                "Neuer Text",
+            )
+
+    def test_generated_translated_state_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            source, translated, artifacts = self.fixture(Path(temp))
+            value = json.loads(translated.read_text())
+            value["languages"]["de"]["New copy"]["stringUnit"]["state"] = "translated"
+            write(translated, value)
+            result = self.run_tool(str(source), str(translated), str(artifacts))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must all remain needs_review", result.stderr)
+
+    def test_changed_permission_prompt_is_refreshed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            source, translated, artifacts = self.fixture(
+                Path(temp),
+                permission_prompt=True,
+            )
+            result = self.run_tool(
+                str(source),
+                str(translated),
+                str(artifacts),
+                "--apply",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            artifact = json.loads((artifacts / "de.json").read_text())
+            self.assertEqual(
+                artifact["infoPlist"]["iOS.Prompt"],
+                "Neue Berechtigung",
+            )
+
+    def test_permission_prompt_overlap_requires_refresh_authorization(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            source, translated, artifacts = self.fixture(
+                Path(temp),
+                permission_prompt=True,
+                permission_refresh=False,
+            )
+            result = self.run_tool(str(source), str(translated), str(artifacts))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("without refresh authorization", result.stderr)
 
 
 if __name__ == "__main__":

@@ -147,7 +147,10 @@ public struct FocusGatedSwitch: View {
             HStack(spacing: SettingsRowMetrics.spacing(.primary)) {
                 Text(title)
                     .font(.headline.weight(.semibold))
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
                 Spacer(minLength: SettingsRowMetrics.spacing(.primary))
                 SettingsSwitchIndicator(isOn: isOn)
             }

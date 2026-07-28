@@ -336,13 +336,15 @@ private struct SettingsMasterRowLabel: View {
 /// master list keeps one stable row per setting.
 struct SettingsRevealSection<Content: View>: View {
     @Binding var isOn: Bool
-    let masterLabel: String
-    var revealedHeader: String? = nil
+    let masterLabel: LocalizedStringResource
+    var revealedHeader: LocalizedStringResource? = nil
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Toggle(masterLabel, isOn: $isOn)
+            Toggle(isOn: $isOn) {
+                Text(masterLabel)
+            }
 
             if isOn {
                 VStack(alignment: .leading, spacing: 16) {

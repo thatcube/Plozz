@@ -46,33 +46,37 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(options, id: \.self) { option in
-                Button {
-                    selection = option
-                } label: {
-                    SegmentLabel(
-                        text: title(option),
-                        isSelected: option == selection
-                    )
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(options, id: \.self) { option in
+                    Button {
+                        selection = option
+                    } label: {
+                        SegmentLabel(
+                            text: title(option),
+                            isSelected: option == selection
+                        )
+                    }
+                    .buttonStyle(SegmentButtonStyle(isSelected: option == selection))
+                    .focused($focusedOption, equals: option)
+                    .accessibilityValue(option == selection ? Text("Selected") : Text(verbatim: ""))
                 }
-                .buttonStyle(SegmentButtonStyle(isSelected: option == selection))
-                .focused($focusedOption, equals: option)
-                .accessibilityValue(option == selection ? Text("Selected") : Text(verbatim: ""))
             }
+            // Generous inset so a focused segment's bright thumb and lift have
+            // room to breathe inside the track instead of crowding the rim.
+            .padding(8)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(palette.cardSurface.opacity(0.45))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(palette.cardBorder.opacity(0.8), lineWidth: 1)
+            )
         }
-        // Generous inset so a focused segment's bright thumb and lift have room
-        // to breathe inside the track instead of crowding the rim.
-        .padding(8)
-        .background(
-            Capsule(style: .continuous)
-                .fill(palette.cardSurface.opacity(0.45))
-        )
-        .overlay(
-            Capsule(style: .continuous)
-                .strokeBorder(palette.cardBorder.opacity(0.8), lineWidth: 1)
-        )
-        .fixedSize()
+        // English fits without scrolling; longer translations scroll the focused
+        // segment fully into view instead of drawing beyond the detail pane.
+        .frame(maxWidth: .infinity, alignment: .leading)
         // Surface focus movement so a caller can live-update a description of the
         // focused option — decoupled from selection, which only changes on Select.
         .onChange(of: focusedOption) { _, newValue in
@@ -94,7 +98,7 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
                 Text(text)
                     .fontWeight(isSelected ? .semibold : .regular)
                     .lineLimit(1)
-                    .fixedSize()
+                    .fixedSize(horizontal: true, vertical: false)
                     .background(
                         // Reserve the bold metrics in every state so the label
                         // is sized as if always semibold — the visible weight can
@@ -102,7 +106,7 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
                         Text(text)
                             .fontWeight(.semibold)
                             .lineLimit(1)
-                            .fixedSize()
+                            .fixedSize(horizontal: true, vertical: false)
                             .hidden()
                     )
                 if isSelected {

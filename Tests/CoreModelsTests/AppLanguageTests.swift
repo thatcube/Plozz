@@ -46,8 +46,8 @@ final class AppLanguageTests: XCTestCase {
 
     // MARK: Available languages
 
-    /// The picker is built from what the bundle SHIPS, so a language can never be
-    /// offered with no strings behind it.
+    /// Every non-source option is built from what the bundle ships. English may
+    /// ship only as the development-region fallback, without an en.lproj.
     func testAvailableAlwaysOffersSystemFirst() {
         XCTAssertEqual(AppLanguage.available().first, .system)
     }
@@ -58,6 +58,7 @@ final class AppLanguageTests: XCTestCase {
 
         for language in AppLanguage.available(in: bundle) {
             guard case let .explicit(code) = language else { continue }
+            if code == "en" { continue }
             XCTAssertTrue(shipped.contains(code), "\(code) is offered but not shipped")
         }
     }
@@ -71,22 +72,28 @@ final class AppLanguageTests: XCTestCase {
         throw XCTSkip("Release builds offer only releaseReady languages.")
         #else
         let bundle = Bundle(for: type(of: self))
-        let shipped = Set(bundle.localizations).subtracting(["Base", "en"])
-        try XCTSkipIf(shipped.isEmpty, "No non-English localization bundled to check against.")
+        let shipped = Set(bundle.localizations).subtracting(["Base"])
 
         let offered = Set(AppLanguage.available(in: bundle).compactMap { language -> String? in
             guard case let .explicit(code) = language else { return nil }
             return code
         })
-        XCTAssertEqual(offered, shipped)
+        XCTAssertEqual(offered, shipped.union(["en"]))
         #endif
     }
 
     func testInProgressReflectsReleaseReadyMembership() {
+        XCTAssertFalse(AppLanguage.isInProgress("en"))
         for code in AppLanguage.releaseReady {
             XCTAssertFalse(AppLanguage.isInProgress(code))
         }
         XCTAssertTrue(AppLanguage.isInProgress("zz"))
+    }
+
+    func testEnglishIsExplicitlySelectableWithoutBeingAReleaseCatalogLanguage() {
+        let bundle = Bundle(for: type(of: self))
+        XCTAssertTrue(AppLanguage.available(in: bundle).contains(.explicit("en")))
+        XCTAssertFalse(AppLanguage.releaseReady.contains("en"))
     }
 
     func testExplicitLanguageCarriesReadingDirection() {
@@ -134,15 +141,19 @@ final class AppLanguageTests: XCTestCase {
                        "Formatting still follows the device")
     }
 
-    /// Only languages declared release-ready may be offered, however many
-    /// `.lproj` folders happen to be in the bundle — a 10%-translated language
-    /// must not be selectable.
+    /// English is the source localization rather than a release-catalog language,
+    /// but must remain explicitly selectable on a non-English device. Every other
+    /// option comes from the exact release-ready set.
     func testOnlyReleaseReadyLanguagesAreOffered() {
         let offered = Set(AppLanguage.available().compactMap { language -> String? in
             guard case let .explicit(code) = language else { return nil }
             return code
         })
-        XCTAssertTrue(offered.isSubset(of: Set(AppLanguage.releaseReady)))
+        XCTAssertTrue(offered.contains("en"))
+        XCTAssertTrue(
+            offered.subtracting(["en"])
+                .isSubset(of: Set(AppLanguage.releaseReady))
+        )
     }
 
     // MARK: Persistence

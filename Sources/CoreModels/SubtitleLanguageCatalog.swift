@@ -19,8 +19,12 @@ public enum SubtitleLanguageCatalog {
     /// with any region/script suffix), or `nil` when unknown. Folds 3-letter
     /// codes to their 2-letter base via `LanguageMatch` so `eng`/`en-US` both
     /// resolve to "English".
-    public static func displayName(forCode code: String?) -> String? {
+    public static func displayName(
+        forCode code: String?,
+        in locale: Locale = .current
+    ) -> String? {
         guard let normalized = LanguageMatch.normalized(code) else { return nil }
-        return languages.first { $0.code == normalized }?.name
+        return locale.localizedString(forLanguageCode: normalized)
+            ?? languages.first { $0.code == normalized }?.name
     }
 }

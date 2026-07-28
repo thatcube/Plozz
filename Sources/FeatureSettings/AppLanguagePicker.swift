@@ -8,9 +8,10 @@ import CoreUI
 ///
 /// The option list is built from `AppLanguage.available()`, which reads what the
 /// bundle actually ships — so a newly translated language appears here on its own,
-/// and a language can never be offered that has no strings behind it. In DEBUG it
-/// also offers languages that are still in progress, marked as such, so a partial
-/// translation can be reviewed without changing the whole device's language.
+/// and a non-source language can never be offered without strings behind it.
+/// English is always offered because it is the source/development localization and
+/// Xcode may omit it from `Bundle.localizations` when no `en.lproj` is needed. In
+/// DEBUG this also offers in-progress languages for review.
 struct AppLanguagePicker: View {
     @Bindable var model: AppLanguageSettingsModel
     @Environment(\.locale) private var locale

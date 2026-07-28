@@ -166,6 +166,15 @@ else
 fi
 
 # --- Build -------------------------------------------------------------------
+PREBUILD_APP_PATH="$(
+  xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIG" \
+    -destination "$DESTINATION" -showBuildSettings 2>/dev/null \
+    | awk -F' = ' '/ CODESIGNING_FOLDER_PATH / { print $2; exit }'
+)"
+if [[ -n "$PREBUILD_APP_PATH" ]]; then
+  tools/l10n-prune-stale-products.sh "$PREBUILD_APP_PATH"
+fi
+
 set -o pipefail
 xcodebuild \
   -project "$PROJECT" \

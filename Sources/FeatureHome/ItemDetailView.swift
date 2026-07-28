@@ -3,6 +3,9 @@ import SwiftUI
 import CoreModels
 import CoreUI
 import FeatureHomeCore
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Item detail screen: backdrop hero, metadata, Play/Resume, and children.
 public struct ItemDetailView: View {
@@ -604,9 +607,9 @@ public struct ItemDetailView: View {
                 .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                 // Cap the whole scroll column to the proposed (safe viewport)
                 // width so an over-wide row can't inflate the column past the
-                // viewport and pan the page sideways. The hero still bleeds
-                // edge-to-edge via its own `.ignoresSafeArea`.
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // viewport and pan the page sideways. The hero backdrop still
+                // paints edge-to-edge using its explicit screen-width frame.
+                .modifier(DetailForegroundWidth())
             }
             // `.userInitiated` rather than the default `.automatic`: automatic is
             // only a hint, and tvOS otherwise takes the topmost focusable element
@@ -641,9 +644,7 @@ public struct ItemDetailView: View {
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
-            // Let the hero bleed into the top overscan inset instead of the
-            // ScrollView reserving it as a blank bar above the backdrop.
-            .ignoresSafeArea(.container, edges: .top)
+            .modifier(DetailTopSafeAreaBreakout())
         }
     }
 
@@ -862,4 +863,30 @@ public struct ItemDetailView: View {
     }
 }
 
+private struct DetailTopSafeAreaBreakout: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(tvOS)
+        // `ignoresSafeArea(.top)` also consumes tvOS's transient horizontal safe
+        // region during a cold NavigationStack push, briefly proposing a
+        // 2,408-point ScrollView. Pull only the known 60-point top inset outward.
+        content.padding(.top, -60)
+        #else
+        content.ignoresSafeArea(.container, edges: .top)
+        #endif
+    }
+}
+
+private struct DetailForegroundWidth: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(tvOS)
+        // Constrain the ScrollView's actual content, not an outer wrapper. A
+        // vertical ScrollView may keep a transient 2,408-point coordinate space
+        // during a cold NavigationStack push even inside a 1,760-point frame; its
+        // exact-width child remains centered at x=80 and cannot lay out off-screen.
+        content.frame(width: UIScreen.main.bounds.width - 160, alignment: .leading)
+        #else
+        content.frame(maxWidth: .infinity, alignment: .leading)
+        #endif
+    }
+}
 #endif

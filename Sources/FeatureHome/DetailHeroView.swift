@@ -990,8 +990,10 @@ struct DetailHeroView: View {
         // + full-bleed treatment, so the detail hero and the Home hero carousel
         // render an identical backdrop. Hero artwork is never spoiler-blurred;
         // episode spoiler masking remains limited to episode text and cards.
-        SeriesDetailHeroBackdrop(            references: backdrop.artworkReferences(for: .detailBackdrop),
+        SeriesDetailHeroBackdrop(
+            references: backdrop.artworkReferences(for: .detailBackdrop),
             asyncFallbackURL: tmdbBackdropFallback,
+            width: Self.screenWidth,
             height: Self.screenHeight * heroHeightFraction,
             scrimTone: scrimTone,
             recedeModel: seriesRecedeModel,
@@ -1733,6 +1735,7 @@ private struct SeriesHeroContentRecedeModifier: ViewModifier {
 private struct SeriesDetailHeroBackdrop: View {
     let references: [ArtworkReference]
     let asyncFallbackURL: (@Sendable () async -> URL?)?
+    let width: CGFloat
     let height: CGFloat
     let scrimTone: Color
     let recedeModel: SeriesHeroRecedeModel?
@@ -1749,6 +1752,7 @@ private struct SeriesDetailHeroBackdrop: View {
             height: height,
             scrimTone: scrimTone,
             verticalOffset: reduceMotion ? 0 : (receded ? -260 : 0),
+            ignoresOverscan: false,
             stillImageOpacity: showsTrailer ? 0 : 1
         ) {
             if showsTrailer {
@@ -1767,6 +1771,12 @@ private struct SeriesDetailHeroBackdrop: View {
                 .transition(.opacity)
             }
         }
+        // The detail ScrollView is proposed the tvOS title-safe width. Give its
+        // purely-visual background the physical panel width explicitly instead of
+        // using `ignoresSafeArea(.horizontal)`, which can feed a wider proposal
+        // back through a freshly-pushed NavigationStack before the safe area
+        // settles and temporarily center the whole page off-screen.
+        .frame(width: width)
         .animation(reduceMotion ? nil : .smooth(duration: 0.9), value: receded)
     }
 }
@@ -1821,5 +1831,4 @@ private struct SeriesHeroFocusProxy: View {
         }
     }
 }
-
 #endif

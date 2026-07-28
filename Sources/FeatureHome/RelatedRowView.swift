@@ -69,7 +69,13 @@ struct RelatedRowView: View {
                 .padding(.leading, leadingInset)
             HStack(spacing: metrics.cardSpacing) {
                 ForEach(0..<Self.placeholderCount, id: \.self) { _ in
+                    // Pinned to the same slot width the loaded row gives a card
+                    // (`MediaRowView.cardSlotWidth`). Without it the placeholder
+                    // drew at its own intrinsic size, so the row visibly resized
+                    // when the real cards arrived — the jump the placeholder is
+                    // there to prevent.
                     SkeletonCardView(style: .poster)
+                        .frame(width: metrics.posterWidth)
                 }
             }
             .padding(.leading, leadingInset)

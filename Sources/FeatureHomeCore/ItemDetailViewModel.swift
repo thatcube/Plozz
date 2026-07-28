@@ -752,6 +752,10 @@ public final class ItemDetailViewModel {
                 // ARE awaited so the Trailer button / rating badges populate
                 // deterministically before load() returns.
                 startSpeculativeEnrichment(for: item)
+                // A film has related titles too. This sat only in the container
+                // branch above, so the row simply never loaded on a movie page —
+                // it looked like a matching failure and was a missing call.
+                loadRelatedTitles(for: taggedItem)
                 await runTrailersAndRatings(
                     for: item,
                     provider: loadProvider,

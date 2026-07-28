@@ -799,7 +799,13 @@ struct SeriesDetailView: View {
             // leaves it alone. Focus was the wrong driver twice over: it made the
             // hero disagree with the fixed sections below it, and iPadOS has no
             // focus concept at all, so the behaviour could never exist there.
-            onSelect: onPlay
+            onSelect: { item in
+                // An unaired episode has nothing to play and no page worth opening,
+                // so selecting it is deliberately inert — it stays focusable purely
+                // so the rest of the run can be browsed and read.
+                guard !item.isUpcomingUnaired else { return }
+                onPlay(item)
+            }
         )
         .mediaItemActionContext(
             MediaItemActionContext(

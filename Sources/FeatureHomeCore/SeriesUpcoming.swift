@@ -47,11 +47,15 @@ public enum SeriesUpcoming {
                     seasonNumber: seasonNumber,
                     episodeNumber: episode.episodeNumber,
                     seriesID: seriesID,
-                    // The series' own artwork, never an episode still: an unaired
-                    // episode rarely has one, and borrowing a neighbouring episode's
-                    // would misrepresent it.
-                    posterURL: seriesArtwork?.seriesPosterURL ?? seriesArtwork?.posterURL,
-                    backdropURL: seriesArtwork?.backdropURL,
+                    // The series' own LANDSCAPE artwork, never an episode still: an
+                    // unaired episode rarely has one, and borrowing a neighbouring
+                    // episode's would misrepresent it.
+                    //
+                    // `posterURL` is deliberately left nil. The `.episodeThumbnail`
+                    // placement tries it before `backdropURL`, so putting the series'
+                    // vertical poster there would crop a portrait image into a 16:9
+                    // card.
+                    backdropURL: seriesArtwork?.backdropURL ?? seriesArtwork?.heroBackdropURL,
                     fallbackArtworkURL: seriesArtwork?.fallbackArtworkURL,
                     scheduledAirDate: episode.airDate,
                     scheduledAirDateHasTime: episode.datePrecision == .dateAndTime

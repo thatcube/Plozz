@@ -67,6 +67,9 @@ private struct FakeTVmaze: TVmazeEnriching {
     func nextEpisode(_ query: MetadataQuery) async -> TVmazeNextEpisode? {
         next
     }
+    /// Defaults to "no listing" so these tests keep exercising the single-next path.
+    var upcomingListing: TVmazeUpcoming?
+    func upcomingEpisodes(_ query: MetadataQuery, limit: Int) async -> TVmazeUpcoming? { upcomingListing }
 }
 
 private struct FakeArtwork: ArtworkProvider {

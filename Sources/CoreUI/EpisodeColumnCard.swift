@@ -41,6 +41,32 @@ public struct EpisodeColumnCard: View {
         VStack(alignment: .leading, spacing: 0) {
             artwork
                 .frame(width: Self.artworkSize.width, height: Self.artworkSize.height)
+                // A not-yet-aired episode reads as unavailable rather than merely
+                // unwatched: desaturated and dimmed, with the air date on the
+                // artwork so the card says what it's waiting for.
+                .saturation(presentation.isUpcoming ? 0 : 1)
+                .opacity(presentation.isUpcoming ? 0.05 : 1)
+                // The artwork is nearly transparent, so without an opaque surface
+                // beneath it the focus backing shows through and washes the card out
+                // further the moment it takes focus. This keeps the slot's own
+                // surface — and the focus outline's contrast — constant.
+                .background {
+                    if presentation.isUpcoming {
+                        palette.cardSurface
+                    }
+                }
+                .overlay {
+                    if presentation.isUpcoming, let air = item.upcomingReleaseText {
+                        // Spelled out rather than a bare date: "Releases Friday"
+                        // can't be mistaken for an air date already passed.
+                        Label(air, systemImage: "clock")
+                            .font(.system(size: 21, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: Capsule())
+                    }
+                }
                 .overlay {
                     if presentation.artworkTreatment != .blurred {
                         ResumeChipOverlay(item: item)
@@ -61,7 +87,7 @@ public struct EpisodeColumnCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(presentation.titleLine)
                     .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(presentation.isUpcoming ? .secondary : .primary)
                     .lineLimit(1)
                     .padding(.top, metrics.landscapeCaptionTopSpacing + metrics.focusCaptionPush)
 
@@ -176,7 +202,9 @@ public struct EpisodeColumnCard: View {
 
     @ViewBuilder
     private var statusIndicator: some View {
-        if presentation.artworkTreatment == .visible {
+        // An unaired episode has no watch state to report, so neither the watched
+        // tick nor the unwatched dot applies.
+        if presentation.artworkTreatment == .visible, !presentation.isUpcoming {
             switch watchStatusIndicator {
             case .watched:
                 if presentation.isWatched {

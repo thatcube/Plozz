@@ -85,7 +85,15 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
     public let policy: ProviderPolicy
     private let client: any TVDBEnriching
 
-    public init(client: any TVDBEnriching, policy: ProviderPolicy = ProviderPolicy()) {
+    /// `version: 2` — TheTVDB now returns a series' whole upcoming run plus its
+    /// cadence, not just the next episode. Entries cached under version 1 hold only
+    /// the single next episode, and their 30-day positive TTL would otherwise serve
+    /// that for a month: the hero would name the next date while the rail stayed
+    /// empty, because the two read different fields of the same response.
+    public init(
+        client: any TVDBEnriching,
+        policy: ProviderPolicy = ProviderPolicy(version: 2)
+    ) {
         self.client = client
         self.policy = policy
     }

@@ -464,6 +464,17 @@ public extension MediaItem {
     ///
     /// "Today"/"Tomorrow"/a weekday inside the coming week, else a short date —
     /// the near-term wording is what makes a rail scannable at a glance.
+    /// The card's release label, e.g. "Releases Friday" — spelled out so it can't
+    /// read as an air date that has already passed.
+    var upcomingReleaseText: String? {
+        guard let text = upcomingAirText else { return nil }
+        switch text {
+        case "Today": return "Releases today"
+        case "Tomorrow": return "Releases tomorrow"
+        default: return "Releases \(text)"
+        }
+    }
+
     var upcomingAirText: String? {
         guard let date = scheduledAirDate else { return nil }
         let calendar = Calendar.current

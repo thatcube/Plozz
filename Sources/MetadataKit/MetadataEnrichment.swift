@@ -134,6 +134,11 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         // wins, mirroring the priority-respecting merge used for fields above.
         if upcomingEpisode == nil, !present.contains(.nextAiringEpisode) {
             upcomingEpisode = other.upcomingEpisode
+            // The list and cadence travel with the episode that won: they describe
+            // the same provider's answer, so taking them from a later provider would
+            // pair one source's run with another's next episode.
+            upcomingEpisodes = other.upcomingEpisodes
+            cadence = other.cadence
         }
         // Keep the first non-empty candidate set (one response serves both screens),
         // unless the caller already has a backdrop from a higher-priority source.

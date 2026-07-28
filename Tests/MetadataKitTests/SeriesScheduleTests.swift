@@ -9,6 +9,9 @@ private struct FakeScheduleTVmaze: TVmazeEnriching {
     var next: TVmazeNextEpisode?
     func resolve(_ query: MetadataQuery, wantEpisodeStill: Bool, wantOverview: Bool) async -> TVmazeResolved? { resolved }
     func nextEpisode(_ query: MetadataQuery) async -> TVmazeNextEpisode? { next }
+    /// Defaults to "no listing" so these tests keep exercising the single-next path.
+    var upcomingListing: TVmazeUpcoming?
+    func upcomingEpisodes(_ query: MetadataQuery, limit: Int) async -> TVmazeUpcoming? { upcomingListing }
 }
 
 private struct FakeScheduleTVDB: TVDBEnriching {
@@ -289,4 +292,25 @@ final class SeriesScheduleTests: XCTestCase {
         _ = await resolver.refresh(query, tier: .idleBacklog, force: true)
         XCTAssertEqual(spy.calls, 2)
     }
+    func testARecordFromAnOlderSchemaIsAlwaysDueForRefresh() {
+        // A record written before `upcomingEpisodes` existed still satisfies its
+        // TTL, so without this it would be served — with an empty list — for hours.
+        let stale = SeriesScheduleRecord(
+            seriesKey: "k",
+            upcomingEpisode: nil,
+            refreshedAt: Date(),
+            refreshDueAt: Date().addingTimeInterval(6 * 60 * 60),
+            schemaVersion: 1
+        )
+        XCTAssertTrue(stale.isRefreshDue(), "An older-schema record can't supply new fields")
+
+        let current = SeriesScheduleRecord(
+            seriesKey: "k",
+            upcomingEpisode: nil,
+            refreshedAt: Date(),
+            refreshDueAt: Date().addingTimeInterval(6 * 60 * 60)
+        )
+        XCTAssertFalse(current.isRefreshDue(), "A current-schema record still honours its TTL")
+    }
+
 }

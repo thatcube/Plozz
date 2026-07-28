@@ -8,6 +8,22 @@ import CoreModels
 /// Kept deliberately small (one row per series) so the whole map is cheap to keep in
 /// memory and serialize, and so Home can render from it with **zero network**.
 public struct SeriesScheduleRecord: Codable, Sendable, Equatable {
+    /// The shape this record was written with. **Bump when a new field is added**
+    /// that existing records can't supply: a record written before the field exists
+    /// still satisfies its TTL, so it would otherwise be served — missing the new
+    /// data — until the TTL expired hours later. `isRefreshDue` treats anything
+    /// below `currentSchemaVersion` as due immediately.
+    ///
+    /// v2 added `upcomingEpisodes` + `cadence`. v3 re-resolves them: v2 records were
+    /// written while TheTVDB's own enrichment cache still held pre-list responses,
+    /// so they carry the new fields but empty. v4 picks up TVmaze's listing, which
+    /// covers series with no known TheTVDB id.
+    public static let currentSchemaVersion = 5
+
+    /// The schema version this record was written with; `1` for records persisted
+    /// before the field existed.
+    public var schemaVersion: Int
+
     /// The stable per-series cache key (``MetadataQuery/enrichmentCacheKey`` of the
     /// series query) this record was stored under.
     public var seriesKey: String
@@ -43,8 +59,10 @@ public struct SeriesScheduleRecord: Codable, Sendable, Equatable {
         cadence: AirCadence? = nil,
         seriesEnded: Bool = false,
         refreshedAt: Date,
-        refreshDueAt: Date
+        refreshDueAt: Date,
+        schemaVersion: Int = SeriesScheduleRecord.currentSchemaVersion
     ) {
+        self.schemaVersion = schemaVersion
         self.seriesKey = seriesKey
         self.upcomingEpisode = upcomingEpisode
         self.upcomingEpisodes = upcomingEpisodes
@@ -60,6 +78,8 @@ public struct SeriesScheduleRecord: Codable, Sendable, Equatable {
     /// store-file version bump would needlessly discard every good record.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Absent means "written before versioning existed" — i.e. version 1.
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         seriesKey = try c.decode(String.self, forKey: .seriesKey)
         upcomingEpisode = try c.decodeIfPresent(UpcomingEpisode.self, forKey: .upcomingEpisode)
         upcomingEpisodes = try c.decodeIfPresent([UpcomingEpisode].self, forKey: .upcomingEpisodes) ?? []
@@ -70,8 +90,12 @@ public struct SeriesScheduleRecord: Codable, Sendable, Equatable {
     }
 
     /// Whether the passive resolver should refresh this record from the network.
+    ///
+    /// A record written under an older schema is always due: it satisfies its TTL but
+    /// cannot supply fields that didn't exist when it was written, so serving it
+    /// would leave the new data missing for hours.
     public func isRefreshDue(now: Date = Date()) -> Bool {
-        refreshDueAt <= now
+        schemaVersion < Self.currentSchemaVersion || refreshDueAt <= now
     }
 }
 

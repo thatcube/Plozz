@@ -44,6 +44,12 @@ public extension String {
     /// is rewritten. A bare URL is left alone (it may be a genuine "Source:"
     /// credit), and bracketed text with no URL is untouched — including markdown's
     /// `[label](url)`, whose bracket comes first and is handled by the parser.
+    ///
+    /// Parentheses are excluded from the URL so a *markdown* link can never be
+    /// mistaken for this form. Allowing them let the URL run past its own closing
+    /// `)` and comma and swallow the following link's label, so a synopsis naming
+    /// four characters in a row collapsed into
+    /// `[Taichi](Iori(Himeko(Yoshifumi(http://…)` — each link eating the next.
     private static func flattenedAniDBLinks(_ text: String) -> String {
         guard !text.isEmpty, let regex = aniDBLink else { return text }
         let range = NSRange(text.startIndex..., in: text)
@@ -56,7 +62,7 @@ public extension String {
     }
 
     private static let aniDBLink = try? NSRegularExpression(
-        pattern: #"https?://[^\s\[\]]+[ \t]*\[([^\]]+)\]"#,
+        pattern: #"https?://[^\s\[\]()]+[ \t]*\[([^\]]+)\]"#,
         options: []
     )
 }

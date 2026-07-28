@@ -55,4 +55,43 @@ final class MarkdownOverviewTests: XCTestCase {
         XCTAssertNotNil(raw.overviewMarkdown)
         XCTAssertEqual(raw, "[Taiju](http://anidb.net/ch99858) wakes up.")
     }
+    // MARK: Several links in a row
+
+    func testConsecutiveMarkdownLinksEachKeepTheirOwnLabel() {
+        // Kokoro Connect names four characters back to back. Letting the AniDB
+        // pattern's URL run past its own closing paren made each link swallow the
+        // next one's label, so the hero read
+        // "[Taichi](Iori(Himeko(Yoshifumi(http://anidb.net/ch41931)".
+        let raw = "The story involves five high school students, "
+            + "[Taichi](http://anidb.net/ch41928), [Iori](http://anidb.net/ch41929), "
+            + "[Himeko](http://anidb.net/ch41930), [Yoshifumi](http://anidb.net/ch41931) and Yui."
+        let flattened = raw.overviewPlainText
+        XCTAssertEqual(
+            flattened,
+            "The story involves five high school students, Taichi, Iori, Himeko, Yoshifumi and Yui."
+        )
+        XCTAssertFalse(flattened.contains("anidb.net"))
+        XCTAssertFalse(flattened.contains("["))
+        XCTAssertFalse(flattened.contains("("))
+    }
+
+    func testConsecutiveAniDBLinksEachKeepTheirOwnLabel() {
+        let raw = "Five students, http://anidb.net/ch41928 [Taichi], "
+            + "http://anidb.net/ch41929 [Iori] and Yui."
+        XCTAssertEqual(raw.overviewPlainText, "Five students, Taichi, Iori and Yui.")
+    }
+
+    func testTheTwoSyntaxesSurviveEachOthersCompany() {
+        // A synopsis edited by more than one agent can carry both forms at once.
+        let raw = "See [Taichi](http://anidb.net/ch41928) and http://anidb.net/ch41929 [Iori]."
+        XCTAssertEqual(raw.overviewPlainText, "See Taichi and Iori.")
+    }
+
+    func testAURLContainingParenthesesIsStillLeftAlone() {
+        // A bare URL is a plausible "Source:" credit, so it is never rewritten —
+        // and excluding parens from the pattern must not change that.
+        let raw = "Source: https://en.wikipedia.org/wiki/Fargo_(1996_film)"
+        XCTAssertEqual(raw.overviewPlainText, raw)
+    }
+
 }

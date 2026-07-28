@@ -91,6 +91,7 @@ public struct HeroSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case isEnabled, sources, maxItems, trailersEnabled, hideWatched
         case randomLibraryKeys, autoAdvance, autoAdvanceSeconds
+        case offeredSourcesVersion
     }
 
     public init(from decoder: Decoder) throws {
@@ -105,7 +106,10 @@ public struct HeroSettings: Codable, Equatable, Sendable {
         }
         self.init(
             isEnabled: value(Bool.self, .isEnabled, d.isEnabled),
-            sources: HeroSettings.adoptingNewSources(value([HeroSourceKind].self, .sources, d.sources)),
+            sources: HeroSettings.adoptingNewSources(
+                value([HeroSourceKind].self, .sources, d.sources),
+                offeredVersion: value(Int.self, .offeredSourcesVersion, 0)
+            ),
             maxItems: value(Int.self, .maxItems, d.maxItems),
             trailersEnabled: value(Bool.self, .trailersEnabled, d.trailersEnabled),
             hideWatched: value(Bool.self, .hideWatched, d.hideWatched),
@@ -115,29 +119,56 @@ public struct HeroSettings: Codable, Equatable, Sendable {
         )
     }
 
-    /// Sources introduced after a stored selection was written, appended to it.
+    /// The generation of ``HeroSourceKind`` a stored selection was last offered.
+    /// Bump when adding a case that existing profiles should pick up.
+    static let currentOfferedSourcesVersion = 1
+
+    /// Sources introduced since `offeredVersion` was written, appended to a stored
+    /// selection.
     ///
-    /// Settings persist the exact list the user chose, so a source added in a later
-    /// version would stay invisible forever to everyone who already has settings —
-    /// the people most likely to want it. A case they never saw can't be one they
-    /// turned off, so adopting it matches intent; anything they *did* switch off is
-    /// still absent from `allCases`-minus-stored only if it's genuinely new, because
-    /// a disabled existing source is remembered separately below.
+    /// Settings persist the exact list the user chose, so a source added later would
+    /// stay invisible forever to everyone who already has settings — the people most
+    /// likely to want it. A case they were never shown can't be one they declined.
+    ///
+    /// The version is what makes this a **one-time** adoption, and it is load-
+    /// bearing rather than bookkeeping: without it, "not in the stored list" reads
+    /// identically whether the source is new or the user switched it off, so turning
+    /// Recently Added off would silently switch it back on at the next load.
     ///
     /// Deliberately skipped when the stored list is empty: that means "hero off by
     /// source", and quietly repopulating it would switch the hero back on.
-    static func adoptingNewSources(_ stored: [HeroSourceKind]) -> [HeroSourceKind] {
-        guard !stored.isEmpty else { return stored }
+    static func adoptingNewSources(
+        _ stored: [HeroSourceKind],
+        offeredVersion: Int
+    ) -> [HeroSourceKind] {
+        guard !stored.isEmpty, offeredVersion < currentOfferedSourcesVersion else { return stored }
         let known = Set(stored)
         return stored + HeroSourceKind.allCases.filter {
-            !known.contains($0) && introducedAfterInitialRelease.contains($0)
+            !known.contains($0) && introducedSinceInitialRelease.contains($0)
         }
     }
 
     /// Sources added after the original four. Only these are adopted into an
     /// existing selection — the first four predate any stored settings, so their
     /// absence is always a deliberate choice.
-    static let introducedAfterInitialRelease: Set<HeroSourceKind> = [.recentlyAdded]
+    static let introducedSinceInitialRelease: Set<HeroSourceKind> = [.recentlyAdded]
+
+    /// Written alongside the values so a saved blob records which generation of
+    /// ``HeroSourceKind`` its owner has been shown. Saving means the current source
+    /// list was on screen, so anything absent from it was declined rather than
+    /// unseen — which is what stops a switched-off source coming back.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(isEnabled, forKey: .isEnabled)
+        try c.encode(sources, forKey: .sources)
+        try c.encode(maxItems, forKey: .maxItems)
+        try c.encode(trailersEnabled, forKey: .trailersEnabled)
+        try c.encode(hideWatched, forKey: .hideWatched)
+        try c.encode(randomLibraryKeys, forKey: .randomLibraryKeys)
+        try c.encode(autoAdvance, forKey: .autoAdvance)
+        try c.encode(autoAdvanceSeconds, forKey: .autoAdvanceSeconds)
+        try c.encode(Self.currentOfferedSourcesVersion, forKey: .offeredSourcesVersion)
+    }
 
     /// Whether the given source is currently enabled.
     public func isEnabled(_ source: HeroSourceKind) -> Bool {

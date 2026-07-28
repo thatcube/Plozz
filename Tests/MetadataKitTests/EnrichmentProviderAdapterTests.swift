@@ -26,6 +26,13 @@ private struct FakeTVDB: TVDBEnriching {
         log.record("nextAired:\(id)")
         return next
     }
+    /// Defaults to "no listing", so the adapter falls back to `nextAired` and the
+    /// existing expectations in this file keep describing that path.
+    var upcoming: TVDBUpcomingSchedule?
+    func upcomingEpisodes(byTVDBID id: String, limit: Int) async -> TVDBUpcomingSchedule? {
+        log.record("upcomingEpisodes:\(id)")
+        return upcoming
+    }
 }
 
 private struct FakeTMDb: TMDbEnriching {

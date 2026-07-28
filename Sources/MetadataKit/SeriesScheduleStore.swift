@@ -12,7 +12,20 @@ public struct SeriesScheduleRecord: Codable, Sendable, Equatable {
     /// series query) this record was stored under.
     public var seriesKey: String
     /// The next known episode, or `nil` for a remembered "no upcoming episode".
+    ///
+    /// Always the first element of ``upcomingEpisodes`` when that is non-empty, so
+    /// existing single-episode readers keep working unchanged.
     public var upcomingEpisode: UpcomingEpisode?
+    /// Every known future episode, oldest first — so a series with nine unreleased
+    /// episodes can list all nine rather than only the next.
+    ///
+    /// Empty for a provider that reports only a single next episode (AniList,
+    /// TVmaze), and for records persisted before this field existed. Readers that
+    /// want "just the next one" should keep using ``upcomingEpisode``.
+    public var upcomingEpisodes: [UpcomingEpisode]
+    /// The series' stated release cadence, when a provider reports one. Never
+    /// inferred from air-date spacing — see ``AirCadence``.
+    public var cadence: AirCadence?
     /// Whether the series is known to have ended (drives the longer "no upcoming"
     /// TTL). Best-effort; defaults to `false`.
     public var seriesEnded: Bool
@@ -26,15 +39,34 @@ public struct SeriesScheduleRecord: Codable, Sendable, Equatable {
     public init(
         seriesKey: String,
         upcomingEpisode: UpcomingEpisode?,
+        upcomingEpisodes: [UpcomingEpisode] = [],
+        cadence: AirCadence? = nil,
         seriesEnded: Bool = false,
         refreshedAt: Date,
         refreshDueAt: Date
     ) {
         self.seriesKey = seriesKey
         self.upcomingEpisode = upcomingEpisode
+        self.upcomingEpisodes = upcomingEpisodes
+        self.cadence = cadence
         self.seriesEnded = seriesEnded
         self.refreshedAt = refreshedAt
         self.refreshDueAt = refreshDueAt
+    }
+
+    /// Decoded explicitly so records written before the list/cadence existed still
+    /// load — they simply carry no list and no cadence until their next refresh.
+    /// Swift's synthesized decoder would reject them for the missing keys, and a
+    /// store-file version bump would needlessly discard every good record.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        seriesKey = try c.decode(String.self, forKey: .seriesKey)
+        upcomingEpisode = try c.decodeIfPresent(UpcomingEpisode.self, forKey: .upcomingEpisode)
+        upcomingEpisodes = try c.decodeIfPresent([UpcomingEpisode].self, forKey: .upcomingEpisodes) ?? []
+        cadence = try c.decodeIfPresent(AirCadence.self, forKey: .cadence)
+        seriesEnded = try c.decodeIfPresent(Bool.self, forKey: .seriesEnded) ?? false
+        refreshedAt = try c.decode(Date.self, forKey: .refreshedAt)
+        refreshDueAt = try c.decode(Date.self, forKey: .refreshDueAt)
     }
 
     /// Whether the passive resolver should refresh this record from the network.

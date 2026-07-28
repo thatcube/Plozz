@@ -63,6 +63,8 @@ public actor SeriesScheduleResolver {
         let record = SeriesScheduleRecord(
             seriesKey: key,
             upcomingEpisode: upcoming,
+            upcomingEpisodes: enrichment.upcomingEpisodes,
+            cadence: enrichment.cadence,
             seriesEnded: seriesEnded,
             refreshedAt: refreshedAt,
             refreshDueAt: due

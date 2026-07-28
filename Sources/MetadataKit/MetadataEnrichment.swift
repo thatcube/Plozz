@@ -30,6 +30,11 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
     /// its own ``UpcomingEpisode/source``), so it is stored directly rather than as a
     /// ``SourcedValue``. Filled only when a caller requests ``MetadataField/nextAiringEpisode``.
     public var upcomingEpisode: UpcomingEpisode?
+    /// Every known future episode, oldest first, when the provider lists more than
+    /// the next one (TheTVDB). Empty for single-next providers (AniList, TVmaze).
+    public var upcomingEpisodes: [UpcomingEpisode]
+    /// The provider-stated release cadence, when reported. Never inferred.
+    public var cadence: AirCadence?
 
     public init(
         externalIDs: [String: SourcedValue<String>] = [:],
@@ -43,7 +48,9 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         bannerURL: SourcedValue<URL>? = nil,
         score: SourcedValue<Double>? = nil,
         backdropCandidates: [SourcedValue<URL>] = [],
-        upcomingEpisode: UpcomingEpisode? = nil
+        upcomingEpisode: UpcomingEpisode? = nil,
+        upcomingEpisodes: [UpcomingEpisode] = [],
+        cadence: AirCadence? = nil
     ) {
         self.externalIDs = externalIDs
         self.title = title
@@ -57,6 +64,8 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         self.score = score
         self.backdropCandidates = backdropCandidates
         self.upcomingEpisode = upcomingEpisode
+        self.upcomingEpisodes = upcomingEpisodes
+        self.cadence = cadence
     }
 
     public var isEmpty: Bool {

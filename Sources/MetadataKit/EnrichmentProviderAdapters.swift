@@ -67,6 +67,10 @@ public protocol TVDBEnriching: Sendable {
     /// best-effort by matching that day against the series' episode list. Returns
     /// `nil` when unconfigured (keyless) or the series has no scheduled next episode.
     func nextAired(byTVDBID id: String) async -> ProviderNextEpisode?
+    /// Every not-yet-aired episode plus the series' stated cadence. Preferred over
+    /// ``nextAired(byTVDBID:)`` because it fills the whole upcoming run in one pass;
+    /// falls back to the single-next path when it yields nothing.
+    func upcomingEpisodes(byTVDBID id: String, limit: Int) async -> TVDBUpcomingSchedule?
 }
 
 extension TVDBClient: TVDBEnriching {}
@@ -140,13 +144,27 @@ public struct TVDBEnrichmentProvider: MetadataEnrichmentProvider {
         }
 
         if missing.contains(.nextAiringEpisode), query.isTV,
-           let tvdbID = meta?.tvdbID ?? knownTVDB,
-           let next = await client.nextAired(byTVDBID: tvdbID) {
-            out.upcomingEpisode = next.upcomingEpisode(
-                seriesIdentity: .external(source: "tvdb", value: tvdbID),
-                source: .tvdb,
-                refreshedAt: Date()
-            )
+           let tvdbID = meta?.tvdbID ?? knownTVDB {
+            let identity = MediaIdentity.external(source: "tvdb", value: tvdbID)
+            let now = Date()
+            // The full listing first: it fills the whole upcoming run and the
+            // cadence in one pass. `nextAired` remains the fallback for a series
+            // whose listing is unavailable but whose next date is known.
+            if let schedule = await client.upcomingEpisodes(byTVDBID: tvdbID, limit: 24),
+               !schedule.episodes.isEmpty {
+                let mapped = schedule.episodes.map {
+                    $0.upcomingEpisode(seriesIdentity: identity, source: .tvdb, refreshedAt: now)
+                }
+                out.upcomingEpisodes = mapped
+                out.upcomingEpisode = mapped.first
+                out.cadence = schedule.cadence
+            } else if let next = await client.nextAired(byTVDBID: tvdbID) {
+                out.upcomingEpisode = next.upcomingEpisode(
+                    seriesIdentity: identity,
+                    source: .tvdb,
+                    refreshedAt: now
+                )
+            }
         }
         return out
     }

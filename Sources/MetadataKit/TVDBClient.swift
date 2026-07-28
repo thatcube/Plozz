@@ -1,4 +1,5 @@
 import Foundation
+import CoreModels
 
 /// Resolved TheTVDB metadata for a title (the neutral result the share enricher
 /// consumes). All fields best-effort; a partial result still helps.
@@ -46,6 +47,26 @@ public struct SeriesEpisodeHint: Sendable, Equatable {
 
 /// Minimal client for **TheTVDB v4** — the bundled keyed metadata/artwork tier.
 ///
+/// A series' known future episodes plus its stated broadcast cadence.
+public struct TVDBUpcomingSchedule: Sendable, Equatable {
+    /// Not-yet-aired episodes, oldest first.
+    public var episodes: [ProviderNextEpisode]
+    /// The provider-stated release cadence, when it reports one.
+    public var cadence: AirCadence?
+    /// TheTVDB's series status (e.g. "Continuing", "Ended"), when reported.
+    public var seriesStatus: String?
+
+    public init(
+        episodes: [ProviderNextEpisode],
+        cadence: AirCadence? = nil,
+        seriesStatus: String? = nil
+    ) {
+        self.episodes = episodes
+        self.cadence = cadence
+        self.seriesStatus = seriesStatus
+    }
+}
+
 /// Flow: `POST /login` with the project api key → a JWT bearer (~1 month), cached
 /// in-memory; then `GET /search?query=…&type=movie|series` with that bearer.
 /// One search yields ids (TVDB + IMDb/TMDb from `remote_ids`), overview, a poster
@@ -174,6 +195,75 @@ public actor TVDBClient {
             datePrecision: .dateOnly,
             sourceURL: URL(string: "\(config.apiBaseURL.absoluteString)/series/\(trimmed)/extended")
         )
+    }
+
+    /// Every episode of `id` that has not aired yet, oldest first, plus the series'
+    /// stated broadcast cadence.
+    ///
+    /// The full episode listing is already fetched to resolve `nextAired`'s
+    /// season/episode — this keeps the future tail rather than discarding it, so a
+    /// series with nine unreleased episodes can show all nine instead of only the
+    /// next one. Costs one extra request (the series record, for cadence).
+    ///
+    /// "Not aired yet" is judged against the start of the current local day, so an
+    /// episode airing *today* still counts as upcoming until the day rolls over —
+    /// matching `dateOnly` precision, which cannot say whether it has aired yet.
+    public func upcomingEpisodes(byTVDBID id: String, limit: Int = 24) async -> TVDBUpcomingSchedule? {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard config.isConfigured, !trimmed.isEmpty, let token = await ensureToken() else { return nil }
+
+        async let seriesTask = seriesRecord(id: trimmed, token: token)
+        async let episodesTask = allEpisodes(seriesID: trimmed, token: token)
+        let (series, episodes) = await (seriesTask, episodesTask)
+
+        let today = Calendar.current.startOfDay(for: Date())
+        let sourceURL = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(trimmed)/extended")
+        let upcoming = (episodes ?? [])
+            .compactMap { ep -> ProviderNextEpisode? in
+                guard let day = ScheduleDateParsing.calendarDate(ep.aired), day >= today else { return nil }
+                return ProviderNextEpisode(
+                    seasonNumber: ep.seasonNumber,
+                    episodeNumber: ep.number,
+                    title: ep.name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
+                    airDate: day,
+                    datePrecision: .dateOnly,
+                    sourceURL: sourceURL
+                )
+            }
+            .sorted { $0.airDate < $1.airDate }
+            .prefix(limit)
+
+        let cadence = AirCadence(
+            weekdays: series?.airsDays?.weekdayIndices ?? [],
+            airsTime: series?.airsTime?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        )
+        guard !upcoming.isEmpty || !cadence.isEmpty else { return nil }
+        return TVDBUpcomingSchedule(
+            episodes: Array(upcoming),
+            cadence: cadence.isEmpty ? nil : cadence,
+            seriesStatus: series?.status?.name
+        )
+    }
+
+    /// The series record, for cadence + status.
+    private func seriesRecord(id: String, token: String) async -> SeriesExtended? {
+        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(id)/extended") else { return nil }
+        let (response, reachable) = await MetadataHTTP.getWithStatus(
+            SeriesExtendedResponse.self, url: url, headers: ["Authorization": "Bearer \(token)"]
+        )
+        if response == nil, !reachable { self.token = nil }
+        return response?.data
+    }
+
+    /// The series' default-order episode listing (first page).
+    private func allEpisodes(seriesID: String, token: String) async -> [EpisodesResponse.Episode]? {
+        guard let url = URL(string: "\(config.apiBaseURL.absoluteString)/series/\(seriesID)/episodes/default?page=0") else {
+            return nil
+        }
+        let (response, _) = await MetadataHTTP.getWithStatus(
+            EpisodesResponse.self, url: url, headers: ["Authorization": "Bearer \(token)"]
+        )
+        return response?.data?.episodes
     }
 
     /// Finds the first episode whose `aired` day equals `day` in the series' default
@@ -531,8 +621,31 @@ public actor TVDBClient {
         let remoteIds: [RemoteID]?
         /// A bare `yyyy-MM-dd` calendar day for the next scheduled episode (no time).
         let nextAired: String?
+        /// Broadcast cadence: the weekday(s) the series airs on, and its usual
+        /// time. Together these produce "New episodes Fridays" without inferring
+        /// a pattern from air dates (which misreads a batch drop as weekly).
+        let airsDays: AirsDays?
+        let airsTime: String?
+        let status: Status?
         struct Genre: Decodable { let name: String? }
         struct RemoteID: Decodable { let id: String?; let sourceName: String? }
+        struct Status: Decodable { let name: String? }
+        /// TheTVDB reports one flag per weekday rather than a list.
+        struct AirsDays: Decodable {
+            let sunday: Bool?
+            let monday: Bool?
+            let tuesday: Bool?
+            let wednesday: Bool?
+            let thursday: Bool?
+            let friday: Bool?
+            let saturday: Bool?
+
+            /// Weekday indices in `Calendar` terms (1 = Sunday), in week order.
+            var weekdayIndices: [Int] {
+                let flags = [sunday, monday, tuesday, wednesday, thursday, friday, saturday]
+                return flags.enumerated().compactMap { $1 == true ? $0 + 1 : nil }
+            }
+        }
     }
 
     /// TheTVDB v4 `/{type}/{id}/translations/{language}` payload — a single
@@ -567,6 +680,9 @@ public actor TVDBClient {
             let name: String?
             /// `yyyy-MM-dd` air day, matched against the series' `nextAired`.
             let aired: String?
+            let overview: String?
+            let runtime: Int?
+            let image: String?
         }
     }
 

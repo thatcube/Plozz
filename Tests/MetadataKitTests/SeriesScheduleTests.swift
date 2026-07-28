@@ -21,6 +21,12 @@ private struct FakeScheduleTVDB: TVDBEnriching {
     }
     func backdropURL(title: String, year: Int?, isMovie: Bool, tvdbID: String?) async -> URL? { nil }
     func nextAired(byTVDBID id: String) async -> ProviderNextEpisode? { calls.record("nextAired:\(id)"); return next }
+    /// Defaults to "no listing" so these tests keep exercising the single-next path.
+    var upcoming: TVDBUpcomingSchedule?
+    func upcomingEpisodes(byTVDBID id: String, limit: Int) async -> TVDBUpcomingSchedule? {
+        calls.record("upcomingEpisodes:\(id)")
+        return upcoming
+    }
 }
 
 private struct FakeScheduleAniList: AniListEnriching {
@@ -133,7 +139,45 @@ final class SeriesScheduleTests: XCTestCase {
         XCTAssertEqual(up?.seasonNumber, 3)
         XCTAssertEqual(up?.episodeNumber, 8)
         XCTAssertEqual(up?.seriesIdentity, .external(source: "tvdb", value: "555"))
-        XCTAssertEqual(fake.calls.all, ["nextAired:555"], "Schedule-only must use nextAired by id, never a resolve")
+        // The point is that a schedule-only request stays on cheap by-id lookups and
+        // never falls back to a title `resolve`. Both schedule calls are by-id, so
+        // assert the absence of a resolve rather than an exact call list — which
+        // would otherwise fail whenever a second by-id source is added.
+        XCTAssertFalse(
+            fake.calls.all.contains { $0.hasPrefix("byTitle") || $0.hasPrefix("byID") },
+            "Schedule-only must never trigger a resolve"
+        )
+        XCTAssertTrue(fake.calls.all.contains("nextAired:555"))
+    }
+
+    func testTVDBPrefersTheFullUpcomingListingOverTheSingleNext() async {
+        // A series with several unreleased episodes lists all of them, so the rail
+        // can show the whole run rather than only the next one.
+        let listed = (1...3).map { offset in
+            ProviderNextEpisode(
+                seasonNumber: 3,
+                episodeNumber: offset,
+                title: "Ep \(offset)",
+                airDate: ScheduleDateParsing.calendarDate("2030-05-0\(offset)")!,
+                datePrecision: .dateOnly
+            )
+        }
+        var fake = FakeScheduleTVDB(next: nil)
+        fake.upcoming = TVDBUpcomingSchedule(
+            episodes: listed,
+            cadence: AirCadence(weekdays: [6], airsTime: "21:00")
+        )
+        let provider = TVDBEnrichmentProvider(client: fake)
+        let out = await provider.enrich(seriesQuery(.tvShow, ids: ["Tvdb": "555"]), missing: [.nextAiringEpisode])
+
+        XCTAssertEqual(out.upcomingEpisodes.count, 3)
+        XCTAssertEqual(out.upcomingEpisode?.episodeNumber, 1, "The single-next stays the first of the list")
+        XCTAssertEqual(out.cadence?.weekdays, [6])
+        XCTAssertTrue(out.cadence?.isSingleWeekday == true)
+        XCTAssertFalse(
+            fake.calls.all.contains("nextAired:555"),
+            "A full listing makes the single-next fallback unnecessary"
+        )
     }
 
     func testTVDBScheduleInertWithoutKnownID() async {

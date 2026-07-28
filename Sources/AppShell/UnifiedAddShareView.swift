@@ -640,8 +640,14 @@ private struct LabeledFormRow<Control: View>: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 20) {
+            // The width is fixed so every row's control lines up, so a longer
+            // translation has to degrade INSIDE it rather than reflow the column.
+            // Without these it wrapped a word into a stack of syllables, which is
+            // what Spanish did to the settings switch's "Activado".
             Text(label)
                 .plozzForeground(.secondary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
                 .frame(width: 150, alignment: .leading)
             control()
                 .frame(maxWidth: .infinity, alignment: .leading)

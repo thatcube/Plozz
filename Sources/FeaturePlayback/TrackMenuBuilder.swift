@@ -80,7 +80,11 @@ enum TrackMenuBuilder {
         locale: Locale = .current
     ) -> [PlayerTrackOption] {
         guard !tracks.isEmpty else { return [] }
-        var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: Text("Off", comment: "Turns a subtitle line off in the subtitle track picker."), isSelected: selectedID == nil)]
+        var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: Text(LocalizedStringResource(
+        "subtitlePicker.option.off",
+        defaultValue: "Off",
+        comment: "The row in the subtitle track picker that shows no subtitles. Sits in a list of track names, not next to a switch, so it may need to agree with 'subtitles' rather than read as a generic on/off state."
+    )), isSelected: selectedID == nil)]
         options.append(contentsOf: tracks.sortedByPreferredLanguage(preferred).map { track in
             PlayerTrackOption(
                 id: track.id,
@@ -103,7 +107,11 @@ enum TrackMenuBuilder {
         locale: Locale = .current
     ) -> [PlayerTrackOption] {
         guard !eligible.isEmpty else { return [] }
-        var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: Text("Off", comment: "Turns a subtitle line off in the subtitle track picker."), isSelected: selectedID == nil)]
+        var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: Text(LocalizedStringResource(
+        "subtitlePicker.option.off",
+        defaultValue: "Off",
+        comment: "The row in the subtitle track picker that shows no subtitles. Sits in a list of track names, not next to a switch, so it may need to agree with 'subtitles' rather than read as a generic on/off state."
+    )), isSelected: selectedID == nil)]
         options.append(contentsOf: eligible.sortedByPreferredLanguage(preferred).map { track in
             PlayerTrackOption(
                 id: track.id,

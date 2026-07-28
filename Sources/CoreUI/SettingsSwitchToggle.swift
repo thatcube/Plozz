@@ -248,10 +248,17 @@ private struct SettingsSwitchIndicator: View {
 
     var body: some View {
         HStack(spacing: 16) {
+            // A FLOOR, not a fixed width. 48pt fits "On"/"Off" and keeps the
+            // track from shifting as the word changes, but pinning the width
+            // outright wrapped longer translations into a vertical column —
+            // Spanish "Activado" rendered as "Ac / ti- / va / do". `fixedSize`
+            // lets the word claim the width it needs; the row's Spacer absorbs it.
             Text(isOn ? "On" : "Off")
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(stateWordColor)
-                .frame(width: 48, alignment: .trailing)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 48, alignment: .trailing)
 
             ZStack {
                 Capsule(style: .continuous)

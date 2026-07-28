@@ -2743,7 +2743,7 @@
       "comment" : "Row label for the operating system version in developer or device-info screens."
     },
     "Off" : {
-      "comment" : "Turns a subtitle line off in the subtitle track picker.",
+      "comment" : "Generic disabled-state label shown beside a settings switch and as a summary value when a feature is turned off. Pairs with \"On\".",
       "localizations" : {
         "es" : {
           "stringUnit" : {
@@ -7116,6 +7116,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Desactivados"
+          }
+        }
+      }
+    },
+    "subtitlePicker.option.off" : {
+      "comment" : "The row in the subtitle track picker that shows no subtitles. Sits in a list of track names, not next to a switch, so it may need to agree with 'subtitles' rather than read as a generic on/off state.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Off"
           }
         }
       }

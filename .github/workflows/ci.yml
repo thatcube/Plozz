@@ -34,9 +34,23 @@ jobs:
       # Localization regressions: brand names leaking into the catalog, copy
       # concatenated with `+` (which the extractor skips entirely, so the string
       # can never be translated), and migrated APIs reverting to `String`.
-      # Ratcheted against tools/l10n-guard-baseline.json — see docs/localization.md.
+      # Any finding fails; see docs/localization.md for the rules.
       - name: Localization guard
         run: tools/l10n-guard.sh
+
+      # Validates the artifact translators actually receive: brands marked
+      # non-translatable, no keys without words in them, every counted string
+      # carrying plural variations, and the permission prompts in each
+      # InfoPlist.xcstrings still matching the Info.plist they mirror.
+      #
+      # `--validate-only`: it reads the committed catalog and needs no toolchain.
+      # A full `--check` also proves the catalog is in sync with the source, but
+      # to do that it rebuilds BOTH platforms with string extraction enabled,
+      # which roughly doubles CI time. Freshness is enforced locally instead —
+      # docs/localization.md requires running tools/l10n-sync.py before
+      # committing a string change.
+      - name: Localization catalog validation
+        run: python3 tools/l10n-sync.py --validate-only
 
       - name: Install XcodeGen
         run: brew install xcodegen

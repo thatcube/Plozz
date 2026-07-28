@@ -410,6 +410,8 @@ def main() -> int:
                         help="Extract from one platform only. Faster, but never prunes.")
     parser.add_argument("--no-build", action="store_true",
                         help="Reuse the previous extraction build.")
+    parser.add_argument("--validate-only", action="store_true",
+                        help="Check the committed catalog without extracting anything (for CI).")
     parser.add_argument("--clean", action="store_true",
                         help="Wipe the localization DerivedData first.")
     parser.add_argument("--quiet", action="store_true", default=True,
@@ -419,6 +421,19 @@ def main() -> int:
 
     if not CATALOG.exists():
         sys.exit(f"✗ Missing catalog: {CATALOG.relative_to(REPO)}")
+
+    # Validation reads only the committed catalog, so it needs no toolchain and
+    # no extraction. That is what makes it usable on a fresh CI runner, where
+    # there is no DerivedData to reuse and a full --check would mean building
+    # both platforms again purely to prove freshness.
+    if args.validate_only:
+        problems = validate_catalog()
+        if problems:
+            print(f"✗ {problems} catalog problem(s).", file=sys.stderr)
+            return 1
+        print("✓ Catalog validates.")
+        return 0
+
     if shutil.which("xcrun") is None:
         sys.exit("✗ xcrun not found — Xcode command line tools are required.")
 

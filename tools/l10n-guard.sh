@@ -18,9 +18,8 @@
 # the toolchain changes, so repeat runs cost ~0.2s instead of ~10s.
 #
 # Usage:
-#   tools/l10n-guard.sh                    # scan Sources/, exit 1 on any regression
+#   tools/l10n-guard.sh                    # scan Sources/, exit 1 on any finding
 #   tools/l10n-guard.sh --force            # rebuild the guard binary first
-#   tools/l10n-guard.sh --update-baseline  # record fixed counts (only ever DOWN)
 #
 set -euo pipefail
 

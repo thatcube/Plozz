@@ -50,15 +50,16 @@
 // positives. Rule 5 runs only on `auditedPaths` from tools/l10n-guard.json, so
 // legacy code is grandfathered and the ratchet tightens one slice at a time.
 //
-// THE RATCHET
-// -----------
-// Running the repo-wide rules over ~207k lines of pre-localization code finds
-// real but pre-existing issues. Failing on all of them would mean the guard could
-// never be switched on, which is how guards end up permanently disabled. Instead
-// tools/l10n-guard-baseline.json records the accepted count PER RULE, and the
-// guard fails only when a count goes UP — or when anything at all is found in an
-// audited file. Baseline counts may only ever decrease (the tool refuses to
-// rewrite them upward), so the debt is one-directional.
+// SCOPE
+// -----
+// Rules 1–4 and 7 are safe repo-wide: they are syntactically decidable and cannot
+// confuse content with copy. Rules 5 and 6 need to know whether a file has been
+// migrated, so they run only on `auditedPaths` in tools/l10n-guard.json. Adding a
+// path there is what tightens the net, and it is done as part of migrating that
+// slice — never separately.
+//
+// There is no baseline file. There was one while the migration was in flight; the
+// debt it tracked is now zero, so the ratchet only ever compared against zero.
 //
 // ESCAPE HATCH
 // ------------
@@ -133,6 +134,19 @@ final class Analyzer: SyntaxVisitor {
     override func visit(_ node: FunctionCallExprSyntax) -> SyntaxVisitorContinueKind {
         let callee = calleeName(node)
 
+        // Rule 1 — eager resolution defeats live locale switching, wherever it
+        // happens. Scoped to copy sinks originally, which missed the real cases:
+        // they were resolutions assigned to a `String` property on the way to a
+        // sink, not written at the sink itself.
+        if callee == "String",
+           node.arguments.contains(where: { $0.label?.text == "localized" }),
+           !isMarkedContent(node) {
+            record("eager-localization", node,
+                   "String(localized:) resolves a resource at call time.",
+                   "Keep the LocalizedStringResource (or build a Text) so it re-resolves when the "
+                   + "language changes. Resolving early freezes the value.")
+        }
+
         // Rule 2 — a runtime String can never be a catalog key.
         if callee == "LocalizedStringKey",
            let first = node.arguments.first,
@@ -152,12 +166,6 @@ final class Analyzer: SyntaxVisitor {
             return .visitChildren
         }
 
-        // Rule 1 — eager resolution defeats live locale switching.
-        if !isVerbatim, containsEagerLocalization(first.expression) {
-            record("eager-localization", node,
-                   "\(callee)(…) resolves its string eagerly with String(localized:).",
-                   "Pass the LocalizedStringResource itself so SwiftUI can re-resolve it when the locale changes.")
-        }
 
         // Rule 3 — `+` bakes English word order into the source.
         if !isVerbatim, isConcatenatedLiteral(first.expression) {
@@ -437,91 +445,22 @@ for case let path as String in walker where path.hasSuffix(".swift") {
 let auditedCount = config.auditedPaths.count
 print("▸ l10n-guard: scanned \(scanned) files (\(auditedCount) audited path(s) under the strict rule)")
 
-let byRule = Dictionary(grouping: findings, by: \.rule).mapValues(\.count)
+// MARK: Report
 
-// Findings inside an audited file are never acceptable — that slice is done, so
-// any hit there is a genuine regression rather than inherited debt.
-let auditedFindings = findings.filter { finding in
-    config.auditedPaths.contains { finding.file == $0 || finding.file.hasPrefix($0 + "/") }
-}
+// Every rule is now enforced everywhere it applies, so any finding is a
+// regression. There was a per-rule ratchet here while the migration was in
+// flight — it seeded from the repo's existing debt and only allowed counts to
+// fall. That debt reached zero, which left ~90 lines whose only behaviour was
+// comparing every count against 0. Deleted rather than kept "in case", because
+// a ratchet with an empty baseline is indistinguishable from no ratchet, and
+// keeping it invited someone to seed it again and reintroduce accepted debt.
 
-// MARK: Ratchet
-
-let baselinePath = "\(repoRoot)/tools/l10n-guard-baseline.json"
-let baselineExists = FileManager.default.fileExists(atPath: baselinePath)
-let baseline: [String: Int] = {
-    guard let data = FileManager.default.contents(atPath: baselinePath),
-          let decoded = try? JSONDecoder().decode([String: Int].self, from: data)
-    else { return [:] }
-    return decoded
-}()
-
-let wantsUpdate = CommandLine.arguments.contains("--update-baseline")
-
-if wantsUpdate {
-    // First run has nothing to ratchet against, so it SEEDS the file: whatever
-    // the repo contains today becomes the accepted debt. Afterwards counts may
-    // only ever go down — refusing to raise them is what makes this a ratchet
-    // rather than a rubber stamp for new violations.
-    var raised: [String] = []
-    if baselineExists {
-        for (rule, count) in byRule where count > (baseline[rule] ?? 0) {
-            raised.append("\(rule): \(baseline[rule] ?? 0) → \(count)")
-        }
-    }
-    guard raised.isEmpty else {
-        print("✗ Refusing to raise the baseline for: \(raised.joined(separator: ", "))")
-        print("  The baseline only ratchets DOWN. Fix the new findings instead.")
-        exit(1)
-    }
-    let merged = byRule.filter { $0.value > 0 }
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    if let data = try? encoder.encode(merged) {
-        try? data.write(to: URL(fileURLWithPath: baselinePath))
-        let summary = merged.map { "\($0.key): \($0.value)" }.sorted().joined(separator: ", ")
-        print(baselineExists
-              ? "✓ Baseline updated: \(summary)"
-              : "✓ Baseline seeded with existing debt: \(summary)")
-    }
+guard !findings.isEmpty else {
+    print("✓ No localization regressions.")
     exit(0)
 }
 
-var regressions: [String] = []
-for (rule, count) in byRule {
-    let allowed = baseline[rule] ?? 0
-    if count > allowed { regressions.append("\(rule): \(count) (baseline \(allowed))") }
-}
-
-// Report improvements so the baseline gets tightened rather than silently drifting.
-var improvements: [String] = []
-for (rule, allowed) in baseline {
-    let count = byRule[rule] ?? 0
-    if count < allowed { improvements.append("\(rule): \(allowed) → \(count)") }
-}
-
-guard !regressions.isEmpty || !auditedFindings.isEmpty else {
-    let debt = baseline.values.reduce(0, +)
-    if improvements.isEmpty {
-        print("✓ No localization regressions." + (debt > 0 ? " (\(debt) known legacy issue(s))" : ""))
-    } else {
-        print("✓ No localization regressions, and some were FIXED:")
-        for improvement in improvements.sorted() { print("    \(improvement)") }
-        print("  Run tools/l10n-guard.sh --update-baseline to lock that in.")
-    }
-    exit(0)
-}
-
-// Show only what must be acted on: everything in audited files, plus the rules
-// that regressed. Reprinting inherited debt on every run trains people to ignore
-// the output.
-let regressedRules = Set(regressions.map { $0.components(separatedBy: ":")[0] })
-let actionable = findings.filter { finding in
-    auditedFindings.contains { $0.file == finding.file && $0.line == finding.line }
-        || regressedRules.contains(finding.rule)
-}
-
-for finding in actionable.sorted(by: { ($0.file, $0.line) < ($1.file, $1.line) }) {
+for finding in findings.sorted(by: { ($0.file, $0.line) < ($1.file, $1.line) }) {
     print("""
 
     ✗ \(finding.file):\(finding.line) [\(finding.rule)]
@@ -530,11 +469,9 @@ for finding in actionable.sorted(by: { ($0.file, $0.line) < ($1.file, $1.line) }
     """)
 }
 
-if !auditedFindings.isEmpty {
-    print("\n✗ \(auditedFindings.count) issue(s) in ALREADY-MIGRATED files — these must be zero.")
-}
-if !regressions.isEmpty {
-    print("\n✗ Above baseline: \(regressions.sorted().joined(separator: ", "))")
-}
+let counts = Dictionary(grouping: findings, by: \.rule)
+    .map { "\($0.key): \($0.value.count)" }
+    .sorted()
+print("\n✗ \(findings.count) localization issue(s) — \(counts.joined(separator: ", "))")
 print("  See docs/localization.md for the rules.")
 exit(1)

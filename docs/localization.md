@@ -236,10 +236,18 @@ so it needs no package dependency — and checks five things:
 | `concatenated-copy` | `Text("a " + "b")` — **the extractor skips this entirely**, so the string never reaches the catalog and can never be translated |
 | `brand-not-verbatim` | "Jellyfin"/"Plex"/… entering the catalog as translatable |
 | `copy-typed-as-string` | a migrated file reverting a copy property to `String` |
+| `copy-returned-as-string` | a function or computed property **returning** prose as `String`; catches what the rule above misses, because that one only looks at copy-shaped *names* |
+| `hand-rolled-plural` | `"\(n) \(n == 1 ? "item" : "items")"` — a counted phrase built from fragments |
 
-The first four run repo-wide. `copy-typed-as-string` runs **only** on
-`auditedPaths` in `tools/l10n-guard.json` — add a path there as part of migrating
-that slice. That is what tightens the ratchet.
+Rules 1–4 and `hand-rolled-plural` run repo-wide. The two `copy-…-as-string`
+rules run **only** on `auditedPaths` in `tools/l10n-guard.json` — add a path
+there as part of migrating that slice. That is what tightens the net.
+
+`hand-rolled-plural` deliberately does **not** flag a bare ternary between two
+literals that never shows the number (`count == 1 ? "Server" : "Servers"`).
+`xcstringstool` refuses a plural variation whose values don't reference the
+count, and tells you to use two top-level strings — so that shape is the
+platform's own answer, not a workaround.
 
 ### Why these rules and not others
 
@@ -254,15 +262,13 @@ design: SF Symbol names, log messages, URLs, codec names and test fixtures are a
 bare literals and none are copy, while the actual failure mode — copy modelled as
 a runtime `String` — isn't a literal at all.
 
-### The ratchet
+### No baseline
 
-Pre-existing findings are recorded in `tools/l10n-guard-baseline.json`. The guard
-fails when a count goes **up**, or when anything at all is found in an audited
-file. Counts may only ever decrease — the tool refuses to write a higher number.
-
-```sh
-tools/l10n-guard.sh --update-baseline   # after fixing some; only ratchets DOWN
-```
+Any finding fails. There was a per-rule baseline while the migration was in
+flight — it seeded from the repo's existing debt and only allowed counts to fall.
+That debt reached zero, so the file was deleted rather than kept: an empty
+baseline behaves exactly like no baseline, and keeping it invites someone to
+re-seed it and quietly accept new debt.
 
 ### Marking content in an audited file
 
@@ -275,8 +281,41 @@ let title: String   // l10n:content — provider-supplied media title
 
 Deliberately greppable: exempting content should be a visible decision.
 
-> **Note:** CI runs the guard but not `l10n-sync.py --check`, because that needs a
-> full tvOS *and* iOS build. Run the sync yourself when adding strings.
+### Catalog validation
+
+`l10n-sync.py` also validates the artifact translators actually receive, which
+is a different question from "does the code compile". It fails on:
+
+- a brand from `neverTranslate` sitting in the catalog as translatable;
+- a key with no words in it (`""`, `"%@ · %@"`) — usually a sign that content
+  and copy were interpolated into one resource;
+- a key that counts something but carries no plural variations, or a variation
+  whose placeholders don't match its key (a dropped specifier is a crash);
+- an `InfoPlist.xcstrings` that has drifted from the `Info.plist` it mirrors.
+
+```sh
+python3 tools/l10n-sync.py                  # extract + sync (run this when adding strings)
+python3 tools/l10n-sync.py --validate-only  # validate the committed catalog; no build needed
+python3 tools/l10n-sync.py --check          # the above, plus proves the catalog is in sync
+```
+
+> **CI runs the guard and `--validate-only`.** It does not run the full
+> `--check`: proving the catalog is in sync means rebuilding **both** platforms
+> with extraction enabled, which roughly doubles CI time. Freshness is a local
+> obligation — run `tools/l10n-sync.py` and commit the catalog whenever you add
+> or change a string.
+
+### Plurals
+
+Anything that counts something needs plural variations in the catalog, because
+English's two forms are not enough for Polish (4) or Arabic (6), and a
+translator handed a flat string has nowhere to put the others.
+
+- **The phrase shows the number** → one resource with the count interpolated
+  (`"\(n) episodes"`), plus plural variations in the catalog. If the string has
+  other arguments too, only the counted fragment becomes a substitution.
+- **The phrase does not show the number** ("Server" / "Servers") → two separate
+  top-level strings chosen in code. `xcstringstool` rejects the alternative.
 
 ## Do not
 

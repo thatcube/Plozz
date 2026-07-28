@@ -13,19 +13,30 @@ import CoreUI
 /// translation can be reviewed without changing the whole device's language.
 struct AppLanguagePicker: View {
     @Bindable var model: AppLanguageSettingsModel
+    @Environment(\.locale) private var locale
 
     private var languages: [AppLanguage] { AppLanguage.available() }
 
-    private var selectedLanguageCode: String? {
-        guard case let .explicit(code) = model.language else { return nil }
-        return code
+    /// The language currently drawn on screen, not merely the picker's stored
+    /// override. In System mode the OS can select a bundled localization while
+    /// `model.language == .system`; that user still needs the correction link.
+    private var displayedLanguageCode: String? {
+        if case let .explicit(code) = model.language { return code }
+        let preferred = Bundle.preferredLocalizations(
+            from: Bundle.main.localizations,
+            forPreferences: [locale.identifier]
+        ).first
+        guard let preferred, preferred != "Base", preferred != "en" else {
+            return nil
+        }
+        return preferred
     }
 
     /// A correction path that needs no translation-platform account. The issue
     /// starts with the language and asks GitHub for the screen/current/better
     /// wording; native speakers can report one bad phrase without editing JSON.
     private var translationIssueURL: URL? {
-        guard let code = selectedLanguageCode else { return nil }
+        guard let code = displayedLanguageCode else { return nil }
         var components = URLComponents(
             string: "https://github.com/thatcube/Plozz/issues/new"
         )

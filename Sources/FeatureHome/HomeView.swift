@@ -524,6 +524,7 @@ public struct HomeView: View {
             }
         }
         .onAppear {
+            MainThreadStallProbe.context = "home"
             if homePerfOverlayEnabled || HomePerfDiagnostics.isStdoutMirrorEnabled {
                 perfSampler.start()
             }

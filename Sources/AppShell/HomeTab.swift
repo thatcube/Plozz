@@ -74,7 +74,10 @@ struct HomeTab: View {
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
-    @Binding var pendingPlayItemID: String?
+    /// The pending Top Shelf deep link, carried by **reference**. This view
+    /// never reads `itemID` — only ``DeepLinkPlayRouter`` does — so carrying it
+    /// costs nothing. As a `Binding` it cost 1,619 body passes in 50 seconds.
+    let pendingPlay: PendingPlayRequest
     /// Snapshot of the durable outbox's not-yet-confirmed plays, folded into the
     /// Continue Watching row so a reload reflects in-app plays the servers haven't
     /// recorded yet (r8-cw-outbox-patch).
@@ -94,6 +97,12 @@ struct HomeTab: View {
     @Binding var resumePrompt: MediaItem?
 
     @State private var path = NavigationPath()
+    /// Builds the Home view model once per tab identity instead of once per
+    /// `body` pass. `HomeView` keeps it in `@State` and ignores every later
+    /// value, so building it inline here was pure waste — and expensive waste:
+    /// it captures a dozen escaping closures and reads the cached Home snapshot
+    /// off disk. See ``LazyViewState``.
+    @State private var homeViewModel = LazyViewState<HomeViewModel>()
     /// Lets a detail page tell whether a child page is pushed on top of it.
     /// See `DetailStackDepth`.
     @State private var detailStackDepth = DetailStackDepth()
@@ -114,24 +123,27 @@ struct HomeTab: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        if MainThreadStallProbe.printsChanges { let _ = Self._printChanges() }
+        return NavigationStack(path: $path) {
             HomeView(
-                viewModel: HomeViewModel(
-                    accounts: accounts,
-                    layoutStore: homeLayoutStore,
-                    contentStore: homeContentStore,
-                    identitySources: identitySources,
-                    currentVisibility: { homeVisibility.visibility },
-                    pendingWatchMutations: pendingWatchMutations,
-                    recentlyAppliedRecency: appliedWatchRecency,
-                    contentPublisher: { continueWatching, latest in
-                        await TopShelfPublisher.publish(
-                            continueWatching: continueWatching,
-                            latest: latest,
-                            locale: locale
-                        )
-                    }
-                ),
+                viewModel: homeViewModel.value {
+                    HomeViewModel(
+                        accounts: accounts,
+                        layoutStore: homeLayoutStore,
+                        contentStore: homeContentStore,
+                        identitySources: identitySources,
+                        currentVisibility: { homeVisibility.visibility },
+                        pendingWatchMutations: pendingWatchMutations,
+                        recentlyAppliedRecency: appliedWatchRecency,
+                        contentPublisher: { continueWatching, latest in
+                            await TopShelfPublisher.publish(
+                                continueWatching: continueWatching,
+                                latest: latest,
+                                locale: locale
+                            )
+                        }
+                    )
+                },
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
                 heroSettings: heroSettings,
@@ -325,20 +337,48 @@ struct HomeTab: View {
             // Watching and was silently dropped in every pushed detail page.
             .mediaItemNavigator { navigate($0, asOwnSubject: $0.kind == .episode) }
         }
-        .task(id: pendingPlayItemID) { await handleDeepLink() }
+        // The deep-link watcher lives in its own leaf view. Reading the pending
+        // id in *this* body subscribed the whole tab to it, and every publish
+        // re-ran `HomeTab.body` — 1,619 times in 50s on device while the id
+        // never left `nil` — rebuilding the navigation stack and every pushed
+        // destination's view model each pass, until the watchdog killed the app.
+        // The leaf reads it and renders nothing, so the invalidation is free.
+        .background {
+            DeepLinkPlayRouter(
+                pendingPlay: pendingPlay,
+                accounts: accounts,
+                onResolved: { requestPlay($0) }
+            )
+        }
     }
 
     /// Resolves a deep-linked item id (from a Top Shelf card) and routes to it,
     /// then clears the request so it fires exactly once. Because the id alone is
     /// provider-ambiguous once content is merged, each active provider is tried
     /// until one resolves the item; the resolved item is tagged with its source.
-    private func handleDeepLink() async {
-        guard let id = pendingPlayItemID else { return }
-        pendingPlayItemID = nil
-        for resolved in accounts {
-            if let item = try? await resolved.provider.item(id: id) {
-                requestPlay(item.taggingSource(resolved.account.id))
-                return
+    ///
+    /// Lives on ``DeepLinkPlayRouter`` rather than on the tab so that watching
+    /// the pending id cannot invalidate the tab's body.
+    private struct DeepLinkPlayRouter: View {
+        let pendingPlay: PendingPlayRequest
+        let accounts: [ResolvedAccount]
+        let onResolved: (MediaItem) -> Void
+
+        var body: some View {
+            Color.clear
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+                .task(id: pendingPlay.itemID) { await route() }
+        }
+
+        private func route() async {
+            guard let id = pendingPlay.itemID else { return }
+            pendingPlay.itemID = nil
+            for resolved in accounts {
+                if let item = try? await resolved.provider.item(id: id) {
+                    onResolved(item.taggingSource(resolved.account.id))
+                    return
+                }
             }
         }
     }

@@ -159,7 +159,10 @@ struct MainTabView: View {
     let profiles: [Profile]
     let activeProfile: Profile
     let askProfileOnStartup: Bool
-    @Binding var pendingPlayItemID: String?
+    /// Carried by reference, never as a `Binding`: a stored binding makes this
+    /// view a subscriber of its source and every publish re-runs the whole tab
+    /// tree. See ``PendingPlayRequest``.
+    let pendingPlay: PendingPlayRequest
     let isAccountIncludedInActiveProfile: (String) -> Bool
     let onSetAccountIncluded: (String, Bool) -> Void
     let onSetAskProfileOnStartup: (Bool) -> Void
@@ -266,7 +269,8 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        TabView(selection: selectedTab) {
+        if MainThreadStallProbe.printsChanges { let _ = Self._printChanges() }
+        return TabView(selection: selectedTab) {
             Tab("Home", systemImage: "house.fill", value: MainTab.home) {
             HomeTab(
                 accounts: accounts,
@@ -302,7 +306,7 @@ struct MainTabView: View {
                 enqueueWatchMutation: enqueueWatchMutation,
                 watchBridge: watchBridge,
                 identitySources: identitySources,
-                pendingPlayItemID: $pendingPlayItemID,
+                pendingPlay: pendingPlay,
                 pendingWatchMutations: pendingWatchMutations,
                 appliedWatchRecency: appliedWatchRecency,
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },

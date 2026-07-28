@@ -165,7 +165,8 @@ public struct ItemDetailView: View {
     }
 
     public var body: some View {
-        ContentStateView(
+        if MainThreadStallProbe.printsChanges { let _ = Self._printChanges() }
+        return ContentStateView(
             state: viewModel.state,
             onRetry: { Task { await viewModel.load() } }
         ) { detail in
@@ -241,7 +242,10 @@ public struct ItemDetailView: View {
                 }
             }
         }
-        .onAppear { viewModel.resumeEnrichmentIfNeeded() }
+        .onAppear {
+            MainThreadStallProbe.context = "detail"
+            viewModel.resumeEnrichmentIfNeeded()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
             if let mutation = MediaItemMutation.from(note) {
                 viewModel.applyWatchedState(mutation)

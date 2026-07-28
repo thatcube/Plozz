@@ -12,6 +12,7 @@ struct PlozzApp: App {
             diskCapacity: 512 * 1024 * 1024,    // 512 MB on disk
             directory: nil
         )
+        MainActor.assumeIsolated { MainThreadStallProbe.startIfRequested() }
     }
 
     var body: some Scene {

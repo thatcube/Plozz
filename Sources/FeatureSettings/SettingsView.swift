@@ -353,6 +353,7 @@ public struct SettingsView: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .task { await reloadLibraries() }
+            .onAppear { MainThreadStallProbe.context = "settings" }
         }
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Sign Out", role: .destructive, action: onSignOutAll)

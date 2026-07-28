@@ -139,6 +139,7 @@ public struct RootView: View {
     }
 
     public var body: some View {
+        if MainThreadStallProbe.printsChanges { let _ = Self._printChanges() }
         // Read the PIN request HERE so the @Observable system registers it
         // as a dependency of body. The sheet's Binding closures aren't
         // tracked, so without this body never re-evaluates when the request
@@ -254,10 +255,7 @@ public struct RootView: View {
                         profiles: appState.profilesModel.profiles,
                         activeProfile: appState.profilesModel.activeProfile,
                         askProfileOnStartup: appState.profilesModel.askProfileOnStartup,
-                        pendingPlayItemID: Binding(
-                            get: { appState.pendingPlayItemID },
-                            set: { appState.pendingPlayItemID = $0 }
-                        ),
+                        pendingPlay: appState.pendingPlay,
                         isAccountIncludedInActiveProfile: { appState.profileFlow.isAccountIncludedInActiveProfile($0) },
                         onSetAccountIncluded: { appState.profileFlow.setAccount($0, includedInActiveProfile: $1) },
                         onSetAskProfileOnStartup: { appState.profileFlow.setAskProfileOnStartup($0) },

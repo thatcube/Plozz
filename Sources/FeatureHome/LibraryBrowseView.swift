@@ -147,6 +147,7 @@ public struct LibraryBrowseView: View {
         // lacked this guard and reloaded the library every time the user came back
         // from a detail page.
         .task { await viewModel.loadFirstPageIfNeeded() }
+        .onAppear { MainThreadStallProbe.context = "library" }
         .background {
             if viewModel.isMediaShare {
                 ShareCatalogRefreshObserver(shareID: viewModel.sourceServerID) {

@@ -49,11 +49,17 @@ public final class AppState {
     /// rather than the provider chooser. `nil` starts the flow at the chooser.
     public private(set) var pendingOnboardingProvider: ProviderKind?
 
-    /// A Jellyfin item id requested via a Top Shelf deep link
-    /// (`plozz://item/<id>`) that the signed-in UI should open for playback.
-    /// Set when the app is launched/foregrounded from a Top Shelf card and
-    /// cleared once the Home tab has routed to it.
-    public var pendingPlayItemID: String?
+    /// A Top Shelf deep link (`plozz://item/<id>`) waiting to be opened.
+    ///
+    /// Deliberately a **separate observable object handed down by reference**
+    /// rather than a property here threaded down as a `Binding`. A view that
+    /// stores such a binding is invalidated whenever its source publishes: on
+    /// device that re-ran `HomeTab.body` 1,619 times in 50 seconds while the
+    /// value never left `nil`, rebuilding the navigation stack and every pushed
+    /// detail page each time, until the watchdog killed the app. A `let`
+    /// reference is stable, so only the one leaf view that actually reads
+    /// ``PendingPlayRequest/itemID`` takes the invalidation.
+    public let pendingPlay = PendingPlayRequest()
 
     /// Per-profile settings facet. Owns the settings sub-models rebuilt when the
     /// active profile changes so switching profiles swaps the active
@@ -1180,7 +1186,7 @@ public final class AppState {
     /// the item for playback once the user is signed in.
     public func handle(url: URL) {
         if let id = TopShelf.itemID(from: url) {
-            pendingPlayItemID = id
+            pendingPlay.itemID = id
         }
     }
 

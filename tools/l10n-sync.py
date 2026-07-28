@@ -52,6 +52,7 @@ import argparse
 import json
 import os
 import platform
+import plistlib
 import re
 import shutil
 import subprocess
@@ -253,6 +254,7 @@ def validate_catalog() -> int:
             problems.append(f"key {key!r} has no translatable content")
 
     problems += plural_problems(strings)
+    problems += infoplist_problems()
 
     for problem in problems:
         print(f"  ✗ {problem}")
@@ -262,6 +264,54 @@ def validate_catalog() -> int:
 # An integer placeholder. `%lld`/`%d`, optionally positional (`%2$lld`).
 INT_PLACEHOLDER = re.compile(r"%(?:(\d+)\$)?(?:ll)?d")
 ANY_PLACEHOLDER = re.compile(r"%(?:(\d+)\$)?(?:(?:ll)?d|@|f|#@[A-Za-z0-9_]+@)")
+
+
+# Permission prompts are not in the app catalog: the system reads them from a
+# per-target InfoPlist table. Each app target therefore owns one, and the English
+# in it has to stay identical to the Info.plist it mirrors.
+INFOPLIST_PAIRS = [
+    (Path("App/Resources/InfoPlist.xcstrings"), Path("App/Resources/Info.plist")),
+    (Path("App/PlozziOS/InfoPlist.xcstrings"), Path("App/PlozziOS/Info.plist")),
+]
+
+# Keys the system shows to a user, as opposed to configuration.
+USER_FACING_INFOPLIST_KEYS = ("UsageDescription",)
+
+
+def infoplist_problems() -> list[str]:
+    """Catch an Info.plist prompt that was edited without its catalog.
+
+    Nothing links the two files, so a reworded prompt would silently keep
+    shipping the old translation in every language but English.
+    """
+    problems: list[str] = []
+    for catalog_path, plist_path in INFOPLIST_PAIRS:
+        catalog_file = REPO / catalog_path
+        plist_file = REPO / plist_path
+        if not catalog_file.exists() or not plist_file.exists():
+            problems.append(f"{catalog_path} or {plist_path} is missing")
+            continue
+        catalog = json.loads(catalog_file.read_text()).get("strings", {})
+        with plist_file.open("rb") as handle:
+            plist = plistlib.load(handle)
+
+        for key, value in plist.items():
+            if not any(marker in key for marker in USER_FACING_INFOPLIST_KEYS):
+                continue
+            entry = catalog.get(key)
+            if entry is None:
+                problems.append(f"{plist_path}: {key} is user-facing but not in {catalog_path.name}")
+                continue
+            english = entry.get("localizations", {}).get("en", {}).get("stringUnit", {}).get("value")
+            if english != value:
+                problems.append(
+                    f"{catalog_path.name}: {key} says {english!r} but {plist_path.name} says {value!r}"
+                )
+
+        for key in catalog:
+            if key not in plist:
+                problems.append(f"{catalog_path.name}: {key} is not in {plist_path.name}")
+    return problems
 
 
 def plural_problems(strings: dict) -> list[str]:

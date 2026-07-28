@@ -1,0 +1,18 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "NSLocalNetworkUsageDescription": {
+      "comment": "Shown when tvOS asks permission to use the local network, which is how servers and shares are discovered.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plozz uses your local network to discover Jellyfin and Emby servers and media shares automatically."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -1,0 +1,30 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "NSLocalNetworkUsageDescription": {
+      "comment": "Shown when iOS asks permission to use the local network, which is how servers and shares are discovered.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plozz uses your local network to discover media servers and network shares."
+          }
+        }
+      }
+    },
+    "NSCameraUsageDescription": {
+      "comment": "Shown when iOS asks permission to use the camera, which is only used to scan the pairing code on another device.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plozz uses the camera to scan the setup code shown on your other device."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

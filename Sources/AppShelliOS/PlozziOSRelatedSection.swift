@@ -30,8 +30,16 @@ struct PlozziOSRelatedSection: View {
                             Button {
                                 onSelect(item)
                             } label: {
-                                PlozziOSPosterCard(item: item)
-                                    .frame(width: cardWidth)
+                                PlozziOSPosterCard(
+                                    item: item,
+                                    // A sequel to the thing you're looking at is
+                                    // the news on this row; ordering alone doesn't
+                                    // say so. Matches tvOS.
+                                    statusCue: continuationItemIDs.contains(item.id)
+                                        ? "Continues"
+                                        : nil
+                                )
+                                .frame(width: cardWidth)
                             }
                             .buttonStyle(.plain)
                         }
@@ -44,5 +52,11 @@ struct PlozziOSRelatedSection: View {
     }
 
     private var items: [MediaItem] { entries.compactMap(\.libraryItem) }
+
+    /// Library ids of the entries that continue the seed's own story, so the cue
+    /// follows the *relation* rather than anything about the matched item.
+    private var continuationItemIDs: Set<String> {
+        Set(entries.compactMap { $0.isContinuation ? $0.libraryItem?.id : nil })
+    }
 }
 #endif

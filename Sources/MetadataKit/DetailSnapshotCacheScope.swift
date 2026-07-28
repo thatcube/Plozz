@@ -25,7 +25,8 @@ public struct DetailSnapshotCacheScope: Equatable, Sendable {
     /// scoped cache subdirectory name.
     public let digest: String
 
-    /// The on-disk subdirectory (under `plozz-detail-cache-v3`) for this identity.
+    /// The on-disk subdirectory (under `DetailSnapshotCache.schemaDirName`) for
+    /// this identity.
     public var directoryComponent: String { digest }
 
     /// Builds a scope from a profile identity and a caller-composed, non-secret

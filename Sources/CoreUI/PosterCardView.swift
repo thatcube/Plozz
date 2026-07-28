@@ -22,7 +22,12 @@ public struct PosterCardView: View {
     private let reservesSubtitleSpace: Bool
     /// Optional caller-owned context cue. It occupies the artwork's top-leading
     /// slot, leaving watch state (top-trailing) and progress (bottom) untouched.
-    private let statusCueText: String?
+    ///
+    /// This is app copy, not media metadata, so it is a `LocalizedStringResource`
+    /// rather than a `String` — a plain `String` reaching `Text` renders verbatim
+    /// and would silently stay English. Media titles on this same card stay
+    /// `String` on purpose; they are provider content and must not be translated.
+    private let statusCueText: LocalizedStringResource?
     /// When `true`, selecting the card starts playback immediately (Continue
     /// Watching, landscape library rows) rather than opening a detail page. Such
     /// cards show the resume chip — play glyph + progress bar + time-remaining —
@@ -52,7 +57,7 @@ public struct PosterCardView: View {
         spoilerSettings: SpoilerSettings = .default,
         enablesAsyncArtworkFallback: Bool = true,
         reservesSubtitleSpace: Bool = true,
-        statusCue: String? = nil,
+        statusCue: LocalizedStringResource? = nil,
         playsOnSelect: Bool = false,
         showsResumeChip: Bool = false,
         downloadState: MediaDownloadBadgeState? = nil,
@@ -634,7 +639,7 @@ public struct PosterCardView: View {
                 .padding(.vertical, metrics.cardStatusCueVerticalPadding)
                 .background(.black.opacity(0.72), in: Capsule(style: .continuous))
                 .padding(inset)
-                .accessibilityLabel(statusCueText)
+                .accessibilityLabel(Text(statusCueText))
         }
     }
 

@@ -219,18 +219,10 @@ private struct PlozziOSSettingsSplitView: View {
                             systemImage: "sparkles.rectangle.stack"
                         )
                     } footer: {
-                        Text(
-                            appModel.profiles.profilesEnabled
-                                ? "Shared across every profile on this \(deviceName)."
-                                : "Shared settings and accounts on this \(deviceName)."
-                        )
+                        Text("Shared across every profile on this \(deviceName).")
                     }
 
-                    SettingsSectionGroup(
-                        appModel.profiles.profilesEnabled
-                            ? "This Profile"
-                            : "Your Settings"
-                    ) {
+                    SettingsSectionGroup("This Profile") {
                         settingsRow(
                             .myLibraries,
                             title: SettingsCopy.libraries,
@@ -245,11 +237,7 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.spoilers, title: "Spoilers", systemImage: "eye.slash")
                         settingsRow(.nightShift, title: "Circadian Mode", systemImage: "moon.stars.fill")
                     } footer: {
-                        Text(
-                            appModel.profiles.profilesEnabled
-                                ? "Saved for \(appModel.profiles.activeProfile.name)."
-                                : "Saved on this \(deviceName)."
-                        )
+                        Text("Saved for \(appModel.profiles.activeProfile.name).")
                     }
 
                     SettingsSectionGroup("Support") {
@@ -349,8 +337,7 @@ private struct PlozziOSSettingsSplitView: View {
 
     @ViewBuilder
     private var settingsDetail: some View {
-        switch selection
-            ?? (appModel.profiles.profilesEnabled ? .profiles : .servers) {
+        switch selection ?? .profiles {
         case .profiles:
             PlozziOSProfilesView(appModel: appModel)
         case .requests:
@@ -569,18 +556,10 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
                 .buttonStyle(.plain)
             } footer: {
-                Text(
-                    appModel.profiles.profilesEnabled
-                        ? "Shared across every profile on this \(deviceName)."
-                        : "Shared settings and accounts on this \(deviceName)."
-                )
+                Text("Shared across every profile on this \(deviceName).")
             }
 
-                SettingsSectionGroup(
-                    appModel.profiles.profilesEnabled
-                        ? "This Profile"
-                        : "Your Settings"
-                ) {
+                SettingsSectionGroup("This Profile") {
                 NavigationLink {
                     PlozziOSMyLibrariesSettingsView(
                         appModel: appModel,
@@ -764,88 +743,65 @@ private struct PlozziOSProfilesView: View {
     var body: some View {
         List {
             SettingsSectionGroup {
+                if appModel.profiles.profiles.count > 1 {
+                    Picker(
+                        "Current Profile",
+                        selection: Binding(
+                            get: { appModel.profiles.activeProfileID },
+                            set: { appModel.selectProfile($0) }
+                        )
+                    ) {
+                        ForEach(appModel.profiles.profiles) { profile in
+                            Text(profile.name).tag(profile.id)
+                        }
+                    }
+                }
                 Toggle(
-                    "Enable Profiles",
+                    "Ask Who’s Watching on Startup",
                     isOn: Binding(
-                        get: { appModel.profiles.profilesEnabled },
-                        set: { enabled in
-                            if enabled {
-                                appModel.profiles.enableProfiles()
-                            } else {
-                                appModel.profiles.disableProfiles()
-                            }
+                        get: {
+                            appModel.profiles.askProfileOnStartup
+                        },
+                        set: {
+                            appModel.profiles.setAskProfileOnStartup($0)
                         }
                     )
                 )
-                .disabled(appModel.profiles.profiles.count > 1)
-
-                if appModel.profiles.profilesEnabled {
-                    if appModel.profiles.profiles.count > 1 {
-                        Picker(
-                            "Current Profile",
-                            selection: Binding(
-                                get: { appModel.profiles.activeProfileID },
-                                set: { appModel.selectProfile($0) }
-                            )
-                        ) {
-                            ForEach(appModel.profiles.profiles) { profile in
-                                Text(profile.name).tag(profile.id)
-                            }
-                        }
-                    }
-                    Toggle(
-                        "Ask Who’s Watching on Startup",
-                        isOn: Binding(
-                            get: {
-                                appModel.profiles.askProfileOnStartup
-                            },
-                            set: {
-                                appModel.profiles.setAskProfileOnStartup($0)
-                            }
-                        )
-                    )
-                }
             } footer: {
-                if appModel.profiles.profiles.count > 1 {
-                    Text("Profiles stay enabled while more than one household profile exists.")
-                } else {
-                    Text("Profiles keep Home, settings, watch history, and downloads personal.")
-                }
+                Text("Profiles keep Home, settings, and downloads personal. Watch history belongs to the account each profile watches as.")
             }
 
-            if appModel.profiles.profilesEnabled {
-                SettingsSectionGroup("Who’s watching?") {
-                    ForEach(appModel.profiles.profiles) { profile in
-                        Button {
-                            editingProfile = profile
-                        } label: {
-                            HStack {
-                                PlozziOSProfileAvatar(
-                                    profile: profile,
-                                    size: 34
-                                )
-                                Text(profile.name)
-                                Spacer()
-                                if profile.id
-                                    == appModel.profiles.activeProfileID {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(.tint)
-                                }
-                                Image(systemName: "pencil")
-                                    .plozzForeground(.secondary)
+            SettingsSectionGroup("Who’s watching?") {
+                ForEach(appModel.profiles.profiles) { profile in
+                    Button {
+                        editingProfile = profile
+                    } label: {
+                        HStack {
+                            PlozziOSProfileAvatar(
+                                profile: profile,
+                                size: 34
+                            )
+                            Text(profile.name)
+                            Spacer()
+                            if profile.id
+                                == appModel.profiles.activeProfileID {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.tint)
                             }
+                            Image(systemName: "pencil")
+                                .plozzForeground(.secondary)
                         }
-                        .swipeActions {
-                            if !appModel.profiles.isDefault(profile) {
-                                Button("Delete", role: .destructive) {
-                                    appModel.removeProfile(profile.id)
-                                }
+                    }
+                    .swipeActions {
+                        if !appModel.profiles.isDefault(profile) {
+                            Button("Delete", role: .destructive) {
+                                appModel.removeProfile(profile.id)
                             }
                         }
                     }
-                    Button("Add Profile", systemImage: "person.badge.plus") {
-                        showingAddProfile = true
-                    }
+                }
+                Button("Add Profile", systemImage: "person.badge.plus") {
+                    showingAddProfile = true
                 }
             }
         }

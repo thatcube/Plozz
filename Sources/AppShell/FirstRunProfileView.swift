@@ -4,11 +4,14 @@ import CoreModels
 import CoreUI
 import FeatureProfiles
 
-/// One-time first-run step shown after the user chose to set up profiles on a
-/// brand-new install. The always-present default profile has already been
-/// seeded with the signed-in identity (name + photo); this lets the user keep
-/// it ("Looks good") or open the shared editor to change the name/avatar. The
-/// Apple-TV-user explanation lives on the preceding `EnableProfilesView`.
+/// One-time first-run step on a brand-new install. The always-present default
+/// profile has already been seeded with the signed-in identity (name + photo);
+/// this lets the user keep it ("Looks good") or open the shared editor to
+/// change the name/avatar.
+///
+/// Profiles are always on, so there is no opt-in gate in front of this screen.
+/// Confirming is the only job here; the fact that more profiles exist is a
+/// single quiet line UNDER the actions, because it's an aside, not a decision.
 ///
 /// It never appears again once completed — signing out of everything and
 /// re-adding a server skips straight into the app (see
@@ -35,16 +38,15 @@ struct FirstRunProfileView: View {
                         .font(.largeTitle.weight(.bold))
                         .multilineTextAlignment(.center)
 
-                    Text("Profile created automatically")
-                        .font(.title3.weight(.semibold))
-                        .multilineTextAlignment(.center)
-
-                    Text("We created this profile from your \(providerName) account. You can rename it or change the photo here, or any time in Settings.")
-                        .font(.body)
-                        .plozzForeground(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 760)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(spacing: 6) {
+                        Text("Almost all settings are saved per profile.")
+                        Text("You can add more profiles in Settings.")
+                    }
+                    .font(.body)
+                    .plozzForeground(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 760)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -106,10 +108,5 @@ struct FirstRunProfileView: View {
         return name.isEmpty ? "Your Profile" : name
     }
 
-    /// The provider the seeded identity came from — the first account added on
-    /// this fresh install. Defaults to a neutral word if none is resolvable.
-    private var providerName: String {
-        appState.accountsProviders.accounts.first?.server.provider.displayName ?? "media"
-    }
 }
 #endif

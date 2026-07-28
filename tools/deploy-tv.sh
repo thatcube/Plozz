@@ -14,8 +14,21 @@
 #   tools/deploy-tv.sh --sim-build     # compile for a tvOS Simulator (fast sanity,
 #                                      #   no HDR — see AGENTS.local.md)
 #   tools/deploy-tv.sh --clean         # wipe THIS worktree's DerivedData first
+#   tools/deploy-tv.sh --branded       # install a SEPARATE per-branch app
+#                                      #   ("Plozz <branch-slug>") side-by-side
+#                                      #   with the canonical one
 #   PLOZZ_SHOW_FIRST_RUN_RESET=1 tools/deploy-tv.sh
 #                                      # show the Debug first-run reset row
+#
+# Per-branch builds (--branded)
+#   Installs com.thatcube.Plozz.<slug> named "Plozz <slug>", where <slug> comes
+#   from the current branch, so a branch can be tested on the Apple TV WITHOUT
+#   replacing the real app. It signs against the stripped
+#   App/Resources/Plozz.branded.entitlements, because a brand-new App ID can't
+#   auto-provision the canonical app's User Management + App Group capabilities.
+#   Consequences: no cloud sync (so it won't inherit servers/profiles — sign in
+#   again), and Top Shelf stays empty. Both are intended isolation, not bugs.
+#   The iOS equivalent is `tools/deploy-ios.sh --branded`.
 #
 # Notes:
 #   * Editing an EXISTING file does NOT need --regen; SPM globs the module dirs.

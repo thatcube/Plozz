@@ -1380,7 +1380,7 @@ public final class AppState {
     }
 
     /// Completes the "choose your libraries" step and continues onboarding: a
-    /// first-ever account detours through the profile-setup sub-flow, a later add
+    /// first-ever account detours through the profile confirm step, a later add
     /// drops straight into the app (applying any freshly-picked Plex identity).
     public func confirmLibrarySelection() {
         let continuation = pendingOnboardingContinuation
@@ -1400,7 +1400,7 @@ public final class AppState {
     /// Handles the "Which Plex user are you?" pick. Binds the chosen Home user to
     /// the active profile, and on first run re-seeds the profile identity from
     /// that user (so the confirm screen shows *who's watching*, not the account
-    /// owner). Then continues to the profile-setup sub-flow (first run) or the
+    /// owner). Then continues to the profile confirm step (first run) or the
     /// app, applying the binding so the Plex identity switches.
     public func selectPlexUserDuringOnboarding(_ user: PlexHomeUser?) {
         guard let pending = plexHomeUsers.pendingPlexUserSelection else { return }
@@ -1433,22 +1433,6 @@ public final class AppState {
             seedAvatar: user?.avatarURL?.absoluteString,
             applyPlexIdentity: !pending.isFirstRun
         )
-    }
-
-    /// First-run "Set Up Profiles": turns on the profiles feature (making it
-    /// visible in Settings + Apple-TV-user aware) and advances to the confirm
-    /// screen so they can keep or edit the seeded profile.
-    public func enableProfilesForFirstRun() {
-        profilesModel.enableProfiles()
-        apply(.profilesEnabled)
-    }
-
-    /// First-run "Not Now — Just Me": keeps profiles hidden/disabled, marks
-    /// first-run setup done, and continues to the one-time theme picker before
-    /// the app.
-    public func declineProfilesForFirstRun() {
-        profilesModel.markFirstRunProfileSetupComplete()
-        apply(.profilesDeclined)
     }
 
     /// Completes the one-time first-run profile confirm step and continues to the

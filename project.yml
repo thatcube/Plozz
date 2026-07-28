@@ -1,6 +1,8 @@
 name: Plozz
 options:
   bundleIdPrefix: com.thatcube
+  # English is the source language for App/Resources/Localizable.xcstrings.
+  developmentLanguage: en
   deploymentTarget:
     iOS: "18.0"
     tvOS: "18.0"
@@ -47,6 +49,12 @@ targets:
       - path: App/Plozz
       - path: App/Resources/Assets.xcassets
       - path: App/Resources/Fonts
+      # The single app-owned String Catalog. SwiftUI/Foundation lookups compiled
+      # into the Swift package modules resolve against `Bundle.main`, so ALL UI
+      # copy — including strings written in FeatureSettings, AppShell, etc. —
+      # is served from this one catalog. Both app targets reference the same
+      # file on purpose so tvOS and iOS can never drift.
+      - path: App/Resources/Localizable.xcstrings
     info:
       path: App/Resources/Info.plist
       properties:
@@ -273,6 +281,8 @@ targets:
     sources:
       - path: App/PlozziOS
       - path: App/Resources/Fonts
+      # Same shared catalog as the tvOS target — see the note there.
+      - path: App/Resources/Localizable.xcstrings
     info:
       path: App/PlozziOS/Info.plist
       properties:
@@ -365,7 +375,10 @@ targets:
         PRODUCT_NAME: Plozz
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        CODE_SIGN_ENTITLEMENTS: App/PlozziOS/PlozziOS.entitlements
+        # Canonical uses the full entitlements; a --branded per-branch build swaps
+        # in the stripped variant (the empty ${PLOZZ_IOS_APP_ENTITLEMENTS} default
+        # keeps the canonical path). Mirrors the tvOS target above.
+        CODE_SIGN_ENTITLEMENTS: ${PLOZZ_IOS_APP_ENTITLEMENTS}
         GENERATE_INFOPLIST_FILE: NO
         SUPPORTS_MACCATALYST: NO
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES

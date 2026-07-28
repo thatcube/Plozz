@@ -35,6 +35,10 @@ export PLOZZ_NAME_SUFFIX="${PLOZZ_NAME_SUFFIX:-}"
 # fresh per-branch App ID can sign without those special capabilities.
 export PLOZZ_TV_APP_ENTITLEMENTS="${PLOZZ_TV_APP_ENTITLEMENTS:-App/Resources/Plozz.entitlements}"
 export PLOZZ_TV_TOPSHELF_ENTITLEMENTS="${PLOZZ_TV_TOPSHELF_ENTITLEMENTS:-TopShelf/TopShelf.entitlements}"
+# iOS entitlements path — same story as tvOS above. A --branded build overrides it
+# with the stripped variant so a fresh per-branch App ID can sign without the
+# canonical app's Push / iCloud / Associated Domains capabilities.
+export PLOZZ_IOS_APP_ENTITLEMENTS="${PLOZZ_IOS_APP_ENTITLEMENTS:-App/PlozziOS/PlozziOS.entitlements}"
 
 xcodegen generate
 

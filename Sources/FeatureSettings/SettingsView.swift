@@ -109,15 +109,12 @@ public struct SettingsView: View {
     private let profiles: [Profile]
     private let activeProfile: Profile
     private let askProfileOnStartup: Bool
-    private let profilesEnabled: Bool
     private let appVersion: String
     private let appBuild: String
     private let repoURL: String
     private let isAccountIncludedInActiveProfile: (String) -> Bool
     private let onSetAccountIncluded: (String, Bool) -> Void
     private let onSetAskProfileOnStartup: (Bool) -> Void
-    private let onEnableProfiles: () -> Void
-    private let onDisableProfiles: () -> Void
     private let onSwitchProfile: () -> Void
     private let onSaveProfile: (ProfileDraft) -> Void
     private let onUpdateProfileCosmetics: (ProfileDraft) -> Void
@@ -178,15 +175,12 @@ public struct SettingsView: View {
         profiles: [Profile],
         activeProfile: Profile,
         askProfileOnStartup: Bool,
-        profilesEnabled: Bool,
         appVersion: String,
         appBuild: String,
         repoURL: String,
         isAccountIncludedInActiveProfile: @escaping (String) -> Bool,
         onSetAccountIncluded: @escaping (String, Bool) -> Void,
         onSetAskProfileOnStartup: @escaping (Bool) -> Void,
-        onEnableProfiles: @escaping () -> Void,
-        onDisableProfiles: @escaping () -> Void,
         onSwitchProfile: @escaping () -> Void,
         onSaveProfile: @escaping (ProfileDraft) -> Void,
         onUpdateProfileCosmetics: @escaping (ProfileDraft) -> Void,
@@ -239,15 +233,12 @@ public struct SettingsView: View {
         self.profiles = profiles
         self.activeProfile = activeProfile
         self.askProfileOnStartup = askProfileOnStartup
-        self.profilesEnabled = profilesEnabled
         self.appVersion = appVersion
         self.appBuild = appBuild
         self.repoURL = repoURL
         self.isAccountIncludedInActiveProfile = isAccountIncludedInActiveProfile
         self.onSetAccountIncluded = onSetAccountIncluded
         self.onSetAskProfileOnStartup = onSetAskProfileOnStartup
-        self.onEnableProfiles = onEnableProfiles
-        self.onDisableProfiles = onDisableProfiles
         self.onSwitchProfile = onSwitchProfile
         self.onSaveProfile = onSaveProfile
         self.onUpdateProfileCosmetics = onUpdateProfileCosmetics
@@ -301,12 +292,9 @@ public struct SettingsView: View {
             profiles: profiles,
             activeProfile: activeProfile,
             askProfileOnStartup: askProfileOnStartup,
-            profilesEnabled: profilesEnabled,
             isAccountIncludedInActiveProfile: isAccountIncludedInActiveProfile,
             onSetAccountIncluded: onSetAccountIncluded,
             onSetAskProfileOnStartup: onSetAskProfileOnStartup,
-            onEnableProfiles: onEnableProfiles,
-            onDisableProfiles: onDisableProfiles,
             onSwitchProfile: onSwitchProfile,
             onSaveProfile: onSaveProfile,
             onUpdateProfileCosmetics: onUpdateProfileCosmetics,
@@ -365,22 +353,6 @@ public struct SettingsView: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .task { await reloadLibraries() }
-            // Turning profiles off from the Profiles detail page makes that page
-            // meaningless — pop back to the Settings root so the UI reflects the
-            // change instead of stranding the user on a dead screen.
-            .onChange(of: profilesEnabled) { _, enabled in
-                if !enabled {
-                    path.removeAll()
-                    // Popping to root lets tvOS pick an arbitrary default focus
-                    // (it landed on "Playback"). Steer it back to the "Enable
-                    // Profiles" row — the same spot the "Profiles" row the user
-                    // came from occupied — once the root is back on screen.
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 350_000_000)
-                        resetFocus(in: rootFocusScope)
-                    }
-                }
-            }
         }
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Sign Out", role: .destructive, action: onSignOutAll)
@@ -431,33 +403,17 @@ public struct SettingsView: View {
     /// One visual container that wraps the active profile's identity AND
     /// every setting it saves. The profile header is the *top* of the same
     /// card the rows are nested in — so it reads as "the profile owns these."
-    @ViewBuilder
     private var profileContainer: some View {
-        if profilesEnabled {
-            VStack(alignment: .leading, spacing: 0) {
-                profileHeaderInline
-                PlozzDivider()
-                    .padding(.horizontal, 28)
-                profileOwnedRows
-                    .padding(.horizontal, 28)
-                    .padding(.top, 16)
-                    .padding(.bottom, 16)
-            }
-            .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
-        } else {
-            // Single-profile (solo) household: the same nested container,
-            // but framed as plain "Settings" with an explicit Enable Profiles
-            // entry point at the top.
-            VStack(alignment: .leading, spacing: 0) {
-                soloHeader
-                PlozzDivider().padding(.horizontal, 28)
-                profileOwnedRows
-                    .padding(.horizontal, 28)
-                    .padding(.top, 16)
-                    .padding(.bottom, 16)
-            }
-            .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
+        VStack(alignment: .leading, spacing: 0) {
+            profileHeaderInline
+            PlozzDivider()
+                .padding(.horizontal, 28)
+            profileOwnedRows
+                .padding(.horizontal, 28)
+                .padding(.top, 16)
+                .padding(.bottom, 16)
         }
+        .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
     }
 
     /// Rows nested inside the profile container — the settings this profile
@@ -554,14 +510,9 @@ public struct SettingsView: View {
                 // Profile roster management is a device concern (who exists on
                 // this Apple TV), not a per-profile one — so it lives here.
                 // "Ask on startup" (the launch picker) lives inside Profiles.
-                if profilesEnabled {
-                    navRow("Profiles", icon: "person.2",
-                           value: "\(profiles.count)",
-                           route: .profile)
-                } else {
-                    enableProfilesRow
-                        .prefersDefaultFocus(in: rootFocusScope)
-                }
+                navRow("Profiles", icon: "person.2",
+                       value: "\(profiles.count)",
+                       route: .profile)
 
                 // Seerr is one shared admin connection powering the Home hero's
                 // trending row + requests for everyone on this Apple TV, so it's
@@ -983,30 +934,13 @@ public struct SettingsView: View {
         }
     }
 
-    /// Servers the active profile is watching, grouped like the detail page. When
-    /// profiles are on, "watching" = at least one of the server's sign-ins is in
-    /// the profile's active set; with profiles off the household watches every
-    /// server it's signed in to (mirrors ``activeProfileServerCount``).
+    /// Servers the active profile is watching, grouped like the detail page:
+    /// "watching" = at least one of the server's sign-ins is in the profile's
+    /// active set (mirrors ``activeProfileServerCount``).
     private var watchedServerGroups: [ServerAccountGroup] {
         serverGroups(from: accounts).filter { group in
-            profilesEnabled
-                ? group.accounts.contains { isAccountIncludedInActiveProfile($0.id) }
-                : true
+            group.accounts.contains { isAccountIncludedInActiveProfile($0.id) }
         }
-    }
-
-    private var soloHeader: some View {
-        HStack(spacing: 20) {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 40, weight: .regular))
-                .plozzForeground(.secondary)
-                .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
-                .background(Circle().fill(palette.fillSubtle))
-                .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
-            Text("Settings").font(Self.identityTitleFont)
-            Spacer()
-        }
-        .padding(28)
     }
 
     // MARK: - Enable profiles row (single-profile household)
@@ -1148,30 +1082,6 @@ public struct SettingsView: View {
         .buttonStyle(SettingsFocusButtonStyle())
     }
 
-    private var enableProfilesRow: some View {
-        Button(action: onEnableProfiles) {
-            HStack(alignment: .top, spacing: 16) {
-                rowIcon("person.crop.circle")
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Enable Profiles")
-                        .font(.callout.weight(.medium))
-                    Text("Each profile gets its own settings, watch history, and libraries.")
-                        .font(.footnote)
-                        .settingsRowSecondary()
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .settingsRowSecondary()
-            }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SettingsFocusButtonStyle())
-    }
-
     // MARK: - Helpers
 
     /// Global summary for the This Apple TV › Servers row: how many distinct
@@ -1186,9 +1096,7 @@ public struct SettingsView: View {
     /// watch-status sync is only meaningful when this is 2+ (otherwise there's
     /// nowhere to fan out to), so the Trackers page uses it to gate that toggle.
     private var activeProfileServerCount: Int {
-        let relevant = profilesEnabled
-            ? accounts.filter { isAccountIncludedInActiveProfile($0.id) }
-            : accounts
+        let relevant = accounts.filter { isAccountIncludedInActiveProfile($0.id) }
         return Set(relevant.map { $0.server.id }).count
     }
 

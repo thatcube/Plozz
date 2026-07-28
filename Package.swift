@@ -15,6 +15,12 @@ import Foundation
 // XcodeGen (see `project.yml`); they link their platform-specific shells below.
 let package = Package(
     name: "Plozz",
+    // Required before any target may own localized resources, and — more
+    // importantly here — it is what makes the Swift compiler's string extraction
+    // emit per-module tables for this package's targets. Without it,
+    // `xcodebuild -exportLocalizations` silently produces an EMPTY catalog even
+    // when `.stringsdata` files are being written. See docs/localization.md.
+    defaultLocalization: "en",
     platforms: [
         .iOS(.v18),
         .tvOS(.v18)

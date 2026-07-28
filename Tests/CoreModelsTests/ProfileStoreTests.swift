@@ -232,43 +232,21 @@ final class ProfilesModelTests: XCTestCase {
         XCTAssertTrue(relaunched.askProfileOnStartup)
     }
 
-    func testSoloHouseholdDefaultsToProfilesDisabledAndNoStartupAsk() {
-        // A brand-new install with the single migrated default profile must
-        // hide all profile UI by default and must NOT pop the launch picker.
+    func testSoloHouseholdDoesNotAskOnStartup() {
+        // A brand-new install with the single migrated default profile must NOT
+        // pop the launch picker — there is nothing to choose between.
         let model = ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
         XCTAssertEqual(model.profiles.count, 1)
-        XCTAssertFalse(model.profilesEnabled)
         XCTAssertFalse(model.askProfileOnStartup)
     }
 
-    func testAddingASecondProfileFlipsHouseholdDefaultsOn() {
-        // Adding a second profile is what makes a household actually use the
-        // profile system. Both defaults flip on so the picker becomes
-        // reachable (and the user doesn't have to dig through Settings to
-        // turn it on after creating Profile #2).
+    func testAddingASecondProfileTurnsOnTheLaunchPicker() {
+        // Adding a second profile is what makes the picker meaningful, so it
+        // flips on by default (the user doesn't have to dig through Settings
+        // after creating Profile #2).
         let model = ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
         _ = model.add(name: "Kid")
-        XCTAssertTrue(model.profilesEnabled)
         XCTAssertTrue(model.askProfileOnStartup)
-    }
-
-    func testExplicitlyEnablingProfilesPersists() {
-        let defaults = makeDefaults()
-        let model = ProfilesModel(store: ProfileStore(defaults: defaults))
-        model.enableProfiles()
-        XCTAssertTrue(model.profilesEnabled)
-        // Survives a relaunch.
-        let relaunched = ProfilesModel(store: ProfileStore(defaults: defaults))
-        XCTAssertTrue(relaunched.profilesEnabled)
-    }
-
-    func testDisablingProfilesRefusedWhenMultipleProfilesExist() {
-        // Hiding profile UI while >1 profile exists would orphan the other
-        // profiles (the picker is the only way to reach them).
-        let model = ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
-        _ = model.add(name: "Kid")
-        model.disableProfiles()
-        XCTAssertTrue(model.profilesEnabled, "Must refuse to disable profiles while multiple exist")
     }
 
     func testAskOnStartupTogglePersists() {

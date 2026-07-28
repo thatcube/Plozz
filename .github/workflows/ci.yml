@@ -38,6 +38,14 @@ jobs:
       - name: Localization guard
         run: tools/l10n-guard.sh
 
+      # Translation files are untrusted batch output. These regressions prove the
+      # importer rejects the failures most likely to break at runtime: a plural
+      # category dropping, adding, or changing a placeholder; direct-plural
+      # categories disagreeing; unknown printf syntax; noncanonical locale tags;
+      # and non-ASCII text failing a round trip.
+      - name: Localization importer regression tests
+        run: python3 -m unittest tools/tests/test_l10n_import.py
+
       # Validates the artifact translators actually receive: brands marked
       # non-translatable, no keys without words in them, every counted string
       # carrying plural variations, and the permission prompts in each

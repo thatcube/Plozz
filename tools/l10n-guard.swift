@@ -192,6 +192,61 @@ final class Analyzer: SyntaxVisitor {
         return .visitChildren
     }
 
+
+    // MARK: Copy returned as String (audited files only)
+
+    /// Catches prose returned from a `-> String` function, computed property, or
+    /// tuple element.
+    ///
+    /// This exists because the declaration-name rule above was demonstrably not
+    /// enough: it only inspects properties literally named `title`, `header`, … so
+    /// copy hiding in `var phase: String`, `func summary(...) -> String`, or a
+    /// `(icon: String, text: String)` tuple sailed straight past a clean guard run.
+    /// A guard that reports success while real English is unreachable is worse than
+    /// no guard, because it is trusted.
+    ///
+    /// "Prose" is deliberately narrow — a literal containing a space AND a
+    /// lowercase letter. That excludes SF Symbol names, identifiers, codec names,
+    /// URLs and format specifiers, which is what keeps this from drowning.
+    private func checkReturnedProse(_ node: some SyntaxProtocol, returnType: String?) {
+        guard isAudited, let returnType, returnsString(returnType), !isMarkedContent(node) else { return }
+        for literal in node.tokens(viewMode: .sourceAccurate).compactMap({ token -> String? in
+            guard case let .stringSegment(text) = token.tokenKind else { return nil }
+            return text
+        }) where looksLikeProse(literal) {
+            record("copy-returned-as-string", node,
+                   "Returns prose as String: \"\(literal.prefix(48))\".",
+                   "A String reaching Text renders verbatim and is never localized. Return "
+                   + "LocalizedStringResource, or mark it `// l10n:content` if it is really content.")
+            return
+        }
+    }
+
+    private func returnsString(_ type: String) -> Bool {
+        let bare = type.replacingOccurrences(of: "?", with: "")
+        // Bare `String`, or a tuple with at least one String element.
+        return bare == "String" || (bare.hasPrefix("(") && bare.contains("String"))
+    }
+
+    /// A literal with a space and a lowercase letter reads as a sentence rather
+    /// than an identifier.
+    private func looksLikeProse(_ text: String) -> Bool {
+        text.contains(" ") && text.contains(where: \.isLowercase)
+            && !text.hasPrefix("%") && !text.contains("://")
+    }
+
+    override func visit(_ node: FunctionDeclSyntax) -> SyntaxVisitorContinueKind {
+        checkReturnedProse(node, returnType: node.signature.returnClause?.type.trimmedDescription)
+        return .visitChildren
+    }
+
+    override func visit(_ node: PatternBindingSyntax) -> SyntaxVisitorContinueKind {
+        // Computed property with an explicit type annotation and a body.
+        guard node.accessorBlock != nil else { return .visitChildren }
+        checkReturnedProse(node, returnType: node.typeAnnotation?.type.trimmedDescription)
+        return .visitChildren
+    }
+
     override func visit(_ node: FunctionParameterSyntax) -> SyntaxVisitorContinueKind {
         guard isAudited else { return .visitChildren }
         let name = (node.secondName ?? node.firstName).text

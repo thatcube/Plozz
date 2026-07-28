@@ -72,12 +72,42 @@ final class AppLanguageTests: XCTestCase {
     /// Languages are listed by endonym — the name written in that language — which
     /// is what someone scanning for their own language actually recognises.
     func testExplicitLanguageUsesItsOwnEndonym() {
-        XCTAssertEqual(AppLanguage.explicit("es").displayName, "Español")
-        XCTAssertEqual(AppLanguage.explicit("de").displayName, "Deutsch")
+        XCTAssertEqual(AppLanguage.explicit("es").endonym, "Español")
+        XCTAssertEqual(AppLanguage.explicit("de").endonym, "Deutsch")
     }
 
-    func testSystemOptionIsLocalizedCopy() {
-        XCTAssertFalse(AppLanguage.system.displayName.isEmpty)
+    /// `.system` has no endonym — its label is app copy, kept as a resource so it
+    /// re-resolves with the injected locale instead of being frozen at launch.
+    func testSystemHasNoEndonymAndUsesACopyResource() {
+        XCTAssertNil(AppLanguage.system.endonym)
+        XCTAssertFalse(String(localized: AppLanguage.systemOptionTitle).isEmpty)
+    }
+
+    /// A regional tag must keep its region on the LANGUAGE — that is what selects
+    /// the `.lproj` — while the FORMATTING region still follows the device.
+    ///
+    /// These are two different things and easy to conflate: `Locale.region` is the
+    /// formatting override (`@rg=`), whereas `Locale.language.region` is what
+    /// resolves resources. "pt-BR" for a user in the US must give Brazilian
+    /// Portuguese text with US dates.
+    func testRegionalTagKeepsLanguageRegionButUsesDeviceFormatting() throws {
+        let locale = try XCTUnwrap(AppLanguage.explicit("pt-BR").locale)
+        XCTAssertEqual(locale.language.languageCode?.identifier, "pt")
+        XCTAssertEqual(locale.language.region?.identifier, "BR",
+                       "The language region selects the localization and must survive")
+        XCTAssertEqual(locale.region, Locale.current.region,
+                       "Formatting still follows the device")
+    }
+
+    /// Only languages declared release-ready may be offered, however many
+    /// `.lproj` folders happen to be in the bundle — a 10%-translated language
+    /// must not be selectable.
+    func testOnlyReleaseReadyLanguagesAreOffered() {
+        let offered = Set(AppLanguage.available().compactMap { language -> String? in
+            guard case let .explicit(code) = language else { return nil }
+            return code
+        })
+        XCTAssertTrue(offered.isSubset(of: Set(AppLanguage.releaseReady)))
     }
 
     // MARK: Persistence

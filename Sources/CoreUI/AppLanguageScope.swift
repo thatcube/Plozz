@@ -24,6 +24,9 @@ import CoreModels
 ///     device language, and no in-app setting can change that.
 @MainActor
 public struct AppLanguageScope<Content: View>: View {
+    /// The locale this view already sits in — the device's, unless something
+    /// above us has overridden it.
+    @Environment(\.locale) private var inheritedLocale
     @State private var model: AppLanguageSettingsModel
     private let content: Content
 
@@ -40,11 +43,12 @@ public struct AppLanguageScope<Content: View>: View {
     public var body: some View {
         content
             .environment(model)
-            // `nil` when following the system: leaving the environment untouched
-            // is not the same as overwriting it with `Locale.current`, which would
-            // freeze the app's language at launch and stop it tracking a change
-            // the user makes in Settings.app.
-            .environment(\.locale, model.locale ?? Locale.current)
+            // For `.system` we re-inject what we INHERITED rather than a captured
+            // `Locale.current`. The comment here used to claim it left the
+            // environment untouched while doing exactly the opposite — freezing
+            // the language at launch, so a change made in Settings.app would not
+            // be picked up.
+            .environment(\.locale, model.locale ?? inheritedLocale)
             // Deliberately NO `.id(model.language)`. Re-identifying the root would
             // guarantee every string re-resolves, but it tears down and rebuilds
             // the whole tree — losing scroll position and tvOS focus on every

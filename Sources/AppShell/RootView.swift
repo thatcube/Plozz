@@ -185,6 +185,11 @@ public struct RootView: View {
                         redownload: { appState.redownloadCloudSync() },
                         reset: { appState.resetCloudSync() }
                     )
+                    // Per-profile language wraps only the profile-scoped subtree.
+                    // The root AppLanguageScope stays the device-level default,
+                    // because onboarding and the profile picker are shown BEFORE
+                    // there is a profile whose language we could honour.
+                    AppLanguageScope(model: appState.profileSettings.appLanguageModel) {
                     MainTabView(
                         accounts: accounts,
                         detailSnapshotCache: detailCache,
@@ -287,6 +292,7 @@ public struct RootView: View {
                         plexIdentityGeneration: appState.plexHomeUsers.plexIdentityGeneration
                     ))
                     .transition(.opacity)
+                    }
                     }
                 }
                 }

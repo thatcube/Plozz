@@ -45,41 +45,63 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
         case .system:
             return nil
         case let .explicit(code):
-            // Keep the device's REGION and override only the language, so
-            // choosing Spanish doesn't silently switch date and number formats to
-            // Spain's. `Locale.current.region` is the user's actual region.
             var components = Locale.Components(identifier: code)
+            // Setting `.region` overrides FORMATTING only (it produces `@rg=`), and
+            // leaves the tag's own region on `languageComponents` untouched. So
+            // "pt-BR" for a US user yields `pt_BR@rg=uszzzz`: Brazilian Portuguese
+            // text, US dates and numbers — which is what we want. Worth stating
+            // because `Locale.region` and `Locale.language.region` look
+            // interchangeable and are not; only the latter selects the `.lproj`.
             if let region = Locale.current.region { components.region = region }
             return Locale(components: components)
         }
     }
 
-    /// Every language the app can actually display, derived from what the bundle
-    /// SHIPS rather than a hardcoded list — so adding a translation makes it
-    /// appear in the picker with no code change (and, just as importantly, a
-    /// language can never be offered that has no strings behind it).
+    /// Languages this build is prepared to OFFER, in the order shown.
+    ///
+    /// Deliberately an explicit list rather than "whatever `.lproj` folders exist".
+    /// A bundled localization only means *some* strings were translated — Spanish
+    /// sat at ~8% while its folder was present, and offering that would show a
+    /// mostly-English UI to someone who asked for Spanish. Readiness is a release
+    /// decision, so it is stated here and reviewed when a language actually ships.
+    ///
+    /// Adding a language: translate it, check it against the pseudolocalization
+    /// pass, then add its tag here.
+    public static let releaseReady: [String] = []
+
+    /// Every language the picker should show: `.system` plus the release-ready
+    /// tags that are actually present in the bundle. The bundle check means a
+    /// mis-typed tag can never produce an option with nothing behind it.
     public static func available(in bundle: Bundle = .main) -> [AppLanguage] {
-        let codes = bundle.localizations
-            .filter { $0 != "Base" }
+        let shipped = Set(bundle.localizations)
+        let offered = releaseReady
+            .filter(shipped.contains)
             .sorted { lhs, rhs in
                 localizedName(for: lhs).localizedCaseInsensitiveCompare(localizedName(for: rhs)) == .orderedAscending
             }
-        return [.system] + codes.map(AppLanguage.explicit)
+        return [.system] + offered.map(AppLanguage.explicit)
     }
 
-    /// The language's name written IN that language ("Español", not "Spanish") —
-    /// the convention every platform picker uses, because someone looking for
-    /// their own language recognises its endonym, not its English name.
-    public var displayName: String {
+    /// The endonym for a specific language. `nil` for `.system`, whose label is
+    /// app copy rather than a language name — see `systemOptionTitle`.
+    ///
+    /// Split in two because resolving the "System" label here required
+    /// `String(localized:)`, which freezes it at the process locale and ignores
+    /// the locale injected by AppLanguageScope. That is precisely the eager
+    /// resolution the guard forbids elsewhere.
+    public var endonym: String? {
         switch self {
-        case .system:
-            return String(localized: "language.system",
-                          defaultValue: "System",
-                          comment: "Language picker option meaning 'follow the device language'.")
-        case let .explicit(code):
-            return Self.localizedName(for: code)
+        case .system: return nil
+        case let .explicit(code): return Self.localizedName(for: code)
         }
     }
+
+    /// Label for the "follow the device" option — real copy, so a resource.
+    public static let systemOptionTitle = LocalizedStringResource(
+        "language.system",
+        defaultValue: "System",
+        comment: "Language picker option meaning 'follow the device language'."
+    )
 
     private static func localizedName(for code: String) -> String {
         let locale = Locale(identifier: code)

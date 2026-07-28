@@ -224,6 +224,38 @@ def check_conflicts(files: list[Path]) -> int:
     return len(conflicts)
 
 
+
+def validate_catalog() -> int:
+    """Check the artifact translators actually receive.
+
+    The guard's AST rule for brand names enumerated call sites, which meant a
+    brand reaching the catalog by any path it didn't model went unnoticed — ten
+    of them did. Validating the catalog instead checks the thing that matters:
+    whatever the route, a brand must not end up in front of a translator.
+    """
+    catalog = json.loads(CATALOG.read_text())
+    strings = catalog.get("strings", {})
+    problems: list[str] = []
+
+    config_path = REPO / "tools/l10n-guard.json"
+    never_translate: set[str] = set()
+    if config_path.exists():
+        never_translate = set(json.loads(config_path.read_text()).get("neverTranslate", []))
+
+    for brand in sorted(never_translate & set(strings)):
+        problems.append(f"brand '{brand}' is translatable — render it with Text(verbatim:)")
+
+    # Keys that carry no words for a translator to translate.
+    for key in sorted(strings):
+        stripped = key.strip()
+        if not stripped or not any(ch.isalpha() for ch in stripped):
+            problems.append(f"key {key!r} has no translatable content")
+
+    for problem in problems:
+        print(f"  ✗ {problem}")
+    return len(problems)
+
+
 def sync(files: list[Path], allow_stale: bool) -> None:
     """Hand the selected `.stringsdata` to `xcstringstool sync`.
 
@@ -274,9 +306,12 @@ def main() -> int:
         sys.exit("✗ xcrun not found — Xcode command line tools are required.")
 
     platform_keys = [args.platform] if args.platform else sorted(PLATFORMS)
-    # Stale marking deletes catalog entries the build did not see. Only safe with
-    # the full tvOS + iOS union; a single-platform run would prune the other's copy.
-    allow_stale = args.platform is None
+    # Stale marking deletes catalog entries the build did not see, so it is only
+    # safe when THIS run demonstrably produced the full tvOS + iOS union.
+    # Deriving it from the argument list alone was a bug: `--platform tvos`
+    # followed by a plain `--no-build` would reuse tvOS-only output and happily
+    # prune every iOS-only string.
+    allow_stale = args.platform is None and not args.no_build
 
     if args.clean and DERIVED.exists():
         shutil.rmtree(DERIVED)
@@ -284,6 +319,9 @@ def main() -> int:
         build_for_extraction(platform_keys, args.quiet)
 
     files = collect_stringsdata(ARCH)
+    if args.no_build and args.platform is None:
+        print("▸ --no-build: reusing cached extraction, so stale marking is skipped "
+              "(cannot prove both platforms are represented)")
     if not files:
         sys.exit("✗ No .stringsdata found. Extraction did not run — check "
                  "defaultLocalization in Package.swift and SWIFT_EMIT_LOC_STRINGS.")
@@ -295,6 +333,7 @@ def main() -> int:
     after = CATALOG.read_text()
 
     if args.check:
+        conflicts += validate_catalog()
         if before != after:
             CATALOG.write_text(before)  # leave the tree as we found it
             print("✗ Catalog is out of date. Run tools/l10n-sync.py and commit.",

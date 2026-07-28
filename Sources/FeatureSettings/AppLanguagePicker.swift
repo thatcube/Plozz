@@ -19,13 +19,15 @@ struct AppLanguagePicker: View {
                 options: languages,
                 selection: $model.language,
                 title: { language in
-                    // Verbatim: an endonym like "Español" is a proper noun that
-                    // must read identically whatever the current UI language is.
-                    // Routing it through a catalog lookup would both be wrong and
-                    // be the key-from-a-runtime-string antipattern the guard
-                    // rejects. ("System" is the one entry that IS copy, and
-                    // AppLanguage.displayName localizes that case itself.)
-                    Text(verbatim: language.displayName)
+                    // An endonym ("Español") is a proper noun and must read
+                    // identically whatever the UI language is, so it is verbatim.
+                    // "System" is the one row that is genuinely copy, so it stays
+                    // a resource and re-resolves with the injected locale.
+                    if let endonym = language.endonym {
+                        Text(verbatim: endonym)
+                    } else {
+                        Text(AppLanguage.systemOptionTitle)
+                    }
                 }
             )
 

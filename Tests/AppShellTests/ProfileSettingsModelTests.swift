@@ -29,12 +29,16 @@ final class ProfileSettingsModelTests: XCTestCase {
         XCTAssertNotEqual(heroBefore, ObjectIdentifier(model.heroSettingsModel))
     }
 
-    /// `rebuild(namespace:)` must swap *every* one of the 18 sub-models, not just a
+    /// `rebuild(namespace:)` must swap *every* sub-model, not just a
     /// representative few — a missed model would silently freeze to the old profile.
-    func testRebuildSwapsAllEighteenSubModelInstances() {
+    /// The language model is here because it WAS missed: it existed and supported
+    /// namespacing, but nothing rebuilt it, so "per-profile language" was in truth
+    /// device-wide.
+    func testRebuildSwapsAllSubModelInstances() {
         let model = ProfileSettingsModel(namespace: "ns-a")
 
         let before: [ObjectIdentifier] = [
+            ObjectIdentifier(model.appLanguageModel),
             ObjectIdentifier(model.subtitleBehaviorModel),
             ObjectIdentifier(model.subtitleStyleModel),
             ObjectIdentifier(model.spoilerModel),
@@ -54,11 +58,12 @@ final class ProfileSettingsModelTests: XCTestCase {
             ObjectIdentifier(model.heroSettingsModel),
             ObjectIdentifier(model.nightShiftModel),
         ]
-        XCTAssertEqual(before.count, 18, "Expected 18 per-profile sub-models")
+        XCTAssertEqual(before.count, 19, "Expected 19 per-profile sub-models")
 
         model.rebuild(namespace: "ns-b")
 
         let after: [ObjectIdentifier] = [
+            ObjectIdentifier(model.appLanguageModel),
             ObjectIdentifier(model.subtitleBehaviorModel),
             ObjectIdentifier(model.subtitleStyleModel),
             ObjectIdentifier(model.spoilerModel),

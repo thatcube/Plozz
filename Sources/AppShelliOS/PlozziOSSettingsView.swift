@@ -1128,9 +1128,15 @@ private struct PlozziOSAppearanceSettingsView: View {
             SettingsSectionGroup("Language") {
                 Picker("Language", selection: $appLanguage.language) {
                     ForEach(AppLanguage.available()) { language in
-                        // Verbatim: an endonym ("Español") is a proper noun and
-                        // must read the same whatever the current UI language is.
-                        Text(verbatim: language.displayName).tag(language)
+                        // Endonym verbatim; the "System" row is copy.
+                        Group {
+                            if let endonym = language.endonym {
+                                Text(verbatim: endonym)
+                            } else {
+                                Text(AppLanguage.systemOptionTitle)
+                            }
+                        }
+                        .tag(language)
                     }
                 }
             } footer: {

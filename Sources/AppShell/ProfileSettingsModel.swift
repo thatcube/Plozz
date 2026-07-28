@@ -38,6 +38,9 @@ public final class ProfileSettingsModel {
     /// lives in `playbackModel`; this only owns the overrides. Rebuilt on profile
     /// switch, mirroring `subtitlePolicyModel`.
     public private(set) var audioPolicyModel: AudioPolicyModel
+    /// The profile's UI language. Rebuilt with the rest on a profile switch, so
+    /// each household member reads Plozz in their own language.
+    public private(set) var appLanguageModel: AppLanguageSettingsModel
     public private(set) var themeModel: ThemeSettingsModel
     /// Opt-in background theme music for movie and series detail pages.
     public private(set) var themeMusicModel: ThemeMusicSettingsModel
@@ -104,6 +107,7 @@ public final class ProfileSettingsModel {
         playbackModel: PlaybackSettingsModel? = nil,
         subtitlePolicyModel: SubtitlePolicyModel? = nil,
         audioPolicyModel: AudioPolicyModel? = nil,
+        appLanguageModel: AppLanguageSettingsModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
         themeMusicModel: ThemeMusicSettingsModel? = nil,
         heroBackgroundModel: HeroBackgroundSettingsModel? = nil,
@@ -124,6 +128,7 @@ public final class ProfileSettingsModel {
         let injected = subtitleBehaviorModel != nil || subtitleStyleModel != nil
             || spoilerModel != nil || playbackModel != nil
             || subtitlePolicyModel != nil || audioPolicyModel != nil
+            || appLanguageModel != nil
             || themeModel != nil || themeMusicModel != nil || heroBackgroundModel != nil
             || diagnosticsModel != nil
             || musicPlayerModel != nil || homeLibraryVisibilityModel != nil
@@ -138,6 +143,7 @@ public final class ProfileSettingsModel {
         // funnels through the same builder so the two code paths can't drift.
         let models = Self.makeModels(
             namespace: ns,
+            appLanguageModel: appLanguageModel,
             subtitleBehaviorModel: subtitleBehaviorModel,
             subtitleStyleModel: subtitleStyleModel,
             spoilerModel: spoilerModel,
@@ -164,6 +170,7 @@ public final class ProfileSettingsModel {
         self.playbackModel = models.playbackModel
         self.subtitlePolicyModel = models.subtitlePolicyModel
         self.audioPolicyModel = models.audioPolicyModel
+        self.appLanguageModel = models.appLanguageModel
         self.themeModel = models.themeModel
         self.themeMusicModel = models.themeMusicModel
         self.heroBackgroundModel = models.heroBackgroundModel
@@ -192,6 +199,7 @@ public final class ProfileSettingsModel {
         playbackModel = models.playbackModel
         subtitlePolicyModel = models.subtitlePolicyModel
         audioPolicyModel = models.audioPolicyModel
+        appLanguageModel = models.appLanguageModel
         themeModel = models.themeModel
         themeMusicModel = models.themeMusicModel
         heroBackgroundModel = models.heroBackgroundModel
@@ -210,6 +218,7 @@ public final class ProfileSettingsModel {
     /// Aggregate of the 18 per-profile sub-models, used to funnel `init` and
     /// `rebuild(namespace:)` through one construction path.
     private struct Models {
+        var appLanguageModel: AppLanguageSettingsModel
         var subtitleBehaviorModel: SubtitleBehaviorModel
         var subtitleStyleModel: SubtitleStyleModel
         var spoilerModel: SpoilerSettingsModel
@@ -236,6 +245,7 @@ public final class ProfileSettingsModel {
     /// to `ns`. Adding or removing a setting means editing only this list.
     private static func makeModels(
         namespace ns: String?,
+        appLanguageModel: AppLanguageSettingsModel? = nil,
         subtitleBehaviorModel: SubtitleBehaviorModel? = nil,
         subtitleStyleModel: SubtitleStyleModel? = nil,
         spoilerModel: SpoilerSettingsModel? = nil,
@@ -257,6 +267,7 @@ public final class ProfileSettingsModel {
         nightShiftModel: NightShiftSettingsModel? = nil
     ) -> Models {
         Models(
+            appLanguageModel: appLanguageModel ?? AppLanguageSettingsModel(store: AppLanguageSettingsStore(namespace: ns)),
             subtitleBehaviorModel: subtitleBehaviorModel ?? SubtitleBehaviorModel(store: SubtitleBehaviorStore(namespace: ns)),
             subtitleStyleModel: subtitleStyleModel ?? SubtitleStyleModel(store: SubtitleStyleStore(namespace: ns)),
             spoilerModel: spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns)),

@@ -1,0 +1,52 @@
+name: Translation correction
+description: Report wording that is wrong, awkward, clipped, or still English.
+title: "[Translation] "
+labels:
+  - translation
+body:
+  - type: input
+    id: language
+    attributes:
+      label: Language
+      placeholder: "e.g. Polish, pt-BR, Arabic"
+    validations:
+      required: true
+
+  - type: input
+    id: screen
+    attributes:
+      label: Screen
+      description: Where in Plozz did you see it?
+      placeholder: "e.g. Settings > Playback > Subtitles"
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current wording
+      description: Copy the text exactly, or attach a screenshot.
+    validations:
+      required: true
+
+  - type: textarea
+    id: better
+    attributes:
+      label: Better wording
+      description: What should Plozz say instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reason
+    attributes:
+      label: Why
+      description: Optional context about grammar, tone, terminology, or layout.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I checked the wording in the current TestFlight or App Store build.
+          required: true

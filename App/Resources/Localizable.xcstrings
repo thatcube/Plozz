@@ -3609,35 +3609,99 @@
       "comment": "Accessibility label for a profile color swatch in the profile editor when choosing a profile tile or avatar background color."
     },
     "Mode": {
-      "comment": "Group title in tvOS spoiler settings above the spoiler-handling mode picker."
+      "comment": "Group title in tvOS spoiler settings above the spoiler-handling mode picker.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Modo"
+          }
+        }
+      }
     },
     "More Actions": {
-      "comment": "Button label on the iOS/iPadOS item detail screen for the overflow menu of extra actions for the current item."
+      "comment": "Button label on the iOS/iPadOS item detail screen for the overflow menu of extra actions for the current item.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Más acciones"
+          }
+        }
+      }
     },
     "More Info": {
-      "comment": "Label for the Home hero action that opens the selected title's detail page, on tvOS and iOS/iPadOS."
+      "comment": "Label for the Home hero action that opens the selected title's detail page, on tvOS and iOS/iPadOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Más información"
+          }
+        }
+      }
     },
     "More actions": {
-      "comment": "Accessibility label for the circular overflow button that opens extra hero or player actions on tvOS and iOS/iPadOS."
+      "comment": "Accessibility label for the circular overflow button that opens extra hero or player actions on tvOS and iOS/iPadOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Más acciones"
+          }
+        }
+      }
     },
     "More actions for %@": {
       "comment": "Accessibility label for the ellipsis actions menu on media cards, episode rows, and download tiles. %@ is the media title for that menu."
     },
     "More colors": {
-      "comment": "Button label in the iOS/iPadOS profile editor that opens the full profile color palette."
+      "comment": "Button label in the iOS/iPadOS profile editor that opens the full profile color palette.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Más colores"
+          }
+        }
+      }
     },
     "Move a provider here to stop using it.": {},
     "Movies & TV": {},
     "Movies, shows, and episodes": {},
     "Music": {
-      "comment": "Label for the Music tab, and fallback title for a music library when the server does not provide a library name."
+      "comment": "Label for the Music tab, and fallback title for a music library when the server does not provide a library name.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Música"
+          }
+        }
+      }
     },
     "Music & Audio": {},
     "Music Player": {
-      "comment": "Section header and row title in Settings for customizing the music now-playing screen."
+      "comment": "Section header and row title in Settings for customizing the music now-playing screen.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reproductor de música"
+          }
+        }
+      }
     },
     "Mute trailer": {
-      "comment": "Accessibility label for the iOS/iPadOS hero trailer audio toggle when trailer audio is currently on."
+      "comment": "Accessibility label for the iOS/iPadOS hero trailer audio toggle when trailer audio is currently on.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Silenciar el tráiler"
+          }
+        }
+      }
     },
     "NEARBY": {
       "comment": "Small heading above nearby-device choices on the tvOS Set Up Another Device screen."
@@ -3646,55 +3710,167 @@
       "comment": "Section header on the iOS/iPadOS Add NFS Share screen above host, port, and export-discovery controls."
     },
     "Name (optional)": {
-      "comment": "Optional display-name text field for network shares in iOS/iPadOS add-share screens, used to give the saved share a custom nickname."
+      "comment": "Optional display-name text field for network shares in iOS/iPadOS add-share screens, used to give the saved share a custom nickname.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nombre (opcional)"
+          }
+        }
+      }
     },
     "Nature & Sky": {},
     "Nature & Weather": {},
     "Navigation": {
-      "comment": "Settings row title for choosing the app's navigation style, such as top tabs or a sidebar."
+      "comment": "Settings row title for choosing the app's navigation style, such as top tabs or a sidebar.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Navegación"
+          }
+        }
+      }
     },
     "Nearby servers": {
-      "comment": "Heading above the discovered local Jellyfin or Emby server list on the iOS/iPadOS Add Server screen."
+      "comment": "Heading above the discovered local Jellyfin or Emby server list on the iOS/iPadOS Add Server screen.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Servidores cercanos"
+          }
+        }
+      }
     },
     "Needs sign-in on this device": {},
     "Network protocol": {
-      "comment": "Section header on the iOS/iPadOS Add Share screen where the user chooses SMB, NFS, WebDAV, SFTP, or FTP."
+      "comment": "Section header on the iOS/iPadOS Add Share screen where the user chooses SMB, NFS, WebDAV, SFTP, or FTP.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Protocolo de red"
+          }
+        }
+      }
     },
     "Neutral background": {
-      "comment": "Accessibility label for the neutral or no-color profile background swatch in the iOS/iPadOS profile editor."
+      "comment": "Accessibility label for the neutral or no-color profile background swatch in the iOS/iPadOS profile editor.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fondo neutro"
+          }
+        }
+      }
     },
     "Never": {
-      "comment": "Value shown for Last scanned when a library or share has not been scanned yet."
+      "comment": "Value shown for Last scanned when a library or share has not been scanned yet.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nunca"
+          }
+        }
+      }
     },
     "Never show forced subtitles.": {
-      "comment": "Explanation shown under the Only Non-Forced subtitle search option."
+      "comment": "Explanation shown under the Only Non-Forced subtitle search option.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No mostrar nunca los subtítulos forzados."
+          }
+        }
+      }
     },
     "Never show subtitles for the deaf or hard-of-hearing.": {
       "comment": "Explanation shown under the Only Non-SDH subtitle search option."
     },
     "New Profile": {
-      "comment": "Title for the create-profile screen in the profile editor, including the editor header and default preview name before the user types one."
+      "comment": "Title for the create-profile screen in the profile editor, including the editor header and default preview name before the user types one.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Perfil nuevo"
+          }
+        }
+      }
     },
     "New server from your other device": {},
     "Next": {
-      "comment": "Accessibility label and action name for the Home hero control that advances to the next featured item."
+      "comment": "Accessibility label and action name for the Home hero control that advances to the next featured item.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Siguiente"
+          }
+        }
+      }
     },
     "Next Episode": {
-      "comment": "Playback action button for skipping to the next episode, shown in the tvOS info panel and iOS/iPadOS player controls."
+      "comment": "Playback action button for skipping to the next episode, shown in the tvOS info panel and iOS/iPadOS player controls.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Episodio siguiente"
+          }
+        }
+      }
     },
     "Nickname": {
-      "comment": "Label for the custom display-name field on the tvOS add-network-share flow."
+      "comment": "Label for the custom display-name field on the tvOS add-network-share flow.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Apodo"
+          }
+        }
+      }
     },
     "Nickname — e.g. Living Room NAS": {},
     "No": {
-      "comment": "Negative answer button on the tvOS device-pairing code confirmation screen when the codes do not match."
+      "comment": "Negative answer button on the tvOS device-pairing code confirmation screen when the codes do not match.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No"
+          }
+        }
+      }
     },
     "No Default Server": {},
     "No Downloads": {
-      "comment": "Empty-state title on iOS/iPadOS Downloads screens when no offline downloads are available."
+      "comment": "Empty-state title on iOS/iPadOS Downloads screens when no offline downloads are available.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sin descargas"
+          }
+        }
+      }
     },
     "No Matches": {
-      "comment": "Empty-state title in the iOS/iPadOS diagnostics log viewer when log entries exist but none match the current filter."
+      "comment": "Empty-state title in the iOS/iPadOS diagnostics log viewer when log entries exist but none match the current filter.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sin coincidencias"
+          }
+        }
+      }
     },
     "No Plex Account": {},
     "No Plex Home users found for this account.": {},
@@ -3710,11 +3886,27 @@
     "No alternate audio": {},
     "No browsable shares were found. You can type the share name manually.": {},
     "No color": {
-      "comment": "Label next to the neutral emoji-background option in the tvOS profile editor when choosing no color behind an emoji avatar."
+      "comment": "Label next to the neutral emoji-background option in the tvOS profile editor when choosing no color behind an emoji avatar.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sin color"
+          }
+        }
+      }
     },
     "No entries in this category.": {},
     "No episodes": {
-      "comment": "Empty-state title for the inline episode rail on iOS/iPadOS when a show or season has no episodes to display."
+      "comment": "Empty-state title for the inline episode rail on iOS/iPadOS when a show or season has no episodes to display.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sin episodios"
+          }
+        }
+      }
     },
     "No folders were found inside this export.": {},
     "No libraries found on this server.": {},
@@ -3751,19 +3943,59 @@
       "comment": "Thermal-status label in developer or performance diagnostics when the device thermal state is normal."
     },
     "None": {
-      "comment": "Label used for settings options that disable an effect or select no value, and as the provider summary in diagnostics when no media providers are connected."
+      "comment": "Label used for settings options that disable an effect or select no value, and as the provider summary in diagnostics when no media providers are connected.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ninguno"
+          }
+        }
+      }
     },
     "None available": {
-      "comment": "Shown on the Second Track row when there are no eligible tracks to show as a second subtitle line."
+      "comment": "Shown on the Second Track row when there are no eligible tracks to show as a second subtitle line.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ninguno disponible"
+          }
+        }
+      }
     },
     "None yet": {
-      "comment": "Empty-state text when no metadata fields or recent diagnostic log entries have been collected yet."
+      "comment": "Empty-state text when no metadata fields or recent diagnostic log entries have been collected yet.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Todavía ninguno"
+          }
+        }
+      }
     },
     "Not Allowed": {
-      "comment": "Alert title shown when a Seerr request fails because the mapped user or account does not have permission to request that title."
+      "comment": "Alert title shown when a Seerr request fails because the mapped user or account does not have permission to request that title.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No permitido"
+          }
+        }
+      }
     },
     "Not Now": {
-      "comment": "Dismiss or skip action for prompts to set up synced servers or sync and pairing flows later, on tvOS and iOS/iPadOS."
+      "comment": "Dismiss or skip action for prompts to set up synced servers or sync and pairing flows later, on tvOS and iOS/iPadOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ahora no"
+          }
+        }
+      }
     },
     "Not Now — Just Me": {},
     "Not connected": {
@@ -3778,14 +4010,30 @@
       }
     },
     "Not now": {
-      "comment": "Secondary button on the tvOS first-run Use Profiles screen to skip enabling profiles for now."
+      "comment": "Secondary button on the tvOS first-run Use Profiles screen to skip enabling profiles for now.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ahora no"
+          }
+        }
+      }
     },
     "Not on your watchlist": {},
     "Not scanned yet": {},
     "Not seeing changes from your other devices? Pull a fresh copy from iCloud.": {},
     "Not seeing it nearby? Scan the QR or type the short code shown on the other device.": {},
     "Not watched": {
-      "comment": "Accessibility value for the watched or unwatched hero toggle on tvOS when the selected item is currently unplayed."
+      "comment": "Accessibility value for the watched or unwatched hero toggle on tvOS when the selected item is currently unplayed.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sin ver"
+          }
+        }
+      }
     },
     "Nothing detected yet.": {},
     "Nothing here yet.": {
@@ -3799,14 +4047,38 @@
       }
     },
     "Nothing here.": {
-      "comment": "Empty-state text in network-share folder or share browsing when the current list has no locations to show."
+      "comment": "Empty-state text in network-share folder or share browsing when the current list has no locations to show.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aquí no hay nada."
+          }
+        }
+      }
     },
     "Nothing matched in your language. If this is a Plex or Jellyfin server, make sure a subtitle source (e.g. OpenSubtitles) is set up on the server.": {},
     "Now Playing": {
-      "comment": "Title for the now-playing screen or card, used as the iOS/iPadOS player sheet navigation title and as the fallback headline when music playback has no custom headline."
+      "comment": "Title for the now-playing screen or card, used as the iOS/iPadOS player sheet navigation title and as the fallback headline when music playback has no custom headline.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reproduciendo ahora"
+          }
+        }
+      }
     },
     "OK": {
-      "comment": "Default dismiss button on many alerts and dialogs across the app."
+      "comment": "Default dismiss button on many alerts and dialogs across the app.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aceptar"
+          }
+        }
+      }
     },
     "OR": {
       "comment": "Center separator between QR-code setup and manual code-entry instructions in tvOS device-code authorization screens."
@@ -3850,7 +4122,15 @@
     },
     "Off. Set to always on.": {},
     "Offline": {
-      "comment": "Reachability status label for servers or alternate media sources that are unavailable."
+      "comment": "Reachability status label for servers or alternate media sources that are unavailable.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sin conexión"
+          }
+        }
+      }
     },
     "On": {
       "comment": "Generic enabled-state label used in settings rows, toggles, and summary values when a feature is enabled.",
@@ -3879,19 +4159,59 @@
     "On your other device, open Plozz ▸ Settings ▸ Sync & Setup ▸ “Set up another device.”": {},
     "On your watchlist": {},
     "Online": {
-      "comment": "Reachability status label for a media server that is reachable over the network."
+      "comment": "Reachability status label for a media server that is reachable over the network.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "En línea"
+          }
+        }
+      }
     },
     "Only Forced": {
-      "comment": "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+      "comment": "Subtitle search preference option for forced (foreign-passage-only) subtitles.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solo forzados"
+          }
+        }
+      }
     },
     "Only Non-Forced": {
-      "comment": "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+      "comment": "Subtitle search preference option for forced (foreign-passage-only) subtitles.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solo no forzados"
+          }
+        }
+      }
     },
     "Only Non-SDH": {
-      "comment": "Subtitle search preference option for hearing-impaired (SDH) subtitles."
+      "comment": "Subtitle search preference option for hearing-impaired (SDH) subtitles.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solo sin SDH"
+          }
+        }
+      }
     },
     "Only SDH": {
-      "comment": "Subtitle search preference option for hearing-impaired (SDH) subtitles."
+      "comment": "Subtitle search preference option for hearing-impaired (SDH) subtitles.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solo SDH"
+          }
+        }
+      }
     },
     "Only approve if this matches your server. Approving pins this exact certificate; a change requires re-approval.": {},
     "Only approve if this matches your server’s SSH host key. Approving pins this exact key; a change requires re-approval.": {},
@@ -3903,7 +4223,15 @@
       "comment": "Explanation shown under the Only SDH subtitle search option."
     },
     "Opacity": {
-      "comment": "Label for subtitle appearance controls that adjust text or background opacity."
+      "comment": "Label for subtitle appearance controls that adjust text or background opacity.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Opacidad"
+          }
+        }
+      }
     },
     "Open Jellyfin on another device, choose **Quick Connect**, and enter this code.": {},
     "Open Jellyfin on another device, choose Quick Connect, and enter this code.": {},
@@ -3922,7 +4250,15 @@
       "comment": "Button in iOS/iPadOS Trakt settings that opens the authorization webpage during account connection."
     },
     "Optional note": {
-      "comment": "Multi-line text field in the iOS/iPadOS Send Diagnostics screen for an optional user note sent with the diagnostics report."
+      "comment": "Multi-line text field in the iOS/iPadOS Send Diagnostics screen for an optional user note sent with the diagnostics report.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nota opcional"
+          }
+        }
+      }
     },
     "Optional. Use your own TMDB read token so lookups run under your account's rate limit.": {},
     "Or enter a code at": {},
@@ -3934,70 +4270,222 @@
       "comment": "Selectable color name in the profile avatar tile-color picker."
     },
     "Order": {
-      "comment": "Label for pickers that choose ordering behavior, including library sort order and metadata-provider ordering mode in settings."
+      "comment": "Label for pickers that choose ordering behavior, including library sort order and metadata-provider ordering mode in settings.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Orden"
+          }
+        }
+      }
     },
     "Original Title": {
-      "comment": "Fact label on a movie or show detail screen for the work's original-language title."
+      "comment": "Fact label on a movie or show detail screen for the work's original-language title.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Título original"
+          }
+        }
+      }
     },
     "Other options": {
-      "comment": "Section header in the iOS add-server flow above alternate sign-in methods such as username/password or Quick Connect."
+      "comment": "Section header in the iOS add-server flow above alternate sign-in methods such as username/password or Quick Connect.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Otras opciones"
+          }
+        }
+      }
     },
     "Outline": {
-      "comment": "Subtitle appearance option used for the outline toggle, the outline preset name, and the summary label when only outline styling is enabled."
+      "comment": "Subtitle appearance option used for the outline toggle, the outline preset name, and the summary label when only outline styling is enabled.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Contorno"
+          }
+        }
+      }
     },
     "Outline Color": {
-      "comment": "Subtitle appearance setting label for the color of the text outline."
+      "comment": "Subtitle appearance setting label for the color of the text outline.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Color del contorno"
+          }
+        }
+      }
     },
     "Outline Width": {
-      "comment": "Subtitle appearance setting label for the thickness of the text outline."
+      "comment": "Subtitle appearance setting label for the thickness of the text outline.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Grosor del contorno"
+          }
+        }
+      }
     },
     "Overview": {
-      "comment": "Section title in Settings' metadata diagnostics view that shows the media item's Overview (synopsis) field as returned by the server."
+      "comment": "Section title in Settings' metadata diagnostics view that shows the media item's Overview (synopsis) field as returned by the server.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sinopsis"
+          }
+        }
+      }
     },
     "PIN": {
       "comment": "Short label beside the lock badge for PIN-protected Plex Home users, and on the tvOS Plex PIN entry screen as the code indicator."
     },
     "PIN required": {
-      "comment": "Accessibility label for the lock badge that marks a Plex Home user profile as PIN protected."
+      "comment": "Accessibility label for the lock badge that marks a Plex Home user profile as PIN protected.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se requiere un PIN"
+          }
+        }
+      }
     },
     "PIN-protected users must unlock when their Plozz profile becomes active.": {},
     "PREVIEW": {
       "comment": "All-caps heading above the live profile card preview in the tvOS profile editor."
     },
     "Parent Folder": {
-      "comment": "Button in the iOS FTP and SFTP folder browser that moves up to the parent directory."
+      "comment": "Button in the iOS FTP and SFTP folder browser that moves up to the parent directory.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Carpeta superior"
+          }
+        }
+      }
     },
     "Partially available": {
-      "comment": "Availability status label on the iOS item detail screen when only some requested copies are already in the user's library."
+      "comment": "Availability status label on the iOS item detail screen when only some requested copies are already in the user's library.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Parcialmente disponible"
+          }
+        }
+      }
     },
     "Password": {
-      "comment": "Field label for password entry in sign-in and network-share connection forms."
+      "comment": "Field label for password entry in sign-in and network-share connection forms.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Contraseña"
+          }
+        }
+      }
     },
     "Password (optional)": {
-      "comment": "Field label for an optional password when adding guest-capable SMB or other share connections on iOS."
+      "comment": "Field label for an optional password when adding guest-capable SMB or other share connections on iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Contraseña (opcional)"
+          }
+        }
+      }
     },
     "Path": {
-      "comment": "Field label for the remote folder path in the iOS FTP and SFTP share setup screens."
+      "comment": "Field label for the remote folder path in the iOS FTP and SFTP share setup screens.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ruta"
+          }
+        }
+      }
     },
     "Pause": {
-      "comment": "Button label for pausing current playback or pausing an active download on iOS."
+      "comment": "Button label for pausing current playback or pausing an active download on iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pausar"
+          }
+        }
+      }
     },
     "Pause All": {
-      "comment": "Button in the iOS Downloads screen that pauses every active download."
+      "comment": "Button in the iOS Downloads screen that pauses every active download.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pausar todo"
+          }
+        }
+      }
     },
     "Pause Download": {
-      "comment": "Context-menu action and item-detail button that pauses an in-progress download."
+      "comment": "Context-menu action and item-detail button that pauses an in-progress download.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pausar la descarga"
+          }
+        }
+      }
     },
     "Pause in Low Data Mode": {},
     "Paused": {
-      "comment": "Status text shown for paused playback in diagnostics and for paused downloads in the downloads UI."
+      "comment": "Status text shown for paused playback in diagnostics and for paused downloads in the downloads UI.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "En pausa"
+          }
+        }
+      }
     },
     "People": {
-      "comment": "Category title in the profile avatar symbol picker for person-themed SF Symbols."
+      "comment": "Category title in the profile avatar symbol picker for person-themed SF Symbols.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Personas"
+          }
+        }
+      }
     },
     "Personal Home rows and library visibility": {},
     "Photo": {
-      "comment": "Option in the profile editor for using a photo as the profile avatar."
+      "comment": "Option in the profile editor for using a photo as the profile avatar.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Foto"
+          }
+        }
+      }
     },
     "Photo from %@": {
       "comment": "Accessibility label for a borrowable profile photo choice in the profile editor on tvOS and iOS. %@ is the source label, such as a user name on a server."
@@ -4008,14 +4496,30 @@
       "comment": "Explanation shown under the Continue Watching hero source option in Settings."
     },
     "Picture": {
-      "comment": "Section header in the iOS Circadian settings above picture adjustments like warmth and dimness."
+      "comment": "Section header in the iOS Circadian settings above picture adjustments like warmth and dimness.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Imagen"
+          }
+        }
+      }
     },
     "Picture in Picture": {},
     "Pink": {
       "comment": "Selectable color name used for profile tile colors and subtitle appearance color presets."
     },
     "Placement": {
-      "comment": "Subtitle layout setting label for where the secondary subtitle track appears relative to the primary track."
+      "comment": "Subtitle layout setting label for where the secondary subtitle track appears relative to the primary track.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Posición"
+          }
+        }
+      }
     },
     "Play": {
       "comment": "Generic media action label for starting playback, used on hero and detail play buttons, music actions, and the play-pause control when playback is currently paused.",
@@ -4030,7 +4534,15 @@
     },
     "Play & Hobbies": {},
     "Play Now": {
-      "comment": "Button label in the iOS Up Next overlay that starts the next episode immediately instead of waiting for the countdown."
+      "comment": "Button label in the iOS Up Next overlay that starts the next episode immediately instead of waiting for the countdown.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reproducir ahora"
+          }
+        }
+      }
     },
     "Play the trailer behind the hero": {},
     "Play trailer behind the hero": {},
@@ -4046,24 +4558,72 @@
       }
     },
     "Playback Diagnostics": {
-      "comment": "Title of the on-screen playback diagnostics overlay shown over the player."
+      "comment": "Title of the on-screen playback diagnostics overlay shown over the player.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diagnóstico de reproducción"
+          }
+        }
+      }
     },
     "Playback Diagnostics Overlay": {},
     "Playback Diagnostics overlays live playback stats (codec, bitrate, buffer, memory) on top of the video. Home Performance Overlay shows a live Home rendering HUD. Both are power-user aids — leave them off for normal watching. Saved on this profile.": {},
     "Playback Speed": {
-      "comment": "Button label and sheet title in iOS player controls for changing playback rate."
+      "comment": "Button label and sheet title in iOS player controls for changing playback rate.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Velocidad de reproducción"
+          }
+        }
+      }
     },
     "Playback Sync": {
-      "comment": "Button label and sheet title in iOS player controls for adjusting playback sync, such as subtitle timing."
+      "comment": "Button label and sheet title in iOS player controls for adjusting playback sync, such as subtitle timing.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sincronización de reproducción"
+          }
+        }
+      }
     },
     "Playback diagnostics": {
-      "comment": "Toggle label in iOS diagnostics settings that enables the playback troubleshooting overlay."
+      "comment": "Toggle label in iOS diagnostics settings that enables the playback troubleshooting overlay.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diagnóstico de reproducción"
+          }
+        }
+      }
     },
     "Playback information": {
-      "comment": "Accessibility label for the information button in the iOS player controls."
+      "comment": "Accessibility label for the information button in the iOS player controls.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Información de reproducción"
+          }
+        }
+      }
     },
     "Playback position": {
-      "comment": "Accessibility label for the main seek slider in the iOS player controls."
+      "comment": "Accessibility label for the main seek slider in the iOS player controls.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Posición de reproducción"
+          }
+        }
+      }
     },
     "Player controls, system prompts, and the Top Shelf row follow the Apple TV's own language.": {
       "extractionState": "stale",
@@ -4085,7 +4645,15 @@
     },
     "Playing on AirPlay": {},
     "Playlists": {
-      "comment": "Section title, browse button label, and page title for music playlists."
+      "comment": "Section title, browse button label, and page title for music playlists.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Listas de reproducción"
+          }
+        }
+      }
     },
     "Plex Home": {
       "comment": "Section header in iOS account settings for Plex Home options."
@@ -4104,42 +4672,138 @@
     "Plozz scans the selected export for movies and TV episodes. NFS uses your server’s existing network permissions.": {},
     "Point your camera at the code on your other device — pinch to zoom": {},
     "Port": {
-      "comment": "Field label for required port entry when connecting to FTP, SFTP, or manually configured share servers."
+      "comment": "Field label for required port entry when connecting to FTP, SFTP, or manually configured share servers.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Puerto"
+          }
+        }
+      }
     },
     "Port (optional)": {
-      "comment": "Field label for an optional network port in SMB, NFS, and manual share connection forms."
+      "comment": "Field label for an optional network port in SMB, NFS, and manual share connection forms.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Puerto (opcional)"
+          }
+        }
+      }
     },
     "Position": {
-      "comment": "Used for the playback position row in the diagnostics overlay and for the subtitle vertical-position setting."
+      "comment": "Used for the playback position row in the diagnostics overlay and for the subtitle vertical-position setting.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Posición"
+          }
+        }
+      }
     },
     "Prefer Forced": {
-      "comment": "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+      "comment": "Subtitle search preference option for forced (foreign-passage-only) subtitles.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Preferir forzados"
+          }
+        }
+      }
     },
     "Prefer Non-Forced": {
-      "comment": "Subtitle search preference option for forced (foreign-passage-only) subtitles."
+      "comment": "Subtitle search preference option for forced (foreign-passage-only) subtitles.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Preferir no forzados"
+          }
+        }
+      }
     },
     "Prefer Non-SDH": {
-      "comment": "Subtitle search preference option for hearing-impaired (SDH) subtitles."
+      "comment": "Subtitle search preference option for hearing-impaired (SDH) subtitles.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Preferir sin SDH"
+          }
+        }
+      }
     },
     "Prefer SDH": {
-      "comment": "Subtitle search preference option for hearing-impaired (SDH) subtitles."
+      "comment": "Subtitle search preference option for hearing-impaired (SDH) subtitles.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Preferir SDH"
+          }
+        }
+      }
     },
     "Prefer local artwork": {},
     "Preferred audio": {
-      "comment": "Picker label in iOS playback settings for the preferred audio track language."
+      "comment": "Picker label in iOS playback settings for the preferred audio track language.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Audio preferido"
+          }
+        }
+      }
     },
     "Preferred language": {
-      "comment": "Setting label in audio defaults for the preferred language Plozz should choose when multiple audio tracks are available."
+      "comment": "Setting label in audio defaults for the preferred language Plozz should choose when multiple audio tracks are available.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Idioma preferido"
+          }
+        }
+      }
     },
     "Preferred language code": {},
     "Presets": {
-      "comment": "Section header in the iOS playback-speed sheet above common speed preset buttons."
+      "comment": "Section header in the iOS playback-speed sheet above common speed preset buttons.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Preajustes"
+          }
+        }
+      }
     },
     "Preview": {
-      "comment": "Label for the day/night preview control in the Night Shift (Circadian) settings, shown on both tvOS and iOS."
+      "comment": "Label for the day/night preview control in the Night Shift (Circadian) settings, shown on both tvOS and iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Vista previa"
+          }
+        }
+      }
     },
     "Preview Skipped": {
-      "comment": "Brief on-player notice shown when Plozz automatically skips a preview segment."
+      "comment": "Brief on-player notice shown when Plozz automatically skips a preview segment.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Avance omitido"
+          }
+        }
+      }
     },
     "Preview a Day": {},
     "Preview at Full Strength": {},
@@ -4155,29 +4819,93 @@
       }
     },
     "Previous Episode": {
-      "comment": "Button in the iOS player's episode menu that starts the previous episode."
+      "comment": "Button in the iOS player's episode menu that starts the previous episode.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Episodio anterior"
+          }
+        }
+      }
     },
     "Primary": {
-      "comment": "Badge label on a server's account row indicating it is the primary (default) account for that server."
+      "comment": "Badge label on a server's account row indicating it is the primary (default) account for that server.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Principal"
+          }
+        }
+      }
     },
     "Primary Track": {
-      "comment": "Section header in the iOS player subtitle menu for the primary subtitle track selection."
+      "comment": "Section header in the iOS player subtitle menu for the primary subtitle track selection.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pista principal"
+          }
+        }
+      }
     },
     "Primary account": {
-      "comment": "Accessibility label for the star badge that marks the currently active account in server settings."
+      "comment": "Accessibility label for the star badge that marks the currently active account in server settings.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cuenta principal"
+          }
+        }
+      }
     },
     "Priority": {
-      "comment": "Section header in iOS metadata settings above the draggable provider priority list."
+      "comment": "Section header in iOS metadata settings above the draggable provider priority list.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Prioridad"
+          }
+        }
+      }
     },
     "Processing": {
-      "comment": "Status label for a season or episode request that Seerr or Jellyseerr is currently processing."
+      "comment": "Status label for a season or episode request that Seerr or Jellyseerr is currently processing.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Procesando"
+          }
+        }
+      }
     },
     "Profile": {
-      "comment": "Singular label used for a single profile in sync summaries, and as the fallback default profile name when no custom name has been entered."
+      "comment": "Singular label used for a single profile in sync summaries, and as the fallback default profile name when no custom name has been entered.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Perfil"
+          }
+        }
+      }
     },
     "Profile created automatically": {},
     "Profile name": {
-      "comment": "Field placeholder and accessibility label for entering a profile's display name in the profile editor."
+      "comment": "Field placeholder and accessibility label for entering a profile's display name in the profile editor.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nombre del perfil"
+          }
+        }
+      }
     },
     "Profiles": {
       "comment": "Section, row, and page title for profile-management screens and sync summaries that contain multiple profiles.",
@@ -4195,68 +4923,196 @@
     "Profiles stay enabled while more than one household profile exists.": {},
     "Protect unwatched episodes": {},
     "Protocol": {
-      "comment": "Label for the transport protocol picker when adding a network share (SMB, NFS, WebDAV, etc.), shown on both tvOS and iOS."
+      "comment": "Label for the transport protocol picker when adding a network share (SMB, NFS, WebDAV, etc.), shown on both tvOS and iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Protocolo"
+          }
+        }
+      }
     },
     "Provider": {
-      "comment": "Picker label in the add-server flow and read-only field label in account settings for the media server provider."
+      "comment": "Picker label in the add-server flow and read-only field label in account settings for the media server provider.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Proveedor"
+          }
+        }
+      }
     },
     "Provider health": {
-      "comment": "Diagnostic metric label showing metadata-provider health in the metadata diagnostics screen."
+      "comment": "Diagnostic metric label showing metadata-provider health in the metadata diagnostics screen.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Estado de los proveedores"
+          }
+        }
+      }
     },
     "Providers": {
-      "comment": "Section header in metadata settings above provider ordering and artwork-source options."
+      "comment": "Section header in metadata settings above provider ordering and artwork-source options.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Proveedores"
+          }
+        }
+      }
     },
     "Purple": {
       "comment": "Selectable color name in the profile avatar tile-color picker."
     },
     "Quality": {
-      "comment": "Fact label in item details for the selected version's playback quality information."
+      "comment": "Fact label in item details for the selected version's playback quality information.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Calidad"
+          }
+        }
+      }
     },
     "Queued": {
-      "comment": "Download status label shown before a queued download starts."
+      "comment": "Download status label shown before a queued download starts.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "En cola"
+          }
+        }
+      }
     },
     "Quick Connect code %@": {
       "comment": "Accessibility label for the large Quick Connect code on the iOS Add Server sign-in screen. %@ is the short approval code."
     },
     "Quick Connect unavailable": {},
     "Random Libraries": {
-      "comment": "Title of the tvOS Home customization group where the user chooses which libraries feed the random-content rail."
+      "comment": "Title of the tvOS Home customization group where the user chooses which libraries feed the random-content rail.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Bibliotecas aleatorias"
+          }
+        }
+      }
     },
     "Random libraries": {
-      "comment": "Section header for the same Home random-libraries setting on iOS."
+      "comment": "Section header for the same Home random-libraries setting on iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Bibliotecas aleatorias"
+          }
+        }
+      }
     },
     "Ratings": {
-      "comment": "Section title on movie or show detail screens above the ratings tiles."
+      "comment": "Section title on movie or show detail screens above the ratings tiles.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Valoraciones"
+          }
+        }
+      }
     },
     "Re-download From iCloud": {},
     "Reactions": {
       "comment": "Category title in the profile avatar emoji picker for reaction-style emojis."
     },
     "Recap Skipped": {
-      "comment": "Brief on-player notice shown when Plozz automatically skips a recap segment."
+      "comment": "Brief on-player notice shown when Plozz automatically skips a recap segment.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Resumen omitido"
+          }
+        }
+      }
     },
     "Recent Activity": {
-      "comment": "Row and page title in diagnostics and settings for the recent app log viewer."
+      "comment": "Row and page title in diagnostics and settings for the recent app log viewer.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Actividad reciente"
+          }
+        }
+      }
     },
     "Recently Played": {
-      "comment": "Title of the music row that shows albums, tracks, or playlists played most recently."
+      "comment": "Title of the music row that shows albums, tracks, or playlists played most recently.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reproducido recientemente"
+          }
+        }
+      }
     },
     "Recently used": {
-      "comment": "Status badge in the server picker for a remembered server before a live reachability check completes."
+      "comment": "Status badge in the server picker for a remembered server before a live reachability check completes.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usado recientemente"
+          }
+        }
+      }
     },
     "Reconnect the selected server and try again.": {},
     "Reconnect to view full details.": {},
     "Redeem Code": {
-      "comment": "Button label in tracker integration settings for submitting an authorization code from services like AniList."
+      "comment": "Button label in tracker integration settings for submitting an authorization code from services like AniList.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Canjear el código"
+          }
+        }
+      }
     },
     "Refresh": {
-      "comment": "Button label on diagnostics and metadata screens for reloading the current data."
+      "comment": "Button label on diagnostics and metadata screens for reloading the current data.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Actualizar"
+          }
+        }
+      }
     },
     "Remember audio per series": {},
     "Remember per series": {},
     "Remember subtitles per series": {},
     "Remove": {
-      "comment": "Generic destructive action label used when removing downloaded items or removing a credential-free server connection."
+      "comment": "Generic destructive action label used when removing downloaded items or removing a credential-free server connection.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quitar"
+          }
+        }
+      }
     },
     "Remove %@": {
       "comment": "Accessibility label for the remove button on a credential-free server sign-in row in the tvOS server detail view. %@ is the server name."
@@ -4299,23 +5155,71 @@
       }
     },
     "Remove All": {
-      "comment": "Confirmation button that deletes all downloads for the current profile."
+      "comment": "Confirmation button that deletes all downloads for the current profile.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quitar todo"
+          }
+        }
+      }
     },
     "Remove All Downloads?": {},
     "Remove Download": {
-      "comment": "Destructive action that deletes a completed download from the device."
+      "comment": "Destructive action that deletes a completed download from the device.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quitar la descarga"
+          }
+        }
+      }
     },
     "Remove Everywhere": {
-      "comment": "Destructive action in server settings that removes a server account from all synced household devices."
+      "comment": "Destructive action in server settings that removes a server account from all synced household devices.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quitar en todas partes"
+          }
+        }
+      }
     },
     "Remove Key": {
-      "comment": "Destructive button in metadata settings that deletes the saved TMDB API key or token."
+      "comment": "Destructive button in metadata settings that deletes the saved TMDB API key or token.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quitar la clave"
+          }
+        }
+      }
     },
     "Remove Server": {
-      "comment": "Destructive action in server settings for removing a server connection, especially credential-free share servers."
+      "comment": "Destructive action in server settings for removing a server connection, especially credential-free share servers.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quitar el servidor"
+          }
+        }
+      }
     },
     "Remove Show": {
-      "comment": "Destructive button in the iOS downloaded-show view that removes all downloaded episodes for that show from the device."
+      "comment": "Destructive button in the iOS downloaded-show view that removes all downloaded episodes for that show from the device.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quitar la serie"
+          }
+        }
+      }
     },
     "Remove from This %@": {
       "comment": "Destructive button in remove-server confirmation dialogs that deletes the server only from the current device instead of everywhere. %@ is the current device name."
@@ -4332,20 +5236,60 @@
     },
     "Remux (server, lossless)": {},
     "Repeat All": {
-      "comment": "Transient status label in the tvOS music Now Playing screen after the user cycles repeat mode to repeat the whole queue."
+      "comment": "Transient status label in the tvOS music Now Playing screen after the user cycles repeat mode to repeat the whole queue.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Repetir todo"
+          }
+        }
+      }
     },
     "Repeat Off": {
-      "comment": "Transient status label in the tvOS music Now Playing screen after the user turns repeat mode off."
+      "comment": "Transient status label in the tvOS music Now Playing screen after the user turns repeat mode off.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Repetición desactivada"
+          }
+        }
+      }
     },
     "Repeat One": {
-      "comment": "Transient status label in the tvOS music Now Playing screen after the user cycles repeat mode to repeat the current track."
+      "comment": "Transient status label in the tvOS music Now Playing screen after the user cycles repeat mode to repeat the current track.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Repetir una"
+          }
+        }
+      }
     },
     "Replace Key": {
-      "comment": "Button in the TMDb API key settings on tvOS and iOS that saves a new key over an already configured key."
+      "comment": "Button in the TMDb API key settings on tvOS and iOS that saves a new key over an already configured key.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sustituir la clave"
+          }
+        }
+      }
     },
     "Report a Problem": {},
     "Request": {
-      "comment": "Primary Seerr request action for an unowned discovery title on Home and detail heroes, also reused for the same action in accessibility labels and VoiceOver actions."
+      "comment": "Primary Seerr request action for an unowned discovery title on Home and detail heroes, also reused for the same action in accessibility labels and VoiceOver actions.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solicitar"
+          }
+        }
+      }
     },
     "Request %@": {
       "comment": "Menu action for requesting one missing season from Seerr in the Home hero or series detail season picker. %@ is the season title."
@@ -4353,17 +5297,49 @@
     "Request All Missing Seasons": {},
     "Request All Seasons": {},
     "Request Failed": {
-      "comment": "Alert title shown when sending a Seerr request fails in the iOS discovery and Home flows."
+      "comment": "Alert title shown when sending a Seerr request fails in the iOS discovery and Home flows.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Error en la solicitud"
+          }
+        }
+      }
     },
     "Request Limit Reached": {},
     "Request More": {
-      "comment": "Label for the series request control when some seasons are already owned but other seasons can still be requested."
+      "comment": "Label for the series request control when some seasons are already owned but other seasons can still be requested.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solicitar más"
+          }
+        }
+      }
     },
     "Request Movie": {
-      "comment": "Button in the iOS detail view for an unavailable movie that sends a Seerr request for that movie."
+      "comment": "Button in the iOS detail view for an unavailable movie that sends a Seerr request for that movie.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solicitar la película"
+          }
+        }
+      }
     },
     "Request Series": {
-      "comment": "Button in the iOS detail view for an unavailable series that sends a Seerr request for that series."
+      "comment": "Button in the iOS detail view for an unavailable series that sends a Seerr request for that series.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solicitar la serie"
+          }
+        }
+      }
     },
     "Request as %@": {
       "comment": "Button label or helper text on request controls for discovery titles, showing which Seerr user will make the request. %@ is the acting Seerr user name."
@@ -4374,20 +5350,44 @@
     "Request as Administrator?": {},
     "Request missing seasons": {},
     "Request seasons": {
-      "comment": "Accessibility label for the iOS hero button or menu that opens season request choices for a series when no acting-user name is appended."
+      "comment": "Accessibility label for the iOS hero button or menu that opens season request choices for a series when no acting-user name is appended.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solicitar temporadas"
+          }
+        }
+      }
     },
     "Request seasons as %@": {
       "comment": "Accessibility label on the iOS hero's season-request menu button for a series. %@ is the acting Seerr user name."
     },
     "Requested": {
-      "comment": "Status shown after a title, season, or episode has already been requested through Seerr or Overseerr but is not yet downloading or available. Used for hero status pills, season-request rows, and episode release badges with the same meaning."
+      "comment": "Status shown after a title, season, or episode has already been requested through Seerr or Overseerr but is not yet downloading or available. Used for hero status pills, season-request rows, and episode release badges with the same meaning.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solicitado"
+          }
+        }
+      }
     },
     "Requested — awaiting approval": {},
     "Requesting a Plex link code…": {},
     "Requesting a code": {},
     "Requesting a code…": {},
     "Requesting…": {
-      "comment": "Progress label shown while a season request is being sent from a series request control."
+      "comment": "Progress label shown while a season request is being sent from a series request control.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solicitando…"
+          }
+        }
+      }
     },
     "Requests are made as": {},
     "Requests as — %@": {
@@ -4397,13 +5397,37 @@
       "comment": "Footer in that Seerr user picker explaining the mapping. %@ is the household profile name."
     },
     "Requires PIN": {
-      "comment": "Accessibility label for the lock icon beside a Plex Home user that requires a PIN before switching to that user."
+      "comment": "Accessibility label for the lock icon beside a Plex Home user that requires a PIN before switching to that user.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Requiere un PIN"
+          }
+        }
+      }
     },
     "Requires Seerr": {
-      "comment": "Disabled-note text in Home customization settings when the Featured source is unavailable because no Seerr server is configured."
+      "comment": "Disabled-note text in Home customization settings when the Featured source is unavailable because no Seerr server is configured.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Requiere Seerr"
+          }
+        }
+      }
     },
     "Rescan": {
-      "comment": "Button that starts a fresh nearby-server or network-share discovery scan in add-server and add-share flows on tvOS and iOS."
+      "comment": "Button that starts a fresh nearby-server or network-share discovery scan in add-server and add-share flows on tvOS and iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Volver a analizar"
+          }
+        }
+      }
     },
     "Reset": {
       "comment": "Destructive reset action. Used both to reset a playback delay value (audio/subtitle sync offset) back to zero and to confirm wiping the iCloud-synced data.",
@@ -4418,7 +5442,15 @@
     },
     "Reset & Re-upload From This Device": {},
     "Reset Sync": {
-      "comment": "Button in the tvOS iCloud Sync repair panel that opens the confirmation to wipe the shared iCloud copy and upload fresh data from this Apple TV."
+      "comment": "Button in the tvOS iCloud Sync repair panel that opens the confirmation to wipe the shared iCloud copy and upload fresh data from this Apple TV.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Restablecer la sincronización"
+          }
+        }
+      }
     },
     "Reset Synced Data": {},
     "Reset synced data?": {},
@@ -4427,7 +5459,15 @@
     "Reset to Recommended": {},
     "Restart from Beginning": {},
     "Results": {
-      "comment": "Metric label in Metadata Diagnostics showing how many cached metadata result entries currently exist."
+      "comment": "Metric label in Metadata Diagnostics showing how many cached metadata result entries currently exist.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Resultados"
+          }
+        }
+      }
     },
     "Resume": {
       "localizations": {
@@ -4440,22 +5480,62 @@
       }
     },
     "Resume All": {
-      "comment": "Button in the iOS Downloads screen that restarts all paused downloads in the In Progress section."
+      "comment": "Button in the iOS Downloads screen that restarts all paused downloads in the In Progress section.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reanudar todo"
+          }
+        }
+      }
     },
     "Resume Download": {
-      "comment": "Action button or menu item for restarting a paused or failed offline download in the iOS detail and downloads surfaces."
+      "comment": "Action button or menu item for restarting a paused or failed offline download in the iOS detail and downloads surfaces.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reanudar la descarga"
+          }
+        }
+      }
     },
     "Resume from %@": {
       "comment": "Primary button in the Resume or Start Over confirmation dialog before playback begins. %@ is the formatted resume timecode."
     },
     "Resume rewind": {
-      "comment": "Picker label in iOS Playback settings for how far to rewind before resuming a partially watched title."
+      "comment": "Picker label in iOS Playback settings for how far to rewind before resuming a partially watched title.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Retroceso al reanudar"
+          }
+        }
+      }
     },
     "Retry": {
-      "comment": "Generic retry button used after failed loads or connections, such as loading Seerr users, loading libraries, or reconnecting an integration."
+      "comment": "Generic retry button used after failed loads or connections, such as loading Seerr users, loading libraries, or reconnecting an integration.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reintentar"
+          }
+        }
+      }
     },
     "Retry Seasons": {
-      "comment": "Button on the series detail hero that retries loading season request availability after that lookup failed."
+      "comment": "Button on the series detail hero that retries loading season request availability after that lookup failed.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reintentar las temporadas"
+          }
+        }
+      }
     },
     "Retry loading seasons": {},
     "Reuse the subtitle you pick for the rest of a series.": {},
@@ -4472,23 +5552,63 @@
       "comment": "Accessibility name for one profile color choice in the profile editor color palette."
     },
     "Rotate automatically": {
-      "comment": "Toggle in Home hero rotation settings that enables automatic carousel advance."
+      "comment": "Toggle in Home hero rotation settings that enables automatic carousel advance.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Rotar automáticamente"
+          }
+        }
+      }
     },
     "Rotation": {
-      "comment": "Section header for Home hero rotation settings on tvOS and iOS."
+      "comment": "Section header for Home hero rotation settings on tvOS and iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Rotación"
+          }
+        }
+      }
     },
     "Rows": {
-      "comment": "Section header for Home row-selection settings, where the user chooses which rows and libraries appear on Home."
+      "comment": "Section header for Home row-selection settings, where the user chooses which rows and libraries appear on Home.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Filas"
+          }
+        }
+      }
     },
     "Rows on Home": {},
     "Royal blue": {
       "comment": "Accessibility name for one profile color choice in the profile editor color palette."
     },
     "Running": {
-      "comment": "Status value in Metadata Diagnostics when metadata enrichment or related work is currently active."
+      "comment": "Status value in Metadata Diagnostics when metadata enrichment or related work is currently active.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "En ejecución"
+          }
+        }
+      }
     },
     "Runtime": {
-      "comment": "Label for a title's duration, used both in detail information and as a library sort field."
+      "comment": "Label for a title's duration, used both in detail information and as a library sort field.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Duración"
+          }
+        }
+      }
     },
     "Rust": {
       "comment": "Accessibility name for one profile color choice in the profile editor color palette."
@@ -4510,10 +5630,26 @@
       "comment": "Accessibility name for one profile color choice in the profile editor color palette."
     },
     "Save": {
-      "comment": "Generic Save button label used for profile editing and for confirming new network-share forms on iOS."
+      "comment": "Generic Save button label used for profile editing and for confirming new network-share forms on iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Guardar"
+          }
+        }
+      }
     },
     "Save Key": {
-      "comment": "Button in the TMDb API key settings on tvOS and iOS that saves a newly entered key when no key is configured yet."
+      "comment": "Button in the TMDb API key settings on tvOS and iOS that saves a newly entered key when no key is configured yet.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Guardar la clave"
+          }
+        }
+      }
     },
     "Saved for %@.": {
       "comment": "Footer under iOS settings sections showing that these preferences are stored per profile. %@ is the active profile name."
@@ -4523,15 +5659,39 @@
     },
     "Scales card size, columns and spacing across the app.": {},
     "Scan Again": {
-      "comment": "Button in the iOS Add Server screen that repeats nearby media-server discovery."
+      "comment": "Button in the iOS Add Server screen that repeats nearby media-server discovery.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Volver a analizar"
+          }
+        }
+      }
     },
     "Scan Local Network": {},
     "Scan Now": {
-      "comment": "Button in the iOS server or share settings that manually starts a scan of the selected connected network share."
+      "comment": "Button in the iOS server or share settings that manually starts a scan of the selected connected network share.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Analizar ahora"
+          }
+        }
+      }
     },
     "Scan QR code": {},
     "Scan now": {
-      "comment": "Button in the tvOS server detail share panel that manually starts a scan of the selected connected network share."
+      "comment": "Button in the tvOS server detail share panel that manually starts a scan of the selected connected network share.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Analizar ahora"
+          }
+        }
+      }
     },
     "Scan the QR code or visit the URL on your phone, sign in to AniList, then enter the code shown:": {},
     "Scan the QR code or visit the URL on your phone, sign in to MyAnimeList, then enter the code shown:": {},
@@ -4543,13 +5703,37 @@
     "Scan with your phone": {},
     "Scan with your phone or tablet": {},
     "Scanning": {
-      "comment": "Server detail row: label for a share currently being scanned, followed by a live folder/item count."
+      "comment": "Server detail row: label for a share currently being scanned, followed by a live folder/item count.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Analizando"
+          }
+        }
+      }
     },
     "Scanning…": {
-      "comment": "Generic progress label used while the app scans a connected network share or scans the local network for a Seerr server."
+      "comment": "Generic progress label used while the app scans a connected network share or scans the local network for a Seerr server.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Analizando…"
+          }
+        }
+      }
     },
     "Schedule": {
-      "comment": "Picker label in iOS Circadian Mode settings for choosing when the warm color schedule runs."
+      "comment": "Picker label in iOS Circadian Mode settings for choosing when the warm color schedule runs.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Programación"
+          }
+        }
+      }
     },
     "Scrobble and sync your Jellyfin watch history to Trakt.": {},
     "Scrobble the music you play in Plozz to your Last.fm profile.": {},
@@ -4576,65 +5760,185 @@
     },
     "Search movies, shows, and episodes": {},
     "Search unavailable": {
-      "comment": "Error-state title on the iOS Search screen when a library search request failed."
+      "comment": "Error-state title on the iOS Search screen when a library search request failed.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Búsqueda no disponible"
+          }
+        }
+      }
     },
     "Search your libraries": {},
     "Searching for lyrics…": {},
     "Searching for servers…": {},
     "Searching for subtitles…": {},
     "Searching…": {
-      "comment": "Generic progress label used while the app is searching, including library search, remote subtitle search, and automatic network-share device discovery."
+      "comment": "Generic progress label used while the app is searching, including library search, remote subtitle search, and automatic network-share device discovery.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Buscando…"
+          }
+        }
+      }
     },
     "Season Download Failed": {},
     "Season Requests": {
-      "comment": "Label on the series season-request control when season request status is available but there are no currently requestable seasons."
+      "comment": "Label on the series season-request control when season request status is available but there are no currently requestable seasons.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solicitudes de temporadas"
+          }
+        }
+      }
     },
     "Seasons Unavailable": {
-      "comment": "Inactive label on the series season-request control when season request data could not be loaded yet."
+      "comment": "Inactive label on the series season-request control when season request data could not be loaded yet.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Temporadas no disponibles"
+          }
+        }
+      }
     },
     "Second Track": {
-      "comment": "Section or row title in player subtitle controls for choosing and managing a second subtitle track for dual subtitles on tvOS and iOS."
+      "comment": "Section or row title in player subtitle controls for choosing and managing a second subtitle track for dual subtitles on tvOS and iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Segunda pista"
+          }
+        }
+      }
     },
     "Seconds per title": {},
     "Security": {
-      "comment": "Picker label in the iOS Add FTP Share form for choosing plain FTP or FTPS security."
+      "comment": "Picker label in the iOS Add FTP Share form for choosing plain FTP or FTPS security.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Seguridad"
+          }
+        }
+      }
     },
     "Seek without pausing": {},
     "Seerr User Not Found": {},
     "Seerr users": {
-      "comment": "Caption above the Seerr user list in settings where a profile is mapped to request as a specific Seerr user."
+      "comment": "Caption above the Seerr user list in settings where a profile is mapped to request as a specific Seerr user.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usuarios de Seerr"
+          }
+        }
+      }
     },
     "Selected": {
-      "comment": "Accessibility value announced for the currently selected option in custom segmented or chip pickers."
+      "comment": "Accessibility value announced for the currently selected option in custom segmented or chip pickers.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Seleccionado"
+          }
+        }
+      }
     },
     "Send Diagnostics": {
-      "comment": "Section header on the iOS diagnostics screen for manually sending crash and recent-activity diagnostics."
+      "comment": "Section header on the iOS diagnostics screen for manually sending crash and recent-activity diagnostics.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Enviar el diagnóstico"
+          }
+        }
+      }
     },
     "Send Feedback": {
-      "comment": "Link in the iOS diagnostics or help settings that opens an email to send feedback to the developer."
+      "comment": "Link in the iOS diagnostics or help settings that opens an email to send feedback to the developer.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Enviar comentarios"
+          }
+        }
+      }
     },
     "Send Recent Activity to Developer": {},
     "Send to Developer": {},
     "Send your servers and sign-in so it’s ready to watch.": {},
     "Sent": {
-      "comment": "Button label state after recent activity or diagnostics have been sent to the developer successfully."
+      "comment": "Button label state after recent activity or diagnostics have been sent to the developer successfully.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Enviado"
+          }
+        }
+      }
     },
     "Separate offline downloads for every profile": {},
     "Serious (throttling)": {
       "comment": "Playback diagnostics label for serious thermal pressure, meaning the device is hot enough that the system may throttle performance."
     },
     "Server": {
-      "comment": "Singular server label used for source pickers, detail facts, account fields, and one-server summaries in sync or setup screens."
+      "comment": "Singular server label used for source pickers, detail facts, account fields, and one-server summaries in sync or setup screens.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Servidor"
+          }
+        }
+      }
     },
     "Server Removed": {
-      "comment": "Empty-state title in iOS server settings after a server has been removed and is no longer available."
+      "comment": "Empty-state title in iOS server settings after a server has been removed and is no longer available.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Servidor eliminado"
+          }
+        }
+      }
     },
     "Server address": {
-      "comment": "Text field label for manually entering a media-server, network-share, or Seerr server address in onboarding and settings forms."
+      "comment": "Text field label for manually entering a media-server, network-share, or Seerr server address in onboarding and settings forms.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Dirección del servidor"
+          }
+        }
+      }
     },
     "Server address (e.g. https://requests.example.com)": {},
     "Server unavailable": {
-      "comment": "Error or empty-state title shown when a title, library, or playback target's server is no longer connected in iOS."
+      "comment": "Error or empty-state title shown when a title, library, or playback target's server is no longer connected in iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Servidor no disponible"
+          }
+        }
+      }
     },
     "Servers": {
       "comment": "Plural label for server lists, sections, tabs, and sync summaries throughout the app.",
@@ -4649,7 +5953,15 @@
     },
     "Servers From Your Other Devices": {},
     "Set Up": {
-      "comment": "Button in iCloud sync and device-setup flows that starts bringing a server or full setup over from another device."
+      "comment": "Button in iCloud sync and device-setup flows that starts bringing a server or full setup over from another device.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Configurar"
+          }
+        }
+      }
     },
     "Set Up Another Device": {},
     "Set Up Device": {},
@@ -4699,10 +6011,26 @@
     "Setting up the other device…": {},
     "Setting up your device…": {},
     "Setting up…": {
-      "comment": "Progress label shown while imported sync or setup data is being applied after device pairing, on tvOS and iOS."
+      "comment": "Progress label shown while imported sync or setup data is being applied after device pairing, on tvOS and iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Configurando…"
+          }
+        }
+      }
     },
     "Settings": {
-      "comment": "Label for the Settings tab, page title, or generic settings button accessibility text."
+      "comment": "Label for the Settings tab, page title, or generic settings button accessibility text.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ajustes"
+          }
+        }
+      }
     },
     "Settings below are saved on this profile.": {},
     "Settings for %@": {
@@ -4712,19 +6040,51 @@
     "Setup didn’t finish": {},
     "Setup was cancelled — the codes didn't match.": {},
     "Shadow": {
-      "comment": "Section or row label in subtitle appearance controls for shadow style settings on caption text."
+      "comment": "Section or row label in subtitle appearance controls for shadow style settings on caption text.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sombra"
+          }
+        }
+      }
     },
     "Shadow & Outline": {},
     "Shadow Color": {
-      "comment": "Row label in subtitle appearance controls for choosing the subtitle shadow color."
+      "comment": "Row label in subtitle appearance controls for choosing the subtitle shadow color.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Color de la sombra"
+          }
+        }
+      }
     },
     "Shadow Thickness": {
-      "comment": "Row label in subtitle appearance controls for choosing the subtitle shadow size or thickness."
+      "comment": "Row label in subtitle appearance controls for choosing the subtitle shadow size or thickness.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Grosor de la sombra"
+          }
+        }
+      }
     },
     "Share": {},
     "Share Crash Reports": {},
     "Share name": {
-      "comment": "Text field label for entering the SMB share name manually when adding a network share."
+      "comment": "Text field label for entering the SMB share name manually when adding a network share.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nombre del recurso compartido"
+          }
+        }
+      }
     },
     "Shared across every profile on this %@.": {
       "comment": "Footer text under shared settings sections on iPhone or iPad Settings. %@ is the device name."
@@ -4734,13 +6094,37 @@
       "comment": "Footer text under shared settings sections on iPhone or iPad when profiles are turned off. %@ is the device name."
     },
     "Shares": {
-      "comment": "Panel title in the tvOS Add Share flow for the list of SMB shares found on the selected server, including its loading and empty states."
+      "comment": "Panel title in the tvOS Add Share flow for the list of SMB shares found on the selected server, including its loading and empty states.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Recursos compartidos"
+          }
+        }
+      }
     },
     "Show Box": {
-      "comment": "Toggle in subtitle appearance settings that shows or hides the background box behind subtitle text, on tvOS and iOS."
+      "comment": "Toggle in subtitle appearance settings that shows or hides the background box behind subtitle text, on tvOS and iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mostrar el recuadro"
+          }
+        }
+      }
     },
     "Show Outline": {
-      "comment": "Toggle in iOS subtitle appearance settings that shows or hides an outline around subtitle text."
+      "comment": "Toggle in iOS subtitle appearance settings that shows or hides an outline around subtitle text.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mostrar el contorno"
+          }
+        }
+      }
     },
     "Show Up Next card": {},
     "Show album, quality & lyrics source": {},
@@ -4755,10 +6139,26 @@
       "comment": "Explanation shown beneath the subtitle mode option in Settings > Playback."
     },
     "Show hero": {
-      "comment": "Toggle in iOS Home settings that shows or hides the large hero carousel."
+      "comment": "Toggle in iOS Home settings that shows or hides the large hero carousel.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mostrar el destacado"
+          }
+        }
+      }
     },
     "Show subtitles": {
-      "comment": "Settings row and control title for choosing default subtitle behavior when playback starts, with optional per-content-type overrides."
+      "comment": "Settings row and control title for choosing default subtitle behavior when playback starts, with optional per-content-type overrides.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mostrar los subtítulos"
+          }
+        }
+      }
     },
     "Show subtitles for the deaf or hard-of-hearing at the top of the list.": {
       "comment": "Explanation shown under the Prefer SDH subtitle search option."
@@ -4768,26 +6168,74 @@
     },
     "Show the hero on Home": {},
     "Shuffle": {
-      "comment": "Button on music screens that starts shuffled playback of the current album, playlist, or other visible music list."
+      "comment": "Button on music screens that starts shuffled playback of the current album, playlist, or other visible music list.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aleatorio"
+          }
+        }
+      }
     },
     "Shuffle Off": {
-      "comment": "Transient status message above the transport controls in the tvOS music Now Playing screen after the user turns shuffle off."
+      "comment": "Transient status message above the transport controls in the tvOS music Now Playing screen after the user turns shuffle off.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aleatorio desactivado"
+          }
+        }
+      }
     },
     "Shuffle On": {
-      "comment": "Transient status message above the transport controls in the tvOS music Now Playing screen after the user turns shuffle on."
+      "comment": "Transient status message above the transport controls in the tvOS music Now Playing screen after the user turns shuffle on.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aleatorio activado"
+          }
+        }
+      }
     },
     "Sign In": {
-      "comment": "Button label and page title for the username and password sign-in screen when adding a server on tvOS or iOS."
+      "comment": "Button label and page title for the username and password sign-in screen when adding a server on tvOS or iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Iniciar sesión"
+          }
+        }
+      }
     },
     "Sign In Manually": {},
     "Sign In to a Server": {},
     "Sign Out": {
-      "comment": "Destructive button label for signing out of a server, or for confirming sign out of all accounts, in Settings."
+      "comment": "Destructive button label for signing out of a server, or for confirming sign out of all accounts, in Settings.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cerrar sesión"
+          }
+        }
+      }
     },
     "Sign Out & Remove Server": {},
     "Sign Out of All Accounts": {},
     "Sign in": {
-      "comment": "Section or panel title above credential fields when signing in to a network share or WebDAV source."
+      "comment": "Section or panel title above credential fields when signing in to a network share or WebDAV source.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Iniciar sesión"
+          }
+        }
+      }
     },
     "Sign in a phone or tablet from this Apple TV over your local network.": {},
     "Sign in a phone or tablet from this Apple TV.": {},
@@ -4824,7 +6272,15 @@
     },
     "Sign-ins are shared by everyone on this Apple TV. Choose what each profile sees under Profile › Your Libraries.": {},
     "Signed in": {
-      "comment": "Status label shown for authenticated servers or accounts in discovery, sync setup, and quick-connect flows."
+      "comment": "Status label shown for authenticated servers or accounts in discovery, sync setup, and quick-connect flows.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sesión iniciada"
+          }
+        }
+      }
     },
     "Signed in as": {},
     "Signed in as %@": {
@@ -4868,7 +6324,15 @@
       }
     },
     "Signed in!": {
-      "comment": "Success status shown after Quick Connect finishes signing in."
+      "comment": "Success status shown after Quick Connect finishes signing in.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "¡Sesión iniciada!"
+          }
+        }
+      }
     },
     "Signs everyone out and removes this server.": {},
     "Signs out all %lld accounts and removes %@ from this Apple TV for everyone.": {
@@ -4915,41 +6379,137 @@
       "comment": "Label in iOS Circadian Mode settings showing the current clock time during the Preview a Day simulation."
     },
     "Size": {
-      "comment": "Generic size label used for file-size facts in playback details and diagnostics, and for subtitle size controls in the subtitle style editors."
+      "comment": "Generic size label used for file-size facts in playback details and diagnostics, and for subtitle size controls in the subtitle style editors.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Tamaño"
+          }
+        }
+      }
     },
     "Skip": {
-      "comment": "Label on the generic in-player skip button for commercial or otherwise unknown detected segments."
+      "comment": "Label on the generic in-player skip button for commercial or otherwise unknown detected segments.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Omitir"
+          }
+        }
+      }
     },
     "Skip Credits": {
-      "comment": "Button label on the in-player skip overlay when the current segment is marked as credits."
+      "comment": "Button label on the in-player skip overlay when the current segment is marked as credits.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Omitir los créditos"
+          }
+        }
+      }
     },
     "Skip Intervals": {
-      "comment": "Settings row title in Playback settings for configuring how far skip back and skip forward jump."
+      "comment": "Settings row title in Playback settings for configuring how far skip back and skip forward jump.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Intervalos de salto"
+          }
+        }
+      }
     },
     "Skip Intro": {
-      "comment": "Button label on the in-player skip overlay when the current segment is marked as an intro."
+      "comment": "Button label on the in-player skip overlay when the current segment is marked as an intro.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Omitir la introducción"
+          }
+        }
+      }
     },
     "Skip Intros": {
-      "comment": "Playback settings row title for choosing how intros and credits are skipped."
+      "comment": "Playback settings row title for choosing how intros and credits are skipped.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Omitir las introducciones"
+          }
+        }
+      }
     },
     "Skip Intros & Credits": {},
     "Skip Preview": {
-      "comment": "Button label on the in-player skip overlay when the current segment is marked as a preview."
+      "comment": "Button label on the in-player skip overlay when the current segment is marked as a preview.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Omitir el avance"
+          }
+        }
+      }
     },
     "Skip Recap": {
-      "comment": "Button label on the in-player skip overlay when the current segment is marked as a recap."
+      "comment": "Button label on the in-player skip overlay when the current segment is marked as a recap.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Omitir el resumen"
+          }
+        }
+      }
     },
     "Skip backward": {
-      "comment": "Accessibility label for the iOS player skip-back button, and the title of the Playback settings picker for the skip-back interval."
+      "comment": "Accessibility label for the iOS player skip-back button, and the title of the Playback settings picker for the skip-back interval.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Retroceder"
+          }
+        }
+      }
     },
     "Skip forward": {
-      "comment": "Accessibility label for the iOS player skip-forward button, and the title of the Playback settings picker for the skip-forward interval."
+      "comment": "Accessibility label for the iOS player skip-forward button, and the title of the Playback settings picker for the skip-forward interval.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Avanzar"
+          }
+        }
+      }
     },
     "Skipped": {
-      "comment": "Past-tense confirmation shown after a commercial or otherwise unknown segment is skipped automatically."
+      "comment": "Past-tense confirmation shown after a commercial or otherwise unknown segment is skipped automatically.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Omitido"
+          }
+        }
+      }
     },
     "Skipping": {
-      "comment": "Section header in iOS Playback settings above intro-skipping and skip-interval controls."
+      "comment": "Section header in iOS Playback settings above intro-skipping and skip-interval controls.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Omitiendo"
+          }
+        }
+      }
     },
     "Sky blue": {
       "comment": "Accessibility label for a selectable Sky blue profile avatar color swatch in the profile editor."
@@ -4964,19 +6524,51 @@
     "Something went wrong talking to this server.": {},
     "Something went wrong talking to this server. Please try again.": {},
     "Sort By": {
-      "comment": "Title of the sort-field picker in library browse menus on tvOS and iOS."
+      "comment": "Title of the sort-field picker in library browse menus on tvOS and iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ordenar por"
+          }
+        }
+      }
     },
     "Sort: %@": {
       "comment": "Label on the library sort menu button on tvOS and iOS. %@ is the current sort field name."
     },
     "Sorta Dark": {
-      "comment": "Display name for one Circadian Mode dimness level in settings."
+      "comment": "Display name for one Circadian Mode dimness level in settings.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Algo oscuro"
+          }
+        }
+      }
     },
     "Source": {
-      "comment": "Information label in an item's Playback details section for the selected version's source or release type."
+      "comment": "Information label in an item's Playback details section for the selected version's source or release type.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fuente"
+          }
+        }
+      }
     },
     "Sources": {
-      "comment": "Group header in tvOS Customize Home settings for choosing which content sources feed the Home hero."
+      "comment": "Group header in tvOS Customize Home settings for choosing which content sources feed the Home hero.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fuentes"
+          }
+        }
+      }
     },
     "Space & Science": {},
     "Spoilers": {
@@ -4995,63 +6587,199 @@
       "comment": "Display name for a stronger Circadian Mode dimness level in settings."
     },
     "Starring": {
-      "comment": "Credit-line label on movie and series hero artwork for the main cast names."
+      "comment": "Credit-line label on movie and series hero artwork for the main cast names.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Protagonizada por"
+          }
+        }
+      }
     },
     "Start Over": {
-      "comment": "Restart action. Used both to cancel and restart the Plex device-linking flow and to begin playback from the beginning instead of resuming."
+      "comment": "Restart action. Used both to cancel and restart the Plex device-linking flow and to begin playback from the beginning instead of resuming.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Empezar de nuevo"
+          }
+        }
+      }
     },
     "Start Watching": {
-      "comment": "Primary button on the sync-setup receive screen that applies transferred sign-ins and enters the app."
+      "comment": "Primary button on the sync-setup receive screen that applies transferred sign-ins and enters the app.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Empezar a ver"
+          }
+        }
+      }
     },
     "Start muted": {
-      "comment": "Toggle label in Home and detail-page trailer settings for beginning trailer playback without audio."
+      "comment": "Toggle label in Home and detail-page trailer settings for beginning trailer playback without audio.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Empezar silenciado"
+          }
+        }
+      }
     },
     "Start over?": {
-      "comment": "Confirmation dialog title in the Plex link flow before discarding progress and returning to the start."
+      "comment": "Confirmation dialog title in the Plex link flow before discarding progress and returning to the start.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "¿Empezar de nuevo?"
+          }
+        }
+      }
     },
     "Status": {
-      "comment": "Label for the current iCloud Sync state in tvOS Settings."
+      "comment": "Label for the current iCloud Sync state in tvOS Settings.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Estado"
+          }
+        }
+      }
     },
     "Steel gray": {
       "comment": "Accessibility label for a selectable Steel gray profile avatar color swatch in the profile editor."
     },
     "Still wrong? Wipe the iCloud copy and re-upload from this Apple TV.": {},
     "Storage": {
-      "comment": "Section header in iOS Downloads for storage usage and delete-all-downloads actions."
+      "comment": "Section header in iOS Downloads for storage usage and delete-all-downloads actions.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Almacenamiento"
+          }
+        }
+      }
     },
     "Stored Fields": {
       "comment": "Section or panel title in metadata diagnostics showing counts of metadata fields cached for each source."
     },
     "Studio": {
-      "comment": "Credit-line label on anime hero artwork for the studio names."
+      "comment": "Credit-line label on anime hero artwork for the studio names.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Estudio"
+          }
+        }
+      }
     },
     "Studios": {
-      "comment": "Section header or information label for the studios associated with a title on detail pages."
+      "comment": "Section header or information label for the studios associated with a title on detail pages.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Estudios"
+          }
+        }
+      }
     },
     "Style": {
-      "comment": "Label used for visual style controls, including card style in settings and subtitle style options in the player."
+      "comment": "Label used for visual style controls, including card style in settings and subtitle style options in the player.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Estilo"
+          }
+        }
+      }
     },
     "Subtitle Delay": {
-      "comment": "Title of the in-player subtitle timing adjustment screen on tvOS and iOS."
+      "comment": "Title of the in-player subtitle timing adjustment screen on tvOS and iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Retardo de subtítulos"
+          }
+        }
+      }
     },
     "Subtitle Style": {
-      "comment": "Title of the in-player subtitle appearance editor."
+      "comment": "Title of the in-player subtitle appearance editor.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Estilo de subtítulos"
+          }
+        }
+      }
     },
     "Subtitle Sync": {
-      "comment": "Label for the in-player control that opens subtitle timing adjustments, and the title of that timing screen."
+      "comment": "Label for the in-player control that opens subtitle timing adjustments, and the title of that timing screen.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sincronización de subtítulos"
+          }
+        }
+      }
     },
     "Subtitle added": {
-      "comment": "Success status shown after a downloaded subtitle has been added to the current playback session."
+      "comment": "Success status shown after a downloaded subtitle has been added to the current playback session.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Subtítulo añadido"
+          }
+        }
+      }
     },
     "Subtitle language": {
-      "comment": "Playback settings row and picker title for the preferred subtitle language."
+      "comment": "Playback settings row and picker title for the preferred subtitle language.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Idioma de los subtítulos"
+          }
+        }
+      }
     },
     "Subtitle search": {
-      "comment": "Section header in iOS subtitle settings for search preferences such as hearing-impaired and forced-subtitle behavior."
+      "comment": "Section header in iOS subtitle settings for search preferences such as hearing-impaired and forced-subtitle behavior.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Búsqueda de subtítulos"
+          }
+        }
+      }
     },
     "Subtitle search failed.": {},
     "Subtitles": {
-      "comment": "Label used for the player subtitle menu and the main subtitle settings pages on iOS and tvOS."
+      "comment": "Label used for the player subtitle menu and the main subtitle settings pages on iOS and tvOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Subtítulos"
+          }
+        }
+      }
     },
     "Subtitles show %@s earlier than the audio": {
       "comment": "Helper text under the subtitle sync control in the player. %@ is the absolute subtitle delay in seconds."
@@ -5061,37 +6789,93 @@
     },
     "Sunrise/sunset unavailable at this location today.": {},
     "Support": {
-      "comment": "Section header in iOS Settings above help, diagnostics, attributions, and about links."
+      "comment": "Section header in iOS Settings above help, diagnostics, attributions, and about links.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ayuda"
+          }
+        }
+      }
     },
     "SwiftUI (forced)": {
       "comment": "Debug value in tvOS Settings showing that the Hero Foreground renderer has been forced to SwiftUI."
     },
     "Swipe to scrub while a title is playing and it resumes the moment you land — faster, but a stray swipe can move your position.": {},
     "Switch Profile": {
-      "comment": "Button label in tvOS Settings that opens the profile picker."
+      "comment": "Button label in tvOS Settings that opens the profile picker.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cambiar de perfil"
+          }
+        }
+      }
     },
     "Switches to this profile": {},
     "Symbol": {
-      "comment": "Option label for using a symbol as a profile avatar in the profile editor."
+      "comment": "Option label for using a symbol as a profile avatar in the profile editor.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Símbolo"
+          }
+        }
+      }
     },
     "Sync Now": {
-      "comment": "Manual action button in iCloud Sync settings that immediately fetches and sends cloud changes."
+      "comment": "Manual action button in iCloud Sync settings that immediately fetches and sends cloud changes.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sincronizar ahora"
+          }
+        }
+      }
     },
     "Sync With iCloud": {},
     "Sync across all my servers": {},
     "Sync watch state across servers": {},
     "Sync your watch history and track what to watch next with Simkl.": {},
     "Syncing…": {
-      "comment": "Short iCloud Sync status message shown while a cloud sync is in progress."
+      "comment": "Short iCloud Sync status message shown while a cloud sync is in progress.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sincronizando…"
+          }
+        }
+      }
     },
     "System": {
-      "comment": "Option label meaning use the device or system default, used in theme, app language, and transparency settings."
+      "comment": "Option label meaning use the device or system default, used in theme, app language, and transparency settings.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sistema"
+          }
+        }
+      }
     },
     "System prompts and the player's own on-screen controls follow the Apple TV's language, not this setting.": {},
     "TMDB rejected this key. Check the token and try again.": {},
     "TMDB v4 API Read Access Token": {},
     "Tags": {
-      "comment": "Information label on a title detail page for the item's tags."
+      "comment": "Information label on a title detail page for the item's tags.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Etiquetas"
+          }
+        }
+      }
     },
     "Tailscale servers can't be found automatically. Manually type your Tailscale IP or MagicDNS name below.": {},
     "Tan": {
@@ -5108,16 +6892,48 @@
       "comment": "Accessibility label for a selectable Teal profile avatar color swatch in the profile editor."
     },
     "Test Connection": {
-      "comment": "Button in iOS Seerr or Jellyseerr settings that re-checks the configured server connection."
+      "comment": "Button in iOS Seerr or Jellyseerr settings that re-checks the configured server connection.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Probar la conexión"
+          }
+        }
+      }
     },
     "Text": {
-      "comment": "Section header in the iOS subtitle appearance editor above font, size, color, and other text controls."
+      "comment": "Section header in the iOS subtitle appearance editor above font, size, color, and other text controls.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Texto"
+          }
+        }
+      }
     },
     "Text Color": {
-      "comment": "Label for the subtitle text color picker in the in-player subtitle appearance editor."
+      "comment": "Label for the subtitle text color picker in the in-player subtitle appearance editor.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Color del texto"
+          }
+        }
+      }
     },
     "Text Size": {
-      "comment": "Label for the subtitle text size control in the in-player subtitle appearance editor."
+      "comment": "Label for the subtitle text size control in the in-player subtitle appearance editor.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Tamaño del texto"
+          }
+        }
+      }
     },
     "Thanks! Your recent activity was sent to the developer.": {},
     "That doesn't look like a Plozz setup code.": {},
@@ -5173,7 +6989,15 @@
     "The setup code expired. Try again.": {},
     "The username or password is incorrect.": {},
     "Theme": {
-      "comment": "Settings row or section title for app appearance options."
+      "comment": "Settings row or section title for app appearance options.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Tema"
+          }
+        }
+      }
     },
     "Theme music volume": {},
     "Theme, layout, and more": {},
@@ -5181,12 +7005,28 @@
     "These servers are set up on another device on your iCloud account. Sign in to watch them here — your login stays private to each device.": {},
     "They're rendered as images by the source, so font, colour, size and position controls don't apply.": {},
     "Thickness": {
-      "comment": "Label for the subtitle shadow or outline thickness control in the iOS subtitle appearance editor."
+      "comment": "Label for the subtitle shadow or outline thickness control in the iOS subtitle appearance editor.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Grosor"
+          }
+        }
+      }
     },
     "This Apple TV": {},
     "This NFS export connects without a sign-in — anyone on this Apple TV can browse it. Choose what shows on your Home under Profile › Your Libraries.": {},
     "This Profile": {
-      "comment": "Section header in iOS Settings for options saved only to the active profile, shown when profiles are enabled."
+      "comment": "Section header in iOS Settings for options saved only to the active profile, shown when profiles are enabled.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Este perfil"
+          }
+        }
+      }
     },
     "This WebDAV server uses HTTP. Review the security warning, then Connect again.": {},
     "This account can’t browse that location.": {},
@@ -5403,7 +7243,15 @@
       "comment": "Explanation shown under the Watchlist hero source option in Settings."
     },
     "Toasty": {
-      "comment": "Display name for a warmer Circadian Mode color-tint level in settings."
+      "comment": "Display name for a warmer Circadian Mode color-tint level in settings.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Muy cálido"
+          }
+        }
+      }
     },
     "Token": {
       "comment": "Label for token-based sign-in when adding a network share, used for the auth method option and the token field."
@@ -5426,7 +7274,15 @@
     },
     "Tracks": {},
     "Trailer": {
-      "comment": "Label used for trailer actions and trailer-related settings, and as the fallback title for a remote trailer item with no server-provided name."
+      "comment": "Label used for trailer actions and trailer-related settings, and as the fallback title for a remote trailer item with no server-provided name.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Tráiler"
+          }
+        }
+      }
     },
     "Trakt, Simkl, AniList, MyAnimeList, Last.fm": {},
     "Transcode (server)": {
@@ -5434,13 +7290,29 @@
     },
     "Travel & Hobbies": {},
     "Trending": {
-      "comment": "Section header on the iOS Home screen for the featured trending shelf."
+      "comment": "Section header on the iOS Home screen for the featured trending shelf.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Tendencias"
+          }
+        }
+      }
     },
     "Trending titles available to stream (requires Seerr).": {
       "comment": "Explanation shown under the Featured hero source option in Settings."
     },
     "Troubleshoot": {
-      "comment": "Label for the iCloud Sync troubleshooting row in tvOS Settings."
+      "comment": "Label for the iCloud Sync troubleshooting row in tvOS Settings.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solucionar problemas"
+          }
+        }
+      }
     },
     "Troubleshooting overlays stay on this device and are off by default.": {},
     "TrueHD Atmos is not AVPlayer-compatible": {},
@@ -5462,7 +7334,15 @@
     },
     "Try Download Again": {},
     "Try again": {
-      "comment": "Retry button label in the tvOS network-share sign-in and connection error panels."
+      "comment": "Retry button label in the tvOS network-share sign-in and connection error panels.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Inténtalo de nuevo"
+          }
+        }
+      }
     },
     "Turn Off Developer Mode": {},
     "Turn Profiles Off": {},
@@ -5470,10 +7350,26 @@
     "Turn on Share Crash Reports in Help & Diagnostics to enable this. Your recent activity is then sent anonymously — no logins, tokens, servers, or titles.": {},
     "Turn servers and libraries on or off, and pick who you watch as.": {},
     "Turns off": {
-      "comment": "Label for the manual Circadian Mode off time in tvOS and iOS settings."
+      "comment": "Label for the manual Circadian Mode off time in tvOS and iOS settings.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se desactiva"
+          }
+        }
+      }
     },
     "Turns on": {
-      "comment": "Label for the manual Circadian Mode start time in tvOS and iOS settings."
+      "comment": "Label for the manual Circadian Mode start time in tvOS and iOS settings.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se activa"
+          }
+        }
+      }
     },
     "UIKit (forced)": {
       "comment": "Debug value in Settings for the Home hero foreground renderer override on tvOS. Shows that the hero foreground is forced to the UIKit implementation instead of the default or SwiftUI renderer."
@@ -5490,7 +7386,15 @@
     "Unable to load libraries": {},
     "Unable to load show": {},
     "Unavailable": {
-      "comment": "Used for temporarily unavailable metadata sources in Metadata > Diagnostics, and for an unavailable season or request status on the iOS item detail screen. This is a generic unavailable-state label."
+      "comment": "Used for temporarily unavailable metadata sources in Metadata > Diagnostics, and for an unavailable season or request status on the iOS item detail screen. This is a generic unavailable-state label.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No disponible"
+          }
+        }
+      }
     },
     "Unavailable in this build": {},
     "Unavailable sources are temporarily skipped and retried automatically.": {},
@@ -5498,20 +7402,52 @@
       "comment": "Informational text in the iOS player's secondary subtitle track section when image subtitles block dual-subtitle selection. %@ is the subtitle format name, such as PGS or DVD."
     },
     "Unknown": {
-      "comment": "Generic fallback value shown when Plozz cannot determine a diagnostic or metadata value, such as playback mode, HDR format, thermal state, app version or build, or a parsed share series name. Used as a plain unknown placeholder."
+      "comment": "Generic fallback value shown when Plozz cannot determine a diagnostic or metadata value, such as playback mode, HDR format, thermal state, app version or build, or a parsed share series name. Used as a plain unknown placeholder.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Desconocido"
+          }
+        }
+      }
     },
     "Unlinked profiles request as the administrator. Linked profiles use that user’s permissions, quotas, and defaults.": {},
     "Unlock": {
-      "comment": "Confirmation button in the iOS Plex PIN sheet. Submits the entered PIN to unlock the selected Plex Home user."
+      "comment": "Confirmation button in the iOS Plex PIN sheet. Submits the entered PIN to unlock the selected Plex Home user.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Desbloquear"
+          }
+        }
+      }
     },
     "Unlock %@": {
       "comment": "Section header in the iOS Plex PIN sheet. %@ is the Plex Home user name being unlocked."
     },
     "Unmute trailer": {
-      "comment": "Accessibility label for the iOS detail-page trailer mute button when the trailer is currently muted. Activating it turns trailer audio back on."
+      "comment": "Accessibility label for the iOS detail-page trailer mute button when the trailer is currently muted. Activating it turns trailer audio back on.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Activar el sonido del tráiler"
+          }
+        }
+      }
     },
     "Up Next": {
-      "comment": "Eyebrow label above the episode name on the in-player Up Next card."
+      "comment": "Eyebrow label above the episode name on the in-player Up Next card.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "A continuación"
+          }
+        }
+      }
     },
     "Up Next lead time": {},
     "Up one level": {},
@@ -5545,14 +7481,38 @@
       }
     },
     "Updating…": {
-      "comment": "Status shown in the Home scan and update pill when more than one media share is updating at the same time. Indicates background library refresh is in progress."
+      "comment": "Status shown in the Home scan and update pill when more than one media share is updating at the same time. Indicates background library refresh is in progress.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Actualizando…"
+          }
+        }
+      }
     },
     "Uploads the full log below so it can be read on a computer instead of scrolling here. Sent anonymously — no logins, tokens, servers, or titles are included.": {},
     "Use Password": {
-      "comment": "Secondary action button in the iOS Quick Connect error view when code-based sign-in is unavailable. Switches to manual username and password sign-in."
+      "comment": "Secondary action button in the iOS Quick Connect error view when code-based sign-in is unavailable. Switches to manual username and password sign-in.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usar contraseña"
+          }
+        }
+      }
     },
     "Use Profiles": {
-      "comment": "Primary onboarding button on the first-run profiles screen on tvOS and iOS. Enables household profiles and continues setup."
+      "comment": "Primary onboarding button on the first-run profiles screen on tvOS and iOS. Enables household profiles and continues setup.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usar perfiles"
+          }
+        }
+      }
     },
     "Use Quick Connect": {},
     "Use This Folder": {},
@@ -5560,32 +7520,88 @@
     "Use a symbol instead": {},
     "Use profiles on this Apple TV?": {},
     "User": {
-      "comment": "Field label in the iOS Account details screen in Settings. Shows the signed-in username for that server account."
+      "comment": "Field label in the iOS Account details screen in Settings. Shows the signed-in username for that server account.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usuario"
+          }
+        }
+      }
     },
     "Username": {
-      "comment": "Username field label or placeholder in server sign-in and network-share add flows on tvOS and iOS, including Jellyfin or Plex password sign-in and WebDAV, FTP, SFTP, and share authentication forms. Enter the account or share username here."
+      "comment": "Username field label or placeholder in server sign-in and network-share add flows on tvOS and iOS, including Jellyfin or Plex password sign-in and WebDAV, FTP, SFTP, and share authentication forms. Enter the account or share username here.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nombre de usuario"
+          }
+        }
+      }
     },
     "Username & Password": {},
     "Username & password": {},
     "Username (blank for guest)": {},
     "Username (optional)": {
-      "comment": "Optional username field placeholder in the iOS Add SMB Share screen. Leave it empty for guest access."
+      "comment": "Optional username field placeholder in the iOS Add SMB Share screen. Leave it empty for guest access.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nombre de usuario (opcional)"
+          }
+        }
+      }
     },
     "Uses intro and credit markers from your server. Requires Plex Pass on Plex, or Media Segments / Intro Skipper on Jellyfin.": {},
     "Verify & Browse": {},
     "Verify & Capture Host Key": {},
     "Verify Certificate": {
-      "comment": "Title of the trust-approval step in the Add WebDAV or Media Share flow on tvOS and iOS. Shown when the app asks the user to confirm a server TLS certificate fingerprint before continuing."
+      "comment": "Title of the trust-approval step in the Add WebDAV or Media Share flow on tvOS and iOS. Shown when the app asks the user to confirm a server TLS certificate fingerprint before continuing.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Verificar el certificado"
+          }
+        }
+      }
     },
     "Verify Connection": {
-      "comment": "Button in the iOS Add WebDAV Share form. Tests the entered server address and credentials before saving."
+      "comment": "Button in the iOS Add WebDAV Share form. Tests the entered server address and credentials before saving.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Verificar la conexión"
+          }
+        }
+      }
     },
     "Verify Host Key": {},
     "Verify Key": {
-      "comment": "Button in Metadata settings on tvOS and iOS for a user-provided TMDB API key. Checks that the saved or drafted key is valid."
+      "comment": "Button in Metadata settings on tvOS and iOS for a user-provided TMDB API key. Checks that the saved or drafted key is valid.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Verificar la clave"
+          }
+        }
+      }
     },
     "Version": {
-      "comment": "Generic label for a playback version/source with no distinguishing facts (resolution, edition, etc.) known."
+      "comment": "Generic label for a playback version/source with no distinguishing facts (resolution, edition, etc.) known.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Versión"
+          }
+        }
+      }
     },
     "Version %@ (Build %@)": {
       "comment": "Version line in the tvOS About panel in Settings. %1$@ is the app version string, %2$@ is the build number.",
@@ -5599,39 +7615,119 @@
       }
     },
     "Versions": {
-      "comment": "Header of the playback source menu page that lists alternate media versions or files for the current item. Shown when the user drills into version selection."
+      "comment": "Header of the playback source menu page that lists alternate media versions or files for the current item. Shown when the user drills into version selection.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Versiones"
+          }
+        }
+      }
     },
     "Vertical Padding": {
-      "comment": "Setting label in the subtitle style editor on tvOS and iOS. Adjusts the vertical padding inside the subtitle background box."
+      "comment": "Setting label in the subtitle style editor on tvOS and iOS. Adjusts the vertical padding inside the subtitle background box.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Margen vertical"
+          }
+        }
+      }
     },
     "Violet": {
       "comment": "Color name for a profile avatar and tile color choice. Refers to the violet profile color option."
     },
     "Volume": {
-      "comment": "Section header in Settings > Detail Page > Behind the hero on tvOS. Groups the theme-music volume control for background music on title detail pages."
+      "comment": "Section header in Settings > Detail Page > Behind the hero on tvOS. Groups the theme-music volume control for background music on title detail pages.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Volumen"
+          }
+        }
+      }
     },
     "Waiting for approval…": {},
     "Warm": {
-      "comment": "One warmth level name in Circadian Mode or Night Shift settings. Selects a moderately warm picture tint."
+      "comment": "One warmth level name in Circadian Mode or Night Shift settings. Selects a moderately warm picture tint.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cálido"
+          }
+        }
+      }
     },
     "Warms and dims the display at night to help you sleep.": {},
     "Warmth": {
-      "comment": "Setting label in Circadian Mode or Night Shift on tvOS and iOS. Controls how warm the picture tint becomes at night."
+      "comment": "Setting label in Circadian Mode or Night Shift on tvOS and iOS. Controls how warm the picture tint becomes at night.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Calidez"
+          }
+        }
+      }
     },
     "Watch Status": {
-      "comment": "Section header in Settings > Integrations on tvOS. Groups watch-status sync options across servers."
+      "comment": "Section header in Settings > Integrations on tvOS. Groups watch-status sync options across servers.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Estado de visualización"
+          }
+        }
+      }
     },
     "Watch indicator": {
-      "comment": "Picker label in iOS Settings > Appearance > Library cards. Chooses whether media cards mark watched items or unwatched items."
+      "comment": "Picker label in iOS Settings > Appearance > Library cards. Chooses whether media cards mark watched items or unwatched items.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Indicador de visualización"
+          }
+        }
+      }
     },
     "Watched": {
-      "comment": "Used for the watch-indicator option in Settings > Appearance and for accessibility text when an episode, card badge, or detail-page watched button is already marked watched. This is the generic already-watched state label."
+      "comment": "Used for the watch-indicator option in Settings > Appearance and for accessibility text when an episode, card badge, or detail-page watched button is already marked watched. This is the generic already-watched state label.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Visto"
+          }
+        }
+      }
     },
     "Watched Indicator": {
-      "comment": "Section header for the media-card watch badge style controls in the tvOS Appearance settings detail pane. Contains the picker that chooses how watched status is marked on library cards."
+      "comment": "Section header for the media-card watch badge style controls in the tvOS Appearance settings detail pane. Contains the picker that chooses how watched status is marked on library cards.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Indicador de visto"
+          }
+        }
+      }
     },
     "Watching as": {
-      "comment": "Label for the per-server identity selector in Servers and Libraries settings on tvOS and iOS. Lets the user choose which Plex Home or Jellyfin account they are watching as on that server."
+      "comment": "Label for the per-server identity selector in Servers and Libraries settings on tvOS and iOS. Lets the user choose which Plex Home or Jellyfin account they are watching as on that server.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Viendo como"
+          }
+        }
+      }
     },
     "We created this profile from your %@ account. You can rename it or change the photo here, or any time in Settings.": {
       "comment": "Explanatory text on the tvOS first-run profile screen. %@ is the provider name the profile was created from, such as Plex or Jellyfin."
@@ -5643,7 +7739,15 @@
       "comment": "Section header in the iOS Add WebDAV Share form. Contains the server URL field."
     },
     "Weight": {
-      "comment": "Setting label in the subtitle style editor on tvOS and iOS. Chooses the subtitle font weight."
+      "comment": "Setting label in the subtitle style editor on tvOS and iOS. Chooses the subtitle font weight.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Grosor"
+          }
+        }
+      }
     },
     "Welcome to Plozz": {},
     "What Plozz does with subtitles when playback starts.": {},
@@ -5658,25 +7762,73 @@
       "comment": "Color name used for subtitle appearance color choices, and also for the white profile avatar and tile color option. Refers to the plain white color."
     },
     "Who's watching?": {
-      "comment": "Title of the tvOS profile picker screen. Asks which local Plozz profile should be opened."
+      "comment": "Title of the tvOS profile picker screen. Asks which local Plozz profile should be opened.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "¿Quién está viendo?"
+          }
+        }
+      }
     },
     "Who’s watching?": {
-      "comment": "Title text for the iOS profile picker and profiles onboarding, and section header in iOS Profile settings. Refers to choosing which local Plozz profile is active."
+      "comment": "Title text for the iOS profile picker and profiles onboarding, and section header in iOS Profile settings. Refers to choosing which local Plozz profile is active.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "¿Quién está viendo?"
+          }
+        }
+      }
     },
     "Width": {
-      "comment": "Label for the subtitle outline width setting in the player's subtitle style options on iOS."
+      "comment": "Label for the subtitle outline width setting in the player's subtitle style options on iOS.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Anchura"
+          }
+        }
+      }
     },
     "Work": {
-      "comment": "Metric label in Metadata > Diagnostics on tvOS and iOS. Shows background metadata-enrichment work status, such as running, queued, or idle."
+      "comment": "Metric label in Metadata > Diagnostics on tvOS and iOS. Shows background metadata-enrichment work status, such as running, queued, or idle.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Trabajo"
+          }
+        }
+      }
     },
     "Written By": {
-      "comment": "Label in the Crew facts section on item detail pages. Introduces the list of writers for the movie, show, or episode."
+      "comment": "Label in the Crew facts section on item detail pages. Introduces the list of writers for the movie, show, or episode.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Escrita por"
+          }
+        }
+      }
     },
     "X": {
       "comment": "The letter shown as the suffix in the custom DTS:X audio-format badge. This is part of the DTS:X brand mark and should stay as the letter X."
     },
     "Year": {
-      "comment": "Label in the Details facts section on item detail pages. Shows the title's production or release year."
+      "comment": "Label in the Details facts section on item detail pages. Shows the title's production or release year.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Año"
+          }
+        }
+      }
     },
     "Yellow": {
       "comment": "Color name used for subtitle appearance color choices, and also for the yellow profile avatar and tile color option. Refers to the plain yellow color."
@@ -5694,7 +7846,15 @@
     "Your Home is empty": {},
     "Your Own TMDB Key": {},
     "Your Profile": {
-      "comment": "Fallback profile name on the tvOS first-run profile confirmation screen when the new profile has no custom name yet, and the iOS first-run screen title for editing that first profile. Refers to the user's own initial Plozz profile."
+      "comment": "Fallback profile name on the tvOS first-run profile confirmation screen when the new profile has no custom name yet, and the iOS first-run screen title for editing that first profile. Refers to the user's own initial Plozz profile.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Tu perfil"
+          }
+        }
+      }
     },
     "Your libraries are empty. Add media on your media server to see it here.": {},
     "Your other device is set up": {},
@@ -6124,7 +8284,15 @@
       }
     },
     "full timeline": {
-      "comment": "Diagnostic phrase in the playback diagnostics overlay for the seekable-window row. Shown when the current seekable window covers the entire media timeline."
+      "comment": "Diagnostic phrase in the playback diagnostics overlay for the seekable-window row. Shown when the current seekable window covers the entire media timeline.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "línea de tiempo completa"
+          }
+        }
+      }
     },
     "heroBackground.detail.off": {
       "comment": "One-line explanation shown under the hero-background picker.",
@@ -6352,7 +8520,15 @@
       "comment": "Example URL placeholder in the iOS Add WebDAV Share address field. Shows the expected format for the server WebDAV address."
     },
     "iCloud Sync": {
-      "comment": "Settings row, page title, and toggle label for Plozz cross-device iCloud syncing on tvOS and iOS. Refers to syncing profiles, settings, and server lists through the user's iCloud account."
+      "comment": "Settings row, page title, and toggle label for Plozz cross-device iCloud syncing on tvOS and iOS. Refers to syncing profiles, settings, and server lists through the user's iCloud account.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sincronización con iCloud"
+          }
+        }
+      }
     },
     "iCloud identity: %@…  (must match on every device)": {
       "comment": "Caption on the iOS iCloud Sync settings card that shows the household identity tag. %@ is the short identity tag that should match across devices."
@@ -6412,7 +8588,15 @@
       }
     },
     "loading…": {
-      "comment": "Live status suffix shown next to the selected second subtitle track while its sidecar is being fetched."
+      "comment": "Live status suffix shown next to the selected second subtitle track while its sidecar is being fetched.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "cargando…"
+          }
+        }
+      }
     },
     "mediaAction.addToWatchlist": {
       "comment": "Context-menu action adding an item to the user's watchlist.",
@@ -6775,11 +8959,27 @@
       }
     },
     "no lines": {
-      "comment": "Live status suffix shown when the selected second subtitle track loaded successfully but contained no lines for this file."
+      "comment": "Live status suffix shown when the selected second subtitle track loaded successfully but contained no lines for this file.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "sin líneas"
+          }
+        }
+      }
     },
     "on another device": {},
     "optional": {
-      "comment": "Placeholder in the tvOS unified Add Media Share form for an optional password field. The user may leave this field blank."
+      "comment": "Placeholder in the tvOS unified Add Media Share form for an optional password field. The user may leave this field blank.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "opcional"
+          }
+        }
+      }
     },
     "optional — blank for guest": {},
     "or enter code": {},
@@ -6985,7 +9185,15 @@
       }
     },
     "required": {
-      "comment": "Placeholder in the tvOS unified Add Media Share form for required username or password fields. Indicates that the field must be filled in before connecting."
+      "comment": "Placeholder in the tvOS unified Add Media Share form for required username or password fields. Indicates that the field must be filled in before connecting.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "obligatorio"
+          }
+        }
+      }
     },
     "search.cue.moreSeasons": {
       "comment": "Badge on a search result for a show only partly in the user's library, meaning more seasons can be requested.",
@@ -8099,7 +10307,15 @@
       }
     },
     "unavailable": {
-      "comment": "Live status suffix shown when the selected second subtitle track's sidecar could not be fetched or decoded."
+      "comment": "Live status suffix shown when the selected second subtitle track's sidecar could not be fetched or decoded.",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "no disponible"
+          }
+        }
+      }
     },
     "v%@": {
       "comment": "Version badge beside an auto-discovered Seerr server in the tvOS and iOS Seerr settings screens. %@ is the server version string."

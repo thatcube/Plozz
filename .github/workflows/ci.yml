@@ -60,6 +60,15 @@ jobs:
       - name: Localization catalog validation
         run: python3 tools/l10n-sync.py --validate-only
 
+      # Detects source changes that keep the same semantic key, plus changed
+      # permission prompts. Those still have existing translations, so ordinary
+      # key-coverage checks cannot tell that all languages need refreshing.
+      - name: Localization source snapshot
+        run: |
+          python3 tools/l10n-export-source.py /tmp/plozz-l10n-delta.json \
+            --missing-for nl \
+            --check-snapshot
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

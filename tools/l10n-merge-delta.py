@@ -33,6 +33,25 @@ def load(path: Path) -> dict[str, Any]:
     return value
 
 
+def generated_units_are_review_pending(value: Any) -> bool:
+    found = False
+
+    def visit(child: Any) -> bool:
+        nonlocal found
+        if isinstance(child, dict):
+            unit = child.get("stringUnit")
+            if isinstance(unit, dict):
+                found = True
+                if unit.get("state") != "needs_review":
+                    return False
+            return all(visit(value) for value in child.values())
+        if isinstance(child, list):
+            return all(visit(value) for value in child)
+        return True
+
+    return visit(value) and found
+
+
 def main() -> int:
     args = parse_args()
     try:
@@ -43,8 +62,9 @@ def main() -> int:
         return 1
 
     source_keys = list(source.get("entries", {}))
-    if not source_keys:
-        print("✗ Source delta contains no entries.", file=sys.stderr)
+    source_info_keys = list(source.get("infoPlistEntries", {}))
+    if not source_keys and not source_info_keys:
+        print("✗ Source delta contains no entries or permission prompts.", file=sys.stderr)
         return 1
     if translated.get("sourceCatalogSHA256") != source.get("catalogSHA256"):
         print("✗ Translated delta was produced from another source catalog.", file=sys.stderr)
@@ -52,10 +72,20 @@ def main() -> int:
     if translated.get("deltaKeys") != source_keys:
         print("✗ Translated delta key order/set differs from source delta.", file=sys.stderr)
         return 1
+    if translated.get("infoPlistKeys", []) != source_info_keys:
+        print(
+            "✗ Translated permission-prompt order/set differs from source delta.",
+            file=sys.stderr,
+        )
+        return 1
 
     translated_languages = translated.get("languages")
     if not isinstance(translated_languages, dict):
         print("✗ Translated delta is missing its languages object.", file=sys.stderr)
+        return 1
+    translated_info_languages = translated.get("infoPlistLanguages", {})
+    if not isinstance(translated_info_languages, dict):
+        print("✗ Translated delta has an invalid infoPlistLanguages object.", file=sys.stderr)
         return 1
     languages = (
         [part.strip() for part in args.languages.split(",") if part.strip()]
@@ -69,6 +99,38 @@ def main() -> int:
         if not isinstance(delta, dict) or set(delta) != set(source_keys):
             print(
                 f"✗ {language}: delta must contain exactly {len(source_keys)} keys.",
+                file=sys.stderr,
+            )
+            return 1
+        invalid_states = [
+            key
+            for key, value in delta.items()
+            if not generated_units_are_review_pending(value)
+        ]
+        if invalid_states:
+            print(
+                f"✗ {language}: generated units must all remain needs_review: "
+                f"{invalid_states[:5]}",
+                file=sys.stderr,
+            )
+            return 1
+        info_delta = translated_info_languages.get(language, {})
+        if not isinstance(info_delta, dict) or set(info_delta) != set(source_info_keys):
+            print(
+                f"✗ {language}: permission delta must contain exactly "
+                f"{len(source_info_keys)} keys.",
+                file=sys.stderr,
+            )
+            return 1
+        invalid_prompts = [
+            key
+            for key, value in info_delta.items()
+            if not isinstance(value, str) or not value
+        ]
+        if invalid_prompts:
+            print(
+                f"✗ {language}: permission translations must be nonempty text: "
+                f"{invalid_prompts[:5]}",
                 file=sys.stderr,
             )
             return 1
@@ -89,18 +151,45 @@ def main() -> int:
             print(f"✗ {artifact_path.name}: missing translations object.", file=sys.stderr)
             return 1
         overlap = set(source_keys) & set(translations)
-        if overlap:
+        refreshable = {
+            key
+            for key, entry in source.get("entries", {}).items()
+            if isinstance(entry, dict) and entry.get("requiresRefresh") is True
+        }
+        unsafe_overlap = overlap - refreshable
+        if unsafe_overlap:
             print(
                 f"✗ {language}: full artifact already contains delta keys: "
-                f"{sorted(overlap)[:5]}",
+                f"{sorted(unsafe_overlap)[:5]}",
                 file=sys.stderr,
             )
             return 1
         translations.update(delta)
+        info_plist = artifact.get("infoPlist")
+        if not isinstance(info_plist, dict):
+            print(f"✗ {artifact_path.name}: missing infoPlist object.", file=sys.stderr)
+            return 1
+        refreshable_prompts = {
+            key
+            for key, entry in source.get("infoPlistEntries", {}).items()
+            if isinstance(entry, dict) and entry.get("requiresRefresh") is True
+        }
+        unsafe_prompt_overlap = (
+            set(info_delta) & set(info_plist)
+        ) - refreshable_prompts
+        if unsafe_prompt_overlap:
+            print(
+                f"✗ {language}: artifact already contains permission prompts "
+                f"without refresh authorization: {sorted(unsafe_prompt_overlap)[:5]}",
+                file=sys.stderr,
+            )
+            return 1
+        info_plist.update(info_delta)
         pending[artifact_path] = artifact
         print(
             f"✓ {language:<8} {len(translations)} total keys "
-            f"(+{len(delta)} delta)"
+            f"(+{len(delta) - len(overlap)} new, {len(overlap)} refreshed, "
+            f"{len(info_delta)} permission prompt(s))"
         )
 
     if args.apply:

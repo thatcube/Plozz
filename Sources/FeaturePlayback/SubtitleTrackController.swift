@@ -22,6 +22,10 @@ protocol SubtitleTrackControllerHost: AnyObject {
     var trackSubtitleOverlay: SubtitleOverlayLoader { get }
     var trackStyle: SubtitleStyle { get }
     var trackPlozzigenAvailable: Bool { get }
+    /// The app's effective language. Track menus name languages IN this locale —
+    /// `Locale.current` would be the SYSTEM language and would ignore an in-app
+    /// override, so a viewer running Plozz in Spanish would see "Japanese".
+    var trackAppLocale: Locale { get }
     var trackAuthenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? { get }
 
     func trackApplySubtitleStyle(_ style: SubtitleStyle)
@@ -161,7 +165,8 @@ final class SubtitleTrackController {
         host.trackControls.audioOptions = TrackMenuBuilder.audioOptions(
             tracks: audio,
             selectedID: selectedAudioTrackID,
-            preferred: preferred
+            preferred: preferred,
+            locale: host.trackAppLocale
         )
 
         let subtitles = engine.subtitleTracks.map { track in
@@ -179,7 +184,8 @@ final class SubtitleTrackController {
             tracks: subtitles,
             selectedID: selectedSubtitleTrackID,
             preferred: preferred,
-            detectedLanguages: detectedSubtitleLanguages
+            detectedLanguages: detectedSubtitleLanguages,
+            locale: host.trackAppLocale
         )
 
         // Dual/second-line picker. If the current secondary is no longer eligible
@@ -210,7 +216,8 @@ final class SubtitleTrackController {
             eligible: secondaryEligible,
             selectedID: selectedSecondarySubtitleTrackID,
             preferred: preferred,
-            detectedLanguages: detectedSubtitleLanguages
+            detectedLanguages: detectedSubtitleLanguages,
+            locale: host.trackAppLocale
         )
     }
 

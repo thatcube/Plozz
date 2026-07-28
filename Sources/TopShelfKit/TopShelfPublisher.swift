@@ -16,17 +16,33 @@ public enum TopShelfPublisher {
     /// plain remote poster. Empty rows are dropped; if nothing is playable the
     /// snapshot is still written (empty) so a freshly-signed-out state clears the
     /// shelf. Stale composited art is pruned each publish.
-    public static func publish(continueWatching: [MediaItem], latest: [MediaItem]) async {
+    /// - Parameter locale: the language the APP is currently showing. The Top
+    ///   Shelf extension is a separate process with its own bundle, so it can
+    ///   neither read the app's catalog nor know about an in-app language
+    ///   override — resolving there would silently fall back to the system
+    ///   language and disagree with the app. So the app resolves the section
+    ///   titles here and stores finished text; the extension only renders.
+    ///   Eager resolution is correct in this one case precisely because the
+    ///   value crosses a process boundary.
+    public static func publish(
+        continueWatching: [MediaItem],
+        latest: [MediaItem],
+        locale: Locale? = nil
+    ) async {
         var sections: [TopShelfSnapshot.Section] = []
 
         let resume = await items(from: continueWatching, compositeProgress: true)
         if !resume.isEmpty {
-            sections.append(.init(id: "continue", title: "Continue Watching", items: resume))
+            sections.append(.init(id: "continue",
+                                  title: resolved("Continue Watching", locale),
+                                  items: resume))
         }
 
         let recent = await items(from: latest)
         if !recent.isEmpty {
-            sections.append(.init(id: "latest", title: "Recently Added", items: recent))
+            sections.append(.init(id: "latest",
+                                  title: resolved("Recently Added", locale),
+                                  items: recent))
         }
 
         // Drop any composited poster no longer referenced by this snapshot. Guard
@@ -105,5 +121,13 @@ public enum TopShelfPublisher {
             return item.seriesPosterURL ?? item.posterURL ?? item.fallbackArtworkURL
         }
         return item.posterURL ?? item.fallbackArtworkURL
+    }
+
+    /// Resolves a section title against the app's current language. `nil` means
+    /// "follow the system", which is what `LocalizedStringResource` already does.
+    private static func resolved(_ resource: LocalizedStringResource, _ locale: Locale?) -> String {
+        var resource = resource
+        if let locale { resource.locale = locale }
+        return String(localized: resource)   // l10n:content — deliberately resolved here: the value is written to an App Group file the Top Shelf extension reads in another process
     }
 }

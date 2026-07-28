@@ -20,6 +20,7 @@ public struct PlayerView: View {
     /// Smooths the HDR/Dolby-Vision HDMI display-mode switch by fading to black
     /// around it (with a timeout so it can never strand on black).
     @State private var hdrTransition = HDRTransitionModel()
+    @Environment(\.locale) private var locale
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     /// The app-root window veil (injected by `RootView`). On HDR/DV exit the player
@@ -105,6 +106,14 @@ public struct PlayerView: View {
             viewModel.controls.diagnosticsEnabled = showDiagnostics
             await viewModel.load()
             if viewModel.controls.diagnosticsEnabled { startSampling() }
+        }
+        // The track controller isn't a View, so it can't read the environment.
+        // Push the app's language in and keep it current: track menus name
+        // languages in it, and an in-app language change has to reach them.
+        .onAppear { viewModel.appLocale = locale }
+        .onChange(of: locale) { _, newLocale in
+            viewModel.appLocale = newLocale
+            viewModel.refreshTrackMenusForLanguageChange()
         }
         .onChange(of: viewModel.controls.diagnosticsEnabled) { _, enabled in
             if enabled {

@@ -25,6 +25,10 @@ import TopShelfKit
 /// full-screen player presentation. Every destination resolves its provider from
 /// the tapped item/library's `sourceAccountID`.
 struct HomeTab: View {
+    /// The app's effective language, injected by `AppLanguageScope`. Read here
+    /// only to hand to the Top Shelf publisher: that snapshot crosses into
+    /// another process, so its titles have to be resolved on this side.
+    @Environment(\.locale) private var locale
     let accounts: [ResolvedAccount]
     /// Detail-snapshot cache scoped to the active content identity, threaded from
     /// `MainTabView` so revisit paints never cross a profile/account/credential.
@@ -123,7 +127,8 @@ struct HomeTab: View {
                     contentPublisher: { continueWatching, latest in
                         await TopShelfPublisher.publish(
                             continueWatching: continueWatching,
-                            latest: latest
+                            latest: latest,
+                            locale: locale
                         )
                     }
                 ),

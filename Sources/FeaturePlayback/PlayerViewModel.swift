@@ -29,6 +29,16 @@ import UIKit
 @MainActor
 @Observable
 public final class PlayerViewModel {
+    /// The app's effective language, pushed in from the view layer's
+    /// `@Environment(\.locale)`. Kept here because the track controller is not a
+    /// View and so cannot read the environment itself.
+    ///
+    /// Deliberately not observed: nothing should re-render merely because this
+    /// changed. The language change is handled explicitly by rebuilding the
+    /// track menus, and making it tracked would add a redraw dependency to every
+    /// view reading this model for no benefit.
+    @ObservationIgnored public var appLocale: Locale = .current
+
     public enum Phase: Equatable {
         case loading
         case ready
@@ -1803,6 +1813,14 @@ extension PlayerViewModel: SubtitleOverlayLoaderHost {
         subtitleController.loadTrackOptions()
     }
 
+    /// Rebuilds the track menus after an in-app language change. Their rows name
+    /// languages ("Japanese", "Japonés"), and those names are baked in when the
+    /// menu is built — so unlike ordinary SwiftUI copy they do not re-resolve on
+    /// their own.
+    public func refreshTrackMenusForLanguageChange() {
+        subtitleController.loadTrackOptions()
+    }
+
     func overlaySetSecondaryStatus(_ status: SecondarySubtitleStatus) {
         controls.secondarySubtitleStatus = status
     }
@@ -1817,6 +1835,8 @@ extension PlayerViewModel: SubtitleOverlayLoaderHost {
 // MARK: - SubtitleTrackControllerHost
 
 extension PlayerViewModel: SubtitleTrackControllerHost {
+    var trackAppLocale: Locale { appLocale }
+
     var trackEngine: any VideoEngine { engine }
     var trackEngineKind: PlaybackEngineKind { currentEngineKind }
     var trackRequest: PlaybackRequest? { request }

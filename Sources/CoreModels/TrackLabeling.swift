@@ -15,9 +15,14 @@ public enum TrackLabeling {
 
     /// A localized, Title-cased language **name** for an ISO-639 code
     /// (`"en"`/`"eng"` → `"English"`). `nil` for nil/empty/unresolvable codes.
-    public static func languageName(forCode code: String?) -> String? {
+    /// - Parameter locale: the language to name the track IN. Defaults to the
+    ///   device's, but the caller should pass the app's effective locale — a
+    ///   viewer who set Plozz to Spanish expects "Japonés", not "Japanese".
+    ///   `Locale.current` is the SYSTEM language and does not follow an in-app
+    ///   override, which is why this is a parameter rather than a lookup.
+    public static func languageName(forCode code: String?, in locale: Locale = .current) -> String? {
         guard let normalized = LanguageMatch.normalized(code), !normalized.isEmpty else { return nil }
-        guard let name = Locale.current.localizedString(forLanguageCode: normalized),
+        guard let name = locale.localizedString(forLanguageCode: normalized),
               !name.isEmpty,
               // Locale echoes the code back for unknown languages; reject that so
               // we fall through to the provider title instead of showing "Qaa".
@@ -159,10 +164,11 @@ public enum TrackLabeling {
         isHearingImpaired: Bool = false,
         isCommentary: Bool = false,
         detectedLanguage: String? = nil,
-        trackID: Int
+        trackID: Int,
+        locale: Locale = .current
     ) -> TrackLabel {
-        let providerName = languageName(forCode: language)
-        let detectedName = providerName == nil ? languageName(forCode: detectedLanguage) : nil
+        let providerName = languageName(forCode: language, in: locale)
+        let detectedName = providerName == nil ? languageName(forCode: detectedLanguage, in: locale) : nil
         let base: TrackLabel.Base
         if let providerName {
             base = .content(providerName)
@@ -206,9 +212,10 @@ public enum TrackLabeling {
         channels: Int? = nil,
         isAtmos: Bool = false,
         isCommentary: Bool = false,
-        trackID: Int
+        trackID: Int,
+        locale: Locale = .current
     ) -> TrackLabel {
-        let languageNm = languageName(forCode: language)
+        let languageNm = languageName(forCode: language, in: locale)
 
         // A provider title that already names the language is a complete label.
         if let languageNm,

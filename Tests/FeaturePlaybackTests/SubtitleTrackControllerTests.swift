@@ -304,6 +304,9 @@ private final class SpyTrackHost: SubtitleTrackControllerHost {
     var trackSubtitleOverlay: SubtitleOverlayLoader { overlay }
     var trackStyle: SubtitleStyle { style }
     var trackPlozzigenAvailable: Bool { plozzigenAvailable }
+    /// Pinned rather than `.current` so track-label assertions don't change
+    /// meaning on a machine with a non-English system language.
+    var trackAppLocale: Locale = Locale(identifier: "en_US")
     var trackAuthenticatedHTTPResolver: (any AuthenticatedHTTPResourceResolving)? { nil }
 
     func trackApplySubtitleStyle(_ style: SubtitleStyle) { self.style = style }

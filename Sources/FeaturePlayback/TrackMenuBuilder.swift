@@ -48,7 +48,8 @@ enum TrackMenuBuilder {
     static func audioOptions(
         tracks: [MediaTrack],
         selectedID: Int?,
-        preferred: [String?]
+        preferred: [String?],
+        locale: Locale = .current
     ) -> [PlayerTrackOption] {
         tracks.sortedByPreferredLanguage(preferred).map { track in
             PlayerTrackOption(
@@ -60,7 +61,8 @@ enum TrackMenuBuilder {
                     channels: track.channels,
                     isAtmos: track.isAtmos,
                     isCommentary: track.isCommentary,
-                    trackID: track.id
+                    trackID: track.id,
+                    locale: locale
                 )),
                 isSelected: track.id == selectedID
             )
@@ -74,14 +76,15 @@ enum TrackMenuBuilder {
         tracks: [MediaTrack],
         selectedID: Int?,
         preferred: [String?],
-        detectedLanguages: [Int: String]
+        detectedLanguages: [Int: String],
+        locale: Locale = .current
     ) -> [PlayerTrackOption] {
         guard !tracks.isEmpty else { return [] }
         var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: Text("Off", comment: "Turns a subtitle line off in the subtitle track picker."), isSelected: selectedID == nil)]
         options.append(contentsOf: tracks.sortedByPreferredLanguage(preferred).map { track in
             PlayerTrackOption(
                 id: track.id,
-                title: subtitleLabel(track, detectedLanguages: detectedLanguages),
+                title: subtitleLabel(track, detectedLanguages: detectedLanguages, locale: locale),
                 isSelected: track.id == selectedID,
                 isExternal: track.isExternal
             )
@@ -96,14 +99,15 @@ enum TrackMenuBuilder {
         eligible: [MediaTrack],
         selectedID: Int?,
         preferred: [String?],
-        detectedLanguages: [Int: String]
+        detectedLanguages: [Int: String],
+        locale: Locale = .current
     ) -> [PlayerTrackOption] {
         guard !eligible.isEmpty else { return [] }
         var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: Text("Off", comment: "Turns a subtitle line off in the subtitle track picker."), isSelected: selectedID == nil)]
         options.append(contentsOf: eligible.sortedByPreferredLanguage(preferred).map { track in
             PlayerTrackOption(
                 id: track.id,
-                title: subtitleLabel(track, detectedLanguages: detectedLanguages),
+                title: subtitleLabel(track, detectedLanguages: detectedLanguages, locale: locale),
                 isSelected: track.id == selectedID
             )
         })
@@ -172,7 +176,8 @@ enum TrackMenuBuilder {
         return primary
     }
 
-    private static func subtitleLabel(_ track: MediaTrack, detectedLanguages: [Int: String]) -> Text {
+    private static func subtitleLabel(_ track: MediaTrack, detectedLanguages: [Int: String],
+                                      locale: Locale) -> Text {
         text(for: TrackLabeling.subtitleLabel(
             displayTitle: track.displayTitle,
             language: track.language,
@@ -182,7 +187,8 @@ enum TrackMenuBuilder {
             isHearingImpaired: track.isHearingImpaired,
             isCommentary: track.isCommentary,
             detectedLanguage: detectedLanguages[track.id],
-            trackID: track.id
+            trackID: track.id,
+            locale: locale
         ))
     }
 

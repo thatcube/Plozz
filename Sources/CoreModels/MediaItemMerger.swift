@@ -70,10 +70,12 @@ public struct UnifiedWatchState: Sendable, Hashable {
 /// possible — the old `additionalSourceAccountIDs` only remembered *which*
 /// accounts also held the title, not how to actually address it there.
 ///
-/// Determinism: the **first** occurrence of a duplicate set stays primary (so the
-/// aggregator's interleave/relevance order is respected), `providerIDs` are
-/// unioned, and `sources`/`additionalSourceAccountIDs` list the primary first
-/// then the de-duplicated alternates in first-seen order.
+/// Determinism: the primary is the member whose own metadata is richest (a managed
+/// server's copy over a plain file share's — see ``richestMember(of:)``), falling
+/// back to the first occurrence, so the aggregator's interleave/relevance order is
+/// respected among equals. `providerIDs` are unioned across **every** member, and
+/// `sources`/`additionalSourceAccountIDs` list the primary first then the
+/// de-duplicated alternates in first-seen order.
 public enum MediaItemMerger {
     /// Collapses duplicate items referring to the same title across providers into
     /// a single merged item, preserving the input order.
@@ -373,7 +375,18 @@ public enum MediaItemMerger {
             guard seenSourceIDs.insert(ref.id).inserted else { return }
             sources.append(ref)
         }
-        for duplicate in duplicates {
+        // The PRIMARY's refs lead, then the rest in their original order.
+        //
+        // "Primary first" is a documented invariant of this list — `sources.first`
+        // is the fallback "current server" in the playback picker, and the selector
+        // treats a lower index as the preferred candidate at equal rank. Choosing
+        // the primary by metadata rather than position broke that: the card would
+        // front the server's copy while the picker highlighted the share's.
+        // Relative order is otherwise untouched, so re-merging stays idempotent.
+        let orderedMembers = [primary] + duplicates.filter {
+            !($0.id == primary.id && $0.sourceAccountID == primary.sourceAccountID)
+        }
+        for duplicate in orderedMembers {
             // Sanitize each member's *own carried* sources against the merged kind
             // before folding them in: a member rehydrated from a stale on-disk cache
             // can carry a cross-kind twin (the episode↔movie bug), and its own

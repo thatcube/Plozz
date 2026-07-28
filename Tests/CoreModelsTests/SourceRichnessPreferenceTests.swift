@@ -127,4 +127,30 @@ final class SourceRichnessPreferenceTests: XCTestCase {
         XCTAssertEqual(merged.providerIDs["AniList"], "12345", "the share's own id must survive")
     }
 
+    func testTheMergedSourceListStillLeadsWithThePrimary() {
+        // "Primary first" is relied on elsewhere: `sources.first` is the playback
+        // picker's fallback "current server", and the selector prefers a lower index
+        // at equal rank. Choosing the primary by metadata rather than position broke
+        // that — the card fronted the server while the picker highlighted the share.
+        let share = item("series:silo", accountID: "share", providerKind: .mediaShare)
+        let plex = item("46124", accountID: "plex", providerKind: .plex, cast: [person])
+
+        let merged = MediaItemMerger.mergeGroup([share, plex])
+        XCTAssertEqual(merged.id, "46124")
+        XCTAssertEqual(merged.sources.first?.accountID, "plex",
+                       "the picker's default must agree with the card")
+        XCTAssertEqual(Set(merged.sources.map(\.accountID)), ["plex", "share"],
+                       "every server still appears")
+    }
+
+    func testMergingIsIdempotent() {
+        // Re-merging an already-merged card must not reshuffle it.
+        let share = item("series:silo", accountID: "share", providerKind: .mediaShare)
+        let plex = item("46124", accountID: "plex", providerKind: .plex, cast: [person])
+        let once = MediaItemMerger.mergeGroup([share, plex])
+        let twice = MediaItemMerger.mergeGroup([once])
+        XCTAssertEqual(twice.id, once.id)
+        XCTAssertEqual(twice.sources.map(\.accountID), once.sources.map(\.accountID))
+    }
+
 }

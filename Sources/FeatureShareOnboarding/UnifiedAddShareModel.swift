@@ -100,7 +100,7 @@ public final class UnifiedAddShareModel {
     public enum LocationLoad: Equatable {
         case idle, loading, loaded
         case needsAuth, badCredentials, unreachable
-        case failed(String)
+        case failed(LocalizedStringResource)
     }
 
     // MARK: Discovery
@@ -122,7 +122,7 @@ public final class UnifiedAddShareModel {
     public var token = ""
     public var authMode: AuthMode = .usernamePassword
     public private(set) var detecting = false
-    public private(set) var connectError: String?
+    public private(set) var connectError: LocalizedStringResource?
     /// Doors detected for the box currently being connected (for the Protocol
     /// dropdown's "Detected" group and per-door port prefill).
     public private(set) var detectedDoors: [DiscoveredMediaShareBox.Door] = []
@@ -403,7 +403,7 @@ public final class UnifiedAddShareModel {
     }
 
     /// The plaintext-credential warning to show for the current form, if any.
-    public var plaintextWarning: String? {
+    public var plaintextWarning: LocalizedStringResource? {
         guard let descriptor = descriptor(selectedTransport) else { return nil }
         switch descriptor.plaintextCredentialRisk {
         case .never:
@@ -542,7 +542,7 @@ public final class UnifiedAddShareModel {
             case .unreachable:
                 self.connectError = "Couldn’t reach that server. Check the address and network."
             case .failed(let message):
-                self.connectError = message
+                self.connectError = "Couldn’t connect: \(message)"
             case .cancelled:
                 break
             }
@@ -579,7 +579,7 @@ public final class UnifiedAddShareModel {
         case .unreachable:
             locationLoad = .unreachable
         case .failed(let message):
-            locationLoad = .failed(message)
+            locationLoad = .failed("Couldn’t load locations: \(message)")
         case .cancelled:
             break
         }
@@ -614,7 +614,7 @@ public final class UnifiedAddShareModel {
         case .permissionDenied:
             locationLoad = .failed("This server didn’t allow listing exports. Enter the export path, e.g. /volume1/Media.")
         case .failed(let message):
-            locationLoad = .failed(message)
+            locationLoad = .failed("Couldn’t load locations: \(message)")
         }
     }
 
@@ -669,7 +669,7 @@ public final class UnifiedAddShareModel {
             case .unreachable:
                 self.connectError = "Couldn’t reach that server. Check the address and network."
             case .failed(let message):
-                self.connectError = message
+                self.connectError = "Couldn’t connect: \(message)"
             case .cancelled:
                 break
             }
@@ -706,7 +706,7 @@ public final class UnifiedAddShareModel {
         case .unreachable:
             locationLoad = .unreachable
         case .failed(let message):
-            locationLoad = .failed(message)
+            locationLoad = .failed("Couldn’t load locations: \(message)")
         case .cancelled:
             break
         }
@@ -1092,7 +1092,7 @@ public final class UnifiedAddShareModel {
 
     // MARK: - Copy
 
-    private static func webDAVMessage(_ error: WebDAVOnboardingError) -> String {
+    private static func webDAVMessage(_ error: WebDAVOnboardingError) -> LocalizedStringResource {
         switch error {
         case .invalidURL: return "That doesn’t look like a valid web address."
         case .notSecure: return "A credential requires a secure (https://) address."

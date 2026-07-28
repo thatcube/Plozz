@@ -407,7 +407,7 @@ final class EngineHandoffCoordinator {
     /// failure log line (empty string for classified errors or an empty payload),
     /// so a stall/retry line names the underlying throw without leaking URLs or
     /// credentials.
-    private static func redactedFailureDetail(_ error: AppError) -> String {
+    private static func redactedFailureDetail(_ error: AppError) -> String {   // l10n:content — redacted diagnostic detail
         guard case .unknown(let message) = error, !message.isEmpty else { return "" }
         return " detail=\(HandoffDiagnostics.redactedDetail(message))"
     }

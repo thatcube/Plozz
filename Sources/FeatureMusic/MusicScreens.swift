@@ -400,7 +400,7 @@ private enum GenrePalette {
 /// glyph; anything else falls back to a hash-picked music glyph so unknown genres
 /// still vary.
 private enum GenreArt {
-    static func symbol(for name: String) -> String {
+    static func symbol(for name: String) -> String {   // l10n:content — SF Symbol name
         let key = name.lowercased()
         // Match on substrings so "Alternative Rock", "Hard Rock" etc. all map.
         let map: [(String, String)] = [

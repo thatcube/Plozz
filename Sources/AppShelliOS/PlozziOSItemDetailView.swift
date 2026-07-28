@@ -1496,7 +1496,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
 private enum PlozziOSSeasonDownloadError: LocalizedError {
     case serverUnavailable
 
-    var errorDescription: String? {
+    var errorDescription: LocalizedStringResource? {
         switch self {
         case .serverUnavailable:
             return "The selected server is no longer available."

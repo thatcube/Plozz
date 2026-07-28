@@ -224,8 +224,21 @@ final class Analyzer: SyntaxVisitor {
 
     private func returnsString(_ type: String) -> Bool {
         let bare = type.replacingOccurrences(of: "?", with: "")
-        // Bare `String`, or a tuple with at least one String element.
-        return bare == "String" || (bare.hasPrefix("(") && bare.contains("String"))
+        if bare == "String" { return true }
+        // For a tuple, only a *copy-shaped* element counts. `(icon: String, text:
+        // LocalizedStringResource)` is already migrated — the String there is an SF
+        // Symbol name, and flagging it would report the tuple's prose literal
+        // against an element that never carries prose.
+        guard bare.hasPrefix("("), bare.hasSuffix(")") else { return false }
+        return bare.dropFirst().dropLast()
+            .split(separator: ",")
+            .contains { element in
+                let parts = element.split(separator: ":", maxSplits: 1)
+                guard parts.count == 2 else { return false }
+                let label = parts[0].trimmingCharacters(in: .whitespaces)
+                let type = parts[1].trimmingCharacters(in: .whitespaces)
+                return config.copyPropertyNames.contains(label) && type == "String"
+            }
     }
 
     /// A literal with a space and a lowercase letter reads as a sentence rather

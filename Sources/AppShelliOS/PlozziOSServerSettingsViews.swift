@@ -84,7 +84,7 @@ struct PlozziOSServersSettingsView: View {
         .contentShape(Rectangle())
     }
 
-    private func summary(for group: ServerAccountGroup) -> String? {
+    private func summary(for group: ServerAccountGroup) -> LocalizedStringResource? {
         if group.accounts.count > 1 {
             return "\(group.accounts.count) sign-ins"
         }
@@ -351,7 +351,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
         }
     }
 
-    private func plexIdentityName(for account: Account) -> String {
+    private func plexIdentityName(for account: Account) -> String {   // l10n:content — Plex user name
         let homeName = appModel.profiles.activeProfile
             .homeUserBinding(forPlexAccount: account.id)?
             .name

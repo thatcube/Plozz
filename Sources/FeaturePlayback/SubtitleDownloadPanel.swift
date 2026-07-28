@@ -119,7 +119,7 @@ struct SubtitleDownloadScreen: View {
     /// The language · downloads · badges line beneath a candidate. The provider is
     /// omitted for OpenSubtitles (Plex's only source, and Jellyfin's usual one — so
     /// it's noise); a *different* provider is shown since then it's informative.
-    private static func remoteSubtitleDetail(_ sub: RemoteSubtitle) -> String {
+    private static func remoteSubtitleDetail(_ sub: RemoteSubtitle) -> String {   // l10n:content — subtitle file metadata from the provider
         var parts: [String] = []
         if let provider = sub.providerName, !provider.isEmpty,
            !provider.lowercased().replacingOccurrences(of: " ", with: "").contains("opensubtitles") {

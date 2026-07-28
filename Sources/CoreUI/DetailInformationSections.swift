@@ -711,7 +711,7 @@ public struct DetailInformationSections: View {
         facts.append(InformationFact(id: id, label: label, value: value))
     }
 
-    private func localityLabel(_ locality: SourceLocality?) -> String? {
+    private func localityLabel(_ locality: SourceLocality?) -> String? {   // l10n:content — source locality detail from the provider
         switch locality {
         case .local: return "Local network"
         case .remote: return "Remote"

@@ -16,7 +16,7 @@ struct PlozziOSAddNFSShareView: View {
     @State private var discoveredItems: [NFSDirectoryItem] = []
     @State private var discoveryTitle: LocalizedStringResource = "Exports"
     @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var errorMessage: Text?
 
     private let probe = NFSOnboardingProbe()
 
@@ -78,7 +78,7 @@ struct PlozziOSAddNFSShareView: View {
 
             if let errorMessage {
                 SettingsSectionGroup {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    Label { errorMessage } icon: { Image(systemName: "exclamationmark.triangle.fill") }
                         .foregroundStyle(.red)
                 }
             }
@@ -97,7 +97,7 @@ struct PlozziOSAddNFSShareView: View {
                     ) {
                         dismiss()
                     } else {
-                        errorMessage = appModel.accountError
+                        errorMessage = appModel.accountError.map { Text(verbatim: $0) }
                     }
                 }
                 .disabled(!canSave || isLoading)
@@ -144,14 +144,14 @@ struct PlozziOSAddNFSShareView: View {
             discoveryTitle = "Exports"
             discoveredItems = items
             if items.isEmpty {
-                errorMessage = "This server didn’t advertise any NFS exports. You can type a path manually."
+                errorMessage = Text("This server didn’t advertise any NFS exports. You can type a path manually.")
             }
         case .unreachable:
-            errorMessage = "Couldn’t reach this NFS server."
+            errorMessage = Text("Couldn’t reach this NFS server.")
         case .permissionDenied:
-            errorMessage = "The server denied access to its NFS exports."
+            errorMessage = Text("The server denied access to its NFS exports.")
         case let .failed(message):
-            errorMessage = message
+            errorMessage = Text(verbatim: message)
         }
     }
 
@@ -172,14 +172,14 @@ struct PlozziOSAddNFSShareView: View {
             discoveryTitle = "Folders"
             discoveredItems = items
             if items.isEmpty {
-                errorMessage = "No folders were found inside this export."
+                errorMessage = Text("No folders were found inside this export.")
             }
         case .unreachable:
-            errorMessage = "Couldn’t reach this NFS server."
+            errorMessage = Text("Couldn’t reach this NFS server.")
         case .permissionDenied:
-            errorMessage = "The server denied access to this export."
+            errorMessage = Text("The server denied access to this export.")
         case let .failed(message):
-            errorMessage = message
+            errorMessage = Text(verbatim: message)
         }
     }
 }

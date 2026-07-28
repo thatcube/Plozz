@@ -40,7 +40,7 @@ final class AddWebDAVShareViewModel {
     // State
     private(set) var step: Step = .enterAddress
     private(set) var isWorking = false
-    private(set) var errorMessage: String?
+    private(set) var errorMessage: LocalizedStringResource?
     private(set) var folders: [WebDAVOnboardingFolder] = []
     private(set) var currentPath = "/"
 
@@ -305,7 +305,7 @@ final class AddWebDAVShareViewModel {
         step = .done(config)
     }
 
-    static func message(for error: WebDAVOnboardingError) -> String {
+    static func message(for error: WebDAVOnboardingError) -> LocalizedStringResource {
         switch error {
         case .invalidURL:
             return "That doesn’t look like a valid web address. Try something like https://nas.local/dav."

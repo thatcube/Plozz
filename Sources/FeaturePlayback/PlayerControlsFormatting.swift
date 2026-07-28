@@ -34,7 +34,7 @@ enum PlayerControlsFormatting {
 
     /// Horizontal offset readout: 0 reads "Centre"; a signed percentage otherwise,
     /// worded by direction so the sign never has to be parsed.
-    static func hOffsetLabel(_ pct: Int) -> String {
+    static func hOffsetLabel(_ pct: Int) -> LocalizedStringResource {
         if pct == 0 { return "Centre" }
         return pct > 0 ? "Right \(pct)%" : "Left \(-pct)%"
     }

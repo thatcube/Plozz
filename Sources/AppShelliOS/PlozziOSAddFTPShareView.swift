@@ -35,7 +35,7 @@ struct PlozziOSAddFTPShareView: View {
     @State private var directories: [FTPDirectoryItem] = []
     @State private var isVerified = false
     @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var errorMessage: Text?
 
     private let probe = FTPOnboardingProbe()
 
@@ -116,7 +116,7 @@ struct PlozziOSAddFTPShareView: View {
 
             if let errorMessage {
                 SettingsSectionGroup {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    Label { errorMessage } icon: { Image(systemName: "exclamationmark.triangle.fill") }
                         .foregroundStyle(.red)
                 }
             }
@@ -195,16 +195,16 @@ struct PlozziOSAddFTPShareView: View {
             isVerified = true
         case .authenticationFailed:
             isVerified = false
-            errorMessage = "The FTP credentials were rejected."
+            errorMessage = Text("The FTP credentials were rejected.")
         case .unreachable:
             isVerified = false
-            errorMessage = "Couldn’t reach this FTP server."
+            errorMessage = Text("Couldn’t reach this FTP server.")
         case let .failed(reason):
             isVerified = false
-            errorMessage = reason
+            errorMessage = Text(verbatim: reason)
         case .cancelled:
             isVerified = false
-            errorMessage = "The connection was cancelled."
+            errorMessage = Text("The connection was cancelled.")
         }
     }
 
@@ -216,7 +216,7 @@ struct PlozziOSAddFTPShareView: View {
         components.port = parsedPort == Int(security.defaultPort) ? nil : parsedPort
         components.path = normalizedPath == "/" ? "" : normalizedPath
         guard let baseURL = components.url else {
-            errorMessage = "The FTP address is invalid."
+            errorMessage = Text("The FTP address is invalid.")
             return
         }
         let auth: MediaShareFTPAuth = authentication == .anonymous
@@ -229,7 +229,7 @@ struct PlozziOSAddFTPShareView: View {
         ) {
             dismiss()
         } else {
-            errorMessage = appModel.accountError
+            errorMessage = appModel.accountError.map { Text(verbatim: $0) }
         }
     }
 

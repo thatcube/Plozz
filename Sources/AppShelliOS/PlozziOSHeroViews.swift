@@ -2149,7 +2149,7 @@ struct PlozziOSHeroPagingIndicator: View {
         )
     }
 
-    private var accessibilityValue: String {
+    private var accessibilityValue: LocalizedStringResource {
         guard let selectedItemID,
               let index = itemIDs.firstIndex(of: selectedItemID) else {
             return ""

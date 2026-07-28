@@ -1247,7 +1247,7 @@ struct HomeHeroView: View {
         // Named VoiceOver actions for *every* visible pill (the row is a single
         // a11y element, so without these only the highlighted action would be
         // reachable). Order matches the visible pills.
-        let a11yActions: [(String, () -> Void)] = itemButtons.map { button in
+        let a11yActions: [(LocalizedStringResource, () -> Void)] = itemButtons.map { button in
             switch button {
             case .play: return (item.resumeProgressFraction != nil ? "Resume" : "Play", { onPlay(item) })
             case .request: return ("Request", { performRequest(for: item) })
@@ -1490,7 +1490,7 @@ struct HomeHeroView: View {
     /// One-line snapshot of the hero's focus/paging state for
     /// ``HeroFocusDiagnostics``. Reads only view state (no mutation), so it is
     /// safe to call from any focus/paging site. Temporary debugging aid.
-    private func hfState() -> String {
+    private func hfState() -> String {   // l10n:content — hero-runtime diagnostic string
         let btnCount = current.map { buttons(for: $0).count } ?? 0
         let focusName = focus.map { "\($0)" } ?? "nil"
         return "idx=\(index)/\(items.count) selBtn=\(selectedButton)/\(btnCount) "
@@ -1704,7 +1704,7 @@ struct HomeHeroView: View {
     }
 
     /// Spoken/label text for a request/download status pill.
-    private func downloadStatusText(for item: MediaItem) -> String {
+    private func downloadStatusText(for item: MediaItem) -> LocalizedStringResource {
         switch heroCTA(for: item) {
         case let .downloading(progress): return "Downloading \(Int((progress * 100).rounded()))%"
         default: return "Requested"
@@ -1733,10 +1733,10 @@ struct HomeHeroView: View {
     }
 
     /// VoiceOver label for the row's currently-selected action.
-    private func accessibilityLabel(for item: MediaItem) -> String {
+    private func accessibilityLabel(for item: MediaItem) -> LocalizedStringResource {
         let itemButtons = buttons(for: item)
-        guard itemButtons.indices.contains(selectedButton) else { return item.title }
-        let name: String
+        guard itemButtons.indices.contains(selectedButton) else { return "\(item.title)" }
+        let name: LocalizedStringResource
         switch itemButtons[selectedButton] {
         case .play: name = item.resumeProgressFraction != nil ? "Resume" : "Play"
         case .request: name = "Request"
@@ -1745,13 +1745,15 @@ struct HomeHeroView: View {
         case .watchlist: name = watchlistTarget(for: item).isFavorite ? "Remove from Watchlist" : "Add to Watchlist"
         case .next: name = "Next"
         }
-        return "\(item.title), \(name)"
+        // The media title is content; the action name is copy. Interpolating the
+        // resolved name keeps the separator translatable.
+        return "\(item.title), \(String(localized: name))"
     }
 
     /// Adds a named VoiceOver action per visible pill so every hero action stays
     /// reachable even though the row is a single accessibility element.
     private struct HeroActionAccessibility: ViewModifier {
-        let actions: [(String, () -> Void)]
+        let actions: [(LocalizedStringResource, () -> Void)]
         func body(content: Content) -> some View {
             actions.reduce(AnyView(content)) { view, entry in
                 AnyView(view.accessibilityAction(named: Text(entry.0), entry.1))

@@ -294,7 +294,7 @@ public final class PlaybackDiagnosticsSampler {
     /// Live player state, combining the item's load status with the player's
     /// time-control status so a black-screen failure or a buffering stall is
     /// visible in the overlay.
-    private static func playbackStateText(item: AVPlayerItem, player: AVPlayer?) -> String {
+    private static func playbackStateText(item: AVPlayerItem, player: AVPlayer?) -> String {   // l10n:content — playback diagnostic
         switch item.status {
         case .failed:
             if let error = item.error { return "Failed: \(error.localizedDescription)" }
@@ -415,7 +415,7 @@ public final class PlaybackDiagnosticsSampler {
 
     /// Friendly Apple TV model name from the hardware identifier (e.g.
     /// `AppleTV14,1` → `Apple TV 4K (3rd gen)`).
-    private static func deviceModelName() -> String {
+    private static func deviceModelName() -> String {   // l10n:content — hardware model identifier
         var systemInfo = utsname()
         uname(&systemInfo)
         let identifier = withUnsafeBytes(of: &systemInfo.machine) { raw -> String in

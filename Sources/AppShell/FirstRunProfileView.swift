@@ -31,7 +31,7 @@ struct FirstRunProfileView: View {
                     .shadow(color: .black.opacity(0.35), radius: 20, y: 10)
 
                 VStack(spacing: 14) {
-                    Text(displayName)
+                    displayName
                         .font(.largeTitle.weight(.bold))
                         .multilineTextAlignment(.center)
 
@@ -101,9 +101,11 @@ struct FirstRunProfileView: View {
         }
     }
 
-    private var displayName: String {
+    /// Text rather than a resource: the profile's own name is content, and only
+    /// the unnamed fallback is copy.
+    private var displayName: Text {
         let name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "Your Profile" : name
+        return name.isEmpty ? Text("Your Profile") : Text(verbatim: name)
     }
 
     /// The provider the seeded identity came from — the first account added on

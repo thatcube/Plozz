@@ -1074,7 +1074,7 @@ public final class ItemDetailViewModel {
     /// Alternate sources come from the merged card (`initialSources`) and any
     /// cross-server discovery already completed (`sources`), deduped by account and
     /// skipping the active source (already checked by the caller).
-    private func firstCrossServerLocalTrailer(
+    private func firstCrossServerLocalTrailer(   // l10n:content — trailer search term
         excluding activeAccountID: String?,
         sourceGeneration: UInt64
     ) async -> (MediaItem, String)? {

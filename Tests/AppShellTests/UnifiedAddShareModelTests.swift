@@ -55,7 +55,12 @@ final class UnifiedAddShareModelTests: XCTestCase {
         }
 
         XCTAssertEqual(model.webDAVScheme, "http")
-        XCTAssertTrue(model.connectError?.contains("uses HTTP") == true)
+        // Compare the resource, not rendered English — the assertion must survive
+        // translation.
+        XCTAssertEqual(
+            model.connectError,
+            "This WebDAV server uses HTTP. Review the security warning, then Connect again."
+        )
         XCTAssertNotNil(model.plaintextWarning)
     }
 

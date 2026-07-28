@@ -126,7 +126,7 @@ struct ServerDetailView: View {
     }
 
     /// Title for the sign-out/remove confirmation, derived from the pending account.
-    private func pendingSignOutTitle(_ pending: PendingSignOut?) -> String {
+    private func pendingSignOutTitle(_ pending: PendingSignOut?) -> LocalizedStringResource {
         guard let pending else { return "" }
         let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
         let isCredentialFree = transport == .nfs
@@ -136,29 +136,40 @@ struct ServerDetailView: View {
     }
 
     /// Primary button label when sync is off (a credential-free share reads "Remove").
-    private func signOutPrimaryLabel(_ pending: PendingSignOut) -> String {
+    private func signOutPrimaryLabel(_ pending: PendingSignOut) -> LocalizedStringResource {
         let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
         return transport == .nfs ? "Remove" : "Sign Out"
     }
 
-    private func signOutMessage(for pending: PendingSignOut) -> String {
+    /// The sign-out confirmation body.
+    ///
+    /// Composed as whole sentences rather than a scope string plus an appended
+    /// clause: concatenating two halves fixes English word order, and the joined
+    /// result is an expression the extractor never sees. Each branch is therefore
+    /// its own complete, translatable sentence.
+    private func signOutMessage(for pending: PendingSignOut) -> LocalizedStringResource {
         let provider = pending.account.server.provider
         let transport = MediaShareTransportKind(mediaShareScheme: pending.account.server.baseURL.scheme)
         let trimmedUser = pending.account.userName.trimmingCharacters(in: .whitespaces)
-        let scope: String
+        let server = pending.serverName
+        let isLast = pending.isLastAccount && transport != .nfs
+
         if transport == .nfs {
-            scope = "This removes the connection to \(pending.serverName) on this Apple TV."
-        } else if provider == .plex {
-            scope = "This removes the Plex sign-in for \(trimmedUser) on this Apple TV."
-        } else if trimmedUser.isEmpty {
-            scope = "This removes the guest connection to \(pending.serverName) on this Apple TV."
-        } else {
-            scope = "This removes \(trimmedUser)'s sign-in to \(pending.serverName) on this Apple TV."
+            return "This removes the connection to \(server) on this Apple TV."
         }
-        if pending.isLastAccount, transport != .nfs {
-            return scope + " No one else in your household is signed in, so \(pending.serverName) will be removed from your servers until someone signs in again."
+        if provider == .plex {
+            return isLast
+                ? "This removes the Plex sign-in for \(trimmedUser) on this Apple TV. No one else in your household is signed in, so \(server) will be removed from your servers until someone signs in again."
+                : "This removes the Plex sign-in for \(trimmedUser) on this Apple TV."
         }
-        return scope
+        if trimmedUser.isEmpty {
+            return isLast
+                ? "This removes the guest connection to \(server) on this Apple TV. No one else in your household is signed in, so \(server) will be removed from your servers until someone signs in again."
+                : "This removes the guest connection to \(server) on this Apple TV."
+        }
+        return isLast
+            ? "This removes \(trimmedUser)'s sign-in to \(server) on this Apple TV. No one else in your household is signed in, so \(server) will be removed from your servers until someone signs in again."
+            : "This removes \(trimmedUser)'s sign-in to \(server) on this Apple TV."
     }
 
     private var currentGroup: ServerAccountGroup? {
@@ -189,8 +200,8 @@ struct ServerDetailView: View {
             ProviderIcon(provider: group.providerKind, size: 44, mediaShareTransport: group.transportKind)
                 .frame(width: 44)
             VStack(alignment: .leading, spacing: 4) {
-                Text(group.serverName).font(.largeTitle.bold())
-                Text(headerSubtitle(for: group))
+                Text(verbatim: group.serverName).font(.largeTitle.bold())
+                headerSubtitle(for: group)
                     .font(.subheadline)
                     .plozzForeground(.secondary)
             }
@@ -201,11 +212,12 @@ struct ServerDetailView: View {
     /// Names what kind of server this is. A file share reads as its transport
     /// (e.g. "WebDAV share") so it's unmistakable; other providers use their
     /// brand name.
-    private func headerSubtitle(for group: ServerAccountGroup) -> String {
+    private func headerSubtitle(for group: ServerAccountGroup) -> Text {
         if let transport = group.transportKind {
-            return "\(transport.badgeLabel) share"
+            return Text("\(transport.badgeLabel) share")
         }
-        return group.providerKind.displayName
+        // Provider names are brands — never translated.
+        return Text(verbatim: group.providerKind.displayName)
     }
 
     // MARK: - Media-share library status
@@ -294,7 +306,7 @@ struct ServerDetailView: View {
 
     /// The destructive-button title. A credential-free share (NFS) isn't a
     /// sign-in, so it reads as "Remove Server" rather than "Sign Out".
-    private func removeButtonTitle(isCredentialFree: Bool, isLast: Bool) -> String {
+    private func removeButtonTitle(isCredentialFree: Bool, isLast: Bool) -> LocalizedStringResource {
         if isCredentialFree { return "Remove Server" }
         return isLast ? "Sign Out & Remove Server" : "Sign Out"
     }
@@ -398,22 +410,23 @@ private struct ShareLibraryStatusPanel: View {
         }
     }
 
-    private static func busyStatusText(_ state: ShareScanState) -> String {
+    private static func busyStatusText(_ state: ShareScanState) -> LocalizedStringResource {
         let phase = state.isScanning ? "Scanning" : "Finding artwork & details"
         if let detail = state.progressDetail { return "\(phase) · \(detail)" }
         return "\(phase)…"
     }
 
-    private static func lastScannedText(_ date: Date?) -> String {
+    private static func lastScannedText(_ date: Date?) -> LocalizedStringResource {
         guard let date else { return "Not scanned yet" }
         let elapsed = Date().timeIntervalSince(date)
         if elapsed < 60 { return "Last scanned just now" }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
-        return "Last scanned " + formatter.localizedString(
-            for: date,
-            relativeTo: Date()
-        )
+        // Interpolated, not concatenated: the relative phrase has to be able to
+        // move within the sentence, and `+` produces an expression the extractor
+        // cannot see at all.
+        let relative = formatter.localizedString(for: date, relativeTo: Date())
+        return "Last scanned \(relative)"
     }
 }
 #endif

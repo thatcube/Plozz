@@ -224,7 +224,7 @@ struct PlaybackDiagnosticsOverlay: View {
     /// A nominal value with its live counterpart folded in as "nominal · N live"
     /// (unit shown once). Falls back to the live value alone when there's no
     /// nominal, or the placeholder when neither exists.
-    private func withLive(nominal: String, live: String) -> String {
+    private func withLive(nominal: String, live: String) -> String {   // l10n:content — diagnostic value
         if nominal != PlaybackDiagnostics.placeholder {
             guard let n = numericToken(live) else { return nominal }
             return "\(nominal) · \(n) live"

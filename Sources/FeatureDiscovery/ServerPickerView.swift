@@ -281,7 +281,7 @@ public struct ServerPickerView: View {
     }
 
     /// Human-readable summary of who's signed in on a server.
-    private func signedInSummary(_ userNames: [String]) -> String {
+    private func signedInSummary(_ userNames: [String]) -> LocalizedStringResource {
         switch userNames.count {
         case 0: return "Signed in"
         case 1: return "Signed in · \(userNames[0])"

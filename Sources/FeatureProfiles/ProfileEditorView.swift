@@ -231,7 +231,7 @@ public struct ProfileEditorView: View {
     /// borrowed photo ignores it.
     private var colorApplies: Bool { avatarMode != .photo }
 
-    private func symbolAccessibilityName(_ symbol: String) -> String {
+    private func symbolAccessibilityName(_ symbol: String) -> String {   // l10n:content — derived from the SF Symbol identifier
         symbol
             .replacingOccurrences(of: ".fill", with: "")
             .replacingOccurrences(of: ".inverse", with: "")
@@ -483,11 +483,11 @@ public struct ProfileEditorView: View {
         )
     }
 
-    private var previewName: String {
+    private var previewName: String {   // l10n:content — profile name typed by the user
         trimmedName.isEmpty ? (isEditing ? "Profile" : "New Profile") : trimmedName
     }
 
-    private var previewSubtitle: String {
+    private var previewSubtitle: String {   // l10n:content — profile name typed by the user
         switch avatarMode {
         case .photo:
             return effectiveImageURL != nil ? "Borrowed photo" : "No photo chosen yet"
@@ -1924,7 +1924,7 @@ fileprivate struct IOSProfileCategoryHeader: View {
     }
 }
 
-fileprivate func iOSProfileSymbolAccessibilityName(_ symbol: String) -> String {
+fileprivate func iOSProfileSymbolAccessibilityName(_ symbol: String) -> String {   // l10n:content — derived from the SF Symbol identifier
     symbol
         .replacingOccurrences(of: ".fill", with: "")
         .replacingOccurrences(of: ".inverse", with: "")

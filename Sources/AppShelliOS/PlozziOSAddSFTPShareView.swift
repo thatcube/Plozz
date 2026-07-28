@@ -21,7 +21,7 @@ struct PlozziOSAddSFTPShareView: View {
     @State private var pendingHostKey: Data?
     @State private var directories: [SFTPDirectoryItem] = []
     @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var errorMessage: Text?
 
     private let probe = SFTPOnboardingProbe()
 
@@ -88,7 +88,7 @@ struct PlozziOSAddSFTPShareView: View {
 
             if let errorMessage {
                 SettingsSectionGroup {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    Label { errorMessage } icon: { Image(systemName: "exclamationmark.triangle.fill") }
                         .foregroundStyle(.red)
                 }
             }
@@ -163,13 +163,13 @@ struct PlozziOSAddSFTPShareView: View {
         case let .success(hostKeySHA256):
             pendingHostKey = hostKeySHA256
         case .unreachable:
-            errorMessage = "Couldn’t reach this SFTP server."
+            errorMessage = Text("Couldn’t reach this SFTP server.")
         case .authenticationFailed:
-            errorMessage = "The SFTP credentials were rejected."
+            errorMessage = Text("The SFTP credentials were rejected.")
         case let .failed(reason):
-            errorMessage = reason
+            errorMessage = Text(verbatim: reason)
         case .cancelled:
-            errorMessage = "The connection was cancelled."
+            errorMessage = Text("The connection was cancelled.")
         }
     }
 
@@ -192,13 +192,13 @@ struct PlozziOSAddSFTPShareView: View {
         case let .success(items):
             directories = items
         case .authenticationFailed:
-            errorMessage = "The SFTP credentials were rejected."
+            errorMessage = Text("The SFTP credentials were rejected.")
         case .unreachable:
-            errorMessage = "Couldn’t reach this SFTP server."
+            errorMessage = Text("Couldn’t reach this SFTP server.")
         case let .failed(reason):
-            errorMessage = reason
+            errorMessage = Text(verbatim: reason)
         case .cancelled:
-            errorMessage = "The connection was cancelled."
+            errorMessage = Text("The connection was cancelled.")
         }
     }
 
@@ -219,7 +219,7 @@ struct PlozziOSAddSFTPShareView: View {
         ) {
             dismiss()
         } else {
-            errorMessage = appModel.accountError
+            errorMessage = appModel.accountError.map { Text(verbatim: $0) }
         }
     }
 

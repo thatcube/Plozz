@@ -194,7 +194,7 @@ struct AddShareView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     messagePanel(
                         title: "Something went wrong",
-                        message: Text(verbatim: message),
+                        message: Text(message),
                         systemImage: "exclamationmark.triangle",
                         retry: { viewModel.loadShares() }
                     )

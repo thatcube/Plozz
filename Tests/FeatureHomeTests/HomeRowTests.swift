@@ -90,11 +90,14 @@ final class HomeRowTests: XCTestCase {
         XCTAssertEqual(styles[.recentlyAdded], .poster)
     }
 
+    /// Titles are `LocalizedStringResource`, so compare the *rendered* English
+    /// rather than the resource: comparing resources would assert the key, which
+    /// is an implementation detail we deliberately allow to be semantic.
     func testTitlesMatchKinds() {
-        XCTAssertEqual(HomeRowKind.continueWatching.title, "Continue Watching")
-        XCTAssertEqual(HomeRowKind.watchlist.title, "Watchlist")
-        XCTAssertEqual(HomeRowKind.recentlyAdded.title, "Recently Added")
-        XCTAssertEqual(HomeRowKind.libraries.title, "Libraries")
+        XCTAssertEqual(String(localized: HomeRowKind.continueWatching.title), "Continue Watching")
+        XCTAssertEqual(String(localized: HomeRowKind.watchlist.title), "Watchlist")
+        XCTAssertEqual(String(localized: HomeRowKind.recentlyAdded.title), "Recently Added")
+        XCTAssertEqual(String(localized: HomeRowKind.libraries.title), "Libraries")
     }
 
     // MARK: - Per-item library visibility (hide a library everywhere on Home)

@@ -216,15 +216,15 @@ struct SubtitleStylePanel: View {
 
         rows.append(StyleRowSpec(slot: slot, title: "Font", kind: .submenu(summary: Text(verbatim: s.fontFamily.displayName), open: { openScreen(.styleFont) }))); slot += 1
         rows.append(choiceRow(slot, "Weight", options: weights, current: s.fontWeight.snapped(to: weights), label: { $0.displayName }) { v in updateStyle { $0.fontWeight = v } }); slot += 1
-        rows.append(numberRow(slot, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } }); slot += 1
-        rows.append(numberRow(slot, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: PlayerControlsFormatting.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } }); slot += 1
-        rows.append(numberRow(slot, "Horizontal Offset", options: Self.hOffsetOptions, current: Int((s.horizontalOffset * 100).rounded()), label: PlayerControlsFormatting.hOffsetLabel) { v in updateStyle { $0.horizontalOffset = Double(v) / 100 } }); slot += 1
+        rows.append(numberRow(slot, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { Text(verbatim: "\($0)%") }) { v in updateStyle { $0.fontScale = Double(v) / 100 } }); slot += 1
+        rows.append(numberRow(slot, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: { Text(PlayerControlsFormatting.positionLabel($0)) }) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } }); slot += 1
+        rows.append(numberRow(slot, "Horizontal Offset", options: Self.hOffsetOptions, current: Int((s.horizontalOffset * 100).rounded()), label: { Text(PlayerControlsFormatting.hOffsetLabel($0)) }) { v in updateStyle { $0.horizontalOffset = Double(v) / 100 } }); slot += 1
         rows.append(colorRow(slot, "Text Color", options: Self.textColorOptions, current: s.textColor, label: PlayerControlsFormatting.colorLabel) { c in updateStyle { $0.textColor = c } }); slot += 1
-        rows.append(numberRow(slot, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.opacity = Double(v) / 100 } }); slot += 1
+        rows.append(numberRow(slot, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { Text(verbatim: "\($0)%") }) { v in updateStyle { $0.opacity = Double(v) / 100 } }); slot += 1
         // Only affects HDR frames, so it appears exclusively while HDR is live —
         // mirroring how the bitmap-primary gate hides controls that can't act.
         if model.subtitlesRenderHDR {
-            rows.append(numberRow(slot, "HDR Brightness", options: Self.hdrBrightnessOptions, current: Int((s.hdrLuminanceScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.hdrLuminanceScale = Double(v) / 100 } }); slot += 1
+            rows.append(numberRow(slot, "HDR Brightness", options: Self.hdrBrightnessOptions, current: Int((s.hdrLuminanceScale * 100).rounded()), label: { Text(verbatim: "\($0)%") }) { v in updateStyle { $0.hdrLuminanceScale = Double(v) / 100 } }); slot += 1
         }
 
         // The submenu group + Reset sit under a divider, wherever the knobs above end.
@@ -304,13 +304,13 @@ struct SubtitleStylePanel: View {
         rows.append(choiceRow(slot, "Shadow", options: Self.shadowStyleOptions, current: s.edge.style, label: { $0.displayName }) { v in updateStyle { $0.edge.style = v } }); slot += 1
         if s.edge.style != .none {
             rows.append(colorRow(slot, "Shadow Color", options: Self.textColorOptions, current: s.edge.color, label: PlayerControlsFormatting.colorLabel) { c in updateStyle { $0.edge.color = c } }); slot += 1
-            rows.append(numberRow(slot, "Shadow Thickness", options: Self.thicknessOptions, current: Int(s.edge.thickness.rounded()), label: { "\($0)" }) { v in updateStyle { $0.edge.thickness = Double(v) } }); slot += 1
+            rows.append(numberRow(slot, "Shadow Thickness", options: Self.thicknessOptions, current: Int(s.edge.thickness.rounded()), label: { Text(verbatim: "\($0)") }) { v in updateStyle { $0.edge.thickness = Double(v) } }); slot += 1
         }
 
         rows.append(StyleRowSpec(slot: slot, title: "Outline", kind: .toggle(isOn: s.border.isEnabled, flip: { updateStyle { $0.border.isEnabled.toggle() } }))); slot += 1
         if s.border.isEnabled {
             rows.append(colorRow(slot, "Outline Color", options: Self.textColorOptions, current: s.border.color, label: PlayerControlsFormatting.colorLabel) { c in updateStyle { $0.border.color = c } }); slot += 1
-            rows.append(numberRow(slot, "Outline Width", options: Self.thicknessOptions, current: Int(s.border.width.rounded()), label: { "\($0)" }) { v in updateStyle { $0.border.width = Double(v) } }); slot += 1
+            rows.append(numberRow(slot, "Outline Width", options: Self.thicknessOptions, current: Int(s.border.width.rounded()), label: { Text(verbatim: "\($0)") }) { v in updateStyle { $0.border.width = Double(v) } }); slot += 1
         }
         return rows
     }
@@ -327,10 +327,10 @@ struct SubtitleStylePanel: View {
         guard s.background.isEnabled else { return rows }
         var slot = 1
         rows.append(colorRow(slot, "Color", options: Self.boxColorOptions, current: s.background.color, label: PlayerControlsFormatting.boxColorLabel) { c in updateStyle { $0.background.color = c } }); slot += 1
-        rows.append(numberRow(slot, "Box Opacity", options: Self.boxOpacityOptions, current: Int((s.background.color.alpha * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.background.color.alpha = Double(v) / 100 } }); slot += 1
-        rows.append(numberRow(slot, "Corner Radius", options: Self.cornerOptions, current: Int(s.background.cornerRadius.rounded()), label: PlayerControlsFormatting.cornerLabel) { v in updateStyle { $0.background.cornerRadius = Double(v) } }); slot += 1
-        rows.append(numberRow(slot, "Horizontal Padding", options: Self.paddingOptions, current: Int(s.background.horizontalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.horizontalPadding = Double(v) } }); slot += 1
-        rows.append(numberRow(slot, "Vertical Padding", options: Self.paddingOptions, current: Int(s.background.verticalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.verticalPadding = Double(v) } }); slot += 1
+        rows.append(numberRow(slot, "Box Opacity", options: Self.boxOpacityOptions, current: Int((s.background.color.alpha * 100).rounded()), label: { Text(verbatim: "\($0)%") }) { v in updateStyle { $0.background.color.alpha = Double(v) / 100 } }); slot += 1
+        rows.append(numberRow(slot, "Corner Radius", options: Self.cornerOptions, current: Int(s.background.cornerRadius.rounded()), label: { Text(PlayerControlsFormatting.cornerLabel($0)) }) { v in updateStyle { $0.background.cornerRadius = Double(v) } }); slot += 1
+        rows.append(numberRow(slot, "Horizontal Padding", options: Self.paddingOptions, current: Int(s.background.horizontalPadding.rounded()), label: { Text(verbatim: "\($0)") }) { v in updateStyle { $0.background.horizontalPadding = Double(v) } }); slot += 1
+        rows.append(numberRow(slot, "Vertical Padding", options: Self.paddingOptions, current: Int(s.background.verticalPadding.rounded()), label: { Text(verbatim: "\($0)") }) { v in updateStyle { $0.background.verticalPadding = Double(v) } }); slot += 1
         return rows
     }
 
@@ -387,10 +387,10 @@ struct SubtitleStylePanel: View {
             // (see SubtitleOverlayView). Hide them while Distinct Style is off so
             // they're not dead controls.
             if sec.differentiate {
-                rows.append(numberRow(slot, "Size", options: Self.secondarySizeOptions, current: Int((sec.relativeScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.secondary?.relativeScale = Double(v) / 100 } }); slot += 1
+                rows.append(numberRow(slot, "Size", options: Self.secondarySizeOptions, current: Int((sec.relativeScale * 100).rounded()), label: { Text(verbatim: "\($0)%") }) { v in updateStyle { $0.secondary?.relativeScale = Double(v) / 100 } }); slot += 1
                 rows.append(colorRow(slot, "Color", options: Self.textColorOptions, current: sec.textColor, label: PlayerControlsFormatting.colorLabel) { c in updateStyle { $0.secondary?.textColor = c } }); slot += 1
             }
-            rows.append(numberRow(slot, "Gap", options: Self.gapOptions, current: Int(sec.gap.rounded()), label: { "\($0)" }) { v in updateStyle { $0.secondary?.gap = Double(v) } }); slot += 1
+            rows.append(numberRow(slot, "Gap", options: Self.gapOptions, current: Int(sec.gap.rounded()), label: { Text(verbatim: "\($0)") }) { v in updateStyle { $0.secondary?.gap = Double(v) } }); slot += 1
         }
         return rows
     }
@@ -399,7 +399,7 @@ struct SubtitleStylePanel: View {
     /// Always shows the outcome (loading / cue count / no lines / unavailable) so a
     /// track that fetched cues but still won't draw is distinguishable on-screen
     /// from one that genuinely returned nothing.
-    private static func secondaryStatusSuffix(_ status: SecondarySubtitleStatus) -> String {
+    private static func secondaryStatusSuffix(_ status: SecondarySubtitleStatus) -> String {   // l10n:content — generated status fragment
         switch status {
         case .idle: return ""
         case .loading: return "  ·  loading…"
@@ -414,11 +414,11 @@ struct SubtitleStylePanel: View {
     /// nearest listed option so it still displays and steps cleanly. Steps by a
     /// signed number of grid indices and clamps at both ends (no wrap), so a fast
     /// hold-to-accelerate run parks at Bottom/Top instead of jumping across.
-    private func numberRow(_ slot: Int, _ title: LocalizedStringResource, options: [Int], current: Int, label: @escaping (Int) -> String, apply: @escaping (Int) -> Void) -> StyleRowSpec {
+    private func numberRow(_ slot: Int, _ title: LocalizedStringResource, options: [Int], current: Int, label: @escaping (Int) -> Text, apply: @escaping (Int) -> Void) -> StyleRowSpec {
         let n = options.count
         let idx = Self.nearestIndex(options, current)
         return StyleRowSpec(slot: slot, title: title, kind: .number(
-            value: Text(verbatim: label(options[idx])),
+            value: label(options[idx]),
             step: { delta in
                 let target = min(max(idx + delta, 0), n - 1)
                 if target != idx { apply(options[target]) }

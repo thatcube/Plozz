@@ -95,7 +95,7 @@ struct PlozziOSSyncSetupReceiveView: View {
         }
     }
 
-    private var waitingSubtitle: String {
+    private var waitingSubtitle: LocalizedStringResource {
         if let name = requestedServer?.serverName {
             return "Open Plozz on your Apple TV or another signed-in device and it’ll offer to add “\(name)” here automatically."
         }

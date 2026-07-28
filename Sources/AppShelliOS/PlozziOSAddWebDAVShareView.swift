@@ -29,7 +29,7 @@ struct PlozziOSAddWebDAVShareView: View {
     @State private var pendingTrustPin: Data?
     @State private var isValidated = false
     @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var errorMessage: Text?
 
     private let probe = WebDAVOnboardingProbe()
 
@@ -84,7 +84,7 @@ struct PlozziOSAddWebDAVShareView: View {
 
             if let errorMessage {
                 SettingsSectionGroup {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    Label { errorMessage } icon: { Image(systemName: "exclamationmark.triangle.fill") }
                         .foregroundStyle(.red)
                 }
             }
@@ -173,7 +173,7 @@ struct PlozziOSAddWebDAVShareView: View {
             case let .needsApproval(sha256):
                 pendingTrustPin = sha256
             case .unreachable:
-                errorMessage = "Couldn’t reach this WebDAV server."
+                errorMessage = Text("Couldn’t reach this WebDAV server.")
             }
         } else {
             trustPinData = nil
@@ -194,7 +194,7 @@ struct PlozziOSAddWebDAVShareView: View {
             errorMessage = nil
         case let .failure(error):
             isValidated = false
-            errorMessage = message(for: error)
+            errorMessage = Text(message(for: error))
         }
     }
 
@@ -209,7 +209,7 @@ struct PlozziOSAddWebDAVShareView: View {
         ) {
             dismiss()
         } else {
-            errorMessage = appModel.accountError
+            errorMessage = appModel.accountError.map { Text(verbatim: $0) }
         }
     }
 
@@ -219,7 +219,7 @@ struct PlozziOSAddWebDAVShareView: View {
         errorMessage = nil
     }
 
-    private func message(for error: WebDAVOnboardingError) -> String {
+    private func message(for error: WebDAVOnboardingError) -> LocalizedStringResource {
         switch error {
         case .invalidURL: "The WebDAV address is invalid."
         case .notSecure: "This server rejected credentials over HTTP."

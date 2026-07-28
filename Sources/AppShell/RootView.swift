@@ -82,7 +82,7 @@ public struct RootView: View {
     /// Title for the same-Apple-ID setup offer alert. Names the specific server when
     /// the offering device asked for just one (per-server "set up with other device"),
     /// else falls back to the device-level framing.
-    private var syncSetupOfferTitle: String {
+    private var syncSetupOfferTitle: LocalizedStringResource {
         let device = appState.cloudSyncUI.pendingSyncSetupOffer?.deviceName ?? "your device"
         if let server = syncSetupOfferServerName {
             return "Set up “\(server)” on “\(device)”?"

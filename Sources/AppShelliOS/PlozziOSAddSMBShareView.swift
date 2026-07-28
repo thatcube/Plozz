@@ -17,7 +17,7 @@ struct PlozziOSAddSMBShareView: View {
     @State private var displayName = ""
     @State private var discoveredShares: [String] = []
     @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var errorMessage: Text?
 
     var body: some View {
         Form {
@@ -75,7 +75,7 @@ struct PlozziOSAddSMBShareView: View {
 
             if let errorMessage {
                 SettingsSectionGroup {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    Label { errorMessage } icon: { Image(systemName: "exclamationmark.triangle.fill") }
                         .foregroundStyle(.red)
                 }
             }
@@ -96,7 +96,7 @@ struct PlozziOSAddSMBShareView: View {
                     ) {
                         dismiss()
                     } else {
-                        errorMessage = appModel.accountError
+                        errorMessage = appModel.accountError.map { Text(verbatim: $0) }
                     }
                 }
                 .disabled(!canSave || isLoading)
@@ -139,23 +139,23 @@ struct PlozziOSAddSMBShareView: View {
                 password: password
             )
             if discoveredShares.isEmpty {
-                errorMessage = "No browsable shares were found. You can type the share name manually."
+                errorMessage = Text("No browsable shares were found. You can type the share name manually.")
             }
         } catch let error as SMBShareEnumerator.ListError {
             switch error {
             case .authenticationRequired:
-                errorMessage = "This server requires a username and password."
+                errorMessage = Text("This server requires a username and password.")
             case .credentialsRejected:
-                errorMessage = "The username or password is incorrect."
+                errorMessage = Text("The username or password is incorrect.")
             case .unreachable:
-                errorMessage = "Couldn’t connect to this SMB server."
+                errorMessage = Text("Couldn’t connect to this SMB server.")
             case .timedOut:
-                errorMessage = "The SMB server took too long to respond."
+                errorMessage = Text("The SMB server took too long to respond.")
             case let .failed(message):
-                errorMessage = message
+                errorMessage = Text(verbatim: message)
             }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = Text(verbatim: error.localizedDescription)
         }
     }
 }

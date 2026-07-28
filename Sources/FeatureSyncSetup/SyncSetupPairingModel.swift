@@ -27,7 +27,7 @@ public final class SyncSetupPairingModel {
         case confirmingSAS(code: String)                              // source awaiting user match-confirm
         case sending                                                   // source in flight
         case sent                                                      // source done
-        case failed(String)
+        case failed(LocalizedStringResource)
     }
 
     public private(set) var phase: Phase = .idle
@@ -298,7 +298,7 @@ public final class SyncSetupPairingModel {
         phase = .idle
     }
 
-    private static func describe(_ error: Error) -> String {
+    private static func describe(_ error: Error) -> LocalizedStringResource {
         switch error {
         case SyncPairingError.expiredContext: return "The setup code expired. Try again."
         case SyncPairingError.notConfirmed: return "Setup was cancelled — the codes didn't match."

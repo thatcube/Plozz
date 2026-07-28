@@ -700,7 +700,7 @@ private struct PlaybackSourceMenuPanel: View {
         versions.first { $0.id == selectedVersionID } ?? versions.first
     }
 
-    private func sourceSubtitle(_ source: MediaSourceRef) -> String? {
+    private func sourceSubtitle(_ source: MediaSourceRef) -> String? {   // l10n:content — server/source detail from the provider
         var parts: [String] = []
         if let provider = source.providerKind?.displayName,
            provider.caseInsensitiveCompare(source.displayName) != .orderedSame {

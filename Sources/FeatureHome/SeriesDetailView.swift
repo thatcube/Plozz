@@ -1337,7 +1337,7 @@ enum SeriesRequestFocusPolicy {
 }
 
 enum SeriesRequestAccessoryPresentation {
-    static func title(hasRequestable: Bool, isRequesting: Bool) -> String {
+    static func title(hasRequestable: Bool, isRequesting: Bool) -> LocalizedStringResource {
         if isRequesting { return "Requesting…" }
         return hasRequestable ? "Request More" : "Season Requests"
     }
@@ -1348,7 +1348,7 @@ enum SeriesRequestAccessoryPresentation {
 }
 
 enum SeasonRequestHeroPresentation {
-    static func inactiveTitle(availabilityLoaded: Bool, resolved: Bool) -> String {
+    static func inactiveTitle(availabilityLoaded: Bool, resolved: Bool) -> LocalizedStringResource {
         if availabilityLoaded { return "No Seasons to Request" }
         return resolved ? "Seasons Unavailable" : "Loading Seasons…"
     }

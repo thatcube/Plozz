@@ -1280,7 +1280,7 @@ struct PlayerControls: View {
     /// stepper. At 0 it teaches which chip does what; once adjusted it states the
     /// actual result (positive delay = subtitles show later than the audio),
     /// which resolves the perennial "does + make them earlier or later?" confusion.
-    static func subtitleSyncHint(_ seconds: TimeInterval) -> String {
+    static func subtitleSyncHint(_ seconds: TimeInterval) -> LocalizedStringResource {
         let rounded = (seconds * 100).rounded() / 100
         if rounded == 0 {
             return "− shows subtitles earlier\n+ shows them later"

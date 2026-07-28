@@ -91,7 +91,7 @@ struct ServersAndLibrariesDetailView: View {
     /// Global sign-in summary — who's signed in to this server, household-wide.
     /// `nil` when there's nothing worth a second line (a credential-free NFS
     /// connection), so the row shows just the server name.
-    private func summary(for group: ServerAccountGroup) -> String? {
+    private func summary(for group: ServerAccountGroup) -> LocalizedStringResource? {
         let accountCount = group.accounts.count
         if accountCount == 0 {
             return "No one signed in"

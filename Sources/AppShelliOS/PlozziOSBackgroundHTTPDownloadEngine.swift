@@ -110,7 +110,7 @@ private enum BackgroundDownloadError: LocalizedError {
     case missingTemporaryFile
     case unexpectedHTTPStatus(Int)
 
-    var errorDescription: String? {
+    var errorDescription: LocalizedStringResource? {
         switch self {
         case .missingSource: "The managed download source is unavailable."
         case .missingTaskIdentity: "The background download lost its identity."

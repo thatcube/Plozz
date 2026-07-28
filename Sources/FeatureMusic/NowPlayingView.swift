@@ -934,7 +934,7 @@ public struct NowPlayingView: View {
     /// The icon + wording for the transient confirmation shown when repeat is
     /// cycled. `.off` and `.all` share the `repeat` glyph (they differ only by
     /// tint), so the words are what actually tell the two apart.
-    private func repeatStatusLabel(_ mode: AudioPlaybackController.RepeatMode) -> (icon: String, text: String) {
+    private func repeatStatusLabel(_ mode: AudioPlaybackController.RepeatMode) -> (icon: String, text: LocalizedStringResource) {
         switch mode {
         case .off: return ("repeat", "Repeat Off")
         case .all: return ("repeat", "Repeat All")
@@ -944,7 +944,7 @@ public struct NowPlayingView: View {
 
     /// Shows `text` (with `icon`) in the transient status pill and re-arms its
     /// auto-dismiss. Called from the toggle transport actions.
-    private func flashStatus(icon: String, text: String) {
+    private func flashStatus(icon: String, text: LocalizedStringResource) {
         withAnimation(.easeInOut(duration: 0.2)) {
             transportStatus = TransportStatus(icon: icon, text: text)
         }
@@ -1307,7 +1307,7 @@ private extension View {
 /// button's active tint is washed out by the tvOS focus highlight.
 private struct TransportStatus: Equatable {
     let icon: String
-    let text: String
+    let text: LocalizedStringResource
 }
 
 /// Reports the natural height of the bottom control bar so the player can slide

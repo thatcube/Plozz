@@ -7,6 +7,9 @@
     " " : {
 
     },
+    "%@" : {
+
+    },
     "%@ " : {
 
     },
@@ -19,6 +22,9 @@
           }
         }
       }
+    },
+    "%@ (detected)" : {
+
     },
     "%@ coming soon" : {
 
@@ -38,6 +44,9 @@
           }
         }
       }
+    },
+    "%@ share" : {
+
     },
     "%@ subtitles are rendered as images and can’t be restyled." : {
 
@@ -60,6 +69,16 @@
     },
     "%@ used by downloads" : {
 
+    },
+    "%@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@"
+          }
+        }
+      }
     },
     "%@ · %@ detected" : {
       "localizations" : {
@@ -84,6 +103,26 @@
     "%@ — Failed" : {
 
     },
+    "%@%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@%2$@"
+          }
+        }
+      }
+    },
+    "%@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
+    },
     "%@, offline" : {
 
     },
@@ -100,8 +139,31 @@
     "%@×" : {
 
     },
+    "%@…" : {
+
+    },
     "%lld" : {
 
+    },
+    "%lld episodes • %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld episodes • %2$@"
+          }
+        }
+      }
+    },
+    "%lld episodes • %lld seasons • %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld episodes • %2$lld seasons • %3$@"
+          }
+        }
+      }
     },
     "%lld item%@ in iCloud  (should match your other devices)" : {
       "localizations" : {
@@ -113,7 +175,29 @@
         }
       }
     },
+    "%lld libraries" : {
+
+    },
+    "%lld lines" : {
+
+    },
+    "%lld of %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld"
+          }
+        }
+      }
+    },
+    "%lld queued" : {
+
+    },
     "%lld sec" : {
+
+    },
+    "%lld sign-ins" : {
 
     },
     "%lld tracks" : {
@@ -128,6 +212,9 @@
           }
         }
       }
+    },
+    "%lld unavailable" : {
+
     },
     "%lld%%" : {
 
@@ -150,6 +237,9 @@
     "/volume1/Media" : {
 
     },
+    "1 line" : {
+
+    },
     "192.168.1.20:5055" : {
 
     },
@@ -165,7 +255,13 @@
     "A cinematic, rotating spotlight at the top of Home, with a Continue Watching row tucked under its lower edge." : {
 
     },
+    "A credential requires a secure (https://) address." : {
+
+    },
     "A media share connects with the credentials you entered (or as a guest). Choose what shows on your Home under Profile › Your Libraries." : {
+
+    },
+    "A username, password, or token requires a secure (https://) address." : {
 
     },
     "API key" : {
@@ -185,6 +281,9 @@
       }
     },
     "Above" : {
+
+    },
+    "Access to this WebDAV folder was denied." : {
 
     },
     "Account" : {
@@ -254,6 +353,9 @@
     "Add media to your server or connect another source." : {
 
     },
+    "Add to Watchlist" : {
+
+    },
     "Add “%@”?" : {
 
     },
@@ -279,6 +381,9 @@
 
     },
     "All Categories" : {
+
+    },
+    "All sources healthy" : {
 
     },
     "Allow Cellular Downloads" : {
@@ -326,6 +431,9 @@
 
     },
     "Artwork" : {
+
+    },
+    "Artwork cache" : {
 
     },
     "Artwork limit" : {
@@ -390,6 +498,9 @@
 
     },
     "Available in your library" : {
+
+    },
+    "Available offline • %@" : {
 
     },
     "Avatar color" : {
@@ -538,6 +649,9 @@
     "Category" : {
 
     },
+    "Centre" : {
+
+    },
     "Certificate SHA-256" : {
 
     },
@@ -574,13 +688,22 @@
     "Choose a Folder" : {
 
     },
+    "Choose a folder" : {
+
+    },
     "Choose a profile to continue." : {
 
     },
     "Choose a server" : {
 
     },
+    "Choose a share" : {
+
+    },
     "Choose a share to add." : {
+
+    },
+    "Choose an export" : {
 
     },
     "Choose theme" : {
@@ -651,6 +774,9 @@
 
     },
     "Color" : {
+
+    },
+    "Coming Soon" : {
 
     },
     "Coming from a device that’s already signed in? Show a code here and scan it from your other phone, tablet, or Apple TV to sign this one in." : {
@@ -750,16 +876,64 @@
     "Couldn't reach TMDB to check the key. Try again in a moment." : {
 
     },
+    "Couldn't reach the other device. Make sure both are on the same Wi-Fi." : {
+
+    },
+    "Couldn't reach the server. Check it's on and connected to the same network, then try again." : {
+
+    },
     "Couldn't send — crash reporting isn't active. Turn on Share Crash Reports below and try again." : {
+
+    },
+    "Couldn't verify the other device. Try again." : {
 
     },
     "Couldn’t Load Libraries" : {
 
     },
+    "Couldn’t capture this server’s host key." : {
+
+    },
+    "Couldn’t connect to this SMB server." : {
+
+    },
     "Couldn’t connect. Check the address and network." : {
 
     },
+    "Couldn’t connect: %@" : {
+
+    },
+    "Couldn’t determine whether this WebDAV server uses HTTP or HTTPS." : {
+
+    },
     "Couldn’t load Seerr users." : {
+
+    },
+    "Couldn’t load locations: %@" : {
+
+    },
+    "Couldn’t reach that server. Check the address and network." : {
+
+    },
+    "Couldn’t reach that server. Check the address and that it’s on the same network, then try again." : {
+
+    },
+    "Couldn’t reach this FTP server." : {
+
+    },
+    "Couldn’t reach this NFS server." : {
+
+    },
+    "Couldn’t reach this SFTP server." : {
+
+    },
+    "Couldn’t reach this WebDAV server." : {
+
+    },
+    "Couldn’t verify this server’s certificate." : {
+
+    },
+    "Couldn’t verify this server’s certificate. If it’s self-signed, approve its fingerprint to continue." : {
 
     },
     "Crash Reports" : {
@@ -769,6 +943,12 @@
 
     },
     "Create" : {
+
+    },
+    "Credentials will be sent over HTTP." : {
+
+    },
+    "Credentials will be sent without encryption." : {
 
     },
     "Crew" : {
@@ -803,6 +983,9 @@
 
     },
     "Darkness" : {
+
+    },
+    "Default" : {
 
     },
     "Delete" : {
@@ -1002,6 +1185,9 @@
     "Downloading %lld percent" : {
 
     },
+    "Downloading %lld%%" : {
+
+    },
     "Downloading subtitles" : {
 
     },
@@ -1084,6 +1270,9 @@
     "Enter Code" : {
 
     },
+    "Enter a port for this WebDAV server." : {
+
+    },
     "Enter address" : {
 
     },
@@ -1106,6 +1295,9 @@
 
     },
     "Enter the code shown on your other device" : {
+
+    },
+    "Enter the code shown on your other device." : {
 
     },
     "Enter the server’s web address and how to sign in." : {
@@ -1181,6 +1373,9 @@
 
     },
     "Fade" : {
+
+    },
+    "Failed" : {
 
     },
     "Fantasy & Sci-Fi" : {
@@ -1289,6 +1484,9 @@
     "Green" : {
 
     },
+    "Guest access" : {
+
+    },
     "HDR Brightness" : {
 
     },
@@ -1392,6 +1590,9 @@
     "How to sign in" : {
 
     },
+    "Idle" : {
+
+    },
     "If this share needs a different account, enter a username and password and try again." : {
 
     },
@@ -1459,6 +1660,12 @@
     "Last scanned" : {
 
     },
+    "Last scanned %@" : {
+
+    },
+    "Last scanned just now" : {
+
+    },
     "Last.fm" : {
 
     },
@@ -1472,6 +1679,9 @@
 
     },
     "Leave every library selected to include all enabled libraries." : {
+
+    },
+    "Left %lld%%" : {
 
     },
     "Libraries" : {
@@ -1522,6 +1732,9 @@
     "Loading Plex users…" : {
 
     },
+    "Loading Seasons…" : {
+
+    },
     "Loading Seerr users…" : {
 
     },
@@ -1535,6 +1748,9 @@
 
     },
     "Loading libraries…" : {
+
+    },
+    "Loading second subtitle…" : {
 
     },
     "Loading show…" : {
@@ -1586,6 +1802,9 @@
 
     },
     "Media" : {
+
+    },
+    "Media library" : {
 
     },
     "Media server" : {
@@ -1693,6 +1912,9 @@
     "New server from your other device" : {
 
     },
+    "Next" : {
+
+    },
     "Next Episode" : {
 
     },
@@ -1729,6 +1951,9 @@
     "No Recent Activity" : {
 
     },
+    "No Seasons to Request" : {
+
+    },
     "No Seerr users found." : {
 
     },
@@ -1747,6 +1972,9 @@
     "No alternate audio" : {
 
     },
+    "No browsable shares were found. You can type the share name manually." : {
+
+    },
     "No color" : {
 
     },
@@ -1754,6 +1982,9 @@
 
     },
     "No episodes" : {
+
+    },
+    "No folders were found inside this export." : {
 
     },
     "No libraries found on this server." : {
@@ -1784,6 +2015,9 @@
 
     },
     "No one in this household is signed in to this server yet." : {
+
+    },
+    "No one signed in" : {
 
     },
     "No photos to borrow yet" : {
@@ -1863,6 +2097,9 @@
 
     },
     "Not on your watchlist" : {
+
+    },
+    "Not scanned yet" : {
 
     },
     "Not seeing changes from your other devices? Pull a fresh copy from iCloud." : {
@@ -1982,6 +2219,12 @@
     "Open Plex to link" : {
 
     },
+    "Open Plozz on your Apple TV or another signed-in device and it’ll offer to add “%@” here automatically." : {
+
+    },
+    "Open Plozz on your Apple TV or another signed-in device and it’ll offer to set this one up automatically." : {
+
+    },
     "Open Simkl" : {
 
     },
@@ -2064,6 +2307,9 @@
 
     },
     "Pause in Low Data Mode" : {
+
+    },
+    "Paused" : {
 
     },
     "People" : {
@@ -2305,6 +2551,9 @@
     "Provider" : {
 
     },
+    "Provider health" : {
+
+    },
     "Providers" : {
 
     },
@@ -2414,6 +2663,9 @@
     "Remove from This Apple TV" : {
 
     },
+    "Remove from Watchlist" : {
+
+    },
     "Remove from all devices?" : {
 
     },
@@ -2424,6 +2676,15 @@
 
     },
     "Removing a sign-in affects every profile on this %@." : {
+
+    },
+    "Repeat All" : {
+
+    },
+    "Repeat Off" : {
+
+    },
+    "Repeat One" : {
 
     },
     "Replace Key" : {
@@ -2448,6 +2709,9 @@
 
     },
     "Request Limit Reached" : {
+
+    },
+    "Request More" : {
 
     },
     "Request Movie" : {
@@ -2493,6 +2757,9 @@
 
     },
     "Requesting a code…" : {
+
+    },
+    "Requesting…" : {
 
     },
     "Requests are made as" : {
@@ -2547,6 +2814,9 @@
     "Restart from Beginning" : {
 
     },
+    "Results" : {
+
+    },
     "Resume" : {
       "localizations" : {
         "es" : {
@@ -2587,6 +2857,9 @@
     "Rewind on resume" : {
 
     },
+    "Right %lld%%" : {
+
+    },
     "Rose" : {
 
     },
@@ -2603,6 +2876,9 @@
 
     },
     "Royal blue" : {
+
+    },
+    "Running" : {
 
     },
     "Runtime" : {
@@ -2747,6 +3023,12 @@
     "Season Download Failed" : {
 
     },
+    "Season Requests" : {
+
+    },
+    "Seasons Unavailable" : {
+
+    },
     "Second Track" : {
 
     },
@@ -2870,6 +3152,19 @@
     "Set up this device from another" : {
 
     },
+    "Set up “%@” on “%@”?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Set up “%1$@” on “%2$@”?"
+          }
+        }
+      }
+    },
+    "Set up “%@”?" : {
+
+    },
     "Setting up the other device…" : {
 
     },
@@ -2888,7 +3183,13 @@
     "Settings for %@" : {
 
     },
+    "Setup didn't complete. Please try again." : {
+
+    },
     "Setup didn’t finish" : {
+
+    },
+    "Setup was cancelled — the codes didn't match." : {
 
     },
     "Shadow" : {
@@ -2951,6 +3252,12 @@
     "Shuffle" : {
 
     },
+    "Shuffle Off" : {
+
+    },
+    "Shuffle On" : {
+
+    },
     "Sign In" : {
 
     },
@@ -2961,6 +3268,9 @@
 
     },
     "Sign Out" : {
+
+    },
+    "Sign Out & Remove Server" : {
 
     },
     "Sign Out of All Accounts" : {
@@ -3006,6 +3316,9 @@
         }
       }
     },
+    "Sign out %@?" : {
+
+    },
     "Sign out of all accounts?" : {
 
     },
@@ -3022,6 +3335,25 @@
 
     },
     "Signed in as" : {
+
+    },
+    "Signed in as %@" : {
+
+    },
+    "Signed in · %@" : {
+
+    },
+    "Signed in · %@ & %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Signed in · %1$@ & %2$@"
+          }
+        }
+      }
+    },
+    "Signed in · %lld users" : {
 
     },
     "Signed in!" : {
@@ -3092,6 +3424,12 @@
 
     },
     "Something went wrong searching or downloading. Try again." : {
+
+    },
+    "Something went wrong talking to this server." : {
+
+    },
+    "Something went wrong talking to this server. Please try again." : {
 
     },
     "Sort By" : {
@@ -3185,7 +3523,16 @@
     "Subtitles" : {
 
     },
+    "Subtitles show %@s earlier than the audio" : {
+
+    },
+    "Subtitles show %@s later than the audio" : {
+
+    },
     "Support" : {
+
+    },
+    "SwiftUI (forced)" : {
 
     },
     "Swipe to scrub while a title is playing and it resumes the moment you land — faster, but a stray swipe can move your position." : {
@@ -3236,6 +3583,9 @@
     "Tangerine" : {
 
     },
+    "Tap the window to bring playback back here." : {
+
+    },
     "Taupe" : {
 
     },
@@ -3257,10 +3607,70 @@
     "Thanks! Your recent activity was sent to the developer." : {
 
     },
+    "That doesn't look like a Plozz setup code." : {
+
+    },
+    "That doesn't look like a Plozz setup link." : {
+
+    },
+    "That doesn’t look like a valid address." : {
+
+    },
+    "That doesn’t look like a valid web address." : {
+
+    },
+    "That doesn’t look like a valid web address. Try something like https://nas.local/dav." : {
+
+    },
+    "That server didn’t respond as a WebDAV share (some need a /dav path)." : {
+
+    },
+    "That server didn’t respond as a WebDAV share. Check the address (some servers need a /dav path)." : {
+
+    },
     "That username or password was incorrect. Please try again." : {
 
     },
+    "That username or password was rejected." : {
+
+    },
+    "That username, password, or token was rejected." : {
+
+    },
+    "That username, password, or token was rejected. Please check it and try again." : {
+
+    },
+    "The FTP address is invalid." : {
+
+    },
+    "The FTP credentials were rejected." : {
+
+    },
+    "The SFTP credentials were rejected." : {
+
+    },
+    "The SMB server took too long to respond." : {
+
+    },
+    "The WebDAV address is invalid." : {
+
+    },
+    "The WebDAV credentials were rejected." : {
+
+    },
+    "The WebDAV server reported an error." : {
+
+    },
     "The account owner is the main Plex account holder; the others are managed/family users under it and may need a PIN. Plozz asks for the PIN on playback and never stores it." : {
+
+    },
+    "The background download lost its identity." : {
+
+    },
+    "The connection was cancelled." : {
+
+    },
+    "The downloaded file could not be finalized." : {
 
     },
     "The language Plozz prefers when choosing subtitles." : {
@@ -3279,6 +3689,12 @@
     "The latest app log lines from this Apple TV" : {
 
     },
+    "The managed download source is unavailable." : {
+
+    },
+    "The media server returned HTTP %lld instead of a media file." : {
+
+    },
     "The most recent app log lines, kept only on this Apple TV and already stripped of tokens and secrets. Newest first — a maintainer may ask what Plozz was doing when a bug happened." : {
 
     },
@@ -3286,6 +3702,39 @@
 
     },
     "The other device is set up" : {
+
+    },
+    "The request was cancelled." : {
+
+    },
+    "The selected second subtitle could not be loaded." : {
+
+    },
+    "The selected server is no longer available." : {
+
+    },
+    "The selected track contains no cues." : {
+
+    },
+    "The server certificate could not be trusted." : {
+
+    },
+    "The server denied access to its NFS exports." : {
+
+    },
+    "The server denied access to this export." : {
+
+    },
+    "The server had a problem. Please try again in a moment." : {
+
+    },
+    "The server had a problem. Try again in a moment." : {
+
+    },
+    "The setup code expired. Try again." : {
+
+    },
+    "The username or password is incorrect." : {
 
     },
     "Theme" : {
@@ -3316,6 +3765,18 @@
 
     },
     "This Profile" : {
+
+    },
+    "This WebDAV server uses HTTP. Review the security warning, then Connect again." : {
+
+    },
+    "This account can’t browse that location." : {
+
+    },
+    "This account doesn’t have permission to browse that location." : {
+
+    },
+    "This address is not a WebDAV endpoint." : {
 
     },
     "This build has no crash-reporting endpoint configured, so nothing can be sent. Crash reporting is available in TestFlight and release builds." : {
@@ -3358,13 +3819,71 @@
     "This profile isn’t linked to a Seerr user. The request will use the unrestricted administrator account." : {
 
     },
+    "This removes %@'s sign-in to %@ on this Apple TV." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This removes %1$@'s sign-in to %2$@ on this Apple TV."
+          }
+        }
+      }
+    },
+    "This removes %@'s sign-in to %@ on this Apple TV. No one else in your household is signed in, so %@ will be removed from your servers until someone signs in again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This removes %1$@'s sign-in to %2$@ on this Apple TV. No one else in your household is signed in, so %3$@ will be removed from your servers until someone signs in again."
+          }
+        }
+      }
+    },
     "This removes every Plex and Jellyfin sign-in on this Apple TV. You'll need to sign in again." : {
 
     },
     "This removes every server and network share from this device." : {
 
     },
+    "This removes the Plex sign-in for %@ on this Apple TV." : {
+
+    },
+    "This removes the Plex sign-in for %@ on this Apple TV. No one else in your household is signed in, so %@ will be removed from your servers until someone signs in again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This removes the Plex sign-in for %1$@ on this Apple TV. No one else in your household is signed in, so %2$@ will be removed from your servers until someone signs in again."
+          }
+        }
+      }
+    },
+    "This removes the connection to %@ on this Apple TV." : {
+
+    },
+    "This removes the guest connection to %@ on this Apple TV." : {
+
+    },
+    "This removes the guest connection to %@ on this Apple TV. No one else in your household is signed in, so %@ will be removed from your servers until someone signs in again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This removes the guest connection to %1$@ on this Apple TV. No one else in your household is signed in, so %2$@ will be removed from your servers until someone signs in again."
+          }
+        }
+      }
+    },
     "This server did not return any movie or TV libraries." : {
+
+    },
+    "This server didn’t advertise any NFS exports. You can type a path manually." : {
+
+    },
+    "This server didn’t advertise any exports. Enter the export path, e.g. /volume1/Media." : {
+
+    },
+    "This server didn’t allow listing exports. Enter the export path, e.g. /volume1/Media." : {
 
     },
     "This server is no longer available." : {
@@ -3374,6 +3893,9 @@
 
     },
     "This server needs a username and password. Go back and enter them." : {
+
+    },
+    "This server rejected credentials over HTTP." : {
 
     },
     "This server requires a username and password." : {
@@ -3495,6 +4017,12 @@
     "Turns on" : {
 
     },
+    "UIKit (forced)" : {
+
+    },
+    "URL cache" : {
+
+    },
     "Unable to link Plex" : {
 
     },
@@ -3547,6 +4075,9 @@
 
     },
     "Updated %@" : {
+
+    },
+    "Updating %lld libraries" : {
 
     },
     "Uploads the full log below so it can be read on a computer instead of scrolling here. Sent anonymously — no logins, tokens, servers, or titles are included." : {
@@ -3719,6 +4250,9 @@
 
     },
     "Width" : {
+
+    },
+    "Work" : {
 
     },
     "Written By" : {
@@ -5960,10 +6494,16 @@
     "· +%lld more" : {
 
     },
+    "—" : {
+
+    },
     "“%@” is set up on another device. Sign in to watch it here — your login stays private to each device. You can also find it later under Settings ▸ iCloud Sync." : {
 
     },
     "“%@” will also be removed from your other devices signed in to iCloud." : {
+
+    },
+    "− shows subtitles earlier\n+ shows them later" : {
 
     },
     "−50 ms" : {

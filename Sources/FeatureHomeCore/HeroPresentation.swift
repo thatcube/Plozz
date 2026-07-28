@@ -120,7 +120,7 @@ public struct HeroPresentation: Sendable, Equatable {
         return value
     }
 
-    private static func sourceMaterial(from tags: [String]) -> String? {
+    private static func sourceMaterial(from tags: [String]) -> String? {   // l10n:content — source-material tag from the server
         for tag in tags {
             let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
             let lowered = trimmed.lowercased()

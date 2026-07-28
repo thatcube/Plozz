@@ -158,11 +158,11 @@ struct PlozziOSDownloadsView: View {
             } label: {
                 DownloadTileContent(
                     title: show.title,
-                    subtitle: DownloadFormatting.showSubtitle(
+                    subtitle: Text(DownloadFormatting.showSubtitle(
                         episodeCount: show.episodeCount,
                         seasonCount: show.seasons.count,
                         bytes: show.totalBytes
-                    ),
+                    )),
                     subtitleColor: .secondary,
                     fraction: nil,
                     failure: nil,
@@ -296,16 +296,16 @@ struct PlozziOSDownloadsStorageBar: View {
 /// A single source of truth for status/size text so movie rows, episode rows,
 /// and show rows read identically.
 enum DownloadFormatting {
-    static func status(for record: DownloadedMediaRecord) -> String {
-        let base: String
+    static func status(for record: DownloadedMediaRecord) -> Text {
+        let base: Text
         switch record.status {
-        case .queued: base = "Queued"
+        case .queued: base = Text("Queued")
         case .downloading:
-            base = "\(Int((record.fractionCompleted ?? 0) * 100))%"
-        case .paused: base = "Paused"
+            base = Text((record.fractionCompleted ?? 0), format: .percent.precision(.fractionLength(0)))
+        case .paused: base = Text("Paused")
         case .completed:
-            base = "Available offline • \(byteText(record.bytesDownloaded))"
-        case .failed: base = "Failed"
+            base = Text("Available offline • \(byteText(record.bytesDownloaded))")
+        case .failed: base = Text("Failed")
         }
         // Several versions of one title can now be downloaded side by side, so
         // the row has to say WHICH file it is or two entries look identical.
@@ -314,7 +314,7 @@ enum DownloadFormatting {
         guard let version = record.versionLabel, !version.isEmpty else {
             return base
         }
-        return "\(version) • \(base)"
+        return Text(verbatim: "\(version) • ") + base
     }
 
     static func statusColor(for record: DownloadedMediaRecord) -> Color {
@@ -336,15 +336,17 @@ enum DownloadFormatting {
         record.status == .failed ? record.failureReason : nil
     }
 
+    /// Both forms are whole sentences so translators can reorder them, and both
+    /// counts are real placeholders so the catalog can carry plural variations.
     static func showSubtitle(
         episodeCount: Int,
         seasonCount: Int,
         bytes: Int64
-    ) -> String {
-        let episodes = "\(episodeCount) "
-            + (episodeCount == 1 ? "episode" : "episodes")
-        let seasons = seasonCount > 1 ? " • \(seasonCount) seasons" : ""
-        return episodes + seasons + " • " + byteText(bytes)
+    ) -> LocalizedStringResource {
+        if seasonCount > 1 {
+            return "\(episodeCount) episodes • \(seasonCount) seasons • \(byteText(bytes))"
+        }
+        return "\(episodeCount) episodes • \(byteText(bytes))"
     }
 
     static func byteText(_ bytes: Int64) -> String {
@@ -391,7 +393,7 @@ struct DownloadRowLink<Content: View>: View {
 struct DownloadRowContent: View {
     /// Media title and a formatted status line — both provider/derived content.
     let title: String   // l10n:content — media title from the server
-    let subtitle: String   // l10n:content — formatted download status
+    let subtitle: Text
     let subtitleColor: Color
     let fraction: Double?
     let failure: String?
@@ -405,7 +407,7 @@ struct DownloadRowContent: View {
                 Text(title)
                     .font(.headline)
                     .lineLimit(2)
-                Text(subtitle)
+                subtitle
                     .font(.caption)
                     .foregroundStyle(subtitleColor)
                 if let fraction {
@@ -435,7 +437,7 @@ struct DownloadTileContent: View {
     @Environment(\.themePalette) private var palette
     /// Media title and a formatted status line — both provider/derived content.
     let title: String   // l10n:content — media title from the server
-    let subtitle: String   // l10n:content — formatted download status
+    let subtitle: Text
     let subtitleColor: Color
     let fraction: Double?
     let failure: String?
@@ -477,7 +479,7 @@ struct DownloadTileContent: View {
                     .font(.headline)
                     .lineLimit(1)
                     .foregroundStyle(palette.primaryText)
-                Text(subtitle)
+                subtitle
                     .font(.caption)
                     .foregroundStyle(subtitleColor)
                     .lineLimit(1)

@@ -179,7 +179,7 @@ public final class HomePerfSampler {
         #endif
     }
 
-    private static func machineIdentifier() -> String {
+    private static func machineIdentifier() -> String {   // l10n:content — hardware model identifier
         #if canImport(Darwin)
         var systemInfo = utsname()
         uname(&systemInfo)

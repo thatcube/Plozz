@@ -257,7 +257,7 @@ public actor TMDbArtworkResolver {
         return id
     }
 
-    private func fetchStillPath(seriesID: String, season: Int, episode: Int, token: String) async -> String? {
+    private func fetchStillPath(seriesID: String, season: Int, episode: Int, token: String) async -> String? {   // l10n:content — TMDb API path
         guard let url = URL(string: "https://api.themoviedb.org/3/tv/\(seriesID)/season/\(season)/episode/\(episode)/images") else {
             return nil
         }

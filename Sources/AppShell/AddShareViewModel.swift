@@ -31,7 +31,7 @@ final class AddShareViewModel {
         /// Couldn't connect to the server at all (off, wrong address, different
         /// network). No amount of credentials will help — offer to retry.
         case unreachable
-        case failed(String)
+        case failed(LocalizedStringResource)
     }
 
     // Discovery
@@ -268,7 +268,7 @@ final class AddShareViewModel {
         return (host.trimmingCharacters(in: .whitespaces), explicitPort ?? inlinePort)
     }
 
-    private static func friendlyError(_ error: Error) -> String {
+    private static func friendlyError(_ error: Error) -> LocalizedStringResource {
         if let e = error as? SMBShareEnumerator.ListError {
             switch e {
             case .timedOut: return "Couldn't reach the server. Check it's on and connected to the same network, then try again."

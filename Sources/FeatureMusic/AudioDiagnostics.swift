@@ -93,7 +93,7 @@ public final class AudioDiagnostics {
     /// useful signal for AirPlay problems. Shows each output's port type (e.g.
     /// `AirPlay`) and name (e.g. the HomePod's name), so the log tells us exactly
     /// what we were connected to when a transition broke.
-    public func currentRouteDescription() -> String {
+    public func currentRouteDescription() -> String {   // l10n:content — audio route diagnostic
         let session = AVAudioSession.sharedInstance()
         let route = session.currentRoute
         let outs = route.outputs.isEmpty

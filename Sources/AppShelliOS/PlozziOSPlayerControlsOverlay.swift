@@ -312,7 +312,7 @@ private struct PlozziOSExternalPlaybackPlaceholder: View {
         return "Playing on AirPlay"
     }
 
-    private var detail: String? {
+    private var detail: LocalizedStringResource? {
         isPictureInPicture ? "Tap the window to bring playback back here." : nil
     }
 }
@@ -807,7 +807,7 @@ private struct PlozziOSSubtitleOptionsSheet: View {
         }
     }
 
-    private var secondaryStatusText: String? {
+    private var secondaryStatusText: LocalizedStringResource? {
         switch viewModel.controls.secondarySubtitleStatus {
         case .idle:
             nil

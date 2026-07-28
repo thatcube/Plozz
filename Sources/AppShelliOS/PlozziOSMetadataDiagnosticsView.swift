@@ -51,11 +51,11 @@ struct PlozziOSMetadataDiagnosticsView: View {
     @ViewBuilder
     private var overviewSection: some View {
         SettingsSectionGroup("Overview") {
-            metricRow("Artwork cache", byteText(snapshot?.artworkCacheBytes))
-            metricRow("URL cache", byteText(snapshot?.metadataCacheBytes))
-            metricRow("Results", snapshot?.resultCacheEntryCount.map(String.init) ?? "—")
-            metricRow("Work", snapshot.map { workText($0.work) } ?? "—")
-            metricRow("Provider health", healthText)
+            metricRow(Text("Artwork cache"), Text(verbatim: byteText(snapshot?.artworkCacheBytes)))
+            metricRow(Text("URL cache"), Text(verbatim: byteText(snapshot?.metadataCacheBytes)))
+            metricRow(Text("Results"), Text(verbatim: snapshot?.resultCacheEntryCount.map { $0.formatted() } ?? "—"))
+            metricRow(Text("Work"), snapshot.map { Text(workText($0.work)) } ?? Text(verbatim: "—"))
+            metricRow(Text("Provider health"), Text(healthText))
             Button {
                 Task { await refresh() }
             } label: {
@@ -83,14 +83,14 @@ struct PlozziOSMetadataDiagnosticsView: View {
                     .plozzForeground(.secondary)
             } else {
                 ForEach(counts, id: \.source) { item in
-                    metricRow(displayName(item.source), item.count.formatted())
+                    metricRow(Text(verbatim: displayName(item.source)), Text(verbatim: item.count.formatted()))
                 }
             }
             if !unavailable.isEmpty {
                 ForEach(unavailable) { breaker in
                     metricRow(
-                        displayName(breaker.source),
-                        (breaker.trippedReason ?? "Unavailable").capitalized,
+                        Text(verbatim: displayName(breaker.source)),
+                        breaker.trippedReason.map { Text(verbatim: $0.capitalized) } ?? Text("Unavailable"),
                         valueColor: .orange
                     )
                 }
@@ -126,12 +126,12 @@ struct PlozziOSMetadataDiagnosticsView: View {
     // MARK: Rows
 
     @ViewBuilder
-    private func metricRow(_ title: String, _ value: String, valueColor: Color = .primary) -> some View {   // l10n:content — diagnostic values, developer-facing
+    private func metricRow(_ title: Text, _ value: Text, valueColor: Color = .primary) -> some View {
         HStack {
-            Text(title)
+            title
                 .plozzForeground(.secondary)
             Spacer(minLength: 12)
-            Text(value)
+            value
                 .font(.callout.weight(.medium).monospacedDigit())
                 .foregroundStyle(valueColor)
                 .multilineTextAlignment(.trailing)
@@ -148,7 +148,7 @@ struct PlozziOSMetadataDiagnosticsView: View {
             .map { (source: $0.key, count: $0.value) }
     }
 
-    private var healthText: String {
+    private var healthText: LocalizedStringResource {
         guard let snapshot else { return "—" }
         let count = snapshot.providerBreakers.lazy.filter(\.isTripped).count
         return count == 0 ? "All sources healthy" : "\(count) unavailable"
@@ -166,7 +166,7 @@ struct PlozziOSMetadataDiagnosticsView: View {
         return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 
-    private func workText(_ work: MetadataEnrichmentDiagnosticsSnapshot.WorkStatus) -> String {
+    private func workText(_ work: MetadataEnrichmentDiagnosticsSnapshot.WorkStatus) -> LocalizedStringResource {
         if work.isRunning { return "Running" }
         let queued = work.queuedItems + work.queuedBacklogs
         return queued > 0 ? "\(queued) queued" : "Idle"

@@ -367,7 +367,7 @@ final class NextEpisodeCoordinator {
     /// The Up Next card's secondary line, e.g. "S2 · E3 · 48m" — season/episode
     /// plus runtime. Season/episode numbers and runtime are never spoilers, so
     /// this is always shown even under a masked thumbnail.
-    static func upNextMeta(for item: MediaItem) -> String? {
+    static func upNextMeta(for item: MediaItem) -> String? {   // l10n:content — episode metadata from the server
         var parts: [String] = []
         if let season = item.seasonNumber, let episode = item.episodeNumber {
             parts.append("S\(season) · E\(episode)")
@@ -381,14 +381,16 @@ final class NextEpisodeCoordinator {
     }
 
     /// Compact runtime label for the Up Next meta line, e.g. `48m` or `1h 2m`.
-    static func upNextRuntimeLabel(_ seconds: TimeInterval) -> String {
+    ///
+    /// Formatted rather than translated: Foundation already knows how each locale
+    /// abbreviates hours and minutes, so this needs no catalog entry and cannot
+    /// drift from the platform's own wording. (Same reasoning as SkipInterval.)
+    static func upNextRuntimeLabel(_ seconds: TimeInterval) -> String {   // l10n:content — locale-formatted duration
         let totalMinutes = max(0, Int(seconds / 60))
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        if hours > 0 {
-            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
-        }
-        return "\(minutes)m"
+        let allowed: Set<Duration.UnitsFormatStyle.Unit> =
+            totalMinutes >= 60 ? [.hours, .minutes] : [.minutes]
+        return Duration.seconds(totalMinutes * 60)
+            .formatted(.units(allowed: allowed, width: .narrow))
     }
 }
 #endif

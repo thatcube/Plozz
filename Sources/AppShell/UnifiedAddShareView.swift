@@ -188,15 +188,15 @@ struct UnifiedAddShareView: View {
                                     viewModel.applyTransport(kind)
                                 } label: {
                                     if kind == viewModel.selectedTransport {
-                                        Label(protocolLabel(kind), systemImage: "checkmark")
+                                        Label { protocolLabel(kind) } icon: { Image(systemName: "checkmark") }
                                     } else {
-                                        Text(protocolLabel(kind))
+                                        protocolLabel(kind)
                                     }
                                 }
                             }
                         } label: {
                             HStack {
-                                Text(protocolLabel(viewModel.selectedTransport))
+                                protocolLabel(viewModel.selectedTransport)
                                 Spacer()
                                 Image(systemName: "chevron.up.chevron.down").font(.footnote).plozzForeground(.secondary)
                             }
@@ -232,7 +232,7 @@ struct UnifiedAddShareView: View {
             .focusSection()
 
             if let error = viewModel.connectError {
-                InlineErrorMessage(Text(verbatim: error), systemImage: "exclamationmark.triangle")
+                InlineErrorMessage(Text(error), systemImage: "exclamationmark.triangle")
             }
             Button {
                 viewModel.connect()
@@ -321,9 +321,11 @@ struct UnifiedAddShareView: View {
         }
     }
 
-    private func protocolLabel(_ kind: MediaShareTransportKind) -> String {
+    private func protocolLabel(_ kind: MediaShareTransportKind) -> Text {
         let detected = viewModel.detectedDoors.contains { $0.transport == kind }
-        return detected ? "\(kind.badgeLabel) (detected)" : kind.badgeLabel
+        // The protocol name is a technical identifier; only the "(detected)"
+        // suffix is copy, so it is interpolated into a translatable sentence.
+        return detected ? Text("\(kind.badgeLabel) (detected)") : Text(verbatim: kind.badgeLabel)
     }
 
     // MARK: - Step 3: verify trust
@@ -359,7 +361,7 @@ struct UnifiedAddShareView: View {
 
     private var locationStep: some View {
         Group {
-            headerRow(title: Text(verbatim: locationTitle), back: { viewModel.backToConnect() }) { EmptyView() }
+            headerRow(title: Text(locationTitle), back: { viewModel.backToConnect() }) { EmptyView() }
             switch viewModel.locationLoad {
             case .idle, .loading:
                 Panel(title: Text("Locations")) { placeholder("Loading…") }
@@ -380,7 +382,7 @@ struct UnifiedAddShareView: View {
             case .failed(let message):
                 Panel(title: Text("Something went wrong")) {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(verbatim: message).plozzForeground(.secondary)
+                        Text(message).plozzForeground(.secondary)
                         Button("Try again") { retryLocation() }.buttonStyle(.borderedProminent)
                     }
                 }
@@ -391,7 +393,7 @@ struct UnifiedAddShareView: View {
         }
     }
 
-    private var locationTitle: String {
+    private var locationTitle: LocalizedStringResource {
         switch viewModel.selectedTransport {
         case .nfs: return "Choose an export"
         case .smb: return "Choose a share"

@@ -190,7 +190,7 @@ struct HelpDiagnosticsDetailView: View {
         }
     }
 
-    private var recentActivityCountLabel: String {
+    private var recentActivityCountLabel: LocalizedStringResource {
         let count = PlozzLog.recentEntries(limit: 500).count
         guard count > 0 else { return "None yet" }
         return count == 1 ? "1 line" : "\(count) lines"

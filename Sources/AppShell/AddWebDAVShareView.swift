@@ -135,10 +135,10 @@ struct AddWebDAVShareView: View {
                 }
             }
             if let warning = viewModel.insecureHTTPWarning {
-                InlineErrorMessage(Text(verbatim: warning), systemImage: "lock.open")
+                InlineErrorMessage(Text(warning), systemImage: "lock.open")
             }
             if let error = viewModel.errorMessage {
-                InlineErrorMessage(Text(verbatim: error), systemImage: "exclamationmark.triangle")
+                InlineErrorMessage(Text(error), systemImage: "exclamationmark.triangle")
             }
             Button {
                 Task { await viewModel.connect() }
@@ -174,7 +174,7 @@ struct AddWebDAVShareView: View {
                     .foregroundStyle(.primary)
             }
             if let error = viewModel.errorMessage {
-                InlineErrorMessage(Text(verbatim: error), systemImage: "exclamationmark.triangle")
+                InlineErrorMessage(Text(error), systemImage: "exclamationmark.triangle")
             }
             HStack(spacing: 20) {
                 Button("Approve & Continue") {
@@ -248,7 +248,7 @@ struct AddWebDAVShareView: View {
                     .focused($focusedField, equals: .displayName)
             }
             if let error = viewModel.errorMessage {
-                InlineErrorMessage(Text(verbatim: error), systemImage: "exclamationmark.triangle")
+                InlineErrorMessage(Text(error), systemImage: "exclamationmark.triangle")
             }
             Button("Use This Folder") { viewModel.useCurrentFolder() }
                 .buttonStyle(.borderedProminent)

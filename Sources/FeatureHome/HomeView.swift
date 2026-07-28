@@ -582,7 +582,7 @@ public struct HomeView: View {
                         .controlSize(.small)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(multi ? "\(activeStates.count) libraries" : Self.pillTitle(primary))
+                    (multi ? Text("\(activeStates.count) libraries") : Self.pillTitle(primary))
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.primary)
                     if let detail = Self.pillSubtitle(primary, multi: multi) {
@@ -617,8 +617,10 @@ public struct HomeView: View {
     }
 
     /// The pill's bold line: the share being updated (what media).
-    private static func pillTitle(_ state: ShareScanState) -> String {
-        state.name.isEmpty ? "Media library" : state.name
+    /// Text rather than a resource: the share's own name is content, and only
+    /// the unnamed fallback is copy.
+    private static func pillTitle(_ state: ShareScanState) -> Text {
+        state.name.isEmpty ? Text("Media library") : Text(verbatim: state.name)
     }
 
     /// The pill's secondary line: the current phase plus any live count.
@@ -631,7 +633,7 @@ public struct HomeView: View {
     }
 
     /// A flattened, spoken description of the pill for VoiceOver.
-    private static func pillAccessibilityLabel(_ states: [ShareScanState]) -> String {
+    private static func pillAccessibilityLabel(_ states: [ShareScanState]) -> LocalizedStringResource {
         guard let primary = states.first else { return "" }
         if states.count > 1 { return "Updating \(states.count) libraries" }
         let sub = pillSubtitle(primary, multi: false).map { ", \($0)" } ?? ""

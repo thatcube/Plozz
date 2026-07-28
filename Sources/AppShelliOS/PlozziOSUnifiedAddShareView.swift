@@ -77,7 +77,7 @@ struct PlozziOSUnifiedAddShareView: View {
         .onDisappear { viewModel.stopScan() }
     }
 
-    private var stepTitle: String {
+    private var stepTitle: LocalizedStringResource {
         switch viewModel.step {
         case .chooseDevice: return "Add a Media Share"
         case .connect: return "Connect"
@@ -166,7 +166,7 @@ struct PlozziOSUnifiedAddShareView: View {
             Section {
                 Picker("Protocol", selection: $viewModel.selectedTransport) {
                     ForEach(MediaShareTransportCatalog.preferenceOrder, id: \.self) { kind in
-                        Text(protocolLabel(kind)).tag(kind)
+                        protocolLabel(kind).tag(kind)
                     }
                 }
                 .onChange(of: viewModel.selectedTransport) { _, kind in
@@ -248,9 +248,11 @@ struct PlozziOSUnifiedAddShareView: View {
 
     private var detectedPorts: [Int] { viewModel.detectedPorts(for: viewModel.selectedTransport) }
 
-    private func protocolLabel(_ kind: MediaShareTransportKind) -> String {
+    /// The protocol name itself is a brand (SMB, NFS…) so it stays verbatim; only
+    /// the "(detected)" annotation is translatable.
+    private func protocolLabel(_ kind: MediaShareTransportKind) -> Text {
         viewModel.detectedDoors.contains { $0.transport == kind }
-            ? "\(kind.badgeLabel) (detected)" : kind.badgeLabel
+            ? Text("\(kind.badgeLabel) (detected)") : Text(verbatim: kind.badgeLabel)
     }
 
     // MARK: - Step 3: verify trust
@@ -278,7 +280,7 @@ struct PlozziOSUnifiedAddShareView: View {
 
     // MARK: - Step 4: pick location
 
-    private var locationTitle: String {
+    private var locationTitle: LocalizedStringResource {
         switch viewModel.selectedTransport {
         case .nfs: return "Choose an export"
         case .smb: return "Choose a share"

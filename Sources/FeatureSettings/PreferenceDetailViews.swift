@@ -287,7 +287,7 @@ struct PlaybackDetailView: View {
         )
     }
 
-    private func subtitleLanguageName(for code: String) -> String {
+    private func subtitleLanguageName(for code: String) -> String {   // l10n:content — language name resolved from Locale
         guard !code.isEmpty else { return "Device Default" }
         return SubtitleLanguageCatalog.languages.first(where: { $0.code == code })?.name ?? code
     }

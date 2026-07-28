@@ -715,7 +715,7 @@ public struct SettingsView: View {
         .buttonStyle(SettingsFocusButtonStyle())
     }
 
-    private var heroForegroundModeLabel: String {
+    private var heroForegroundModeLabel: LocalizedStringResource {
         switch heroForegroundMode {
         case 1: return "UIKit (forced)"
         case 2: return "SwiftUI (forced)"

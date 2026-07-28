@@ -89,7 +89,7 @@ public struct EpisodeColumnPresentation: Equatable, Sendable, CustomDebugStringC
         accessibilityLabel = accessibilityParts.joined(separator: ", ")
     }
 
-    public var debugDescription: String {
+    public var debugDescription: String {   // l10n:content — debug description
         "EpisodeColumnPresentation(titleLine: \(titleLine.debugDescription), metadataText: \(metadataText.debugDescription), progress: \(progress.debugDescription), isWatched: \(isWatched), artworkTreatment: \(artworkTreatment), overviewTreatment: \(overviewTreatment), visibleOverview: \(visibleOverview.debugDescription), accessibilityLabel: \(accessibilityLabel.debugDescription))"
     }
 }

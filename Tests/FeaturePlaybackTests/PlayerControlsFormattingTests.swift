@@ -13,9 +13,11 @@ final class PlayerControlsFormattingTests: XCTestCase {
     }
 
     func testHorizontalOffsetLabelWordsDirection() {
-        XCTAssertEqual(PlayerControlsFormatting.hOffsetLabel(0), "Centre")
-        XCTAssertEqual(PlayerControlsFormatting.hOffsetLabel(20), "Right 20%")
-        XCTAssertEqual(PlayerControlsFormatting.hOffsetLabel(-15), "Left 15%")
+        XCTAssertEqual(String(localized: PlayerControlsFormatting.hOffsetLabel(0)), "Centre")
+        // Interpolated resources carry placeholders, so the resource itself never
+        // equals the finished sentence — render it before comparing.
+        XCTAssertEqual(String(localized: PlayerControlsFormatting.hOffsetLabel(20)), "Right 20%")
+        XCTAssertEqual(String(localized: PlayerControlsFormatting.hOffsetLabel(-15)), "Left 15%")
     }
 
     func testCornerLabelSentinelReadsFull() {

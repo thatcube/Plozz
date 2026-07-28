@@ -1635,7 +1635,7 @@ private struct PlozziOSPlaybackSettingsView: View {
         )
     }
 
-    private func audioName(_ preference: AudioLanguagePreference) -> String {
+    private func audioName(_ preference: AudioLanguagePreference) -> String {   // l10n:content — language name resolved from Locale
         switch preference {
         case .original:
             return "Original language"

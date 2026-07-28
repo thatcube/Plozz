@@ -752,20 +752,20 @@ private struct MetadataDiagnosticsOverviewPanel: View {
                     )
                     MetadataDiagnosticMetric(
                         title: "Work",
-                        value: snapshot.map { workText($0.work) } ?? "—"
+                        value: snapshot.map { String(localized: workText($0.work)) } ?? "—"
                     )
                 }
 
                 PlozzDivider()
                 MetadataDiagnosticMetric(
                     title: "Provider health",
-                    value: healthText
+                    value: String(localized: healthText)
                 )
             }
         }
     }
 
-    private var healthText: String {
+    private var healthText: LocalizedStringResource {
         guard let snapshot else { return "—" }
         let count = snapshot.providerBreakers.lazy.filter(\.isTripped).count
         return count == 0 ? "All sources healthy" : "\(count) unavailable"
@@ -776,7 +776,7 @@ private struct MetadataDiagnosticsOverviewPanel: View {
         return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 
-    private func workText(_ work: MetadataEnrichmentDiagnosticsSnapshot.WorkStatus) -> String {
+    private func workText(_ work: MetadataEnrichmentDiagnosticsSnapshot.WorkStatus) -> LocalizedStringResource {
         if work.isRunning { return "Running" }
         let queued = work.queuedItems + work.queuedBacklogs
         return queued > 0 ? "\(queued) queued" : "Idle"

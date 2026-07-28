@@ -434,7 +434,7 @@ struct MyLibrariesDetailView: View {
         .overlay(Circle().strokeBorder(ProviderIcon.tint(.plex).opacity(0.45), lineWidth: 1.5))
     }
 
-    private func identityName(for binding: PlexHomeUserBinding?) -> String {
+    private func identityName(for binding: PlexHomeUserBinding?) -> String {   // l10n:content — Plex user name
         guard let binding, !binding.name.isEmpty else { return "Choose Plex user" }
         return binding.requiresPIN == true ? "\(binding.name) • PIN" : binding.name
     }

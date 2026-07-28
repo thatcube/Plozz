@@ -296,7 +296,8 @@ struct PipelineShareResolver: ShareMetadataResolving {
             // the top (home-hero) candidate as its single backdrop today.
             backdropURL: enrichment.homeHero,
             logoURL: enrichment.logoURL,
-            title: enrichment.title
+            title: enrichment.title,
+            cast: enrichment.cast
         )
     }
 
@@ -315,6 +316,10 @@ struct PipelineShareResolver: ShareMetadataResolving {
             .title, .overview, .genres,
             .posterURL, .backdropURL, .homeHero, .detailBackdrop, .logoURL,
             .providerID("Imdb"), .providerID("Tvdb"), .providerID("Tmdb"),
+            // A share has only files, so its cast has to come from a provider —
+            // this is the one metadata a server-backed item always arrives with and
+            // a share never did.
+            .cast,
         ]
         if isAnime {
             fields.formUnion([.providerID("AniList"), .providerID("Mal")])

@@ -47,6 +47,7 @@ public struct MetadataCapability: RawRepresentable, Codable, Hashable, Sendable 
     /// by the Step 8 "Airing Soon" / missing-episode features — not a per-item field
     /// written back onto a ``MediaItem``.
     public static let nextAiringEpisode = Self(rawValue: "nextAiringEpisode")
+    public static let cast = Self(rawValue: "cast")
 }
 
 public extension MetadataCapability {
@@ -92,5 +93,6 @@ public extension MetadataCapability {
         .episodeThumbnail: .episodeStill,
         .ratings: .ratings,
         .nextAiringEpisode: .nextAiringEpisode,
+        .cast: .cast,
     ]
 }

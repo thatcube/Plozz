@@ -206,6 +206,7 @@ public protocol TMDbEnriching: Sendable {
     var isEnabled: Bool { get }
     func backdropURLs(for query: MetadataQuery, limit: Int) async -> [URL]
     func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL?
+    func cast(for query: MetadataQuery, limit: Int) async -> [MediaPerson]
 }
 
 extension TMDbMetadataProvider: TMDbEnriching {}
@@ -215,7 +216,7 @@ extension TMDbMetadataProvider: TMDbEnriching {}
 /// poster, clear logo, and per-episode stills. Inert when TMDb isn't configured.
 public struct TMDbEnrichmentProvider: MetadataEnrichmentProvider {
     public let id: MetadataSource = .tmdb
-    public let capabilities: Set<MetadataCapability> = [.poster, .backdrop, .logo, .episodeStill]
+    public let capabilities: Set<MetadataCapability> = [.poster, .backdrop, .logo, .episodeStill, .cast]
     public let policy: ProviderPolicy
     private let provider: any TMDbEnriching
     private let backdropLimit: Int
@@ -241,6 +242,10 @@ public struct TMDbEnrichmentProvider: MetadataEnrichmentProvider {
         }
         if missing.contains(.episodeThumbnail), let url = await provider.artworkURL(.thumbnail, for: query) {
             out.episodeStillURL = SourcedValue(value: url, source: .tmdb)
+        }
+        if missing.contains(.cast) {
+            let people = await provider.cast(for: query, limit: 40)
+            if !people.isEmpty { out.cast = SourcedValue(value: people, source: .tmdb) }
         }
         return out
     }

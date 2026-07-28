@@ -67,7 +67,10 @@ actor ShareEnricher {
     /// documentary that ended rather than the 2026 drama whose episodes were on disk.
     /// Everything matched by title needs another look now that the evidence arrives.
     /// (16 was spent by the diagnostic build that found this, so it is skipped.)
-    static let version = 17
+    /// v18: cast. A share's detail page had no cast at all — the record had no
+    /// field for it, so no provider was ever asked — while a Jellyfin/Plex copy of
+    /// the same show showed a full one.
+    static let version = 18
 
     private let store: ShareCatalogStore
     private let resolver: ShareMetadataResolving

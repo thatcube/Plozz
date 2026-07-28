@@ -28,6 +28,8 @@ struct EnrichmentRecord: Sendable, Equatable {
     /// Airbender"), overlaid over a generic folder-derived display title at read
     /// time. Persisted in the `title` enrichment column so it survives re-scans.
     var title: String?
+    /// Billed cast, best-first. Empty when no provider supplied one.
+    var cast: [MediaPerson] = []
     var provenance = MetadataProvenance()
 
     static func sourced(
@@ -38,7 +40,8 @@ struct EnrichmentRecord: Sendable, Equatable {
         posterURL: SourcedValue<URL>? = nil,
         backdropURL: SourcedValue<URL>? = nil,
         logoURL: SourcedValue<URL>? = nil,
-        title: SourcedValue<String>? = nil
+        title: SourcedValue<String>? = nil,
+        cast: SourcedValue<[MediaPerson]>? = nil
     ) -> EnrichmentRecord {
         var provenance = MetadataProvenance()
         for (namespace, value) in providerIDs {
@@ -51,6 +54,7 @@ struct EnrichmentRecord: Sendable, Equatable {
         provenance.set(backdropURL, for: .backdropURL)
         provenance.set(logoURL, for: .logoURL)
         provenance.set(title, for: .title)
+        provenance.set(cast, for: .cast)
         return EnrichmentRecord(
             providerIDs: providerIDs.mapValues(\.value),
             overview: overview?.value,

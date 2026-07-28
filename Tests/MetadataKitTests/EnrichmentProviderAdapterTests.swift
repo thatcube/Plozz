@@ -44,6 +44,8 @@ private struct FakeTMDb: TMDbEnriching {
     var still: URL?
     var isEnabled: Bool { enabled }
     func backdropURLs(for query: MetadataQuery, limit: Int) async -> [URL] { Array(backdrops.prefix(limit)) }
+    var people: [MediaPerson] = []
+    func cast(for query: MetadataQuery, limit: Int) async -> [MediaPerson] { people }
     func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL? {
         switch kind {
         case .poster: return poster
@@ -76,6 +78,8 @@ private struct FakeTVmaze: TVmazeEnriching {
 private struct FakeArtwork: ArtworkProvider {
     let id = "fake"
     var urls: [ArtworkKind: URL] = [:]
+    var people: [MediaPerson] = []
+    func cast(for query: MetadataQuery, limit: Int) async -> [MediaPerson] { people }
     func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL? { urls[kind] }
 }
 

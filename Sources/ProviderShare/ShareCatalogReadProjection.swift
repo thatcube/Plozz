@@ -72,6 +72,7 @@ enum ShareCatalogReadProjection {
         rec.backdropURL = CatalogConnection.columnText(stmt, base + 5).flatMap(URL.init(string:))
         rec.logoURL = CatalogConnection.columnText(stmt, base + 6).flatMap(URL.init(string:))
         rec.title = CatalogConnection.columnText(stmt, base + 7)
+        rec.cast = CatalogJSON.decode([MediaPerson].self, CatalogConnection.columnText(stmt, base + 8)) ?? []
         return rec
     }
 
@@ -325,6 +326,12 @@ enum ShareCatalogReadProjection {
         if copy.genres.isEmpty, !rec.genres.isEmpty {
             copy.genres = rec.genres
             adopt(.genres)
+        }
+        // Cast belongs to the show/film, so an episode inherits its series' people
+        // rather than carrying none — the same way it inherits show artwork.
+        if copy.people.isEmpty, !rec.cast.isEmpty {
+            copy.people = rec.cast
+            adopt(.cast)
         }
         if copy.runtime == nil, let rt = rec.runtime, item.kind == .movie {
             copy.runtime = rt

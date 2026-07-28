@@ -54,6 +54,11 @@ enum CurrentMetadataPriority {
     /// builds, so keyless devices fall straight through to TVmaze). Movies have no
     /// episode schedule.
     private static let scheduleRules: [MetadataPriorityRule] = [
+        cast(.movie, [.tmdb]),
+        cast(.tvShow, [.tmdb]),
+        cast(.anime, [.tmdb]),
+        cast(.unknown, [.tmdb]),
+
         schedule(.anime, [.anilist, .tvdb, .tvmaze]),
         schedule(.tvShow, [.tvdb, .tvmaze]),
         schedule(.unknown, [.tvdb, .tvmaze]),
@@ -90,6 +95,22 @@ enum CurrentMetadataPriority {
         MetadataPriorityRule(
             context: MetadataPriorityContext(rawValue: "nextAiringEpisode.\(type.rawValue)"),
             field: .nextAiringEpisode,
+            sources: sources
+        )
+    }
+
+    /// Cast chain. TMDb only for now: it is the one bundled source with billed
+    /// cast, character names and headshots for both film and TV. Anime included —
+    /// AniList models voice actors separately from characters and would need its
+    /// own mapping, so it stays out until that is built rather than shipping a
+    /// half-populated row.
+    private static func cast(
+        _ type: ContentType,
+        _ sources: [MetadataSource]
+    ) -> MetadataPriorityRule {
+        MetadataPriorityRule(
+            context: MetadataPriorityContext(rawValue: "cast.\(type.rawValue)"),
+            field: .cast,
             sources: sources
         )
     }

@@ -99,6 +99,40 @@ public struct TMDbMetadataProvider: ArtworkProvider {
 
     /// Resolves a TMDb id, preferring a stamped id (`Tmdb`, or `SeriesTmdb` for
     /// episodes/seasons) over a title search.
+    /// Billed cast, best-first, or `[]`.
+    ///
+    /// TV uses `aggregate_credits`, which merges a person's roles across every
+    /// season — the plain `credits` endpoint returns only the *first* season's
+    /// billing, so a later-season regular would be missing from a show the viewer
+    /// is midway through.
+    public func cast(for query: MetadataQuery, limit: Int = 40) async -> [MediaPerson] {
+        guard isEnabled, limit > 0, let id = await resolveID(for: query) else { return [] }
+        let isTV = query.isTV
+        let path = isTV
+            ? "/3/tv/\(id)/aggregate_credits"
+            : "/3/movie/\(id)/credits"
+        guard let url = url(path),
+              let response = await MetadataHTTP.get(CreditsResponse.self, url: url, headers: authHeaders)
+        else { return [] }
+
+        return (response.cast ?? []).prefix(limit).compactMap { entry -> MediaPerson? in
+            guard let name = entry.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !name.isEmpty, let personID = entry.id
+            else { return nil }
+            // A TV entry carries `roles`; a film entry carries `character`.
+            let rawRole = (entry.roles?.first?.character ?? entry.character)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let role = (rawRole?.isEmpty ?? true) ? nil : rawRole
+            return MediaPerson(
+                id: "tmdb:person:\(personID)",
+                name: name,
+                role: role,
+                kind: "Actor",
+                imageURL: entry.profile_path.flatMap { URL(string: "\(imageBase)/w342\($0)") }
+            )
+        }
+    }
+
     /// Titles TMDb considers related, best-first.
     ///
     /// Prefers `/recommendations` (personalised-style, curated from user behaviour)
@@ -232,6 +266,19 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     struct SearchResult: Decodable {
         let id: Int?
         let poster_path: String?
+    }
+    struct CreditsResponse: Decodable {
+        let cast: [CreditEntry]?
+    }
+    struct CreditEntry: Decodable {
+        let id: Int?
+        let name: String?
+        let character: String?
+        let profile_path: String?
+        let roles: [CreditRole]?
+    }
+    struct CreditRole: Decodable {
+        let character: String?
     }
     struct RelatedResponse: Decodable {
         let results: [RelatedResult]?

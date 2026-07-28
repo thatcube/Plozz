@@ -90,6 +90,44 @@ public enum MediaItemMerger {
     ///     Browse, Search and the watch fan-out all read one consistent set
     ///     regardless of entry path. Defaults to a no-op so cold-start / existing
     ///     callers behave exactly as before.
+    /// The member whose metadata should front the merged card.
+    ///
+    /// Account order decided this before, which meant a plain file share could
+    /// front a title a managed server also holds — and the card then showed
+    /// whatever Plozz synthesised from filenames rather than the server's curated
+    /// record. Silo opened that way had no cast at all while the Plex copy had 163
+    /// people, and the empty cast went on to distort the page's layout.
+    ///
+    /// Only the *display* member changes. Every copy still contributes its ids,
+    /// versions and watch state, and playback still chooses by locality first (see
+    /// ``CrossSourceSelection``), so a local share is still played from even when a
+    /// remote server fronts the card.
+    ///
+    /// Ties keep the earlier member, so ordering stays deterministic.
+    static func richestMember(of duplicates: [MediaItem]) -> MediaItem {
+        guard duplicates.count > 1 else { return duplicates[0] }
+        var best = duplicates[0]
+        var bestRank = displayRichness(of: best)
+        for member in duplicates.dropFirst() {
+            let rank = displayRichness(of: member)
+            if rank > bestRank {
+                best = member
+                bestRank = rank
+            }
+        }
+        return best
+    }
+
+    /// How complete a member's own metadata is, for fronting a merged card. The
+    /// backend tier dominates — a managed server curates the whole record — with
+    /// present cast as a secondary signal, so a share that HAS been enriched isn't
+    /// demoted below a server copy that somehow has nothing.
+    private static func displayRichness(of item: MediaItem) -> Int {
+        let backend = (item.sources.first { $0.accountID == item.sourceAccountID }?.providerKind)
+            .map(\.metadataRichnessRank) ?? 1
+        return backend * 2 + (item.cast.isEmpty ? 0 : 1)
+    }
+
     public static func merge(
         _ items: [MediaItem],
         serverInfo: (String) -> SourceServerInfo? = { _ in nil },
@@ -285,9 +323,10 @@ public enum MediaItemMerger {
         serverInfo: (String) -> SourceServerInfo? = { _ in nil },
         identitySources: (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) -> MediaItem {
-        guard var primary = duplicates.first else {
+        guard !duplicates.isEmpty else {
             preconditionFailure("mergeGroup requires at least one item")
         }
+        var primary = richestMember(of: duplicates)
 
         // The eager index's known servers for this title (origin-agnostic SSOT),
         // resolved from the primary's identities. Folded in below so even a

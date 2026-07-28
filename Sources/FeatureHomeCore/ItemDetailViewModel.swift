@@ -1579,7 +1579,9 @@ public final class ItemDetailViewModel {
     /// neither the cache read nor the network refresh can delay the detail page.
     private func loadUpcomingSchedule(for item: MediaItem) {
         guard item.kind == .series else { return }
-        let query = MetadataQuery(item)
+        // Series-scoped so a share copy and a server copy of the same show resolve
+        // to one cache entry once ids land, instead of each holding its own.
+        let query = MetadataQuery(item).seriesScoped
         Task { [weak self] in
             guard let self else { return }
             if let cached = await SeriesScheduleResolver.shared.cachedRecord(for: query) {

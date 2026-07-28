@@ -121,13 +121,22 @@ final class CatalogConnection {
             enriched_at REAL NOT NULL,
             enrich_version INTEGER NOT NULL,
             attempts INTEGER NOT NULL DEFAULT 0,
-            title TEXT
+            title TEXT,
+            cast_json TEXT
         );
         """)
         // Migration: bounded-retry attempt counter (added after first ship). Guarded
         // so it runs at most once; `exec` ignores the "duplicate column" error too.
         if !hasColumn(table: "enrichment", column: "attempts") {
             apply("ALTER TABLE enrichment ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;")
+        }
+        // Migration: cast. A server-backed item arrives with its people attached;
+        // a share has only files, so everything else about the title is resolved
+        // externally — and cast was simply missing from that list, leaving share
+        // detail pages with no cast at all where a Jellyfin/Plex copy of the same
+        // show had a full one.
+        if !hasColumn(table: "enrichment", column: "cast_json") {
+            apply("ALTER TABLE enrichment ADD COLUMN cast_json TEXT;")
         }
         // Migration: the resolved canonical title (e.g. "Avatar: The Last Airbender"),
         // applied over a generic folder-derived display title at READ time — durable

@@ -33,6 +33,9 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
     /// Every known future episode, oldest first, when the provider lists more than
     /// the next one (TheTVDB). Empty for single-next providers (AniList, TVmaze).
     public var upcomingEpisodes: [UpcomingEpisode]
+    /// Billed cast, best-first. Only a file-based share resolves this externally;
+    /// a media server sends its people with the item.
+    public var cast: SourcedValue<[MediaPerson]>?
     /// The provider-stated release cadence, when reported. Never inferred.
     public var cadence: AirCadence?
 
@@ -108,6 +111,7 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         // per season, still be asked. When no provider can list, every one is tried
         // once (`triedForField` prevents repeats) and the singular survives.
         if !upcomingEpisodes.isEmpty { fields.insert(.nextAiringEpisode) }
+        if cast != nil { fields.insert(.cast) }
         return fields
     }
 
@@ -133,6 +137,7 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         fill(&posterURL, from: other.posterURL, field: .posterURL, present: present)
         fill(&logoURL, from: other.logoURL, field: .logoURL, present: present)
         fill(&episodeStillURL, from: other.episodeStillURL, field: .episodeThumbnail, present: present)
+        fill(&cast, from: other.cast, field: .cast, present: present)
         // Banner and score have no dedicated MetadataField (bonus art/metadata);
         // still first-writer-wins, and never blocked by `present`.
         if bannerURL == nil { bannerURL = other.bannerURL }

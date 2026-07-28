@@ -48,6 +48,23 @@ struct CatalogReadQueries {
     /// forwarders guarantee before delegating here.
     private var db: OpaquePointer? { connection.db }
 
+    /// The `cast_json` column expression for an enrichment SELECT, or a literal
+    /// `NULL` when the column isn't there.
+    ///
+    /// A catalog whose schema migration failed — the "keep reading a legacy catalog
+    /// rather than lose it" path — never gains the column, and naming it directly
+    /// would fail the *whole* statement, so a single new field would take every
+    /// other enrichment value down with it. Degrading to NULL keeps such a catalog
+    /// fully readable minus the one thing it genuinely doesn't have.
+    private var castColumn: String {
+        connection.hasColumn(table: "enrichment", column: "cast_json") ? "cast_json" : "NULL"
+    }
+
+    /// The same expression qualified for a joined `enrichment e`.
+    private var joinedCastColumn: String {
+        castColumn == "cast_json" ? "e.cast_json" : "NULL"
+    }
+
     /// Leaf enrichment persistence over the same actor-confined connection — used only
     /// for the `hasUsableEnrichment` fast-path check inside `pendingEnrichment`.
     private var enrichmentRepo: EnrichmentRepository { EnrichmentRepository(connection: connection) }
@@ -167,7 +184,7 @@ struct CatalogReadQueries {
         query("""
         SELECT g.logical_id, g.title, g.year, g.rep_id,
                e.provider_ids_json, e.overview, e.genres_json, e.runtime,
-               e.poster_url, e.backdrop_url, e.logo_url, e.title
+               e.poster_url, e.backdrop_url, e.logo_url, e.title, \(joinedCastColumn)
         FROM (
           SELECT
             CASE WHEN MIN(COALESCE(movie_group_key, movie_key)) IS NOT NULL
@@ -229,7 +246,7 @@ struct CatalogReadQueries {
         query("""
         SELECT a.series_key, MIN(a.series_title), MAX(a.year), MIN(a.sort_title) AS s,
                e.provider_ids_json, e.overview, e.genres_json, e.runtime,
-               e.poster_url, e.backdrop_url, e.logo_url, e.title
+               e.poster_url, e.backdrop_url, e.logo_url, e.title, \(joinedCastColumn)
         FROM assets a
         LEFT JOIN enrichment e ON e.item_id = 'series:' || a.series_key
         LEFT JOIN metadata_values sv
@@ -853,7 +870,7 @@ struct CatalogReadQueries {
         guard db != nil else { return nil }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, """
-        SELECT provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, title
+        SELECT provider_ids_json, overview, genres_json, runtime, poster_url, backdrop_url, logo_url, title, \(castColumn)
         FROM enrichment WHERE item_id=?;
         """, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
@@ -895,7 +912,7 @@ struct CatalogReadQueries {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, """
         SELECT item_id, provider_ids_json, overview, genres_json, runtime,
-               poster_url, backdrop_url, logo_url, title
+               poster_url, backdrop_url, logo_url, title, \(castColumn)
         FROM enrichment WHERE item_id IN (\(placeholders));
         """, -1, &stmt, nil) == SQLITE_OK else { return withLocalOverlay(items) }
         for (offset, itemID) in itemIDs.enumerated() {

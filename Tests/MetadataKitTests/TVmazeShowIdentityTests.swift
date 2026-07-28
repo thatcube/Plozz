@@ -131,4 +131,27 @@ final class TVmazeShowIdentityTests: XCTestCase {
         ))
     }
 
+    // MARK: Exact lookups
+
+    func testPrefersAnExactIDLookupOverATitleSearch() {
+        // An id settles identity outright, so a title search is never reached when
+        // one is known. TVmaze answers with a 301 to the show, which URLSession
+        // follows.
+        let urls = TVmazeClient.lookupURLs(for: identity(imdb: "tt14527704", tvdb: "427619"))
+            .map(\.absoluteString)
+        XCTAssertEqual(urls, [
+            "https://api.tvmaze.com/lookup/shows?imdb=tt14527704",
+            "https://api.tvmaze.com/lookup/shows?thetvdb=427619",
+        ])
+    }
+
+    func testSkipsLookupsForIDsThatCannotResolve() {
+        // A slug or a server's internal id would 404 and cost a request each.
+        XCTAssertEqual(
+            TVmazeClient.lookupURLs(for: identity(imdb: "plex://show/5d9c", tvdb: "lucky")),
+            []
+        )
+        XCTAssertEqual(TVmazeClient.lookupURLs(for: identity()), [])
+    }
+
 }

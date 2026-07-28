@@ -99,26 +99,41 @@ public struct TVmazeClient: TVmazeEnriching {
 
     private func fetchShow(for query: MetadataQuery) async -> Show? {
         let known = Self.showIdentity(for: query)
-        if let imdb = known.imdb,
-           let url = URL(string: "https://api.tvmaze.com/lookup/shows?imdb=\(imdb)"),
-           let show = await MetadataHTTP.get(Show.self, url: url) {
-            return show
+        // An id lookup is exact, so it settles identity outright — no title, no year,
+        // no ambiguity. TVmaze answers it with a 301 to the show, which URLSession
+        // follows. Both id kinds are tried: a library can carry either.
+        for url in Self.lookupURLs(for: known) {
+            if let show = await MetadataHTTP.get(Show.self, url: url) { return show }
         }
         guard let escaped = metadataEscaped(query.title),
               let url = URL(string: "https://api.tvmaze.com/singlesearch/shows?q=\(escaped)"),
               let candidate = await MetadataHTTP.get(Show.self, url: url)
         else { return nil }
-        // TVmaze's id lookup only covers part of its catalogue, so a title search is
-        // the usual path — and it matches on the title alone, ignoring year and ids.
-        // Two shows can share a name: "Lucky!" (2022, ended) and "Lucky" (2026,
-        // airing weekly) both answer to the same query, and taking the wrong one
-        // would attach a live weekly schedule to a series that finished years ago.
+        // Falling back to a title search, which matches on the title alone. Two shows
+        // can share a name: "Lucky!" (2022, ended) and "Lucky" (2026, airing weekly)
+        // both answer to the same query, and taking the wrong one would attach a live
+        // weekly schedule to a series that finished years ago.
         guard Self.isConsistentIdentity(
             candidateIMDb: candidate.externals?.imdb,
             candidateTVDB: candidate.externals?.thetvdb,
             known: known
         ) else { return nil }
         return candidate
+    }
+
+    /// Exact-lookup URLs for whichever ids the query carries, most reliable first.
+    static func lookupURLs(for known: ShowIdentity) -> [URL] {
+        var urls: [URL] = []
+        if let imdb = known.imdb, isIMDbID(imdb),
+           let url = URL(string: "https://api.tvmaze.com/lookup/shows?imdb=\(imdb)") {
+            urls.append(url)
+        }
+        // Only a numeric TVDB id: a stored slug would 404 and cost a request.
+        if let tvdb = known.tvdb, Int(tvdb) != nil,
+           let url = URL(string: "https://api.tvmaze.com/lookup/shows?thetvdb=\(tvdb)") {
+            urls.append(url)
+        }
+        return urls
     }
 
     /// The **show-level** external ids a query carries.
@@ -175,7 +190,7 @@ public struct TVmazeClient: TVmazeEnriching {
         return true
     }
 
-    private static func isIMDbID(_ value: String) -> Bool {
+    static func isIMDbID(_ value: String) -> Bool {
         value.count > 2 && value.lowercased().hasPrefix("tt")
             && value.dropFirst(2).allSatisfy(\.isNumber)
     }
@@ -363,8 +378,9 @@ public struct TVmazeEnrichmentProvider: MetadataEnrichmentProvider {
     /// than only the next episode. v3: started answering for anime schedules at all
     /// — while it refused them it returned an empty enrichment, and those empties
     /// were cached, so admitting anime changed nothing until this bump. v4: stopped
-    /// binding a title search to a show whose ids contradict the query's, so any
-    /// same-title mismatch already cached has to be dropped.
+    /// binding a title search to a show whose ids contradict the query's, and started
+    /// resolving by TVDB id where one is known, so any same-title mismatch already
+    /// cached has to be dropped.
     public init(
         client: any TVmazeEnriching = TVmazeClient(),
         policy: ProviderPolicy = ProviderPolicy(version: 4)

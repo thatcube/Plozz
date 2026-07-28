@@ -57,6 +57,26 @@ public enum AppLanguage: Hashable, Sendable, Identifiable {
         }
     }
 
+    /// Reading direction to apply with an explicit in-app language override.
+    /// `nil` means inherit the device direction for `.system`.
+    ///
+    /// SwiftUI's `locale` and `layoutDirection` are independent environments:
+    /// injecting Arabic text does not mirror an app that was launched under an
+    /// English device language. Keep the direction next to the locale decision
+    /// so the two shells cannot drift.
+    public var isRightToLeft: Bool? {
+        switch self {
+        case .system:
+            return nil
+        case let .explicit(code):
+            let languageCode =
+                Locale(identifier: code).language.languageCode?.identifier
+                ?? code
+            return Locale.Language(identifier: languageCode).characterDirection
+                == .rightToLeft
+        }
+    }
+
     /// Languages this build is prepared to OFFER, in the order shown.
     ///
     /// Deliberately an explicit list rather than "whatever `.lproj` folders exist".

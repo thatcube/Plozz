@@ -89,6 +89,14 @@ final class AppLanguageTests: XCTestCase {
         XCTAssertTrue(AppLanguage.isInProgress("zz"))
     }
 
+    func testExplicitLanguageCarriesReadingDirection() {
+        XCTAssertEqual(AppLanguage.explicit("ar").isRightToLeft, true)
+        XCTAssertEqual(AppLanguage.explicit("he").isRightToLeft, true)
+        XCTAssertEqual(AppLanguage.explicit("en").isRightToLeft, false)
+        XCTAssertEqual(AppLanguage.explicit("zh-Hant").isRightToLeft, false)
+        XCTAssertNil(AppLanguage.system.isRightToLeft)
+    }
+
     func testAvailableExcludesBaseLocalization() {
         let offered = AppLanguage.available().map(\.storageValue)
         XCTAssertFalse(offered.contains("Base"))

@@ -8,10 +8,11 @@ import CoreModels
 /// Wrap each app's root view in this once. Both shells use it so tvOS and iOS
 /// cannot drift on how the override is applied.
 ///
-/// ## Why `\.locale` and not something more forceful
+/// ## Why environment values and not something more forceful
 ///
 /// Injecting `\.locale` is the supported way to re-resolve SwiftUI text at
-/// runtime, and it re-renders live — no relaunch, which matters because the
+/// runtime, and `\.layoutDirection` mirrors explicit Arabic/Hebrew overrides.
+/// They re-render live — no relaunch, which matters because the
 /// alternative (writing `AppleLanguages` and restarting) is exactly the jarring
 /// behaviour the system language switch already has.
 ///
@@ -19,14 +20,15 @@ import CoreModels
 ///   * It does **not** change `Locale.current`. Any non-view code that formats or
 ///     compares text must be handed a locale explicitly rather than reading the
 ///     process-wide one.
-///   * It does not reach system-drawn UI — AVKit's player chrome, permission
-///     prompts, or the Top Shelf extension (a separate process). Those follow the
-///     device language, and no in-app setting can change that.
+///   * It does not reach system-drawn UI — AVKit's player chrome and permission
+///     prompts follow the device language. Top Shelf titles are different: the
+///     app resolves those before writing its cross-process snapshot.
 @MainActor
 public struct AppLanguageScope<Content: View>: View {
     /// The locale this view already sits in — the device's, unless something
     /// above us has overridden it.
     @Environment(\.locale) private var inheritedLocale
+    @Environment(\.layoutDirection) private var inheritedLayoutDirection
     @State private var model: AppLanguageSettingsModel
     private let content: Content
 
@@ -49,6 +51,12 @@ public struct AppLanguageScope<Content: View>: View {
             // the language at launch, so a change made in Settings.app would not
             // be picked up.
             .environment(\.locale, model.locale ?? inheritedLocale)
+            .environment(
+                \.layoutDirection,
+                model.language.isRightToLeft.map {
+                    $0 ? LayoutDirection.rightToLeft : .leftToRight
+                } ?? inheritedLayoutDirection
+            )
             // Deliberately NO `.id(model.language)`. Re-identifying the root would
             // guarantee every string re-resolves, but it tears down and rebuilds
             // the whole tree — losing scroll position and tvOS focus on every

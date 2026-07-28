@@ -20,6 +20,8 @@ public struct ResumeProgressCapsule: View {
     /// Live gauges (downloads) pass `false` to stay exact at low percentages.
     public var floorsMinimumFill: Bool
 
+    @Environment(\.plozzChromeIsFocused) private var isFocused
+
     public init(
         progress: Double,
         onLight: Bool,
@@ -35,8 +37,15 @@ public struct ResumeProgressCapsule: View {
     }
 
     public var body: some View {
-        let track = onLight ? Color.black.opacity(0.22) : Color.white.opacity(0.32)
-        let fill = onLight ? Color.black.opacity(0.85) : Color.white
+        // `onLight` is already a focus treatment on the detail Play button (a
+        // focused button turns white, so the bar flips to dark ink). Only the
+        // white-on-artwork path takes the resting dim.
+        let track = onLight
+            ? Color.black.opacity(0.22)
+            : PlozzMediaChrome.track(isFocused: isFocused)
+        let fill = onLight
+            ? Color.black.opacity(0.85)
+            : PlozzMediaChrome.foreground(isFocused: isFocused)
         Capsule()
             .fill(track)
             .frame(width: width, height: height)

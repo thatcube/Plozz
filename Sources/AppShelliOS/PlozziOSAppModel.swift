@@ -676,6 +676,19 @@ final class PlozziOSAppModel {
         mediaShareRescanService.rescan(accountID: accountID)
     }
 
+    /// Media-share account ids signed in on this device. Scopes the Settings
+    /// status header so a removed share's late scanner event can't leave a ghost
+    /// row. Deliberately NOT the busy states themselves: the header does that
+    /// (high-frequency) lookup in its own body so progress ticks can't invalidate
+    /// the whole Settings page.
+    var mediaShareAccountIDs: Set<String> {
+        Set(
+            accountsProviders.accounts
+                .filter { $0.server.provider == .mediaShare }
+                .map(\.id)
+        )
+    }
+
     var deviceID: String {
         accountStore.deviceID()
     }

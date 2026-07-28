@@ -70,6 +70,9 @@ public struct EpisodeColumnCard: View {
                 .overlay {
                     if presentation.artworkTreatment != .blurred {
                         ResumeChipOverlay(item: item)
+                            // Settles the chip's white at rest, full strength on
+                            // focus. No-op off tvOS.
+                            .plozzChromeFocused(isFocused)
                     }
                 }
                 .overlay(alignment: .topTrailing) { statusIndicator }

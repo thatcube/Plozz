@@ -98,8 +98,17 @@ public struct ThemePalette: Equatable, Sendable {
     /// secondary or above. Shared so the primary → secondary → tertiary hierarchy
     /// is consistent on every platform.
     public let tertiaryText: Color
-    /// Accent / tint colour (Plozz's `AccentColor`).
+    /// Accent / tint colour — the "this is selected" mark. **Monochrome by
+    /// design**: white on the dark themes, near-black on Light. Plozz is a
+    /// media-heavy UI and uses colour VERY sparingly on purpose, so selection
+    /// state reads as emphasis rather than decoration, and nothing competes with
+    /// the artwork. Colour is opt-in per feature (see ``brandBlue``, used for
+    /// progress bars), never the default chrome.
     public let accent: Color
+    /// Foreground that sits legibly ON ``accent`` when it's used as a filled
+    /// background — the inverse of the accent's own tone. Needed because a
+    /// monochrome accent can't assume a white glyph reads on top of it.
+    public var onAccent: Color { isLight ? .white : .black }
     /// Text colour for inline error / failure messaging (wrong credentials,
     /// unreachable server, etc). Theme-aware so it reads as a clear "danger" red
     /// against each background — brighter on dark and Black, deeper on light.
@@ -221,10 +230,20 @@ public struct ThemePalette: Equatable, Sendable {
 // MARK: - Concrete palettes
 
 public extension ThemePalette {
-    /// Plozz's configured accent colour (the `AccentColor` asset). Resolves to
-    /// the app's tint at runtime; reserved here so a future asset change flows
-    /// through every theme.
-    static var brandAccent: Color { .accentColor }
+    /// Plozz's accent — deliberately MONOCHROME, resolved per theme (see
+    /// ``ThemePalette/accent``).
+    ///
+    /// This used to be `Color.accentColor`, but the app ships no accent colour
+    /// asset (the tvOS `AccentColor.colorset` is empty and the iOS catalogue has
+    /// none), so it silently resolved to each platform's OS default — system
+    /// white on tvOS, system blue on iOS/iPadOS. The same selected row or
+    /// checkmark rendered a different colour on each device. Pinning it to the
+    /// theme's own primary-text tone makes the two platforms agree AND keeps the
+    /// interface monochrome; anything that genuinely wants colour reaches for
+    /// ``brandBlue`` explicitly.
+    static func brandAccent(isLight: Bool) -> Color {
+        isLight ? Color.black.opacity(0.90) : .white
+    }
 
     /// The hairline colour for dark-appearance surface edges and separators. A
     /// faint cool blue-grey (essentially neutral — just off dead-grey so the line
@@ -316,7 +335,7 @@ public extension ThemePalette {
         primaryText: .white,
         secondaryText: Color.white.opacity(0.60),
         tertiaryText: Color.white.opacity(0.36),
-        accent: ThemePalette.brandAccent,
+        accent: ThemePalette.brandAccent(isLight: false),
         errorText: Color(red: 1.0, green: 0.42, blue: 0.40),
         topGlow: ThemePalette.brandBlue.opacity(0.075),
         focusedCardGlassTint: Color.white.opacity(0.13),
@@ -350,7 +369,7 @@ public extension ThemePalette {
         primaryText: .white,
         secondaryText: Color.white.opacity(0.60),
         tertiaryText: Color.white.opacity(0.36),
-        accent: ThemePalette.brandAccent,
+        accent: ThemePalette.brandAccent(isLight: false),
         errorText: Color(red: 1.0, green: 0.42, blue: 0.40),
         topGlow: nil,
         focusedCardGlassTint: Color.white.opacity(0.10),
@@ -394,7 +413,7 @@ public extension ThemePalette {
         primaryText: Color.black.opacity(0.90),
         secondaryText: Color.black.opacity(0.60),
         tertiaryText: Color.black.opacity(0.45),
-        accent: ThemePalette.brandAccent,
+        accent: ThemePalette.brandAccent(isLight: true),
         errorText: Color(red: 0.78, green: 0.11, blue: 0.09),
         topGlow: ThemePalette.brandBlue.opacity(0.14),
         focusedCardGlassTint: Color.black.opacity(0.05),

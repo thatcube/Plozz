@@ -225,22 +225,47 @@ public struct PlozzMetrics: Equatable, Sendable {
         PlozzTheme.Metrics.cardCaptionSpacing + landscapeCaptionInset * PlozzTheme.Metrics.captionTopClearanceFactor
     }
 
-    public init(density: UIDensity) {
-        self.init(density: density, geometryScale: 1)
+    /// - Parameter dynamicTypeSize: the reader's current text size. Pass the
+    ///   view's `\.dynamicTypeSize` so the metrics REBUILD when it changes —
+    ///   typography here is sampled once at construction, so without that
+    ///   dependency the whole table stays frozen at whatever the size was on
+    ///   launch and a text-size change only takes effect on relaunch.
+    public init(density: UIDensity, dynamicTypeSize: DynamicTypeSize = .large) {
+        self.init(density: density, geometryScale: 1, dynamicTypeSize: dynamicTypeSize)
     }
 
     /// Touch-sized geometry for the shared card system. Typography still follows
     /// the platform's native Dynamic Type metrics; only physical card geometry,
     /// insets, overlays, and spacing are reduced from the 10-foot tvOS scale.
-    public static func touch(density: UIDensity) -> PlozzMetrics {
-        PlozzMetrics(density: density, geometryScale: 0.5)
+    public static func touch(
+        density: UIDensity,
+        dynamicTypeSize: DynamicTypeSize = .large
+    ) -> PlozzMetrics {
+        PlozzMetrics(density: density, geometryScale: 0.5, dynamicTypeSize: dynamicTypeSize)
     }
 
-    private init(density: UIDensity, geometryScale: CGFloat) {
+    private init(density: UIDensity, geometryScale: CGFloat, dynamicTypeSize: DynamicTypeSize) {
         let densityScale = CGFloat(density.scale)
         let s = densityScale * geometryScale
         self.density = density
         self.scale = densityScale
+
+        #if canImport(UIKit)
+        // Resolve typography against the size we were HANDED rather than whatever
+        // the process-wide trait collection happens to hold. Two reasons: the
+        // caller's `\.dynamicTypeSize` is the value SwiftUI actually invalidates
+        // on, and sampling a global would silently disagree with it in previews,
+        // on a secondary scene, or mid-transition.
+        let typeTraits = UITraitCollection(
+            preferredContentSizeCategory: dynamicTypeSize.plozzContentSizeCategory
+        )
+        func scaled(_ style: UIFont.TextStyle, _ base: CGFloat) -> CGFloat {
+            UIFontMetrics(forTextStyle: style).scaledValue(for: base, compatibleWith: typeTraits)
+        }
+        func preferred(_ style: UIFont.TextStyle) -> CGFloat {
+            UIFont.preferredFont(forTextStyle: style, compatibleWith: typeTraits).pointSize
+        }
+        #endif
 
         func step(_ base: CGFloat) -> CGFloat { (base * s).rounded() }
         /// Like `step`, but only applies `damping` of the density deviation from
@@ -310,20 +335,19 @@ public struct PlozzMetrics: Equatable, Sendable {
         // it grows on the `.subheadline` curve from there — the same curve the
         // title already follows.
         #if os(tvOS)
-        let baseTitleFontSize = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
+        let baseTitleFontSize = preferred(.subheadline)
         // tvOS keeps its own tuned constant (20 against a 29pt title), scaled on
         // the same curve as the title so it tracks the reader's text size.
-        let baseSubtitleFontSize = UIFontMetrics(forTextStyle: .subheadline)
-            .scaledValue(for: PlozzTheme.Metrics.cardSubtitleFontSize)
+        let baseSubtitleFontSize = scaled(.subheadline, PlozzTheme.Metrics.cardSubtitleFontSize)
         #elseif canImport(UIKit)
-        let baseTitleFontSize = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
+        let baseTitleFontSize = preferred(.subheadline)
         // iOS/iPadOS: one step BELOW the title. `cardSubtitleFontSize` is a tvOS
         // value (20 reads as secondary against a 29pt title) and applying it here
         // made the metadata line 20pt against a 15pt title — the caption was
         // literally larger than the title it described. `.footnote` sits directly
         // under `.subheadline`, restoring the hierarchy, and being a real text
         // style it tracks Dynamic Type natively.
-        let baseSubtitleFontSize = UIFont.preferredFont(forTextStyle: .footnote).pointSize
+        let baseSubtitleFontSize = preferred(.footnote)
         #else
         let baseTitleFontSize = PlozzTheme.Metrics.cardTitleFontSizeFallback
         let baseSubtitleFontSize = PlozzTheme.Metrics.cardSubtitleFontSize
@@ -331,23 +355,31 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.cardTitleFontSize = (baseTitleFontSize * densityScale).rounded()
         self.cardSubtitleFontSize = (baseSubtitleFontSize * densityScale).rounded()
 
-        // Resume chip. tvOS keeps its tuned 10-foot constants; iOS/iPadOS derives
-        // from `.subheadline` so the chip sits with the card's own typography and
-        // tracks Dynamic Type, rather than inheriting tvOS point sizes (which read
-        // as enormous on a handset — the same trap the card caption fell into).
+        // Resume chip. iOS/iPadOS derives from `.subheadline` so the chip sits with
+        // the card's own typography, rather than inheriting tvOS point sizes (which
+        // read as enormous on a handset — the same trap the card caption fell into).
+        //
+        // tvOS keeps its tuned 10-foot constants as the BASE but now scales every
+        // one of them on the `.subheadline` curve, the same way the tvOS card
+        // subtitle already does. `UIFontMetrics` is fully available on tvOS
+        // (`tvos(11.0)`), and at the default content size `scaledValue(for:)`
+        // returns the base unchanged — so this is visually identical today and only
+        // grows if the system text size does. Scaling the whole set together (font,
+        // inset, bar, badge) is what keeps the chip in proportion instead of a
+        // large label crowding a fixed-width bar.
         #if os(tvOS)
-        let baseChipFont = PlozzTheme.Metrics.resumeChipFontSize
-        let baseChipInset = PlozzTheme.Metrics.resumeChipInset
-        let baseChipBarWidth = PlozzTheme.Metrics.resumeChipBarWidth
-        let baseChipBarHeight = PlozzTheme.Metrics.resumeChipBarHeight
-        let baseChipAccessory = PlozzTheme.Metrics.resumeChipAccessorySize
+        let baseChipFont = scaled(.subheadline, PlozzTheme.Metrics.resumeChipFontSize)
+        let baseChipInset = scaled(.subheadline, PlozzTheme.Metrics.resumeChipInset)
+        let baseChipBarWidth = scaled(.subheadline, PlozzTheme.Metrics.resumeChipBarWidth)
+        let baseChipBarHeight = scaled(.subheadline, PlozzTheme.Metrics.resumeChipBarHeight)
+        let baseChipAccessory = scaled(.subheadline, PlozzTheme.Metrics.resumeChipAccessorySize)
         #elseif canImport(UIKit)
-        let baseChipFont = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
+        let baseChipFont = preferred(.subheadline)
         let baseChipInset: CGFloat = 12
-        let baseChipBarWidth: CGFloat = 54
-        let baseChipBarHeight: CGFloat = 4
+        let baseChipBarWidth: CGFloat = 38
+        let baseChipBarHeight: CGFloat = 6
         // Matches the chip's cap height closely enough to sit on the same baseline.
-        let baseChipAccessory = UIFont.preferredFont(forTextStyle: .subheadline).pointSize + 6
+        let baseChipAccessory = preferred(.subheadline) + 6
         #else
         let baseChipFont = PlozzTheme.Metrics.resumeChipFontSize
         let baseChipInset = PlozzTheme.Metrics.resumeChipInset
@@ -362,13 +394,15 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.resumeChipBarHeight = max((baseChipBarHeight * densityScale).rounded(), 3)
         self.resumeChipAccessorySize = (baseChipAccessory * densityScale).rounded()
 
+        // Same treatment for the artwork "…" affordance: tuned tvOS constants as the
+        // base, scaled on the `.headline` curve the iOS branch below already uses.
         #if os(tvOS)
-        let baseMenuGlyph = PlozzTheme.Metrics.artworkMenuGlyphSize
-        let baseMenuTarget = PlozzTheme.Metrics.artworkMenuTargetSize
+        let baseMenuGlyph = scaled(.headline, PlozzTheme.Metrics.artworkMenuGlyphSize)
+        let baseMenuTarget = scaled(.headline, PlozzTheme.Metrics.artworkMenuTargetSize)
         #elseif canImport(UIKit)
         // Match the episode rows' existing, proven affordance: a bold `.headline`
         // glyph in a 44pt target.
-        let baseMenuGlyph = UIFont.preferredFont(forTextStyle: .headline).pointSize
+        let baseMenuGlyph = preferred(.headline)
         let baseMenuTarget: CGFloat = 44
         #else
         let baseMenuGlyph = PlozzTheme.Metrics.artworkMenuGlyphSize
@@ -422,4 +456,33 @@ public extension EnvironmentValues {
     }
 }
 
+#endif
+
+#if canImport(UIKit)
+extension DynamicTypeSize {
+    /// The UIKit content-size category matching this SwiftUI size.
+    ///
+    /// `PlozzMetrics` resolves typography through `UIFontMetrics`, which is a
+    /// UIKit API, while the value SwiftUI invalidates views on is
+    /// `\.dynamicTypeSize`. Mapping across explicitly keeps the two in agreement
+    /// instead of letting the metrics read a process-wide category that SwiftUI
+    /// never told them about.
+    var plozzContentSizeCategory: UIContentSizeCategory {
+        switch self {
+        case .xSmall: return .extraSmall
+        case .small: return .small
+        case .medium: return .medium
+        case .large: return .large
+        case .xLarge: return .extraLarge
+        case .xxLarge: return .extraExtraLarge
+        case .xxxLarge: return .extraExtraExtraLarge
+        case .accessibility1: return .accessibilityMedium
+        case .accessibility2: return .accessibilityLarge
+        case .accessibility3: return .accessibilityExtraLarge
+        case .accessibility4: return .accessibilityExtraExtraLarge
+        case .accessibility5: return .accessibilityExtraExtraExtraLarge
+        @unknown default: return .large
+        }
+    }
+}
 #endif

@@ -4,135 +4,117 @@ How translations are sourced, reviewed and shipped. For the engineering rules �
 what makes a string translatable in the first place — see
 [`localization.md`](localization.md).
 
-## Where we are
+## Current production system
 
-```sh
-python3 tools/l10n-sync.py --coverage
-```
+Translations are produced and reviewed by independent high-capability language
+models, then treated as untrusted batch input. They never edit
+`Localizable.xcstrings` directly:
 
-Every string in the app is translatable, the catalog validates, plurals are
-expressed in the catalog rather than in Swift, and 960 of 1587 keys carry a
-translator comment. Spanish exists at ~6% as a test seed and is **not offered**
-in the language picker.
+1. A source packet contains every key, English value, translator comment, and
+   Apple plural/substitution structure.
+2. One translator agent owns one language file outside Git. Agents work in
+   parallel without sharing the catalog.
+3. A different model reviews all 1,620 entries against the source and comments,
+   fixes terminology/grammar/context, and adds the three system permission
+   prompts.
+4. `tools/l10n-import.py` requires exact key coverage, nonempty values,
+   `needs_review` provenance, canonical BCP-47 tags, unchanged placeholder types,
+   valid plural leaves, and all permission prompts. It merges into temporary
+   catalogs first and makes Apple's `xcstringstool` compile all three.
+5. Only the importer writes the repository catalogs.
 
-## The platform: Crowdin
+This is deliberate. `Localizable.xcstrings` is one large JSON file; allowing
+parallel agents or translator pull requests to edit it directly creates merge
+conflicts and makes one malformed language capable of corrupting every other
+language.
 
-**Weblate cannot be used.** It has no support for Apple String Catalogs — only
-the legacy `.strings`/`.stringsdict` pair. The request
-([weblate#10848](https://github.com/WeblateOrg/weblate/issues/10848)) has been
-open since January 2024 and is blocked on its upstream parser library
-([translate#5190](https://github.com/translate/translate/issues/5190)). Using it
-would mean abandoning String Catalogs, which is the format Apple's own tooling —
-extraction, `xcstringstool`, plural variations, the Xcode editor — is built
-around. Not worth it.
+### Why model translation is acceptable here
 
-**Crowdin supports `.xcstrings`** as a multilingual file, including plural
-variations, and its
-[open-source programme](https://crowdin.com/pricing) is free but requires an
-application. [LiveContainer](https://github.com/LiveContainer/LiveContainer) is a
-comparable iOS app running exactly this setup, so the path is proven.
+Plozz accepts useful, complete model translations over an English-only app.
+Perfect native review before first release is not the gate; users can report a
+poor phrase and corrections are cheap.
 
-Apple offers nothing here. Xcode's XLIFF export is a one-translator-at-a-time
-workflow; Xcode Cloud and App Store Connect don't touch in-app strings.
+That policy is viable because this catalog has unusually strong context:
 
-### Why a platform rather than pull requests
+- 960 keys say where the string appears and what every placeholder contains.
+- Ambiguous English collisions have separate semantic keys: the switch state
+  “Off” is not the subtitle picker's “Off”; the network-share noun “Share” is not
+  the diagnostics action verb.
+- Runtime content and product/codec brands are separated from copy.
+- Counts use real Apple plural variations, including independent substitutions
+  for strings with two counts.
+- An independent reviewer uses a different model from the first translator.
+- Structural gates reject output that would crash, drop a number, corrupt a
+  placeholder, or make a language silently fall back to English.
 
-`Localizable.xcstrings` is one JSON file. Twenty translators sending pull
-requests against one file means twenty conflicts. Crowdin holds the translations
-itself and writes back a single commit on an `l10n_` branch as one pull request,
-so translators never touch the repo.
+Every model-generated unit remains `needs_review`. That is provenance, not a
+release blocker. A later native-speaker correction changes the unit to
+`translated`.
 
-The residual conflict — Crowdin's branch vs. `main` when both change the catalog
-— is inherent to a single-file format, not a Crowdin flaw. Expect to resolve it
-occasionally.
+## Languages
 
-A `crowdin.yml` is committed at the repo root, configured for the three
-catalogs and marked inactive. It is a decision written down, not a live
-integration — nothing is uploaded until a project exists.
+The first wave targets broad Apple/Jellyfin/Plex reach and deliberately includes
+hard grammar/layout cases:
 
-### Verify before committing to it
+- Spanish, French, German, Italian, Brazilian Portuguese, Dutch
+- Polish, Russian, Ukrainian, Turkish
+- Simplified Chinese, Traditional Chinese, Japanese, Korean
+- Arabic and Hindi
 
-Three things are undocumented and must be checked on a throwaway project first.
-Each has a cheap workaround, but finding out late is expensive:
-
-1. **Locale flooding.** A 2024 report
-   ([crowdin/github-action#245](https://github.com/crowdin/github-action/issues/245))
-   had Crowdin writing back *every* Crowdin system locale into the catalog,
-   producing `ITMS-90176: Unrecognized Locale` on App Store upload. Closed as
-   "not planned". Check the exported file contains only our languages.
-2. **`shouldTranslate: false`** — does Crowdin respect it, or expose those keys
-   to translators anyway?
-3. **Comments** — do our 960 comments actually reach the translator's editor as
-   context? They are the main quality investment; if they don't survive the
-   round trip, the platform choice changes.
-
-Also confirm a Crowdin round trip leaves `xcstringstool sync` happy — key order
-and `extractionState` are not documented as preserved.
-
-## Which languages
-
-Deliberately not "as many as possible". Each language is a permanent maintenance
-commitment: every new string reopens every language, and a half-translated UI is
-worse than an English one because it looks broken rather than untranslated.
-
-Start with a small set, ship it properly, and add more only when there is a
-translator who will stay. Reasonable first candidates, on Apple TV/iOS install
-base and on Jellyfin/Plex self-hosting communities: German, French, Spanish,
-Italian, Portuguese (Brazil), Dutch, Polish, Chinese (Simplified), Japanese.
-
-Two worth taking early for engineering reasons rather than reach:
-
-- **German** is the truncation stress test — routinely 30–40% longer than
-  English. If the tvOS focus rows survive German they survive most things.
-- **Polish or Russian** exercises the plural work: four forms, so any place we
-  got plurals wrong shows up immediately.
-
-Arabic or Hebrew would additionally prove the right-to-left layout, but that is a
-larger UI commitment — run `tools/deploy-tv.sh --pseudo-rtl` first and see how
-much breaks before promising it.
+Follow-up waves add more languages through the same isolated pipeline. German
+stresses long labels; Polish/Russian/Ukrainian exercise multi-form plurals;
+Arabic exercises right-to-left layout and logical navigation symbols.
 
 ## Quality gate
 
-A language ships when it is **complete and reviewed**, not when it exists.
+A model-generated language can ship when:
 
-`AppLanguage.releaseReady` is the switch: the picker offers exactly the tags
-listed there, and a language absent from it is invisible no matter how much of it
-is translated. This is deliberate — a bundled `.lproj` only means *some* strings
-were translated. Spanish sat at 6% with its folder present; offering it would
-have shown a mostly-English UI to someone who asked for Spanish.
+1. It has all catalog keys and all three permission prompts.
+2. A second model completed a full independent review.
+3. The importer passes placeholder, plural, locale-tag, state, and key-set
+   validation.
+4. `xcstringstool` compiles the merged app and permission catalogs.
+5. Both platform builds and the full test suite pass.
+6. `AppLanguage.releaseReady` explicitly includes the tag.
 
-To add a language:
+`needs_review` remains visible in `--coverage`; it tells maintainers what still
+lacks native review without hiding a usable language from users.
 
-1. Coverage is at or near 100% (`--coverage` counts only the `translated`
-   state — `needs_review` deliberately does not count).
-2. A native speaker has read it **in the app**, not in a spreadsheet. Most bad
-   translations are individually correct and wrong in context.
-3. It has been through a pseudolocalization pass (see `localization.md`) and the
-   layout survives.
-4. Add the tag to `releaseReady`, in the order it should appear.
+## Commands
 
-### On machine translation
+```sh
+# Validate isolated language files without changing the catalog
+python3 tools/l10n-import.py <artifact-dir> \
+  --languages de,fr,es \
+  --require-info-plist
 
-Fine as a **seed**, never as a ship. Machine output goes in as `needs_review` so
-it doesn't count toward coverage and can't reach the picker on its own. It gives
-a volunteer something to correct rather than a blank file, which is a much
-easier ask.
+# Merge only after every listed language passes
+python3 tools/l10n-import.py <artifact-dir> \
+  --languages de,fr,es \
+  --require-info-plist \
+  --apply
 
-What it cannot do is judge the things this catalog is full of: whether "Off"
-means a switch or a subtitle track, whether "Share" is a verb or a noun, whether
-"Original" is a video quality or a download size. That is exactly what the
-translator comments are for, and exactly what an unreviewed machine pass gets
-wrong confidently.
+# Catalog and source-code gates
+python3 tools/l10n-sync.py --coverage
+python3 tools/l10n-sync.py --validate-only
+tools/l10n-guard.sh
+```
 
-## Keeping it honest
+Importer regression tests run in CI because Apple’s compiler does **not** reject
+every unsafe plural shape. During review, `xcstringstool` accepted a plural
+category that dropped its count and another that added a nonexistent runtime
+argument; the importer now blocks both.
 
-- `python3 tools/l10n-sync.py --coverage` — per-language state, the input to the
-  `releaseReady` decision.
-- `python3 tools/l10n-sync.py --validate-only` — runs in CI. Catches brands that
-  became translatable, keys with no words in them, counted strings missing plural
-  variations, and permission prompts drifting from `Info.plist`.
-- `tools/l10n-guard.sh` — runs in CI. Catches copy reverting to `String`, eager
-  resolution, concatenated copy, hand-rolled plurals.
+## Corrections
 
-When adding a string, run `tools/l10n-sync.py` and commit the catalog. A string
-that never reaches the catalog cannot be translated by anyone.
+Native speakers do not need a translation platform account. A translation issue
+should identify:
+
+- language;
+- screen;
+- current wording;
+- better wording and, when useful, why.
+
+The correction can be made directly in Xcode's String Catalog editor or in the
+catalog JSON, validated, and shipped. A future Crowdin/Weblate-style platform is
+optional community infrastructure, not a dependency for language support.

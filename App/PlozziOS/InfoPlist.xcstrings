@@ -10,6 +10,24 @@
             "state": "translated",
             "value": "Plozz uses your local network to discover media servers and network shares."
           }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz gebruikt je lokale netwerk om mediaservers en gedeelde netwerkmappen te vinden."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz potrzebuje dostępu do sieci lokalnej, aby wykrywać serwery multimediów i udziały sieciowe."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "O Plozz usa sua rede local para encontrar servidores de mídia e compartilhamentos de rede."
+          }
         }
       }
     },
@@ -21,6 +39,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "Plozz uses the camera to scan the setup code shown on your other device."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz gebruikt de camera om de installatiecode te scannen die op je andere apparaat wordt weergegeven."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz używa aparatu do skanowania kodu konfiguracji wyświetlanego na innym urządzeniu."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "O Plozz usa a câmera para escanear o código de configuração exibido no outro dispositivo."
           }
         }
       }

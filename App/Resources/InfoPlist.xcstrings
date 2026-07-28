@@ -10,6 +10,24 @@
             "state": "translated",
             "value": "Plozz uses your local network to discover Jellyfin and Emby servers and media shares automatically."
           }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz gebruikt je lokale netwerk om Jellyfin- en Emby-servers en gedeelde mediamappen automatisch te vinden."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Plozz potrzebuje dostępu do sieci lokalnej, aby wykrywać serwery Jellyfin i Emby oraz udziały multimedialne."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "O Plozz usa sua rede local para encontrar automaticamente servidores Jellyfin e Emby e compartilhamentos de mídia."
+          }
         }
       }
     }

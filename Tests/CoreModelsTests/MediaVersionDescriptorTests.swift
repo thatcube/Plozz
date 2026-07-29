@@ -199,3 +199,36 @@ final class MediaVersionDescriptorTests: XCTestCase {
         XCTAssertEqual(first, "b", "the better file wins the tiebreak")
     }
 }
+
+/// Independent checks on the cases a real library actually throws at this,
+/// written after the scoring was redesigned around comparable evidence.
+extension MediaVersionDescriptorTests {
+    func testAShowThatLabelsEditionsOnlySometimesStillMatches() {
+        // The regression that motivated the redesign: a descriptor carrying an
+        // edition must not disqualify every unlabelled file, or a show that names
+        // the cut on one episode and not the rest falls back forever.
+        var chosen = MediaVersion(id: "s1e1", height: 2160)
+        chosen.name = "Uncensored 2160p"
+        let descriptor = MediaVersionDescriptor(version: chosen)
+        XCTAssertNotNil(descriptor.edition)
+
+        let unlabelled = [
+            MediaVersion(id: "s1e2-hd", height: 1080),
+            MediaVersion(id: "s1e2-uhd", height: 2160)
+        ]
+        XCTAssertEqual(unlabelled.bestMatch(for: descriptor)?.id, "s1e2-uhd")
+    }
+
+    func testA1080pEpisodeInAnOtherwise4KShowStillPlays() {
+        // One SD-mastered episode shouldn't silently revert the whole show to the
+        // server default; 1080p is the honest best answer to "the 4K one".
+        let descriptor = MediaVersionDescriptor(version: MediaVersion(id: "uhd", height: 2160))
+        let onlyHD = [MediaVersion(id: "hd", height: 1080)]
+        XCTAssertEqual(onlyHD.bestMatch(for: descriptor)?.id, "hd")
+    }
+
+    func test720pIsNotAcceptedAsA4KSubstitute() {
+        let descriptor = MediaVersionDescriptor(version: MediaVersion(id: "uhd", height: 2160))
+        XCTAssertNil([MediaVersion(id: "sd", height: 720)].bestMatch(for: descriptor))
+    }
+}

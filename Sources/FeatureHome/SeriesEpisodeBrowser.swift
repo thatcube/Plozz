@@ -13,12 +13,18 @@ import UIKit
 final class SeriesHeroRecedeModel {
     var isReceded = false
 
-    func recede() {
+    @discardableResult
+    func recede() -> Bool {
+        guard !isReceded else { return false }
         isReceded = true
+        return true
     }
 
-    func restore() {
+    @discardableResult
+    func restore() -> Bool {
+        guard isReceded else { return false }
         isReceded = false
+        return true
     }
 }
 
@@ -139,6 +145,23 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .environment(\.plozzMetrics, .standard)
+    }
+}
+
+struct SeriesRecedeReveal<Content: View>: View {
+    let recedeModel: SeriesHeroRecedeModel
+    @ViewBuilder let content: () -> Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let revealed = recedeModel.isReceded
+        content()
+            .opacity(revealed ? 1 : 0)
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: 0.3),
+                value: revealed
+            )
     }
 }
 

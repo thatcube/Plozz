@@ -144,6 +144,9 @@ struct SeriesDetailView: View {
     /// each card and made scrolling the rail snap back; a stable target keeps it
     /// silky smooth while still re-pointing on open/season-change/switch.
     @State private var railTargetID: String?
+    /// Full per-item media facts for the resting Play target. Kept outside the
+    /// episode rail so badge enrichment never rewrites hundreds of visible cards.
+    @State private var restingPlayTargetEnrichment: MediaItem?
     /// Cosmetic-only series hero recede state. The parent writes it but never reads
     /// it, so episode focus changes do not invalidate this page or its rail.
     @State private var recedeModel = SeriesHeroRecedeModel()
@@ -235,9 +238,8 @@ struct SeriesDetailView: View {
             // cards already have their thumbnail when scrolled to rather than
             // visibly fetching it on appear.
             .task(id: stillPrefetchKey) { await prefetchSeasonStills() }
-            // Background-warm *every* season's thumbnails the moment the page opens,
-            // so switching seasons later is instant (no gray-placeholder flash)
-            // rather than fetching that season's stills only once it is selected.
+            // Background-warm nearby seasons so switching later is instant. A
+            // single-season series has no neighbors, so this is a no-op there.
             .task(id: seasonSetKey) { await prewarmAllSeasons() }
             // The hero holds a local copy of its item, so when a watched/watchlist
             // mutation broadcasts (e.g. from the hero's own Watched button), flip
@@ -360,14 +362,7 @@ struct SeriesDetailView: View {
                             guard !ignoresSystemFocusMoves else { return }
                             rearmEpisodeRailOnHeroFocusIfNeeded()
                             seasonBarEngaged = false
-                            recedeModel.restore()
-                            if reduceMotion {
-                                proxy.scrollTo(Self.topAnchorID, anchor: .top)
-                            } else {
-                                withAnimation(.easeInOut(duration: 0.4)) {
-                                    proxy.scrollTo(Self.topAnchorID, anchor: .top)
-                                }
-                            }
+                            restoreHero(using: proxy)
                         }
                     )
                     .id(Self.topAnchorID)
@@ -391,7 +386,9 @@ struct SeriesDetailView: View {
                     .task(id: railTargetID) {
                         guard let id = railTargetID,
                               let target = currentEpisodes.first(where: { $0.id == id }) else { return }
-                        _ = await viewModel.enrichEpisodeBadgesIfNeeded(target)
+                        let enriched = await viewModel.enrichEpisodeBadgesIfNeeded(target)
+                        guard railTargetID == id else { return }
+                        restingPlayTargetEnrichment = enriched
                     }
 
                     SeriesEpisodeBrowser(
@@ -407,14 +404,11 @@ struct SeriesDetailView: View {
                             // The bar stays in the hierarchy (opacity, not removed) so
                             // pressing down still lands on the active season chip, whose
                             // focus fires the recede that fades the bar in.
-                            seasonTabBar {
-                                centerEpisodeBrowser(using: proxy)
+                            SeriesRecedeReveal(recedeModel: recedeModel) {
+                                seasonTabBar {
+                                    centerEpisodeBrowser(using: proxy)
+                                }
                             }
-                            .opacity(recedeModel.isReceded ? 1 : 0)
-                            .animation(
-                                reduceMotion ? nil : .easeInOut(duration: 0.3),
-                                value: recedeModel.isReceded
-                            )
                         },
                         episodeContent: {
                             episodeRail {
@@ -468,25 +462,7 @@ struct SeriesDetailView: View {
                 // browser (hiding the cast) as the child was pushed.
                 guard !ignoresSystemFocusMoves else { return }
                 if focused {
-                    recedeModel.restore()
-                    // ANIMATE only when the user moved focus back up to Play from
-                    // further down the page — there the glide explains where the
-                    // page went.
-                    //
-                    // On a fresh open it is wrong. The play target often resolves a
-                    // beat after the push, which claims focus for Play, which makes
-                    // tvOS scroll to frame a bottom-anchored button; animating the
-                    // correction turned that artifact into a visible slide of the
-                    // whole hero a second after arriving. The page is already where
-                    // it belongs, so put it back instantly and show nothing.
-                    let isSettlingAfterOpen = !hasUserDirectedFocus
-                    if reduceMotion || isSettlingAfterOpen {
-                        proxy.scrollTo(Self.topAnchorID, anchor: .top)
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.4)) {
-                            proxy.scrollTo(Self.topAnchorID, anchor: .top)
-                        }
-                    }
+                    restoreHero(using: proxy)
                 }
             }
             .task {
@@ -501,12 +477,27 @@ struct SeriesDetailView: View {
     /// so Season → Episode has no second vertical movement and rapid DOWN-DOWN
     /// cannot produce a different resting offset from a slow navigation.
     private func centerEpisodeBrowser(using proxy: ScrollViewProxy) {
-        recedeModel.recede()
+        guard recedeModel.recede() else { return }
         if reduceMotion {
             proxy.scrollTo(Self.browserFocusAnchorID, anchor: .center)
         } else {
             withAnimation(.smooth(duration: 0.55)) {
                 proxy.scrollTo(Self.browserFocusAnchorID, anchor: .center)
+            }
+        }
+    }
+
+    /// Uses one animated transaction for the actual browser→hero transition.
+    /// Subsequent focus moves within the hero action row still correct tvOS's
+    /// per-button reveal nudge, but do so without stacking another animation.
+    private func restoreHero(using proxy: ScrollViewProxy) {
+        let transitioned = recedeModel.restore()
+        let isSettlingAfterOpen = !hasUserDirectedFocus
+        if reduceMotion || isSettlingAfterOpen || !transitioned {
+            proxy.scrollTo(Self.topAnchorID, anchor: .top)
+        } else {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                proxy.scrollTo(Self.topAnchorID, anchor: .top)
             }
         }
     }
@@ -618,7 +609,6 @@ struct SeriesDetailView: View {
                 // `hasSettledOpeningFocus`) so it can't fire behind them.
                 hasUserDirectedFocus = true
                 hasSettledOpeningFocus = true
-                recedeModel.recede()
                 if isEntering { onFocusEntered() }
                 // Focus has genuinely left the episode rail (it's now on the bar), so
                 // tell the rail to re-arm its entry gate for the next down-press.
@@ -692,7 +682,6 @@ struct SeriesDetailView: View {
                 seasonBarEngaged = true
                 hasUserDirectedFocus = true
                 hasSettledOpeningFocus = true
-                recedeModel.recede()
                 if isEntering { onFocusEntered() }
                 episodeRailResetToken += 1
             }
@@ -823,7 +812,16 @@ struct SeriesDetailView: View {
         // originally-targeted episode / next-up; after an in-place switch it is
         // re-pointed to the preserved episode on the new server (new per-server id).
         // MediaRowView re-scrolls via .onChange(of: defaultFocusID) when it changes.
-        let target = railTargetID
+        // The episode array is published before `resolveRestingHero` resumes and
+        // stores `railTargetID`. On a huge single season that one actor turn used
+        // to render episodes 1–50, then replace the window with the target-centered
+        // 50 when the id arrived — the apparent post-arrival "renegotiation".
+        // Resolve the same fallback synchronously from the final episode pool so
+        // the rail's very first frame already uses its permanent target.
+        let stableTarget = railTargetID.flatMap { id in
+            currentEpisodes.contains(where: { $0.id == id }) ? id : nil
+        }
+        let target = stableTarget ?? SeriesResume.nextUp(in: currentEpisodes)?.id
         return SeriesWindowedEpisodeRail(
             title: railTitle,
             episodes: episodes,
@@ -841,7 +839,6 @@ struct SeriesDetailView: View {
                 // Play claim must not fire behind them.
                 hasUserDirectedFocus = true
                 hasSettledOpeningFocus = true
-                recedeModel.recede()
                 onFocusEntered()
             },
             onSelect: { item in
@@ -888,29 +885,11 @@ struct SeriesDetailView: View {
         }
     }
 
-    /// Background-warms *every other* season the moment the page opens, which is
-    /// what eliminates the gray-placeholder flash when the user later switches
-    /// seasons. For each season we first ensure its episodes are fetched and cached
-    /// (so the rail never momentarily shows an empty list on switch) and then warm
-    /// + inject each episode's thumbnail ahead of time. Seasons are warmed one at a
-    /// time, yielding between them, so a long show never floods the loader or
-    /// competes with the on-screen season's art. The currently selected season is
-    /// skipped here because `prefetchSeasonStills` already owns it.
+    /// Background-warms the nearest seasons after the visible season has settled.
+    /// Bounded so long multi-season shows do not decode their entire catalog.
     private func prewarmAllSeasons() async {
-        // Defer the bulk warm so it doesn't flood the (per-host capped) connection
-        // pool the instant the page opens and starve the hero backdrop / title logo
-        // and the *current* season's stills — the art the user is actually looking
-        // at. The current season is already warmed promptly by
-        // `prefetchSeasonStills`.
         try? await Task.sleep(for: .seconds(2.5))
         if Task.isCancelled { return }
-        // Only pre-warm a WINDOW of seasons nearest the selected one, warmed
-        // nearest-first. A long series (e.g. a 20+ season anime) otherwise decoded
-        // every season's stills up front — hundreds of landscape thumbnails — for
-        // seasons the user may never open, thrashing the decoded-image cache and
-        // burning CPU/network on a low-power Apple TV. Seasons outside the window
-        // still warm instantly on demand when selected (see `stillPrefetchKey`), so
-        // the only cost is a brief thumbnail fetch when jumping to a distant season.
         let selectedIndex = seasons.firstIndex { $0.id == selectedSeasonID } ?? 0
         let neighbors = seasons.enumerated()
             .filter { $0.element.id != selectedSeasonID }
@@ -925,10 +904,6 @@ struct SeriesDetailView: View {
         }
     }
 
-    /// How many seasons (nearest the selected one) to pre-warm thumbnails for up
-    /// front. Small enough that even a very long series does a bounded amount of
-    /// decode work on open, large enough that adjacent-season switches stay
-    /// flash-free.
     private static let prewarmSeasonWindow = 4
 
     /// Makes a season's episode thumbnails render with **no gray flash** when its
@@ -1163,10 +1138,13 @@ struct SeriesDetailView: View {
         // The hero is the show — either nothing is watched or all of it is. Both
         // mean "start from the beginning", so offer the first episode rather than
         // `nextUp`, which returns the *finale* once everything is played.
-        if SeriesResume.isFinished(seasons: seasons, episodes: currentEpisodes) {
-            return currentEpisodes.first
-        }
-        return SeriesResume.nextUp(in: currentEpisodes)
+        let target = SeriesResume.isFinished(seasons: seasons, episodes: currentEpisodes)
+            ? currentEpisodes.first
+            : SeriesResume.nextUp(in: currentEpisodes)
+        guard let target,
+              let enriched = restingPlayTargetEnrichment,
+              enriched.id == target.id else { return target }
+        return enriched
     }
 
     /// The hero item with its season/episode numbers guaranteed when an episode is

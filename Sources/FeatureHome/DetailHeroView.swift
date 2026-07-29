@@ -1820,7 +1820,6 @@ private struct SeriesHeroFocusProxy: View {
                 .padding(.bottom, bottomInset)
                 .onChange(of: focused) { _, isFocused in
                     guard isFocused, !ignoresFocus else { return }
-                    model.restore()
                     onRestore()
                     // The action row becomes focusable after the recede-state update
                     // commits. Hand focus to Play on the following run-loop turn.

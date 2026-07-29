@@ -91,10 +91,6 @@ public final class ItemDetailViewModel {
     /// change already sees the current value. Tracking it too would spend one of
     /// this type's observable-property budget for no additional invalidation.
     @ObservationIgnored private var seasonLoadFailures: Set<String> = []
-    /// Seasons painted from the stale-while-revalidate snapshot. They render
-    /// instantly, but the first `loadEpisodes` must still fetch live provider state
-    /// so watched/resume changes made since the snapshot are not frozen on revisit.
-    @ObservationIgnored private var snapshotRestoredSeasonIDs: Set<String> = []
     private final class SeasonLoad: @unchecked Sendable {
         enum WaitResult: Sendable {
             case completed
@@ -173,10 +169,9 @@ public final class ItemDetailViewModel {
     private var lastNonRetrySeasonLoadGeneration: UInt64 = 0
     private var seasonLoadingSuspended = false
     private var seasonLoadingResumeSourceGeneration: UInt64?
-    /// Episode ids whose badges have already been enriched from a full per-item
-    /// fetch (see ``enrichEpisodeBadgesIfNeeded(_:)``) so the focused-episode hero
-    /// never re-fetches the same episode while the user browses a rail.
-    private var enrichedEpisodeIDs: Set<String> = []
+    /// Full per-item episode facts used by the hero. Deliberately separate from
+    /// `seasonEpisodes`: enriching a focused hero must not replace the visible rail.
+    @ObservationIgnored private var enrichedEpisodesByID: [String: MediaItem] = [:]
     /// When this detail is a series, context propagated onto its episodes so each
     /// episode resolves fallback artwork/routing with full series metadata.
     private var seriesEpisodeContext: SeriesEpisodeContext?
@@ -1239,7 +1234,6 @@ public final class ItemDetailViewModel {
         cancelSeasonLoads(retryWaiters: true)
         seasonEpisodes = [:]
         seasonLoadFailures = []
-        snapshotRestoredSeasonIDs = []
         for seasonID in loadedSeasonIDs {
             guard !Task.isCancelled, isCurrent() else { return }
             await loadEpisodes(for: seasonID)
@@ -1310,7 +1304,6 @@ public final class ItemDetailViewModel {
         // the new server (its ids differ); the season list reloads via reload().
         seasonEpisodes = [:]
         seasonLoadFailures = []
-        snapshotRestoredSeasonIDs = []
         preselectedSeasonID = nil
 
         // Reload the new server's detail + children in place over the existing
@@ -1421,7 +1414,6 @@ public final class ItemDetailViewModel {
             if let existing = seasonLoads[seasonID] {
                 load = existing
             } else {
-                let requiresLiveRefresh = snapshotRestoredSeasonIDs.remove(seasonID) != nil
                 // A season whose fetch failed holds a placeholder `[]`, not an
                 // answer, so it stays eligible for another attempt: without this
                 // one dropped request would leave the season permanently empty
@@ -1429,7 +1421,7 @@ public final class ItemDetailViewModel {
                 // the caller reaches here on discrete events (open, season
                 // change, refresh), not on every focus move.
                 let previousAttemptFailed = seasonLoadFailures.contains(seasonID)
-                if seasonEpisodes[seasonID] != nil, !requiresLiveRefresh, !previousAttemptFailed {
+                if seasonEpisodes[seasonID] != nil, !previousAttemptFailed {
                     return
                 }
                 let provider = activeProvider
@@ -1522,42 +1514,14 @@ public final class ItemDetailViewModel {
     /// the hero in place, or `nil` when there is nothing to update.
     public func enrichEpisodeBadgesIfNeeded(_ episode: MediaItem) async -> MediaItem? {
         guard episode.kind == .episode else { return nil }
-        if enrichedEpisodeIDs.contains(episode.id) {
-            return storedEpisode(id: episode.id)
-        }
+        if let enriched = enrichedEpisodesByID[episode.id] { return enriched }
         guard let full = try? await activeProvider.item(id: episode.id),
               !Task.isCancelled else { return nil }
-        enrichedEpisodeIDs.insert(episode.id)
         var enriched = episode
         enriched.mediaInfo = full.mediaInfo ?? enriched.mediaInfo
         if !full.versions.isEmpty { enriched.versions = full.versions }
-        mergeEnrichedEpisodeIntoRail(enriched)
+        enrichedEpisodesByID[episode.id] = enriched
         return enriched
-    }
-
-    /// The currently-cached rail copy of an episode, scanning every loaded season.
-    private func storedEpisode(id: String) -> MediaItem? {
-        for episodes in seasonEpisodes.values {
-            if let match = episodes.first(where: { $0.id == id }) { return match }
-        }
-        return nil
-    }
-
-    /// Folds an enriched episode's badge facts back into its season's rail entry,
-    /// preserving every other field already on the cached item (e.g. a
-    /// view-injected still URL) so the rail re-renders artwork in place.
-    private func mergeEnrichedEpisodeIntoRail(_ episode: MediaItem) {
-        for (seasonID, episodes) in seasonEpisodes {
-            guard let index = episodes.firstIndex(where: { $0.id == episode.id }) else { continue }
-            var updated = episodes
-            var merged = updated[index]
-            merged.mediaInfo = episode.mediaInfo
-            merged.versions = episode.versions
-            updated[index] = merged
-            seasonEpisodes[seasonID] = updated
-            persistSnapshot()
-            return
-        }
     }
 
     /// Stamps an item with this detail's owning account (if any) so navigation
@@ -1588,6 +1552,7 @@ public final class ItemDetailViewModel {
         snapshotRestoreTask = nil
         pendingSnapshotWrite?.cancel()
         pendingSnapshotWrite = nil
+        enrichedEpisodesByID.removeAll()
     }
 
     /// Captures the series-level context (TMDb id + anime ids/genre) used to stamp
@@ -1601,9 +1566,9 @@ public final class ItemDetailViewModel {
     }
 
     /// Paints a restored ``DetailSnapshotCache`` snapshot so a revisited title
-    /// shows its hero, season/episode lists and server picker instantly. Strictly
-    /// additive to first paint — the live `load()` immediately follows and replaces
-    /// this in place with fresh data (same identity ⇒ no flicker).
+    /// shows its hero, season list, schedule, and server picker instantly. Episode
+    /// rails deliberately wait for one live fetch from the already-selected server
+    /// so a stale cached rail can never be replaced underneath the viewer.
     private func applySnapshot(_ snapshot: DetailSnapshotCache.Snapshot) {
         let item = tagged(snapshot.item)
         captureSeriesContext(from: item)
@@ -1616,10 +1581,6 @@ public final class ItemDetailViewModel {
             childrenLoaded: true,
             upcomingSchedule: snapshot.upcomingSchedule
         ))
-        if !snapshot.seasonEpisodes.isEmpty {
-            seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
-            snapshotRestoredSeasonIDs.formUnion(snapshot.seasonEpisodes.keys)
-        }
         if snapshot.sources.count > 1 {
             let restored = prunedToActiveAccounts(snapshot.sources)
             if restored.count > 1 {
@@ -1632,8 +1593,8 @@ public final class ItemDetailViewModel {
     /// Applies a snapshot that lost the race to the live fetch. On a genuinely cold
     /// open (no hero painted yet) it restores the full snapshot; otherwise it keeps
     /// whatever hero is showing and only ADOPTS enrichments the current state still
-    /// lacks — so a revisit still gets its season picker / episode rails / server
-    /// picker instantly from disk without ever downgrading a fresher render.
+    /// lacks — so a revisit still gets its season picker, schedule, and server picker
+    /// instantly from disk without ever downgrading a fresher render.
     private func applySnapshotIfNotStale(_ snapshot: DetailSnapshotCache.Snapshot) {
         if state.value == nil && !hasPaintedFreshDetail {
             applySnapshot(snapshot)
@@ -1642,7 +1603,7 @@ public final class ItemDetailViewModel {
         }
     }
 
-    /// Merges cached children/episodes/sources into the current state WITHOUT
+    /// Merges cached children/schedule/sources into the current state WITHOUT
     /// downgrading anything the live fetch already produced (each merge is guarded
     /// on the current value being empty/thinner).
     private func adoptSnapshotEnrichments(_ snapshot: DetailSnapshotCache.Snapshot) {
@@ -1669,10 +1630,6 @@ public final class ItemDetailViewModel {
             detail.upcomingSchedule = upcomingSchedule
             state = .loaded(detail)
         }
-        if seasonEpisodes.isEmpty, !snapshot.seasonEpisodes.isEmpty {
-            seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
-            snapshotRestoredSeasonIDs.formUnion(snapshot.seasonEpisodes.keys)
-        }
         if sources.count <= 1, snapshot.sources.count > 1 {
             let restored = prunedToActiveAccounts(snapshot.sources)
             if restored.count > 1 {
@@ -1682,7 +1639,7 @@ public final class ItemDetailViewModel {
         }
     }
 
-    /// Writes the current resolved detail (item + children + episodes + sources) to
+    /// Writes the current resolved detail (item + children + schedule + sources) to
     /// the persistent cache for instant restore next time. Coalesced to at most one
     /// in-flight write per view model (cancel-and-replace + short debounce): a burst
     /// of state changes during a single open would otherwise fire many full-snapshot
@@ -1694,7 +1651,7 @@ public final class ItemDetailViewModel {
         let snapshot = DetailSnapshotCache.Snapshot(
             item: detail.item,
             children: detail.children,
-            seasonEpisodes: seasonEpisodes,
+            seasonEpisodes: [:],
             sources: sources,
             upcomingSchedule: detail.upcomingSchedule
         )

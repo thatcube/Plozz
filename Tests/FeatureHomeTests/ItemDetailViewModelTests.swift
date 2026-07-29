@@ -483,13 +483,11 @@ final class ItemDetailViewModelTests: XCTestCase {
                       "Playback from a source-specific library must remain on that source")
     }
 
-    // MARK: - Initial locality preference (series server picking)
+    // MARK: - Source stability after construction
 
-    func testMergedOpenLoadsFromLocalCopyWhenPrimaryIsRemote() async {
-        // A merged series whose merge-primary is the REMOTE (sister's Tailscale)
-        // server, with a same-LAN copy on another account. Opened from Home
-        // (originSourceAccountID nil), the page must load from the LOCAL copy so
-        // every episode streams locally — not from the remote merge-primary.
+    func testViewModelNeverRetargetsMergedPrimaryAfterConstruction() async {
+        // DetailOpenEnvironment chooses the source before constructing this model.
+        // Once constructed, even a better alternate must never reload the page.
         let remoteShow = MediaItem(id: "r-show", title: "Avatar", kind: .series, sourceAccountID: "remote")
         let localShow = MediaItem(id: "l-show", title: "Avatar", kind: .series, sourceAccountID: "local")
         let remote = FakeMediaProvider(allItems: [remoteShow])
@@ -510,9 +508,8 @@ final class ItemDetailViewModelTests: XCTestCase {
 
         await vm.load()
 
-        XCTAssertEqual(vm.state.value?.item.id, "l-show",
-                       "Merged open retargets onto the local copy before fetching")
-        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "local")
+        XCTAssertEqual(vm.state.value?.item.id, "r-show")
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "remote")
     }
 
     func testLibraryOpenKeepsItsServerEvenWhenRemote() async {
@@ -544,7 +541,7 @@ final class ItemDetailViewModelTests: XCTestCase {
                        "A library-tile open keeps its own server, locality notwithstanding")
     }
 
-    func testLibraryOriginRetargetsMergedPrimaryToLibraryCopy() async {
+    func testLibraryOriginDoesNotRetargetAnAlreadyConstructedModel() async {
         let jellyfinMovie = MediaItem(
             id: "jellyfin-movie",
             title: "Movie",
@@ -576,8 +573,8 @@ final class ItemDetailViewModelTests: XCTestCase {
 
         await vm.load()
 
-        XCTAssertEqual(vm.state.value?.item.id, plexMovie.id)
-        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "plex")
+        XCTAssertEqual(vm.state.value?.item.id, jellyfinMovie.id)
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "jellyfin")
         XCTAssertTrue(vm.isLibraryOriginPinned)
     }
 
@@ -673,7 +670,7 @@ final class ItemDetailViewModelTests: XCTestCase {
                        "A subsequent load() must not re-apply the local-first preference over the user's pick")
     }
 
-    func testMovieRetargetsToPreferredSourceAfterAsyncDiscovery() async {
+    func testAsyncDiscoveryOnlyEnrichesPickerWithoutRetargetingMovie() async {
         let remoteMovie = MediaItem(
             id: "remote-movie",
             title: "Movie",
@@ -714,11 +711,10 @@ final class ItemDetailViewModelTests: XCTestCase {
         )
 
         await vm.load()
-        await waitUntil {
-            vm.state.value?.item.id == "local-movie"
-        }
+        await waitUntil { vm.sources.count == 2 }
 
-        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "local")
+        XCTAssertEqual(vm.state.value?.item.id, "remote-movie")
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "remote")
     }
 
     func testLoadEpisodesFetchesAndCachesPerSeason() async {
@@ -1216,7 +1212,7 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(Set(vm.sources.map(\.itemID)), ["p1", "p2"])
     }
 
-    func testUnchangedDiscoveryRetargetsSnapshotRestoredMovieSource() async {
+    func testUnchangedDiscoveryKeepsSnapshotRestoredMovieSourceStable() async {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("plozz-atmos-source-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -1278,9 +1274,10 @@ final class ItemDetailViewModelTests: XCTestCase {
         await vm.load()
         await waitUntil { vm.sources.count == 2 }
         discoveryGate.open()
-        await waitUntil { vm.state.value?.item.id == "local-movie" }
+        try? await Task.sleep(for: .milliseconds(100))
 
-        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "local")
+        XCTAssertEqual(vm.state.value?.item.id, "remote-movie")
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "remote")
     }
 
     /// Disabling a server (its account is excluded from the active profile, so
@@ -1358,7 +1355,7 @@ final class ItemDetailViewModelTests: XCTestCase {
                        "Enabled cross-server source must remain in the restored picker")
     }
 
-    func testSnapshotRestoredEpisodesRefreshLiveWatchStateOnSeasonOpen() async {
+    func testSnapshotEpisodesStayHiddenUntilLiveSeasonLoadCompletes() async {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("plozz-watch-refresh-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -1392,8 +1389,11 @@ final class ItemDetailViewModelTests: XCTestCase {
             snapshotCache: cache
         )
         await vm.load()
-        await waitUntil { vm.episodes(for: seasonItem.id) != nil }
-        XCTAssertEqual(vm.episodes(for: seasonItem.id)?.first?.isPlayed, false)
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(
+            vm.episodes(for: seasonItem.id),
+            "A stale snapshot must not paint an episode rail that will change after arrival"
+        )
 
         await vm.loadEpisodes(for: seasonItem.id)
 
@@ -1401,7 +1401,7 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(
             provider.childrenCallCount[seasonItem.id, default: 0],
             1,
-            "A cached episode rail must still refresh live watch state"
+            "The visible rail must be decided by one live load from the selected server"
         )
     }
 
@@ -1409,7 +1409,7 @@ final class ItemDetailViewModelTests: XCTestCase {
     /// trimmed, SDR-looking episode (no per-stream DoVi/HDR, no Media-level Atmos
     /// hint), while the full per-item fetch carries the real 4K Dolby Vision /
     /// HDR10 / Atmos facts. The focused-episode hero must enrich from the full
-    /// fetch and update the cached rail entry in place.
+    /// fetch without rewriting the visible rail.
     func testFocusedEpisodeBadgesEnrichFromFullItemFetch() async {
         let sparse = MediaItem(
             id: "e1", title: "The End", kind: .episode, episodeNumber: 1,
@@ -1443,9 +1443,11 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(enriched?.technicalBadges.map(\.label),
                        ["4K", "Dolby Vision", "Dolby Atmos", "HDR10"],
                        "Focused episode must badge from the full fetch's real metadata")
-        // The cached rail entry is updated in place so the rail re-renders too.
-        XCTAssertEqual(vm.seasonEpisodes["s1"]?.first?.technicalBadges.map(\.label),
-                       ["4K", "Dolby Vision", "Dolby Atmos", "HDR10"])
+        XCTAssertEqual(
+            vm.seasonEpisodes["s1"]?.first?.technicalBadges.map(\.label),
+            before,
+            "Hero-only enrichment must not replace the visible episode array"
+        )
     }
 
     /// Enrichment is idempotent: a second focus of the same episode returns the
@@ -1475,7 +1477,7 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertTrue(second?.technicalBadges.map(\.label).contains("Dolby Vision") ?? false)
     }
 
-    func testResolvedArtworkMergePreservesConcurrentBadgeEnrichment() async {
+    func testResolvedArtworkMergeDoesNotAdoptHeroOnlyBadgeEnrichment() async {
         let sparse = MediaItem(id: "e1", title: "The End", kind: .episode, episodeNumber: 1)
         let rich = MediaItem(
             id: "e1", title: "The End", kind: .episode, episodeNumber: 1,
@@ -1497,8 +1499,8 @@ final class ItemDetailViewModelTests: XCTestCase {
 
         let cached = vm.episodes(for: "s1")?.first
         XCTAssertEqual(cached?.posterURL, posterURL)
-        XCTAssertTrue(cached?.technicalBadges.map(\.label).contains("Dolby Vision") ?? false)
-        XCTAssertTrue(cached?.technicalBadges.map(\.label).contains("Dolby Atmos") ?? false)
+        XCTAssertFalse(cached?.technicalBadges.map(\.label).contains("Dolby Vision") ?? false)
+        XCTAssertFalse(cached?.technicalBadges.map(\.label).contains("Dolby Atmos") ?? false)
     }
 
     // MARK: - In-place cross-server switch (Problem 4)

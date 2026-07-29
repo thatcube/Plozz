@@ -53,3 +53,4 @@ Frameworks/
 
 # Local per-worktree dev build counter (generate-project.sh dirty-tree suffix)
 .plozz-dev-build
+trace-output/

@@ -26,6 +26,17 @@ public enum TopShelfPosterComposer {
     /// metrics (poster width 280, bar height 12, inset 22, scrim = height*8.5,
     /// fill shadow blur = height*0.25). Kept as width fractions so the composited
     /// bar matches the in-app bar regardless of the source image's pixel size.
+    /// Bumped whenever the bar's drawn appearance changes.
+    ///
+    /// The composite cache is keyed by item, progress bucket and source art URL —
+    /// none of which move when only the *rendering* changes, so recolouring the
+    /// bar left every existing PNG a cache hit and the shelf kept showing the old
+    /// blue indefinitely. Folding a style generation into the filename retires
+    /// those renders; `TopShelfStore.pruneArtwork` then deletes them.
+    ///
+    /// 1: brand-blue fill. 2: white chrome matching `PlozzMediaChrome`.
+    static let barStyleGeneration = 2
+
     /// Internal rather than private so `PlozzMediaChromeParityTests` can pin the
     /// two greys to CoreUI's live values.
     enum Bar {
@@ -71,7 +82,7 @@ public enum TopShelfPosterComposer {
         // stretched backdrop) the composite is regenerated rather than served
         // stale. Stale files are then pruned by `TopShelfStore.pruneArtwork`.
         let artKey = String(fnv1a(posterURL.absoluteString), radix: 16)
-        let fileName = "\(sanitize(id))_\(bucket)_\(artKey).png"
+        let fileName = "\(sanitize(id))_\(bucket)_\(artKey)_v\(barStyleGeneration).png"
         let destination = directory.appendingPathComponent(fileName)
 
         // Reuse an identical prior render (same item + same rounded percentage).
@@ -115,7 +126,7 @@ public enum TopShelfPosterComposer {
         let bucketPart = barProgress.map { String(Int(($0 * 100).rounded())) } ?? "none"
         // Key on the title too so a renamed item regenerates its placeholder.
         let titleKey = String(fnv1a("ph|" + title), radix: 16)
-        let fileName = "\(sanitize(id))_ph_\(bucketPart)_\(titleKey).png"
+        let fileName = "\(sanitize(id))_ph_\(bucketPart)_\(titleKey)_v\(barStyleGeneration).png"
         let destination = directory.appendingPathComponent(fileName)
 
         if FileManager.default.fileExists(atPath: destination.path) {

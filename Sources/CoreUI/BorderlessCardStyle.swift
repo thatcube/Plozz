@@ -51,11 +51,22 @@ private struct FocusHaloModifier: ViewModifier {
                 // the artwork: sized to the artwork by `.background`, then grown
                 // `pad` beyond every edge with negative padding (backgrounds draw
                 // outside the content bounds), its radius bumped to stay concentric.
-                Color.clear
-                    .plozzGlassCard(cornerRadius: cornerRadius + pad, isFocused: true)
-                    .padding(-pad)
-                    .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
-                    .opacity(isFocused ? 1 : 0)
+                //
+                // BUILT ONLY WHEN FOCUSED, and that is a performance requirement,
+                // not tidiness. This asks for `isFocused: true` unconditionally —
+                // real refractive Liquid Glass, a live backdrop effect — plus a
+                // 20pt shadow. Hiding that with `.opacity(0)` still renders it, so
+                // every card in a row paid for a focus surface that was then
+                // multiplied by zero: measured at ~100 offscreen passes per frame
+                // on an A12 Apple TV, for a 3.3% hitch ratio. Only one card can
+                // hold focus, so only one should ever build this.
+                if isFocused {
+                    Color.clear
+                        .plozzGlassCard(cornerRadius: cornerRadius + pad, isFocused: true)
+                        .padding(-pad)
+                        .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
+                        .transition(.opacity)
+                }
             }
             .scaleEffect(isFocused ? focusScale : 1)
     }

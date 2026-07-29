@@ -1665,7 +1665,7 @@ private struct CheckmarkShape: Shape {
 }
 
 private struct DetailHeroCreditLine: View {
-    let label: String   // l10n:content — media subtitle from the server
+    let label: LocalizedStringResource
     let values: [String]
     @Environment(\.themePalette) private var palette
 
@@ -1676,8 +1676,9 @@ private struct DetailHeroCreditLine: View {
 
     private func text(_ values: [String]) -> some View {
         (
-            Text(verbatim: "\(label) ").foregroundStyle(palette.tertiaryText)
-            + Text(values.joined(separator: ", "))
+            Text(label).foregroundStyle(palette.tertiaryText)
+            + Text(verbatim: " ")
+            + Text(verbatim: values.formatted())
                 .foregroundStyle(palette.primaryText)
         )
         .fixedSize(horizontal: false, vertical: true)

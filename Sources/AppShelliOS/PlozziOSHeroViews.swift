@@ -2058,9 +2058,10 @@ private struct PlozziOSDetailCredits: View {
     private func credit(_ label: LocalizedStringResource, values: [String]) -> some View {
         let capped = Array(values.prefix(3))
         return (
-            Text(verbatim: "\(label) ")
+            Text(label)
                 .foregroundStyle(palette.secondaryText)
-            + Text(capped.joined(separator: ", "))
+            + Text(verbatim: " ")
+            + Text(verbatim: capped.formatted())
                 .foregroundStyle(palette.primaryText)
         )
         .font(.subheadline.weight(.medium))

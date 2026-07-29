@@ -84,6 +84,27 @@ final class SeriesSeasonRevealEdgeTests: XCTestCase {
 }
 
 final class SeriesDetailBrowserPolicyTests: XCTestCase {
+    func testWholeSeriesEntryClaimsHeroPlay() {
+        XCTAssertTrue(SeriesDetailEntryPolicy.claimsHeroPlay(
+            hasOpenedOnce: false,
+            hasInitialEpisode: false
+        ))
+    }
+
+    func testIndividualEpisodeEntryLeavesInitialFocusToRail() {
+        XCTAssertFalse(SeriesDetailEntryPolicy.claimsHeroPlay(
+            hasOpenedOnce: false,
+            hasInitialEpisode: true
+        ))
+    }
+
+    func testReturningPageDoesNotReclaimHeroPlay() {
+        XCTAssertFalse(SeriesDetailEntryPolicy.claimsHeroPlay(
+            hasOpenedOnce: true,
+            hasInitialEpisode: false
+        ))
+    }
+
     func testLooseEpisodeBrowserRearmsWhenHeroRegainsFocus() {
         XCTAssertTrue(SeriesDetailBrowserPolicy.rearmsEpisodeRailOnHeroFocus(hasSeasons: false))
         XCTAssertFalse(SeriesDetailBrowserPolicy.rearmsEpisodeRailOnHeroFocus(hasSeasons: true))

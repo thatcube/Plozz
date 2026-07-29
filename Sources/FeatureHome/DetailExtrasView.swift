@@ -144,17 +144,9 @@ private struct SeriesCastRevealModifier: ViewModifier {
         let revealed = (model?.isReceded ?? true) || revealsWithoutBrowser
         content
             .opacity(revealed ? 1 : 0)
-            .offset(y: revealed ? 0 : 96)
             .disabled(!revealed || suppressesFocus)
             .accessibilityHidden(!revealed)
-            .animation(
-                reduceMotion
-                    ? nil
-                    : (revealed
-                        ? SeriesHeroRevealTransition.entrance
-                        : .easeOut(duration: 0.14)),
-                value: revealed
-            )
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: revealed)
     }
 }
 

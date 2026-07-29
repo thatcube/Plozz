@@ -65,11 +65,6 @@ struct DetailHeroView: View {
     /// Optional series-only cosmetic recede state. The model is consumed by leaf
     /// modifiers so changing it never invalidates the parent page or episode rail.
     var seriesRecedeModel: SeriesHeroRecedeModel? = nil
-    /// Whether focus changes arriving right now are the system re-establishing
-    /// focus (a child page pushed/popped) rather than the user navigating. The
-    /// receded hero's invisible focus proxy must ignore those — see
-    /// `SeriesHeroFocusProxy`.
-    var ignoresSystemFocusMoves: Bool = false
     /// A short air-schedule line for a still-airing series, e.g. "New episodes
     /// Fridays" or "New season Aug 5". `nil` when nothing is known.
     var scheduleLine: LocalizedStringResource? = nil
@@ -132,7 +127,6 @@ struct DetailHeroView: View {
     /// the scroll for each newly-focused button. `nil` leaves scroll behaviour
     /// untouched.
     var onHeroActionFocused: (() -> Void)? = nil
-
     /// Marks this hero as presenting a **discovery** (Seerr) title that isn't in
     /// the library. When `true` the library-only action buttons (Play, Trailer,
     /// watchlist/watched/refresh, server/version "…" menu) are suppressed and the
@@ -794,12 +788,9 @@ struct DetailHeroView: View {
                 // remain leading via the HStack's content, so widening only the
                 // section's frame adds no over-wide *focusable* geometry.
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .plzGeoLog("actionRow")
                 .focusScope(heroActionsScope)
                 .focusSection()
-                // The receded row is visually hidden, so remove only its controls
-                // from focus. Disabling the entire hero would also disable the
-                // sibling return proxy that restores Play on an UP press.
-                .disabled(seriesRecedeModel?.isReceded == true)
                 // Keep the whole action row pinned to the hero top: this row is
                 // bottom-anchored in a hero that is full-screen-height for a
                 // childless movie, so when focus lands on any button tvOS
@@ -808,6 +799,7 @@ struct DetailHeroView: View {
                 // moves *within* the row too, since tvOS re-nudges the scroll for
                 // each newly-focused button.
                 .onChange(of: heroActionRowFocus) { _, focus in
+                    plzGeoNote("actionRowFocus=\(String(describing: focus))")
                     if focus != nil { onHeroActionFocused?() }
                 }
             }
@@ -825,7 +817,7 @@ struct DetailHeroView: View {
             height: seriesRecedeModel == nil ? nil : heroHeight,
             alignment: .bottomLeading
         )
-        .modifier(SeriesHeroContentRecedeModifier(model: seriesRecedeModel))
+        .modifier(SeriesHeroContentLiftModifier(model: seriesRecedeModel))
         // The full-bleed backdrop lives in a `.background`, which by definition is
         // sized to the host and does NOT contribute to the host's measured size.
         // That is the fix: previously the backdrop was a ZStack *sibling* whose
@@ -849,25 +841,13 @@ struct DetailHeroView: View {
                     .transition(.opacity)
             }
         }
-        .overlay(alignment: .bottomLeading) {
-            if let seriesRecedeModel {
-                SeriesHeroFocusProxy(
-                    model: seriesRecedeModel,
-                    playButtonFocus: playButtonFocus,
-                    bottomInset: bottomInset,
-                    ignoresFocus: ignoresSystemFocusMoves,
-                    onRestore: { onHeroActionFocused?() }
-                )
-            }
-        }
         // A right-aligned "Starring …" line opposite the action buttons (mirrors
         // the Apple TV detail layout). Billing order is our proxy for the stars;
         // the full cast still lives in the Cast row below. Shares the buttons'
-        // `bottomInset` so the two sit on the same baseline, and is hidden while
-        // the hero is receded for the episode browser.
+        // `bottomInset` so the two sit on the same baseline and follows the same
+        // compositor lift as the left-side hero content.
         .overlay(alignment: .bottomTrailing) {
             if !presentsEpisodeStill,
-               seriesRecedeModel?.isReceded != true,
                !starringCastValues.isEmpty
                 || !directorValues.isEmpty
                 || !animeStudioValues.isEmpty {
@@ -904,6 +884,7 @@ struct DetailHeroView: View {
                 .padding(.bottom, bottomInset)
                 .contentTransition(.opacity)
                 .allowsHitTesting(false)
+                .modifier(SeriesHeroContentLiftModifier(model: seriesRecedeModel))
             }
         }
         .contextMenu {
@@ -1715,21 +1696,52 @@ private struct DetailHeroFactsRow: View {
     }
 }
 
-private struct SeriesHeroContentRecedeModifier: ViewModifier {
+/// Mirrors Home's recede architecture: the real hero hierarchy remains alive and
+/// focusable while a post-layout transform moves it, and a cross-fade — never a
+/// translation off the screen edge — is what makes it go away. tvOS will not
+/// focus an item whose rendered frame lies entirely outside the screen, so
+/// lifting the action row above the top edge (as this did) silently killed UP
+/// from the season bar. Opacity does *not* remove focusability (the season bar
+/// relies on the same trick for DOWN), so the fade is the safe half of the
+/// effect and the travel is purely the visible part of it.
+private struct SeriesHeroContentLiftModifier: ViewModifier {
     let model: SeriesHeroRecedeModel?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         let receded = model?.isReceded == true
+        // Render-only, deliberately. The hero action row's LAYOUT frame stays
+        // parked above the season bar at all times, so tvOS can always reach it
+        // with UP and never has to scroll the page to reveal it. What the viewer
+        // sees is pure transform: dropped into the lower third for the resting
+        // page, travelling back up to its parked position — and fading out —
+        // once the browser takes over.
+        //
+        // No `.animation` here: the recede/restore call sites wrap the state
+        // change in one `withAnimation`, and an explicit modifier would override
+        // that ambient transaction, letting the hero travel at a different speed
+        // from everything else.
         content
-            .opacity(receded ? 0 : 1)
-            .offset(y: reduceMotion ? 0 : (receded ? -120 : 0))
-            .accessibilityHidden(receded)
-            .animation(
-                reduceMotion ? nil : .smooth(duration: 0.3),
-                value: receded
-            )
+            .offset(y: heroOffset(receded: receded))
+            // A MASK, not `.opacity`: UIKit will not focus a view whose alpha is
+            // zero, and this content has to stay reachable with UP from the
+            // season bar the entire time it is invisible. A mask hides the
+            // rendering while the view's own alpha stays 1.
+            .mask {
+                Rectangle()
+                    .opacity(model == nil || !receded ? 1 : 0)
+            }
+    }
+
+    private func heroOffset(receded: Bool) -> CGFloat {
+        guard model != nil else { return 0 }
+        if reduceMotion {
+            return receded ? -SeriesEpisodeBrowserLayout.heroContentRecedeLift : 0
+        }
+        return receded
+            ? -SeriesEpisodeBrowserLayout.heroContentRecedeLift
+            : SeriesEpisodeBrowserLayout.heroContentRestDrop
     }
 }
 
@@ -1743,8 +1755,6 @@ private struct SeriesDetailHeroBackdrop: View {
     let trailerController: HeroTrailerController
     let showsTrailer: Bool
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
         let receded = recedeModel?.isReceded == true
         HeroBackdropLayer(
@@ -1752,7 +1762,7 @@ private struct SeriesDetailHeroBackdrop: View {
             asyncFallbackURL: asyncFallbackURL,
             height: height,
             scrimTone: scrimTone,
-            verticalOffset: reduceMotion ? 0 : (receded ? -260 : 0),
+            verticalOffset: 0,
             ignoresOverscan: false,
             stillImageOpacity: showsTrailer ? 0 : 1
         ) {
@@ -1778,57 +1788,10 @@ private struct SeriesDetailHeroBackdrop: View {
         // back through a freshly-pushed NavigationStack before the safe area
         // settles and temporarily center the whole page off-screen.
         .frame(width: width)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.9), value: receded)
-    }
-}
-
-private struct SeriesHeroFocusProxy: View {
-    let model: SeriesHeroRecedeModel
-    let playButtonFocus: FocusState<Bool>.Binding?
-    let bottomInset: CGFloat
-    /// Withdraw this proxy from the focus system while a child page is on top.
-    /// On a pop tvOS restores focus by geometry and lands on this invisible
-    /// proxy, which would expand the hero — leaving focus on a hero the user
-    /// can't see and collapsing the episode browser and cast with it.
-    ///
-    /// It must become genuinely non-focusable rather than merely ignore the
-    /// event: swallowing focus silently stranded it here, with nothing visible
-    /// focused and no way to navigate back up.
-    let ignoresFocus: Bool
-    let onRestore: () -> Void
-
-    @FocusState private var focused: Bool
-
-    @ViewBuilder
-    var body: some View {
-        if model.isReceded {
-            Color.clear
-                .frame(maxWidth: .infinity)
-                .frame(height: 96)
-                .contentShape(Rectangle())
-                .focusable(!ignoresFocus)
-                .focused($focused)
-                .focusEffectDisabled()
-                .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
-                .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                // Stand in for the receded action row as the same full-width focus
-                // section, so UP from any Season chip has a section to enter.
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .focusSection()
-                // Match the real action row's bottom band. This keeps the proxy
-                // strictly above Seasons/Episodes instead of inserting an invisible
-                // focusable between them.
-                .padding(.bottom, bottomInset)
-                .onChange(of: focused) { _, isFocused in
-                    guard isFocused, !ignoresFocus else { return }
-                    onRestore()
-                    // The action row becomes focusable after the recede-state update
-                    // commits. Hand focus to Play on the following run-loop turn.
-                    DispatchQueue.main.async {
-                        playButtonFocus?.wrappedValue = true
-                    }
-                }
-        }
+        // Match Home's slower parallax track, but transform the completed backdrop
+        // layer so its mask/artwork do not re-render on every animation frame.
+        .offset(y: receded ? -SeriesEpisodeBrowserLayout.heroBackdropRecedeLift : 0)
+        .animation(.smooth(duration: 0.9), value: receded)
     }
 }
 #endif

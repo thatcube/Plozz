@@ -149,17 +149,33 @@ fi
 # Naming the real device makes Xcode provision for it. Falls back to the generic
 # destination when a UDID can't be resolved (device asleep/offline), so this can
 # only ever improve on the old behaviour.
+#
+# BOUNDED, and skipped entirely for a build-only run.
+#
+# `devicectl device info details` talks to the hardware, so an asleep or absent
+# iPhone/iPad leaves it waiting — with two devices that stalled the script for
+# minutes before the first compile, looking for all the world like a hung build.
+# A compile needs no device at all (this is exactly what deploy-tv.sh already
+# does: build the generic slice, name the device only to install), so
+# `--build-only` never asks, and when we do ask we give up quickly and fall back
+# to the generic destination rather than blocking.
 device_udid() {
-  xcrun devicectl device info details --device "$1" 2>/dev/null \
-    | awk -F': ' '/• UDID:/ { gsub(/^[ \t]+/, "", $2); print $2; exit }'
+  local reply
+  reply="$(
+    xcrun devicectl device info details --device "$1" --timeout 10 2>/dev/null \
+      | awk -F': ' '/• UDID:/ { gsub(/^[ \t]+/, "", $2); print $2; exit }'
+  )" || return 0
+  printf '%s' "$reply"
 }
 
 TARGET_UDIDS=()
-if [[ "$DEPLOY_IPHONE" == "1" ]]; then
-  udid="$(device_udid "$IPHONE_CORE_ID")"; [[ -n "$udid" ]] && TARGET_UDIDS+=("$udid")
-fi
-if [[ "$DEPLOY_IPAD" == "1" ]]; then
-  udid="$(device_udid "$IPAD_CORE_ID")"; [[ -n "$udid" ]] && TARGET_UDIDS+=("$udid")
+if [[ "$BUILD_ONLY" != "1" ]]; then
+  if [[ "$DEPLOY_IPHONE" == "1" ]]; then
+    udid="$(device_udid "$IPHONE_CORE_ID")"; [[ -n "$udid" ]] && TARGET_UDIDS+=("$udid")
+  fi
+  if [[ "$DEPLOY_IPAD" == "1" ]]; then
+    udid="$(device_udid "$IPAD_CORE_ID")"; [[ -n "$udid" ]] && TARGET_UDIDS+=("$udid")
+  fi
 fi
 
 BUILD_DESTINATION="generic/platform=iOS"
@@ -194,6 +210,10 @@ if [[ "$NO_BUILD" != "1" ]]; then
     ${BUILD_SETTING_OVERRIDES[@]+"${BUILD_SETTING_OVERRIDES[@]}"} \
     build \
     | { command -v xcbeautify >/dev/null 2>&1 && xcbeautify || cat; }
+  # State the outcome in one greppable line. xcbeautify's own summary varies with
+  # whether stdout is a terminal, so a piped run could finish successfully and
+  # still look like silence to whatever was reading it.
+  echo "✓ Build succeeded."
 fi
 
 APP_PATH="$(

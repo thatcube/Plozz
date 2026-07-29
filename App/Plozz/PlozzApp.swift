@@ -23,6 +23,9 @@ struct PlozzApp: App {
             AppLanguageScope {
                 RootView()
             }
+            // Back must never quit the app just because focus hasn't settled —
+            // see `TVBackButtonGuard`.
+            .tvBackButtonGuard()
         }
     }
 }

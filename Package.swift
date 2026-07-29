@@ -701,7 +701,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CoreUITests",
-            dependencies: ["CoreUI", "CoreModels"]
+            dependencies: ["CoreUI", "CoreModels", "TopShelfKit"]
         ),
         .testTarget(
             name: "CoreNetworkingTests",

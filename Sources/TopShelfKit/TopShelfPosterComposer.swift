@@ -17,7 +17,7 @@ import UIKit
 /// get a poster card with a progress bar.
 ///
 /// The bar's geometry and colours mirror `PosterCardView.progressBar` at base
-/// density (a 12pt bar on a 280pt-wide poster, #00A4DC fill, white-0.22 track,
+/// density (a 12pt bar on a 280pt-wide poster, white-0.72 fill, white-0.24 track,
 /// a black-0.6 bottom scrim and a black-0.35 fill shadow), expressed as
 /// fractions of the image width so the burned-in bar stays visually identical to
 /// the in-app one at any resolution.
@@ -26,15 +26,24 @@ public enum TopShelfPosterComposer {
     /// metrics (poster width 280, bar height 12, inset 22, scrim = height*8.5,
     /// fill shadow blur = height*0.25). Kept as width fractions so the composited
     /// bar matches the in-app bar regardless of the source image's pixel size.
-    private enum Bar {
+    /// Internal rather than private so `PlozzMediaChromeParityTests` can pin the
+    /// two greys to CoreUI's live values.
+    enum Bar {
         static let heightFraction: CGFloat = 12.0 / 280.0
         static let insetFraction: CGFloat = 22.0 / 280.0
         static let scrimFraction: CGFloat = (12.0 * 8.5) / 280.0
         static let shadowBlurFraction: CGFloat = (12.0 * 0.25) / 280.0
-        // #00A4DC — ThemePalette.brandBlue.
-        static let fillRed: CGFloat = 0.0
-        static let fillGreen: CGFloat = 0.643
-        static let fillBlue: CGFloat = 0.863
+        // Mirrors `PlozzMediaChrome` rather than the brand blue: colour is
+        // reserved for specific moments, and a white bar sits better over
+        // arbitrary artwork. These are the RESTING values, because a burned-in
+        // image can't respond to focus and a shelf reads as a wall of cards.
+        //
+        // Duplicated as literals on purpose — TopShelfKit is built into the
+        // extension, which must not pull in CoreUI (and its SwiftUI/theme
+        // surface) just to name two greys. `PlozzMediaChromeParityTests` pins
+        // them to the in-app values so the two can't drift apart silently.
+        static let fillWhite: CGFloat = 0.72
+        static let trackAlpha: CGFloat = 0.24
     }
 
     /// Builds (or reuses a cached) composited poster for one in-progress item and
@@ -252,12 +261,15 @@ public enum TopShelfPosterComposer {
 
         let radius = barHeight / 2
 
-        // Track: translucent white capsule.
+        // Track: translucent white capsule. Stays translucent while the fill is
+        // opaque — it is the absence of progress, so it should sink into the
+        // artwork rather than read as a second competing bar.
         let trackRect = CGRect(x: inset, y: barTop, width: trackWidth, height: barHeight)
-        UIColor.white.withAlphaComponent(0.22).setFill()
+        UIColor.white.withAlphaComponent(Bar.trackAlpha).setFill()
         UIBezierPath(roundedRect: trackRect, cornerRadius: radius).fill()
 
-        // Fill: brand-blue capsule with a soft drop shadow.
+        // Fill: opaque white-grey capsule with a soft drop shadow. Opaque so a
+        // bright poster can never wash it out.
         let fillRect = CGRect(x: inset, y: barTop, width: fillWidth, height: barHeight)
         cg.saveGState()
         cg.setShadow(
@@ -265,7 +277,7 @@ public enum TopShelfPosterComposer {
             blur: shadowBlur,
             color: UIColor.black.withAlphaComponent(0.35).cgColor
         )
-        UIColor(red: Bar.fillRed, green: Bar.fillGreen, blue: Bar.fillBlue, alpha: 1).setFill()
+        UIColor(white: Bar.fillWhite, alpha: 1).setFill()
         UIBezierPath(roundedRect: fillRect, cornerRadius: radius).fill()
         cg.restoreGState()
     }

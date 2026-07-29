@@ -436,24 +436,24 @@ private enum ServerPromptFollowUp {
 
 private enum PlozziOSDestination: String, CaseIterable, Identifiable, Hashable {
     case home
-    case search
     case downloads
+    case search
 
     var id: Self { self }
 
     var title: LocalizedStringResource {
         switch self {
         case .home: "Home"
-        case .search: "Search"
         case .downloads: "Downloads"
+        case .search: "Search"
         }
     }
 
     var systemImage: String {
         switch self {
         case .home: "house"
-        case .search: "magnifyingglass"
         case .downloads: "arrow.down.circle"
+        case .search: "magnifyingglass"
         }
     }
 }
@@ -492,24 +492,6 @@ private struct PlozziOSTabShell: View {
             }
 
             Tab(
-                "Search",
-                systemImage: "magnifyingglass",
-                value: PlozziOSDestination.search
-            ) {
-                NavigationStack {
-                    PlozziOSDestinationView(
-                        destination: .search,
-                        appModel: appModel,
-                        onAddServer: onAddServer,
-                        onShowSettings: showSettings
-                    )
-                    .plozziOSItemNavigation(appModel: appModel)
-                }
-                .toolbarBackground(.hidden, for: .navigationBar)
-                .background { AppBackground(palette: palette) }
-            }
-
-            Tab(
                 "Downloads",
                 systemImage: "arrow.down.circle",
                 value: PlozziOSDestination.downloads
@@ -521,6 +503,32 @@ private struct PlozziOSTabShell: View {
                         onAddServer: onAddServer,
                         onShowSettings: showSettings
                     )
+                }
+                .toolbarBackground(.hidden, for: .navigationBar)
+                .background { AppBackground(palette: palette) }
+            }
+
+            // Last, and with the SEARCH ROLE rather than an ordinary tab: on a
+            // wide layout with the top tab bar (iPad) the system pulls a
+            // search-role tab out of the row and renders it as a lone
+            // magnifying glass at the trailing edge, which is the icon-only
+            // treatment we want — and it stays a normal labelled tab on iPhone.
+            // Doing that by hand would mean blanking the title, which reads as a
+            // bug to VoiceOver.
+            Tab(
+                "Search",
+                systemImage: "magnifyingglass",
+                value: PlozziOSDestination.search,
+                role: .search
+            ) {
+                NavigationStack {
+                    PlozziOSDestinationView(
+                        destination: .search,
+                        appModel: appModel,
+                        onAddServer: onAddServer,
+                        onShowSettings: showSettings
+                    )
+                    .plozziOSItemNavigation(appModel: appModel)
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
                 .background { AppBackground(palette: palette) }

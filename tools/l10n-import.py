@@ -477,6 +477,19 @@ def validate_info_plist(
     return values
 
 
+def dump_catalog(catalog: dict[str, Any]) -> str:
+    """Serialize a String Catalog the way Xcode itself writes one.
+
+    Xcode uses `"key" : value` — a space on BOTH sides of the colon — and no
+    trailing newline. Python's default `"key": value` is semantically identical
+    and utterly unreadable in review: it rewrites every one of the catalog's
+    ~255k lines, burying the handful that actually changed. Matching Xcode also
+    means a round trip through this tool is a no-op, so opening the catalog in
+    Xcode afterwards doesn't churn it straight back.
+    """
+    return json.dumps(catalog, ensure_ascii=False, indent=2, separators=(",", " : "))
+
+
 def compile_catalog(catalog: dict[str, Any]) -> None:
     """Use Apple's compiler as the final authority on String Catalog structure."""
 
@@ -484,10 +497,7 @@ def compile_catalog(catalog: dict[str, Any]) -> None:
         temp_path = Path(temp)
         catalog_path = temp_path / "Localizable.xcstrings"
         output_path = temp_path / "compiled"
-        catalog_path.write_text(
-            json.dumps(catalog, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        catalog_path.write_text(dump_catalog(catalog), encoding="utf-8")
         proc = subprocess.run(
             [
                 "xcrun",
@@ -573,16 +583,10 @@ def main() -> int:
         print("✓ xcstringstool compiled both permission-prompt catalogs.")
 
     if args.apply:
-        catalog_path.write_text(
-            json.dumps(merged, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        catalog_path.write_text(dump_catalog(merged), encoding="utf-8")
         if args.require_info_plist:
             for path, info_catalog in merged_info_catalogs.items():
-                path.write_text(
-                    json.dumps(info_catalog, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8",
-                )
+                path.write_text(dump_catalog(info_catalog), encoding="utf-8")
         print(
             f"✓ Imported {len(summaries)} language(s) into "
             f"{catalog_path.relative_to(REPO)}."

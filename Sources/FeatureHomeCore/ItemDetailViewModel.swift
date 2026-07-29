@@ -377,21 +377,6 @@ public final class ItemDetailViewModel {
     /// Set once the live fetch publishes fresh detail, so a late snapshot restore
     /// never clobbers a fresher hero.
     @ObservationIgnored private var hasPaintedFreshDetail = false
-    /// Guards the one-time initial locality retarget in ``load()`` so it runs at
-    /// most once and can never override a later user server switch. Set the first
-    /// time `load()` evaluates the preference, and eagerly by ``switchToSource``
-    /// so an explicit pick is always authoritative.
-    @ObservationIgnored private var didApplyInitialLocalityPreference = false
-    /// Set once the user explicitly picks a server via ``switchToSource`` so the
-    /// automatic post-discovery locality retarget (``retargetToMostLocalSourceAfterDiscovery``)
-    /// can never override their choice.
-    private var userDidSwitchSource = false
-    /// Accounts already tried for the automatic "the selected server returned no
-    /// children — fail over to another server that hosts this title" recovery, so
-    /// a title present on two degraded servers can't ping-pong between them. Reset
-    /// on each fresh ``load`` (new open). Never engaged after an explicit
-    /// ``switchToSource`` (`userDidSwitchSource`), so it can't override a user pick.
-    private var childrenFailoverTriedAccounts: Set<String> = []
     /// Coalesces snapshot writes to AT MOST one in flight per view model: a burst
     /// of state changes (children arrive, episodes prewarm, cross-server discovery,
     /// alternate-source updates) used to each fire a full-snapshot encode+write,
@@ -583,14 +568,8 @@ public final class ItemDetailViewModel {
         enrichmentTask = nil
         crossServerDiscoveryTask?.cancel()
         crossServerDiscoveryTask = nil
-        // Fresh open: let the children-empty failover try each server once again.
-        childrenFailoverTriedAccounts = []
-
         hasPaintedFreshDetail = false
 
-        // A source-specific library is authoritative even when an aggregated or
-        // cached grid item happens to carry another server as its merge primary.
-        applyLibraryOriginPreferenceIfAvailable(in: initialSources)
         // A Plex watchlist / Discover open loads with a global Discover id even
         // though the identity index resolved the real library copy into
         // initialSources; adopt that library id up front so the fetches below run
@@ -598,12 +577,6 @@ public final class ItemDetailViewModel {
         // children). Handles the single-library-copy case that the multi-source
         // locality retarget below doesn't.
         adoptLibraryItemIDForActiveAccountIfNeeded()
-        // Before the very first fetch, retarget a cross-server-merged Home/Search
-        // open onto its most-local copy (see doc on the method): a SERIES loads
-        // its whole tree from ONE server and its per-server episodes can't
-        // cross-server re-select at play time, so the initial server MUST be the
-        // local one or every episode streams from a remote/Tailscale merge-primary.
-        applyInitialLocalityPreferenceIfNeeded()
         let loadProvider = activeProvider
         let loadItemID = activeItemID
         let loadAccountID = activeSourceAccountID
@@ -687,7 +660,12 @@ public final class ItemDetailViewModel {
                 // exactly as it already does for a seeded open — so an empty-children
                 // first paint is safe and never strands the season picker.
                 let seededChildren = state.value?.children ?? []
-                state = .loaded(Detail(item: taggedItem, children: seededChildren, childrenLoaded: state.value?.childrenLoaded ?? false))
+                state = .loaded(Detail(
+                    item: taggedItem,
+                    children: seededChildren,
+                    childrenLoaded: state.value?.childrenLoaded ?? false,
+                    upcomingSchedule: state.value?.upcomingSchedule
+                ))
                 hasPaintedFreshDetail = true
                 seedSources(from: taggedItem)
                 startStreamProbeEnrichment(
@@ -712,19 +690,17 @@ public final class ItemDetailViewModel {
                 let (fetchedChildren, resume) = await (childrenTask, resumeTask)
                 guard !Task.isCancelled, isCurrent() else { return }
                 serverResumeEpisode = resume
-                state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged), childrenLoaded: true))
+                state = .loaded(Detail(
+                    item: taggedItem,
+                    children: fetchedChildren.map(tagged),
+                    childrenLoaded: true,
+                    upcomingSchedule: state.value?.upcomingSchedule
+                ))
                 // Deliberately after the state publish: the schedule is decoration,
                 // and must never hold up the page. Cache read first (instant), then
                 // a background refresh that repaints only if it finds something new.
                 loadUpcomingSchedule(for: taggedItem)
                 loadRelatedTitles(for: taggedItem)
-                // The selected server returned nothing for a container title. If
-                // another known server hosts it, switch to that one in place (its
-                // reload takes over) rather than stranding an empty episode browser.
-                if fetchedChildren.isEmpty,
-                   await failoverIfChildrenMissing(currentAccount: loadAccountID) {
-                    return
-                }
                 persistSnapshot()
                 // Trailers + ratings ARE awaited: opening a detail deterministically
                 // populates its Trailer button and rating badges. Cancelled with
@@ -738,7 +714,12 @@ public final class ItemDetailViewModel {
                 // Leaf kinds (movie/episode/video): the hero IS the content, so
                 // publish it immediately, then load trailers/ratings off the
                 // critical path of first paint.
-                state = .loaded(Detail(item: taggedItem, children: [], childrenLoaded: true))
+                state = .loaded(Detail(
+                    item: taggedItem,
+                    children: [],
+                    childrenLoaded: true,
+                    upcomingSchedule: state.value?.upcomingSchedule
+                ))
                 hasPaintedFreshDetail = true
                 seedSources(from: taggedItem)
                 startStreamProbeEnrichment(
@@ -795,7 +776,12 @@ public final class ItemDetailViewModel {
         var updated = current
         updated.availability = availability
         updated.downloadProgress = downloadProgress
-        state = .loaded(Detail(item: updated, children: current.kind == .series ? (state.value?.children ?? []) : [], childrenLoaded: state.value?.childrenLoaded ?? true))
+        state = .loaded(Detail(
+            item: updated,
+            children: current.kind == .series ? (state.value?.children ?? []) : [],
+            childrenLoaded: state.value?.childrenLoaded ?? true,
+            upcomingSchedule: state.value?.upcomingSchedule
+        ))
     }
 
     /// Public entry so the detail view can poll a discovery title's live Seerr
@@ -1230,13 +1216,14 @@ public final class ItemDetailViewModel {
             children = []
         }
         guard !Task.isCancelled, isCurrent() else { return }
-        state = .loaded(Detail(item: tagged(item), children: children.map(tagged), childrenLoaded: true))
-        // Same failover as `load()`: if this (possibly just-switched) server also
-        // returned nothing for a container, try the next untried server in place.
-        if children.isEmpty,
-           await failoverIfChildrenMissing(currentAccount: account) {
-            return
-        }
+        let upcomingSchedule = state.value?.upcomingSchedule
+        state = .loaded(Detail(
+            item: tagged(item),
+            children: children.map(tagged),
+            childrenLoaded: true,
+            upcomingSchedule: upcomingSchedule
+        ))
+        loadUpcomingSchedule(for: item)
         startStreamProbeEnrichment(
             for: item,
             provider: provider,
@@ -1292,175 +1279,6 @@ public final class ItemDetailViewModel {
         activeItemID = librarySource.itemID
     }
 
-    /// Retargets the initial active server to the most-local copy of a
-    /// cross-server-merged title — **once**, before the first fetch.
-    ///
-    /// A movie re-selects its best (most-local) copy at play time via the picker
-    /// and `bestSourcePlayItem`, so its initial load server doesn't affect where
-    /// it plays. A **series** is different: the whole season/episode tree loads
-    /// from ONE server, and each per-server episode carries only its own single
-    /// source — so `bestSourcePlayItem` can't cross-server re-select at play time.
-    /// If the merge-primary happens to be a remote/Tailscale server, every episode
-    /// would then stream remotely even when a same-LAN copy exists. Picking the
-    /// local server up front fixes that (the picker still lets the user switch).
-    ///
-    /// Scope guards:
-    ///  * Only for titles opened from a cross-server-merged Home/Search row
-    ///    (`originSourceAccountID == nil`). A deliberate library-tile browse keeps
-    ///    that library's server.
-    ///  * Only when there's a real cross-server choice (`initialSources > 1`).
-    ///  * Runs at most once and is disabled by an explicit `switchToSource`, so it
-    ///    never fights a user's manual server pick.
-    ///
-    /// Locality is read LIVE from each source's provider (falling back to the
-    /// stored ref locality) so a network change since the card was built is
-    /// honored.
-    private func applyInitialLocalityPreferenceIfNeeded() {
-        guard !didApplyInitialLocalityPreference else { return }
-        // Only consume the one-shot once there's a REAL cross-server choice to
-        // evaluate. A Continue Watching / Home card commonly cold-loads with a
-        // single known source (its local twin isn't in the identity index yet), so
-        // burning the flag here would permanently disable the retarget — the
-        // deferred ``retargetToMostLocalSourceAfterDiscovery`` handles that case
-        // once discovery surfaces the twin.
-        guard originSourceAccountID == nil, initialSources.count > 1 else { return }
-        didApplyInitialLocalityPreference = true
-
-        let liveRanked = initialSources.map { source -> MediaSourceRef in
-            let provider = source.accountID == activeSourceAccountID
-                ? activeProvider
-                : alternateProviderResolver(source.accountID)
-            guard let locality = provider?.connectionLocality else { return source }
-            var copy = source
-            copy.locality = locality
-            return copy
-        }
-
-        guard let best = CrossSourceSelector.bestSelection(
-                  from: liveRanked,
-                  capabilities: .detected()
-              )?.source else { return }
-
-        // Adopt the best copy when it differs from the active target by EITHER
-        // account OR item id. The item-id check is what fixes a title opened from
-        // a Plex **watchlist** / Discover row: the active id is then a global
-        // Discover id, while the resolved library source on the SAME account
-        // carries the real library ratingKey. Without adopting that id,
-        // `children(of:)` runs on the Discover id and returns nothing (no
-        // episodes, no play target) even though the server is perfectly healthy.
-        guard best.accountID != activeSourceAccountID
-                || best.itemID != activeItemID else { return }
-
-        let bestProvider: (any MediaProvider)?
-        if best.accountID == activeSourceAccountID {
-            bestProvider = activeProvider
-        } else {
-            bestProvider = alternateProviderResolver(best.accountID)
-        }
-        guard let provider = bestProvider else { return }
-
-        invalidateSourceOperations()
-        activeProvider = provider
-        activeItemID = best.itemID
-        activeSourceAccountID = best.accountID
-    }
-
-    /// Retargets a merged grid item to the source-specific library that opened it.
-    /// The grid's merge primary is an implementation detail and may be a different
-    /// server; the library origin is the user's explicit navigation choice.
-    @discardableResult
-    private func applyLibraryOriginPreferenceIfAvailable(
-        in candidates: [MediaSourceRef]
-    ) -> Bool {
-        guard !userDidSwitchSource,
-              let originSourceAccountID,
-              activeSourceAccountID != originSourceAccountID,
-              let source = candidates.first(where: {
-                  $0.accountID == originSourceAccountID
-              }),
-              let provider = alternateProviderResolver(originSourceAccountID)
-        else { return false }
-
-        invalidateSourceOperations()
-        activeProvider = provider
-        activeItemID = source.itemID
-        activeSourceAccountID = originSourceAccountID
-        return true
-    }
-
-    /// Deferred twin of ``applyInitialLocalityPreferenceIfNeeded`` for the common
-    /// case where a title cold-loads with a SINGLE source and its preferred copy is
-    /// only discovered later (async cross-server discovery).
-    ///
-    /// The initial pass can only choose among the sources known at first paint. A
-    /// Continue Watching / Home card usually has just one source then (the identity
-    /// index hasn't surfaced the same-LAN twin yet), so it correctly does nothing.
-    /// When discovery later folds in a more-local twin we must still route the
-    /// series there — otherwise every episode streams from the original (possibly
-    /// remote/Tailscale) server for the whole session, because a series loads its
-    /// episode tree from ONE server and per-server episodes can't cross-server
-    /// re-select at play time (see ``applyInitialLocalityPreferenceIfNeeded``). This
-    /// also refreshes the retarget against LIVE locality, so it doubles as the
-    /// detail page's fix for a stale synchronous locality read.
-    ///
-    /// Movies also retarget now that provider-specific delayed enrichment updates
-    /// their detail badges; the picker must never highlight one server while the
-    /// detail model remains loaded from another. Never overrides an explicit user
-    /// pick (``switchToSource``) or an origin-pinned detail page. Returns `true`
-    /// when it retargeted.
-    @discardableResult
-    private func retargetToMostLocalSourceAfterDiscovery(kind: MediaItemKind) async -> Bool {
-        guard kind == .series || kind == .movie || kind == .episode || kind == .video,
-              originSourceAccountID == nil,
-              !userDidSwitchSource,
-              sources.count > 1 else { return false }
-
-        let liveRanked = sources.map { source -> MediaSourceRef in
-            let provider = source.accountID == activeSourceAccountID
-                ? activeProvider
-                : alternateProviderResolver(source.accountID)
-            guard let locality = provider?.connectionLocality else { return source }
-            var copy = source
-            copy.locality = locality
-            return copy
-        }
-
-        guard let best = CrossSourceSelector.bestSelection(
-                  from: liveRanked,
-                  capabilities: .detected()
-              )?.source,
-              best.accountID != activeSourceAccountID,
-              let provider = alternateProviderResolver(best.accountID) else { return false }
-
-        // Deliberately DO NOT call `suspendEnrichment()` here: this runs inside
-        // `crossServerDiscoveryTask` (via the awaited `applyDiscoveredSources`), and
-        // suspend cancels that task — which would also cancel THIS task and make the
-        // `reload()` below bail on its `Task.isCancelled` checks, painting nothing.
-        // Stop only the per-server speculative enrichment now pointed at the wrong
-        // server; the discovery task itself is already finishing.
-        enrichmentTask?.cancel(); enrichmentTask = nil
-        alternateSourceEnrichmentTask?.cancel(); alternateSourceEnrichmentTask = nil
-
-        invalidateSourceOperations()
-        activeProvider = provider
-        activeItemID = best.itemID
-        activeSourceAccountID = best.accountID
-
-        seasonLoadingSuspended = true
-        seasonLoadingResumeSourceGeneration = sourceGeneration
-        cancelSeasonLoads()
-        seasonEpisodes = [:]
-        seasonLoadFailures = []
-        snapshotRestoredSeasonIDs = []
-        preselectedSeasonID = nil
-
-        await reload()
-        // Re-establish alternate-version enrichment against the NEW active server so
-        // the picker's other servers still fill in their real versions.
-        startAlternateSourceEnrichment(primaryID: best.itemID)
-        return true
-    }
-
     /// Switches the page to another server's copy of this title IN PLACE — without
     /// pushing a navigation entry — and reloads that server's children/episodes.
     ///
@@ -1477,12 +1295,6 @@ public final class ItemDetailViewModel {
         guard accountID != activeSourceAccountID,
               let source = sources.first(where: { $0.accountID == accountID }),
               let provider = alternateProviderResolver(accountID) else { return }
-
-        // An explicit user pick is authoritative — never let a subsequent
-        // `load()` re-apply the automatic initial locality preference, nor the
-        // post-discovery locality retarget, over it.
-        didApplyInitialLocalityPreference = true
-        userDidSwitchSource = true
 
         // Stop the old server's speculative enrichment so it can't clobber the new
         // server's source list after the switch.
@@ -1533,34 +1345,6 @@ public final class ItemDetailViewModel {
         }
     }
 
-    /// When the automatically-selected server returns NO children for a container
-    /// title that other servers also host, that server is almost certainly
-    /// degraded (offline library, stale id). Probe the other known sources and, if
-    /// one actually has children, switch to it in place so episodes load from a
-    /// working server instead of stranding the page. Returns `true` when it
-    /// switched (the caller should stop — ``switchToSource``'s reload takes over).
-    ///
-    /// Never runs after an explicit user pick (`userDidSwitchSource`) — the user's
-    /// choice is authoritative even if it's the empty one — and each server is
-    /// tried at most once per open, so two degraded servers can't ping-pong.
-    private func failoverIfChildrenMissing(currentAccount: String?) async -> Bool {
-        guard !userDidSwitchSource else { return false }
-        if let currentAccount { childrenFailoverTriedAccounts.insert(currentAccount) }
-        let candidates = sources.filter {
-            $0.accountID != currentAccount
-                && !childrenFailoverTriedAccounts.contains($0.accountID)
-        }
-        for candidate in candidates {
-            childrenFailoverTriedAccounts.insert(candidate.accountID)
-            guard let provider = alternateProviderResolver(candidate.accountID) else { continue }
-            let probe = await fetchChildren(provider, of: candidate.itemID)
-            guard !probe.isEmpty else { continue }
-            await switchToSource(accountID: candidate.accountID)
-            return true
-        }
-        return false
-    }
-
     /// Asks the server which episode of this series to resume, via the same
     /// Continue Watching feed the Home rail is built from.
     ///
@@ -1606,6 +1390,7 @@ public final class ItemDetailViewModel {
         guard var detail = state.value, detail.upcomingSchedule != record else { return }
         detail.upcomingSchedule = record
         state = .loaded(detail)
+        persistSnapshot()
     }
 
     private func fetchServerResumeEpisode(
@@ -1825,7 +1610,12 @@ public final class ItemDetailViewModel {
         // A snapshot's children are a COMPLETED fetch persisted from a prior visit,
         // so mark them loaded — otherwise a revisited folder would flash its
         // loading placeholder (and, worse, never distinguish empty-from-loading).
-        state = .loaded(Detail(item: item, children: snapshot.children.map(tagged), childrenLoaded: true))
+        state = .loaded(Detail(
+            item: item,
+            children: snapshot.children.map(tagged),
+            childrenLoaded: true,
+            upcomingSchedule: snapshot.upcomingSchedule
+        ))
         if !snapshot.seasonEpisodes.isEmpty {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
             snapshotRestoredSeasonIDs.formUnion(snapshot.seasonEpisodes.keys)
@@ -1867,7 +1657,17 @@ public final class ItemDetailViewModel {
             }
         }
         if let detail = state.value, detail.children.isEmpty, !snapshot.children.isEmpty {
-            state = .loaded(Detail(item: detail.item, children: snapshot.children.map(tagged), childrenLoaded: true))
+            state = .loaded(Detail(
+                item: detail.item,
+                children: snapshot.children.map(tagged),
+                childrenLoaded: true,
+                upcomingSchedule: detail.upcomingSchedule ?? snapshot.upcomingSchedule
+            ))
+        } else if var detail = state.value,
+                  detail.upcomingSchedule == nil,
+                  let upcomingSchedule = snapshot.upcomingSchedule {
+            detail.upcomingSchedule = upcomingSchedule
+            state = .loaded(detail)
         }
         if seasonEpisodes.isEmpty, !snapshot.seasonEpisodes.isEmpty {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
@@ -1895,7 +1695,8 @@ public final class ItemDetailViewModel {
             item: detail.item,
             children: detail.children,
             seasonEpisodes: seasonEpisodes,
-            sources: sources
+            sources: sources,
+            upcomingSchedule: detail.upcomingSchedule
         )
         let key = snapshotKey
         let cache = snapshotCache
@@ -2190,18 +1991,8 @@ public final class ItemDetailViewModel {
             applyUnifiedWatchState()
             persistSnapshot()
         }
-        // A library-origin copy that was not present at first paint can arrive from
-        // async discovery. Prefer it before any Home/Search locality routing.
-        if applyLibraryOriginPreferenceIfAvailable(in: result) {
-            await reload()
-            startAlternateSourceEnrichment(primaryID: activeItemID)
-            return
-        }
-        // If discovery surfaced a preferred copy, route there now so the detail
-        // provider matches the server highlighted by the picker. The reload inside
-        // re-drives detail and re-establishes alternate enrichment for the new
-        // active server, so return before kicking the old server's pass.
-        if await retargetToMostLocalSourceAfterDiscovery(kind: primary.kind) { return }
+        // Discovery enriches the picker only. The visible page never changes server
+        // after arrival; only an explicit user selection may call switchToSource.
         startAlternateSourceEnrichment(primaryID: primary.id)
     }
 

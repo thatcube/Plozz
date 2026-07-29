@@ -41,6 +41,7 @@ public final class DetailSnapshotCache: Sendable {
         public var children: [MediaItem]
         public var seasonEpisodes: [String: [MediaItem]]
         public var sources: [MediaSourceRef]
+        public var upcomingSchedule: SeriesScheduleRecord?
         public var savedAt: Date
 
         public init(
@@ -48,12 +49,14 @@ public final class DetailSnapshotCache: Sendable {
             children: [MediaItem],
             seasonEpisodes: [String: [MediaItem]] = [:],
             sources: [MediaSourceRef] = [],
+            upcomingSchedule: SeriesScheduleRecord? = nil,
             savedAt: Date = Date()
         ) {
             self.item = item
             self.children = children
             self.seasonEpisodes = seasonEpisodes
             self.sources = sources
+            self.upcomingSchedule = upcomingSchedule
             self.savedAt = savedAt
         }
     }
@@ -80,11 +83,13 @@ public final class DetailSnapshotCache: Sendable {
     /// v6: Plex episodes cached before the `posterURL` fix hold the SHOW's poster
     /// where the episode's own still belongs, so a series page kept serving series
     /// artwork from cache while a freshly-fetched episode page looked right.
+    /// v7 persists the upcoming schedule with the rest of the series page so a
+    /// revisit or explicit server switch cannot temporarily erase it.
     ///
     /// Exposed (not private) so tests assert against this single source of truth
     /// rather than repeating the literal: a duplicated copy silently goes stale on
     /// the next bump, which is exactly how a bump once broke the suite.
-    static let schemaDirName = "plozz-detail-cache-v6"
+    static let schemaDirName = "plozz-detail-cache-v7"
     private static let schemaDirPrefix = "plozz-detail-cache"
     private static let defaultScopeComponent = "default"
 

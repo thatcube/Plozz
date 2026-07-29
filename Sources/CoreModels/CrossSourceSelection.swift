@@ -29,12 +29,14 @@ public struct CrossSourceSelection: Sendable, Hashable {
 ///    better default than a remote 4K that buffers over a relay. Sources of
 ///    unknown locality sit between known-local and known-remote so an
 ///    unclassifiable host never loses to a known-remote server.
-/// 1. **Known native compatibility** — a version whose flattened facts fit the
+/// 1. **Managed server before file share** — within the same locality tier,
+///    Plex/Emby/Jellyfin provide the richer and more reliable series page.
+/// 2. **Known native compatibility** — a version whose flattened facts fit the
 ///    native profile beats one that does not. This is only an ordering hint.
-/// 2. **Known beats unknown** — a source whose versions are loaded beats one
+/// 3. **Known beats unknown** — a source whose versions are loaded beats one
 ///    whose file list hasn't been fetched yet.
-/// 3. **Higher quality** — `qualityScore` (resolution → HDR → bitrate).
-/// 4. **Primary first** — stable tie-break so a file mirrored identically on two
+/// 4. **Higher quality** — `qualityScore` (resolution → HDR → bitrate).
+/// 5. **Primary first** — stable tie-break so a file mirrored identically on two
 ///    servers deterministically resolves to the primary source.
 public enum CrossSourceSelector {
     private struct Candidate {
@@ -63,9 +65,9 @@ public enum CrossSourceSelector {
     /// The default server+version to play across `sources`, or `nil` when empty.
     ///
     /// `preferring` is a **soft** origin/library hint used only as the *last*
-    /// tie-break (after locality, Direct-Play, known-versions and quality): when
-    /// the item was opened from a particular server's library tile, that server
-    /// wins **only** among otherwise-equal candidates. It never overrides
+    /// tie-break (after locality, provider tier, Direct Play, known versions, and
+    /// quality): when the item was opened from a particular server's library tile,
+    /// that server wins **only** among otherwise-equal candidates. It never overrides
     /// locality — a local copy still beats a remote/Tailscale origin — so the
     /// "play from the closest server" guarantee holds while a genuine tie
     /// resolves to the browsed library deterministically.
@@ -114,17 +116,12 @@ public enum CrossSourceSelector {
 
         let winner = candidates.max { lhs, rhs in
             if lhs.localityRank != rhs.localityRank { return lhs.localityRank < rhs.localityRank }
+            if lhs.richnessRank != rhs.richnessRank { return lhs.richnessRank < rhs.richnessRank }
             if lhs.nativeCompatible != rhs.nativeCompatible {
                 return !lhs.nativeCompatible && rhs.nativeCompatible
             }
             if lhs.hasVersions != rhs.hasVersions { return !lhs.hasVersions && rhs.hasVersions }
             if lhs.qualityScore != rhs.qualityScore { return lhs.qualityScore < rhs.qualityScore }
-            // A managed server outranks a plain file share when everything above is
-            // equal. Both copies play identically; the server's is the better *page*
-            // — it has cast, canonical titles and curated artwork, where a share has
-            // whatever Plozz could synthesise from filenames. Silo opened from a
-            // share showed no cast at all while the Plex copy had 163 people.
-            if lhs.richnessRank != rhs.richnessRank { return lhs.richnessRank < rhs.richnessRank }
             // Soft origin/library preference: only breaks an otherwise-exact tie.
             if lhs.isPreferred != rhs.isPreferred { return !lhs.isPreferred && rhs.isPreferred }
             // Lower order (primary) should win the tie → it must be the "max".

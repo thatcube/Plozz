@@ -98,21 +98,35 @@ public struct DetailOpenEnvironment {
     /// identity-index enrichment above resolves to its real library copies so the
     /// server picker and episodes work.
     ///
-    /// - Parameter libraryOrigin: pins the default source to a library the user
-    ///   browsed from; `nil` for merged Home/Search/watchlist rows (which keep the
-    ///   smart best-source default).
+    /// - Parameter libraryOrigin: soft tie-break for otherwise-equivalent sources;
+    ///   locality and managed-server priority remain authoritative.
     public func makeViewModel(for item: MediaItem, libraryOrigin: String?) -> ItemDetailViewModel {
         let isDiscovery = item.isNotInLibraryDiscovery
+        let sources = initialSources(for: item, isDiscovery: isDiscovery).map { source in
+            guard let locality = resolveOptionalProvider(source.accountID)?.connectionLocality
+            else { return source }
+            var liveSource = source
+            liveSource.locality = locality
+            return liveSource
+        }
+        let selectedSource = isDiscovery
+            ? nil
+            : CrossSourceSelector.bestSelection(
+                from: sources,
+                capabilities: .detected(),
+                preferring: libraryOrigin
+            )?.source
+        let selectedItem = selectedSource.map { item.selectingSource($0) } ?? item
         return ItemDetailViewModel(
-            provider: resolveProvider(item.sourceAccountID),
-            itemID: item.id,
-            initialItem: item,
+            provider: resolveProvider(selectedSource?.accountID ?? item.sourceAccountID),
+            itemID: selectedSource?.itemID ?? item.id,
+            initialItem: selectedItem,
             isDiscoveryItem: isDiscovery,
             discoveryStatusRefresh: discoveryStatusRefresh,
             ratingsProvider: ratingsProvider,
-            sourceAccountID: item.sourceAccountID,
+            sourceAccountID: selectedSource?.accountID ?? item.sourceAccountID,
             originSourceAccountID: libraryOrigin,
-            initialSources: initialSources(for: item, isDiscovery: isDiscovery),
+            initialSources: sources,
             alternateProviderResolver: resolveOptionalProvider,
             crossServerSourceResolver: isDiscovery ? nil : crossServerSourceResolver,
             relatedTitlesLoader: makeRelatedTitlesLoader?(),
@@ -123,8 +137,8 @@ public struct DetailOpenEnvironment {
     /// Build the detail view model for a series opened via an episode/season
     /// context: the fronted page IS the series, and the tapped child seeds the
     /// hero for instant first paint. No `initialSources` enrichment — the
-    /// cross-server resolver fills the picker once the page settles, exactly as a
-    /// directly-opened series does.
+    /// cross-server resolver fills the picker once the page settles, without ever
+    /// switching the already-visible page automatically.
     public func makeSeriesContextViewModel(
         seriesID: String,
         seed: MediaItem,

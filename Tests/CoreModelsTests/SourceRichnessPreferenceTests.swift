@@ -109,6 +109,26 @@ final class SourceRichnessPreferenceTests: XCTestCase {
         )
         XCTAssertEqual(selection?.source.accountID, "plex")
     }
+
+    func testAtEqualLocalityManagedServerOutranksHigherQualityShare() {
+        let share4K = source(
+            "share",
+            kind: .mediaShare,
+            locality: .local,
+            versions: [MediaVersion(id: "share-4k", height: 2160)]
+        )
+        let plex1080 = source(
+            "plex",
+            kind: .plex,
+            locality: .local,
+            versions: [MediaVersion(id: "plex-1080", height: 1080)]
+        )
+        let selection = CrossSourceSelector.bestSelection(
+            from: [share4K, plex1080],
+            capabilities: MediaCapabilities()
+        )
+        XCTAssertEqual(selection?.source.accountID, "plex")
+    }
     // MARK: Ids survive whichever copy wins
 
     func testEveryMembersIDsSurviveWhenALaterCopyFronts() {

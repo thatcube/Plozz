@@ -208,22 +208,32 @@ private struct PlozziOSCanonicalItemDetailView: View {
         } else {
             discoveryStatusRefresh = nil
         }
-        let initialSources = DetailOpenEnvironment.initialSources(
+        let selection = DetailOpenEnvironment.initialSourceSelection(
             for: item,
             isDiscovery: isDiscoveryItem,
-            identitySources: appModel.identityIndex.identitySourcesProvider
+            libraryOrigin: originSourceAccountID,
+            identitySources: appModel.identityIndex.identitySourcesProvider,
+            sourceLocality: {
+                appModel.accountsProviders.provider(forAccountID: $0)?.connectionLocality
+            }
         )
+        let initialSources = selection.sources
+        let selectedSource = selection.selected
+        let selectedItem = selectedSource.map { item.selectingSource($0) } ?? item
+        let selectedProvider = selectedSource.flatMap {
+            appModel.accountsProviders.provider(forAccountID: $0.accountID)
+        } ?? provider
         self.initialSources = initialSources
         let accounts = appModel.accountsProviders.homeAccounts
         let identitySources = appModel.identityIndex.identitySourcesProvider
         _viewModel = State(
             initialValue: ItemDetailViewModel(
-                provider: provider,
-                itemID: item.id,
-                initialItem: item,
+                provider: selectedProvider,
+                itemID: selectedSource?.itemID ?? item.id,
+                initialItem: selectedItem,
                 isDiscoveryItem: isDiscoveryItem,
                 discoveryStatusRefresh: discoveryStatusRefresh,
-                sourceAccountID: item.sourceAccountID,
+                sourceAccountID: selectedSource?.accountID ?? item.sourceAccountID,
                 originSourceAccountID: originSourceAccountID,
                 initialSources: initialSources,
                 alternateProviderResolver: { accountID in

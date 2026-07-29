@@ -93,6 +93,36 @@ public struct DetailOpenEnvironment {
         )
     }
 
+    /// Resolves the complete source set and chooses the page's server before a
+    /// detail model exists. Shared by tvOS and iOS so neither platform can fall
+    /// back to post-arrival retargeting.
+    public static func initialSourceSelection(
+        for item: MediaItem,
+        isDiscovery: Bool,
+        libraryOrigin: String?,
+        identitySources: (MediaItem) -> [MediaSourceRef],
+        sourceLocality: (String) -> SourceLocality?
+    ) -> (sources: [MediaSourceRef], selected: MediaSourceRef?) {
+        let sources = initialSources(
+            for: item,
+            isDiscovery: isDiscovery,
+            identitySources: identitySources
+        ).map { source in
+            guard let locality = sourceLocality(source.accountID) else { return source }
+            var liveSource = source
+            liveSource.locality = locality
+            return liveSource
+        }
+        let selected = isDiscovery
+            ? nil
+            : CrossSourceSelector.bestSelection(
+                from: sources,
+                capabilities: .detected(),
+                preferring: libraryOrigin
+            )?.source
+        return (sources, selected)
+    }
+
     /// Build the detail view model for a tapped movie or series — including a Plex
     /// **watchlist** / Discover title (empty `sources`, Discover id), which the
     /// identity-index enrichment above resolves to its real library copies so the
@@ -102,20 +132,17 @@ public struct DetailOpenEnvironment {
     ///   locality and managed-server priority remain authoritative.
     public func makeViewModel(for item: MediaItem, libraryOrigin: String?) -> ItemDetailViewModel {
         let isDiscovery = item.isNotInLibraryDiscovery
-        let sources = initialSources(for: item, isDiscovery: isDiscovery).map { source in
-            guard let locality = resolveOptionalProvider(source.accountID)?.connectionLocality
-            else { return source }
-            var liveSource = source
-            liveSource.locality = locality
-            return liveSource
-        }
-        let selectedSource = isDiscovery
-            ? nil
-            : CrossSourceSelector.bestSelection(
-                from: sources,
-                capabilities: .detected(),
-                preferring: libraryOrigin
-            )?.source
+        let selection = Self.initialSourceSelection(
+            for: item,
+            isDiscovery: isDiscovery,
+            libraryOrigin: libraryOrigin,
+            identitySources: identitySources,
+            sourceLocality: {
+                resolveOptionalProvider($0)?.connectionLocality
+            }
+        )
+        let sources = selection.sources
+        let selectedSource = selection.selected
         let selectedItem = selectedSource.map { item.selectingSource($0) } ?? item
         return ItemDetailViewModel(
             provider: resolveProvider(selectedSource?.accountID ?? item.sourceAccountID),

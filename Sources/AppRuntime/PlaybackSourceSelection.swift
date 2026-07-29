@@ -2,6 +2,22 @@ import Foundation
 import CoreModels
 
 public enum PlaybackSourceSelection {
+    /// Permanent, opt-in tracing of every playback routing decision
+    /// (`PLOZZ_TRACE_SOURCE=1`).
+    ///
+    /// Not scaffolding. Cross-server routing depends on the identity index, live
+    /// locality and the merge all agreeing, and when the wrong server plays there
+    /// is nothing on screen to say why — the app just streams from somewhere
+    /// unexpected. Diagnosing that without this means a rebuild and a redeploy
+    /// before the first question can even be asked.
+    private static let tracesRouting =
+        ProcessInfo.processInfo.environment["PLOZZ_TRACE_SOURCE"] == "1"
+
+    private static func trace(_ message: @autoclosure () -> String) {
+        guard tracesRouting else { return }
+        print("PLZSRC " + message())
+    }
+
     public static func bestPlayItem(
         _ item: MediaItem,
         accounts: [ResolvedAccount],
@@ -63,6 +79,7 @@ public enum PlaybackSourceSelection {
         if item.explicitSourceSelection,
            let picked = item.selectedSourceAccountID,
            liveSources.contains(where: { $0.accountID == picked }) {
+            trace("  KEPT explicit pick acct=\(picked.prefix(10))")
             return item
         }
 
@@ -85,6 +102,20 @@ public enum PlaybackSourceSelection {
         // equal candidates. An explicit user pick has already returned above, so
         // this can never override a deliberate choice.
         let hasCrossServerChoice = Set(liveSources.map(\.accountID)).count > 1
+        if tracesRouting {
+            let describe: (MediaSourceRef) -> String = { source in
+                let kind = source.providerKind.map(String.init(describing:)) ?? "?"
+                let locality = source.locality.map(String.init(describing:)) ?? "nil"
+                return "[\(kind) acct=\(source.accountID.prefix(10)) item=\(source.itemID) loc=\(locality)]"
+            }
+            trace(
+                "route \(item.title) id=\(item.id) kind=\(item.kind) origin=\(item.sourceAccountID ?? "nil") "
+                    + "own=\(item.sources.count) identity=\(identitySources(item).count) live=\(liveSources.count) "
+                    + "ids=\(item.providerIDs.keys.sorted().joined(separator: ",")) "
+                    + "primaryPlayable=\(primaryIsPlayable) crossChoice=\(hasCrossServerChoice)"
+            )
+            trace("  live: \(liveSources.map(describe).joined(separator: " "))")
+        }
         if !liveSources.isEmpty, !primaryIsPlayable || hasCrossServerChoice {
             let selection = CrossSourceSelector.bestSelection(
                 from: liveSources,
@@ -92,6 +123,7 @@ public enum PlaybackSourceSelection {
                 preferring: item.sourceAccountID
             )
             let target = selection?.source ?? liveSources[0]
+            trace("  CHOSE acct=\(target.accountID.prefix(10)) item=\(target.itemID)")
             return MediaItem.retargetedForPlayback(
                 item: item,
                 sources: liveSources,
@@ -117,6 +149,7 @@ public enum PlaybackSourceSelection {
                     versionID: nil
                 )
             }
+            trace("  UNCHANGED — nothing better to route to")
             return item
         }
 

@@ -281,14 +281,32 @@ final class SeriesUpcomingTests: XCTestCase {
         )
     }
 
-    func testTreatsAMultiEpisodePremiereFollowedByWeeklyAsANewSeason() {
-        // Percy Jackson opens with two episodes on one day, then goes weekly. The
-        // ongoing cadence is what matters after opening night.
-        var run = [
-            upcoming(season: 3, episode: 1, daysFromNow: 40),
-            upcoming(season: 3, episode: 2, daysFromNow: 40),
-        ]
-        run += (3...8).map { upcoming(season: 3, episode: $0, daysFromNow: 40 + ($0 - 2) * 7) }
+    func testNamesHowManyEpisodesAStaggeredPremiereOpensWith() {
+        // Reacher opens with three episodes on one day, then goes weekly. "New
+        // season Aug 12" hides the part the viewer actually wants to know, and it
+        // isn't a full-season drop either, so it says what lands that day.
+        var run = (1...3).map { upcoming(season: 4, episode: $0, daysFromNow: 40) }
+        run += (4...8).map { upcoming(season: 4, episode: $0, daysFromNow: 40 + ($0 - 3) * 7) }
+        let line = SeriesUpcoming.heroLine(
+            nextEpisode: run[0],
+            cadence: nil,
+            schedule: run,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(english(line)?.hasPrefix("First 3 episodes"), true)
+    }
+
+    func testStillNamesAFullSeasonDropRatherThanCountingItsEpisodes() {
+        // Every episode shares the premiere date, so there is no "first N" to
+        // distinguish — that reads as a whole season landing at once.
+        let batch = (1...8).map { upcoming(season: 7, episode: $0, daysFromNow: 40) }
+        XCTAssertNil(SeriesUpcoming.premiereBatchCount(batch, premiere: batch[0], calendar: calendar))
+    }
+
+    func testLeavesALonePremiereAsANewSeason() {
+        // One episode on opening day and the rest weekly is an ordinary premiere.
+        let run = (1...8).map { upcoming(season: 5, episode: $0, daysFromNow: 40 + ($0 - 1) * 7) }
         let line = SeriesUpcoming.heroLine(
             nextEpisode: run[0],
             cadence: nil,

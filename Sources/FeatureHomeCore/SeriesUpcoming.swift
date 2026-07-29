@@ -142,6 +142,23 @@ public enum SeriesUpcoming {
             return "Full season releases \(nextEpisode.airDate, format: .dateTime.month(.abbreviated).day().year())"
         }
 
+        // A staggered premiere — several episodes at once, then the rest spread out
+        // — is neither a full-season drop nor an ordinary single-episode premiere,
+        // and "New season Aug 12" hides the very thing the viewer wants to know.
+        // Leads with what actually lands that day. Same "releases, never available"
+        // reasoning as above applies, so no verb promises anything about their
+        // library.
+        if isSeasonPremiere,
+           let batch = premiereBatchCount(schedule, premiere: nextEpisode) {
+            let sameYear =
+                calendar.component(.year, from: nextEpisode.airDate)
+                == calendar.component(.year, from: now)
+            if sameYear {
+                return "First \(batch) episodes \(nextEpisode.airDate, format: .dateTime.month(.abbreviated).day())"
+            }
+            return "First \(batch) episodes \(nextEpisode.airDate, format: .dateTime.month(.abbreviated).day().year())"
+        }
+
         // "every Friday" is a claim about the *future*, so it is only made when the
         // dated episodes prove it: consecutive upcoming episodes exactly a week
         // apart. A provider's stated airing day describes intent and survives a
@@ -250,6 +267,26 @@ public enum SeriesUpcoming {
     /// opens with S3E1 and S3E2 on one day, then goes weekly) is deliberately not
     /// counted — the ongoing cadence is what matters after opening night, so it
     /// keeps the "New season" phrasing.
+    /// How many episodes land WITH the premiere when the season is staggered:
+    /// several on opening day and the rest later. `nil` for a lone premiere or a
+    /// whole season arriving at once — both of which read better as themselves.
+    ///
+    /// Counts only episodes we have dates for, so a partially-dated season can
+    /// never inflate the number.
+    static func premiereBatchCount(
+        _ schedule: [UpcomingEpisode],
+        premiere: UpcomingEpisode,
+        calendar: Calendar = .current
+    ) -> Int? {
+        let season = schedule.filter { $0.seasonNumber == premiere.seasonNumber }
+        let premiereDay = calendar.startOfDay(for: premiere.airDate)
+        let sameDay = season.filter {
+            calendar.startOfDay(for: $0.airDate) == premiereDay
+        }
+        guard sameDay.count > 1, sameDay.count < season.count else { return nil }
+        return sameDay.count
+    }
+
     static func isFullSeasonDrop(_ schedule: [UpcomingEpisode], premiere: UpcomingEpisode) -> Bool {
         let season = schedule.filter { $0.seasonNumber == premiere.seasonNumber }
         guard season.count > 1 else { return false }

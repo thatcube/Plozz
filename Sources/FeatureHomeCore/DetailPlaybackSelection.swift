@@ -60,10 +60,23 @@ public enum DetailPlaybackSelection {
             return versionOverride
         }
         let key = versionPreferenceKey(for: item)
-        // An exact file id first: for a movie you return to, that IS the choice.
-        let remembered = preferences.preferredVersionID(forTitle: key)
-        if let remembered, versions.contains(where: { $0.id == remembered }) {
-            return remembered
+        // An exact file id, but ONLY for a title whose key is its own — a movie
+        // you return to, where that id IS the choice.
+        //
+        // Deliberately skipped for an episode. Its key is the SERIES', so the id
+        // stored there is one episode's file: replaying that episode matched the
+        // id and returned it, while every other episode fell through to the shape
+        // below. One episode played the old pick forever and the rest played the
+        // remembered kind — the same show behaving two different ways depending
+        // on which episode you happened to have chosen from.
+        //
+        // A file id cannot express "play this show like that", so for a series it
+        // is not consulted at all; the descriptor is the only honest answer.
+        if item.seriesID == nil {
+            let remembered = preferences.preferredVersionID(forTitle: key)
+            if let remembered, versions.contains(where: { $0.id == remembered }) {
+                return remembered
+            }
         }
         // Otherwise the remembered SHAPE. This is what carries a choice across a
         // series: every episode's files have their own provider ids, so the id

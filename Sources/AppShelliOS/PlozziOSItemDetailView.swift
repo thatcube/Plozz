@@ -1240,6 +1240,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
     @State private var isDownloadingSeason = false
     @State private var seasonDownloadError: String?
     @State private var seasonDownloadPrompt: PlozziOSSeasonDownloadPrompt?
+    @State private var railTargetID: String?
     /// The season the resting target was settled from, so browsing elsewhere
     /// leaves the hero where the viewer actually is.
     @State private var resolvedSeasonID: String?
@@ -1293,6 +1294,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
                 seasons: seasons
             )
         )
+        _railTargetID = State(initialValue: initialEpisode?.id)
     }
 
     var body: some View {
@@ -1357,10 +1359,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
                     isLoading: !seasons.isEmpty
                         && selectedSeasonID != nil
                         && displayedEpisodes == nil,
-                    currentEpisodeID: SeriesEpisodeEntry.episode(
-                        matching: initialEpisode,
-                        in: displayedEpisodes ?? []
-                    )?.id,
+                    currentEpisodeID: railTargetID,
                     onPlay: onPlay
                 )
             }
@@ -1368,7 +1367,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
                 if selectedSeasonID == nil
                     || !ids.contains(selectedSeasonID ?? "") {
                     selectedSeasonID = SeriesEpisodeEntry.seasonID(
-                        initialEpisode: initialEpisode,
+                        initialEpisode: initialEpisode ?? viewModel.serverResumeEpisode,
                         initialSeasonID: nil,
                         seasons: seasons
                     )
@@ -1380,6 +1379,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
                 // since none of those episode ids exist here.
                 if !ids.contains(resolvedSeasonID ?? "") {
                     resolvedSeasonID = nil
+                    railTargetID = nil
                 }
             }
             .task(id: selectedSeasonID) {
@@ -1563,6 +1563,7 @@ private struct PlozziOSInlineSeriesBrowser: View {
             in: displayedEpisodes
         ) {
             resolvedSeasonID = selectedSeasonID
+            railTargetID = loaded.id
             onPlayTargetChange(loaded)
             onHeroShowsSeriesChange(false)
             return
@@ -1577,11 +1578,11 @@ private struct PlozziOSInlineSeriesBrowser: View {
         // Both "never started" and "finished" mean start from the beginning, so
         // Play takes the first episode rather than `nextUp`, which returns the
         // finale once everything is played.
-        onPlayTargetChange(
-            hasResumePoint
-                ? SeriesResume.nextUp(in: displayedEpisodes)
-                : displayedEpisodes.first
-        )
+        let target = hasResumePoint
+            ? SeriesResume.nextUp(in: displayedEpisodes)
+            : displayedEpisodes.first
+        railTargetID = target?.id
+        onPlayTargetChange(target)
         onHeroShowsSeriesChange(!hasResumePoint)
     }
 }
@@ -1680,10 +1681,24 @@ private struct PlozziOSSeasonButton: View {
 
 private struct PlozziOSInlineEpisodeRail: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var scrollPositionID: String?
     let episodes: [MediaItem]?
     let isLoading: Bool
     var currentEpisodeID: String? = nil
     let onPlay: (MediaItem, Bool) -> Void
+
+    init(
+        episodes: [MediaItem]?,
+        isLoading: Bool,
+        currentEpisodeID: String? = nil,
+        onPlay: @escaping (MediaItem, Bool) -> Void
+    ) {
+        self.episodes = episodes
+        self.isLoading = isLoading
+        self.currentEpisodeID = currentEpisodeID
+        self.onPlay = onPlay
+        _scrollPositionID = State(initialValue: currentEpisodeID)
+    }
 
     var body: some View {
         if isLoading {
@@ -1695,35 +1710,33 @@ private struct PlozziOSInlineEpisodeRail: View {
             )
             .frame(minHeight: 180)
         } else if let episodes {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    LazyHStack(alignment: .top, spacing: 14) {
-                        ForEach(episodes) { episode in
-                            PlozziOSInlineEpisodeEntry(
-                                episode: episode,
-                                episodes: episodes,
-                                onPlay: onPlay
-                            )
-                            .id(episode.id)
-                        }
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 14) {
+                    ForEach(episodes) { episode in
+                        PlozziOSInlineEpisodeEntry(
+                            episode: episode,
+                            episodes: episodes,
+                            onPlay: onPlay
+                        )
+                        .id(episode.id)
                     }
-                    .scrollTargetLayout()
                 }
-                .scrollTargetBehavior(.viewAligned(limitBehavior: .never))
-                .contentMargins(
-                    .horizontal,
-                    PlozziOSPageLayout.horizontalInset(
-                        for: horizontalSizeClass
-                    ),
-                    for: .scrollContent
-                )
-                .scrollIndicators(.hidden)
-                .scrollClipDisabled()
-                .task(id: currentEpisodeID) {
-                    guard let currentEpisodeID else { return }
-                    await Task.yield()
-                    proxy.scrollTo(currentEpisodeID, anchor: .leading)
-                }
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.viewAligned(limitBehavior: .never))
+            .scrollPosition(id: $scrollPositionID, anchor: .leading)
+            .contentMargins(
+                .horizontal,
+                PlozziOSPageLayout.horizontalInset(
+                    for: horizontalSizeClass
+                ),
+                for: .scrollContent
+            )
+            .scrollIndicators(.hidden)
+            .scrollClipDisabled()
+            .onChange(of: currentEpisodeID, initial: true) { _, target in
+                guard let target else { return }
+                scrollPositionID = target
             }
         }
     }

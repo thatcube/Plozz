@@ -65,12 +65,13 @@ struct DetailExtrasView: View {
         (seriesRecedeModel?.isReceded ?? true) || revealsSeriesCastWithoutBrowser
     }
 
-    /// Related is **removed** from the layout until the hero recedes, rather than
-    /// hidden in place like the cast. It is not load-bearing for the browser's
-    /// runway, so reserving its height buys nothing and costs a second empty block
-    /// on exactly the route where the first one is already visible.
+    /// Related now stays in the layout and is revealed in place like the cast.
+    /// Removing it meant it could only ever pop in and out — it had no position
+    /// to travel from, so it stood still while the episode row slid away. The
+    /// reserved height costs nothing visually now that the whole column rides
+    /// off the bottom of the screen for the resting page.
     private var showsRelated: Bool {
-        guard onSelectRelated != nil, seriesContentRevealed else { return false }
+        guard onSelectRelated != nil else { return false }
         return !relatedEntries.isEmpty || !relatedHasResolved
     }
 
@@ -105,7 +106,11 @@ struct DetailExtrasView: View {
                         onSelect: onSelectRelated
                     )
                     .environment(\.plozzMetrics, .standard)
-                    .disabled(suppressesFocus)
+                    .modifier(SeriesCastRevealModifier(
+                        model: seriesRecedeModel,
+                        revealsWithoutBrowser: revealsSeriesCastWithoutBrowser,
+                        suppressesFocus: suppressesFocus
+                    ))
                 }
                 if !item.cast.isEmpty {
                     CastRowView(
@@ -146,7 +151,10 @@ private struct SeriesCastRevealModifier: ViewModifier {
             .opacity(revealed ? 1 : 0)
             .disabled(!revealed || suppressesFocus)
             .accessibilityHidden(!revealed)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: revealed)
+            // No `.animation` of its own. A 0.16s pop against the column's 0.9s
+            // travel is why these rows appeared to stand still while the episode
+            // row slid away: an explicit modifier overrides the single ambient
+            // transaction the whole transition rides on.
     }
 }
 

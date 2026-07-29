@@ -127,6 +127,11 @@ struct DetailHeroView: View {
     /// the scroll for each newly-focused button. `nil` leaves scroll behaviour
     /// untouched.
     var onHeroActionFocused: (() -> Void)? = nil
+    /// Focus has left the hero's action row entirely — so it is somewhere below,
+    /// in the browser or the extras. Unlike a row's "focus entered" callback this
+    /// is an unmissable signal: it comes from SwiftUI's own focus state rather
+    /// than an edge a fast key-press can outrun.
+    var onHeroActionBlurred: (() -> Void)? = nil
     /// Marks this hero as presenting a **discovery** (Seerr) title that isn't in
     /// the library. When `true` the library-only action buttons (Play, Trailer,
     /// watchlist/watched/refresh, server/version "…" menu) are suppressed and the
@@ -788,7 +793,6 @@ struct DetailHeroView: View {
                 // remain leading via the HStack's content, so widening only the
                 // section's frame adds no over-wide *focusable* geometry.
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .plzGeoLog("actionRow")
                 .focusScope(heroActionsScope)
                 .focusSection()
                 // Keep the whole action row pinned to the hero top: this row is
@@ -799,8 +803,11 @@ struct DetailHeroView: View {
                 // moves *within* the row too, since tvOS re-nudges the scroll for
                 // each newly-focused button.
                 .onChange(of: heroActionRowFocus) { _, focus in
-                    plzGeoNote("actionRowFocus=\(String(describing: focus))")
-                    if focus != nil { onHeroActionFocused?() }
+                    if focus != nil {
+                        onHeroActionFocused?()
+                    } else {
+                        onHeroActionBlurred?()
+                    }
                 }
             }
         }
@@ -1728,8 +1735,14 @@ private struct SeriesHeroContentLiftModifier: ViewModifier {
             // zero, and this content has to stay reachable with UP from the
             // season bar the entire time it is invisible. A mask hides the
             // rendering while the view's own alpha stays 1.
+            //
+            // The generous negative padding is load-bearing: a mask is sized to
+            // the content, so a plain `Rectangle()` clipped whatever a focused
+            // hero button drew outside that frame — its scale and focus halo —
+            // and shaved a few pixels off Play's left edge.
             .mask {
                 Rectangle()
+                    .padding(-600)
                     .opacity(model == nil || !receded ? 1 : 0)
             }
     }

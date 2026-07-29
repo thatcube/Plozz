@@ -390,6 +390,18 @@ struct SeriesDetailView: View {
                             // by geometry, not the user pressing up.
                             guard !ignoresSystemFocusMoves else { return }
                             handleHeroFocus(using: proxy)
+                        },
+                        // Belt and braces for the recede state. `revealBrowser`
+                        // is otherwise driven purely by the season bar's and
+                        // rail's "focus entered" edges, and a fast DOWN can
+                        // outrun those — leaving focus in the browser while the
+                        // page still believes it is resting, so the chips, cast
+                        // and Related all sit there rendered invisible. Focus
+                        // leaving the hero is the same fact stated in a form
+                        // that cannot be missed.
+                        onHeroActionBlurred: {
+                            guard !ignoresSystemFocusMoves else { return }
+                            revealBrowser(using: proxy)
                         }
                     )
                     .id(Self.topAnchorID)
@@ -417,6 +429,13 @@ struct SeriesDetailView: View {
                         restingPlayTargetEnrichment = enriched
                     }
 
+                    // The browser and everything beneath it form ONE column that
+                    // is pulled up into the hero. Nesting matters: with the
+                    // negative padding on the browser alone its height collapsed
+                    // to zero, so Cast/Related resumed the flow at the hero's
+                    // bottom edge (1080) rather than at the rail's (880) — the
+                    // ~200pt void the viewer read as "Related is miles away".
+                    VStack(alignment: .leading, spacing: 0) {
                     SeriesEpisodeBrowser(
                         series: series,
                         recedeModel: recedeModel,
@@ -445,13 +464,6 @@ struct SeriesDetailView: View {
                             episodeRail { revealBrowser(using: proxy) }
                         }
                     )
-                    // Static. The browser's layout position never changes — it is
-                    // permanently at its browsing position, which is what keeps
-                    // the season bar and episode rail inside the viewport and the
-                    // focus engine quiet. The resting look comes from the
-                    // browser's own render-only `.offset`, and the sections below
-                    // therefore never move either.
-                    .padding(.top, -SeriesEpisodeBrowserLayout.heroOverlap)
 
                     DetailExtrasView(
                         item: series,
@@ -469,9 +481,37 @@ struct SeriesDetailView: View {
                         relatedHasResolved: viewModel.relatedTitlesLoader?.hasResolved ?? true,
                         onSelectRelated: onSelectRelated
                     )
-                        .padding(.top, 32)
-                        .plzGeoLog("extras")
+                        // A real layout gap, not a transform: it has to be
+                        // truthful for the focus engine at both ends. Resting it
+                        // parks the extras below the fold (a show with no cast
+                        // would otherwise expose its About block over the hero);
+                        // browsing it closes up so Related peeks directly under
+                        // the episode rail. Neither the season bar nor the rail
+                        // moves, so no reveal scroll is provoked either way.
+                        .padding(.top, SeriesEpisodeBrowserLayout.extrasBrowsingGap)
+                        // Parallax on top of the column's shared drop.
+                        .offset(
+                            y: recedeModel.isReceded
+                                ? 0
+                                : SeriesEpisodeBrowserLayout.extrasParallaxDrop
+                        )
                         .id(Self.extrasAnchorID)
+                    }
+                    // Static. The column's layout position never changes — it is
+                    // permanently at its browsing position, which is what keeps
+                    // the season bar and episode rail inside the viewport and the
+                    // focus engine quiet.
+                    .padding(.top, -SeriesEpisodeBrowserLayout.heroOverlap)
+                    // The ONE thing that moves for the resting page, and it moves
+                    // the browser, Cast and Related as a single body — they are
+                    // one column and must travel as one. Render-only, so every
+                    // layout/focus frame stays exactly where the focus engine
+                    // expects it and no reveal scroll is ever provoked.
+                    .offset(
+                        y: recedeModel.isReceded
+                            ? 0
+                            : SeriesEpisodeBrowserLayout.browserRestDrop
+                    )
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                 // Cap the whole scroll column to the proposed (safe viewport)
@@ -599,7 +639,6 @@ struct SeriesDetailView: View {
     /// Coming down from the hero the page is already at 0, so this is a no-op,
     /// and Season → Episode moves cost nothing either.
     private func revealBrowser(using proxy: ScrollViewProxy) {
-        PlozzLog.app.info("PLZGEO focus=browser")
         withAnimation(.smooth(duration: Self.recedeAnimationDuration)) {
             recedeModel.isReceded = true
             proxy.scrollTo(Self.topAnchorID, anchor: .top)
@@ -607,9 +646,6 @@ struct SeriesDetailView: View {
     }
 
     private func handleHeroFocus(using proxy: ScrollViewProxy) {
-        PlozzLog.app.info(
-            "PLZGEO focus=hero dupSuppressed=\(suppressesDuplicateHeroFocus)"
-        )
         guard !suppressesDuplicateHeroFocus else { return }
         rearmEpisodeRailOnHeroFocusIfNeeded()
         seasonBarEngaged = false
@@ -1704,12 +1740,10 @@ private struct SeasonRequestBoundaryModifier: ViewModifier {
                 .scrollClipDisabled(false)
                 .mask {
                     HStack(spacing: 0) {
-                        LinearGradient(
-                            colors: [.clear, .white],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: SeriesEpisodeBrowserLayout.seasonRequestFadeWidth)
+                        // No LEADING fade. The accessory owns the trailing edge
+                        // only; a gradient here started dissolving the first
+                        // chip right at the hero keyline and shaved its left
+                        // side even when the bar wasn't scrolled at all.
                         Rectangle()
                             .fill(.white)
                         LinearGradient(

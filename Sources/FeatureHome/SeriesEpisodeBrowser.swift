@@ -23,7 +23,29 @@ final class SeriesHeroRecedeModel {
 }
 
 enum SeriesHeroRevealTransition {
-    static var entrance: Animation { .easeInOut(duration: 0.2) }
+    /// The single clock the whole hero/browser transition runs on. Every call
+    /// site wraps its state change in `withAnimation(ambient)` and every moving
+    /// part inherits it — a per-view `.animation` overrides the transaction and
+    /// desyncs that part from the rest.
+    static var ambient: Animation { .smooth(duration: 0.9) }
+
+    /// The one deliberate exception: the receded logo leaves faster than it
+    /// arrives, so it is out of the way before the hero lands rather than
+    /// cross-dissolving through it for the full travel.
+    ///
+    /// `easeInOut`, and neither `easeIn` nor `easeOut`. Ease-IN holds the logo at
+    /// full strength and dumps the whole fade at the end, which reads as leaving
+    /// far too late. Ease-OUT does the opposite — over half the fade lands in the
+    /// first sliver of the duration — which reads as blinking out no matter how
+    /// long you make it. Only a symmetric curve is actually watchable.
+    ///
+    /// It covers the logo's travel as well as its opacity, on one clock, so the
+    /// two can't diverge.
+    static var logoExit: Animation { .easeInOut(duration: 0.45) }
+
+    /// The season bar's fade leaves quicker still, so the chips are clear of the
+    /// hero before the logo is.
+    static var seasonBarExit: Animation { .easeInOut(duration: 0.3) }
 }
 
 enum SeriesEpisodeBrowserLayout {
@@ -55,12 +77,16 @@ enum SeriesEpisodeBrowserLayout {
     /// the episode row sit uncomfortably low, with the focused card's captions
     /// jammed against the bottom. The receded stage is:
     ///
-    ///     0    …  112    dead space (hero backdrop only)
-    ///     112  …  186    hero action row (parked, faded out — never covered)
+    ///     0    …  155    dead space (hero backdrop only)
+    ///     155  …  229    hero action row (parked, masked out — never covered)
     ///      72  …  272    receded logo        ← RENDER ONLY, not in layout
     ///     272  …  360    season bar          ← the column starts here
     ///     360  …  880    episode rail
-    ///     880  …  1080   breathing room
+    ///     880  …  1080   slack for the focused card's scale + halo
+    ///
+    /// That slack is not decoration. Sizing the rail flush to 1080 let a focused
+    /// card's expanded frame cross the bottom edge, and tvOS scrolled the page up
+    /// to reveal it — which dragged the whole browser up with it.
     ///
     /// Two hard rules keep tvOS's focus engine out of this:
     /// 1. Every focusable frame stays *inside* the viewport (ending short of the
@@ -87,12 +113,29 @@ enum SeriesEpisodeBrowserLayout {
     /// nor shorter (which clips the synopsis off the focused card).
     static let episodeRailHeight: CGFloat = 520
 
+    /// Distance from the bottom of the episode rail to Cast/Related. A single
+    /// constant now: the whole column shares one resting drop, so the extras
+    /// ride down off the bottom of the screen with the episode row rather than
+    /// needing their own resting position.
+    static let extrasBrowsingGap: CGFloat = 64
+
+    /// Parallax. The column moves as one body, and these two travel a little
+    /// further on top of that so they trail the episode row in and out rather
+    /// than arriving locked to it.
+    ///
+    /// The logo's share is deliberately small. It is already being carried
+    /// `browserRestDrop` (≈588pt) by the column; stacking a large parallax on
+    /// top meant it crossed ~250pt in the first 150ms and no fade duration could
+    /// stop that reading as a blink.
+    static let logoParallaxDrop: CGFloat = 100
+    static let extrasParallaxDrop: CGFloat = 160
+
     /// How far the browser column is pushed back DOWN for the resting page, so
     /// only the top of the episode artwork peeks below the full-screen hero.
     /// Render-only, so the rail's focus frame stays on screen the whole time.
     /// Tracks `browserColumnTopInset`: the column's layout moved up, so the
     /// resting drop grows by the same amount to leave the peek identical.
-    static let browserRestDrop: CGFloat = 568
+    static let browserRestDrop: CGFloat = 588
 
     /// The hero action row's layout must sit above the season bar (or DOWN from
     /// Play could never reach it, and UP from a season chip could never reach
@@ -100,14 +143,14 @@ enum SeriesEpisodeBrowserLayout {
     /// 112…186 and `heroContentRestDrop` pushes it visually back down to the
     /// lower third for the resting page.
     static let heroContentBottomLift: CGFloat = 860
-    static let heroContentRestDrop: CGFloat = 583
+    static let heroContentRestDrop: CGFloat = 683
     /// Zero — and that is a hard constraint, not a taste call. tvOS refuses to
     /// focus an item rendered entirely off-screen, so any lift large enough to
     /// clear the top edge makes UP from a season chip dead. The receded hero
     /// therefore *parks* at its layout position and disappears by fading
     /// instead. The visible motion is the rise/fall of `heroContentRestDrop`.
     static let heroContentRecedeLift: CGFloat = 0
-    static let heroBackdropRecedeLift: CGFloat = 240
+    static let heroBackdropRecedeLift: CGFloat = 1000
 
     /// Align the episode column's visible content—not the taller rail viewport—
     /// with screen center.
@@ -147,7 +190,6 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             if showsSeasons {
                 seasonContent()
-                    .plzGeoLog("seasonBar")
             }
 
             ZStack(alignment: .top) {
@@ -173,29 +215,29 @@ struct SeriesEpisodeBrowser<SeasonContent: View, EpisodeContent: View>: View {
                 maxHeight: SeriesEpisodeBrowserLayout.episodeRailHeight,
                 alignment: .topLeading
             )
-            .plzGeoLog("rail")
 
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        // Render-only, and that is the point: the receded logo used to be the
-        // first row of this column, which put its LAYOUT frame directly on top
-        // of the hero action row's. tvOS's focus engine treats a candidate
-        // covered by another view as unreachable, so UP from a season chip
-        // found nothing. As an overlay it draws in exactly the same place while
+        // A BACKGROUND, so the logo draws *behind* the column and slides away
+        // under the episode row rather than across it.
+        //
+        // Render-only either way, and that is the point: the receded logo used
+        // to be the first row of this column, which put its LAYOUT frame
+        // directly on top of the hero action row's. tvOS's focus engine treats a
+        // candidate covered by another view as unreachable, so UP from a season
+        // chip found nothing. Here it draws in exactly the same place while
         // contributing no layout and no focus geometry at all.
-        .overlay(alignment: .top) {
+        .background(alignment: .top) {
             SeriesRecededLogo(series: series, recedeModel: recedeModel)
                 .frame(maxWidth: .infinity)
                 .frame(height: SeriesEpisodeBrowserLayout.recededLogoHeight, alignment: .center)
                 .offset(y: -SeriesEpisodeBrowserLayout.recededLogoHeight)
                 .allowsHitTesting(false)
         }
-        // The ONLY thing that moves for the resting page. A render-only
-        // transform, so the season bar's and rail's layout/focus frames stay
-        // inside the viewport at all times and tvOS never scrolls the page to
-        // reveal them. The sections below keep their static layout position, so
-        // this can't open a gap either.
-        .offset(y: recedeModel.isReceded ? 0 : SeriesEpisodeBrowserLayout.browserRestDrop)
+        // NOTE: the resting drop is applied by the page, to the browser AND
+        // everything below it together (see `SeriesDetailView`), so Cast and
+        // Related travel with the episode row instead of staying put while it
+        // slides away.
         .environment(\.plozzMetrics, .standard)
     }
 }
@@ -209,12 +251,24 @@ struct SeriesRecedeReveal<Content: View>: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// The bar has NO travel of its own: it is carried by the column, exactly
+    /// like the episode row, and only its opacity is animated here. A private
+    /// offset made it read as drifting independently of the episodes.
+    ///
+    /// Arriving, this restates the ambient animation exactly so the fade lands
+    /// with the column's motion — an earlier 0.2s pop here is precisely what
+    /// made the chips look like they weren't following it. Leaving, it fades on
+    /// a quicker clock so the chips are clear before the hero returns.
     var body: some View {
         let revealed = recedeModel.isReceded || forceVisible
         content()
             .opacity(revealed ? 1 : 0)
             .animation(
-                reduceMotion ? nil : SeriesHeroRevealTransition.entrance,
+                reduceMotion
+                    ? nil
+                    : (revealed
+                        ? SeriesHeroRevealTransition.ambient
+                        : SeriesHeroRevealTransition.seasonBarExit),
                 value: revealed
             )
     }
@@ -245,12 +299,20 @@ private struct SeriesRecededLogo: View {
         }
         .frame(width: 620, height: 200, alignment: .center)
         .opacity(revealed ? 1 : 0)
-        .offset(y: revealed || reduceMotion ? 0 : 80)
+        .offset(y: revealed || reduceMotion ? 0 : SeriesEpisodeBrowserLayout.logoParallaxDrop)
+        // Arriving restates the ambient animation exactly, so the logo still
+        // lands with the hero's departure. `.animation(nil, …)` can't serve as
+        // the "inherit" side — nil means "don't animate", not "use the
+        // transaction".
+        .animation(
+            reduceMotion
+                ? nil
+                : (revealed
+                    ? SeriesHeroRevealTransition.ambient
+                    : SeriesHeroRevealTransition.logoExit),
+            value: revealed
+        )
         .accessibilityHidden(!revealed)
-        // Deliberately no `.animation` modifier: the logo has to arrive *with*
-        // the hero's departure, so it inherits the single ambient transaction the
-        // recede observer opens instead of running on its own clock.
-        // `reduceMotion` still gets a static presentation via the offset above.
     }
 
     private var logoFallback: (@Sendable () async -> URL?)? {

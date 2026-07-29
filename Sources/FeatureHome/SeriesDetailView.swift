@@ -824,22 +824,17 @@ struct SeriesDetailView: View {
         // re-pointed to the preserved episode on the new server (new per-server id).
         // MediaRowView re-scrolls via .onChange(of: defaultFocusID) when it changes.
         let target = railTargetID
-        return MediaRowView(
+        return SeriesWindowedEpisodeRail(
             title: railTitle,
-            items: episodes,
-            presentation: .episodeColumn,
+            episodes: episodes,
             spoilerSettings: spoilerSettings,
-            // Keep focus on the hero Play button initially; pre-scroll the rail to
-            // the resume/target episode and make it the row's default focus so
-            // pressing down from Play lands on *that* episode — wherever it is in
-            // the season — rather than the geometrically-nearest card.
-            initialFocusID: nil,
-            initialScrollID: target,
-            defaultFocusID: target,
+            targetID: target,
             focusResetToken: episodeRailResetToken,
             isCovered: hasChildOnTop,
-            onRefocusComplete: { isReclaimingFocus = false },
-            leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
+            precedingContainerIDs: precedingSeasonIDs,
+            onRefocusComplete: {
+                isReclaimingFocus = false
+            },
             onFocusEntered: {
                 seasonBarEngaged = false
                 // The user has taken focus into the rail themselves — the opening
@@ -849,12 +844,6 @@ struct SeriesDetailView: View {
                 recedeModel.recede()
                 onFocusEntered()
             },
-            // Deliberately no `onFocusChange` hero repointing. The hero describes
-            // whatever Play would play, which is a property of *watch state*, not
-            // of where the cursor happens to be resting — so browsing the rail
-            // leaves it alone. Focus was the wrong driver twice over: it made the
-            // hero disagree with the fixed sections below it, and iPadOS has no
-            // focus concept at all, so the behaviour could never exist there.
             onSelect: { item in
                 // An unaired episode has nothing to play and no page worth opening,
                 // so selecting it is deliberately inert — it stays focusable purely
@@ -862,12 +851,6 @@ struct SeriesDetailView: View {
                 guard !item.isUpcomingUnaired else { return }
                 onPlay(item)
             }
-        )
-        .mediaItemActionContext(
-            MediaItemActionContext(
-                orderedSiblings: episodes,
-                precedingContainerIDs: precedingSeasonIDs
-            )
         )
     }
 
@@ -1412,6 +1395,101 @@ struct SeriesDetailView: View {
         updateRailTarget()
     }
 
+}
+
+private struct SeriesWindowedEpisodeRail: View {
+    let title: Text?
+    let episodes: [MediaItem]
+    let spoilerSettings: SpoilerSettings
+    let targetID: String?
+    let focusResetToken: Int
+    let isCovered: Bool
+    let precedingContainerIDs: [String]
+    let onRefocusComplete: () -> Void
+    let onFocusEntered: () -> Void
+    let onSelect: (MediaItem) -> Void
+
+    @State private var windowRange: Range<Int>?
+
+    var body: some View {
+        let visibleEpisodes = Array(episodes[resolvedWindow])
+        MediaRowView(
+            title: title,
+            items: visibleEpisodes,
+            presentation: .episodeColumn,
+            spoilerSettings: spoilerSettings,
+            initialFocusID: nil,
+            initialScrollID: targetID,
+            defaultFocusID: targetID,
+            focusResetToken: focusResetToken,
+            isCovered: isCovered,
+            onRefocusComplete: onRefocusComplete,
+            leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
+            onFocusEntered: onFocusEntered,
+            onFocusChange: { item in
+                if let item {
+                    expandWindow(around: item.id)
+                }
+            },
+            onSelect: onSelect
+        )
+        .mediaItemActionContext(
+            MediaItemActionContext(
+                orderedSiblings: episodes,
+                precedingContainerIDs: precedingContainerIDs
+            )
+        )
+        .onChange(of: targetID) { _, _ in
+            windowRange = nil
+        }
+    }
+
+    private var resolvedWindow: Range<Int> {
+        guard !episodes.isEmpty else { return episodes.indices }
+        let targetIndex = targetID.flatMap { id in
+            episodes.firstIndex(where: { $0.id == id })
+        }
+        let storedRangeIsValid = windowRange.map { range in
+            range.lowerBound >= episodes.startIndex
+                && range.lowerBound < episodes.endIndex
+                && range.upperBound <= episodes.endIndex
+                && targetIndex.map(range.contains) != false
+        } ?? false
+        let range = storedRangeIsValid ? windowRange! : initialWindow
+        let lower = Swift.max(range.lowerBound, episodes.startIndex)
+        let upper = Swift.min(range.upperBound, episodes.endIndex)
+        return lower..<upper
+    }
+
+    private var initialWindow: Range<Int> {
+        let windowSize = 50
+        guard episodes.count > windowSize else { return episodes.indices }
+        let targetIndex = targetID
+            .flatMap { id in episodes.firstIndex(where: { $0.id == id }) }
+            ?? episodes.startIndex
+        let lower = Swift.min(
+            Swift.max(episodes.startIndex, targetIndex - windowSize / 2),
+            episodes.endIndex - windowSize
+        )
+        return lower..<(lower + windowSize)
+    }
+
+    private func expandWindow(around itemID: String) {
+        guard episodes.count > 50,
+              let index = episodes.firstIndex(where: { $0.id == itemID }) else {
+            return
+        }
+        var range = windowRange ?? initialWindow
+        if index - range.lowerBound <= 8 {
+            range = Swift.max(episodes.startIndex, range.lowerBound - 25)..<range.upperBound
+        }
+        if range.upperBound - index <= 8 {
+            range = range.lowerBound..<Swift.min(episodes.endIndex, range.upperBound + 25)
+        }
+        if range != windowRange {
+            windowRange = range
+        }
+    }
 }
 
 enum SeriesDetailBrowserPolicy {

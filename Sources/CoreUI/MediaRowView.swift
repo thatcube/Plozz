@@ -390,6 +390,10 @@ public struct MediaRowView: View {
                     item: item,
                     spoilerSettings: spoilerSettings
                 ) { onSelect(item) }
+                // Skips the body when the card's inputs are unchanged. Without
+                // it the stored `action` closure makes every card compare
+                // unequal, so the whole rail re-rendered on each parent update.
+                .equatable()
                 .environment(\.plozzMetrics, .standard),
                 for: item
             )

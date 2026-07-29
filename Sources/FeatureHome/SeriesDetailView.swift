@@ -159,6 +159,7 @@ struct SeriesDetailView: View {
     /// Cosmetic-only series hero recede state. The parent writes it but never reads
     /// it, so episode focus changes do not invalidate this page or its rail.
     @State private var recedeModel = SeriesHeroRecedeModel()
+    @State private var placeholderCache = SeriesPlaceholderCache()
     /// Whether another detail page is pushed on top of this one — see
     /// `DetailStackDepth`. Supplied by the hosting page, which owns the counter
     /// and so is the only view that can record its own level correctly.
@@ -230,6 +231,7 @@ struct SeriesDetailView: View {
 
 
     var body: some View {
+        let _ = plozzTraceBodyChanges { Self._printChanges() }
         let _ = plozzPrintChanges { Self._printChanges() }
         scrollContent
             // Never clip a focused card's lift, shadow or border.
@@ -1183,20 +1185,41 @@ struct SeriesDetailView: View {
     }
 
     /// The selected season's unaired episodes, as non-playable rail entries.
+    ///
+    /// MEMOIZED, because this *builds `MediaItem` values* — and it was a plain
+    /// computed property, so it did so on every body evaluation, then fed an
+    /// array concatenation that copied the whole rail's items again. This view
+    /// re-evaluates on every episode focus change, which is where Instruments
+    /// found the app-update phase blowing the entire 16.7 ms frame budget on its
+    /// own (`initializeWithCopy for MediaItem` and array-buffer growth were among
+    /// the few symbolicated hot frames).
+    ///
+    /// Safe to key on counts rather than contents: placeholders describe UNAIRED
+    /// episodes, which are derived from the schedule and the owned episodes'
+    /// numbering. They carry no watched state or badges, so the in-place
+    /// mutations that do change owned episodes cannot change these.
     private var upcomingPlaceholders: [MediaItem] {
         guard let schedule = viewModel.state.value?.upcomingSchedule,
               !schedule.upcomingEpisodes.isEmpty else { return [] }
         let seasonNumber = selectedSeasonID
             .flatMap { id in seasons.first { $0.id == id } }?
             .seasonNumber
-        return SeriesUpcoming.placeholders(
-            for: seasonNumber,
+        let owned = currentEpisodes
+        return placeholderCache.placeholders(
+            seasonNumber: seasonNumber,
             seriesID: series.id,
-            seriesTitle: series.title,
-            ownedEpisodes: currentEpisodes,
-            schedule: schedule.upcomingEpisodes,
-            seriesArtwork: series
-        )
+            ownedCount: owned.count,
+            scheduleCount: schedule.upcomingEpisodes.count
+        ) {
+            SeriesUpcoming.placeholders(
+                for: seasonNumber,
+                seriesID: series.id,
+                seriesTitle: series.title,
+                ownedEpisodes: owned,
+                schedule: schedule.upcomingEpisodes,
+                seriesArtwork: series
+            )
+        }
     }
 
     /// The hero's air-schedule line, e.g. "New episodes Fridays".
@@ -1634,6 +1657,43 @@ private struct SeriesWindowedEpisodeRail: View {
         if range != windowRange {
             windowRange = range
         }
+    }
+}
+
+/// Per-view memo for the rail's unaired-episode placeholders.
+///
+/// A plain reference type, not `@Observable`: filling the cache must never
+/// invalidate anything. It only exists so repeated body evaluations of the same
+/// season stop rebuilding `MediaItem` values from scratch.
+private final class SeriesPlaceholderCache {
+    private struct Key: Hashable {
+        let seasonNumber: Int?
+        let seriesID: String
+        let ownedCount: Int
+        let scheduleCount: Int
+    }
+
+    private var key: Key?
+    private var value: [MediaItem] = []
+
+    func placeholders(
+        seasonNumber: Int?,
+        seriesID: String,
+        ownedCount: Int,
+        scheduleCount: Int,
+        build: () -> [MediaItem]
+    ) -> [MediaItem] {
+        let candidate = Key(
+            seasonNumber: seasonNumber,
+            seriesID: seriesID,
+            ownedCount: ownedCount,
+            scheduleCount: scheduleCount
+        )
+        if key == candidate { return value }
+        let built = build()
+        key = candidate
+        value = built
+        return built
     }
 }
 

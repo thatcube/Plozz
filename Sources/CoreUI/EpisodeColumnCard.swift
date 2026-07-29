@@ -4,7 +4,26 @@ import CoreModels
 import MetadataKit
 
 /// The fixed standard-size, borderless episode column used only on series detail.
-public struct EpisodeColumnCard: View {
+///
+/// `Equatable` so callers can wrap it in `.equatable()`, and that is a measured
+/// requirement rather than a nicety. The card stores its `action` closure, and
+/// closures never compare equal, so SwiftUI's structural check on the view value
+/// always failed: EVERY card in the rail re-evaluated its body whenever the
+/// parent did. `Self._printChanges()` on an A12 Apple TV recorded 2550
+/// `@self changed` rebuilds against only 141 real focus changes — an 18×
+/// amplification — and most of them fired during hero transitions, when nothing
+/// about any card had changed at all.
+///
+/// Comparing the inputs is sound because everything the card draws is derived
+/// from them: `presentation` is built from exactly this pair, and the body's
+/// remaining direct reads are all off `item`. Focus, the synopsis animation and
+/// environment values are separate graph dependencies, so they still invalidate
+/// the body normally — `.equatable()` only short-circuits the *value* check.
+public struct EpisodeColumnCard: View, Equatable {
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.item == rhs.item && lhs.spoilerSettings == rhs.spoilerSettings
+    }
+
     public static let artworkSize = CGSize(width: 480, height: 270)
     public static let sideMargin: CGFloat = 8
     public static let slotWidth = artworkSize.width + sideMargin * 2
@@ -38,6 +57,7 @@ public struct EpisodeColumnCard: View {
     }
 
     public var body: some View {
+        let _ = plozzTraceBodyChanges { Self._printChanges() }
         VStack(alignment: .leading, spacing: 0) {
             artwork
                 .frame(width: Self.artworkSize.width, height: Self.artworkSize.height)

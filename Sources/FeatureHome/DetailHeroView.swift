@@ -260,23 +260,34 @@ struct DetailHeroView: View {
     /// the light unfocused button in light mode.
     @Environment(\.colorScheme) private var colorScheme
 
+    @State private var presentationCache = HeroPresentationCache()
+
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
 
+    // Both presentations are MEMOIZED, and that is a measured performance fix
+    // rather than a style preference.
+    //
+    // `HeroPresentation.init` is not cheap — artwork routing, title
+    // normalisation, badge composition, several array maps/filters/joins and
+    // provider-id lookups — and these were plain computed properties, so every
+    // one of the ~22 references across this view rebuilt one from scratch on
+    // every body evaluation. Browsing the episode rail re-evaluates this hero on
+    // each card, which is exactly where Instruments put the cost: the app-update
+    // phase averaged 17.3 ms/frame against a 16.7 ms total budget, with 355 ms
+    // spikes, on an A12 Apple TV.
+    //
+    // A struct can't memoise into itself, so the cache is a reference type held
+    // in `@State` — created once per view lifetime and keyed by the item's
+    // identity, so a new item recomputes and a re-render of the same item does
+    // not. `HeroPresentation` is a value type built purely from the item, so
+    // this cannot go stale as long as the key covers what it reads.
     private var focusedPresentation: HeroPresentation {
-        HeroPresentation(
-            item: item,
-            artworkStyle: .landscape,
-            surface: .detail
-        )
+        presentationCache.presentation(for: item)
     }
 
     private var rootPresentation: HeroPresentation {
-        HeroPresentation(
-            item: backdrop,
-            artworkStyle: .landscape,
-            surface: .detail
-        )
+        presentationCache.presentation(for: backdrop)
     }
 
     /// Tone of the hero legibility scrim: a dark wash in dark mode (so light
@@ -590,6 +601,7 @@ struct DetailHeroView: View {
     }
 
     var body: some View {
+        let _ = plozzTraceBodyChanges { Self._printChanges() }
         let hideText = spoilerSettings.shouldHideText(for: item)
         let heroHeight = Self.screenHeight * heroHeightFraction
         // When the hero fills the screen (a movie, with no children rail below to
@@ -1711,6 +1723,50 @@ private struct DetailHeroFactsRow: View {
 /// from the season bar. Opacity does *not* remove focusability (the season bar
 /// relies on the same trick for DOWN), so the fade is the safe half of the
 /// effect and the travel is purely the visible part of it.
+/// Per-view memo for `HeroPresentation`, keyed by the identity of the item it
+/// was built from.
+///
+/// Deliberately a plain reference type rather than `@Observable`: nothing should
+/// re-render when the cache fills. It exists purely so repeated reads within one
+/// body evaluation — and across re-renders of the same item — cost a dictionary
+/// lookup instead of a rebuild.
+///
+/// Keyed on more than the id: the same item is mutated in place as watched state
+/// and enriched badges arrive, and the hero must reflect that immediately.
+private final class HeroPresentationCache {
+    private struct Key: Hashable {
+        let id: String
+        let isPlayed: Bool
+        let playedPercentage: Double?
+        let badgeCount: Int
+        let artworkCount: Int
+    }
+
+    private var entries: [Key: HeroPresentation] = [:]
+
+    func presentation(for item: MediaItem) -> HeroPresentation {
+        let key = Key(
+            id: item.id,
+            isPlayed: item.isPlayed,
+            playedPercentage: item.playedPercentage,
+            badgeCount: item.technicalBadges.count,
+            artworkCount: item.artworkReferences(for: .logo).count
+        )
+        if let cached = entries[key] { return cached }
+        let built = HeroPresentation(
+            item: item,
+            artworkStyle: .landscape,
+            surface: .detail
+        )
+        // Bounded: browsing a long season would otherwise accumulate one entry
+        // per episode passed. The hero only ever shows one item at a time, so a
+        // small window is plenty.
+        if entries.count > 8 { entries.removeAll(keepingCapacity: true) }
+        entries[key] = built
+        return built
+    }
+}
+
 private struct SeriesHeroContentLiftModifier: ViewModifier {
     let model: SeriesHeroRecedeModel?
 

@@ -692,10 +692,37 @@ private func makePlayerViewModel(
     let neighborResolver: (@Sendable () async -> (previous: MediaItem?, next: MediaItem?))?
     if convergingItem.kind == .episode, let seasonID = convergingItem.seasonID {
         let originAccountID = convergingItem.sourceAccountID
+        // Carry the show's remembered version onto the neighbours.
+        //
+        // They arrive straight from the provider with no version selected, so
+        // auto-advance and the Up Next card both played whatever the server
+        // considers default — the viewer picks the 4K cut on one episode and the
+        // next one silently drops to 1080p. The detail page already resolves
+        // this; the player's own advance path never asked.
+        //
+        // Resolved per episode rather than copied from the current one, because
+        // the remembered preference is a SHAPE: episodes have their own files,
+        // and the match has to be made against the files that episode actually
+        // has (see `MediaVersionDescriptor`).
+        let versionPreferences = VersionPreferenceStore()
+        let deviceCapabilities = MediaCapabilities.detected()
         neighborResolver = {
             let siblings = (try? await episodeProvider.children(of: seasonID)) ?? []
             let tagged = originAccountID.map { id in siblings.map { $0.taggingSource(id) } } ?? siblings
-            return EpisodeSequence.neighbors(of: convergingItem, in: tagged)
+            let (previous, next) = EpisodeSequence.neighbors(of: convergingItem, in: tagged)
+            func applyingPreferredVersion(_ episode: MediaItem?) -> MediaItem? {
+                guard let episode, episode.versions.count > 1 else { return episode }
+                let id = DetailPlaybackSelection.preferredVersionID(
+                    for: episode,
+                    versions: episode.versions,
+                    versionOverride: nil,
+                    preferences: versionPreferences,
+                    capabilities: deviceCapabilities
+                )
+                guard let id else { return episode }
+                return episode.selectingVersion(id)
+            }
+            return (applyingPreferredVersion(previous), applyingPreferredVersion(next))
         }
     } else {
         neighborResolver = nil

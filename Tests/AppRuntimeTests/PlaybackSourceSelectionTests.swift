@@ -101,3 +101,82 @@ final class PlaybackSourceSelectionTests: XCTestCase {
         XCTAssertEqual(movie.selectingSource(untyped).id, "46498")
     }
 }
+
+/// The closest-server guarantee, which used to hold only when the item's own
+/// server happened to be unplayable.
+extension PlaybackSourceSelectionTests {
+    func testPrefersTheLocalCopyOverAPlayableRemoteOrigin() {
+        // A Continue Watching card carries whichever server's resume state won
+        // the merge — for a shared title that can be a remote Jellyfin. Because
+        // that origin was perfectly playable, the local Plex copy was never even
+        // considered, and the card played over Tailscale.
+        var remote = MediaSourceRef(
+            accountID: "sister-jellyfin",
+            itemID: "ep-remote",
+            kind: .episode,
+            providerKind: .jellyfin
+        )
+        remote.locality = .remote
+        var local = MediaSourceRef(
+            accountID: "my-plex",
+            itemID: "ep-local",
+            kind: .episode,
+            providerKind: .plex
+        )
+        local.locality = .local
+
+        var item = MediaItem(
+            id: "ep-remote",
+            title: "The Storm",
+            kind: .episode,
+            sourceAccountID: "sister-jellyfin"
+        )
+        item.sources = [remote, local]
+
+        let selected = PlaybackSourceSelection.bestPlayItem(
+            item,
+            accounts: [],
+            identitySources: { _ in [] }
+        )
+
+        XCTAssertEqual(selected.selectedSourceAccountID, "my-plex")
+        XCTAssertEqual(selected.id, "ep-local")
+    }
+
+    func testKeepsAnExplicitServerPickEvenWhenItIsRemote() {
+        // Ranking must never override a deliberate choice — the user picked that
+        // server in the detail page's picker.
+        var remote = MediaSourceRef(
+            accountID: "sister-jellyfin",
+            itemID: "ep-remote",
+            kind: .episode,
+            providerKind: .jellyfin
+        )
+        remote.locality = .remote
+        var local = MediaSourceRef(
+            accountID: "my-plex",
+            itemID: "ep-local",
+            kind: .episode,
+            providerKind: .plex
+        )
+        local.locality = .local
+
+        var item = MediaItem(
+            id: "ep-remote",
+            title: "The Storm",
+            kind: .episode,
+            sourceAccountID: "sister-jellyfin"
+        )
+        item.sources = [remote, local]
+        item.selectedSourceAccountID = "sister-jellyfin"
+        item.explicitSourceSelection = true
+
+        let selected = PlaybackSourceSelection.bestPlayItem(
+            item,
+            accounts: [],
+            identitySources: { _ in [] }
+        )
+
+        XCTAssertEqual(selected.selectedSourceAccountID, "sister-jellyfin")
+    }
+}

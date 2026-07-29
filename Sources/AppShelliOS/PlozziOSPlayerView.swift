@@ -8,6 +8,23 @@ struct PlozziOSPlaybackRequest: Identifiable {
     let id = UUID()
     let item: MediaItem
     let startPosition: TimeInterval
+
+    /// Resolves the show's remembered version HERE, so no play path can skip it.
+    /// See `PlayRequest` on tvOS — same reasoning, and the same four paths had
+    /// each forgotten to ask.
+    init(
+        item: MediaItem,
+        startPosition: TimeInterval,
+        versionPreferences: any VersionPreferenceStoring,
+        capabilities: MediaCapabilities = .detected()
+    ) {
+        self.item = DetailPlaybackSelection.playbackReady(
+            item,
+            preferences: versionPreferences,
+            capabilities: capabilities
+        )
+        self.startPosition = startPosition
+    }
 }
 
 struct PlozziOSPlayerView: View {
@@ -215,12 +232,31 @@ struct PlozziOSPlayerView: View {
         guard item.kind == .episode, let seasonID = item.seasonID else { return nil }
         let provider = self.provider
         let accountID = item.sourceAccountID
+        // Carry the show's remembered version onto the neighbours — see the tvOS
+        // shell's resolver for the reasoning. Both platforms need this: the
+        // neighbours arrive from the provider with no version selected, so
+        // auto-advance played the server default however deliberately the viewer
+        // had chosen otherwise.
+        let versionPreferences = appModel.versionPreferences
+        let deviceCapabilities = MediaCapabilities.detected()
         return {
             let siblings = (try? await provider.children(of: seasonID)) ?? []
             let tagged = accountID.map { id in
                 siblings.map { $0.taggingSource(id) }
             } ?? siblings
-            return EpisodeSequence.neighbors(of: item, in: tagged)
+            let (previous, next) = EpisodeSequence.neighbors(of: item, in: tagged)
+            func applyingPreferredVersion(_ episode: MediaItem?) -> MediaItem? {
+                guard let episode, episode.versions.count > 1 else { return episode }
+                guard let id = DetailPlaybackSelection.preferredVersionID(
+                    for: episode,
+                    versions: episode.versions,
+                    versionOverride: nil,
+                    preferences: versionPreferences,
+                    capabilities: deviceCapabilities
+                ) else { return episode }
+                return episode.selectingVersion(id)
+            }
+            return (applyingPreferredVersion(previous), applyingPreferredVersion(next))
         }
     }
 

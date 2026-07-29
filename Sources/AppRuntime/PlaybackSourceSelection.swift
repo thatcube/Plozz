@@ -68,7 +68,23 @@ public enum PlaybackSourceSelection {
         let primaryIsPlayable = liveSources.contains {
             $0.accountID == item.sourceAccountID && $0.itemID == item.id
         }
-        if !primaryIsPlayable, !liveSources.isEmpty {
+        // Rank whenever there is a real choice — not only when the item's own
+        // server is unplayable.
+        //
+        // Short-circuiting on "the origin works" silently defeated the closest-
+        // server guarantee for every row play. A Continue Watching card carries
+        // whichever server's resume state won the merge, which for a shared title
+        // can be a remote/Tailscale Jellyfin; because that source was perfectly
+        // playable, the local Plex copy was never even considered. Reported as
+        // "it plays my sister's server instead of mine".
+        //
+        // Ranking is safe here precisely because the selector already encodes the
+        // intended policy: locality first, with the item's own account passed as
+        // `preferring` — a SOFT tie-break that only decides between otherwise-
+        // equal candidates. An explicit user pick has already returned above, so
+        // this can never override a deliberate choice.
+        let hasCrossServerChoice = Set(liveSources.map(\.accountID)).count > 1
+        if !liveSources.isEmpty, !primaryIsPlayable || hasCrossServerChoice {
             let selection = CrossSourceSelector.bestSelection(
                 from: liveSources,
                 capabilities: .detected(),

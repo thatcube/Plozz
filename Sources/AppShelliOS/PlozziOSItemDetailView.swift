@@ -703,7 +703,8 @@ private struct PlozziOSCanonicalItemDetailView: View {
         guard item.kind == .series else {
             playbackRequest = PlozziOSPlaybackRequest(
                 item: item,
-                startPosition: fromBeginning ? 0 : (item.resumePosition ?? 0)
+                startPosition: fromBeginning ? 0 : (item.resumePosition ?? 0),
+                versionPreferences: appModel.versionPreferences
             )
             return
         }
@@ -715,7 +716,8 @@ private struct PlozziOSCanonicalItemDetailView: View {
             ) else { return }
             playbackRequest = PlozziOSPlaybackRequest(
                 item: episode,
-                startPosition: fromBeginning ? 0 : (episode.resumePosition ?? 0)
+                startPosition: fromBeginning ? 0 : (episode.resumePosition ?? 0),
+                versionPreferences: appModel.versionPreferences
             )
         }
     }

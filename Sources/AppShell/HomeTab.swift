@@ -492,6 +492,7 @@ struct HomeTab: View {
 
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
     /// play immediately from the start.
+
     private func requestPlay(_ item: MediaItem) {
         let target = bestSourcePlayItem(item, accounts: accounts, identitySources: identitySources)
         // A whole series can't be direct-played (its container has no media, so

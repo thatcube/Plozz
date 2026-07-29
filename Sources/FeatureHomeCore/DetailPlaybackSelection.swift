@@ -1,3 +1,4 @@
+import Foundation
 import CoreModels
 
 /// Platform-neutral detail-page server and media-version selection.
@@ -74,6 +75,35 @@ public enum DetailPlaybackSelection {
             return match.id
         }
         return versions.recommendedSelection(for: capabilities)?.id
+    }
+
+    /// The item as it should actually be played: the show's remembered version
+    /// resolved against THIS item's own files.
+    ///
+    /// Exists so version resolution can be applied by construction rather than by
+    /// remembering. `preferredVersionID` was already shared, but every play path
+    /// had to opt in by calling it — and four of them didn't: the tvOS and iOS
+    /// episode auto-advance, and both platforms' Continue Watching rows. Each
+    /// handed the player an item straight from the provider, so it played the
+    /// server default however deliberately the viewer had chosen otherwise, and
+    /// the bug had to be found once per path.
+    ///
+    /// A no-op when the item already carries an explicit choice, or has nothing
+    /// to choose between.
+    public static func playbackReady(
+        _ item: MediaItem,
+        preferences: any VersionPreferenceStoring,
+        capabilities: MediaCapabilities
+    ) -> MediaItem {
+        guard item.selectedVersionID == nil, item.versions.count > 1 else { return item }
+        guard let id = preferredVersionID(
+            for: item,
+            versions: item.versions,
+            versionOverride: nil,
+            preferences: preferences,
+            capabilities: capabilities
+        ) else { return item }
+        return item.selectingVersion(id)
     }
 
     public static func versionPreferenceKey(for item: MediaItem) -> String {

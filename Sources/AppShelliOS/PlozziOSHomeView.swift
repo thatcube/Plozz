@@ -500,7 +500,8 @@ struct PlozziOSHomeView: View {
         guard item.kind == .series else {
             playbackRequest = PlozziOSPlaybackRequest(
                 item: item,
-                startPosition: item.resumePosition ?? 0
+                startPosition: item.resumePosition ?? 0,
+                versionPreferences: appModel.versionPreferences
             )
             return
         }
@@ -512,10 +513,12 @@ struct PlozziOSHomeView: View {
             ) else { return }
             playbackRequest = PlozziOSPlaybackRequest(
                 item: episode,
-                startPosition: episode.resumePosition ?? 0
+                startPosition: episode.resumePosition ?? 0,
+                versionPreferences: appModel.versionPreferences
             )
         }
     }
+
 
     /// One-tap Seerr request from the Home hero, mirroring the detail hero. When
     /// the active profile isn't linked to a Seerr user (and there are multiple

@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import FeatureHomeCore
 import FeatureHome
 import FeatureMusic
 import FeaturePlayback
@@ -27,13 +28,25 @@ struct PlayRequest: Identifiable, Equatable {
     let traceID: UUID
     let requestedAt: Date
 
+    /// Resolves the show's remembered version HERE, so no play path can skip it.
+    ///
+    /// Every tvOS playback starts by building one of these, so applying the
+    /// preference in the initializer makes it structural rather than something
+    /// each caller must remember — which is exactly what four separate paths
+    /// forgot (see `DetailPlaybackSelection.playbackReady`).
     init(
         item: MediaItem,
         startPosition: TimeInterval,
         traceID: UUID = UUID(),
-        requestedAt: Date = Date()
+        requestedAt: Date = Date(),
+        versionPreferences: any VersionPreferenceStoring = VersionPreferenceStore(),
+        capabilities: MediaCapabilities = .detected()
     ) {
-        self.item = item
+        self.item = DetailPlaybackSelection.playbackReady(
+            item,
+            preferences: versionPreferences,
+            capabilities: capabilities
+        )
         self.startPosition = startPosition
         self.traceID = traceID
         self.requestedAt = requestedAt

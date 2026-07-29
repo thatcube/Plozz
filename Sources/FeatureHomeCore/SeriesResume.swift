@@ -175,6 +175,51 @@ public struct SeasonEpisodeRef: Equatable, Sendable {
     }
 }
 
+/// Resolves an episode-context entry against the active server's season/episode
+/// objects. Provider ids differ across servers, but S/E ordinals remain stable.
+public enum SeriesEpisodeEntry {
+    public static func seasonID(
+        initialEpisode: MediaItem?,
+        initialSeasonID: String?,
+        seasons: [MediaItem]
+    ) -> String? {
+        if let id = initialEpisode?.seasonID,
+           seasons.contains(where: { $0.id == id }) {
+            return id
+        }
+        if let number = initialEpisode?.seasonNumber,
+           let season = seasons.first(where: { $0.seasonNumber == number }) {
+            return season.id
+        }
+        if let initialSeasonID,
+           seasons.contains(where: { $0.id == initialSeasonID }) {
+            return initialSeasonID
+        }
+        return seasons.first?.id
+    }
+
+    public static func episode(
+        matching initialEpisode: MediaItem?,
+        in episodes: [MediaItem]
+    ) -> MediaItem? {
+        guard let initialEpisode else { return nil }
+        if let exact = episodes.first(where: { $0.id == initialEpisode.id }) {
+            return exact
+        }
+        if let season = initialEpisode.seasonNumber,
+           let episode = initialEpisode.episodeNumber {
+            return SeriesHeroNumbering.episode(
+                matching: SeasonEpisodeRef(season: season, episode: episode),
+                in: episodes
+            )
+        }
+        if let episode = initialEpisode.episodeNumber {
+            return episodes.first { $0.episodeNumber == episode }
+        }
+        return nil
+    }
+}
+
 /// Pure, UI-independent derivation of the `S{n} · E{m}` numbering a TV-show hero
 /// must always show when an *episode* is fronted. Some list/search/seed episodes
 /// arrive missing their `seasonNumber`/`episodeNumber` (they know only their own

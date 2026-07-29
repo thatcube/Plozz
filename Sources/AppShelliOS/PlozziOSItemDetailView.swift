@@ -1287,7 +1287,11 @@ private struct PlozziOSInlineSeriesBrowser: View {
         self.seasonRequestError = seasonRequestError
         self.onRequestSeasons = onRequestSeasons
         _selectedSeasonID = State(
-            initialValue: initialEpisode?.seasonID ?? initialSeasonID
+            initialValue: SeriesEpisodeEntry.seasonID(
+                initialEpisode: initialEpisode,
+                initialSeasonID: initialSeasonID,
+                seasons: seasons
+            )
         )
     }
 
@@ -1353,16 +1357,21 @@ private struct PlozziOSInlineSeriesBrowser: View {
                     isLoading: !seasons.isEmpty
                         && selectedSeasonID != nil
                         && displayedEpisodes == nil,
-                    currentEpisodeID: initialEpisode?.seasonID == selectedSeasonID
-                        ? initialEpisode?.id
-                        : nil,
+                    currentEpisodeID: SeriesEpisodeEntry.episode(
+                        matching: initialEpisode,
+                        in: displayedEpisodes ?? []
+                    )?.id,
                     onPlay: onPlay
                 )
             }
             .onChange(of: seasons.map(\.id), initial: true) { _, ids in
                 if selectedSeasonID == nil
                     || !ids.contains(selectedSeasonID ?? "") {
-                    selectedSeasonID = ids.first
+                    selectedSeasonID = SeriesEpisodeEntry.seasonID(
+                        initialEpisode: initialEpisode,
+                        initialSeasonID: nil,
+                        seasons: seasons
+                    )
                 }
                 // A different set of season ids means a different server backing
                 // this show, so the resume point has to be resolved again against
@@ -1549,9 +1558,10 @@ private struct PlozziOSInlineSeriesBrowser: View {
         // loaded empty array, which still publishes.
         guard let displayedEpisodes else { return }
         // An explicitly opened episode outranks the resume point.
-        if initialEpisode?.seasonID == selectedSeasonID,
-           let initialID = initialEpisode?.id,
-           let loaded = displayedEpisodes.first(where: { $0.id == initialID }) {
+        if let loaded = SeriesEpisodeEntry.episode(
+            matching: initialEpisode,
+            in: displayedEpisodes
+        ) {
             resolvedSeasonID = selectedSeasonID
             onPlayTargetChange(loaded)
             onHeroShowsSeriesChange(false)
@@ -1710,8 +1720,9 @@ private struct PlozziOSInlineEpisodeRail: View {
                 )
                 .scrollIndicators(.hidden)
                 .scrollClipDisabled()
-                .onAppear {
+                .task(id: currentEpisodeID) {
                     guard let currentEpisodeID else { return }
+                    await Task.yield()
                     proxy.scrollTo(currentEpisodeID, anchor: .leading)
                 }
             }

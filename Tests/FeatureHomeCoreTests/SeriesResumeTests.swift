@@ -27,6 +27,46 @@ final class SeriesResumeTests: XCTestCase {
         Date(timeIntervalSince1970: 1_700_000_000 + Double(offset) * 86_400)
     }
 
+    func testEpisodeEntryMapsAcrossServerSpecificIDsBySeasonAndEpisodeNumber() {
+        let tapped = MediaItem(
+            id: "plex-e5",
+            title: "Episode 5",
+            kind: .episode,
+            seasonNumber: 1,
+            episodeNumber: 5,
+            seriesID: "plex-show",
+            seasonID: "plex-season"
+        )
+        let activeSeason = MediaItem(
+            id: "jellyfin-season",
+            title: "Season 1",
+            kind: .season,
+            seasonNumber: 1
+        )
+        let activeEpisodes = [
+            episode("jellyfin-e4", number: 4),
+            episode("jellyfin-e5", number: 5),
+            episode("jellyfin-e6", number: 6),
+        ].map {
+            var copy = $0
+            copy.seasonNumber = 1
+            return copy
+        }
+
+        XCTAssertEqual(
+            SeriesEpisodeEntry.seasonID(
+                initialEpisode: tapped,
+                initialSeasonID: tapped.seasonID,
+                seasons: [activeSeason]
+            ),
+            activeSeason.id
+        )
+        XCTAssertEqual(
+            SeriesEpisodeEntry.episode(matching: tapped, in: activeEpisodes)?.id,
+            "jellyfin-e5"
+        )
+    }
+
     // MARK: nextUp selection
 
     func testNextUpPicksFirstInProgressByPercentage() {

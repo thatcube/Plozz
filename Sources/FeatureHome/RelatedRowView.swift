@@ -66,32 +66,31 @@ struct RelatedRowView: View {
             Text("Related")
                 .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 .padding(.leading, leadingInset)
-            HStack(spacing: metrics.cardSpacing) {
-                ForEach(0..<Self.placeholderCount, id: \.self) { _ in
-                    // Pinned to the same slot width the loaded row gives a card
-                    // (`MediaRowView.cardSlotWidth`). Without it the placeholder
-                    // drew at its own intrinsic size, so the row visibly resized
-                    // when the real cards arrived — the jump the placeholder is
-                    // there to prevent.
-                    SkeletonCardView(style: .poster)
-                        .frame(width: metrics.posterWidth)
+            // Use the same nested horizontal viewport as MediaRowView. A plain
+            // eight-card HStack reports its ~2,400pt intrinsic width to the outer
+            // vertical ScrollView even when visually clipped, widening the whole
+            // detail column and letting tvOS pan it sideways while the skeleton is
+            // present. The horizontal ScrollView keeps the layout footprint pinned
+            // to the actual viewport, exactly like the loaded Related row.
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: metrics.cardSpacing) {
+                    ForEach(0..<Self.placeholderCount, id: \.self) { _ in
+                        SkeletonCardView(style: .poster)
+                            .frame(width: metrics.posterWidth)
+                    }
                 }
+                .padding(.leading, leadingInset)
+                .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                .padding(.vertical, metrics.railShadowClearance)
             }
-            .padding(.leading, leadingInset)
-            // Match MediaRowView's effective scroll-viewport clearance. The loaded
-            // row places its cards `railTopPadding` below the title and reserves
-            // `railVerticalPadding` below them after its internal shadow padding is
-            // cancelled. Without these, the skeleton sat 16pt higher and 40pt
-            // shorter, so the episode/Related composition shifted when cards loaded.
-            .padding(.top, metrics.railTopPadding)
-            .padding(.bottom, metrics.railVerticalPadding)
+            .padding(.top, metrics.railTopClearanceOffset)
+            .padding(.bottom, metrics.railBottomClearanceOffset)
             // Non-focusable so the focus engine never anchors on a placeholder and
             // strands focus where a card is about to be replaced.
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .clipped()
     }
 
     /// Enough to read as a row without measuring the viewport — the placeholders

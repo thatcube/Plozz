@@ -1687,8 +1687,7 @@ private struct PlozziOSInlineEpisodeRail: View {
 
     var body: some View {
         if isLoading {
-            ProgressView("Loading episodes…")
-                .frame(minHeight: 180)
+            PlozziOSInlineEpisodeSkeletonRail()
         } else if let episodes, episodes.isEmpty {
             ContentUnavailableView(
                 "No episodes",
@@ -1727,6 +1726,83 @@ private struct PlozziOSInlineEpisodeRail: View {
                 }
             }
         }
+    }
+}
+
+private struct PlozziOSInlineEpisodeSkeletonRail: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(0..<6, id: \.self) { _ in
+                    PlozziOSInlineEpisodeSkeleton()
+                }
+            }
+        }
+        .contentMargins(
+            .horizontal,
+            PlozziOSPageLayout.horizontalInset(for: horizontalSizeClass),
+            for: .scrollContent
+        )
+        .scrollIndicators(.hidden)
+        .scrollDisabled(true)
+        .accessibilityLabel("Loading episodes")
+    }
+}
+
+private struct PlozziOSInlineEpisodeSkeleton: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.plozzCardStyle) private var cardStyle
+    @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.themePalette) private var palette
+
+    @ViewBuilder
+    var body: some View {
+        if cardStyle == .framed {
+            content
+                .plozzFramedMediaCard(
+                    innerCornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
+                )
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(
+                cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
+                style: .continuous
+            )
+            .fill(palette.fill)
+            .frame(width: cardWidth, height: cardWidth * 9 / 16)
+            .plozzMediaEdge(
+                cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                skeletonLine(width: 72, height: 10)
+                skeletonLine(width: cardWidth * 0.64, height: 17)
+                skeletonLine(width: cardWidth * 0.88, height: 13)
+                skeletonLine(width: cardWidth * 0.72, height: 13)
+            }
+            .frame(maxWidth: .infinity, minHeight: 66, alignment: .topLeading)
+            .padding(.horizontal, metrics.landscapeCaptionInset)
+        }
+        .frame(width: cardWidth, alignment: .leading)
+        .padding(cardStyle == .framed ? 10 : 0)
+        .shimmering()
+    }
+
+    private func skeletonLine(width: CGFloat, height: CGFloat) -> some View {
+        Capsule()
+            .fill(palette.fill)
+            .frame(width: width, height: height)
+    }
+
+    private var cardWidth: CGFloat {
+        horizontalSizeClass == .regular ? 360 : 300
     }
 }
 

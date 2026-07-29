@@ -208,10 +208,16 @@ public enum SeriesEpisodeEntry {
         }
         if let season = initialEpisode.seasonNumber,
            let episode = initialEpisode.episodeNumber {
-            return SeriesHeroNumbering.episode(
+            if let exact = SeriesHeroNumbering.episode(
                 matching: SeasonEpisodeRef(season: season, episode: episode),
                 in: episodes
-            )
+            ) {
+                return exact
+            }
+            // `episodes` is already the selected season's scoped child list.
+            // Some providers omit seasonNumber on those rows, so E-number is the
+            // correct fallback here and cannot accidentally cross seasons.
+            return episodes.first { $0.episodeNumber == episode }
         }
         if let episode = initialEpisode.episodeNumber {
             return episodes.first { $0.episodeNumber == episode }

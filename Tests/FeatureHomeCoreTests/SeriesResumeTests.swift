@@ -47,11 +47,7 @@ final class SeriesResumeTests: XCTestCase {
             episode("jellyfin-e4", number: 4),
             episode("jellyfin-e5", number: 5),
             episode("jellyfin-e6", number: 6),
-        ].map {
-            var copy = $0
-            copy.seasonNumber = 1
-            return copy
-        }
+        ]
 
         XCTAssertEqual(
             SeriesEpisodeEntry.seasonID(

@@ -799,7 +799,12 @@ struct SeriesDetailView: View {
 
     // MARK: Episode rail
 
+    @ViewBuilder
     private func episodeRail(onFocusEntered: @escaping () -> Void) -> some View {
+        if let selectedSeasonID,
+           viewModel.episodes(for: selectedSeasonID) == nil {
+            SeriesEpisodeSkeletonRail()
+        } else {
         // Owned episodes first, then the season's not-yet-aired ones so a viewer can
         // see (and read about) the rest of the run without leaving the page.
         let episodes = currentEpisodes + upcomingPlaceholders
@@ -822,7 +827,7 @@ struct SeriesDetailView: View {
             currentEpisodes.contains(where: { $0.id == id }) ? id : nil
         }
         let target = stableTarget ?? SeriesResume.nextUp(in: currentEpisodes)?.id
-        return SeriesWindowedEpisodeRail(
+        SeriesWindowedEpisodeRail(
             title: railTitle,
             episodes: episodes,
             spoilerSettings: spoilerSettings,
@@ -849,6 +854,7 @@ struct SeriesDetailView: View {
                 onPlay(item)
             }
         )
+        }
     }
 
     /// The ids of seasons that come before the one whose rail is showing, so
@@ -1467,6 +1473,64 @@ private struct SeriesWindowedEpisodeRail: View {
         if range != windowRange {
             windowRange = range
         }
+    }
+}
+
+private struct SeriesEpisodeSkeletonRail: View {
+    private let metrics = PlozzMetrics.standard
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: metrics.cardSpacing) {
+                ForEach(0..<4, id: \.self) { _ in
+                    SeriesEpisodeSkeletonCard()
+                }
+            }
+            .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+            .padding(.vertical, metrics.railShadowClearance)
+        }
+        .padding(.top, metrics.railTopClearanceOffset)
+        .padding(.bottom, metrics.railBottomClearanceOffset)
+        .scrollDisabled(true)
+        .accessibilityLabel("Loading episodes")
+    }
+}
+
+private struct SeriesEpisodeSkeletonCard: View {
+    @Environment(\.themePalette) private var palette
+    private let metrics = PlozzMetrics.standard
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            RoundedRectangle(
+                cornerRadius: metrics.landscapeCardCornerRadius,
+                style: .continuous
+            )
+            .fill(palette.fill)
+            .frame(
+                width: EpisodeColumnCard.artworkSize.width,
+                height: EpisodeColumnCard.artworkSize.height
+            )
+            .plozzMediaEdge(cornerRadius: metrics.landscapeCardCornerRadius)
+
+            VStack(alignment: .leading, spacing: 10) {
+                skeletonLine(width: 250, height: 20)
+                skeletonLine(width: 440, height: 15)
+                skeletonLine(width: 390, height: 15)
+                skeletonLine(width: 310, height: 15)
+            }
+            .padding(.top, metrics.landscapeCaptionTopSpacing)
+        }
+        .frame(width: EpisodeColumnCard.artworkSize.width, alignment: .leading)
+        .padding(.horizontal, EpisodeColumnCard.sideMargin)
+        .shimmering()
+    }
+
+    private func skeletonLine(width: CGFloat, height: CGFloat) -> some View {
+        Capsule()
+            .fill(palette.fill)
+            .frame(width: width, height: height)
     }
 }
 

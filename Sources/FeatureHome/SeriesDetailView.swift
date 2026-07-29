@@ -499,8 +499,18 @@ struct SeriesDetailView: View {
                         item: series,
                         selectedSource: distinctServerChoices.first { $0.accountID == series.sourceAccountID }
                             ?? viewModel.currentSourceForDisplay,
+                        // Describe the file PLAY WILL ACTUALLY RUN.
+                        //
+                        // The old fallback was `playVersions.first`, and the
+                        // picker's order is largest-file-first — so with nothing
+                        // explicitly selected the panel described an arbitrary
+                        // version while Play passed `nil`, meaning "let the server
+                        // choose". The two disagreed until the user changed the
+                        // version by hand, which is exactly when the override made
+                        // them agree again. `nil` now shows the server's own
+                        // default, which is what `nil` actually starts.
                         selectedVersion: playVersions.first { $0.id == effectivePlayVersionID }
-                            ?? playVersions.first
+                            ?? playVersions.first(where: \.isDefault)
                             ?? playTarget.map { MediaVersion.synthesized(from: $0) },
                         leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
                         seriesRecedeModel: recedeModel,

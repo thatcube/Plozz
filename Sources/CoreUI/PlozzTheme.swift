@@ -273,6 +273,11 @@ public enum PlozzTheme {
 
         /// Focus scale for a lifted medium card.
         public static let mediumFocusedCardScale: CGFloat = 1.07
+        /// Focus lift for large read-only information cards (About, Details,
+        /// Playback). Gentler than a media card's: these are wide, text-heavy
+        /// panels, and a browse-card scale on one reads as the whole column
+        /// jumping.
+        public static let readOnlyFocusedCardScale: CGFloat = 1.02
         /// Scale applied to a focused browsing tile (matches Twozz Browse).
         public static let focusedCardScale: CGFloat = 1.08
 

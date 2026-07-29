@@ -98,6 +98,15 @@ struct DetailExtrasView: View {
                 // Above the cast: "what else is like this" is a browsing decision,
                 // and the viewer is making it now. Who was in it is reference
                 // material they look up afterwards.
+                // Every section carries an EXPLICIT identity.
+                //
+                // `showsRelated` flips as Related resolves, which inserts or
+                // removes a sibling and shifts every following section's
+                // structural position — and with it their identity, silently
+                // resetting their `@State`. `DetailInformationSections` keeps the
+                // About card's "show full overview" flag there, so a Related
+                // resolution landing at the wrong moment discarded the flag and
+                // the sheet never appeared.
                 if showsRelated, let onSelectRelated {
                     RelatedRowView(
                         entries: relatedEntries,
@@ -111,6 +120,7 @@ struct DetailExtrasView: View {
                         revealsWithoutBrowser: revealsSeriesCastWithoutBrowser,
                         suppressesFocus: suppressesFocus
                     ))
+                    .id("detail-extras-related")
                 }
                 if !item.cast.isEmpty {
                     CastRowView(
@@ -126,6 +136,7 @@ struct DetailExtrasView: View {
                             revealsWithoutBrowser: revealsSeriesCastWithoutBrowser,
                             suppressesFocus: suppressesFocus
                         ))
+                        .id("detail-extras-cast")
                 }
                 DetailInformationSections(
                     item: item,
@@ -133,6 +144,7 @@ struct DetailExtrasView: View {
                     selectedSource: selectedSource,
                     selectedVersion: selectedVersion
                 )
+                .id("detail-extras-info")
             }
         }
     }

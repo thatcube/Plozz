@@ -8,6 +8,33 @@ import UIKit
 /// Shared title-level detail sections. Platform shells keep their own Cast rail
 /// first, then place this view beneath it so content and ordering stay identical
 /// while the adaptive grids naturally collapse on iPhone.
+#if os(tvOS) && canImport(UIKit)
+/// Makes the presenting sheet's own host transparent, so the card floats over
+/// the page (dimmed) instead of on an opaque full-screen plate.
+private struct ClearSheetBackground: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        DispatchQueue.main.async {
+            view.superview?.superview?.backgroundColor = .clear
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+}
+#else
+private struct ClearSheetBackground: View {
+    var body: some View { Color.clear }
+}
+#endif
+
+private struct OverviewCardHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 public struct DetailInformationSections: View {
     private let item: MediaItem
     private let horizontalInset: CGFloat
@@ -15,6 +42,7 @@ public struct DetailInformationSections: View {
     private let selectedVersion: MediaVersion?
 
     @State private var showsFullOverview = false
+    @State private var overviewCardHeight: CGFloat = 0
     @State private var overviewFullHeight: CGFloat = 0
     @State private var overviewVisibleHeight: CGFloat = 0
     /// Height the About card would take at its *base* line cap, measured from a
@@ -289,8 +317,48 @@ public struct DetailInformationSections: View {
         return "S\(season) · E\(episode)"
     }
 
+    @ViewBuilder
     private var aboutContent: some View {
-        Button { showsFullOverview = true } label: {
+        // Interactive ONLY when there is more overview to show.
+        //
+        // `plozzFocusableCard` applies `.focusable(true)` on tvOS, so wrapping a
+        // Button in it produced a SECOND focusable element around the button: the
+        // wrapper took focus (the oversized highlight on the whole card) and
+        // swallowed Select, so the button's action never ran and the sheet never
+        // appeared. It also made every About card focusable — including the ones
+        // with nothing to expand.
+        //
+        // So when there IS something to open the card is a button whose focus
+        // treatment comes from its button style; when there isn't, it keeps the
+        // plain focusable-card wrapper like every other read-only section. What
+        // it never does again is stack the two.
+        if isOverviewTruncated {
+            Button { showsFullOverview = true } label: {
+                aboutCardBody
+            }
+            // Same lift as the read-only cards beside it. The style's default is
+            // a browse-card 1.07, which on a panel this wide both mismatched its
+            // neighbours and grew far enough to overlap the Ratings column.
+            .buttonStyle(
+                PlozzCardButtonStyle(
+                    cornerRadius: cardCornerRadius,
+                    focusedScale: PlozzTheme.Metrics.readOnlyFocusedCardScale
+                )
+            )
+            .sheet(isPresented: $showsFullOverview) {
+                overviewSheet
+            }
+        } else {
+            // Read-only, but STILL FOCUSABLE — every other card on this page is,
+            // and skipping over just this one reads as a dead spot. Only the
+            // Button is dropped, since there is nothing to open.
+            aboutCardBody
+                .plozzFocusableCard(cornerRadius: cardCornerRadius)
+        }
+    }
+
+    private var aboutCardBody: some View {
+        Group {
             VStack(alignment: .leading, spacing: aboutContentSpacing) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     // "S1 · E1" ahead of the episode's title, so the card says
@@ -325,11 +393,6 @@ public struct DetailInformationSections: View {
             .onPreferenceChange(AboutBaseCardHeightKey.self) { aboutBaseCardHeight = $0 }
             .onPreferenceChange(BodyLineHeightKey.self) { bodyLineHeight = $0 }
             .padding(cardPadding)
-        }
-        .buttonStyle(.plain)
-        .plozzFocusableCard(cornerRadius: cardCornerRadius)
-        .sheet(isPresented: $showsFullOverview) {
-            overviewSheet
         }
     }
 
@@ -454,7 +517,89 @@ public struct DetailInformationSections: View {
         .compositingGroup()
     }
 
+    @ViewBuilder
     private var overviewSheet: some View {
+        #if os(tvOS)
+        tvOverviewCard
+        #else
+        overviewSheetForms
+        #endif
+    }
+
+    #if os(tvOS)
+    /// A centred card, sized to its text — deliberately NOT the
+    /// `NavigationStack` + `navigationTitle` used on iOS.
+    ///
+    /// tvOS renders a navigation title at display size, so a long show name was
+    /// truncated to "With You and th…" while the body text sat small beneath a
+    /// large empty gap. Apple's own detail overview is a plain card: title at
+    /// body-ish weight, a secondary line of genres, then the overview, with the
+    /// card hugging its content.
+    private var tvOverviewCard: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(item.title)
+                        .font(.system(size: 38, weight: .semibold))
+                        .foregroundStyle(palette.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !item.genres.isEmpty {
+                        Text(item.genres.prefix(3).joined(separator: ", "))
+                            .font(.system(size: 26))
+                            .plozzForeground(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if let overview = nonempty(item.overview) {
+                        overviewText(overview)
+                            .font(.system(size: 29))
+                            .foregroundStyle(palette.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(48)
+                // Measure what the text actually needs, so the card can be sized
+                // to it rather than guessed at.
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: OverviewCardHeightKey.self,
+                            value: geometry.size.height
+                        )
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            // An EXPLICIT height, between a floor and a cap.
+            //
+            // `fixedSize` + `maxHeight` was the wrong pairing: fixedSize forces
+            // the scroll view to its ideal (full content) height and the cap then
+            // clipped it, which is why the title was sliced off the top and the
+            // body ran out of the bottom. Sizing it to the measured content keeps
+            // a short overview hugged, and anything past the cap scrolls instead
+            // of overflowing.
+            .frame(
+                width: 900,
+                height: min(max(overviewCardHeight, 220), 760)
+            )
+            .onPreferenceChange(OverviewCardHeightKey.self) { overviewCardHeight = $0 }
+            .background {
+                RoundedRectangle(cornerRadius: 32, style: .continuous)
+                    .fill(palette.settingsBackground)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+            .shadow(color: .black.opacity(0.5), radius: 40, y: 20)
+        }
+        .background(ClearSheetBackground())
+    }
+    #endif
+
+    private var overviewSheetForms: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {

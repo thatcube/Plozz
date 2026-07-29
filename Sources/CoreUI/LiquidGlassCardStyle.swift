@@ -268,6 +268,10 @@ public struct PlozzFocusableCardModifier: ViewModifier {
             .focusable(true)
             .focused($focused)
             .focusEffectDisabled()
+            // Read-only cards lift too. Focus should always be legible as
+            // movement, not just a change of surface — otherwise the information
+            // sections read as inert while every other card on the page responds.
+            .scaleEffect(focused ? PlozzTheme.Metrics.readOnlyFocusedCardScale : 1)
             .zIndex(focused ? 1 : 0)
             .animation(.easeOut(duration: 0.18), value: focused)
         #else

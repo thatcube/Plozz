@@ -805,6 +805,16 @@ struct DetailHeroView: View, Equatable {
                 maxWidth: 800,
                 reservesSpace: false
             )
+            // Refuse to be squeezed below the line limit.
+            //
+            // A series hero is a FIXED-height frame, and the browser transition
+            // pushes the content column up with a large bottom inset
+            // (`heroContentBottomLift`) so the action row's layout sits above the
+            // season bar. That leaves little slack, and the overview is the only
+            // flexible element in the column — so SwiftUI compressed it, silently,
+            // to a single line. `fixedSize` makes it claim its natural height for
+            // however many lines it actually has, up to `lineCount`.
+            .fixedSize(horizontal: false, vertical: true)
             // Bottom facts region just above the action buttons: year · runtime,
             // ratings, then capability badges (4K / Atmos / HDR …). One wrapping
             // layout owns every item so an unusually rich title can add a real

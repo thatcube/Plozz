@@ -284,7 +284,18 @@ struct SeriesDetailView: View {
                 guard heroItem.kind == .episode, heroItem.isPlayed else {
                     return
                 }
-                Task { await resolveRestingHero(in: selectedSeasonID) }
+                // The hero advances to the next unwatched episode, but the rail
+                // must stay exactly where the user left it: marking an episode
+                // watched from its own card should update that card in place, not
+                // scroll the row to a different episode and take focus with it.
+                // Marking from the hero has no rail focus to protect, so there the
+                // rail still follows.
+                Task {
+                    await resolveRestingHero(
+                        in: selectedSeasonID,
+                        repointsRail: !browserHoldsFocus
+                    )
+                }
             }
     }
 
@@ -417,6 +428,12 @@ struct SeriesDetailView: View {
                             revealBrowser(using: proxy)
                         }
                     )
+                    // Skips the hero's body when none of its inputs changed. The
+                    // page's focus flags (season bar engaged, rail reset token,
+                    // focused chip) flip this whole body, and the hero's stored
+                    // closures otherwise made it compare unequal every time — so
+                    // it rebuilt while masked out behind the episode browser.
+                    .equatable()
                     .id(Self.topAnchorID)
                     // Episodes are seeded from the season's `/children` listing,
                     // which on Plex can omit the per-stream DoVi/HDR facts and the
@@ -1010,7 +1027,7 @@ struct SeriesDetailView: View {
         let target = entryTarget
             ?? stableTarget
             ?? SeriesResume.nextUp(in: currentEpisodes)?.id
-        SeriesWindowedEpisodeRail(
+        SeriesEpisodeRailContent(
             title: railTitle,
             episodes: episodes,
             spoilerSettings: spoilerSettings,
@@ -1533,7 +1550,16 @@ struct SeriesDetailView: View {
     /// empty list, and acting on that would pin the show fallback with no playable
     /// target until the page was closed.
     @MainActor
-    private func resolveRestingHero(in seasonID: String?) async {
+    /// - Parameter repointsRail: Whether the rail's stable entry target should
+    ///   follow the newly-resolved hero. True at the discrete moments the rail is
+    ///   allowed to move (open, season change, server switch); FALSE for a live
+    ///   correction such as a watched mutation, because `railTargetID` feeds
+    ///   `MediaRowView`'s `defaultFocusID` — changing it re-scrolls and refocuses
+    ///   the rail, which yanks it out from under someone who is browsing it.
+    private func resolveRestingHero(
+        in seasonID: String?,
+        repointsRail: Bool = true
+    ) async {
         let loadState = seasonID.map { viewModel.seasonLoadState(for: $0) }
         let pool: [MediaItem]
         if let loadState {
@@ -1559,12 +1585,29 @@ struct SeriesDetailView: View {
                 episodes: pool
             )
         }
-        updateRailTarget()
+        if repointsRail { updateRailTarget() }
     }
 
 }
 
-private struct SeriesWindowedEpisodeRail: View {
+/// The series detail episode rail.
+///
+/// Renders the season's episodes in full, deliberately. An earlier version
+/// windowed a long season to ~50 cards around the focus target and grew that
+/// range as focus neared an edge — and every one of those growth steps was a
+/// focus bug, because expanding the LEADING side prepends cards to the
+/// `LazyHStack`. That shifts the content sideways and recycles the focused card,
+/// so tvOS re-establishes focus by geometry: measured on device jumping ~36
+/// episodes at a time while holding LEFT, and landing on episode 25 when opening
+/// on 118. Collapsing the growth into a single step didn't help — one shift
+/// steals focus just as thoroughly as five.
+///
+/// Windowing bought nothing to pay for that. `MediaRowView` scrolls a
+/// `LazyHStack`, which only ever builds the cards actually on screen; passing it
+/// 323 items rather than 50 costs three dictionary inserts per extra item at
+/// init and nothing per frame. The array is now constant for the whole browse,
+/// which is the property that makes focus stable.
+private struct SeriesEpisodeRailContent: View {
     let title: Text?
     let episodes: [MediaItem]
     let spoilerSettings: SpoilerSettings
@@ -1577,13 +1620,10 @@ private struct SeriesWindowedEpisodeRail: View {
     let onFocusEntered: () -> Void
     let onSelect: (MediaItem) -> Void
 
-    @State private var windowRange: Range<Int>?
-
     var body: some View {
-        let visibleEpisodes = Array(episodes[resolvedWindow])
         MediaRowView(
             title: title,
-            items: visibleEpisodes,
+            items: episodes,
             presentation: .episodeColumn,
             spoilerSettings: spoilerSettings,
             initialFocusID: initialFocusID,
@@ -1594,11 +1634,6 @@ private struct SeriesWindowedEpisodeRail: View {
             onRefocusComplete: onRefocusComplete,
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
             onFocusEntered: onFocusEntered,
-            onFocusChange: { item in
-                if let item {
-                    expandWindow(around: item.id)
-                }
-            },
             onSelect: onSelect
         )
         .mediaItemActionContext(
@@ -1607,56 +1642,6 @@ private struct SeriesWindowedEpisodeRail: View {
                 precedingContainerIDs: precedingContainerIDs
             )
         )
-        .onChange(of: targetID) { _, _ in
-            windowRange = nil
-        }
-    }
-
-    private var resolvedWindow: Range<Int> {
-        guard !episodes.isEmpty else { return episodes.indices }
-        let targetIndex = targetID.flatMap { id in
-            episodes.firstIndex(where: { $0.id == id })
-        }
-        let storedRangeIsValid = windowRange.map { range in
-            range.lowerBound >= episodes.startIndex
-                && range.lowerBound < episodes.endIndex
-                && range.upperBound <= episodes.endIndex
-                && targetIndex.map(range.contains) != false
-        } ?? false
-        let range = storedRangeIsValid ? windowRange! : initialWindow
-        let lower = Swift.max(range.lowerBound, episodes.startIndex)
-        let upper = Swift.min(range.upperBound, episodes.endIndex)
-        return lower..<upper
-    }
-
-    private var initialWindow: Range<Int> {
-        let windowSize = 50
-        guard episodes.count > windowSize else { return episodes.indices }
-        let targetIndex = targetID
-            .flatMap { id in episodes.firstIndex(where: { $0.id == id }) }
-            ?? episodes.startIndex
-        let lower = Swift.min(
-            Swift.max(episodes.startIndex, targetIndex - windowSize / 2),
-            episodes.endIndex - windowSize
-        )
-        return lower..<(lower + windowSize)
-    }
-
-    private func expandWindow(around itemID: String) {
-        guard episodes.count > 50,
-              let index = episodes.firstIndex(where: { $0.id == itemID }) else {
-            return
-        }
-        var range = windowRange ?? initialWindow
-        if index - range.lowerBound <= 8 {
-            range = Swift.max(episodes.startIndex, range.lowerBound - 25)..<range.upperBound
-        }
-        if range.upperBound - index <= 8 {
-            range = range.lowerBound..<Swift.min(episodes.endIndex, range.upperBound + 25)
-        }
-        if range != windowRange {
-            windowRange = range
-        }
     }
 }
 

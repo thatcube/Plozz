@@ -14,7 +14,68 @@ import UIKit
 /// It is intentionally stateless and driven entirely by `item`, so a parent can
 /// swap which item it shows (series → focused season → focused episode) and the
 /// whole hero animates to reflect the newly focused context.
-struct DetailHeroView: View {
+struct DetailHeroView: View, Equatable {
+    /// Compares the hero's INPUTS so callers can wrap it in `.equatable()`.
+    ///
+    /// The hero stores ten action closures, created fresh inside the page's body
+    /// each pass, and closures never compare equal — so SwiftUI's structural
+    /// check always failed and this large view (backdrop, logo, metadata, badges,
+    /// credits, action row) re-evaluated on every page update. On tvOS the hero
+    /// is masked out entirely while the episode browser holds focus, so those
+    /// rebuilds were not just redundant, they were invisible: measured at 183
+    /// rebuilds during a browsing session in which the hero never changed.
+    ///
+    /// Each closure is compared for PRESENCE rather than ignored. Their identity
+    /// is meaningless, but their nil-ness is not — it decides whether the Play,
+    /// Trailer, request and version/source controls exist at all, so dropping
+    /// them from the comparison would let the action row go stale.
+    ///
+    /// `playButtonFocus` is deliberately absent: a `FocusState` binding drives
+    /// focus through its own graph dependency, not through the view value.
+    /// `seriesRecedeModel` is compared by identity because it is `@Observable` —
+    /// reading `isReceded` registers an observation that invalidates the body on
+    /// its own.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.item == rhs.item
+            && lhs.backdropItem == rhs.backdropItem
+            && lhs.heroHeightFraction == rhs.heroHeightFraction
+            && lhs.titleFallbackOverride == rhs.titleFallbackOverride
+            && lhs.offersParentNavigation == rhs.offersParentNavigation
+            && lhs.presentsEpisodeStill == rhs.presentsEpisodeStill
+            && lhs.actionItem == rhs.actionItem
+            && lhs.seriesRecedeModel === rhs.seriesRecedeModel
+            && lhs.scheduleLine == rhs.scheduleLine
+            && lhs.spoilerSettings == rhs.spoilerSettings
+            && lhs.playTitle == rhs.playTitle
+            && lhs.playProgress == rhs.playProgress
+            && lhs.playRemainingText == rhs.playRemainingText
+            && lhs.playSeasonEpisodeText == rhs.playSeasonEpisodeText
+            && lhs.versions == rhs.versions
+            && lhs.selectedVersionID == rhs.selectedVersionID
+            && lhs.sources == rhs.sources
+            && lhs.offlineSourceAccountIDs == rhs.offlineSourceAccountIDs
+            && lhs.selectedSourceAccountID == rhs.selectedSourceAccountID
+            && lhs.fallbackTechnicalBadges == rhs.fallbackTechnicalBadges
+            && lhs.isDiscoveryItem == rhs.isDiscoveryItem
+            && lhs.requestCTA == rhs.requestCTA
+            && lhs.requestActingName == rhs.requestActingName
+            && lhs.seasonRequestAvailability == rhs.seasonRequestAvailability
+            && lhs.seasonRequestAvailabilityResolved == rhs.seasonRequestAvailabilityResolved
+            && lhs.seasonRequestAvailabilityFailed == rhs.seasonRequestAvailabilityFailed
+            && lhs.isRequestingSeasons == rhs.isRequestingSeasons
+            // Presence, not identity — see above.
+            && (lhs.onPlay == nil) == (rhs.onPlay == nil)
+            && (lhs.onPlayTrailer == nil) == (rhs.onPlayTrailer == nil)
+            && (lhs.onSelectVersion == nil) == (rhs.onSelectVersion == nil)
+            && (lhs.onSelectSource == nil) == (rhs.onSelectSource == nil)
+            && (lhs.onRequest == nil) == (rhs.onRequest == nil)
+            && (lhs.onRequestSeasons == nil) == (rhs.onRequestSeasons == nil)
+            && (lhs.onRetrySeasonRequestAvailability == nil)
+                == (rhs.onRetrySeasonRequestAvailability == nil)
+            && (lhs.onHeroActionFocused == nil) == (rhs.onHeroActionFocused == nil)
+            && (lhs.onHeroActionBlurred == nil) == (rhs.onHeroActionBlurred == nil)
+    }
+
     let item: MediaItem
     @Environment(HeroTrailerController.self) private var heroTrailerController
     @Environment(HeroBackgroundSettingsModel.self) private var heroBackground

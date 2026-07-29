@@ -102,6 +102,9 @@ public struct MediaRowView: View {
     /// came-in/resume episode. A stale id from another season is ignored because it
     /// won't exist in the current `items`.
     @State private var lastFocusedID: String?
+    /// Whether the user has actually moved around this row since its target was
+    /// last re-pointed. Latches the entry gate off — see `cardIsDisabled`.
+    @State private var hasBrowsedSinceTargetChange = false
     /// Items whose artwork has already been queued for prefetch, so each card's
     /// `onAppear` only ever schedules its forward window once.
     @State private var prefetchedIDs: Set<String> = []
@@ -245,7 +248,32 @@ public struct MediaRowView: View {
         // the page reappears, and leaving the other cards focusable let it land
         // on one of them (or the row below) visibly before we corrected it.
         if let coveredFocusID { return item.id != coveredFocusID }
-        return gatesFocus && !focusEngaged && item.id != gateTarget
+        // The gate stops disabling cards for good once the row has been browsed.
+        //
+        // Disabling exists ONLY to avoid a transient highlight on the
+        // geometrically-nearest card as focus enters the row; the real targeting
+        // is `handleFocusChange` redirecting to `gateTarget`, which still runs on
+        // every re-entry. So the cost of dropping it is cosmetic, and the cost of
+        // keeping it turned out not to be.
+        //
+        // Keying it on `focusEngaged` was the bug. That flag is reset by
+        // `focusResetToken`, which the page bumps on season-bar and hero focus
+        // events — and during a fast horizontal hold `focusedID` blips to nil
+        // between cards (see `handleFocusChange`). A bump landing in one of those
+        // blips disabled every card but the target WHILE THE USER WAS BROWSING:
+        // tvOS lost its focus candidate, scrambled for focusable content, and the
+        // lazy stack realised from the beginning. Measured on device: holding LEFT
+        // from #114 walked to #109, then the row teleported to #0...#4 and the
+        // gate dragged it back — the "bounce".
+        //
+        // `hasBrowsedSinceTargetChange` only ever resets at the discrete moments
+        // the row is genuinely re-entered from scratch (a new `defaultFocusID`,
+        // i.e. season switch or open), so no token churn can revive the gate
+        // under the user.
+        return gatesFocus
+            && !focusEngaged
+            && !hasBrowsedSinceTargetChange
+            && item.id != gateTarget
     }
 
     public var body: some View {
@@ -319,6 +347,7 @@ public struct MediaRowView: View {
                         // the only focusable card on the next entry.
                         focusEngaged = false
                         lastFocusedID = nil
+                        hasBrowsedSinceTargetChange = false
                         guard let newTarget, itemIDSet.contains(newTarget) else { return }
                         // Hard-align rather than going through `scrollToIfNeeded`.
                         // The caller only re-points this at discrete moments — open,
@@ -340,6 +369,14 @@ public struct MediaRowView: View {
                         // way out is too late: the system's own focus moves can
                         // land on another card first and overwrite it.
                         coveredFocusID = focusEngaged ? lastFocusedID : nil
+                    }
+                    // Does the ITEMS ARRAY change mid-browse? If it does, the
+                    // LazyHStack rebuilds and the scroll offset resets to the
+                    // start — which would explain the row teleporting to #0
+                    // without any scroll call of ours.
+                    .onChange(of: items.count) { old, new in
+                    }
+                    .onChange(of: itemIDSet) { _, _ in
                     }
                     .onChange(of: focusResetToken) { _, _ in
                         // Focus genuinely left the row for a sibling above (the season
@@ -540,6 +577,7 @@ public struct MediaRowView: View {
         // strand the focus indicator. The gate now re-arms only on `focusResetToken`
         // (focus actually left the row, up to the season bar).
         guard let newValue else { return }
+        hasBrowsedSinceTargetChange = true
         if !focusEngaged { onFocusEntered?() }
         lastFocusedID = newValue
         if !focusEngaged,

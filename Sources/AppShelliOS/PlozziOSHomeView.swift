@@ -4,8 +4,20 @@ import CoreModels
 import CoreUI
 import FeatureHomeCore
 import MediaDownloads
+import Observation
 import SwiftUI
 import UIKit
+
+@MainActor
+@Observable
+private final class PlozziOSHomeHeroPullModel {
+    var distance: CGFloat = 0
+
+    func update(_ distance: CGFloat) {
+        guard self.distance != distance else { return }
+        self.distance = distance
+    }
+}
 
 struct PlozziOSHomeView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -17,7 +29,10 @@ struct PlozziOSHomeView: View {
     @State private var playbackRequest: PlozziOSPlaybackRequest?
     @State private var isRequestingHero = false
     @State private var heroRequestStatuses: [String: MediaAvailabilityStatus] = [:]
-    @State private var heroPullDistance: CGFloat = 0
+    /// High-frequency overscroll state. The Home page passes this reference without
+    /// reading it; only the hero backdrop leaf observes `distance`, so pulling no
+    /// longer invalidates every Home row on every scroll tick.
+    @State private var heroPullModel = PlozziOSHomeHeroPullModel()
     /// When each optimistic override was set. An override may shield the CTA from
     /// an untracked (`.unknown`) poll only briefly — long enough to bridge the gap
     /// until Seerr commits a freshly-created request — after which the authoritative
@@ -242,7 +257,7 @@ struct PlozziOSHomeView: View {
                         requestStatus: { heroRequestStatuses[$0.id] },
                         onRequest: beginHeroRequest,
                         onRequestSeasons: beginHeroSeasonRequest,
-                        pullDistance: heroPullDistance
+                        pullModel: heroPullModel
                     )
                 }
 
@@ -330,7 +345,7 @@ struct PlozziOSHomeView: View {
                 + geometry.contentInsets.top
             return max(0, -topOffset)
         } action: { _, pullDistance in
-            heroPullDistance = pullDistance
+            heroPullModel.update(pullDistance)
         }
         .task(
             id: PlozziOSHeroLoadID(
@@ -681,7 +696,7 @@ private struct PlozziOSHomeHeroCarousel: View {
     /// Per-season request handler for a featured **series** (item, chosen season
     /// numbers). When set, the series Request CTA becomes a season-picker menu.
     var onRequestSeasons: ((MediaItem, [Int]) -> Void)?
-    var pullDistance: CGFloat = 0
+    let pullModel: PlozziOSHomeHeroPullModel
 
     /// Loaded Seerr season-request availability for featured discovery series,
     /// keyed by item id, so the hero's Request menu can list per-season options.
@@ -696,14 +711,6 @@ private struct PlozziOSHomeHeroCarousel: View {
             surfaceRole: .home,
             dynamicTypeSize: dynamicTypeSize
         )
-        let pullScale = 1 + (pullDistance / max(heroHeight, 1))
-        let upwardScaleGrowth = (pullScale - 1) * heroHeight / 2
-        // The +2pt top over-scan while pulling guarantees the scaled backdrop
-        // covers the screen's top edge; without it subpixel rounding briefly
-        // exposes the window background (a white hairline in light mode). The
-        // matching bottom shift is hidden by the hero's fade mask.
-        let pullOffset = max(pullDistance - upwardScaleGrowth, 0)
-            + (pullDistance > 0 ? 2 : 0)
         GeometryReader { proxy in
             let swipeDistance = max(proxy.size.width, 1)
             let progress = min(abs(dragOffset) / swipeDistance, 1)
@@ -719,7 +726,11 @@ private struct PlozziOSHomeHeroCarousel: View {
             let incomingX = -slideDir * slideTravel * (1 - progress)
             ZStack {
                 if let currentItem {
-                    ZStack {
+                    PlozziOSPullResponsiveHomeBackdrop(
+                        model: pullModel,
+                        style: style,
+                        heroHeight: heroHeight
+                    ) { pullScale in
                         ZStack {
                             if let dragTargetItem {
                                 PlozziOSHomeStaticBackdrop(
@@ -752,16 +763,6 @@ private struct PlozziOSHomeHeroCarousel: View {
                                 .id(currentItem.id)
                             }
                         }
-                        .mask { PlozziOSHeroFadeMask() }
-                        .scaleEffect(pullScale, anchor: .center)
-                        .offset(y: -pullOffset)
-
-                        PlozziOSStationaryHeroScrim(
-                            style: style,
-                            height: heroHeight
-                        )
-                        .mask { PlozziOSHeroFadeMask() }
-                        .offset(y: -pullDistance)
                     }
 
                     PlozziOSHomeHeroSlide(
@@ -801,6 +802,7 @@ private struct PlozziOSHomeHeroCarousel: View {
 
                 }
             }
+
             .contentShape(Rectangle())
             .gesture(
                 PlozziOSHorizontalHeroDragGesture(
@@ -1172,6 +1174,35 @@ private struct PlozziOSHomeHeroCarousel: View {
                     break
                 }
             }
+        }
+    }
+}
+
+/// Owns the only observation of Home overscroll distance. This confines each
+/// finger-tracking update to the backdrop/scrim transforms rather than rebuilding
+/// the carousel foreground, paging indicator, and every row in `PlozziOSHomeView`.
+private struct PlozziOSPullResponsiveHomeBackdrop<Backdrop: View>: View {
+    let model: PlozziOSHomeHeroPullModel
+    let style: HeroArtworkStyle
+    let heroHeight: CGFloat
+    @ViewBuilder let backdrop: (CGFloat) -> Backdrop
+
+    var body: some View {
+        let pullDistance = model.distance
+        let pullScale = 1 + (pullDistance / max(heroHeight, 1))
+        let upwardScaleGrowth = (pullScale - 1) * heroHeight / 2
+        let pullOffset = max(pullDistance - upwardScaleGrowth, 0)
+            + (pullDistance > 0 ? 2 : 0)
+
+        ZStack {
+            backdrop(pullScale)
+                .mask { PlozziOSHeroFadeMask() }
+                .scaleEffect(pullScale, anchor: .center)
+                .offset(y: -pullOffset)
+
+            PlozziOSStationaryHeroScrim(style: style, height: heroHeight)
+                .mask { PlozziOSHeroFadeMask() }
+                .offset(y: -pullDistance)
         }
     }
 }

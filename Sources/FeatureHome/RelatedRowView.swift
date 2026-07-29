@@ -31,31 +31,30 @@ struct RelatedRowView: View {
     @Environment(\.plozzMetrics) private var metrics
 
     var body: some View {
-        if !items.isEmpty {
-            MediaRowView(
-                title: Text("Related"),
-                items: items,
-                style: .poster,
-                spoilerSettings: spoilerSettings,
-                leadingInset: leadingInset,
-                onFocusEntered: onFocusEntered,
-                statusCue: { item in
-                    continuationItemIDs.contains(item.id) ? "Continues" : nil
-                },
-                onSelect: onSelect
-            )
-            // `MediaRowView` carries the vertical rhythm a Home screen needs, where
-            // rows abut directly. Here the enclosing stack already spaces its
-            // sections, so that padding lands on top of it — 96pt between this row
-            // and the cast, which pushed the cast off the screen entirely. Cancelled
-            // so the stack remains the single source of spacing; the row's *clip*
-            // clearance (what keeps a focused card's lift from being cut) is applied
-            // separately inside and is untouched.
-            .padding(.top, -metrics.railTopPadding)
-            .padding(.bottom, -metrics.railVerticalPadding)
-        } else if !hasResolved {
-            placeholder
+        Group {
+            if !items.isEmpty {
+                MediaRowView(
+                    title: Text("Related"),
+                    items: items,
+                    style: .poster,
+                    spoilerSettings: spoilerSettings,
+                    leadingInset: leadingInset,
+                    onFocusEntered: onFocusEntered,
+                    statusCue: { item in
+                        continuationItemIDs.contains(item.id) ? "Continues" : nil
+                    },
+                    onSelect: onSelect
+                )
+            } else if !hasResolved {
+                placeholder
+            }
         }
+        // Both states carry the same rail rhythm before this cancellation:
+        // MediaRowView supplies it through the scroll viewport; `placeholder`
+        // mirrors it around its non-scrolling HStack. Keeping this modifier outside
+        // the branch makes their title, cards, and total footprint identical.
+        .padding(.top, -metrics.railTopPadding)
+        .padding(.bottom, -metrics.railVerticalPadding)
         // Resolved and empty: the row collapses. A title with nothing related in
         // this library is rare but real, and permanent placeholders for content
         // that will never arrive are worse than no row.
@@ -79,6 +78,13 @@ struct RelatedRowView: View {
                 }
             }
             .padding(.leading, leadingInset)
+            // Match MediaRowView's effective scroll-viewport clearance. The loaded
+            // row places its cards `railTopPadding` below the title and reserves
+            // `railVerticalPadding` below them after its internal shadow padding is
+            // cancelled. Without these, the skeleton sat 16pt higher and 40pt
+            // shorter, so the episode/Related composition shifted when cards loaded.
+            .padding(.top, metrics.railTopPadding)
+            .padding(.bottom, metrics.railVerticalPadding)
             // Non-focusable so the focus engine never anchors on a placeholder and
             // strands focus where a card is about to be replaced.
             .allowsHitTesting(false)

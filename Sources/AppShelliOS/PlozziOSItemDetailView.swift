@@ -778,10 +778,14 @@ private struct PlozziOSCanonicalItemDetailView: View {
 
     private func selectVersion(_ id: String, for item: MediaItem) {
         versionOverride = id
-        appModel.versionPreferences.setPreferredVersionID(
-            id,
-            forTitle: DetailPlaybackSelection.versionPreferenceKey(for: item)
-        )
+        let key = DetailPlaybackSelection.versionPreferenceKey(for: item)
+        guard let version = detailPlaybackOptions(for: item).versions.first(where: { $0.id == id })
+        else {
+            appModel.versionPreferences.setPreferredVersionID(id, forTitle: key)
+            appModel.versionPreferences.setPreferredVersionDescriptor(nil, forTitle: key)
+            return
+        }
+        appModel.versionPreferences.rememberVersion(version, forTitle: key)
     }
 
     private func beginRequest(_ item: MediaItem, seasons: [Int]? = nil) {

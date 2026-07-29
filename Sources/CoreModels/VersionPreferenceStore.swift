@@ -19,11 +19,50 @@ public protocol VersionPreferenceStoring: Sendable {
     /// Remembers `versionID` as the preferred version for `titleID`. Passing
     /// `nil` clears the preference (reverting to the recommended default).
     func setPreferredVersionID(_ versionID: String?, forTitle titleID: String)
+
+    /// The remembered *kind* of version for `titleID`, or `nil` if none.
+    ///
+    /// Separate from the id above because the two answer different questions. An
+    /// id identifies one file, which is right for a movie you return to; a
+    /// descriptor identifies what the viewer was asking for, which is the only
+    /// thing that can carry across a series, where every episode's files have
+    /// their own ids.
+    func preferredVersionDescriptor(forTitle titleID: String) -> MediaVersionDescriptor?
+    /// Remembers `descriptor` for `titleID`. `nil` clears it.
+    func setPreferredVersionDescriptor(
+        _ descriptor: MediaVersionDescriptor?,
+        forTitle titleID: String
+    )
+}
+
+public extension VersionPreferenceStoring {
+    /// Defaults keep existing lightweight test/preview stores source-compatible.
+    func preferredVersionDescriptor(forTitle titleID: String) -> MediaVersionDescriptor? {
+        nil
+    }
+
+    func setPreferredVersionDescriptor(
+        _ descriptor: MediaVersionDescriptor?,
+        forTitle titleID: String
+    ) {}
+
+    /// Records both representations from one explicit choice, so a movie keeps
+    /// its exact file and a series keeps the shape of it.
+    func rememberVersion(_ version: MediaVersion, forTitle titleID: String) {
+        setPreferredVersionID(version.id, forTitle: titleID)
+        let descriptor = MediaVersionDescriptor(version: version)
+        setPreferredVersionDescriptor(descriptor.isEmpty ? nil : descriptor, forTitle: titleID)
+    }
 }
 
 public final class VersionPreferenceStore: VersionPreferenceStoring, @unchecked Sendable {
+    /// Every title lives inside one property-list dictionary. Serialize the
+    /// read-modify-write across instances so one concurrent choice cannot erase
+    /// another title written from a sibling store.
+    private static let lock = NSLock()
     private let defaults: UserDefaults
     private let baseKey: String
+    private let descriptorKey: String
 
     /// - Parameter namespace: per-profile scope. `nil` (the default/primary
     ///   profile) uses the legacy un-suffixed key; other profiles pass their
@@ -31,22 +70,62 @@ public final class VersionPreferenceStore: VersionPreferenceStoring, @unchecked 
     public init(defaults: UserDefaults = .standard, namespace: String? = nil) {
         self.defaults = defaults
         self.baseKey = SettingsKey.scoped("com.plozz.playback.preferredVersions", namespace: namespace)
+        self.descriptorKey = SettingsKey.scoped(
+            "com.plozz.playback.preferredVersionShapes",
+            namespace: namespace
+        )
     }
 
     public func preferredVersionID(forTitle titleID: String) -> String? {
         guard !titleID.isEmpty else { return nil }
-        let map = defaults.dictionary(forKey: baseKey) as? [String: String]
-        return map?[titleID]
+        return synchronized {
+            let map = defaults.dictionary(forKey: baseKey) as? [String: String]
+            return map?[titleID]
+        }
     }
 
     public func setPreferredVersionID(_ versionID: String?, forTitle titleID: String) {
         guard !titleID.isEmpty else { return }
-        var map = (defaults.dictionary(forKey: baseKey) as? [String: String]) ?? [:]
-        if let versionID {
-            map[titleID] = versionID
-        } else {
-            map.removeValue(forKey: titleID)
+        synchronized {
+            var map = (defaults.dictionary(forKey: baseKey) as? [String: String]) ?? [:]
+            if let versionID {
+                map[titleID] = versionID
+            } else {
+                map.removeValue(forKey: titleID)
+            }
+            defaults.set(map, forKey: baseKey)
         }
-        defaults.set(map, forKey: baseKey)
+    }
+
+    public func preferredVersionDescriptor(forTitle titleID: String) -> MediaVersionDescriptor? {
+        guard !titleID.isEmpty,
+              let data = synchronized({
+                  let map = defaults.dictionary(forKey: descriptorKey) as? [String: Data]
+                  return map?[titleID]
+              })
+        else { return nil }
+        return try? JSONDecoder().decode(MediaVersionDescriptor.self, from: data)
+    }
+
+    public func setPreferredVersionDescriptor(
+        _ descriptor: MediaVersionDescriptor?,
+        forTitle titleID: String
+    ) {
+        guard !titleID.isEmpty else { return }
+        synchronized {
+            var map = (defaults.dictionary(forKey: descriptorKey) as? [String: Data]) ?? [:]
+            if let descriptor, let data = try? JSONEncoder().encode(descriptor) {
+                map[titleID] = data
+            } else {
+                map.removeValue(forKey: titleID)
+            }
+            defaults.set(map, forKey: descriptorKey)
+        }
+    }
+
+    private func synchronized<T>(_ body: () -> T) -> T {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        return body()
     }
 }

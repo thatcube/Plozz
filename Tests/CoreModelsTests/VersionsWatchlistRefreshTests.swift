@@ -305,4 +305,77 @@ final class VersionPreferenceStoreTests: XCTestCase {
         XCTAssertEqual(primary.preferredVersionID(forTitle: "m"), "v-primary")
         XCTAssertEqual(profileB.preferredVersionID(forTitle: "m"), "v-b")
     }
+
+    func testDescriptorPersistsAcrossStoreInstances() {
+        let suite = "test.versionpref.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let writer = VersionPreferenceStore(defaults: defaults)
+        let descriptor = MediaVersionDescriptor(
+            edition: "director's cut",
+            height: 2160,
+            videoRange: "dovi",
+            sourceQuality: "remux",
+            videoCodec: "hevc",
+            audioProfile: "atmos"
+        )
+        writer.setPreferredVersionDescriptor(descriptor, forTitle: "movie-1")
+
+        let reader = VersionPreferenceStore(defaults: defaults)
+        XCTAssertEqual(reader.preferredVersionDescriptor(forTitle: "movie-1"), descriptor)
+    }
+
+    func testDescriptorStorageCoexistsWithLegacyIDOnlyPreference() {
+        let (store, _) = makeStore()
+        store.setPreferredVersionID("legacy-file", forTitle: "movie-1")
+        XCTAssertNil(store.preferredVersionDescriptor(forTitle: "movie-1"))
+
+        store.setPreferredVersionDescriptor(
+            MediaVersionDescriptor(height: 2160),
+            forTitle: "movie-1"
+        )
+        XCTAssertEqual(store.preferredVersionID(forTitle: "movie-1"), "legacy-file")
+
+        store.setPreferredVersionDescriptor(nil, forTitle: "movie-1")
+        XCTAssertEqual(store.preferredVersionID(forTitle: "movie-1"), "legacy-file")
+        XCTAssertNil(store.preferredVersionDescriptor(forTitle: "movie-1"))
+    }
+
+    func testRememberVersionStoresIDAndDescriptorTogether() {
+        let (store, _) = makeStore()
+        let version = MediaVersion(
+            id: "file-4k",
+            height: 2160,
+            videoRange: "DOVI",
+            audioProfile: "Dolby Atmos"
+        )
+        store.rememberVersion(version, forTitle: "series-1")
+
+        XCTAssertEqual(store.preferredVersionID(forTitle: "series-1"), "file-4k")
+        XCTAssertEqual(
+            store.preferredVersionDescriptor(forTitle: "series-1"),
+            MediaVersionDescriptor(version: version)
+        )
+    }
+
+    func testConcurrentWritesDoNotDropOtherTitles() {
+        let (store, _) = makeStore()
+        DispatchQueue.concurrentPerform(iterations: 40) { index in
+            store.setPreferredVersionID("version-\(index)", forTitle: "title-\(index)")
+            store.setPreferredVersionDescriptor(
+                MediaVersionDescriptor(height: 720 + index),
+                forTitle: "title-\(index)"
+            )
+        }
+
+        for index in 0..<40 {
+            XCTAssertEqual(
+                store.preferredVersionID(forTitle: "title-\(index)"),
+                "version-\(index)"
+            )
+            XCTAssertEqual(
+                store.preferredVersionDescriptor(forTitle: "title-\(index)")?.height,
+                720 + index
+            )
+        }
+    }
 }

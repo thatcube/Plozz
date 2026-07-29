@@ -37,6 +37,8 @@ public enum EditionParser {
         (["theatrical cut", "theatrical"], "Theatrical"),
         (["extended edition", "extended cut", "extended"], "Extended"),
         (["unrated"], "Unrated"),
+        (["uncensored"], "Uncensored"),
+        (["censored"], "Censored"),
         (["uncut"], "Uncut"),
         (["remastered", "remaster"], "Remastered"),
         (["special edition"], "Special Edition"),

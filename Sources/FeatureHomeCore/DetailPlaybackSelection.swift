@@ -58,11 +58,20 @@ public enum DetailPlaybackSelection {
            versions.contains(where: { $0.id == versionOverride }) {
             return versionOverride
         }
-        let remembered = preferences.preferredVersionID(
-            forTitle: versionPreferenceKey(for: item)
-        )
+        let key = versionPreferenceKey(for: item)
+        // An exact file id first: for a movie you return to, that IS the choice.
+        let remembered = preferences.preferredVersionID(forTitle: key)
         if let remembered, versions.contains(where: { $0.id == remembered }) {
             return remembered
+        }
+        // Otherwise the remembered SHAPE. This is what carries a choice across a
+        // series: every episode's files have their own provider ids, so the id
+        // above can never match another episode — only "2160p Dolby Vision
+        // Bluray" can. Falls through when nothing is close enough, because
+        // forcing a bad match is worse than the device-recommended pick.
+        if let descriptor = preferences.preferredVersionDescriptor(forTitle: key),
+           let match = versions.bestMatch(for: descriptor) {
+            return match.id
         }
         return versions.recommendedSelection(for: capabilities)?.id
     }

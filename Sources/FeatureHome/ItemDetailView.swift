@@ -213,7 +213,9 @@ public struct ItemDetailView: View {
                     },
                     onSelectRelated: onSelectChild,
                     initialSeasonID: initialSeasonID ?? viewModel.preselectedSeasonID ?? initialEpisode?.seasonID,
-                    initialEpisode: initialEpisode
+                    initialEpisode: initialEpisode,
+                    capabilities: capabilities,
+                    versionPreferences: versionPreferences
                 )
             } else if isEmptyContainer(detail) {
                 emptyFolderState(detail.item)
@@ -853,7 +855,23 @@ public struct ItemDetailView: View {
     /// time, keyed per title (per series for an episode).
     private func selectVersion(_ id: String, for item: MediaItem) {
         versionOverride = id
-        versionPreferences.setPreferredVersionID(id, forTitle: versionPreferenceKey(for: item))
+        let key = versionPreferenceKey(for: item)
+        guard let version = effectiveVersions(
+            for: item,
+            sources: viewModel.sources,
+            activeAccountID: effectiveSource(
+                for: item,
+                sources: viewModel.sources,
+                serverChoices: serverChoices(from: viewModel.sources)
+            )?.accountID
+        ).first(where: { $0.id == id }) else {
+            versionPreferences.setPreferredVersionID(id, forTitle: key)
+            versionPreferences.setPreferredVersionDescriptor(nil, forTitle: key)
+            return
+        }
+        // Remember the exact file AND its shape: the id is what a movie returns
+        // to, the shape is what an episode can carry forward.
+        versionPreferences.rememberVersion(version, forTitle: key)
     }
 
     /// Stable key for the per-title version preference. Episodes share their

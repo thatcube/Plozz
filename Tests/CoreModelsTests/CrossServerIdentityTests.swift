@@ -647,6 +647,8 @@ final class EditionParserTests: XCTestCase {
         XCTAssertEqual(EditionParser.edition(from: "Blade.Runner.Final.Cut.1080p"), "Final Cut")
         XCTAssertEqual(EditionParser.edition(from: "Aliens Director's Cut"), "Director's Cut")
         XCTAssertEqual(EditionParser.edition(from: "Superman.II.The.Donner.Cut"), "Donner Cut")
+        XCTAssertEqual(EditionParser.edition(from: "Anime S01E03 Uncensored"), "Uncensored")
+        XCTAssertEqual(EditionParser.edition(from: "Anime S01E03 Censored"), "Censored")
         XCTAssertNil(EditionParser.edition(from: "Just A Plain Title 2160p"))
     }
 

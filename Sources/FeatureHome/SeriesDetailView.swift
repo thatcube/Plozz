@@ -159,6 +159,12 @@ struct SeriesDetailView: View {
     /// Cosmetic-only series hero recede state. The parent writes it but never reads
     /// it, so episode focus changes do not invalidate this page or its rail.
     @State private var recedeModel = SeriesHeroRecedeModel()
+    /// This device's capabilities, used to order version candidates.
+    private let capabilities: MediaCapabilities
+    /// Remembered version choices. Episodes share their SERIES' key (see
+    /// `DetailPlaybackSelection.versionPreferenceKey`), so choosing a version on
+    /// one episode sets it for the whole show.
+    private let versionPreferences: VersionPreferenceStoring
     @State private var placeholderCache = SeriesPlaceholderCache()
     /// Whether another detail page is pushed on top of this one — see
     /// `DetailStackDepth`. Supplied by the hosting page, which owns the counter
@@ -179,7 +185,9 @@ struct SeriesDetailView: View {
         onSelectServer: ((MediaSourceRef) -> Void)? = nil,
         onSelectRelated: @escaping (MediaItem) -> Void = { _ in },
         initialSeasonID: String? = nil,
-        initialEpisode: MediaItem? = nil
+        initialEpisode: MediaItem? = nil,
+        capabilities: MediaCapabilities = .detected(),
+        versionPreferences: VersionPreferenceStoring = VersionPreferenceStore()
     ) {
         self.series = series
         self.hasChildOnTop = hasChildOnTop
@@ -196,6 +204,8 @@ struct SeriesDetailView: View {
         self.onSelectRelated = onSelectRelated
         self.initialSeasonID = initialSeasonID
         self.initialEpisode = initialEpisode
+        self.capabilities = capabilities
+        self.versionPreferences = versionPreferences
         // When opened via "Go to Season", pre-select that season (and front it in
         // the hero) so the page lands on the requested season rather than the
         // default one. When opened by tapping an episode, front that episode and
@@ -391,7 +401,7 @@ struct SeriesDetailView: View {
                         onPlayTrailer: trailerButtonAction,
                         versions: playVersions,
                         selectedVersionID: effectivePlayVersionID,
-                        onSelectVersion: playVersions.count > 1 ? { versionOverride = $0 } : nil,
+                        onSelectVersion: playVersions.count > 1 ? { selectVersion($0) } : nil,
                         sources: distinctServerChoices,
                         offlineSourceAccountIDs: viewModel.unreachableSourceAccountIDs,
                         selectedSourceAccountID: series.sourceAccountID,
@@ -1323,6 +1333,28 @@ struct SeriesDetailView: View {
         playTarget?.versions ?? []
     }
 
+    /// Applies to the WHOLE SHOW, not just this episode.
+    ///
+    /// `versionPreferenceKey` is `seriesID ?? id`, so an episode writes its
+    /// series' key: picking the 4K cut on episode 3 is how a viewer says "play
+    /// this show in 4K", and every later episode matches the same shape.
+    private func selectVersion(_ id: String) {
+        versionOverride = id
+        guard let target = playTarget,
+              let version = playVersions.first(where: { $0.id == id }) else {
+            if let target = playTarget {
+                let key = DetailPlaybackSelection.versionPreferenceKey(for: target)
+                versionPreferences.setPreferredVersionID(id, forTitle: key)
+                versionPreferences.setPreferredVersionDescriptor(nil, forTitle: key)
+            }
+            return
+        }
+        versionPreferences.rememberVersion(
+            version,
+            forTitle: DetailPlaybackSelection.versionPreferenceKey(for: target)
+        )
+    }
+
     /// The server-picker list with same-account duplicates collapsed (one entry
     /// per distinct account). Matches the movie/`ItemDetailView` behaviour so a
     /// rare same-server duplicate series doesn't render two identical "Server"
@@ -1340,10 +1372,17 @@ struct SeriesDetailView: View {
     /// the in-session override when it's still valid for this episode, else the
     /// device-recommended pick.
     private var effectivePlayVersionID: String? {
-        if let versionOverride, playVersions.contains(where: { $0.id == versionOverride }) {
-            return versionOverride
-        }
-        return playVersions.recommendedSelection(for: .detected())?.id
+        guard let target = playTarget else { return nil }
+        // The same resolver the movie page uses, so both honour an explicit
+        // choice the same way — and so an episode can inherit the shape chosen
+        // on a sibling episode.
+        return DetailPlaybackSelection.preferredVersionID(
+            for: target,
+            versions: playVersions,
+            versionOverride: versionOverride,
+            preferences: versionPreferences,
+            capabilities: capabilities
+        )
     }
 
     /// The technical facts of the file Play would actually run.

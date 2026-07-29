@@ -1744,6 +1744,17 @@ private struct SeriesHeroContentLiftModifier: ViewModifier {
                 Rectangle()
                     .padding(-600)
                     .opacity(model == nil || !receded ? 1 : 0)
+                    // Scoped to the mask, so only the fade is retimed — the
+                    // content's travel still runs on the ambient clock with the
+                    // rest of the transition.
+                    .animation(
+                        reduceMotion
+                            ? nil
+                            : (receded
+                                ? SeriesHeroRevealTransition.heroContentFadeExit
+                                : SeriesHeroRevealTransition.ambient),
+                        value: receded
+                    )
             }
     }
 

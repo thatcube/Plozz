@@ -43,9 +43,24 @@ enum SeriesHeroRevealTransition {
     /// two can't diverge.
     static var logoExit: Animation { .easeInOut(duration: 0.45) }
 
-    /// The season bar's fade leaves quicker still, so the chips are clear of the
-    /// hero before the logo is.
-    static var seasonBarExit: Animation { .easeInOut(duration: 0.3) }
+    /// The season chips' OPACITY leaves early, while the bar itself keeps
+    /// travelling with the episode row on the ambient clock. Scoping this to the
+    /// opacity is the whole trick: an earlier attempt animated the bar's
+    /// position too, and it read as the chips drifting off on their own.
+    ///
+    /// `easeInOut`, for the same reason as `logoExit`: `easeOut` front-loads a
+    /// fade so hard that most of it lands in the first fraction of the duration,
+    /// and no amount of lengthening stops that reading as an instant cut. A
+    /// symmetric curve is what makes it legible as an animation at all — so
+    /// "sooner" has to come from a shorter duration, not a sharper curve.
+    static var seasonBarFadeExit: Animation { .easeInOut(duration: 0.36) }
+
+    /// The hero's own copy clears earlier than it travels, so it is out of the
+    /// way while the browser is still arriving rather than dissolving across the
+    /// whole 0.9s. Same symmetric curve as the others — see `logoExit` for why a
+    /// front-loaded one reads as an instant cut.
+    static var heroContentFadeExit: Animation { .easeInOut(duration: 0.4) }
+
 }
 
 enum SeriesEpisodeBrowserLayout {
@@ -106,6 +121,11 @@ enum SeriesEpisodeBrowserLayout {
     static let seasonBarHeight: CGFloat = 88
     /// Softens the clipped boundary before the fixed season-request accessory.
     static let seasonRequestFadeWidth: CGFloat = 72
+    /// How far a focused season chip may render outside the bar's scroll
+    /// viewport — enough for its focus scale and halo. The gutter to the left of
+    /// the first chip is much wider than this, so the overflow never reaches the
+    /// screen edge.
+    static let seasonBarFocusOverflow: CGFloat = 80
     /// Full height of an episode card: artwork + title + the focused card's
     /// 3-line synopsis. `heroOverlap` is derived from this so the browser column
     /// ends exactly at the bottom edge of the screen — the rail must be neither
@@ -144,12 +164,18 @@ enum SeriesEpisodeBrowserLayout {
     /// lower third for the resting page.
     static let heroContentBottomLift: CGFloat = 860
     static let heroContentRestDrop: CGFloat = 683
-    /// Zero — and that is a hard constraint, not a taste call. tvOS refuses to
-    /// focus an item rendered entirely off-screen, so any lift large enough to
-    /// clear the top edge makes UP from a season chip dead. The receded hero
-    /// therefore *parks* at its layout position and disappears by fading
-    /// instead. The visible motion is the rise/fall of `heroContentRestDrop`.
-    static let heroContentRecedeLift: CGFloat = 0
+    /// Extra rise for the hero content as the browser takes over, on top of
+    /// giving back `heroContentRestDrop`.
+    ///
+    /// This was pinned at 0 for a long time on the theory that tvOS refuses to
+    /// focus an item rendered off-screen — a lift used to make UP from a season
+    /// chip dead. The real culprit turned out to be the `.opacity(0)` that hid
+    /// the hero at the time: a zero-alpha view is genuinely unfocusable, whereas
+    /// a masked one is not. With the mask in place the content can travel again.
+    ///
+    /// Still worth treating as load-bearing: if UP from the season bar ever goes
+    /// dead again, this is the first constant to put back to 0.
+    static let heroContentRecedeLift: CGFloat = 250
     static let heroBackdropRecedeLift: CGFloat = 1000
 
     /// Align the episode column's visible content—not the taller rail viewport—
@@ -251,14 +277,15 @@ struct SeriesRecedeReveal<Content: View>: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// The bar has NO travel of its own: it is carried by the column, exactly
-    /// like the episode row, and only its opacity is animated here. A private
-    /// offset made it read as drifting independently of the episodes.
+    /// The bar travels with the episode rail — it is carried by the column, like
+    /// every other row — and the ONLY thing that happens here is its opacity.
     ///
-    /// Arriving, this restates the ambient animation exactly so the fade lands
-    /// with the column's motion — an earlier 0.2s pop here is precisely what
-    /// made the chips look like they weren't following it. Leaving, it fades on
-    /// a quicker clock so the chips are clear before the hero returns.
+    /// Deliberately no offset of its own: a private one makes the chips drift
+    /// independently of the rail, which is exactly what they must not do. The
+    /// animation below therefore only ever reaches the opacity, never a
+    /// position. Arriving it restates the ambient animation so the fade lands
+    /// with the column's motion; leaving it runs short and front-loaded, so the
+    /// chips are gone early while the bar is still travelling.
     var body: some View {
         let revealed = recedeModel.isReceded || forceVisible
         content()
@@ -268,7 +295,7 @@ struct SeriesRecedeReveal<Content: View>: View {
                     ? nil
                     : (revealed
                         ? SeriesHeroRevealTransition.ambient
-                        : SeriesHeroRevealTransition.seasonBarExit),
+                        : SeriesHeroRevealTransition.seasonBarFadeExit),
                 value: revealed
             )
     }

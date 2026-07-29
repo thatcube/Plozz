@@ -67,6 +67,13 @@ struct SeriesDetailView: View {
     /// snap from a geometrically-nearer chip. Once true, every chip is focusable
     /// so left/right moves freely between seasons; it resets when focus leaves.
     @State private var seasonBarEngaged = false
+    /// Whether focus is currently somewhere inside the episode browser.
+    ///
+    /// Gates the hero-blur backstop below. Focus leaving the hero does NOT imply
+    /// it went down into the browser: opening the source/"…" menu blurs the
+    /// action row too, and treating that as a browser entry receded the hero and
+    /// scrolled the page out from under the menu.
+    @State private var browserHoldsFocus = false
     /// Bumped whenever focus enters the season tab bar. Handed to the episode rail
     /// as its `focusResetToken` so the rail re-arms its entry gate deterministically
     /// when focus has truly left it (gone up to the bar) — rather than inferring it
@@ -393,14 +400,18 @@ struct SeriesDetailView: View {
                         },
                         // Belt and braces for the recede state. `revealBrowser`
                         // is otherwise driven purely by the season bar's and
-                        // rail's "focus entered" edges, and a fast DOWN can
-                        // outrun those — leaving focus in the browser while the
-                        // page still believes it is resting, so the chips, cast
-                        // and Related all sit there rendered invisible. Focus
-                        // leaving the hero is the same fact stated in a form
-                        // that cannot be missed.
+                        // rail's "focus entered" edges, and if one of those is
+                        // ever skipped, focus sits in the browser while the page
+                        // still believes it is resting — leaving the chips, cast
+                        // and Related rendered invisible.
+                        //
+                        // Strictly a CORRECTION, never an initiator: it only
+                        // runs while the browser genuinely holds focus. Blur
+                        // alone means nothing, because presenting a menu blurs
+                        // the action row as well.
                         onHeroActionBlurred: {
-                            guard !ignoresSystemFocusMoves else { return }
+                            guard !ignoresSystemFocusMoves,
+                                  browserHoldsFocus else { return }
                             revealBrowser(using: proxy)
                         }
                     )
@@ -476,7 +487,12 @@ struct SeriesDetailView: View {
                         seriesRecedeModel: recedeModel,
                         revealsSeriesCastWithoutBrowser: revealsCastWithoutBrowser,
                         suppressesFocus: ignoresSystemFocusMoves,
-                        onCastFocusEntered: { seasonBarEngaged = false },
+                        onCastFocusEntered: {
+                            seasonBarEngaged = false
+                            // Cast/Related sit BELOW the browser, so the page
+                            // must stay receded while they hold focus.
+                            browserHoldsFocus = true
+                        },
                         relatedEntries: viewModel.relatedTitlesLoader?.entries ?? [],
                         relatedHasResolved: viewModel.relatedTitlesLoader?.hasResolved ?? true,
                         onSelectRelated: onSelectRelated
@@ -649,6 +665,7 @@ struct SeriesDetailView: View {
         guard !suppressesDuplicateHeroFocus else { return }
         rearmEpisodeRailOnHeroFocusIfNeeded()
         seasonBarEngaged = false
+        browserHoldsFocus = false
         suppressesDuplicateHeroFocus = true
         withAnimation(.smooth(duration: Self.recedeAnimationDuration)) {
             recedeModel.isReceded = false
@@ -762,6 +779,7 @@ struct SeriesDetailView: View {
                 // We're now inside the bar — open every chip to focus so left/right
                 // navigation between seasons works.
                 seasonBarEngaged = true
+                browserHoldsFocus = true
                 // User-driven focus: fence the opening Play claim (see
                 // `hasSettledOpeningFocus`) so it can't fire behind them.
                 hasUserDirectedFocus = true
@@ -1004,6 +1022,7 @@ struct SeriesDetailView: View {
             },
             onFocusEntered: {
                 seasonBarEngaged = false
+                browserHoldsFocus = true
                 // The user has taken focus into the rail themselves — the opening
                 // Play claim must not fire behind them.
                 hasUserDirectedFocus = true
@@ -1737,13 +1756,24 @@ private struct SeasonRequestBoundaryModifier: ViewModifier {
             // A fixed request control owns the trailing edge: contain the tabs and
             // soften that boundary so labels never render beneath the accessory.
             content
-                .scrollClipDisabled(false)
+                // Let a focused chip's scale and halo render outside the scroll
+                // viewport. Clipping to the viewport shaved the left edge off
+                // Season 1 whenever the reveal parked it flush against the
+                // leading bound — and there is a wide empty gutter there, so
+                // nothing was gained by cutting it.
+                .scrollClipDisabled()
                 .mask {
                     HStack(spacing: 0) {
-                        // No LEADING fade. The accessory owns the trailing edge
-                        // only; a gradient here started dissolving the first
-                        // chip right at the hero keyline and shaved its left
-                        // side even when the bar wasn't scrolled at all.
+                        // The leading fade lives entirely in the overflow
+                        // region, OUTSIDE the viewport. Inside it, it dissolved
+                        // the first chip at the hero keyline even when the bar
+                        // had not been scrolled at all.
+                        LinearGradient(
+                            colors: [.clear, .white],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: SeriesEpisodeBrowserLayout.seasonBarFocusOverflow / 2)
                         Rectangle()
                             .fill(.white)
                         LinearGradient(
@@ -1753,6 +1783,12 @@ private struct SeasonRequestBoundaryModifier: ViewModifier {
                         )
                         .frame(width: SeriesEpisodeBrowserLayout.seasonRequestFadeWidth)
                     }
+                    // The mask is what still bounds the bar, so it has to be
+                    // grown by the same overflow the scroll view now permits —
+                    // otherwise it simply becomes the new clipper. The trailing
+                    // edge stays put: the accessory owns it.
+                    .padding(.leading, -SeriesEpisodeBrowserLayout.seasonBarFocusOverflow)
+                    .padding(.vertical, -SeriesEpisodeBrowserLayout.seasonBarFocusOverflow)
                 }
         } else {
             // Exact pre-request rail geometry: the viewport begins at the hero

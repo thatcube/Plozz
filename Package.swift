@@ -113,9 +113,29 @@ let package = Package(
         // Still pinned by exact SHA rather than a version range: the engine is the
         // playback path, so a bump is a deliberate, device-tested change.
         //
+        // Now 6.0.2 (was 5.23.8). Two things about this bump are worth knowing
+        // before anyone moves it again:
+        //
+        //   * Take 6.0.1 or later, never 6.0.0. LibDovi shipped its visionOS
+        //     slices and a tvOS floor correction together as 1.1.0; a raised
+        //     floor is breaking, so SwiftPM resolved that minor into every
+        //     consumer pinning `from: "1.0.x"` and then failed on the mismatch
+        //     instead of backing off. LibDovi 1.1.0 was withdrawn and republished
+        //     as 2.0.0, which 6.0.1+ pins. 6.0.0 still points at the withdrawn
+        //     tag and does not resolve at all.
+        //   * 6.0.0 raised the engine's tvOS floor to 17.0 — a correction, since
+        //     LibDovi's tvOS slices were always built `-mtvos-version-min=17.0`.
+        //     Plozz targets tvOS 18, so this costs us nothing. It is the only
+        //     breaking change across the 84 releases in this range; no public
+        //     symbol was removed or renamed.
+        //
+        // Pinned to the 6.0.2 RELEASE rather than upstream HEAD, which carries
+        // unreleased seek-lifecycle work. Same reasoning as the exact-SHA pin:
+        // the playback path takes documented, released changes only.
+        //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked.
-        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "fb2fa8dffa73247d8699e79a7926b55f9a5eb5d3"),
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "a216ca28e933526d98e95338be26cfc733587fec"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

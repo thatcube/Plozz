@@ -834,7 +834,7 @@ struct PlayerControls: View {
     /// it far enough to return the tab to that margin would leave the top
     /// `bottomMargin − gap` of the card showing. The shortfall is made up by
     /// `infoCardCatchUp` instead.
-    private static let infoCardGap: CGFloat = 40
+    private static let infoCardGap: CGFloat = 32
 
     /// The extra distance the card travels beyond the rest of the cluster, so a gap
     /// tighter than `bottomMargin` still parks it fully off-screen.

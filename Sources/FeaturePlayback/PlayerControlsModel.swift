@@ -156,6 +156,38 @@ public final class SubtitleDownloadModel {
     public init() {}
 }
 
+/// Content for the player's now-playing **Info card** — the panel the Info tab
+/// reveals.
+///
+/// Split out of `PlayerControlsModel` (a known god object under a decreasing-only
+/// budget in `tools/arch-guard.py`). Everything here is written once per item by
+/// `PlayerViewModel` and read only by `InfoPanelView`, so it has no reason to sit
+/// alongside live transport state that changes many times a second.
+@MainActor
+@Observable
+public final class InfoCardModel {
+    /// Episode title (or movie title) for the headline — distinct from
+    /// `PlayerControlsModel.title`, which for episodes holds the *series* name.
+    public var headline: String = ""   // l10n:content — media metadata from the server
+    /// Long-form synopsis.
+    public var overview: String = ""   // l10n:content — media metadata from the server
+    /// Technical badges (resolution/codec/HDR/etc.).
+    public var badges: [MediaBadge] = []
+    /// Ordered artwork candidates (image → backdrop → poster) for the thumbnail.
+    public var artworkURLs: [URL] = []
+    /// Pre-formatted runtime label (e.g. "37 min") for the meta line.
+    public var runtimeLabel: String = ""   // l10n:content — formatted upstream
+    /// Compact season/episode tag for the metadata row (e.g. "S2 · E7"). Empty for
+    /// movies.
+    public var episodeTag: String = ""   // l10n:content — media metadata from the server
+    /// Whether a following episode exists to jump to.
+    public var hasNextEpisode: Bool = false
+    /// Whether a preceding episode exists to jump to.
+    public var hasPreviousEpisode: Bool = false
+
+    public init() {}
+}
+
 /// Shared, observable state for the custom player's transport overlay.
 ///
 /// `PlayerViewModel` writes live playback facts (position, duration, buffered,
@@ -206,24 +238,10 @@ public final class PlayerControlsModel {
     public var hasTrickplay: Bool = false
 
     // MARK: Info panel
-    /// Episode title (or movie title) for the now-playing Info card headline —
-    /// distinct from `title`, which for episodes holds the *series* name.
-    public var infoHeadline: String = ""
-    /// Long-form synopsis for the now-playing Info card.
-    public var overview: String = ""
-    /// Technical badges (resolution/codec/HDR/etc.) for the Info card.
-    public var infoBadges: [MediaBadge] = []
-    /// Ordered artwork candidates (image → backdrop → poster) for the Info thumbnail.
-    public var artworkURLs: [URL] = []
-    /// Pre-formatted runtime label (e.g. "37 min") for the Info card meta line.
-    public var infoRuntimeLabel: String = ""
-    /// Compact season/episode tag for the Info card metadata row (e.g. "S2 · E7").
-    /// Empty for movies.
-    public var infoEpisodeTag: String = ""
-    /// Whether a following episode exists to jump to from the Info card.
-    public var hasNextEpisode: Bool = false
-    /// Whether a preceding episode exists to jump to from the Info card.
-    public var hasPreviousEpisode: Bool = false
+    /// The now-playing card's content. A facet: `InfoPanelView` is its only reader
+    /// and the view model writes it once per item, so it doesn't belong on the
+    /// surface every transport view type-checks against.
+    public let infoCard = InfoCardModel()
 
     // MARK: Track menus
     public var audioOptions: [PlayerTrackOption] = []

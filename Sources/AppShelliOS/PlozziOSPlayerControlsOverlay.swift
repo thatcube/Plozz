@@ -1439,10 +1439,10 @@ private struct PlozziOSPlaybackInfoSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Text(viewModel.controls.infoHeadline)
+                    Text(viewModel.controls.infoCard.headline)
                         .font(.headline)
-                    if !viewModel.controls.overview.isEmpty {
-                        Text(verbatim: viewModel.controls.overview.overviewPlainText)
+                    if !viewModel.controls.infoCard.overview.isEmpty {
+                        Text(verbatim: viewModel.controls.infoCard.overview.overviewPlainText)
                             .plozzForeground(.secondary)
                     }
                 }
@@ -1452,14 +1452,14 @@ private struct PlozziOSPlaybackInfoSheet: View {
                         viewModel.requestSeek(to: 0)
                         dismiss()
                     }
-                    if viewModel.controls.hasPreviousEpisode,
+                    if viewModel.controls.infoCard.hasPreviousEpisode,
                        let previous = viewModel.previousEpisode {
                         Button("Previous Episode", systemImage: "backward.end.fill") {
                             viewModel.playEpisode(previous)
                             dismiss()
                         }
                     }
-                    if viewModel.controls.hasNextEpisode {
+                    if viewModel.controls.infoCard.hasNextEpisode {
                         Button("Next Episode", systemImage: "forward.end.fill") {
                             viewModel.playNextEpisode()
                             dismiss()
@@ -1467,9 +1467,9 @@ private struct PlozziOSPlaybackInfoSheet: View {
                     }
                 }
 
-                if !viewModel.controls.infoBadges.isEmpty {
+                if !viewModel.controls.infoCard.badges.isEmpty {
                     Section("Media") {
-                        ForEach(viewModel.controls.infoBadges, id: \.self) { badge in
+                        ForEach(viewModel.controls.infoCard.badges, id: \.self) { badge in
                             Text(badge.label)
                         }
                     }

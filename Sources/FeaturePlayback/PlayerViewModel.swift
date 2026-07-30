@@ -675,8 +675,8 @@ public final class PlayerViewModel {
         guard !didStop else { return }
         previousEpisode = prev
         nextEpisode = next
-        controls.hasPreviousEpisode = prev != nil
-        controls.hasNextEpisode = next != nil
+        controls.infoCard.hasPreviousEpisode = prev != nil
+        controls.infoCard.hasNextEpisode = next != nil
         nextEpisodeCoordinator.updateUpNextCard()
         // Eagerly prefetch the next episode's resolved stream when the provider's
         // `playbackInfo` is idempotent (Plex, SMB share) — safe to resolve the
@@ -1597,12 +1597,12 @@ public final class PlayerViewModel {
         let lines = Self.titleLines(for: request.item)
         controls.title = lines.primary
         controls.subtitle = lines.secondary
-        controls.overview = request.item.overview ?? ""
-        controls.infoHeadline = request.item.title
-        controls.infoEpisodeTag = Self.episodeTag(for: request.item)
-        controls.infoBadges = request.item.technicalBadges
-        controls.artworkURLs = [request.item.backdropURL, request.item.heroBackdropURL, request.item.fallbackArtworkURL, request.item.posterURL].compactMap { $0 }
-        controls.infoRuntimeLabel = request.item.runtime?.runtimeBadgeText ?? ""
+        controls.infoCard.overview = request.item.overview ?? ""
+        controls.infoCard.headline = request.item.title
+        controls.infoCard.episodeTag = Self.episodeTag(for: request.item)
+        controls.infoCard.badges = request.item.technicalBadges
+        controls.infoCard.artworkURLs = [request.item.backdropURL, request.item.heroBackdropURL, request.item.fallbackArtworkURL, request.item.posterURL].compactMap { $0 }
+        controls.infoCard.runtimeLabel = request.item.runtime?.runtimeBadgeText ?? ""
         controls.hasTrickplay = request.scrubPreview?.isUsable ?? false
         controls.duration = request.item.runtime ?? 0
         controls.currentSeconds = 0

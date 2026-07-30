@@ -39,7 +39,7 @@ struct InfoPanelView: View {
     /// The bottom metadata row content: "S2 · E7 · 42m" (season/episode + runtime),
     /// shown inline with the technical badges — Apple-TV style.
     private var infoMetaLine: String {
-        [model.infoEpisodeTag, model.infoRuntimeLabel]
+        [model.infoCard.episodeTag, model.infoCard.runtimeLabel]
             .filter { !$0.isEmpty }
             .joined(separator: " · ")
     }
@@ -70,17 +70,17 @@ struct InfoPanelView: View {
             infoThumbnail(cornerRadius: thumbRadius, height: thumbHeight)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(model.infoHeadline.isEmpty ? "Now Playing" : model.infoHeadline)
+                Text(model.infoCard.headline.isEmpty ? "Now Playing" : model.infoCard.headline)
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .truncationMode(.tail)
-                if !model.overview.isEmpty {
+                if !model.infoCard.overview.isEmpty {
                     // Ellipsis, no `fixedSize`: the overview truncates instead of
                     // forcing its full height, so a long synopsis can never push
                     // the meta/badge row off the bottom of the card (it stays
                     // pinned by the Spacer below).
-                    Text(model.overview)
+                    Text(model.infoCard.overview)
                         .font(.footnote)
                         .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(3)
@@ -97,8 +97,8 @@ struct InfoPanelView: View {
                             .foregroundStyle(.white.opacity(0.6))
                             .lineLimit(1)
                     }
-                    if !model.infoBadges.isEmpty {
-                        MediaBadgeRow(badges: model.infoBadges)
+                    if !model.infoCard.badges.isEmpty {
+                        MediaBadgeRow(badges: model.infoCard.badges)
                     }
                 }
             }
@@ -120,12 +120,12 @@ struct InfoPanelView: View {
                         actions.restart()
                         onClose()   // focus restored centrally in onChange(of: openPanel)
                     }
-                    if model.hasPreviousEpisode {
+                    if model.infoCard.hasPreviousEpisode {
                         infoActionButton(title: "Previous", icon: "backward.end.fill", prominent: false, slot: .infoPrev) {
                             actions.playPreviousEpisode()
                         }
                     }
-                    if model.hasNextEpisode {
+                    if model.infoCard.hasNextEpisode {
                         infoActionButton(title: "Next Episode", icon: "forward.end.fill", prominent: true, slot: .infoNext) {
                             actions.playNextEpisode()
                         }
@@ -163,7 +163,7 @@ struct InfoPanelView: View {
         Color.clear
             .frame(width: height * 16.0 / 9.0, height: height)
             .overlay {
-                FallbackAsyncImage(urls: model.artworkURLs, variant: .landscapeCard) {
+                FallbackAsyncImage(urls: model.infoCard.artworkURLs, variant: .landscapeCard) {
                     // Fixed white, NOT palette.fill: this sits over the player's
                     // variable video/artwork backdrop (always dark-scrimmed), so a
                     // theme-tracking fill would be wrong here — it's a scrim-relative

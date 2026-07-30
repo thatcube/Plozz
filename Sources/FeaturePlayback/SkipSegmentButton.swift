@@ -123,14 +123,20 @@ private struct RemainingRing: View {
     let fraction: Double
     let focused: Bool
 
+    /// Shared with the Up Next card's ring: the two are the same component in two
+    /// places, so the weight lives in one constant and can't drift apart. (Track and
+    /// progress arc obviously share it too — a difference there would read as a
+    /// rendering bug rather than a design choice.)
+    private static var strokeWidth: CGFloat { UpNextCardView.ringStroke }
+
     var body: some View {
         let foreground = focused ? Color.black : Color.white
         ZStack {
             Circle()
-                .stroke(foreground.opacity(0.22), lineWidth: 3.5)
+                .stroke(foreground.opacity(0.22), lineWidth: Self.strokeWidth)
             Circle()
                 .trim(from: 0, to: max(0, min(1, fraction)))
-                .stroke(foreground, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+                .stroke(foreground, style: StrokeStyle(lineWidth: Self.strokeWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }
         .frame(width: 38, height: 38)

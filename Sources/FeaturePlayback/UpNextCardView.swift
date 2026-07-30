@@ -33,6 +33,31 @@ struct UpNextCardView: View {
     /// sensible default so the first frame isn't zero-height.
     @State private var mediaHeight: CGFloat = 92
 
+    // MARK: Metrics
+    //
+    // The card is a landscape media card — artwork inset inside a rounded surface —
+    // so it uses the SHARED radius pair rather than numbers of its own:
+    // `mediumMediaCornerRadius` inside, and the derived
+    // `landscapeCardCornerRadius` (= inner + `cardInset`) outside. That's the same
+    // pair the Home rails and the episode cards use, so the corners read as one
+    // family and stay concentric — a constant-width border rather than a fatter
+    // curve at each corner.
+
+    /// Inner artwork radius — the shared landscape-media value.
+    static var artRadius: CGFloat { PlozzTheme.Metrics.mediumMediaCornerRadius }
+
+    /// Outer surface radius, derived so the border stays concentric with the art.
+    static var surfaceRadius: CGFloat { artRadius + PlozzTheme.Metrics.cardInset }
+
+    /// Diameter of the trailing play control.
+    static let controlDiameter: CGFloat = 48
+
+    /// The countdown ring sits just inside the control.
+    static var ringDiameter: CGFloat { controlDiameter - 2 }
+
+    /// Shared with the Skip button's ring so the two read as the same component.
+    static let ringStroke: CGFloat = 5
+
     var body: some View {
         VStack {
             Spacer()
@@ -59,24 +84,24 @@ struct UpNextCardView: View {
             HStack(spacing: 22) {
                 thumbnail(for: info)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     info.eyebrow
-                        .font(.caption.weight(.heavy))
-                        .tracking(1.4)
+                        .font(.caption2.weight(.heavy))
+                        .tracking(1.2)
                         .textCase(.uppercase)
                         .foregroundStyle(focused ? Color.black.opacity(0.6) : Color.white.opacity(0.65))
                     // Show name leads. It's highly variable (short sitcoms →
                     // very long anime titles), so it shrinks a step, then wraps to
                     // two lines, then truncates — always staying readable.
                     info.showName
-                        .font(.title3.weight(.bold))
+                        .font(.headline.weight(.bold))
                         .foregroundStyle(focused ? Color.black : Color.white)
                         .lineLimit(2)
                         .minimumScaleFactor(0.7)
                         .truncationMode(.tail)
                     if let meta = info.metaLine {
                         Text(meta)
-                            .font(.subheadline.weight(.medium))
+                            .font(.footnote.weight(.medium))
                             .foregroundStyle(focused ? Color.black.opacity(0.7) : Color.white.opacity(0.75))
                             .lineLimit(1)
                     }
@@ -91,9 +116,15 @@ struct UpNextCardView: View {
 
                 trailingControl
             }
-            .padding(.leading, 22)
-            .padding(.trailing, 32)
-            .padding(.vertical, 24)
+            // Leading + vertical are ONE inset, and it's the same `cardInset` the
+            // home-screen cards use — that's what makes the card's corner
+            // concentric with the artwork's (outer radius = inner + inset), so the
+            // border reads as a constant-width ring rather than a fatter curve at
+            // the corners. The trailing side holds the play button, not artwork, so
+            // it isn't bound by the rule and keeps a wider optical margin.
+            .padding(.leading, PlozzTheme.Metrics.cardInset)
+            .padding(.trailing, 24)
+            .padding(.vertical, PlozzTheme.Metrics.cardInset)
         }
         .buttonStyle(UpNextCardStyle(focused: focused))
         .focused($focused)
@@ -137,11 +168,11 @@ struct UpNextCardView: View {
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Self.artRadius, style: .continuous))
             .blur(radius: info.blurThumbnail ? 18 : 0)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Self.artRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: Self.artRadius, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
             )
     }
@@ -163,12 +194,12 @@ struct UpNextCardView: View {
             }
 
             Image(systemName: "play.fill")
-                .font(.system(size: 26, weight: .bold))
+                .font(.system(size: 21, weight: .bold))
                 .foregroundStyle(focused ? Color.black : Color.white)
                 // Optical centering — a play triangle reads slightly left of centre.
                 .offset(x: 2)
         }
-        .frame(width: 60, height: 60)
+        .frame(width: Self.controlDiameter, height: Self.controlDiameter)
     }
 }
 
@@ -182,13 +213,13 @@ private struct CountdownRing: View {
         let foreground = focused ? Color.black : Color.white
         ZStack {
             Circle()
-                .stroke(foreground.opacity(0.22), lineWidth: 4)
+                .stroke(foreground.opacity(0.22), lineWidth: UpNextCardView.ringStroke)
             Circle()
                 .trim(from: 0, to: max(0, min(1, fraction)))
-                .stroke(foreground, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                .stroke(foreground, style: StrokeStyle(lineWidth: UpNextCardView.ringStroke, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }
-        .frame(width: 58, height: 58)
+        .frame(width: UpNextCardView.ringDiameter, height: UpNextCardView.ringDiameter)
         .animation(.linear(duration: 0.3), value: fraction)
     }
 }
@@ -201,11 +232,11 @@ private struct UpNextCardStyle: ButtonStyle {
         configuration.label
             .foregroundStyle(focused ? Color.black : Color.white)
             .background(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.card, style: .continuous)
+                RoundedRectangle(cornerRadius: UpNextCardView.surfaceRadius, style: .continuous)
                     .fill(focused ? Color.white : Color.black.opacity(0.55))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.card, style: .continuous)
+                RoundedRectangle(cornerRadius: UpNextCardView.surfaceRadius, style: .continuous)
                     .strokeBorder(Color.white.opacity(focused ? 0 : 0.5), lineWidth: 1.5)
             )
             .scaleEffect(configuration.isPressed ? 0.97 : (focused ? 1.04 : 1.0))

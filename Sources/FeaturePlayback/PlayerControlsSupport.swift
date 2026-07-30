@@ -192,6 +192,43 @@ struct InfoActionButtonStyle: ButtonStyle {
     }
 }
 
+/// The Info tab's button style.
+///
+/// Looks like the transport's other capsule controls, but is drawn here so it
+/// **ignores `\.isEnabled`** — the repo's established way to take a control out of
+/// the focus order without greying it (see `FocusGatedSwitch` /
+/// `SettingsFocusButtonStyle` in CoreUI). The tab needs that because it is only
+/// focusable while its card is open, yet must look completely normal the rest of
+/// the time. Focus colours swap instantly, like the Info card's own actions.
+struct PlayerTabButtonStyle: ButtonStyle {
+    let focused: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let label = configuration.label
+            .font(.callout.weight(.semibold))
+            .padding(.horizontal, 26)
+            .padding(.vertical, 14)
+        return Group {
+            if focused {
+                label
+                    .foregroundStyle(.black)
+                    .background(Capsule(style: .continuous).fill(.white))
+            } else if #available(iOS 26.0, tvOS 26.0, *) {
+                label
+                    .foregroundStyle(.white)
+                    .glassEffect(.regular, in: Capsule(style: .continuous))
+            } else {
+                label
+                    .foregroundStyle(.white)
+                    .background(Capsule(style: .continuous).fill(.white.opacity(0.16)))
+            }
+        }
+        .clipShape(Capsule(style: .continuous))
+        .scaleEffect(configuration.isPressed ? 0.96 : 1)
+        .animation(nil, value: focused)
+    }
+}
+
 /// Drives the trickplay thumbnail's dismissal: it appears instantly (identity
 /// insertion) and, on removal, quickly fades while blurring, scaling down a
 /// touch, and drifting slightly downward.

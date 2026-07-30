@@ -285,25 +285,11 @@ struct PlayerControls: View {
             // Any focus move between control-bar buttons is activity — bump so the
             // container restarts its idle countdown instead of hiding mid-navigation.
             model.controlBarActivity &+= 1
-            if slot == .button(.info) {
-                if model.controlBarEntry == .info {
-                    // Invariant: the Info tab is focused ONLY with its card open —
-                    // the tab is the card's header, not a standalone button. However
-                    // focus reached it (our entry write, walking up from a card
-                    // button), the card comes with it, so the tab can never sit
-                    // focused over nothing.
-                    if openPanel != .info { openPanel = .info }
-                } else {
-                    // Safety net for an Up entry: the tab is a Down-only destination,
-                    // so focus landing there means the focus engine's own entry pass
-                    // beat us to it. Bounce to the track row WITHOUT opening the card
-                    // — that cascade is what turned an Up press into "Info card open,
-                    // Restart focused" (the engine then fell into the freshly
-                    // inserted card, and the track row it should have used had been
-                    // disabled by the open panel).
-                    restoreFocus(initialFocus)
-                }
-            }
+            // Invariant: the tab is focused ONLY with its card open. It's enforced
+            // structurally by `infoTabFocusable` (the tab isn't even in the focus
+            // order otherwise); this covers the one moment the gate can't — a Down
+            // entry, where focus is applied in the same update that opens the card.
+            if slot == .button(.info), openPanel != .info { openPanel = .info }
             // `infoTabSettled` distinguishes "the tab has been focused for a beat"
             // from "focus arrived on the tab in this very event". A move command and
             // the focus change it causes land in the same turn, and the order isn't
@@ -778,7 +764,7 @@ struct PlayerControls: View {
                 Label("Info", systemImage: "info.circle")
                     .labelStyle(.titleOnly)
             }
-            .playerGlassButton(prominent: openPanel == .info)
+            .buttonStyle(PlayerTabButtonStyle(focused: focus == .button(.info)))
             .focused($focus, equals: .button(.info))
 
             Spacer(minLength: 20)
@@ -786,11 +772,14 @@ struct PlayerControls: View {
         .opacity(model.isScrubbing ? 0 : 1)
         .offset(y: model.isScrubbing ? 8 : 0)
         .allowsHitTesting(!model.isScrubbing)
-        // The tab stays live while its OWN card is open (that's what makes it a tab
-        // rather than a button); any other open panel traps focus, so it drops out.
-        // It's also out of the focus order for the entry instant unless the viewer
-        // pressed Down, which is what keeps an Up entry off it (see `entryLocksOut`).
-        .disabled((openPanel != nil && openPanel != .info) || entryLocksOut(.button(.info)))
+        // The tab is in the focus order ONLY while its card is open (or is opening,
+        // on a Down entry). That's the invariant — focused tab == visible card —
+        // made structural: with the card closed the engine simply cannot move onto
+        // the tab, so Down from a track control can't land there and the tab can
+        // never sit focused over nothing. `PlayerTabButtonStyle` ignores
+        // `\.isEnabled`, so this removes the tab from the focus order WITHOUT
+        // greying it out.
+        .disabled(!infoTabFocusable)
         // Bridge the horizontal offset between the rows: the track controls sit at
         // the trailing edge and the tab at the leading one, so nothing is
         // geometrically below Speed/Audio/Subtitles and a Down press would simply do
@@ -806,24 +795,29 @@ struct PlayerControls: View {
     ///
     /// The focus engine decides where focus lands when the control layer becomes
     /// focusable, and it does NOT defer to a `@FocusState` value that is already in
-    /// place — telemetry caught it moving focus off our intended Subtitles button
-    /// and onto the Info tab. So rather than steering the engine, we narrow what it
-    /// can choose from: for the couple of frames an entry takes, every control
-    /// except the entry's own target leaves the focus order, and the engine's pick
-    /// is correct because it is the only pick available. Down targets the Info tab
-    /// (its card is the destination); Up targets the track row.
+    /// place — telemetry caught it moving focus off our intended button. So rather
+    /// than steering the engine, we narrow what it can choose from: for the couple
+    /// of frames an entry takes, every control except the entry's own target leaves
+    /// the focus order, and the engine's pick is correct because it is the only pick
+    /// available. Down targets the Info tab (its card is the destination); Up
+    /// targets the first track control.
     private var entryFocusTarget: FocusSlot? {
         guard model.controlBarVisible, !model.controlBarEntrySettled else { return nil }
         return model.controlBarEntry == .info ? .button(.info) : initialFocus
     }
 
-    /// Whether `slot` is one of the controls held out of the focus order for the
-    /// duration of an entry. `.disabled` dims a stock button, but the window is a
-    /// couple of frames long and coincides with the transport fading in, so there is
-    /// nothing settled on screen to look dimmed.
+    /// Whether `slot` is held out of the focus order for the duration of an entry.
+    /// The window is a couple of frames and coincides with the transport fading in,
+    /// so nothing settled is on screen to look dimmed.
     private func entryLocksOut(_ slot: FocusSlot) -> Bool {
         guard let target = entryFocusTarget else { return false }
         return slot != target
+    }
+
+    /// Whether the Info tab is in the focus order: only while its card is open, or
+    /// while a Down entry is on its way to opening it. See the tab's `.disabled`.
+    private var infoTabFocusable: Bool {
+        openPanel == .info || entryFocusTarget == .button(.info)
     }
 
     /// The now-playing card the Info tab reveals, full width beneath the tab row.
@@ -1324,14 +1318,12 @@ struct PlayerControls: View {
 
     // MARK: Model helpers
 
-    /// Focus target when the track row first takes focus: Subtitles (the most-used
-    /// control) when present, otherwise the first category, otherwise the
-    /// always-present Info tab.
+    /// Focus target when the track row first takes focus: its FIRST control, i.e.
+    /// the leading edge of the row. (It used to prefer Subtitles as "the most-used
+    /// control", which read as arbitrarily skipping past Speed and Audio.)
     private var initialFocus: FocusSlot {
-        let categories = model.trackControlCategories
-        if categories.contains(.subtitles) { return .button(.subtitles) }
-        if let first = categories.first { return .button(first) }
-        return .button(.info)
+        guard let first = model.trackControlCategories.first else { return .button(.info) }
+        return .button(first)
     }
 
     struct TrackRow: Identifiable {

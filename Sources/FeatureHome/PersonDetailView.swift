@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import MetadataKit
 
 /// The credits a person page can show, and how they were obtained.
 ///
@@ -34,17 +35,24 @@ public final class PersonDetailViewModel {
     /// which is most people — and when it is empty this class does exactly what
     /// it did before, one request, no extra latency.
     private let otherProviders: [any MediaProvider]
+    /// Consulted in order, and only once every server has come back without a
+    /// biography. Several rather than one so no single provider is load-bearing:
+    /// drop them all and the page still shows who the person is and what the
+    /// viewer owns with them.
+    private let biographyProviders: [any PersonBiographyProvider]
     private let limit: Int
 
     public init(
         person: MediaPerson,
         provider: (any MediaProvider)?,
         otherProviders: [any MediaProvider] = [],
+        biographyProviders: [any PersonBiographyProvider] = [],
         limit: Int = 40
     ) {
         self.person = person
         self.provider = provider
         self.otherProviders = otherProviders
+        self.biographyProviders = biographyProviders
         self.limit = limit
     }
 
@@ -85,6 +93,26 @@ public final class PersonDetailViewModel {
         // A server that had nothing to say about the home source's failure should
         // not leave the page reading "unavailable" when others answered.
         if !merged.isEmpty { state = .loaded }
+    }
+
+    /// Last resort for a biography, after every server has been asked.
+    ///
+    /// Servers first, always: their answer is free, offline, already paid for by
+    /// the library scan, and needs no name matching. Only when none of them
+    /// stored one — common, since a server only keeps the bios it happened to
+    /// download — is an outside source consulted, in order, stopping at the
+    /// first that can confidently identify the person.
+    private func fillBiographyFromExternalSources() async {
+        guard biography == nil, !biographyProviders.isEmpty else { return }
+        let name = person.name
+        guard !name.isEmpty else { return }
+        for provider in biographyProviders {
+            if let text = await provider.biography(for: name, role: person.kind),
+               !text.isEmpty {
+                biography = text
+                return
+            }
+        }
     }
 
     /// Collapses the same title held on more than one server into one entry.
@@ -128,8 +156,10 @@ public final class PersonDetailViewModel {
 
         // Render what the home server gave us before consulting anyone else, so
         // time-to-content never depends on how many servers are signed in.
-        guard !otherProviders.isEmpty else { return }
-        await mergeOtherServers()
+        if !otherProviders.isEmpty {
+            await mergeOtherServers()
+        }
+        await fillBiographyFromExternalSources()
     }
 }
 

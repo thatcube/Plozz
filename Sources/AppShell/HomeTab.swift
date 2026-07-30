@@ -277,7 +277,11 @@ struct HomeTab: View {
                             // single-server case, where this stays one request.
                             otherProviders: accounts
                                 .filter { $0.account.id != route.sourceAccountID }
-                                .map(\.provider)
+                                .map(\.provider),
+                            // Only reached when no server stored a biography.
+                            // Wikipedia needs no key or account, so this rung
+                            // works for every user out of the box.
+                            biographyProviders: [WikipediaPersonBiographyProvider()]
                         )
                     },
                     onSelectItem: { navigate($0, libraryOrigin: route.sourceAccountID) }

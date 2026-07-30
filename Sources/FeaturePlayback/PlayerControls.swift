@@ -186,9 +186,12 @@ struct PlayerControls: View {
     /// the row can be clamped instead of running off the screen.
     @State private var trackControlsWidth: CGFloat = 0
 
-    /// Measured top edge of the track-control row within the controls layer, so the
-    /// menus can sit just above the buttons while living outside the transport.
+    /// Measured top edge of the track-control row, in GLOBAL space, so the menus can
+    /// sit just above the buttons while living outside the transport.
     @State private var trackControlsTop: CGFloat = 0
+
+    /// The controls layer's own bottom edge, in the same GLOBAL space.
+    @State private var controlsBottom: CGFloat = 0
 
     /// The transport control that was focused when the current panel was opened.
     /// Restored (deferred) whenever the panel fully closes so focus always lands
@@ -262,10 +265,16 @@ struct PlayerControls: View {
         .onPreferenceChange(SpeedButtonLeadingKey.self) { speedButtonLeading = $0 }
         .background(
             GeometryReader { proxy in
-                Color.clear.preference(key: ControlsHeightKey.self, value: proxy.size.height)
+                Color.clear
+                    .preference(key: ControlsHeightKey.self, value: proxy.size.height)
+                    .preference(key: ControlsBottomKey.self, value: proxy.frame(in: .global).maxY)
             }
         )
         .onPreferenceChange(ControlsHeightKey.self) { availableHeight = $0 }
+        .onPreferenceChange(ControlsBottomKey.self) { controlsBottom = $0 }
+        // Menus animate open/closed on their own clock. Keyed on `optionsPanel`, which
+        // is nil for Info, so this can't fire for — or retime — the Info reveal.
+        .animation(.easeInOut(duration: 0.2), value: optionsPanel)
         .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintVisible)
         .onChange(of: model.controlBarVisible) { _, focused in
             titleVisible = true
@@ -823,9 +832,14 @@ struct PlayerControls: View {
             GeometryReader { proxy in
                 Color.clear
                     .preference(key: TrackControlsWidthKey.self, value: proxy.size.width)
+                    // GLOBAL, not the named controls space: the cluster carries an
+                    // `.offset` for the Info reveal, and a named-space measurement is
+                    // taken from the pre-transform layout, so the menus were placed
+                    // against where the buttons WOULD be without it — landing on top
+                    // of them. The global frame reflects the transform.
                     .preference(
                         key: TrackControlsTopKey.self,
-                        value: proxy.frame(in: .named(Self.controlsSpace)).minY
+                        value: proxy.frame(in: .global).minY
                     )
             }
         )
@@ -1051,10 +1065,14 @@ struct PlayerControls: View {
     /// controls, plus the gap a menu leaves above them. Falls back to the transport's
     /// measured height until the first measurement lands.
     private var menuBottomInset: CGFloat {
-        guard availableHeight > 0, trackControlsTop > 0 else {
+        guard controlsBottom > 0, trackControlsTop > 0, controlsBottom > trackControlsTop else {
             return transportHeight + Self.bottomMargin + Self.panelLift
         }
-        return availableHeight - trackControlsTop + Self.panelLift
+        // BOTH edges in global space. The layer is inset by the tvOS safe area, so its
+        // height (960) is 60pt short of its bottom edge (1020) — subtracting the
+        // buttons' global top from the layer's HEIGHT put every menu 60pt too low,
+        // landing it on the buttons it belongs above.
+        return controlsBottom - trackControlsTop + Self.panelLift
     }
 
     /// A thin focusable strip just above the Info tab, present only while the card

@@ -318,6 +318,17 @@ struct PanelGlassBackground: ViewModifier {
     }
 }
 
+/// Reports the controls layer's own BOTTOM edge in global space, so a measurement
+/// taken against the buttons (also global) subtracts two numbers from the same
+/// coordinate system. The layer is inset by the tvOS safe area, so its height is NOT
+/// its bottom edge — mixing the two put the menus 60pt low, right on the buttons.
+struct ControlsBottomKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// Reports the track-control row's TOP edge, in the controls layer's coordinate
 /// space, so the options menus can be positioned just above the buttons that open
 /// them while living outside the transport's view tree.

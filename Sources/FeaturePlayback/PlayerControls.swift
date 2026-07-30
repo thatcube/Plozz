@@ -241,10 +241,15 @@ struct PlayerControls: View {
             }
             .animation(.easeInOut(duration: 0.25), value: model.controlsVisible)
             .animation(.easeInOut(duration: 0.3), value: styleEditing)
+            // A member of the ZStack, NOT an `.overlay` on it. An overlay attached
+            // after `.ignoresSafeArea()` still gets the system safe area in its
+            // environment, so tvOS inset the editor by 60/90 on top of its own 60pt
+            // margin — pushing it ~120 down and ~150 in, nowhere near the margin the
+            // rest of the player uses. In here it shares the cluster's coordinate
+            // space, so the same constant means the same thing for both.
+            styleEditorLayer
         }
         .ignoresSafeArea()
-        // Screen-level, so its top edge is the screen's — not the cluster's.
-        .overlay(alignment: .top) { styleEditorLayer }
         .animation(.easeInOut(duration: 0.3), value: styleEditing)
         // One space across the whole layer: the Speed button and its panel sit in
         // different sub-stacks of the cluster, so the alignment measurement has to
@@ -1058,9 +1063,9 @@ struct PlayerControls: View {
         if styleEditing {
             morphingPanel(for: .subtitles)
                 .plozzFocusSection()
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.horizontal, Self.horizontalMargin)
+                .padding(.trailing, Self.horizontalMargin)
                 .padding(.top, Self.horizontalMargin)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .transition(.scale(scale: 0.9, anchor: .topTrailing).combined(with: .opacity))
         }
     }

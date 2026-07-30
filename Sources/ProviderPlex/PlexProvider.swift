@@ -165,6 +165,19 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         try await client.recentlyAdded(limit: limit).map(map(metadata:))
     }
 
+    /// Titles in this library featuring a person.
+    ///
+    /// `MediaPerson.id` is namespaced by role kind (`"actor:12345"`) so cast and
+    /// crew entries can't collide, but Plex's `actor` filter wants the bare tag id
+    /// — so strip the prefix back off. An entry with no numeric id falls back to
+    /// the person's name, which the filter does not accept, so those yield nothing
+    /// rather than a wrong match.
+    public func items(withPerson personID: String, limit: Int) async throws -> [MediaItem] {
+        let bare = personID.split(separator: ":", maxSplits: 1).last.map(String.init) ?? personID
+        guard !bare.isEmpty, bare.allSatisfy(\.isNumber) else { return [] }
+        return try await client.itemsWithActor(id: bare, limit: limit).map(map(metadata:))
+    }
+
     /// Plex-native discovery hubs for one library (`/hubs/sections/{id}`), surfaced
     /// as a library's extra rows in unmerged Home mode. Hubs whose content the
     /// uniform base rows already cover (Recently Added, On Deck / Continue

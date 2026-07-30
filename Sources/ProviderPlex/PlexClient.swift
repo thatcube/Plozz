@@ -192,6 +192,21 @@ public struct PlexClient: Sendable {
         return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer.Metadata ?? []
     }
 
+    /// `GET /library/all?actor={id}` — everything in the library featuring a
+    /// person. `type=1,2` keeps the result to whole movies and shows rather than
+    /// individual episodes, matching the Jellyfin side.
+    func itemsWithActor(id: String, limit: Int) async throws -> [PlexMetadata] {
+        let query = [
+            URLQueryItem(name: "actor", value: id),
+            URLQueryItem(name: "type", value: "1,2"),
+            URLQueryItem(name: "X-Plex-Container-Start", value: "0"),
+            URLQueryItem(name: "X-Plex-Container-Size", value: String(max(0, limit))),
+            URLQueryItem(name: "sort", value: "year:desc")
+        ]
+        let endpoint = Endpoint(path: "/library/all", queryItems: query, headers: headers)
+        return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer.Metadata ?? []
+    }
+
     /// `GET /library/recentlyAdded` — newest items across libraries.
     func recentlyAdded(limit: Int) async throws -> [PlexMetadata] {
         try await decodeStreamEnriched(

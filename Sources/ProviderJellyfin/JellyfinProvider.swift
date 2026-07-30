@@ -171,6 +171,17 @@ public struct JellyfinProvider: MediaProvider {
         try await client.latestItems(userID: session.userID, limit: limit).map(map(item:))
     }
 
+    /// Titles in this library featuring a person. The id is Jellyfin's own person
+    /// GUID — the same one `map(people:)` puts on `MediaPerson` — so no external
+    /// identity lookup is involved and the results are always playable.
+    public func items(withPerson personID: String, limit: Int) async throws -> [MediaItem] {
+        try await client.itemsWithPerson(
+            userID: session.userID,
+            personID: personID,
+            limit: limit
+        ).map(map(item:))
+    }
+
     /// Library-scoped Continue Watching. Jellyfin's Resume/NextUp feeds don't
     /// report each item's owning library (an episode's `ParentId` is its season),
     /// so the only reliable way to attribute — and therefore Home-filter — items

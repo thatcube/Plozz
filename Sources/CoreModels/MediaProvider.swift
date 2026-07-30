@@ -186,6 +186,19 @@ public protocol MediaProvider: Sendable {
     /// Absolute URL for an item's artwork, or `nil` if unavailable.
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL?
 
+    // MARK: People
+
+    /// Items in the viewer's **own library** featuring `personID`, newest first.
+    ///
+    /// This is the durable half of a person page. It needs no third party: the id
+    /// is the source's own (a Jellyfin/Emby person GUID, a Plex `actor:<n>`, a
+    /// `tmdb:person:<n>` for shares), every result is a real library item that
+    /// plays, and no title-matching step can mis-bind it. A metadata outage costs
+    /// the page its biography, not its usefulness.
+    ///
+    /// Best-effort: a provider that cannot query by person returns an empty array.
+    func items(withPerson personID: String, limit: Int) async throws -> [MediaItem]
+
     // MARK: Connection locality
 
     /// How reachable this provider's *currently active* server connection is
@@ -226,6 +239,11 @@ public extension MediaProvider {
     /// this; Jellyfin and test doubles inherit the safe empty result, so unmerged
     /// Home falls back to the uniform base rows for them.
     func libraryHubs(libraryID: String, kind: MediaItemKind, limit: Int) async throws -> [LibrarySection] { [] }
+
+    /// Default: cannot query by person, so a person page shows no library credits
+    /// for this source rather than failing. Jellyfin/Emby (`PersonIds`), Plex
+    /// (`actor`) and the share catalog (its persisted cast) override this.
+    func items(withPerson personID: String, limit: Int) async throws -> [MediaItem] { [] }
 
     /// Default: ignore the exclusions and run the unscoped search. Providers that
     /// can attribute results to a library (Plex `librarySectionID`) or scope the

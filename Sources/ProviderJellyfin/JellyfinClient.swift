@@ -277,6 +277,34 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
     }
 
+    /// `/Users/{id}/Items?PersonIds=…` — everything in the viewer's library
+    /// featuring a person, newest first.
+    ///
+    /// Recursive + `IncludeItemTypes` so it spans every library and returns whole
+    /// titles rather than individual episodes: a person page wants "Breaking Bad",
+    /// not forty episode rows. `Fields` matches the other list queries so the
+    /// results map through the same path.
+    func itemsWithPerson(
+        userID: String,
+        personID: String,
+        limit: Int
+    ) async throws -> [BaseItemDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items",
+            queryItems: [
+                URLQueryItem(name: "PersonIds", value: personID),
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
+                URLQueryItem(name: "SortBy", value: "PremiereDate,SortName"),
+                URLQueryItem(name: "SortOrder", value: "Descending"),
+                URLQueryItem(name: "Limit", value: String(limit)),
+                URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,ProviderIds")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
+    }
+
     func latestItems(userID: String, limit: Int, parentID: String? = nil) async throws -> [BaseItemDto] {
         var queryItems = [
             URLQueryItem(name: "Limit", value: String(limit)),

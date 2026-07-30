@@ -153,6 +153,9 @@ struct PlayerControls: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// Measured height of the Info card plus the gap above it. Drives `infoCardLift`.
+    @State private var infoCardHeight: CGFloat = 0
+
     @State private var openPanel: Category?
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
@@ -482,22 +485,40 @@ struct PlayerControls: View {
                 )
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            // The Info card is a real member of the cluster's stack rather than an
-            // overlay: appended BELOW the tab row, it pushes the tab (and the
-            // scrubber above it) up as it slides in from the bottom edge, so the tab
-            // ends up sitting on top of its own card like a segmented control.
-            if openPanel == .info {
+            // The Info card is a PERMANENT member of the stack, never inserted or
+            // removed. That's the whole trick behind the reveal moving as one unit:
+            // the layout always holds the revealed arrangement (card at the bottom,
+            // tab above it), and the resting look is produced purely by translating
+            // the cluster down so the card sits just off the bottom edge. Opening it
+            // is then a single transform on a fixed stage — nothing appears, nothing
+            // reflows, so no part can arrive on its own clock. (Same approach as the
+            // series-detail hero/browser reveal; see SeriesEpisodeBrowserLayout.)
+            if !styleEditing {
                 infoCard
                     .plozzFocusSection()
-                    // A pure slide, no cross-fade: the card rises from behind the
-                    // transport and pushes the tab up, exactly like the Apple TV
-                    // app. Combining `.move` with `.opacity` made it read as
-                    // materialising in place instead of arriving from somewhere,
-                    // because most of an opacity curve lands in the first sliver of
-                    // the travel.
-                    .transition(.move(edge: .bottom))
+                    // Widen the stack's 18pt gap to the cluster's bottom margin. That
+                    // equality is load-bearing: it's what makes ONE offset put the
+                    // card exactly off-screen at rest AND the tab exactly at its
+                    // resting height (see `infoCardLift`).
+                    .padding(.top, Self.infoCardGap - 18)
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: InfoCardHeightKey.self, value: proxy.size.height)
+                        }
+                    )
+                    // Off-screen but still in the hierarchy, so its buttons must be
+                    // out of the focus order. `InfoActionButtonStyle` ignores
+                    // `\.isEnabled`, so this doesn't grey the card.
+                    .disabled(!infoMode)
             }
         }
+        // THE reveal: the entire cluster — options slot, track controls, scrub bar,
+        // tab and card — travels as one rigid unit. At rest it's parked far enough
+        // down that the card clears the bottom edge; revealed it sits at its natural
+        // place. Nothing moves relative to anything else, which is what stops the
+        // card reading as detached from the transport above it.
+        .offset(y: infoMode ? 0 : infoCardLift)
+        .onPreferenceChange(InfoCardHeightKey.self) { infoCardHeight = $0 }
         .onPreferenceChange(TransportHeightKey.self) { transportHeight = $0 }
         // The Info reveal's single clock. Every part of it — the card's slide, the
         // transport fading back, the track row lifting away — is driven by
@@ -757,11 +778,12 @@ struct PlayerControls: View {
         .opacity(model.isScrubbing ? 0 : 1)
         .offset(y: model.isScrubbing ? 8 : 0)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
-        // Step aside as a whole once the Info card takes over, so the tab and its
-        // card are the only chrome left. Deliberately no `.animation` — it rides the
-        // cluster's single reveal clock (see `infoReveal`).
+        // Clear out once the Info card takes over, so the tab and its card are the
+        // only chrome left. Opacity ONLY — it's already travelling with the rest of
+        // the cluster, and an offset of its own is exactly the kind of second
+        // movement that made the reveal look like separate pieces. Deliberately no
+        // `.animation` either: it rides the cluster's single reveal clock.
         .opacity(infoMode ? 0 : 1)
-        .offset(y: infoMode ? -24 : 0)
         .allowsHitTesting(!infoMode)
         // Trap focus inside an open panel: while one is up, the transport buttons
         // drop out of the focus engine so directional nav can't wander out of the
@@ -795,6 +817,30 @@ struct PlayerControls: View {
     /// keyed on it and stay clear of the Info reveal's clock.
     private var optionsPanel: Category? {
         openPanel == .info ? nil : openPanel
+    }
+
+    /// Gap between the tab row and the Info card. Equal to the cluster's bottom
+    /// margin ON PURPOSE — see `infoCardLift` for the arithmetic that equality makes
+    /// work out.
+    private static let infoCardGap: CGFloat = 48
+
+    /// How far down the cluster parks when the Info card is closed.
+    ///
+    /// The stack is permanently in its revealed arrangement, so parking has to do
+    /// two things at once: leave the tab exactly at its resting height, and put the
+    /// card entirely below the bottom edge. Travelling by the card's height plus the
+    /// stack's 18pt spacing does both, because the gap above the card was widened to
+    /// match the cluster's 48pt bottom margin:
+    ///
+    ///   tab bottom, parked  = revealed + lift = (bottom − 48 − H − 18) + (H + 18)
+    ///                       = bottom − 48   ← its normal resting height
+    ///   card top,   parked  = (bottom − 48 − H + gapPad) + (H + 18) = bottom
+    ///                       ← exactly level with the bottom edge, so none shows
+    ///
+    /// Falls back to a lift that's simply large enough while the height is still
+    /// unmeasured (the first layout pass), so the card can't flash into view.
+    private var infoCardLift: CGFloat {
+        infoCardHeight > 0 ? infoCardHeight + 18 : 900
     }
 
     /// The single clock the Info card's arrival and departure run on.

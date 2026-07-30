@@ -41,6 +41,16 @@ struct PanelBodyHeightKey: PreferenceKey {
     }
 }
 
+/// Reports the Info card's laid-out height (including the gap above it) so the
+/// control cluster knows exactly how far to travel to bring it on screen — and, at
+/// rest, exactly how far down to park so the card sits just below the bottom edge.
+struct InfoCardHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// The scrub track: buffered + played fill, a knob, and a floating trickplay
 /// thumbnail positioned over the scrub head while scrubbing.
 struct ScrubBar: View {

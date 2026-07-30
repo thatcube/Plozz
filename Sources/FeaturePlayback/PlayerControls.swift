@@ -263,18 +263,20 @@ struct PlayerControls: View {
             // Where the viewer entered from decides what they get: Down opens the
             // Info card with its tab focused (the tab row behaves like a segmented
             // control above the card), Up lands in the track-control row above the
-            // scrubber. Unlike the old single-row bar there is no unambiguous
-            // "nearest" control any more, so the destination is chosen explicitly —
-            // deferred via `restoreFocus`, which lands after the engine's own default
-            // pass (a synchronous write races it and briefly lights two controls).
+            // scrubber. The write is SYNCHRONOUS — the container holds its focus
+            // update until `controlBarFocusArmed` says we've applied it, so the
+            // engine finds the intended target already in place instead of picking
+            // its own and having ours yank focus across the row a beat later.
             switch model.controlBarEntry {
             case .info:
                 panelReturnFocus = .button(.info)
                 openPanel = .info
+                focus = .button(.info)
             case .trackControls:
                 openPanel = nil
-                restoreFocus(initialFocus)
+                focus = initialFocus
             }
+            model.controlBarFocusArmed = true
         }
         .onChange(of: focus) { _, slot in
             #if DEBUG

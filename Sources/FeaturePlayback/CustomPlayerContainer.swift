@@ -1245,19 +1245,16 @@ final class PlayerInputViewController: UIViewController {
         setSurfaceRecognizers(enabled: false)
         controlBarHost?.view.isUserInteractionEnabled = true
         playerInputView?.allowsFocus = false
-        // Ask for the focus update a runloop turn late, on purpose. The controls
-        // decide their own entry target from `controlBarEntry` — and gate the Info
-        // tab out of the focus order for exactly this moment — but both of those are
-        // evaluated when SwiftUI re-renders, which has NOT happened yet at this
-        // point. Asking synchronously had the focus engine choose from the previous
-        // render, where the tab was still focusable, and an Up press could land on
-        // Info (opening its card and falling through to Restart). One turn later the
-        // hierarchy the engine inspects matches the entry the viewer asked for.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.focusContext == .controlBar else { return }
-            self.setNeedsFocusUpdate()
-            self.updateFocusIfNeeded()
-        }
+        // Hand UIKit its focus update only once the controls have applied the focus
+        // this entry direction asks for. The engine picks from whatever SwiftUI last
+        // RENDERED, and none of the controls' entry logic — the target itself, or
+        // gating the Info tab out of the focus order — exists in the render that's on
+        // screen at this point. Asking synchronously let the engine choose its own
+        // control (Up landing on Info, or on Speed then jumping to Subtitles as our
+        // write arrived); waiting for the arm flag means it finds the intended target
+        // already in place.
+        model.controlBarFocusArmed = false
+        requestControlBarFocusUpdate()
         // The control bar participates in auto-hide too: navigating its buttons
         // restarts the countdown (see refreshFromEngine) and an open menu pins it,
         // but once the viewer stops interacting the transport times out and focus
@@ -1265,6 +1262,22 @@ final class PlayerInputViewController: UIViewController {
         // is in the bar.
         lastControlBarActivity = model.controlBarActivity
         scheduleAutoHide()
+    }
+
+    /// Poll the main queue until the controls report they've applied the entry focus
+    /// (see `PlayerControlsModel.controlBarFocusArmed`), then run the focus update.
+    /// Capped so a controls layer that never arms — e.g. it was torn down mid-entry —
+    /// still gets focus rather than leaving the viewer with a dead remote.
+    private func requestControlBarFocusUpdate(attempt: Int = 0) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.focusContext == .controlBar else { return }
+            if !self.model.controlBarFocusArmed, attempt < 5 {
+                self.requestControlBarFocusUpdate(attempt: attempt + 1)
+                return
+            }
+            self.setNeedsFocusUpdate()
+            self.updateFocusIfNeeded()
+        }
     }
 
     /// Returns focus to the scrub surface (Up / Menu from the control-bar root),
@@ -1282,6 +1295,7 @@ final class PlayerInputViewController: UIViewController {
         guard focusContext == .controlBar else { return }
         focusContext = .surface
         model.controlBarVisible = false
+        model.controlBarFocusArmed = false
         controlBarHost?.view.isUserInteractionEnabled = false
         playerInputView?.allowsFocus = true
         setSurfaceRecognizers(enabled: true)

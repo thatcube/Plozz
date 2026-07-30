@@ -240,6 +240,14 @@ public final class PlayerControlsModel {
     /// **Up** (the track-control row above the scrubber).
     public var controlBarEntry: ControlBarEntry = .trackControls
 
+    /// Set by the controls once they've applied the focus the entry direction asks
+    /// for, and cleared by the input controller when it starts an entry. The
+    /// controller waits for it before asking UIKit for a focus update: the engine
+    /// picks from whatever SwiftUI last rendered, so asking too early let it choose
+    /// its own control and produced a visible jump when our intended focus landed a
+    /// beat later.
+    public var controlBarFocusArmed: Bool = false
+
     /// The two ways focus enters the control layer, one per direction.
     public enum ControlBarEntry: Equatable, Sendable {
         /// Up from the scrub surface: land in the track row (Speed/Audio/Subtitles).

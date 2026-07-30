@@ -240,6 +240,20 @@ struct PlayerControls: View {
 
     var body: some View {
         ZStack {
+            // Measures the box the ZStack's CHILDREN are laid out in. The outer
+            // `.background` reports a different one (960 tall, ending at 1020) than
+            // the children actually get (ending at 1080) — telemetry caught the menus
+            // sitting exactly that 60pt low, on top of the buttons. A sibling probe is
+            // the only way to measure the same box the menu layer is padded within.
+            Color.clear
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: ControlsBottomKey.self,
+                            value: proxy.frame(in: .global).maxY
+                        )
+                    }
+                )
             dimScrim
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
@@ -265,9 +279,7 @@ struct PlayerControls: View {
         .onPreferenceChange(SpeedButtonLeadingKey.self) { speedButtonLeading = $0 }
         .background(
             GeometryReader { proxy in
-                Color.clear
-                    .preference(key: ControlsHeightKey.self, value: proxy.size.height)
-                    .preference(key: ControlsBottomKey.self, value: proxy.frame(in: .global).maxY)
+                Color.clear.preference(key: ControlsHeightKey.self, value: proxy.size.height)
             }
         )
         .onPreferenceChange(ControlsHeightKey.self) { availableHeight = $0 }

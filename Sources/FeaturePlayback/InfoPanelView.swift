@@ -14,6 +14,21 @@ import CoreModels
 /// owns none of the panel morph/focus-restore choreography — that stays in
 /// `PlayerControls` — so this is a pure content extraction.
 struct InfoPanelView: View {
+    /// Fixed 16:9 thumbnail height; the card's height is derived from it.
+    static let thumbHeight: CGFloat = 210
+    /// Padding between the card's content and its glass edge.
+    static let contentPadding: CGFloat = 24
+
+    /// The card's **exact** laid-out height, known up front rather than measured.
+    ///
+    /// Everything in the card is pinned to `thumbHeight` (the text column and the
+    /// action column both are), so this is deterministic. `PlayerControls` needs it
+    /// before the first frame to park the cluster with the card just off-screen —
+    /// measuring it instead meant the parked offset changed the moment the
+    /// measurement landed (and again whenever metadata arrived), which showed up as
+    /// the transport jumping.
+    static var cardHeight: CGFloat { thumbHeight + contentPadding * 2 }
+
     let model: PlayerControlsModel
     let actions: PlayerOptionsActions
     @FocusState.Binding var focus: PlayerControls.FocusSlot?
@@ -48,8 +63,8 @@ struct InfoPanelView: View {
         // nested inside the card's glass radius (outer = inner + content padding),
         // so both corners share a centre.
         let thumbRadius = PlozzTheme.Metrics.mediumMediaCornerRadius
-        let contentPad: CGFloat = 24
-        let thumbHeight: CGFloat = 210
+        let contentPad = Self.contentPadding
+        let thumbHeight = Self.thumbHeight
 
         return HStack(alignment: .top, spacing: 28) {
             infoThumbnail(cornerRadius: thumbRadius, height: thumbHeight)
@@ -138,6 +153,8 @@ struct InfoPanelView: View {
             .fixedSize(horizontal: true, vertical: false)
         }
         .padding(contentPad)
+        // Pin the height so `cardHeight` is a promise, not an estimate.
+        .frame(height: Self.cardHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(PanelGlassBackground(cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius))
     }

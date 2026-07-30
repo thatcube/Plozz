@@ -153,9 +153,6 @@ struct PlayerControls: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Measured height of the Info card plus the gap above it. Drives `infoCardLift`.
-    @State private var infoCardHeight: CGFloat = 0
-
     @State private var openPanel: Category?
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
@@ -501,11 +498,6 @@ struct PlayerControls: View {
                     // card exactly off-screen at rest AND the tab exactly at its
                     // resting height (see `infoCardLift`).
                     .padding(.top, Self.infoCardGap - 18)
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear.preference(key: InfoCardHeightKey.self, value: proxy.size.height)
-                        }
-                    )
                     // Off-screen but still in the hierarchy, so its buttons must be
                     // out of the focus order. `InfoActionButtonStyle` ignores
                     // `\.isEnabled`, so this doesn't grey the card.
@@ -517,8 +509,7 @@ struct PlayerControls: View {
         // down that the card clears the bottom edge; revealed it sits at its natural
         // place. Nothing moves relative to anything else, which is what stops the
         // card reading as detached from the transport above it.
-        .offset(y: infoMode ? 0 : infoCardLift)
-        .onPreferenceChange(InfoCardHeightKey.self) { infoCardHeight = $0 }
+        .offset(y: infoMode ? 0 : Self.infoCardLift)
         .onPreferenceChange(TransportHeightKey.self) { transportHeight = $0 }
         // The Info reveal's single clock. Every part of it — the card's slide, the
         // transport fading back, the track row lifting away — is driven by
@@ -829,19 +820,19 @@ struct PlayerControls: View {
     /// The stack is permanently in its revealed arrangement, so parking has to do
     /// two things at once: leave the tab exactly at its resting height, and put the
     /// card entirely below the bottom edge. Travelling by the card's height plus the
-    /// stack's 18pt spacing does both, because the gap above the card was widened to
-    /// match the cluster's 48pt bottom margin:
+    /// stack's 18pt spacing does both, because the gap above the card is widened to
+    /// match the cluster's 48pt bottom margin (H = the card's height):
     ///
     ///   tab bottom, parked  = revealed + lift = (bottom − 48 − H − 18) + (H + 18)
     ///                       = bottom − 48   ← its normal resting height
     ///   card top,   parked  = (bottom − 48 − H + gapPad) + (H + 18) = bottom
     ///                       ← exactly level with the bottom edge, so none shows
     ///
-    /// Falls back to a lift that's simply large enough while the height is still
-    /// unmeasured (the first layout pass), so the card can't flash into view.
-    private var infoCardLift: CGFloat {
-        infoCardHeight > 0 ? infoCardHeight + 18 : 900
-    }
+    /// A CONSTANT, deliberately. Deriving it from a measured height meant the parked
+    /// offset changed the instant the measurement arrived — and again whenever the
+    /// card's metadata did — teleporting the transport. `InfoPanelView` pins its own
+    /// height, so this is exact.
+    private static let infoCardLift: CGFloat = InfoPanelView.cardHeight + infoCardGap
 
     /// The single clock the Info card's arrival and departure run on.
     ///

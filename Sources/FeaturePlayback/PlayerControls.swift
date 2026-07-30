@@ -432,42 +432,24 @@ struct PlayerControls: View {
             // panel (the title/description are repetitive with it, so they fade out).
             // The Info card is NOT part of this slot — it enters from the bottom edge
             // below the tab row (see `infoCard`).
-            ZStack(alignment: .bottomLeading) {
-                titleBlock
-                    .opacity(titleVisible ? 1 : 0)
-                    // Scoped to the title, NOT the cluster. `titleVisible` flips one
-                    // update after a panel opens, and as a cluster-level modifier
-                    // this re-timed the in-flight reveal: the probe caught the
-                    // offset handed from the 0.42 spring to this 0.28 curve a frame
-                    // in, which is what made the transport lurch.
-                    .animation(.easeInOut(duration: 0.28), value: titleVisible)
-                if let openPanel, openPanel != .info {
-                    morphingPanel(for: openPanel)
-                        .plozzFocusSection()
-                        // Sit a touch higher than the title it replaces so the box
-                        // clears the transport instead of resting on the scrub bar.
-                        .padding(.bottom, Self.panelLift)
-                        // Grow + fade from the corner nearest the button that opened
-                        // it so it reads as springing from the control rather than
-                        // zooming out of screen-centre. Panels that pin to the trailing
-                        // edge (Audio/Subtitles/Sync) grow from `.bottomTrailing`;
-                        // Speed aligns to the LEFT of its own button, so it grows from
-                        // `.bottomLeading`. Anchoring Speed to `.bottomTrailing` put the
-                        // origin at the box's far (right) edge, away from its button —
-                        // reading as a zoom from centre.
-                        .transition(
-                            .scale(
-                                scale: 0.9,
-                                anchor: openPanel == .speed ? .bottomLeading : .bottomTrailing
-                            )
-                            .combined(with: .opacity)
-                        )
-                }
-            }
-            // Scoped to the panel slot for the same reason as the title's fade: a
-            // cluster-level animation modifier retimes ANY change in flight, the
-            // reveal's travel included.
-            .animation(.easeInOut(duration: 0.2), value: optionsPanel)
+            titleBlock
+                .opacity(titleVisible ? 1 : 0)
+                // Scoped to the title, NOT the cluster. `titleVisible` flips one
+                // update after a panel opens, and as a cluster-level modifier this
+                // re-timed the in-flight reveal: the probe caught the offset handed
+                // from the 0.42 spring to this 0.28 curve a frame in, which is what
+                // made the transport lurch.
+                .animation(.easeInOut(duration: 0.28), value: titleVisible)
+                // The options menus float ABOVE the title rather than sharing a slot
+                // with it. As a stack member the tallest of them (440pt) set the
+                // slot's height, and with the Info card now permanently in the stack
+                // the cluster no longer fit the screen — so opening Subtitles shoved
+                // the whole transport upward. An overlay draws outside its bounds and
+                // contributes no height, so a menu can be any size without moving a
+                // single control. It also suits what they are: floating menus, not
+                // part of the transport's layout.
+                .overlay(alignment: .bottomLeading) { optionsPanelLayer }
+                .animation(.easeInOut(duration: 0.2), value: optionsPanel)
             // Transport block (track controls + scrubber + tab row). Hidden entirely
             // while the full-height appearance editor is open so the live subtitles
             // behind it are unobstructed; measured otherwise so other panels can size
@@ -973,6 +955,34 @@ struct PlayerControls: View {
     /// while a Down entry is on its way to opening it. See the tab's `.disabled`.
     private var infoTabFocusable: Bool {
         openPanel == .info || entryFocusTarget == .button(.info)
+    }
+
+    /// The floating options menu (Speed / Audio / Subtitles), drawn above the title
+    /// block. Grows upward from the title's bottom edge — where it has always
+    /// appeared — but without occupying layout. See the overlay's note.
+    @ViewBuilder
+    private var optionsPanelLayer: some View {
+        if let panel = optionsPanel {
+            morphingPanel(for: panel)
+                .plozzFocusSection()
+                // Sit a touch higher than the title it covers so the box clears the
+                // transport instead of resting on the scrub bar.
+                .padding(.bottom, Self.panelLift)
+                // Grow + fade from the corner nearest the button that opened it so it
+                // reads as springing from the control rather than zooming out of
+                // screen-centre. Panels that pin to the trailing edge (Audio /
+                // Subtitles / Sync) grow from `.bottomTrailing`; Speed aligns to the
+                // LEFT of its own button, so it grows from `.bottomLeading`. Anchoring
+                // Speed to `.bottomTrailing` put the origin at the box's far (right)
+                // edge, away from its button — reading as a zoom from centre.
+                .transition(
+                    .scale(
+                        scale: 0.9,
+                        anchor: panel == .speed ? .bottomLeading : .bottomTrailing
+                    )
+                    .combined(with: .opacity)
+                )
+        }
     }
 
     /// A thin focusable strip just above the Info tab, present only while the card

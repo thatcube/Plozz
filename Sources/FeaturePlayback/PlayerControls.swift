@@ -257,7 +257,9 @@ struct PlayerControls: View {
         .onChange(of: model.controlBarVisible) { _, focused in
             titleVisible = true
             guard focused else {
-                openPanel = nil
+                // Includes the idle auto-hide firing with the card open: park the
+                // cluster on the reveal clock, never by snapping.
+                withAnimation(revealClock) { openPanel = nil }
                 focus = nil
                 model.isPanelOpen = false
                 return
@@ -405,9 +407,12 @@ struct PlayerControls: View {
     /// captured by an ambient transaction from whatever caused it — a focus change,
     /// a Select press, or the container flipping the transport visible.
     private func revealInfoCard() {
-        withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : Self.infoReveal) {
-            openPanel = .info
-        }
+        withAnimation(revealClock) { openPanel = .info }
+    }
+
+    /// The reveal's animation, honouring Reduce Motion.
+    private var revealClock: Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : Self.infoReveal
     }
 
     /// Dismiss the Info card and hand focus back to the scrub bar.
@@ -416,9 +421,7 @@ struct PlayerControls: View {
     /// tab focused over a closed card is exactly the state the focus invariant in
     /// `onChange(of: focus)` forbids (it would immediately re-open the card).
     private func closeInfoCard() {
-        withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : Self.infoReveal) {
-            openPanel = nil
-        }
+        withAnimation(revealClock) { openPanel = nil }
         onExitToSurface()
     }
 
@@ -434,6 +437,12 @@ struct PlayerControls: View {
             ZStack(alignment: .bottomLeading) {
                 titleBlock
                     .opacity(titleVisible ? 1 : 0)
+                    // Scoped to the title, NOT the cluster. `titleVisible` flips one
+                    // update after a panel opens, and as a cluster-level modifier
+                    // this re-timed the in-flight reveal: the probe caught the
+                    // offset handed from the 0.42 spring to this 0.28 curve a frame
+                    // in, which is what made the transport lurch.
+                    .animation(.easeInOut(duration: 0.28), value: titleVisible)
                 if let openPanel, openPanel != .info {
                     morphingPanel(for: openPanel)
                         .plozzFocusSection()
@@ -457,6 +466,10 @@ struct PlayerControls: View {
                         )
                 }
             }
+            // Scoped to the panel slot for the same reason as the title's fade: a
+            // cluster-level animation modifier retimes ANY change in flight, the
+            // reveal's travel included.
+            .animation(.easeInOut(duration: 0.2), value: optionsPanel)
             // Transport block (track controls + scrubber + tab row). Hidden entirely
             // while the full-height appearance editor is open so the live subtitles
             // behind it are unobstructed; measured otherwise so other panels can size
@@ -510,18 +523,22 @@ struct PlayerControls: View {
         // place. Nothing moves relative to anything else, which is what stops the
         // card reading as detached from the transport above it.
         .offset(y: infoMode ? 0 : Self.infoCardLift)
+        #if DEBUG
+        // TEMPORARY probe: reports the transaction actually in effect for the
+        // cluster's offset, so "did the reveal animate at all?" is an observation
+        // rather than a guess.
+        .transaction { t in
+            PlozzLog.playback.debug(
+                "PLZANIM infoMode=\(infoMode) offset=\(infoMode ? 0 : Self.infoCardLift) anim=\(String(describing: t.animation)) disabled=\(t.disablesAnimations)"
+            )
+        }
+        #endif
         .onPreferenceChange(TransportHeightKey.self) { transportHeight = $0 }
-        // The Info reveal's single clock. Every part of it — the card's slide, the
-        // transport fading back, the track row lifting away — is driven by
-        // `infoMode` and inherits this, so nothing can travel at its own speed.
-        // Reduce Motion drops the movement and keeps a plain cross-fade.
-        .animation(reduceMotion ? .easeInOut(duration: 0.2) : Self.infoReveal, value: infoMode)
-        // The options panels (Speed / Audio / Subtitles) keep their own snappier
-        // curve. Keyed on `optionsPanel`, which is nil for Info, so opening the card
-        // doesn't change it and this modifier can't fire for — and override — the
-        // reveal above.
-        .animation(.easeInOut(duration: 0.2), value: optionsPanel)
-        .animation(.easeInOut(duration: 0.28), value: titleVisible)
+        // The reveal's clock, and — deliberately — the ONLY animation modifier at
+        // cluster level that can fire while it runs. Anything else here retimes the
+        // travel mid-flight, however unrelated it looks: every other fade is scoped
+        // to the view it belongs to. Reduce Motion drops the movement.
+        .animation(revealClock, value: infoMode)
         .animation(.easeInOut(duration: 0.3), value: styleEditing)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
         .padding(.horizontal, Self.horizontalMargin)

@@ -480,12 +480,10 @@ struct PlayerControls: View {
                     scrubberRow
                         // The transport steps aside for the Info card: faded in
                         // place rather than removed, so the tab and its card never
-                        // shift as it goes. No `.animation` here on purpose — it
-                        // rides the single reveal clock applied to the cluster, and
-                        // a per-view modifier would override that transaction and
-                        // let this travel at its own speed.
+                        // shift as it goes.
                         .opacity(infoMode ? 0 : 1)
                         .allowsHitTesting(!infoMode)
+                        .animation(Self.transportExit(reduceMotion), value: infoMode)
                     tabRow
                 }
                 .background(
@@ -789,10 +787,10 @@ struct PlayerControls: View {
         // Clear out once the Info card takes over, so the tab and its card are the
         // only chrome left. Opacity ONLY — it's already travelling with the rest of
         // the cluster, and an offset of its own is exactly the kind of second
-        // movement that made the reveal look like separate pieces. Deliberately no
-        // `.animation` either: it rides the cluster's single reveal clock.
+        // movement that made the reveal look like separate pieces.
         .opacity(infoMode ? 0 : 1)
         .allowsHitTesting(!infoMode)
+        .animation(Self.transportExit(reduceMotion), value: infoMode)
         // Trap focus inside an open panel: while one is up, the transport buttons
         // drop out of the focus engine so directional nav can't wander out of the
         // menu. It closes only by selecting a row or pressing Menu (native-menu
@@ -857,7 +855,21 @@ struct PlayerControls: View {
     /// frame, and `.smooth` is the same family the series-detail hero reveal uses
     /// (`SeriesHeroRevealTransition.ambient`) — shorter here because this is one
     /// card, not a whole page.
-    private static let infoReveal: Animation = .smooth(duration: 0.42)
+    private static let infoReveal: Animation = .smooth(duration: 0.5)
+
+    /// The transport's fade as the card takes over. Scoped to the rows' own opacity
+    /// (so it can't retime the cluster's travel) and deliberately a *symmetric*
+    /// curve that outlasts most of that travel.
+    ///
+    /// It used to inherit the reveal spring, which front-loads: the scrub bar and
+    /// track buttons were gone almost immediately, leaving the tab to cross the
+    /// screen with nothing around it to read its motion against — which looks like
+    /// teleporting even though it's animating. Keeping them visible for most of the
+    /// journey is what makes the movement legible. (The same reasoning as
+    /// `SeriesHeroRevealTransition.heroContentFadeExit`.)
+    static func transportExit(_ reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : .easeInOut(duration: 0.42)
+    }
 
     /// The tab row beneath the scrub bar. Today a single Info tab; siblings
     /// (Chapters, …) join it here and switch the card below rather than opening

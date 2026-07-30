@@ -204,28 +204,33 @@ struct PlayerTabButtonStyle: ButtonStyle {
     let focused: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        let label = configuration.label
+        // ONE geometry for both states: the label, font and padding are applied
+        // once and only the BACKGROUND swaps. Branching into two differently-built
+        // chains (a filled capsule vs. `.glassEffect`) let the two states measure
+        // differently, so the tab changed size the instant it took focus — and in a
+        // bottom-anchored stack a size change moves everything, which reads as the
+        // tab jumping rather than travelling.
+        configuration.label
             .font(.callout.weight(.semibold))
+            .foregroundStyle(focused ? .black : .white)
             .padding(.horizontal, 26)
             .padding(.vertical, 14)
-        return Group {
-            if focused {
-                label
-                    .foregroundStyle(.black)
-                    .background(Capsule(style: .continuous).fill(.white))
-            } else if #available(iOS 26.0, tvOS 26.0, *) {
-                label
-                    .foregroundStyle(.white)
-                    .glassEffect(.regular, in: Capsule(style: .continuous))
-            } else {
-                label
-                    .foregroundStyle(.white)
-                    .background(Capsule(style: .continuous).fill(.white.opacity(0.16)))
-            }
+            .background { background }
+            .clipShape(Capsule(style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(nil, value: focused)
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        let shape = Capsule(style: .continuous)
+        if focused {
+            shape.fill(.white)
+        } else if #available(iOS 26.0, tvOS 26.0, *) {
+            shape.fill(.clear).glassEffect(.regular, in: shape)
+        } else {
+            shape.fill(.white.opacity(0.16))
         }
-        .clipShape(Capsule(style: .continuous))
-        .scaleEffect(configuration.isPressed ? 0.96 : 1)
-        .animation(nil, value: focused)
     }
 }
 

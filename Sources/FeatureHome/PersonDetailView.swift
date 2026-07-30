@@ -189,6 +189,8 @@ public struct PersonDetailView: View {
     @FocusState private var backFocused: Bool
 
     private static let headshotDiameter: CGFloat = 220
+    /// Reading measure for the biography — roughly 90 characters at this size.
+    private static let biographyWidth: CGFloat = 1000
 
     public init(
         person: MediaPerson,
@@ -211,33 +213,54 @@ public struct PersonDetailView: View {
         .task { await viewModel.load() }
     }
 
+    /// Headshot on the left, name and biography beside it, the pair centred on
+    /// screen.
+    ///
+    /// No character name. This page is about the person, not the one title the
+    /// viewer happened to arrive from — "Bilbo Baggins" is a fact about The
+    /// Hobbit, and it reads as a subtitle on a page that then lists a dozen
+    /// other roles.
     private var header: some View {
         HStack(alignment: .center, spacing: PlozzTheme.Spacing.large) {
             headshot
             VStack(alignment: .leading, spacing: PlozzTheme.Spacing.small) {
                 Text(person.name)
                     .font(.system(size: metrics.sectionHeaderFontSize * 1.6, weight: .bold))
-                if let role = person.role, !role.isEmpty {
-                    Text(role)
-                        .font(.system(size: metrics.sectionHeaderFontSize))
-                        .plozzForeground(.secondary)
-                }
                 if let kind = person.kind, !kind.isEmpty, !person.isCast {
+                    // Crew keep their discipline (Director, Writer): unlike a
+                    // character it describes the person, not one credit.
                     Text(kind)
                         .font(.system(size: metrics.sectionHeaderFontSize * 0.8))
                         .plozzForeground(.secondary)
                 }
                 if let biography = viewModel.biography {
-                    Text(biography)
-                        .font(.system(size: metrics.sectionHeaderFontSize * 0.72))
-                        .plozzForeground(.secondary)
-                        .lineLimit(5)
-                        .padding(.top, PlozzTheme.Spacing.small)
+                    ExpandableOverviewText(
+                        text: biography,
+                        title: person.name,
+                        lineLimit: 3,
+                        font: .system(size: metrics.sectionHeaderFontSize * 0.72)
+                    )
+                    .plozzForeground(.secondary)
+                    .padding(.top, PlozzTheme.Spacing.small)
                 }
             }
-            Spacer(minLength: 0)
+            // Held well short of the screen: a full-width line of body text is
+            // far past a comfortable reading measure at this size, and from
+            // across a room it becomes hard to track from the end of one line to
+            // the start of the next.
+            .frame(maxWidth: Self.biographyWidth, alignment: .leading)
         }
+        // The pair sits centred, rather than pinned to the leading edge.
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+        // A full-width focus section, because the only focusable thing up here
+        // is the biography — and it sits to the RIGHT of the headshot. Without
+        // this, pressing Up from the left-most credit finds nothing above it
+        // (the headshot is not focusable) and the press dies. A section captures
+        // the movement across the whole width and redirects it inward, so Up
+        // reaches the biography from anywhere along the row. Same fix, and the
+        // same reason, as the player's bottom tab row.
+        .personFocusSection()
     }
 
     @ViewBuilder
@@ -273,13 +296,18 @@ public struct PersonDetailView: View {
     private var credits: some View {
         switch viewModel.state {
         case .loaded where !viewModel.libraryCredits.isEmpty:
-            // The row is focusable, so this is the one state that needs no Back
+            // Rows are focusable, so this is the one state that needs no Back
             // button of its own.
-            MediaRowView(
-                title: Text("Also in your library"),
-                items: viewModel.libraryCredits,
-                onSelect: onSelectItem
-            )
+            VStack(alignment: .leading, spacing: 0) {
+                creditRow("Movies", kinds: [.movie])
+                creditRow("TV Shows", kinds: [.series])
+                // Anything that is neither — the by-name queries ask only for
+                // movies and series, but a share catalog answers from its own
+                // records and can return loose video. Kept under the original
+                // heading rather than dropped, since these are still titles the
+                // viewer owns with this person.
+                creditRow("Also in your library", kinds: nil)
+            }
         case .loading:
             creditlessState { ProgressView().scaleEffect(1.5) }
         case .loaded, .unavailable:
@@ -294,6 +322,47 @@ public struct PersonDetailView: View {
             }
         }
     }
+
+    /// One shelf of the person's work, or nothing when they have none of that
+    /// kind. Split by kind because a prolific actor's single mixed row buries
+    /// films among a dozen series (and vice versa), and the two are usually
+    /// looked for separately.
+    ///
+    /// `kinds: nil` means "everything not claimed by a named row above", so no
+    /// item can be silently dropped by adding a row.
+    @ViewBuilder
+    private func creditRow(_ title: LocalizedStringResource, kinds: Set<MediaItemKind>?) -> some View {
+        let items = credits(matching: kinds)
+        if !items.isEmpty {
+            MediaRowView(title: Text(title), items: items, onSelect: onSelectItem)
+                // Each shelf is its own focus section, which MediaRowView
+                // deliberately does NOT do by default — ordinary rows stay
+                // unsectioned to preserve tvOS's column-aligned projection.
+                //
+                // This page has to override that, because its header cannot
+                // satisfy the projection: the biography is the only focusable
+                // thing up there and it sits to the RIGHT of the headshot, so
+                // nothing focusable is ever above a left-most card. With a
+                // single movie at the left edge, Down from the biography found
+                // no candidate in its corridor and skipped the whole Movies row
+                // to land in TV Shows. A section captures the movement across
+                // the full width instead, and remembers the last card focused
+                // within it, so returning to a shelf comes back where you left.
+                .personFocusSection()
+        }
+    }
+
+    /// Credits for one row. `nil` kinds means everything the named rows above
+    /// didn't claim.
+    private func credits(matching kinds: Set<MediaItemKind>?) -> [MediaItem] {
+        guard let kinds else {
+            return viewModel.libraryCredits.filter { !Self.namedRowKinds.contains($0.kind) }
+        }
+        return viewModel.libraryCredits.filter { kinds.contains($0.kind) }
+    }
+
+    /// Kinds that already have a row of their own.
+    private static let namedRowKinds: Set<MediaItemKind> = [.movie, .series]
 
     /// Any state with no credits row: the given content plus the focusable Back
     /// button that keeps Menu working.
@@ -312,6 +381,18 @@ public struct PersonDetailView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
         .defaultFocus($backFocused, true)
+    }
+}
+private extension View {
+    /// `focusSection()` where it exists. tvOS-only API, and this view also builds
+    /// for iOS.
+    @ViewBuilder
+    func personFocusSection() -> some View {
+        #if os(tvOS)
+        focusSection()
+        #else
+        self
+        #endif
     }
 }
 #endif

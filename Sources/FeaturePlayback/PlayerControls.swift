@@ -39,7 +39,8 @@ struct PlayerOptionsActions {
 ///    options panel. It sits ABOVE the track-control row, so a menu always opens
 ///    over its own buttons rather than under them.
 ///  * **Track controls** — Speed · Audio · Subtitles, directly above the scrub bar.
-///    Reached by pressing **Up** from the scrub surface; Up again returns to it.
+///    Reached by pressing **Up** from the scrub surface; Menu (or the idle
+///    auto-hide) returns to the video, since nothing sits above them.
 ///  * **Scrub bar** — buffered/played fill + floating trickplay thumbnail.
 ///  * **Tab row** — beneath the scrubber; today just Info, later joined by siblings
 ///    (Chapters, …).
@@ -343,37 +344,25 @@ struct PlayerControls: View {
 
     /// Directional presses that the focus engine can't resolve on its own.
     ///
-    /// The controls are two focusable rows now (track controls above the scrubber,
-    /// the tab row below it), so Up is no longer a blanket "leave the bar": from the
-    /// Info tab it has somewhere to go (the track row) and the engine moves focus
-    /// there, so only a press that originates IN the track row — or on the tab when
-    /// there is no track row — exits to the scrub surface. Up from
-    /// the Info tab *while the card is open* closes the card first — the exact
-    /// reverse of the Down press that opened it. Down from the tab opens the card,
-    /// matching Down from the scrub surface.
+    /// Up never leaves the controls: there is nothing above the track row, so a
+    /// press there is a no-op (Menu is how you get back to the video). The one Up
+    /// that does something is from the Info tab while its card is open — it backs
+    /// out of the card and lifts focus into the track row, bringing the transport
+    /// back with it. Down from the tab opens the card, matching Down from the scrub
+    /// surface.
     ///
     /// Guarding on `focus` is safe because `@FocusState` still holds the PREVIOUS
     /// slot when the move command fires; the engine moves focus afterwards.
     private func handleMove(_ direction: PlozzMoveCommandDirection) {
         switch direction {
         case .up:
-            guard let focus else { return }
-            if openPanel == .info {
-                // Only the tab (the card's top edge) backs out; Up from a card
-                // button just walks up to the tab.
-                if focus == .button(.info) {
-                    openPanel = nil
-                    onExitToSurface()
-                }
-                return
-            }
-            guard openPanel == nil else { return }
-            if case .button(let category) = focus, category != .info {
-                onExitToSurface()
-            } else if focus == .button(.info), model.trackControlCategories.isEmpty {
-                // Nothing above the tab to move to — Up is the way out.
-                onExitToSurface()
-            }
+            // Only the tab (the card's top edge) backs out; Up from a card button
+            // just walks up to the tab, and Up in the track row does nothing.
+            guard openPanel == .info, focus == .button(.info) else { return }
+            // Route the central close-restore at the track row instead of back onto
+            // the tab, so this reads as one continuous upward move.
+            panelReturnFocus = initialFocus
+            openPanel = nil
         case .down:
             // Down from the tab opens its card, so the tab reads the same whether
             // you press Select on it or keep pressing Down from the scrub bar.

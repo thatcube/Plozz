@@ -1049,8 +1049,9 @@ final class PlayerInputViewController: UIViewController {
     }
 
     /// An Up press from the scrub surface reveals the transport and lands focus in
-    /// the track-control row above the scrubber (Speed · Audio · Subtitles); Up again
-    /// from there returns to the surface. If a Skip button is
+    /// the track-control row above the scrubber (Speed · Audio · Subtitles); nothing
+    /// sits above that row, so a further Up is a no-op and Menu is the way back to
+    /// the video. If a Skip button is
     /// currently showing passively (a grace-window seek landed in a segment), Up
     /// grabs it instead so the viewer can act on the affordance they chose not to
     /// have steal focus.

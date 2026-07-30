@@ -45,7 +45,12 @@ public struct EpisodeWatchStatePill: View {
 
     private enum State {
         case watched
-        case inProgress(fraction: Double, remaining: String)
+        /// `remaining` is optional: an item can be resumable without a known
+        /// runtime (some providers omit it, and a series-level entry has none), and
+        /// the glyph + bar are the useful part. Requiring the label meant those
+        /// items lost the whole chip and fell back to the plain full-width bar, so
+        /// Continue Watching showed two different treatments side by side.
+        case inProgress(fraction: Double, remaining: String?)
         case runtime(String)
     }
 
@@ -53,9 +58,8 @@ public struct EpisodeWatchStatePill: View {
         if showsWatched, item.isPlayed {
             return .watched
         }
-        if let fraction = item.resumeProgressFraction,
-           let remaining = item.resumeRemainingText {
-            return .inProgress(fraction: fraction, remaining: remaining)
+        if let fraction = item.resumeProgressFraction {
+            return .inProgress(fraction: fraction, remaining: item.resumeRemainingText)
         }
         if showsRuntimeWhenIdle, let runtime = item.runtime?.runtimeBadgeText {
             return .runtime(runtime)
@@ -93,9 +97,9 @@ public struct EpisodeWatchStatePill: View {
                     width: barWidth,
                     height: barHeight
                 )
-                Text(remaining)
+                if let remaining { Text(remaining) }
             }
-            .accessibilityLabel("\(remaining) left")
+            .accessibilityLabel(remaining.map { "\($0) left" } ?? "Partly watched")
         case let .runtime(text):
             Text(text)
         }
@@ -187,7 +191,7 @@ public struct ResumeChipOverlay: View {
                         max(20, geometry.size.width * 0.42)
                     )
                     HStack(alignment: .center, spacing: metrics.resumeChipInset * 0.5) {
-                        if item.cardRuntimeText != nil {
+                        if item.cardRuntimeText != nil || item.resumeProgressFraction != nil {
                             EpisodeWatchStatePill(
                                 item: item,
                                 showsRuntimeWhenIdle: true,
@@ -223,8 +227,10 @@ public struct ResumeChipOverlay: View {
         }
     }
 
+    /// Anything to draw along the bottom edge. Resume progress counts even with no
+    /// runtime text — see `EpisodeWatchStatePill.State.inProgress`.
     private var hasBottomChrome: Bool {
-        item.cardRuntimeText != nil || downloadState != nil
+        item.cardRuntimeText != nil || item.resumeProgressFraction != nil || downloadState != nil
     }
 
 }

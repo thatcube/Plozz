@@ -424,7 +424,14 @@ public struct PosterCardView: View {
     private var showsResumeChip: Bool {
         (playsOnSelect || showsResumeChipOverride)
             && !hideThumbnail
-            && (item.cardRuntimeText != nil || downloadState != nil || showsActionsMenu)
+            // Resume progress qualifies on its own. Gating solely on runtime text
+            // meant an item whose provider didn't supply a runtime dropped to the
+            // plain full-width progress bar, so a Continue Watching row mixed the
+            // two treatments depending on metadata the viewer can't see.
+            && (item.cardRuntimeText != nil
+                || item.resumeProgressFraction != nil
+                || downloadState != nil
+                || showsActionsMenu)
     }
 
     /// The shared resume affordance — identical to the episode card's overlay.

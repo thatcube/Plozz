@@ -546,13 +546,21 @@ public extension MediaItem {
         }
     }
 
+    /// Both branches require progress to be *strictly* between 0 and 1, because
+    /// "in progress" means there is something left to resume. The resume branch
+    /// must not clamp to 1: providers hand back stale or rounded positions where
+    /// `resumePosition >= runtime`, and clamping would render those as a
+    /// permanently full progress bar with no remaining time. When the resume
+    /// position is degenerate we fall through to `playedPercentage`, which also
+    /// recovers the case where the provider's runtime is simply wrong.
     private var cardProgressFraction: Double? {
         guard !isPlayed else { return nil }
         if let runtime, runtime > 0, let resume = resumePosition, resume > 0 {
-            return min(1, max(0, resume / runtime))
+            let fraction = resume / runtime
+            if fraction < 1 { return fraction }
         }
         if let percentage = playedPercentage, percentage > 0, percentage < 1 {
-            return min(1, max(0, percentage))
+            return percentage
         }
         return nil
     }

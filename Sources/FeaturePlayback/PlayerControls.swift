@@ -512,10 +512,14 @@ struct PlayerControls: View {
         .animation(.easeInOut(duration: 0.3), value: styleEditing)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
         .padding(.horizontal, Self.horizontalMargin)
-        // Even margins in editor mode (60 all round); otherwise the usual top-heavy
-        // transport layout. The top shrinks so the full-height panel clears overscan.
-        .padding(.top, styleEditing ? 60 : 90)
-        .padding(.bottom, styleEditing ? 60 : Self.bottomMargin)
+        // Fixed, whatever is open. These used to widen to an even 60 for the Style
+        // editor, back when the editor was laid out INSIDE this cluster and the whole
+        // thing flipped to top-anchored. The editor has its own screen-level layer
+        // now, so that only had one effect left: the extra 12pt at the bottom lifted
+        // the cluster, and the Info card — parked flush against the screen edge —
+        // peeked into view by exactly that much whenever Style was open.
+        .padding(.top, 90)
+        .padding(.bottom, Self.bottomMargin)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

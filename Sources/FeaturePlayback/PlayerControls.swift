@@ -32,20 +32,24 @@ struct PlayerOptionsActions {
     var restart: () -> Void = {}
 }
 
-/// The complete custom-player transport: a title bar, the scrub bar (with
-/// buffered/played fill + floating trickplay thumbnail), and — directly beneath
-/// the scrubber — a **focusable row of native tvOS buttons** (Audio & Subtitles ·
-/// Speed · A/V Sync · Diagnostics), modelled on Netflix / the Apple
-/// TV app.
+/// The complete custom-player transport, split across the two edges of the
+/// screen:
 ///
-///  * The button row is **visible whenever the transport is** so viewers can see
-///    what's available; focus only drops into it on swipe-down / Down, and
-///    returns to the scrub surface on Up / Menu.
-///  * Selecting a category expands its options as a panel that floats just above
-///    the scrubber, so the row stays put.
+///  * **Top row** — the track controls (Speed · Audio · Subtitles), pinned to the
+///    top edge. Reached by pressing **Up** from the scrub surface; Up again
+///    returns to it. Selecting a category expands its options as a panel that
+///    floats just above the scrubber (i.e. it stays in the bottom cluster, near
+///    the timeline it affects, rather than dropping out of the top row).
+///  * **Bottom cluster** — the now-playing title, the scrub bar (with
+///    buffered/played fill + floating trickplay thumbnail), and beneath it the
+///    **tab row**: today just Info, later joined by siblings (Chapters, …).
+///  * **Info** — pressing **Down** from the scrub surface (or selecting the tab)
+///    slides the Info card up from the bottom edge, pushing the Info tab up above
+///    it, Apple-TV style. While the card is up the top row hides entirely, so the
+///    only visible chrome is the tab and its card.
 ///  * Playback keeps running while adjusting (Infuse-style) so track/speed/sync
 ///    changes have instant feedback.
-///  * Capability-driven — rows the active engine can't honour are hidden.
+///  * Capability-driven — controls the active engine can't honour are hidden.
 ///
 /// All Siri-Remote *scrubbing* input is handled in UIKit
 /// (`PlayerInputViewController`); this view never takes focus while the player is
@@ -150,13 +154,23 @@ struct PlayerControls: View {
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
 
-    /// Named coordinate space spanning the whole bottom cluster (panel slot +
-    /// scrubber + button row) so the Speed button's leading edge can be measured
-    /// in the same frame the Speed panel is laid out in.
-    private static let bottomClusterSpace = "PlayerBottomCluster"
+    /// Named coordinate space spanning the WHOLE controls layer (top row + bottom
+    /// cluster) so the Speed button's leading edge — now up in the top row — can be
+    /// measured in the same frame the Speed panel (down in the bottom cluster) is
+    /// laid out in.
+    private static let controlsSpace = "PlayerControlsLayer"
 
-    /// Measured leading-edge X of the Speed button, in `bottomClusterSpace`. The
-    /// Speed panel left-aligns to this so it opens directly under its own button.
+    /// Side margin shared by the top row and the bottom cluster, so a panel aligned
+    /// to a top-row button lines up with the transport beneath it.
+    private static let horizontalMargin: CGFloat = 60
+
+    /// Extra lift under an open options panel so it clears the transport instead of
+    /// sitting right on top of the scrub bar.
+    private static let panelLift: CGFloat = 18
+
+    /// Measured leading-edge X of the Speed button, in `controlsSpace` (i.e.
+    /// including the layer's side margin). The Speed panel left-aligns to this so
+    /// it opens directly under its own button.
     @State private var speedButtonLeading: CGFloat = 0
 
     /// The transport control that was focused when the current panel was opened.
@@ -205,8 +219,12 @@ struct PlayerControls: View {
     @State private var cachedPanelHeight: [Category: CGFloat] = [:]
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             dimScrim
+            // Track controls, pinned to the top edge and independent of the bottom
+            // cluster's anchor flips.
+            topControlRow
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             VStack(spacing: 0) {
                 if !styleEditing { Spacer(minLength: 0) }
                 bottomCluster
@@ -220,6 +238,11 @@ struct PlayerControls: View {
             .animation(.easeInOut(duration: 0.3), value: styleEditing)
         }
         .ignoresSafeArea()
+        // One space across both edges: the Speed button lives in the top row while
+        // its panel is laid out in the bottom cluster, so the alignment measurement
+        // has to cross them.
+        .coordinateSpace(name: Self.controlsSpace)
+        .onPreferenceChange(SpeedButtonLeadingKey.self) { speedButtonLeading = $0 }
         .background(
             GeometryReader { proxy in
                 Color.clear.preference(key: ControlsHeightKey.self, value: proxy.size.height)
@@ -228,15 +251,27 @@ struct PlayerControls: View {
         .onPreferenceChange(ControlsHeightKey.self) { availableHeight = $0 }
         .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintVisible)
         .onChange(of: model.controlBarVisible) { _, focused in
-            openPanel = nil
             titleVisible = true
-            // Don't force a specific button when the bar takes focus — imperatively
-            // setting @FocusState here fought the engine's own default pick and
-            // briefly lit two buttons at once. Let the engine choose on entry; only
-            // clear our binding when focus leaves the bar.
-            if !focused {
+            guard focused else {
+                openPanel = nil
                 focus = nil
                 model.isPanelOpen = false
+                return
+            }
+            // Where the viewer entered from decides what they get: Down opens the
+            // Info card with its tab focused (the tab row behaves like a segmented
+            // control above the card), Up lands in the top track-control row.
+            // Unlike the old single-row bar there is no unambiguous "nearest"
+            // control any more, so the destination is chosen explicitly — deferred
+            // via `restoreFocus`, which lands after the engine's own default pass
+            // (a synchronous write races it and briefly lights two controls).
+            switch model.controlBarEntry {
+            case .info:
+                panelReturnFocus = .button(.info)
+                openPanel = .info
+            case .topRow:
+                openPanel = nil
+                restoreFocus(initialFocus)
             }
         }
         .onChange(of: focus) { _, _ in
@@ -303,51 +338,94 @@ struct PlayerControls: View {
         .plozzRemoteCommands(
             onExit: handleExit,
             onPlayPause: actions.togglePlayPause,
-            onMove: { direction in
-                if direction == .up && openPanel == nil { onExitToSurface() }
-            }
+            onMove: handleMove
         )
     }
 
-    // MARK: Bottom cluster (title + scrubber + buttons)
+    /// Directional presses that the focus engine can't resolve on its own.
+    ///
+    /// The controls now span both screen edges, so Up is no longer a blanket
+    /// "leave the bar": from the Info tab it has somewhere to go (the top row) and
+    /// the engine moves focus there, so only a press that originates IN the top row
+    /// (or on the tab when there is no top row) exits to the scrub surface. Up from
+    /// the Info tab *while the card is open* closes the card first — the exact
+    /// reverse of the Down press that opened it. Down from the tab opens the card,
+    /// matching Down from the scrub surface.
+    ///
+    /// Guarding on `focus` is safe because `@FocusState` still holds the PREVIOUS
+    /// slot when the move command fires; the engine moves focus afterwards.
+    private func handleMove(_ direction: PlozzMoveCommandDirection) {
+        switch direction {
+        case .up:
+            guard let focus else { return }
+            if openPanel == .info {
+                // Only the tab (the card's top edge) backs out; Up from a card
+                // button just walks up to the tab.
+                if focus == .button(.info) {
+                    openPanel = nil
+                    onExitToSurface()
+                }
+                return
+            }
+            guard openPanel == nil else { return }
+            if case .button(let category) = focus, category != .info {
+                onExitToSurface()
+            } else if focus == .button(.info), model.trackControlCategories.isEmpty {
+                // Nothing above the tab to move to — Up is the way out.
+                onExitToSurface()
+            }
+        case .down:
+            // Down from the tab opens its card, so the tab reads the same whether
+            // you press Select on it or keep pressing Down from the scrub bar.
+            if openPanel == nil, focus == .button(.info) { toggle(.info) }
+        case .left, .right:
+            break
+        }
+    }
+
+    // MARK: Bottom cluster (title / options panel + scrubber + tab row + Info card)
 
     private var bottomCluster: some View {
         VStack(alignment: .leading, spacing: 18) {
             // The context slot directly above the scrub bar: normally the now-playing
-            // title/description; when a panel opens it cross-fades to the panel (the
-            // title/description are repetitive with the Info card, so they fade out).
+            // title/description; when an options panel opens it cross-fades to the
+            // panel (the title/description are repetitive with it, so they fade out).
+            // The Info card is NOT part of this slot — it enters from the bottom edge
+            // below the tab row (see `infoCard`).
             ZStack(alignment: .bottomLeading) {
                 titleBlock
                     .opacity(titleVisible ? 1 : 0)
-                if let openPanel {
-                    panelContainer(for: openPanel)
+                if let openPanel, openPanel != .info {
+                    morphingPanel(for: openPanel)
                         .plozzFocusSection()
+                        // Sit a touch higher than the title it replaces so the box
+                        // clears the transport instead of resting on the scrub bar.
+                        .padding(.bottom, Self.panelLift)
                         // Grow + fade from the corner nearest the button that opened
                         // it so it reads as springing from the control rather than
                         // zooming out of screen-centre. Panels that pin to the trailing
-                        // edge (Audio/Subtitles/Sync) grow from `.bottomTrailing`; Info
-                        // and Speed align to the LEFT of their own button, so they grow
-                        // from `.bottomLeading`. Anchoring Speed to `.bottomTrailing`
-                        // put the origin at the box's far (right) edge, away from its
-                        // button — reading as a zoom from centre.
+                        // edge (Audio/Subtitles/Sync) grow from `.bottomTrailing`;
+                        // Speed aligns to the LEFT of its own button, so it grows from
+                        // `.bottomLeading`. Anchoring Speed to `.bottomTrailing` put the
+                        // origin at the box's far (right) edge, away from its button —
+                        // reading as a zoom from centre.
                         .transition(
                             .scale(
                                 scale: 0.9,
-                                anchor: (openPanel == .info || openPanel == .speed)
-                                    ? .bottomLeading : .bottomTrailing
+                                anchor: openPanel == .speed ? .bottomLeading : .bottomTrailing
                             )
                             .combined(with: .opacity)
                         )
                 }
             }
-            // Transport block (scrubber + buttons). Hidden entirely while the
+            // Transport block (scrubber + tab row). Hidden entirely while the
             // full-height appearance editor is open so the live subtitles behind
             // it are unobstructed; measured otherwise so other panels can size to
             // match. Its removal/return animates with the panel's height change.
             if !styleEditing {
                 VStack(alignment: .leading, spacing: 18) {
                     scrubberRow
-                    buttonRow
+                    tabRow
                 }
                 .background(
                     GeometryReader { proxy in
@@ -356,15 +434,22 @@ struct PlayerControls: View {
                 )
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+            // The Info card is a real member of the cluster's stack rather than an
+            // overlay: appended BELOW the tab row, it pushes the tab (and the
+            // scrubber above it) up as it slides in from the bottom edge, so the tab
+            // ends up sitting on top of its own card like a segmented control.
+            if openPanel == .info {
+                infoCard
+                    .plozzFocusSection()
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .onPreferenceChange(TransportHeightKey.self) { transportHeight = $0 }
-        .coordinateSpace(name: Self.bottomClusterSpace)
-        .onPreferenceChange(SpeedButtonLeadingKey.self) { speedButtonLeading = $0 }
         .animation(.easeInOut(duration: 0.2), value: openPanel)
         .animation(.easeInOut(duration: 0.28), value: titleVisible)
         .animation(.easeInOut(duration: 0.3), value: styleEditing)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
-        .padding(.horizontal, 60)
+        .padding(.horizontal, Self.horizontalMargin)
         // Even margins in editor mode (60 all round); otherwise the usual top-heavy
         // transport layout. The top shrinks so the full-height panel clears overscan.
         .padding(.top, styleEditing ? 60 : 90)
@@ -570,25 +655,17 @@ struct PlayerControls: View {
         }
     }
 
-    // MARK: Button row
+    // MARK: Control rows
 
-    private var buttonRow: some View {
+    /// The track controls (Speed · Audio · Subtitles), pinned to the TOP edge and
+    /// right-aligned above the trailing edge their panels open from.
+    ///
+    /// Hidden — not just disabled — whenever the Info card is up (the card owns the
+    /// screen then) or the appearance editor has taken the top-right corner.
+    private var topControlRow: some View {
         HStack(spacing: 20) {
-            // Utility cluster (far left): media Info. (The Diagnostics/Stats
-            // toggle moved into the Info card so the transport row stays lean.)
-            Button {
-                toggle(.info)
-            } label: {
-                Label("Info", systemImage: "info.circle")
-                    .labelStyle(.iconOnly)
-            }
-            .playerGlassButton(prominent: openPanel == .info)
-            .focused($focus, equals: .button(.info))
-
             Spacer(minLength: 20)
-
-            // Track controls (far right), grouped: Speed · Audio · Subtitles.
-            ForEach(availableCategories, id: \.self) { category in
+            ForEach(model.trackControlCategories, id: \.self) { category in
                 Button {
                     toggle(category)
                 } label: {
@@ -604,22 +681,67 @@ struct PlayerControls: View {
                         GeometryReader { proxy in
                             Color.clear.preference(
                                 key: SpeedButtonLeadingKey.self,
-                                value: proxy.frame(in: .named(Self.bottomClusterSpace)).minX
+                                value: proxy.frame(in: .named(Self.controlsSpace)).minX
                             )
                         }
                     }
                 }
             }
         }
+        .padding(.horizontal, Self.horizontalMargin)
+        .padding(.top, 60)
         .opacity(model.isScrubbing ? 0 : 1)
-        .offset(y: model.isScrubbing ? 8 : 0)
-        .allowsHitTesting(!model.isScrubbing)
+        .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
+        // Slide up and out of the way as a whole, so opening the Info card clears
+        // the top of the screen rather than leaving dimmed controls behind.
+        .opacity(topRowVisible ? 1 : 0)
+        .offset(y: topRowVisible ? 0 : -40)
+        .animation(.easeInOut(duration: 0.28), value: topRowVisible)
+        .allowsHitTesting(topRowVisible)
         // Trap focus inside an open panel: while one is up, the transport buttons
         // drop out of the focus engine so directional nav can't wander out of the
         // menu. It closes only by selecting a row or pressing Menu (native-menu
         // behaviour). The scrub surface is already non-focusable while the bar owns
         // focus, so the open panel becomes the sole focusable region.
-        .disabled(openPanel != nil)
+        .disabled(openPanel != nil || !topRowVisible)
+        .plozzFocusSection()
+    }
+
+    /// Whether the top row is on screen: it rides the transport's visibility, and
+    /// steps aside for the Info card and the full-height appearance editor.
+    private var topRowVisible: Bool {
+        model.controlsVisible && !styleEditing && openPanel != .info
+    }
+
+    /// The tab row beneath the scrub bar. Today a single Info tab; siblings
+    /// (Chapters, …) join it here and switch the card below rather than opening
+    /// their own floating panel.
+    private var tabRow: some View {
+        HStack(spacing: 20) {
+            Button {
+                toggle(.info)
+            } label: {
+                Label("Info", systemImage: "info.circle")
+                    .labelStyle(.iconOnly)
+            }
+            .playerGlassButton(prominent: openPanel == .info)
+            .focused($focus, equals: .button(.info))
+
+            Spacer(minLength: 20)
+        }
+        .opacity(model.isScrubbing ? 0 : 1)
+        .offset(y: model.isScrubbing ? 8 : 0)
+        .allowsHitTesting(!model.isScrubbing)
+        // The tab stays live while its OWN card is open (that's what makes it a tab
+        // rather than a button); any other open panel traps focus, so it drops out.
+        .disabled(openPanel != nil && openPanel != .info)
+    }
+
+    /// The now-playing card the Info tab reveals, full width beneath the tab row.
+    private var infoCard: some View {
+        InfoPanelView(model: model, actions: actions, focus: $focus, onClose: { openPanel = nil })
+            .colorScheme(.dark)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func toggle(_ category: Category) {
@@ -649,15 +771,17 @@ struct PlayerControls: View {
     }
 
     /// The focus target a freshly-opened panel should land on: the active/selected
-    /// row for the track lists, the first available delay row for Sync, the primary
-    /// action for Info, and the right control for each Subtitles sub-screen. Deferred
+    /// row for the track lists, the first available delay row for Sync, the tab
+    /// itself for Info, and the right control for each Subtitles sub-screen. Deferred
     /// onto `focus` in `onChange(of: openPanel)` via `restoreFocus`.
     private var preferredPanelFocus: FocusSlot? {
         guard let panel = openPanel else { return nil }
         switch panel {
         case .info:
-            return model.hasNextEpisode ? .infoNext
-                : (model.hasPreviousEpisode ? .infoPrev : .infoRestart)
+            // The tab, not the card: the row above the card behaves like a
+            // segmented control, so opening lands there and a further Down press
+            // steps into the card's actions.
+            return .button(.info)
         case .subtitles:
             switch subtitleScreen {
             case .tracks:
@@ -689,17 +813,6 @@ struct PlayerControls: View {
     }
 
     // MARK: Panels
-
-    @ViewBuilder
-    private func panelContainer(for category: Category) -> some View {
-        if category == .info {
-            InfoPanelView(model: model, actions: actions, focus: $focus, onClose: { openPanel = nil })
-                .colorScheme(.dark)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            morphingPanel(for: category)
-        }
-    }
 
     /// Fixed width for an open control panel, per category. Most menus share a
     /// roomy 520pt column; the Speed menu only holds short preset labels
@@ -807,9 +920,11 @@ struct PlayerControls: View {
             }
         }
         // Speed opens left-aligned under its own button; the other panels pin
-        // to the trailing edge above the track-button cluster.
+        // to the trailing edge above the track-button cluster. The measured X is
+        // in the whole-layer space, so drop the layer's side margin to express it
+        // relative to the cluster's content edge.
         .modifier(PanelHorizontalPlacement(
-            leadingInset: category == .speed ? speedButtonLeading : nil
+            leadingInset: category == .speed ? speedButtonLeading - Self.horizontalMargin : nil
         ))
     }
 
@@ -1114,33 +1229,13 @@ struct PlayerControls: View {
 
     // MARK: Model helpers
 
-    /// Track controls, left→right: Speed · Audio · **Subtitles** (Subtitles at the
-    /// far-right edge), rendered on the right of the button row opposite the
-    /// left-hand utility cluster (Info · Diagnostics).
-    ///
-    /// A/V Sync is intentionally omitted for now — the standalone button was
-    /// removed. `Category.sync` + `syncPane` are kept so it can be restored later.
-    private var availableCategories: [Category] {
-        var result: [Category] = []
-        if model.engineCapabilities.contains(.playbackSpeed) {
-            result.append(.speed)
-        }
-        if !model.audioOptions.isEmpty
-            || model.engineCapabilities.contains(.dialogEnhance) {
-            result.append(.audio)
-        }
-        if model.hasSelectableSubtitles {
-            result.append(.subtitles)
-        }
-        return result
-    }
-
-    /// Focus target when the bar first takes focus: Subtitles (the most-used
+    /// Focus target when the top row first takes focus: Subtitles (the most-used
     /// control) when present, otherwise the first category, otherwise the
-    /// always-present Info button.
+    /// always-present Info tab.
     private var initialFocus: FocusSlot {
-        if availableCategories.contains(.subtitles) { return .button(.subtitles) }
-        if let first = availableCategories.first { return .button(first) }
+        let categories = model.trackControlCategories
+        if categories.contains(.subtitles) { return .button(.subtitles) }
+        if let first = categories.first { return .button(first) }
         return .button(.info)
     }
 
@@ -1326,6 +1421,32 @@ struct PlayerControls: View {
         scrubbing
             ? .easeOut(duration: 0.1)
             : .easeOut(duration: 0.2).delay(0.45)
+    }
+}
+
+extension PlayerControlsModel {
+    /// The track controls the current engine/source can actually offer, in the
+    /// order the top row lays them out: Speed · Audio · **Subtitles** (Subtitles
+    /// nearest the trailing edge, where its panel opens from).
+    ///
+    /// Lives on the model rather than the view so `CustomPlayerContainer` can ask
+    /// the same question before dropping focus into the row on an Up press — an
+    /// empty row must flash the transport instead of swallowing the press.
+    ///
+    /// A/V Sync is intentionally omitted for now — the standalone button was
+    /// removed. `Category.sync` + `syncPane` are kept so it can be restored later.
+    var trackControlCategories: [PlayerControls.Category] {
+        var result: [PlayerControls.Category] = []
+        if engineCapabilities.contains(.playbackSpeed) {
+            result.append(.speed)
+        }
+        if !audioOptions.isEmpty || engineCapabilities.contains(.dialogEnhance) {
+            result.append(.audio)
+        }
+        if hasSelectableSubtitles {
+            result.append(.subtitles)
+        }
+        return result
     }
 }
 

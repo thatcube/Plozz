@@ -867,9 +867,9 @@ final class PlayerInputViewController: UIViewController {
             case .ignore:
                 break
             case .enterControlBar:
-                // A deliberate downward swipe reveals the controls and drops focus
-                // into the bottom button row.
-                enterControlBar()
+                // A deliberate downward swipe reveals the controls and brings the
+                // Info card up, tab focused — same as a Down press.
+                enterControlBar(entry: .info)
             case .flashAndSuppress:
                 // Pause-to-seek gate: flash the transport for feedback only.
                 flashControls()
@@ -1033,15 +1033,16 @@ final class PlayerInputViewController: UIViewController {
         skip(by: model.skipForwardInterval.seconds)
     }
 
-    /// A Down press from the scrub surface reveals the controls and drops focus
-    /// straight into the bottom control bar — the same destination as swipe-down.
+    /// A Down press from the scrub surface reveals the controls and brings the Info
+    /// card into view with its tab focused — the same destination as swipe-down.
     @objc private func handleDown() {
         guard focusContext == .surface, !model.isScrubbing else { return }
-        enterControlBar()
+        enterControlBar(entry: .info)
     }
 
-    /// An Up press from the scrub surface reveals the transport without moving
-    /// focus off the surface, matching the swipe-up reveal. If a Skip button is
+    /// An Up press from the scrub surface reveals the transport and lands focus in
+    /// the top track-control row (Speed · Audio · Subtitles); pressing Up again
+    /// from there returns to the surface. If a Skip button is
     /// currently showing passively (a grace-window seek landed in a segment), Up
     /// grabs it instead so the viewer can act on the affordance they chose not to
     /// have steal focus.
@@ -1055,7 +1056,9 @@ final class PlayerInputViewController: UIViewController {
             enterUpNext(stealFocus: true)
             return
         }
-        flashControls()
+        // Falls back to a plain transport flash when this source has no track
+        // controls to focus (see `hasControlBarContent(for:)`).
+        enterControlBar(entry: .topRow)
     }
 
     private func skip(by seconds: TimeInterval) {
@@ -1201,15 +1204,16 @@ final class PlayerInputViewController: UIViewController {
 
     // MARK: Control bar focus
 
-    /// Reveals the transport and drops Siri-Remote focus into the bottom control
-    /// bar (Audio & Subtitles · Speed · A/V Sync). Surface scrub/skip recognizers
-    /// are disabled so the SwiftUI focus engine owns navigation. Playback keeps
-    /// running so track/speed/sync tweaks apply live (Infuse-style).
-    private func enterControlBar() {
+    /// Reveals the transport and drops Siri-Remote focus into the control layer.
+    /// `entry` picks the destination: **Down** opens the Info card with its tab
+    /// focused, **Up** lands in the top track-control row. Surface scrub/skip
+    /// recognizers are disabled so the SwiftUI focus engine owns navigation.
+    /// Playback keeps running so track/speed/sync tweaks apply live (Infuse-style).
+    private func enterControlBar(entry: PlayerControlsModel.ControlBarEntry) {
         guard focusContext == .surface else { return }
-        guard hasControlBarContent else {
+        guard hasControlBarContent(for: entry) else {
             // Nothing to configure for this engine/source — just flash the
-            // transport instead of dropping focus into an empty bar.
+            // transport instead of dropping focus into an empty row.
             flashControls()
             return
         }
@@ -1224,6 +1228,7 @@ final class PlayerInputViewController: UIViewController {
         if presentingSkipButton { exitSkipButton() }
         focusContext = .controlBar
         model.controlsVisible = true
+        model.controlBarEntry = entry
         model.controlBarVisible = true
         setSurfaceRecognizers(enabled: false)
         controlBarHost?.view.isUserInteractionEnabled = true
@@ -1265,9 +1270,14 @@ final class PlayerInputViewController: UIViewController {
         for recognizer in surfaceRecognizers { recognizer.isEnabled = enabled }
     }
 
-    /// The bottom control bar always has at least the Diagnostics toggle, so
-    /// entering it is always meaningful.
-    private var hasControlBarContent: Bool { true }
+    /// The Info tab is always available, so a Down entry is always meaningful; the
+    /// top row only exists when the engine/source actually offers track controls.
+    private func hasControlBarContent(for entry: PlayerControlsModel.ControlBarEntry) -> Bool {
+        switch entry {
+        case .info: return true
+        case .topRow: return !model.trackControlCategories.isEmpty
+        }
+    }
 
     deinit {
         autoHideTask?.cancel()

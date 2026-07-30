@@ -230,10 +230,24 @@ public final class PlayerControlsModel {
     public var previewImage: CGImage?
     /// Whether a real scrub-preview frame is available for display.
     public var hasPreviewFrame: Bool { previewImage != nil }
-    /// True while the focusable bottom control bar owns Siri-Remote focus. The
-    /// input controller reads this to suppress scrub gestures and the control bar
-    /// reads it to take/relinquish focus.
+    /// True while the focusable control layer owns Siri-Remote focus. The
+    /// input controller reads this to suppress scrub gestures and the controls
+    /// read it to take/relinquish focus.
     public var controlBarVisible: Bool = false
+    /// Which half of the control layer a focus entry is headed for. Written by the
+    /// input controller *before* `controlBarVisible` flips true, so the controls
+    /// know whether the viewer swiped/pressed **Down** (Info card, tab focused) or
+    /// **Up** (the top track-control row).
+    public var controlBarEntry: ControlBarEntry = .topRow
+
+    /// The two ways focus enters the control layer, one per direction.
+    public enum ControlBarEntry: Equatable, Sendable {
+        /// Up from the scrub surface: land in the top row (Speed/Audio/Subtitles).
+        case topRow
+        /// Down from the scrub surface: open the Info card with its tab focused.
+        case info
+    }
+
     /// True while an options menu (Audio & Subtitles / Speed / A·V Sync / Info)
     /// is open above the control bar. The input controller keeps the transport
     /// pinned visible while a menu is open and only lets the idle auto-hide fire

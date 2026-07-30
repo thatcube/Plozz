@@ -186,6 +186,10 @@ struct PlayerControls: View {
     /// the row can be clamped instead of running off the screen.
     @State private var trackControlsWidth: CGFloat = 0
 
+    /// Measured top edge of the track-control row within the controls layer, so the
+    /// menus can sit just above the buttons while living outside the transport.
+    @State private var trackControlsTop: CGFloat = 0
+
     /// The transport control that was focused when the current panel was opened.
     /// Restored (deferred) whenever the panel fully closes so focus always lands
     /// back where the user started — no matter how deep the panel's sub-screens
@@ -247,7 +251,7 @@ struct PlayerControls: View {
             // margin — pushing it ~120 down and ~150 in, nowhere near the margin the
             // rest of the player uses. In here it shares the cluster's coordinate
             // space, so the same constant means the same thing for both.
-            styleEditorLayer
+            optionsPanelLayer
         }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 0.3), value: styleEditing)
@@ -748,23 +752,6 @@ struct PlayerControls: View {
             // the title's own frame is greedy.
             trackControlButtons
                 .layoutPriority(1)
-                // The menus hang off the BUTTONS, not off the row: bottom-aligned in
-                // a row whose height is set by the much taller title block, the row's
-                // top edge sits ~40pt above the buttons, and anchoring there put every
-                // menu that far from the control that opened it.
-                //
-                // Outside `trackControlButtons`'s own `.disabled` on purpose — inside,
-                // the open menu would inherit it and its rows couldn't be selected.
-                .overlay(alignment: .topTrailing) {
-                    optionsPanelLayer
-                        // Hang the menu entirely ABOVE the buttons: aligning its top
-                        // guide to its own bottom edge shifts it up by exactly its own
-                        // height, whatever that turns out to be — no measurement and
-                        // no hand-tuned constant. The gap is `panelLift`, part of that
-                        // height via the padding below.
-                        .alignmentGuide(.top) { $0[.bottom] }
-                }
-                .animation(.easeInOut(duration: 0.2), value: optionsPanel)
         }
     }
 
@@ -834,10 +821,16 @@ struct PlayerControls: View {
         .coordinateSpace(name: Self.trackControlsSpace)
         .background(
             GeometryReader { proxy in
-                Color.clear.preference(key: TrackControlsWidthKey.self, value: proxy.size.width)
+                Color.clear
+                    .preference(key: TrackControlsWidthKey.self, value: proxy.size.width)
+                    .preference(
+                        key: TrackControlsTopKey.self,
+                        value: proxy.frame(in: .named(Self.controlsSpace)).minY
+                    )
             }
         )
         .onPreferenceChange(TrackControlsWidthKey.self) { trackControlsWidth = $0 }
+        .onPreferenceChange(TrackControlsTopKey.self) { trackControlsTop = $0 }
     }
 
     /// True while the Info card owns the moment. The track controls and the scrub
@@ -1013,61 +1006,55 @@ struct PlayerControls: View {
         openPanel == .info || entryFocusTarget == .button(.info)
     }
 
-    /// The floating options menu (Speed / Audio / Subtitles), drawn above the
-    /// transport's top edge — so it always clears the track controls that open it —
-    /// without occupying layout. See the overlay's note.
+    /// The floating options menu (Speed · Audio · Subtitles), including the Subtitle
+    /// Style editor it morphs into.
+    ///
+    /// ONE panel whose position flips between two anchors — not two panels swapping
+    /// places. That is what restores the original tracks↔Style transition: the
+    /// container travels up and grows in a single continuous morph, instead of one box
+    /// vanishing as another appears. Splitting them in order to pin Style at the top
+    /// is what lost it; both behaviours are wanted, and this gives both.
+    ///
+    /// The travel animates because the panel's IDENTITY never changes — only the
+    /// `Spacer`s around it come and go, and a Spacer's length animates. (Putting the
+    /// panel itself in an `if/else` would give the branches separate identities and
+    /// hard-cut between them. The original avoided that the same way, by flipping
+    /// Spacers around a fixed cluster.)
     @ViewBuilder
     private var optionsPanelLayer: some View {
-        // The Style editor is pinned to the top of the screen instead — see
-        // `styleEditorLayer`.
-        if let panel = optionsPanel, !styleEditing {
-            morphingPanel(for: panel)
-                .plozzFocusSection()
-                // Horizontal placement, measured LEFTWARD from the button row's
-                // trailing edge (the overlay's anchor). No safe-area inset of its own:
-                // a menu lines up with the controls it belongs to, and the transport
-                // sets that margin for the whole player. Insetting the menus alone
-                // just made them look misaligned with their own buttons.
-                .offset(x: -panelTrailingShift(for: panel))
-                // Breathing room between the menu and the buttons beneath it.
-                .padding(.bottom, Self.panelLift)
-                // Grow + fade from the corner nearest the button that opened it so it
-                // reads as springing from the control rather than zooming out of
-                // screen-centre. Panels that pin to the trailing edge (Audio /
-                // Subtitles / Sync) grow from `.bottomTrailing`; Speed aligns to the
-                // LEFT of its own button, so it grows from `.bottomLeading`. Anchoring
-                // Speed to `.bottomTrailing` put the origin at the box's far (right)
-                // edge, away from its button — reading as a zoom from centre.
-                .transition(
-                    .scale(
-                        scale: 0.9,
-                        anchor: panel == .speed ? .bottomLeading : .bottomTrailing
-                    )
-                    .combined(with: .opacity)
-                )
+        if let panel = optionsPanel {
+            VStack(spacing: 0) {
+                // Style pins to the TOP, so its height changes extend downward and
+                // walking into a sub-screen can neither shift the panel nor overflow
+                // the screen. Every other menu rests just above the buttons that
+                // opened it.
+                if !styleEditing { Spacer(minLength: 0) }
+                morphingPanel(for: panel)
+                    .plozzFocusSection()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    // Horizontal placement, measured LEFTWARD from the trailing edge.
+                    .offset(x: -panelTrailingShift(for: panel))
+                if styleEditing { Spacer(minLength: 0) }
+            }
+            .padding(.horizontal, Self.horizontalMargin)
+            .padding(.top, Self.horizontalMargin)
+            // Rest just above the track controls. Their top edge is MEASURED rather
+            // than derived from the transport's height: the buttons are one row inside
+            // it, and that row's height is set by the much taller title block beside
+            // them.
+            .padding(.bottom, menuBottomInset)
+            .transition(.scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .opacity))
         }
     }
 
-    /// The Subtitle Style editor, pinned to the TOP-RIGHT corner of the screen.
-    ///
-    /// Deliberately not hung off the track controls like the other menus. It's much
-    /// taller and it MORPHS as you walk into its sub-screens (Font, Shadow & Outline,
-    /// …); anchored at the bottom, every height change moved its top edge — the whole
-    /// panel sliding down as a submenu opened — and its full height overflowed the top
-    /// of the screen. Pinned at the top, the morph extends downward from a fixed edge,
-    /// which is how this editor behaved before the menus moved.
-    ///
-    /// Top margin == side margin, so it sits concentric in the corner.
-    @ViewBuilder
-    private var styleEditorLayer: some View {
-        if styleEditing {
-            morphingPanel(for: .subtitles)
-                .plozzFocusSection()
-                .padding(.trailing, Self.horizontalMargin)
-                .padding(.top, Self.horizontalMargin)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .transition(.scale(scale: 0.9, anchor: .topTrailing).combined(with: .opacity))
+    /// Distance from the bottom of the controls layer up to the top of the track
+    /// controls, plus the gap a menu leaves above them. Falls back to the transport's
+    /// measured height until the first measurement lands.
+    private var menuBottomInset: CGFloat {
+        guard availableHeight > 0, trackControlsTop > 0 else {
+            return transportHeight + Self.bottomMargin + Self.panelLift
         }
+        return availableHeight - trackControlsTop + Self.panelLift
     }
 
     /// A thin focusable strip just above the Info tab, present only while the card

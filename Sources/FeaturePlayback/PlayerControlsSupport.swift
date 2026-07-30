@@ -318,6 +318,16 @@ struct PanelGlassBackground: ViewModifier {
     }
 }
 
+/// Reports the track-control row's TOP edge, in the controls layer's coordinate
+/// space, so the options menus can be positioned just above the buttons that open
+/// them while living outside the transport's view tree.
+struct TrackControlsTopKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// Reports the track-control row's width so a menu aligned to one of its buttons
 /// can be clamped against the row's trailing edge.
 struct TrackControlsWidthKey: PreferenceKey {

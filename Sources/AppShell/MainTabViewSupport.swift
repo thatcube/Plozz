@@ -951,12 +951,35 @@ extension View {
     /// Presents a "Resume vs Start Over" choice for an in-progress `item`.
     /// `onChoose` receives the chosen start position in seconds (the saved
     /// resume point for Resume, `0` for Start Over).
+    ///
+    /// Both actions are quantified, in the same unit the card uses: "Continue · 59m
+    /// left" against "Start Over · 1h 48m". The dialog's whole job is a comparison,
+    /// so the two options have to be comparable — the old pairing put a timecode on
+    /// one ("Resume from 49:37") and nothing on the other, which read as two
+    /// different kinds of thing and made the viewer reconcile a position against the
+    /// "59m" they had just pressed. Now each number is simply what that choice costs.
+    ///
+    /// "Resume", not "Continue": the app already distinguishes the two. The hero
+    /// Play button renders "Resume" for exactly this action on exactly this item
+    /// (`resumeProgressFraction != nil ? "Resume" : "Play"`), while "Continue" is
+    /// the onboarding verb — Plex link, Select Theme, Select Libraries — meaning
+    /// "advance this flow". Using it here gave one action two names depending on
+    /// where it was pressed. (The "Continue Watching" row is a collection name, not
+    /// an action, so it doesn't set the verb.)
+    ///
+    /// There is deliberately **no "you stopped at …" line**: it states a fact that
+    /// doesn't inform the decision. The message carries identity instead, because
+    /// the title alone can mislead — a Continue Watching card shows the SERIES name
+    /// while `item.title` for an episode is the EPISODE name, so pressing "Avatar:
+    /// The Last Airbender" used to open a dialog headed "Bato of the Water Tribe".
     func resumePrompt(
         item: Binding<MediaItem?>,
         onChoose: @escaping (MediaItem, TimeInterval) -> Void
     ) -> some View {
         confirmationDialog(
-            item.wrappedValue?.title ?? "",
+            // The series name for an episode, so the dialog is headed by the same
+            // title the viewer just pressed; the episode itself moves to the message.
+            item.wrappedValue.map(Self.resumePromptTitle) ?? "",
             isPresented: Binding(
                 get: { item.wrappedValue != nil },
                 set: { if !$0 { item.wrappedValue = nil } }
@@ -965,14 +988,51 @@ extension View {
             presenting: item.wrappedValue
         ) { presented in
             // Resume is listed first so it receives default focus.
-            Button("Resume from \(PlaybackTimecode.string(from: presented.resumePosition ?? 0))") {
-                onChoose(presented, presented.resumePosition ?? 0)
+            if let remaining = presented.resumeRemainingText {
+                Button("Resume · \(remaining) left") {
+                    onChoose(presented, presented.resumePosition ?? 0)
+                }
+            } else {
+                // No runtime from the provider, so there's no remaining time to
+                // quote — the plain verb still reads correctly.
+                Button("Resume") {
+                    onChoose(presented, presented.resumePosition ?? 0)
+                }
             }
-            Button("Start Over") {
-                onChoose(presented, 0)
+            if let runtime = presented.runtime?.runtimeBadgeText {
+                Button("Start Over · \(runtime)") {
+                    onChoose(presented, 0)
+                }
+            } else {
+                Button("Start Over") {
+                    onChoose(presented, 0)
+                }
             }
             Button("Cancel", role: .cancel) {}
+        } message: { presented in
+            if let context = Self.resumePromptContext(for: presented) {
+                Text(verbatim: context)
+            }
         }
+    }
+
+    /// Title for the resume dialog: the SERIES for an episode (matching the card
+    /// that opened it), otherwise the item's own title.
+    private static func resumePromptTitle(_ item: MediaItem) -> String {
+        if item.kind == .episode, let series = item.parentTitle, !series.isEmpty {
+            return series
+        }
+        return item.title
+    }
+
+    /// Secondary identity line: which episode this is. `nil` for anything whose
+    /// title already says everything (a movie), so no empty message is drawn.
+    private static func resumePromptContext(for item: MediaItem) -> String? {
+        guard item.kind == .episode else { return nil }
+        let parts = [item.subtitle, item.title]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 #endif

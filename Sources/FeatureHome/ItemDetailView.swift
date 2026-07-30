@@ -177,7 +177,14 @@ public struct ItemDetailView: View {
             // redirects a season load to its parent series, so by the time we
             // render here a season has become a `.series`. `container` only ever
             // serves movies, episodes, folders and collections.
-            if isDiscoveryItem {
+            if isShed {
+                // Buried under two or more pages: build nothing. Keeps this page's
+                // artwork out of memory and its subtree out of every diff pass,
+                // while the surrounding modifiers (`.task`, the DetailStackDepth
+                // bookkeeping in `.onAppear`/`.onDisappear`) stay attached and
+                // unaffected — so the page re-inflates in place when uncovered.
+                Color.clear
+            } else if isDiscoveryItem {
                 // A not-in-library discovery title (movie OR series) has no library
                 // children/sources to render, and must NOT enter SeriesDetailView
                 // (which expects real seasons/episodes). Show a request-focused
@@ -509,6 +516,30 @@ public struct ItemDetailView: View {
         guard let ownStackDepth, let depth = stackDepth?.depth else { return false }
         return depth > ownStackDepth
     }
+
+    /// How many detail pages are stacked on top of this one.
+    private var coveredBy: Int {
+        guard let ownStackDepth, let depth = stackDepth?.depth else { return 0 }
+        return max(0, depth - ownStackDepth)
+    }
+
+    /// Pages buried at least this deep stop building their content.
+    ///
+    /// A `NavigationStack` never disappears the page a push covers, so without
+    /// this every page ever visited stays fully built — holding its artwork and
+    /// re-participating in every SwiftUI invalidation pass. Measured on device:
+    /// ~22MB and a growing main-thread stall per level, reaching a 1076ms hitch
+    /// by the tenth push. Both symptoms are the same cause counted twice.
+    ///
+    /// Two, not one: the page directly under the top one is where a Back lands,
+    /// so keeping it built makes the common Back instant. Anything deeper needs
+    /// at least two presses to reach and can afford to rebuild — and its view
+    /// model is usually still in `detailViewModels` (an LRU of 4), so rebuilding
+    /// is a re-render rather than a re-fetch.
+    private static let shedWhenCoveredBy = 2
+
+    /// Whether this page should stand down and render nothing.
+    private var isShed: Bool { coveredBy >= Self.shedWhenCoveredBy }
 
     private func container(_ detail: ItemDetailViewModel.Detail) -> some View {
         let sources = viewModel.sources

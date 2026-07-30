@@ -1218,7 +1218,7 @@ final class PlayerInputViewController: UIViewController {
     /// focused, **Up** lands in the track-control row above the scrubber. Surface scrub/skip
     /// recognizers are disabled so the SwiftUI focus engine owns navigation.
     /// Playback keeps running so track/speed/sync tweaks apply live (Infuse-style).
-    private func enterControlBar(entry: PlayerControlsModel.ControlBarEntry) {
+    private func enterControlBar(entry: ControlBarEntryModel.Entry) {
         guard focusContext == .surface else { return }
         guard hasControlBarContent(for: entry) else {
             // Nothing to configure for this engine/source — just flash the
@@ -1237,11 +1237,8 @@ final class PlayerInputViewController: UIViewController {
         if presentingSkipButton { exitSkipButton() }
         focusContext = .controlBar
         model.controlsVisible = true
-        model.controlBarEntry = entry
+        model.controlBar.entry = entry
         model.controlBarVisible = true
-        #if DEBUG
-        PlozzLog.playback.debug("PLZFOCUS enter control bar entry=\(entry) categories=\(model.trackControlCategories.count)")
-        #endif
         setSurfaceRecognizers(enabled: false)
         controlBarHost?.view.isUserInteractionEnabled = true
         playerInputView?.allowsFocus = false
@@ -1253,8 +1250,8 @@ final class PlayerInputViewController: UIViewController {
         // control (Up landing on Info, or on Speed then jumping to Subtitles as our
         // write arrived); waiting for the arm flag means it finds the intended target
         // already in place.
-        model.controlBarFocusArmed = false
-        model.controlBarEntrySettled = false
+        model.controlBar.focusArmed = false
+        model.controlBar.settled = false
         requestControlBarFocusUpdate()
         // The control bar participates in auto-hide too: navigating its buttons
         // restarts the countdown (see refreshFromEngine) and an open menu pins it,
@@ -1266,13 +1263,13 @@ final class PlayerInputViewController: UIViewController {
     }
 
     /// Poll the main queue until the controls report they've applied the entry focus
-    /// (see `PlayerControlsModel.controlBarFocusArmed`), then run the focus update.
+    /// (see `ControlBarEntryModel.focusArmed`), then run the focus update.
     /// Capped so a controls layer that never arms — e.g. it was torn down mid-entry —
     /// still gets focus rather than leaving the viewer with a dead remote.
     private func requestControlBarFocusUpdate(attempt: Int = 0) {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.focusContext == .controlBar else { return }
-            if !self.model.controlBarFocusArmed, attempt < 5 {
+            if !self.model.controlBar.focusArmed, attempt < 5 {
                 self.requestControlBarFocusUpdate(attempt: attempt + 1)
                 return
             }
@@ -1282,7 +1279,7 @@ final class PlayerInputViewController: UIViewController {
             // focusable control. Release the narrowing a turn later, so the rest of
             // the row (and the Info tab) come back for ordinary navigation.
             DispatchQueue.main.async { [weak self] in
-                self?.model.controlBarEntrySettled = true
+                self?.model.controlBar.settled = true
             }
         }
     }
@@ -1302,8 +1299,8 @@ final class PlayerInputViewController: UIViewController {
         guard focusContext == .controlBar else { return }
         focusContext = .surface
         model.controlBarVisible = false
-        model.controlBarFocusArmed = false
-        model.controlBarEntrySettled = false
+        model.controlBar.focusArmed = false
+        model.controlBar.settled = false
         controlBarHost?.view.isUserInteractionEnabled = false
         playerInputView?.allowsFocus = true
         setSurfaceRecognizers(enabled: true)
@@ -1317,7 +1314,7 @@ final class PlayerInputViewController: UIViewController {
 
     /// The Info tab is always available, so a Down entry is always meaningful; the
     /// track row only exists when the engine/source actually offers track controls.
-    private func hasControlBarContent(for entry: PlayerControlsModel.ControlBarEntry) -> Bool {
+    private func hasControlBarContent(for entry: ControlBarEntryModel.Entry) -> Bool {
         switch entry {
         case .info: return true
         case .trackControls: return !model.trackControlCategories.isEmpty

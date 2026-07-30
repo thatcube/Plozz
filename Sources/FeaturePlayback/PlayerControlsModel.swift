@@ -80,6 +80,52 @@ public enum SubtitleDownloadState: Equatable, Sendable {
     case failed
 }
 
+/// The hand-off that decides where Siri-Remote focus lands when the player's
+/// control layer takes focus.
+///
+/// Split out of `PlayerControlsModel` so the four pieces of one negotiation live
+/// together — and because that type is a known god object under a decreasing-only
+/// budget in `tools/arch-guard.py`; new state belongs in a facet, not on it.
+///
+/// The sequence, on every entry: the input controller sets `entry` and clears
+/// `focusArmed`/`settled` BEFORE `controlBarVisible` flips true → the controls apply
+/// the focus that direction asks for and set `focusArmed` → the controller finally
+/// asks UIKit for its focus update → `settled` flips true a turn later. The order
+/// matters because the focus engine picks from whatever SwiftUI last RENDERED and
+/// will overrule a `@FocusState` value already in place.
+@MainActor
+@Observable
+public final class ControlBarEntryModel {
+    /// The two ways focus enters the control layer, one per direction.
+    public enum Entry: Equatable, Sendable {
+        /// Up from the scrub surface: land in the track row (Speed/Audio/Subtitles).
+        case trackControls
+        /// Down from the scrub surface: open the Info card with its tab focused.
+        case info
+    }
+
+    /// Which half of the layer this entry is headed for.
+    public var entry: Entry = .trackControls
+
+    /// Set by the controls once they've applied the focus `entry` asks for. The
+    /// input controller waits for it before asking UIKit for a focus update; asking
+    /// earlier let the engine choose its own control, and our intended focus then
+    /// arrived a beat later as a visible jump.
+    public var focusArmed: Bool = false
+
+    /// False from the moment an entry starts until the focus engine has run its
+    /// pass. While false the controls narrow the focus order to the single control
+    /// `entry` targets, so the engine's pick can't be anything else — the only
+    /// approach that works, since it overrules an applied `@FocusState` write.
+    public var settled: Bool = false
+
+    /// True while the Info card is open. The scrub bar reads it so its focus
+    /// appearance doesn't change underneath the card's reveal — see `ScrubBar`.
+    public var infoCardOpen: Bool = false
+
+    public init() {}
+}
+
 /// Shared, observable state for the custom player's transport overlay.
 ///
 /// `PlayerViewModel` writes live playback facts (position, duration, buffered,
@@ -234,38 +280,12 @@ public final class PlayerControlsModel {
     /// input controller reads this to suppress scrub gestures and the controls
     /// read it to take/relinquish focus.
     public var controlBarVisible: Bool = false
-    /// Which half of the control layer a focus entry is headed for. Written by the
-    /// input controller *before* `controlBarVisible` flips true, so the controls
-    /// know whether the viewer swiped/pressed **Down** (Info card, tab focused) or
-    /// **Up** (the track-control row above the scrubber).
-    public var controlBarEntry: ControlBarEntry = .trackControls
-
-    /// Set by the controls once they've applied the focus the entry direction asks
-    /// for, and cleared by the input controller when it starts an entry. The
-    /// controller waits for it before asking UIKit for a focus update: the engine
-    /// picks from whatever SwiftUI last rendered, so asking too early let it choose
-    /// its own control and produced a visible jump when our intended focus landed a
-    /// beat later.
-    public var controlBarFocusArmed: Bool = false
-
-    /// False from the moment an entry starts until the focus engine has run its
-    /// pass, then true for the rest of the session. While false the controls narrow
-    /// the focus order to the single control the entry direction asks for, so the
-    /// engine's pick cannot be anything else. Steering it any other way failed: the
-    /// engine happily overrules a `@FocusState` write that is already in place.
-    public var controlBarEntrySettled: Bool = false
-
-    /// The two ways focus enters the control layer, one per direction.
-    public enum ControlBarEntry: Equatable, Sendable {
-        /// Up from the scrub surface: land in the track row (Speed/Audio/Subtitles).
-        case trackControls
-        /// Down from the scrub surface: open the Info card with its tab focused.
-        case info
-    }
-
-    /// True while the Info card is open. The scrub bar reads it so its focus
-    /// appearance doesn't change underneath the card's reveal — see `ScrubBar`.
-    public var infoCardOpen: Bool = false
+    /// How focus enters the control layer, and how far that entry has got. A facet
+    /// rather than four more properties here: they're one concern (the hand-off
+    /// between the input controller and the SwiftUI focus engine), and a stored `let`
+    /// keeps this god object's observable surface from growing — see
+    /// `ControlBarEntryModel`.
+    public let controlBar = ControlBarEntryModel()
     /// True while an options menu (Audio & Subtitles / Speed / A·V Sync / Info)
     /// is open above the control bar. The input controller keeps the transport
     /// pinned visible while a menu is open and only lets the idle auto-hide fire

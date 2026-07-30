@@ -3,7 +3,6 @@ import SwiftUI
 import UIKit
 import CoreUI
 import CoreModels
-import CoreNetworking
 
 /// Lightweight value-type bag of options callbacks. Mirrors the tunable subset
 /// of `PlayerActions` so the controls stay presentation-only.
@@ -302,10 +301,10 @@ struct PlayerControls: View {
             // Info card with its tab focused (the tab row behaves like a segmented
             // control above the card), Up lands in the track-control row above the
             // scrubber. The write is SYNCHRONOUS — the container holds its focus
-            // update until `controlBarFocusArmed` says we've applied it, so the
+            // update until `controlBar.focusArmed` says we've applied it, so the
             // engine finds the intended target already in place instead of picking
             // its own and having ours yank focus across the row a beat later.
-            switch model.controlBarEntry {
+            switch model.controlBar.entry {
             case .info:
                 panelReturnFocus = .button(.info)
                 revealInfoCard()
@@ -314,12 +313,9 @@ struct PlayerControls: View {
                 openPanel = nil
                 focus = initialFocus
             }
-            model.controlBarFocusArmed = true
+            model.controlBar.focusArmed = true
         }
         .onChange(of: focus) { _, slot in
-            #if DEBUG
-            PlozzLog.playback.debug("PLZFOCUS controls focus=\(String(describing: slot)) entry=\(model.controlBarEntry) panel=\(String(describing: openPanel))")
-            #endif
             // Any focus move between control-bar buttons is activity — bump so the
             // container restarts its idle countdown instead of hiding mid-navigation.
             model.controlBarActivity &+= 1
@@ -344,8 +340,14 @@ struct PlayerControls: View {
         .onChange(of: openPanel) { _, panel in
             // Surface whether a menu is open so the container pins the transport
             // visible while one is up, and count the open/close as bar activity.
-            model.isPanelOpen = panel != nil
-            model.infoCardOpen = panel == .info
+            // Deliberately EXCLUDES the Info card. `isPanelOpen` pins the transport
+            // on screen (ControlsAutoHidePolicy returns `.stayVisible`, which ends the
+            // auto-hide task), which is right for a menu the viewer opened mid-task —
+            // but the card is now where a plain Down press lands, so counting it left
+            // the transport up forever after every Down entry. The card behaves like
+            // the old control bar instead: idle for the timeout and it hides.
+            model.isPanelOpen = panel != nil && panel != .info
+            model.controlBar.infoCardOpen = panel == .info
             model.controlBarActivity &+= 1
             subtitleScreen = .tracks
             guard let panel else {
@@ -526,10 +528,17 @@ struct PlayerControls: View {
                 // reveal transaction as the cluster's offset, which is what makes
                 // the two land together (see `infoCardCatchUp`).
                 .offset(y: infoMode ? 0 : Self.infoCardCatchUp)
-                // Off-screen but still in the hierarchy, so its buttons must be
-                // out of the focus order. `InfoActionButtonStyle` ignores
-                // `\.isEnabled`, so this doesn't grey the card.
-                .disabled(!infoMode)
+                // Off-screen but still in the hierarchy, so its buttons must be out
+                // of the focus order. `InfoActionButtonStyle` ignores `\.isEnabled`,
+                // so this doesn't grey the card.
+                //
+                // Also out for the duration of an ENTRY, even a Down entry that is
+                // opening this very card: `infoMode` is already true by the time the
+                // engine runs its pass, so without this the card's four buttons were
+                // candidates alongside the tab and a Down press could land inside the
+                // card body. Narrowing the order to the entry's own target is the
+                // whole reason the engine can't overrule us (see `entryFocusTarget`).
+                .disabled(!infoMode || entryFocusTarget != nil)
         }
         // THE reveal: the entire cluster — options slot, track controls, scrub bar,
         // tab and card — travels as one rigid unit. At rest it's parked far enough
@@ -858,9 +867,16 @@ struct PlayerControls: View {
                     // taken from the pre-transform layout, so the menus were placed
                     // against where the buttons WOULD be without it — landing on top
                     // of them. The global frame reflects the transform.
+                    //
+                    // Which is also why it's frozen while the card is up: reflecting
+                    // the transform means this changes on EVERY frame of the reveal,
+                    // and republishing it would rewrite @State (invalidating the whole
+                    // body) ~30 times per reveal. Republishing the last value is a
+                    // no-op for `onPreferenceChange`. Nothing is lost: no options menu
+                    // can be open while the card is, so nobody reads it meanwhile.
                     .preference(
                         key: TrackControlsTopKey.self,
-                        value: proxy.frame(in: .global).minY
+                        value: infoMode ? trackControlsTop : proxy.frame(in: .global).minY
                     )
             }
         )
@@ -927,26 +943,28 @@ struct PlayerControls: View {
     /// change is the gap — see `infoCardGap`.)
     private static var infoCardBottomPad: CGFloat { max(0, infoCardInset - bottomMargin) }
 
-    /// How far down the cluster parks when the Info card is closed.
+    /// How far down the CLUSTER parks when the Info card is closed.
     ///
-    /// The stack is permanently in its revealed arrangement, so parking has to do
-    /// two things at once: leave the tab exactly at its resting height, and put the
-    /// card entirely below the bottom edge. Travelling by the card's height plus the
-    /// stack's 18pt spacing does both, because the gap above the card is widened to
-    /// match the cluster's 48pt bottom margin (H = the card's height):
+    /// The stack is permanently in its revealed arrangement, so parking has two jobs:
+    /// return the tab to its resting height, and put the card off-screen. Writing
+    /// H = `InfoPanelView.cardHeight` (258), pad = `infoCardBottomPad` (12),
+    /// gap = `infoCardGap` (32), margin = `bottomMargin` (48), so lift = 302:
     ///
-    ///   tab bottom, parked  = revealed + lift = (bottom − 48 − H − 18) + (H + 18)
-    ///                       = bottom − 48   ← its normal resting height
-    ///   card top,   parked  = (bottom − 48 − H + gapPad) + (H + 18) = bottom
-    ///                       ← exactly level with the bottom edge, so none shows
+    ///   revealed  tab bottom = bottom − margin − pad − H − gap
+    ///   parked    tab bottom = that + lift = bottom − margin        ✓ resting height
+    ///
+    ///   revealed  card top   = bottom − margin − pad − H
+    ///   parked    card top   = that + lift = bottom + (gap − margin) = bottom − 16
+    ///
+    /// The card's top would therefore sit 16pt ABOVE the edge — the price of a gap
+    /// tighter than the margin — so the card alone travels a further
+    /// `infoCardCatchUp` (16) and lands exactly on it. See that constant for why the
+    /// small differential doesn't read as desynchronised.
     ///
     /// A CONSTANT, deliberately. Deriving it from a measured height meant the parked
     /// offset changed the instant the measurement arrived — and again whenever the
     /// card's metadata did — teleporting the transport. `InfoPanelView` pins its own
     /// height, so this is exact.
-    /// How far the CLUSTER travels — enough to return the tab to `bottomMargin`. The
-    /// card adds `infoCardCatchUp` on top so its own top lands on the screen's bottom
-    /// edge exactly.
     private static let infoCardLift: CGFloat =
         InfoPanelView.cardHeight + infoCardBottomPad + infoCardGap
 
@@ -1010,8 +1028,8 @@ struct PlayerControls: View {
     /// available. Down targets the Info tab (its card is the destination); Up
     /// targets the first track control.
     private var entryFocusTarget: FocusSlot? {
-        guard model.controlBarVisible, !model.controlBarEntrySettled else { return nil }
-        return model.controlBarEntry == .info ? .button(.info) : initialFocus
+        guard model.controlBarVisible, !model.controlBar.settled else { return nil }
+        return model.controlBar.entry == .info ? .button(.info) : initialFocus
     }
 
     /// Whether `slot` is held out of the focus order for the duration of an entry.
@@ -1127,7 +1145,7 @@ struct PlayerControls: View {
     /// Requiring focus to already be on the tab or a card button means the strip can
     /// only ever be reached deliberately, by pressing Up from inside the card.
     private var infoExitGuideActive: Bool {
-        guard openPanel == .info, model.controlBarEntrySettled else { return false }
+        guard openPanel == .info, model.controlBar.settled else { return false }
         switch focus {
         case .button(.info), .infoNext, .infoPrev, .infoRestart, .infoStats:
             return true

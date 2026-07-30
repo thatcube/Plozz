@@ -69,7 +69,7 @@ struct ScrubBar: View {
             // curve, while the cluster carrying it translated on the reveal's spring.
             // A thin line growing about its centre while sliding reads as arriving
             // from the wrong direction entirely.
-            let focused = model.controlsVisible && (!model.controlBarVisible || model.infoCardOpen)
+            let focused = model.controlsVisible && (!model.controlBarVisible || model.controlBar.infoCardOpen)
             let barHeight: CGFloat = focused ? 20 : 12
             let knobWidth: CGFloat = focused ? 8 : 4
             let knobHeight: CGFloat = focused ? (model.isScrubbing ? 40 : 32) : barHeight

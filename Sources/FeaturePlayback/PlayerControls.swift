@@ -114,6 +114,9 @@ struct PlayerControls: View {
 
     enum FocusSlot: Hashable {
         case button(Category)
+        /// Invisible strip above the Info tab. Focusing it IS the "leave the card"
+        /// gesture — see `infoExitGuide`.
+        case infoExit
         case infoNext       // Info panel: Next Episode
         case infoPrev       // Info panel: Previous Episode
         case infoRestart    // Info panel: Restart
@@ -156,11 +159,6 @@ struct PlayerControls: View {
     @State private var openPanel: Category?
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
-
-    /// True once focus has *rested* on the Info tab for a runloop turn, as opposed
-    /// to having landed there in the event currently being handled. See the Up
-    /// branch of `handleMove(_:)`.
-    @State private var infoTabSettled = false
 
     /// Named coordinate space spanning the WHOLE controls layer, so the Speed
     /// button's leading edge can be measured in the same frame its panel — laid out
@@ -294,6 +292,11 @@ struct PlayerControls: View {
             // order otherwise); this covers the one moment the gate can't — a Down
             // entry, where focus is applied in the same update that opens the card.
             if slot == .button(.info), openPanel != .info { revealInfoCard() }
+            // Focus reached the strip above the tab, which only a deliberate Up from
+            // the tab itself can do: that's the exit gesture. Acting on where focus
+            // LANDED — rather than on the press that may have caused it — is what
+            // makes this reliable; see `infoExitGuide`.
+            if slot == .infoExit { closeInfoCard() }
             // `infoTabSettled` distinguishes "the tab has been focused for a beat"
             // from "focus arrived on the tab in this very event". A move command and
             // the focus change it causes land in the same turn, and the order isn't
@@ -301,12 +304,6 @@ struct PlayerControls: View {
             // otherwise be mistaken for an Up press ON the tab, and would close the
             // card the viewer was just entering. Settling one runloop turn later
             // makes the two cases distinguishable without guessing at delivery order.
-            infoTabSettled = false
-            if slot == .button(.info) {
-                DispatchQueue.main.async {
-                    if focus == .button(.info) { infoTabSettled = true }
-                }
-            }
         }
         .onChange(of: openPanel) { _, panel in
             // Surface whether a menu is open so the container pins the transport
@@ -382,12 +379,13 @@ struct PlayerControls: View {
     private func handleMove(_ direction: PlozzMoveCommandDirection) {
         switch direction {
         case .up:
-            // The tab is the card's top edge: leaving it upward closes the card and
-            // hands focus back to the scrub bar. `infoTabSettled` keeps the Up that
-            // *arrived* on the tab (from a card button) from being read as an Up
-            // *on* the tab.
-            guard openPanel == .info, focus == .button(.info), infoTabSettled else { return }
-            closeInfoCard()
+            // Nothing to do. Leaving the card upward is handled by the focus engine
+            // moving onto `infoExitGuide`, not by interpreting this press: when the
+            // card is open, an Up press and the focus change it causes arrive in an
+            // order tvOS does not guarantee, so "was this press ON the tab, or did it
+            // MOVE me here?" cannot be answered here. Reading the press led to Up
+            // from a card button skipping the tab and dropping to the scrub bar.
+            break
         case .down:
             // Down from a track control returns to the scrub bar. Handing focus back
             // to the surface here also takes the whole controls layer out of the
@@ -927,6 +925,8 @@ struct PlayerControls: View {
         .opacity(model.isScrubbing ? 0 : 1)
         .offset(y: model.isScrubbing ? 8 : 0)
         .allowsHitTesting(!model.isScrubbing)
+        // The exit strip rides along as an overlay so it adds no layout of its own.
+        .overlay(alignment: .top) { infoExitGuide }
         // The tab is in the focus order ONLY while its card is open (or is opening,
         // on a Down entry). That's the invariant — focused tab == visible card —
         // made structural: with the card closed the engine simply cannot move onto
@@ -973,6 +973,35 @@ struct PlayerControls: View {
     /// while a Down entry is on its way to opening it. See the tab's `.disabled`.
     private var infoTabFocusable: Bool {
         openPanel == .info || entryFocusTarget == .button(.info)
+    }
+
+    /// A thin focusable strip just above the Info tab, present only while the card
+    /// is open. It is the *destination* of an Up press from the tab — and focusing
+    /// it closes the card (see `onChange(of: focus)`).
+    ///
+    /// Why a target rather than reading the press: with the card open, everything
+    /// above the tab is out of the focus order, so tvOS delivers the Up press and
+    /// any focus change it causes in an order that isn't guaranteed. Interpreting
+    /// the press therefore couldn't tell "Up ON the tab" from "Up that MOVED me to
+    /// the tab", and Up from a card button skipped the tab and dropped to the scrub
+    /// bar. Giving the gesture somewhere to LAND lets the focus engine answer the
+    /// question instead: from a card button the tab is nearer, so focus stops there;
+    /// only from the tab itself is this the next thing up.
+    ///
+    /// The usual caveat about invisible focus catchers (they lose proximity contests
+    /// — see `FocusGatedSwitch`) doesn't bite here: while the card is open this is
+    /// the ONLY focusable thing above the tab, so it has no competition.
+    @ViewBuilder
+    private var infoExitGuide: some View {
+        if openPanel == .info {
+            // Not `Color.clear`: UIKit won't focus a fully transparent view.
+            Color.black.opacity(0.001)
+                .frame(height: 8)
+                .frame(maxWidth: .infinity)
+                .focusable()
+                .focused($focus, equals: .infoExit)
+                .offset(y: -26)
+        }
     }
 
     /// The now-playing card the Info tab reveals, full width beneath the tab row.

@@ -50,6 +50,48 @@ and the diagnostics overlay.
 - **No secrets in URLs logged.** Stream URLs frequently embed tokens —
   `PlayerViewModel` redacts before logging.
 
+## Transport layout — read before moving anything in `PlayerControls`
+
+The controls look like a simple stack, but four rules hold it together. Each was
+paid for with a real regression; breaking one produces a symptom that looks like it
+comes from somewhere else entirely.
+
+**1. Measure the box your view is actually laid out in.** A `GeometryReader` in the
+controls layer's `.background` reports a DIFFERENT box (960 tall, ending at y=1020)
+from the one the `ZStack`'s children receive (ending at y=1080). Positioning a child
+using the background's numbers puts it exactly one safe-area inset (60pt) out of
+place. `ControlsBottomKey` is therefore measured by a **sibling probe inside the
+ZStack**, so both edges of the arithmetic come from one geometry. If you re-anchor
+the menus, keep measuring from a view in the same layout box — and verify the
+rendered frame rather than reasoning about it, because these boxes do not differ in
+any way you can see.
+
+**2. The bottom cluster is a fixed stage moved by ONE transform.** The Info card is a
+permanent stack member; "closed" is the whole cluster translated down so the card
+clears the screen (`infoCardLift`). Nothing is inserted and nothing reflows, which is
+what makes the reveal read as one object instead of parts arriving separately. The
+consequence: **any change to the cluster's height or margins moves the card**, and
+because it parks flush against the screen edge, a stray few points shows up as the
+card peeking into view. If the card peeks, something changed the cluster's layout —
+don't look at the card.
+
+**3. `bottomMargin`, `infoCardGap` and `infoCardCatchUp` are one equation.** Parking
+the cluster puts the card's top at `bottomMargin − infoCardGap` above the screen edge,
+so a gap tighter than the margin would leave the card showing; `infoCardCatchUp` makes
+up the difference by letting the card travel that much further. Change one, recheck
+all three. Padding *below* or *inside* the card cancels out and is free.
+
+**4. One animation modifier at cluster level.** `.animation(value:)` retimes ANY
+change in flight, however unrelated the value it watches. A `titleVisible` fade sitting
+at cluster level grabbed the reveal a frame in and handed a 0.42s spring to a 0.28s
+curve — visible as a lurch. Every other fade is scoped to the view it belongs to.
+
+Focus has its own rule, from the same family as the tvOS note in
+`AGENTS.local.md`: **gate what is focusable; never chase focus after it lands.** The
+engine does not defer to a `@FocusState` value already in place, so the Info tab is
+kept out of the focus order unless its card is open, and an entry narrows the order to
+the single control the pressed direction targets.
+
 ## Where to look first
 
 - `VideoEngine.swift` — the protocol every engine implements.

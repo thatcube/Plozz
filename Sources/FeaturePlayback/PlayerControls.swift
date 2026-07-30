@@ -1068,7 +1068,12 @@ struct PlayerControls: View {
             // than derived from the transport's height: the buttons are one row inside
             // it, and that row's height is set by the much taller title block beside
             // them.
-            .padding(.bottom, menuBottomInset)
+            // Only the bottom-anchored menus reserve room above the buttons. The Style
+            // editor is top-pinned, so that inset is dead space below it — and a tall
+            // sub-screen (Font) plus 315pt of it exceeded the layer's height, growing
+            // the ZStack and nudging every child, cluster included. That showed up as
+            // the submenu drifting down and the Info card peeking in from the bottom.
+            .padding(.bottom, styleEditing ? Self.horizontalMargin : menuBottomInset)
             .transition(.scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .opacity))
         }
     }

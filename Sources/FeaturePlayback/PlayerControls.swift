@@ -364,7 +364,11 @@ struct PlayerControls: View {
                 }
                 return
             }
-            titleVisible = false
+            // The Info card doesn't use this: its title fade rides the reveal clock
+            // (see `titleBlock`). Flipping it here would fade the title on the menus'
+            // curve at the same time, which is exactly the kind of near-miss timing
+            // that made the transport look like separate pieces.
+            if panel != .info { titleVisible = false }
             // Seed the box height from the last time this panel was open so it renders
             // in the measured (ScrollView) branch immediately — no pre-measure→measured
             // structural swap that would rebuild the rows and knock initial focus to the
@@ -483,7 +487,6 @@ struct PlayerControls: View {
                     // shift as it goes.
                     .opacity(infoMode ? 0 : 1)
                     .allowsHitTesting(!infoMode)
-                    .animation(Self.transportExit(reduceMotion), value: infoMode)
                     .opacity(chromeHidden ? 0 : 1)
                     .animation(.easeInOut(duration: 0.3), value: chromeHidden)
                 tabRow
@@ -760,13 +763,19 @@ struct PlayerControls: View {
     private var titleAndControlsRow: some View {
         HStack(alignment: .bottom, spacing: 32) {
             titleBlock
-                .opacity(titleVisible && !chromeHidden ? 1 : 0)
-                // Scoped to the title, NOT the cluster. `titleVisible` flips one
-                // update after a panel opens, and as a cluster-level modifier this
-                // re-timed the in-flight reveal: the probe caught the offset handed
-                // from the 0.42 spring to this 0.28 curve a frame in, which is what
-                // made the transport lurch.
+                // Two separate reasons to hide, each on its own clock. Opening a MENU
+                // fades the title on the menus' curve (`titleVisible`); the Info
+                // reveal is a different motion and the title must travel with the
+                // rest of the transport, so that half rides the reveal clock via
+                // `infoMode` and is deliberately NOT folded into `titleVisible`.
+                //
+                // Both are scoped to the title rather than the cluster: a
+                // cluster-level modifier retimes whatever is in flight, and this one
+                // caught the reveal a frame in — handing a 0.5s spring to a 0.28s
+                // curve, which read as a lurch.
+                .opacity(titleVisible && !chromeHidden && !infoMode ? 1 : 0)
                 .animation(.easeInOut(duration: 0.28), value: titleVisible)
+                .animation(revealClock, value: infoMode)
             // The controls are laid out FIRST (higher priority) at their intrinsic
             // width; the title then takes what's left and truncates. Without this a
             // long series name would push the buttons off the trailing edge, since
@@ -822,7 +831,6 @@ struct PlayerControls: View {
         // movement that made the reveal look like separate pieces.
         .opacity(infoMode ? 0 : 1)
         .allowsHitTesting(!infoMode)
-        .animation(Self.transportExit(reduceMotion), value: infoMode)
         // Trap focus inside an open panel: while one is up, the transport buttons
         // drop out of the focus engine so directional nav can't wander out of the
         // menu. It closes only by selecting a row or pressing Menu (native-menu
@@ -949,19 +957,6 @@ struct PlayerControls: View {
     /// card, not a whole page.
     private static let infoReveal: Animation = .smooth(duration: 0.5)
 
-    /// The transport's fade as the card takes over. Scoped to the rows' own opacity
-    /// (so it can't retime the cluster's travel) and deliberately a *symmetric*
-    /// curve that outlasts most of that travel.
-    ///
-    /// It used to inherit the reveal spring, which front-loads: the scrub bar and
-    /// track buttons were gone almost immediately, leaving the tab to cross the
-    /// screen with nothing around it to read its motion against — which looks like
-    /// teleporting even though it's animating. Keeping them visible for most of the
-    /// journey is what makes the movement legible. (The same reasoning as
-    /// `SeriesHeroRevealTransition.heroContentFadeExit`.)
-    static func transportExit(_ reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeInOut(duration: 0.2) : .easeInOut(duration: 0.42)
-    }
 
     /// The tab row beneath the scrub bar. Today a single Info tab; siblings
     /// (Chapters, …) join it here and switch the card below rather than opening

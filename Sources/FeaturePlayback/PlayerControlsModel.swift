@@ -263,6 +263,9 @@ public final class PlayerControlsModel {
         case info
     }
 
+    /// True while the Info card is open. The scrub bar reads it so its focus
+    /// appearance doesn't change underneath the card's reveal — see `ScrubBar`.
+    public var infoCardOpen: Bool = false
     /// True while an options menu (Audio & Subtitles / Speed / A·V Sync / Info)
     /// is open above the control bar. The input controller keeps the transport
     /// pinned visible while a menu is open and only lets the idle auto-hide fire

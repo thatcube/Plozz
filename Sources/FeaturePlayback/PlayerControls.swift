@@ -345,6 +345,7 @@ struct PlayerControls: View {
             // Surface whether a menu is open so the container pins the transport
             // visible while one is up, and count the open/close as bar activity.
             model.isPanelOpen = panel != nil
+            model.infoCardOpen = panel == .info
             model.controlBarActivity &+= 1
             subtitleScreen = .tracks
             guard let panel else {

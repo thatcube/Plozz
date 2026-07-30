@@ -62,7 +62,14 @@ struct ScrubBar: View {
             // the played fill is bright and the playhead is a rounded pill. Once
             // focus moves to the buttons the bar slims by 8pt, the fill fades and
             // the playhead squares off flush into the track.
-            let focused = model.controlsVisible && !model.controlBarVisible
+            // `infoCardOpen` holds the bar in its focused shape for the whole Info
+            // reveal. The bar is invisible behind the card, so its appearance there is
+            // moot — but without this, focus returning to the surface as the card
+            // closes resized the bar (12→20 tall, knob 4→8) on this view's own 0.2s
+            // curve, while the cluster carrying it translated on the reveal's spring.
+            // A thin line growing about its centre while sliding reads as arriving
+            // from the wrong direction entirely.
+            let focused = model.controlsVisible && (!model.controlBarVisible || model.infoCardOpen)
             let barHeight: CGFloat = focused ? 20 : 12
             let knobWidth: CGFloat = focused ? 8 : 4
             let knobHeight: CGFloat = focused ? (model.isScrubbing ? 40 : 32) : barHeight

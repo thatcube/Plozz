@@ -842,6 +842,13 @@ struct PlayerControls: View {
     /// Gap between the tab row and the Info card when the card is open.
     private static let infoCardGap: CGFloat = 32
 
+    /// Slack added to the masked strip so the card's glass — which draws a soft
+    /// shadow OUTSIDE its own bounds — is hidden along with the card itself. The
+    /// card is clipped to its shape too (see `infoCard`); this covers whatever the
+    /// clip doesn't. Safe up to `bottomMargin`, since that's where the revealed
+    /// card's bottom edge sits.
+    private static let infoCardMaskSlack: CGFloat = 16
+
     /// How much of the card would peek above the screen edge at rest.
     ///
     /// The cluster travels as ONE rigid unit, which ties these three numbers
@@ -851,7 +858,9 @@ struct PlayerControls: View {
     /// would be to move the tab down (the gap and margin become one number) or to
     /// let the card travel further than the tab, which is exactly the desync this
     /// layout exists to avoid. Instead the strip is masked off; see `bottomCluster`.
-    private static var infoCardPeek: CGFloat { max(0, bottomMargin - infoCardGap) }
+    private static var infoCardPeek: CGFloat {
+        min(bottomMargin, max(0, bottomMargin - infoCardGap) + infoCardMaskSlack)
+    }
 
     /// How far down the cluster parks when the Info card is closed.
     ///
@@ -966,6 +975,17 @@ struct PlayerControls: View {
         InfoPanelView(model: model, actions: actions, focus: $focus, onClose: closeInfoCard)
             .colorScheme(.dark)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // Clip to the card's own silhouette. Liquid Glass draws a soft shadow
+            // beyond the shape it's applied to, and that shadow was escaping the
+            // strip masked off at the bottom of the screen — so the card announced
+            // itself with a glow above the bottom edge while still closed. (Losing
+            // the shadow is no loss here: the panels deliberately don't use one, a
+            // per-frame offscreen blur over Dolby Vision being the original
+            // frame-drop culprit. See `PanelGlassBackground`.)
+            .clipShape(RoundedRectangle(
+                cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius,
+                style: .continuous
+            ))
     }
 
     private func toggle(_ category: Category) {

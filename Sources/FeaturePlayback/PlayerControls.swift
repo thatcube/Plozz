@@ -535,26 +535,6 @@ struct PlayerControls: View {
         .padding(.top, styleEditing ? 60 : 90)
         .padding(.bottom, styleEditing ? 60 : Self.bottomMargin)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Hide the strip of card that a tighter-than-the-margin gap leaves showing at
-        // rest (see `infoCardPeek`). A MASK rather than clipping or an opacity gate:
-        // it's a fixed window in LAYOUT space, so the content slides underneath it
-        // and the card is revealed as it rises — no state to animate, nothing to
-        // desync.
-        //
-        // Applied at the END of the chain, after the cluster's padding: the window is
-        // measured from this view's bottom edge, and only here is that the SCREEN's
-        // bottom edge. Before the padding it was the card's own bottom — 48pt higher —
-        // so the strip landed on the resting tab and clipped it.
-        //
-        // The generous negative padding is load-bearing: a mask is sized to its
-        // content, so a bare `Rectangle()` would crop whatever the focused controls
-        // draw outside the cluster's bounds (their focus halo and glass bleed).
-        .mask(alignment: .top) {
-            Rectangle()
-                .padding(EdgeInsets(
-                    top: -800, leading: -800, bottom: Self.infoCardPeek, trailing: -800
-                ))
-        }
     }
 
     /// The dim scrim behind the controls. A *fixed*, bottom-anchored gradient that
@@ -836,31 +816,26 @@ struct PlayerControls: View {
     }
 
     /// The cluster's bottom margin: how far the tab row rests above the screen edge
-    /// with the card closed. Unchanged from the layout that shipped before the card.
+    /// with the card closed. 48 sits a little inside the 54pt action-safe line and
+    /// 12pt below tvOS's 60pt title-safe line — deliberately, to match where the
+    /// Apple TV app puts its own transport.
     private static let bottomMargin: CGFloat = 48
 
     /// Gap between the tab row and the Info card when the card is open.
-    private static let infoCardGap: CGFloat = 32
-
-    /// Slack added to the masked strip so the card's glass — which draws a soft
-    /// shadow OUTSIDE its own bounds — is hidden along with the card itself. The
-    /// card is clipped to its shape too (see `infoCard`); this covers whatever the
-    /// clip doesn't. Safe up to `bottomMargin`, since that's where the revealed
-    /// card's bottom edge sits.
-    private static let infoCardMaskSlack: CGFloat = 16
-
-    /// How much of the card would peek above the screen edge at rest.
     ///
-    /// The cluster travels as ONE rigid unit, which ties these three numbers
-    /// together: parking it far enough to put the tab back at `bottomMargin` leaves
-    /// the card's top exactly `bottomMargin − infoCardGap` above the bottom edge. So
-    /// a gap TIGHTER than the margin necessarily shows a sliver — the only ways out
-    /// would be to move the tab down (the gap and margin become one number) or to
-    /// let the card travel further than the tab, which is exactly the desync this
-    /// layout exists to avoid. Instead the strip is masked off; see `bottomCluster`.
-    private static var infoCardPeek: CGFloat {
-        min(bottomMargin, max(0, bottomMargin - infoCardGap) + infoCardMaskSlack)
-    }
+    /// The SAME number as `bottomMargin`, and it has to be. The cluster travels as
+    /// one rigid unit, so parking it far enough to return the tab to `bottomMargin`
+    /// puts the card's top exactly `bottomMargin − gap` above the screen edge. A
+    /// tighter gap therefore leaves that much card showing at rest — no matter what
+    /// else the layout does (padding below the card cancels out of the arithmetic;
+    /// so does transparent padding inside it). Masking the strip off was worse than
+    /// the problem: the card vanished at an invisible line instead of sliding off
+    /// the screen. Equal gap and margin make the card's top land exactly on the
+    /// bottom edge, so it leaves the way a physical thing would, with nothing hidden.
+    ///
+    /// To tighten the gap, `bottomMargin` has to come down with it — the tab would
+    /// sit lower. They cannot be tuned apart.
+    private static var infoCardGap: CGFloat { bottomMargin }
 
     /// How far down the cluster parks when the Info card is closed.
     ///

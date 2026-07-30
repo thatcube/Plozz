@@ -509,6 +509,8 @@ struct PlayerControls: View {
                     // card exactly off-screen at rest AND the tab exactly at its
                     // resting height (see `infoCardLift`).
                     .padding(.top, Self.infoCardGap - 18)
+                    // Even up the bottom inset with the sides (see `infoCardInset`).
+                    .padding(.bottom, Self.infoCardBottomPad)
                     // Off-screen but still in the hierarchy, so its buttons must be
                     // out of the focus order. `InfoActionButtonStyle` ignores
                     // `\.isEnabled`, so this doesn't grey the card.
@@ -837,6 +839,20 @@ struct PlayerControls: View {
     /// sit lower. They cannot be tuned apart.
     private static var infoCardGap: CGFloat { bottomMargin }
 
+    /// The revealed card's inset from the screen on all three of its free edges.
+    /// Equal to the side margin by definition, so the card reads as evenly framed
+    /// rather than 12pt tighter at the bottom than at the sides.
+    private static var infoCardInset: CGFloat { horizontalMargin }
+
+    /// Extra bottom padding under the card, on top of the cluster's own margin, to
+    /// reach `infoCardInset`.
+    ///
+    /// Free of charge: it drops out of the parking arithmetic entirely. Lifting the
+    /// cluster by this much MORE still returns the tab to exactly `bottomMargin`, so
+    /// the card can be framed evenly without the tab moving a pixel. (What can't
+    /// change is the gap — see `infoCardGap`.)
+    private static var infoCardBottomPad: CGFloat { max(0, infoCardInset - bottomMargin) }
+
     /// How far down the cluster parks when the Info card is closed.
     ///
     /// The stack is permanently in its revealed arrangement, so parking has to do
@@ -854,7 +870,10 @@ struct PlayerControls: View {
     /// offset changed the instant the measurement arrived — and again whenever the
     /// card's metadata did — teleporting the transport. `InfoPanelView` pins its own
     /// height, so this is exact.
-    private static let infoCardLift: CGFloat = InfoPanelView.cardHeight + infoCardGap
+    /// Reduces to `cardHeight + infoCardInset` when the gap equals the bottom margin:
+    /// the card's top then parks exactly on the screen's bottom edge.
+    private static let infoCardLift: CGFloat =
+        InfoPanelView.cardHeight + infoCardBottomPad + infoCardGap
 
     /// The single clock the Info card's arrival and departure run on.
     ///

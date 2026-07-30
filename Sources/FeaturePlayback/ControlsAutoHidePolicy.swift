@@ -14,15 +14,22 @@ enum ControlsAutoHidePolicy {
     /// Floor measured from the last input (a reveal, skip, or control-bar focus
     /// move) — the transport never hides sooner than this after the viewer acted.
     static let minSinceInput: TimeInterval = 4.0
+    /// The same floor while the Info card is open. Longer because the card is
+    /// something to READ — a synopsis, episode number, runtime and badges — rather
+    /// than a row of buttons to act on, so the 4s that suits the transport cuts a
+    /// viewer off mid-sentence.
+    static let minSinceInputWithInfoCard: TimeInterval = 9.0
 
     /// When the transport should hide: 1s after the load finishes, but never
-    /// sooner than 4s after the last input. A long load therefore clears the
-    /// transport quickly once the picture is genuinely up, while a short load or a
-    /// hands-on interaction keeps the controls around the full 4s the viewer needs
-    /// to act on the controls they just summoned.
-    static func hideDate(loadDoneAt: Date, inputAt: Date) -> Date {
-        max(loadDoneAt.addingTimeInterval(postLoadGrace),
-            inputAt.addingTimeInterval(minSinceInput))
+    /// sooner than the input floor. A long load therefore clears the transport
+    /// quickly once the picture is genuinely up, while a short load or a hands-on
+    /// interaction keeps the controls around for the time the viewer needs to act on
+    /// what they just summoned — longer when that's the Info card, which is read
+    /// rather than operated.
+    static func hideDate(loadDoneAt: Date, inputAt: Date, infoCardOpen: Bool = false) -> Date {
+        let floor = infoCardOpen ? minSinceInputWithInfoCard : minSinceInput
+        return max(loadDoneAt.addingTimeInterval(postLoadGrace),
+                   inputAt.addingTimeInterval(floor))
     }
 
     /// Where tvOS focus currently lives — mirrors the controller's private

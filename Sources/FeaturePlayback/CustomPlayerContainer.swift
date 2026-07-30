@@ -1171,7 +1171,11 @@ final class PlayerInputViewController: UIViewController {
                 // up, while a short load / hands-on interaction keeps it around the
                 // full 4s the viewer needs to act on the controls they summoned.
                 let loadDoneAt = Date()
-                let hideAt = ControlsAutoHidePolicy.hideDate(loadDoneAt: loadDoneAt, inputAt: inputAt)
+                let hideAt = ControlsAutoHidePolicy.hideDate(
+                    loadDoneAt: loadDoneAt,
+                    inputAt: inputAt,
+                    infoCardOpen: self?.model.controlBar.infoCardOpen ?? false
+                )
                 let wait = hideAt.timeIntervalSinceNow
                 if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
                 if Task.isCancelled { return }

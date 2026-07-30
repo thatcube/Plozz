@@ -35,6 +35,43 @@ final class ControlsAutoHidePolicyTests: XCTestCase {
         XCTAssertEqual(hideAt.timeIntervalSince(inputAt), 4.0, accuracy: 0.0001)
     }
 
+    func testInfoCardHoldsALongerInputFloor() {
+        // The Info card is read, not operated, so the floor is longer than the 4s
+        // that suits a row of buttons.
+        let inputAt = Date()
+        let loadDoneAt = inputAt.addingTimeInterval(0.2) // near-instant load
+        let hideAt = ControlsAutoHidePolicy.hideDate(
+            loadDoneAt: loadDoneAt, inputAt: inputAt, infoCardOpen: true
+        )
+        XCTAssertEqual(hideAt.timeIntervalSince(inputAt),
+                       ControlsAutoHidePolicy.minSinceInputWithInfoCard, accuracy: 0.0001,
+                       "the card gets its own, longer floor")
+        XCTAssertGreaterThan(ControlsAutoHidePolicy.minSinceInputWithInfoCard,
+                             ControlsAutoHidePolicy.minSinceInput)
+    }
+
+    func testInfoCardFloorStillLosesToASlowLoad() {
+        // The card extends the INPUT floor only; a load that finishes even later
+        // still governs, exactly as for the transport.
+        let inputAt = Date()
+        let loadDoneAt = inputAt.addingTimeInterval(20)
+        let hideAt = ControlsAutoHidePolicy.hideDate(
+            loadDoneAt: loadDoneAt, inputAt: inputAt, infoCardOpen: true
+        )
+        XCTAssertEqual(hideAt.timeIntervalSince(loadDoneAt),
+                       ControlsAutoHidePolicy.postLoadGrace, accuracy: 0.0001)
+    }
+
+    func testDefaultFloorIsUnchangedWithoutTheInfoCard() {
+        // Regression guard: adding the card's floor must not move the normal one.
+        let inputAt = Date()
+        let loadDoneAt = inputAt.addingTimeInterval(0.2)
+        XCTAssertEqual(
+            ControlsAutoHidePolicy.hideDate(loadDoneAt: loadDoneAt, inputAt: inputAt),
+            ControlsAutoHidePolicy.hideDate(loadDoneAt: loadDoneAt, inputAt: inputAt, infoCardOpen: false)
+        )
+    }
+
     // MARK: outcome — interaction pins beat focus routing
 
     func testScrubbingStaysVisibleRegardlessOfFocus() {

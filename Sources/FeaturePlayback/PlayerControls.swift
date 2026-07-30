@@ -165,6 +165,10 @@ struct PlayerControls: View {
     /// in a different sub-stack of the cluster — is positioned in.
     private static let controlsSpace = "PlayerControlsLayer"
 
+    /// Coordinate space of the track-control row, which the options menus are
+    /// anchored to. See `trackControlButtons`.
+    private static let trackControlsSpace = "PlayerTrackControls"
+
     /// Side margin of the controls layer. Subtracted from the whole-layer
     /// measurement above so a panel aligned to a button lands in the cluster's own
     /// content coordinates.
@@ -174,9 +178,8 @@ struct PlayerControls: View {
     /// sitting right on top of the scrub bar.
     private static let panelLift: CGFloat = 18
 
-    /// Measured leading-edge X of the Speed button, in `controlsSpace` (i.e.
-    /// including the layer's side margin). The Speed panel left-aligns to this so
-    /// it opens directly under its own button.
+    /// Measured leading-edge X of the Speed button, in `trackControlsSpace`. The
+    /// Speed panel left-aligns to this so it opens directly above its own button.
     @State private var speedButtonLeading: CGFloat = 0
 
     /// The transport control that was focused when the current panel was opened.
@@ -453,23 +456,6 @@ struct PlayerControls: View {
                         Color.clear.preference(key: TransportHeightKey.self, value: proxy.size.height)
                     }
                 )
-                // The options menus float above the transport's top edge — i.e. above
-                // the track controls that open them — and contribute NO layout. As a
-                // stack member the tallest of them (440pt) set its slot's height, and
-                // with the Info card now permanently in the stack the cluster stopped
-                // fitting the screen, so opening Subtitles shoved every control
-                // upward. An overlay draws outside its bounds, so a menu can be any
-                // size without moving anything. It also suits what they are: floating
-                // menus, not part of the transport's layout.
-                .overlay(alignment: .top) {
-                    optionsPanelLayer
-                        // Hang the menu entirely ABOVE the anchor: aligning its top
-                        // guide to its own bottom edge shifts it up by exactly its
-                        // own height, whatever that turns out to be — no measurement
-                        // and no hand-tuned constant.
-                        .alignmentGuide(.top) { $0[.bottom] }
-                }
-                .animation(.easeInOut(duration: 0.2), value: optionsPanel)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             // The Info card is a PERMANENT member of the stack, never inserted or
@@ -743,6 +729,23 @@ struct PlayerControls: View {
             // the title's own frame is greedy.
             trackControlButtons
                 .layoutPriority(1)
+                // The menus hang off the BUTTONS, not off the row: bottom-aligned in
+                // a row whose height is set by the much taller title block, the row's
+                // top edge sits ~40pt above the buttons, and anchoring there put every
+                // menu that far from the control that opened it.
+                //
+                // Outside `trackControlButtons`'s own `.disabled` on purpose — inside,
+                // the open menu would inherit it and its rows couldn't be selected.
+                .overlay(alignment: .topLeading) {
+                    optionsPanelLayer
+                        // Hang the menu entirely ABOVE the buttons: aligning its top
+                        // guide to its own bottom edge shifts it up by exactly its own
+                        // height, whatever that turns out to be — no measurement and
+                        // no hand-tuned constant. The gap is `panelLift`, part of that
+                        // height via the padding below.
+                        .alignmentGuide(.top) { $0[.bottom] }
+                }
+                .animation(.easeInOut(duration: 0.2), value: optionsPanel)
         }
     }
 
@@ -771,7 +774,7 @@ struct PlayerControls: View {
                         GeometryReader { proxy in
                             Color.clear.preference(
                                 key: SpeedButtonLeadingKey.self,
-                                value: proxy.frame(in: .named(Self.controlsSpace)).minX
+                                value: proxy.frame(in: .named(Self.trackControlsSpace)).minX
                             )
                         }
                     }
@@ -801,6 +804,10 @@ struct PlayerControls: View {
         // horizontal offset between them.
         .disabled(openPanel != nil)
         .plozzFocusSection()
+        // The menus are anchored to this row, so the Speed button's leading edge is
+        // measured in ITS space — the offset that aligns the Speed menu to its own
+        // button is then just that number.
+        .coordinateSpace(name: Self.trackControlsSpace)
     }
 
     /// True while the Info card owns the moment. The track controls and the scrub
@@ -984,7 +991,6 @@ struct PlayerControls: View {
         if let panel = optionsPanel {
             morphingPanel(for: panel)
                 .plozzFocusSection()
-                .frame(maxWidth: .infinity, alignment: .leading)
                 // Breathing room between the menu and the buttons beneath it.
                 .padding(.bottom, Self.panelLift)
                 // Grow + fade from the corner nearest the button that opened it so it
@@ -1259,7 +1265,7 @@ struct PlayerControls: View {
         // in the whole-layer space, so drop the layer's side margin to express it
         // relative to the cluster's content edge.
         .modifier(PanelHorizontalPlacement(
-            leadingInset: category == .speed ? speedButtonLeading - Self.horizontalMargin : nil
+            leadingInset: category == .speed ? speedButtonLeading : nil
         ))
     }
 

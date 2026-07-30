@@ -165,18 +165,34 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         try await client.recentlyAdded(limit: limit).map(map(metadata:))
     }
 
-    /// Titles in this library featuring a person.
+    /// Titles in this library on which a person worked.
     ///
-    /// `MediaPerson.id` is namespaced by role kind (`"actor:12345"`) so cast and
-    /// crew entries can't collide, but Plex's `actor` filter wants the bare tag id
-    /// — so strip the prefix back off. An entry with no numeric id falls back to
-    /// the person's name, which the filter does not accept, so those yield nothing
-    /// rather than a wrong match.
+    /// `MediaPerson.id` is namespaced by role kind (`"actor:12345"`,
+    /// `"director:99"`) so cast and crew entries can't collide. That prefix is
+    /// load-bearing here rather than noise to be stripped: Plex keeps a separate
+    /// filter per role, so a director's tag id has to be asked of `director=`.
+    /// Querying `actor=` for it — which is what stripping the prefix and always
+    /// using `actor` did — returns an empty page for every director and writer.
+    ///
+    /// An entry Plex gave no numeric id falls back to the person's name, which
+    /// these filters don't accept, so those return nothing rather than matching
+    /// the wrong person.
     public func items(withPerson personID: String, limit: Int) async throws -> [MediaItem] {
-        let bare = personID.split(separator: ":", maxSplits: 1).last.map(String.init) ?? personID
-        guard !bare.isEmpty, bare.allSatisfy(\.isNumber) else { return [] }
-        return try await client.itemsWithActor(id: bare, limit: limit).map(map(metadata:))
+        let parts = personID.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2 else { return [] }
+        let field = String(parts[0]).lowercased()
+        let tagID = String(parts[1])
+        guard Self.personFilterFields.contains(field) else { return [] }
+        guard !tagID.isEmpty, tagID.allSatisfy(\.isNumber) else { return [] }
+        return try await client.itemsWithPersonTag(
+            field: field,
+            id: tagID,
+            limit: limit
+        ).map(map(metadata:))
     }
+
+    /// Plex's per-role filter fields, matching the kinds `map(people:)` emits.
+    private static let personFilterFields: Set<String> = ["actor", "director", "writer"]
 
     /// Plex-native discovery hubs for one library (`/hubs/sections/{id}`), surfaced
     /// as a library's extra rows in unmerged Home mode. Hubs whose content the

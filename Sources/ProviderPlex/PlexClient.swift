@@ -192,12 +192,17 @@ public struct PlexClient: Sendable {
         return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer.Metadata ?? []
     }
 
-    /// `GET /library/all?actor={id}` — everything in the library featuring a
-    /// person. `type=1,2` keeps the result to whole movies and shows rather than
-    /// individual episodes, matching the Jellyfin side.
-    func itemsWithActor(id: String, limit: Int) async throws -> [PlexMetadata] {
+    /// `GET /library/all?{field}={id}` — everything in the library on which a
+    /// person worked. `type=1,2` keeps the result to whole movies and shows
+    /// rather than individual episodes, matching the Jellyfin side.
+    ///
+    /// The field is role-specific and that matters: unlike Jellyfin, whose
+    /// `PersonIds` matches a person in any capacity, Plex keeps `actor`,
+    /// `director` and `writer` as separate filters. Asking `actor=` for a
+    /// director's tag id returns nothing at all.
+    func itemsWithPersonTag(field: String, id: String, limit: Int) async throws -> [PlexMetadata] {
         let query = [
-            URLQueryItem(name: "actor", value: id),
+            URLQueryItem(name: field, value: id),
             URLQueryItem(name: "type", value: "1,2"),
             URLQueryItem(name: "X-Plex-Container-Start", value: "0"),
             URLQueryItem(name: "X-Plex-Container-Size", value: String(max(0, limit))),

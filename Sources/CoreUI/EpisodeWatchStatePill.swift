@@ -99,7 +99,17 @@ public struct EpisodeWatchStatePill: View {
                 )
                 if let remaining { Text(remaining) }
             }
-            .accessibilityLabel(remaining.map { "\($0) left" } ?? "Partly watched")
+            .accessibilityLabel(
+                remaining.map { Text("\($0) left") }
+                    ?? Text(
+                        "Partly watched",
+                        comment: """
+                            Accessibility label for the progress chip on a partly \
+                            watched card, used when the remaining time is unknown. \
+                            Describes watch state, not a command.
+                            """
+                    )
+            )
         case let .runtime(text):
             Text(text)
         }

@@ -989,8 +989,18 @@ extension View {
         ) { presented in
             // Resume is listed first so it receives default focus.
             if let remaining = presented.resumeRemainingText {
-                Button("Resume · \(remaining) left") {
+                Button {
                     onChoose(presented, presented.resumePosition ?? 0)
+                } label: {
+                    Text(
+                        "Resume · \(remaining) left",
+                        comment: """
+                            Resume-playback dialog button: continue from the saved \
+                            position. The placeholder is a formatted duration (e.g. \
+                            "59m") for the time REMAINING, not the elapsed position. \
+                            Pairs with "Start Over · %@", which quotes the full runtime.
+                            """
+                    )
                 }
             } else {
                 // No runtime from the provider, so there's no remaining time to
@@ -1000,8 +1010,17 @@ extension View {
                 }
             }
             if let runtime = presented.runtime?.runtimeBadgeText {
-                Button("Start Over · \(runtime)") {
+                Button {
                     onChoose(presented, 0)
+                } label: {
+                    Text(
+                        "Start Over · \(runtime)",
+                        comment: """
+                            Resume-playback dialog button: restart from the beginning. \
+                            The placeholder is a formatted duration (e.g. "1h 48m") for \
+                            the item's FULL runtime. Pairs with "Resume · %@ left".
+                            """
+                    )
                 }
             } else {
                 Button("Start Over") {

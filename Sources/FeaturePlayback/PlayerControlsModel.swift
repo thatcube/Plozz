@@ -237,13 +237,13 @@ public final class PlayerControlsModel {
     /// Which half of the control layer a focus entry is headed for. Written by the
     /// input controller *before* `controlBarVisible` flips true, so the controls
     /// know whether the viewer swiped/pressed **Down** (Info card, tab focused) or
-    /// **Up** (the top track-control row).
-    public var controlBarEntry: ControlBarEntry = .topRow
+    /// **Up** (the track-control row above the scrubber).
+    public var controlBarEntry: ControlBarEntry = .trackControls
 
     /// The two ways focus enters the control layer, one per direction.
     public enum ControlBarEntry: Equatable, Sendable {
-        /// Up from the scrub surface: land in the top row (Speed/Audio/Subtitles).
-        case topRow
+        /// Up from the scrub surface: land in the track row (Speed/Audio/Subtitles).
+        case trackControls
         /// Down from the scrub surface: open the Info card with its tab focused.
         case info
     }

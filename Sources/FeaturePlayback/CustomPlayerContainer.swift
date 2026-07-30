@@ -1041,7 +1041,7 @@ final class PlayerInputViewController: UIViewController {
     }
 
     /// An Up press from the scrub surface reveals the transport and lands focus in
-    /// the top track-control row (Speed · Audio · Subtitles); pressing Up again
+    /// the track-control row above the scrubber (Speed · Audio · Subtitles); Up again
     /// from there returns to the surface. If a Skip button is
     /// currently showing passively (a grace-window seek landed in a segment), Up
     /// grabs it instead so the viewer can act on the affordance they chose not to
@@ -1058,7 +1058,7 @@ final class PlayerInputViewController: UIViewController {
         }
         // Falls back to a plain transport flash when this source has no track
         // controls to focus (see `hasControlBarContent(for:)`).
-        enterControlBar(entry: .topRow)
+        enterControlBar(entry: .trackControls)
     }
 
     private func skip(by seconds: TimeInterval) {
@@ -1206,7 +1206,7 @@ final class PlayerInputViewController: UIViewController {
 
     /// Reveals the transport and drops Siri-Remote focus into the control layer.
     /// `entry` picks the destination: **Down** opens the Info card with its tab
-    /// focused, **Up** lands in the top track-control row. Surface scrub/skip
+    /// focused, **Up** lands in the track-control row above the scrubber. Surface scrub/skip
     /// recognizers are disabled so the SwiftUI focus engine owns navigation.
     /// Playback keeps running so track/speed/sync tweaks apply live (Infuse-style).
     private func enterControlBar(entry: PlayerControlsModel.ControlBarEntry) {
@@ -1271,11 +1271,11 @@ final class PlayerInputViewController: UIViewController {
     }
 
     /// The Info tab is always available, so a Down entry is always meaningful; the
-    /// top row only exists when the engine/source actually offers track controls.
+    /// track row only exists when the engine/source actually offers track controls.
     private func hasControlBarContent(for entry: PlayerControlsModel.ControlBarEntry) -> Bool {
         switch entry {
         case .info: return true
-        case .topRow: return !model.trackControlCategories.isEmpty
+        case .trackControls: return !model.trackControlCategories.isEmpty
         }
     }
 

@@ -283,11 +283,25 @@ struct PlayerControls: View {
             // Any focus move between control-bar buttons is activity — bump so the
             // container restarts its idle countdown instead of hiding mid-navigation.
             model.controlBarActivity &+= 1
-            // Invariant: the Info tab is focused ONLY with its card open — the tab is
-            // the card's header, not a standalone button. Whatever route focus took
-            // to get there (our entry write, a Down press, the focus engine), the
-            // card comes with it, so the tab can never sit focused over nothing.
-            if slot == .button(.info), openPanel != .info { openPanel = .info }
+            if slot == .button(.info) {
+                if model.controlBarEntry == .info {
+                    // Invariant: the Info tab is focused ONLY with its card open —
+                    // the tab is the card's header, not a standalone button. However
+                    // focus reached it (our entry write, walking up from a card
+                    // button), the card comes with it, so the tab can never sit
+                    // focused over nothing.
+                    if openPanel != .info { openPanel = .info }
+                } else {
+                    // Safety net for an Up entry: the tab is a Down-only destination,
+                    // so focus landing there means the focus engine's own entry pass
+                    // beat us to it. Bounce to the track row WITHOUT opening the card
+                    // — that cascade is what turned an Up press into "Info card open,
+                    // Restart focused" (the engine then fell into the freshly
+                    // inserted card, and the track row it should have used had been
+                    // disabled by the open panel).
+                    restoreFocus(initialFocus)
+                }
+            }
             // `infoTabSettled` distinguishes "the tab has been focused for a beat"
             // from "focus arrived on the tab in this very event". A move command and
             // the focus change it causes land in the same turn, and the order isn't
@@ -799,6 +813,12 @@ struct PlayerControls: View {
     /// auto-hide window after Menu returns to the video — during which the tab is
     /// not reachable anyway (the host's interaction is off), so gating there bought
     /// nothing and just left the tab looking disabled.
+    ///
+    /// That exemption is also why the container hands UIKit its focus update a turn
+    /// late (see `enterControlBar(entry:)`): the gate is evaluated against the LAST
+    /// RENDERED state, so asking for focus in the same breath as flipping
+    /// `controlBarVisible` would have the engine pick from a hierarchy where the tab
+    /// still looked open for business.
     private var infoTabFocusable: Bool {
         !model.controlBarVisible || focus != nil || model.controlBarEntry == .info
     }

@@ -1245,8 +1245,19 @@ final class PlayerInputViewController: UIViewController {
         setSurfaceRecognizers(enabled: false)
         controlBarHost?.view.isUserInteractionEnabled = true
         playerInputView?.allowsFocus = false
-        setNeedsFocusUpdate()
-        updateFocusIfNeeded()
+        // Ask for the focus update a runloop turn late, on purpose. The controls
+        // decide their own entry target from `controlBarEntry` — and gate the Info
+        // tab out of the focus order for exactly this moment — but both of those are
+        // evaluated when SwiftUI re-renders, which has NOT happened yet at this
+        // point. Asking synchronously had the focus engine choose from the previous
+        // render, where the tab was still focusable, and an Up press could land on
+        // Info (opening its card and falling through to Restart). One turn later the
+        // hierarchy the engine inspects matches the entry the viewer asked for.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.focusContext == .controlBar else { return }
+            self.setNeedsFocusUpdate()
+            self.updateFocusIfNeeded()
+        }
         // The control bar participates in auto-hide too: navigating its buttons
         // restarts the countdown (see refreshFromEngine) and an open menu pins it,
         // but once the viewer stops interacting the transport times out and focus

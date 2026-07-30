@@ -521,16 +521,20 @@ struct PlayerControls: View {
         // place. Nothing moves relative to anything else, which is what stops the
         // card reading as detached from the transport above it.
         .offset(y: infoMode ? 0 : Self.infoCardLift)
-        #if DEBUG
-        // TEMPORARY probe: reports the transaction actually in effect for the
-        // cluster's offset, so "did the reveal animate at all?" is an observation
-        // rather than a guess.
-        .transaction { t in
-            PlozzLog.playback.debug(
-                "PLZANIM infoMode=\(infoMode) offset=\(infoMode ? 0 : Self.infoCardLift) anim=\(String(describing: t.animation)) disabled=\(t.disablesAnimations)"
-            )
+        // Hide the strip of card that a tighter-than-the-margin gap leaves showing at
+        // rest (see `infoCardPeek`). A MASK rather than clipping or an opacity gate:
+        // it's a fixed window in the cluster's LAYOUT space, so the content slides
+        // underneath it and the card is simply revealed as it rises — no state to
+        // animate, nothing to desync. The generous negative padding is load-bearing:
+        // a mask is sized to its content, so a bare `Rectangle()` would crop whatever
+        // the focused controls draw outside the cluster's bounds (their focus halo
+        // and glass bleed).
+        .mask(alignment: .top) {
+            Rectangle()
+                .padding(EdgeInsets(
+                    top: -800, leading: -800, bottom: Self.infoCardPeek, trailing: -800
+                ))
         }
-        #endif
         .onPreferenceChange(TransportHeightKey.self) { transportHeight = $0 }
         // The reveal's clock, and — deliberately — the ONLY animation modifier at
         // cluster level that can fire while it runs. Anything else here retimes the
@@ -543,7 +547,7 @@ struct PlayerControls: View {
         // Even margins in editor mode (60 all round); otherwise the usual top-heavy
         // transport layout. The top shrinks so the full-height panel clears overscan.
         .padding(.top, styleEditing ? 60 : 90)
-        .padding(.bottom, styleEditing ? 60 : 48)
+        .padding(.bottom, styleEditing ? 60 : Self.bottomMargin)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -825,10 +829,23 @@ struct PlayerControls: View {
         openPanel == .info ? nil : openPanel
     }
 
-    /// Gap between the tab row and the Info card. Equal to the cluster's bottom
-    /// margin ON PURPOSE — see `infoCardLift` for the arithmetic that equality makes
-    /// work out.
-    private static let infoCardGap: CGFloat = 48
+    /// The cluster's bottom margin: how far the tab row rests above the screen edge
+    /// with the card closed. Unchanged from the layout that shipped before the card.
+    private static let bottomMargin: CGFloat = 48
+
+    /// Gap between the tab row and the Info card when the card is open.
+    private static let infoCardGap: CGFloat = 32
+
+    /// How much of the card would peek above the screen edge at rest.
+    ///
+    /// The cluster travels as ONE rigid unit, which ties these three numbers
+    /// together: parking it far enough to put the tab back at `bottomMargin` leaves
+    /// the card's top exactly `bottomMargin − infoCardGap` above the bottom edge. So
+    /// a gap TIGHTER than the margin necessarily shows a sliver — the only ways out
+    /// would be to move the tab down (the gap and margin become one number) or to
+    /// let the card travel further than the tab, which is exactly the desync this
+    /// layout exists to avoid. Instead the strip is masked off; see `bottomCluster`.
+    private static var infoCardPeek: CGFloat { max(0, bottomMargin - infoCardGap) }
 
     /// How far down the cluster parks when the Info card is closed.
     ///

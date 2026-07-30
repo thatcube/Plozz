@@ -521,20 +521,6 @@ struct PlayerControls: View {
         // place. Nothing moves relative to anything else, which is what stops the
         // card reading as detached from the transport above it.
         .offset(y: infoMode ? 0 : Self.infoCardLift)
-        // Hide the strip of card that a tighter-than-the-margin gap leaves showing at
-        // rest (see `infoCardPeek`). A MASK rather than clipping or an opacity gate:
-        // it's a fixed window in the cluster's LAYOUT space, so the content slides
-        // underneath it and the card is simply revealed as it rises — no state to
-        // animate, nothing to desync. The generous negative padding is load-bearing:
-        // a mask is sized to its content, so a bare `Rectangle()` would crop whatever
-        // the focused controls draw outside the cluster's bounds (their focus halo
-        // and glass bleed).
-        .mask(alignment: .top) {
-            Rectangle()
-                .padding(EdgeInsets(
-                    top: -800, leading: -800, bottom: Self.infoCardPeek, trailing: -800
-                ))
-        }
         .onPreferenceChange(TransportHeightKey.self) { transportHeight = $0 }
         // The reveal's clock, and — deliberately — the ONLY animation modifier at
         // cluster level that can fire while it runs. Anything else here retimes the
@@ -549,6 +535,26 @@ struct PlayerControls: View {
         .padding(.top, styleEditing ? 60 : 90)
         .padding(.bottom, styleEditing ? 60 : Self.bottomMargin)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Hide the strip of card that a tighter-than-the-margin gap leaves showing at
+        // rest (see `infoCardPeek`). A MASK rather than clipping or an opacity gate:
+        // it's a fixed window in LAYOUT space, so the content slides underneath it
+        // and the card is revealed as it rises — no state to animate, nothing to
+        // desync.
+        //
+        // Applied at the END of the chain, after the cluster's padding: the window is
+        // measured from this view's bottom edge, and only here is that the SCREEN's
+        // bottom edge. Before the padding it was the card's own bottom — 48pt higher —
+        // so the strip landed on the resting tab and clipped it.
+        //
+        // The generous negative padding is load-bearing: a mask is sized to its
+        // content, so a bare `Rectangle()` would crop whatever the focused controls
+        // draw outside the cluster's bounds (their focus halo and glass bleed).
+        .mask(alignment: .top) {
+            Rectangle()
+                .padding(EdgeInsets(
+                    top: -800, leading: -800, bottom: Self.infoCardPeek, trailing: -800
+                ))
+        }
     }
 
     /// The dim scrim behind the controls. A *fixed*, bottom-anchored gradient that

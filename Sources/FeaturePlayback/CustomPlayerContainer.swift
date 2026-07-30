@@ -728,7 +728,7 @@ final class PlayerInputViewController: UIViewController {
             enterUpNext()
         case .beginAutoDelay:
             upNextAdvanceAtSeconds = model.currentSeconds + SkipIntrosMode.autoSkipDelay
-            model.upNextAdvanceAtSeconds = upNextAdvanceAtSeconds
+            model.upNextCard.advanceAtSeconds = upNextAdvanceAtSeconds
             enterUpNext()
         case .advance:
             advanceToUpNext()
@@ -737,7 +737,7 @@ final class PlayerInputViewController: UIViewController {
 
     private func enterUpNext(stealFocus: Bool = true) {
         presentingUpNext = true
-        model.isPresentingUpNext = true
+        model.upNextCard.isPresenting = true
         guard stealFocus else {
             // Passive present (a grace-window seek landed in credits): the card is
             // visible but the scrub surface keeps focus, so the seek is never
@@ -757,9 +757,9 @@ final class PlayerInputViewController: UIViewController {
     /// dismissed, or its credits window passes.
     private func exitUpNext() {
         presentingUpNext = false
-        model.isPresentingUpNext = false
+        model.upNextCard.isPresenting = false
         upNextAdvanceAtSeconds = nil
-        model.upNextAdvanceAtSeconds = nil
+        model.upNextCard.advanceAtSeconds = nil
         upNextHost?.view.isUserInteractionEnabled = false
         if focusContext == .upNext {
             focusContext = .surface
@@ -774,7 +774,7 @@ final class PlayerInputViewController: UIViewController {
     /// Marks the card consumed so a per-tick auto mode (instant/delay) fires this
     /// exactly once and never re-summons anything for the same credits window.
     private func advanceToUpNext() {
-        model.dismissedUpNext = true
+        model.upNextCard.dismissed = true
         actions.playUpNext()
         exitUpNext()
     }

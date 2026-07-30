@@ -188,6 +188,46 @@ public final class InfoCardModel {
     public init() {}
 }
 
+/// The closing-credits **Up Next** card's stored state.
+///
+/// Split out of `PlayerControlsModel` (a known god object under a decreasing-only
+/// budget in `tools/arch-guard.py`). Only the stored values live here: the
+/// decisions that consume them stay on `PlayerControlsModel`, since they also weigh
+/// the item's skippable segments and the live playhead, and a computed property
+/// costs nothing on the observable surface either way.
+@MainActor
+@Observable
+public final class UpNextModel {
+    /// Presentation data for the next episode, resolved (with spoiler masking) by
+    /// the view model when a next episode exists and the Up Next setting is on.
+    /// `nil` for movies, the final episode, or when the card is disabled — in which
+    /// case no Up Next card is ever offered and credits behave normally.
+    public var info: UpNextInfo?
+
+    /// True once the user has dismissed the card for the current item, so it
+    /// doesn't keep re-grabbing focus through the rest of the credits.
+    public var dismissed: Bool = false
+
+    /// Mirrors `CustomPlayerContainer.presentingUpNext`: true only while the
+    /// container has actually *presented* the card (focused or the passive
+    /// grace-seek present). The SwiftUI `UpNextCardView` renders on this — not the
+    /// raw `upNextActive` — so it renders in lockstep with the container's focus
+    /// state and never draws on top of an open menu (the root cause of Back exiting
+    /// the whole player instead of dismissing the card).
+    public var isPresenting: Bool = false
+
+    /// In `.autoDelay`, the playback position (seconds) at which the card
+    /// auto-advances to the next episode. Drives the countdown ring; `nil` when not
+    /// counting down.
+    public var advanceAtSeconds: TimeInterval?
+
+    /// How long before the end the card may appear when there's no credits marker.
+    /// Set from the profile's `PlaybackSettings.upNextLeadSeconds`; default 30s.
+    public var leadSeconds: TimeInterval = 30
+
+    public init() {}
+}
+
 /// Shared, observable state for the custom player's transport overlay.
 ///
 /// `PlayerViewModel` writes live playback facts (position, duration, buffered,
@@ -386,25 +426,12 @@ public final class PlayerControlsModel {
     public var seekLanding: SkipSeekLanding?
 
     // MARK: Up Next (closing-credits next-episode card)
-    /// Presentation data for the next episode, resolved (with spoiler masking)
-    /// by the view model when a next episode exists and the Up Next setting is on.
-    /// `nil` for movies, the final episode, or when the card is disabled — in
-    /// which case no Up Next card is ever offered and credits behave normally.
-    public var upNext: UpNextInfo?
-    /// True once the user has dismissed the Up Next card for the current item, so
-    /// it doesn't keep re-grabbing focus through the rest of the credits.
-    public var dismissedUpNext: Bool = false
-    /// Mirrors `CustomPlayerContainer.presentingUpNext`: true only while the
-    /// container has actually *presented* the Up Next card (focused or the passive
-    /// grace-seek present). The SwiftUI `UpNextCardView` renders on this — not the
-    /// raw `upNextActive` — so it renders in lockstep with the container's focus
-    /// state and never draws on top of an open menu (the root cause of Back
-    /// exiting the whole player instead of dismissing the card).
-    public var isPresentingUpNext: Bool = false
-    /// In `.autoDelay`, the playback position (seconds) at which the Up Next card
-    /// auto-advances to the next episode. Drives the card's countdown ring; `nil`
-    /// when not counting down.
-    public var upNextAdvanceAtSeconds: TimeInterval?
+    /// The closing-credits next-episode card's own state. A facet for the stored
+    /// values only — the decisions that read them (`upNextActive`,
+    /// `creditsOwnedByUpNext`, …) stay on this type, because they also weigh the
+    /// skippable segments and the live playhead. Computed properties don't count
+    /// against the observable surface, so they cost nothing here.
+    public let upNextCard = UpNextModel()
 
     public init() {}
 
@@ -487,15 +514,13 @@ public final class PlayerControlsModel {
     /// (A deep seek into credits clears ``activeCreditsSegment``, so a deliberate
     /// jump still falls through to normal handling.)
     public var creditsOwnedByUpNext: Bool {
-        upNext != nil && activeCreditsSegment != nil
+        upNextCard.info != nil && activeCreditsSegment != nil
     }
 
     /// Seconds before the end at which the Up Next card appears when there is NO
     /// closing-credits marker to anchor it — marker-less servers (SMB shares) or
     /// content the server never analysed for segments. Marker-based content still
     /// triggers on its real credits segment (usually earlier / more accurate).
-    /// Set from the profile's `PlaybackSettings.upNextLeadSeconds`; default 30s.
-    public var upNextLeadSeconds: TimeInterval = 30
 
     /// Whether playback is in its final stretch by time alone — the fallback
     /// trigger for the Up Next card when there's no credits marker. Guarded on a
@@ -506,7 +531,7 @@ public final class PlayerControlsModel {
     public var isNearEndByTime: Bool {
         guard duration > 0, currentSeconds > 0 else { return false }
         let remaining = duration - currentSeconds
-        return remaining > 0 && remaining <= upNextLeadSeconds
+        return remaining > 0 && remaining <= upNextCard.leadSeconds
     }
 
     /// Whether this content has a closing-credits marker at all. When it does, the
@@ -523,7 +548,7 @@ public final class PlayerControlsModel {
     /// final ``markerlessUpNextLeadSeconds`` by time. Marker-based content is
     /// unaffected — it still triggers exactly on its credits segment.
     public var upNextActive: Bool {
-        guard !dismissedUpNext, upNext != nil else { return false }
+        guard !upNextCard.dismissed, upNextCard.info != nil else { return false }
         if creditsOwnedByUpNext { return true }
         return !hasCreditsMarker && isNearEndByTime
     }

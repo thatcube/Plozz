@@ -483,7 +483,7 @@ public final class PlayerViewModel {
         self.controls.skipBackwardInterval = playbackSettings.skipBackwardInterval
         self.controls.skipForwardInterval = playbackSettings.skipForwardInterval
         self.controls.seekWithoutPausing = playbackSettings.seekWithoutPausing
-        self.controls.upNextLeadSeconds = TimeInterval(playbackSettings.upNextLeadSeconds)
+        self.controls.upNextCard.leadSeconds = TimeInterval(playbackSettings.upNextLeadSeconds)
         // Seed the overlay with the profile's persisted subtitle appearance so a
         // selected subtitle renders in the user's style from the first cue.
         self.liveSubtitles.style = style
@@ -723,7 +723,7 @@ public final class PlayerViewModel {
     /// Dismisses the Up Next card for the current episode without advancing
     /// (card Menu / swipe-up), so it won't keep grabbing focus during credits.
     public func dismissUpNextCard() {
-        controls.dismissedUpNext = true
+        controls.upNextCard.dismissed = true
     }
 
     /// Fetches the playing episode's series-level ids and folds them into the

@@ -132,8 +132,8 @@ struct PlozziOSPlayerControlsOverlay: View {
                 .padding(24)
             }
 
-            if viewModel.controls.isPresentingUpNext,
-               let upNext = viewModel.controls.upNext {
+            if viewModel.controls.upNextCard.isPresenting,
+               let upNext = viewModel.controls.upNextCard.info {
                 PlozziOSUpNextCard(
                     info: upNext,
                     countdownRemaining: upNextCountdownRemaining,
@@ -191,7 +191,7 @@ struct PlozziOSPlayerControlsOverlay: View {
     }
 
     private var upNextCountdownRemaining: TimeInterval? {
-        guard let deadline = viewModel.controls.upNextAdvanceAtSeconds else { return nil }
+        guard let deadline = viewModel.controls.upNextCard.advanceAtSeconds else { return nil }
         return max(deadline - viewModel.controls.currentSeconds, 0)
     }
 

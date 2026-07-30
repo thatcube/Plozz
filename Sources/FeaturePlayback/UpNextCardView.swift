@@ -11,7 +11,7 @@ import CoreUI
 /// Select → advance to the next episode (`actions.playUpNext`, an in-place VM
 /// swap, never a seek-to-end, so the next episode never flashes the series
 /// page). Menu / swipe-up → dismiss without advancing (`actions.dismissUpNext`).
-/// The card only renders when `model.isPresentingUpNext` is true and no menu is
+/// The card only renders when `model.upNextCard.isPresenting` is true and no menu is
 /// open (`!controlBarVisible`) — i.e. the container has actually presented it
 /// during the (seek-respecting) credits window with a next episode queued — so
 /// it never draws over an open menu and never collides with the Skip Credits
@@ -38,7 +38,7 @@ struct UpNextCardView: View {
             Spacer()
             HStack {
                 Spacer()
-                if model.isPresentingUpNext, !model.controlBarVisible, let info = model.upNext {
+                if model.upNextCard.isPresenting, !model.controlBarVisible, let info = model.upNextCard.info {
                     card(for: info)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -49,7 +49,7 @@ struct UpNextCardView: View {
             .padding(.bottom, 200)
         }
         .ignoresSafeArea()
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.isPresentingUpNext)
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.upNextCard.isPresenting)
         .onAppear { focused = true }
     }
 
@@ -156,7 +156,7 @@ struct UpNextCardView: View {
             Circle()
                 .fill(focused ? Color.black.opacity(0.08) : Color.white.opacity(0.15))
 
-            if model.skipMode == .autoDelay, let deadline = model.upNextAdvanceAtSeconds {
+            if model.skipMode == .autoDelay, let deadline = model.upNextCard.advanceAtSeconds {
                 let remaining = deadline - model.currentSeconds
                 let fraction = min(1, max(0, remaining / SkipIntrosMode.autoSkipDelay))
                 CountdownRing(fraction: fraction, focused: focused)

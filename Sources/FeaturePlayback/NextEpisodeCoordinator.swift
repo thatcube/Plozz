@@ -186,7 +186,7 @@ final class NextEpisodeCoordinator {
         guard Date().timeIntervalSince(lastUpNextDiagAt) >= 8 else { return }
         lastUpNextDiagAt = Date()
         let creditsStart = controls.skippableSegments.first { $0.kind == .credits }?.start
-        HandoffDiagnostics.emit("upnext-state cDur=\(Int(cDur)) cCur=\(Int(cCur)) eDur=\(Int(host.upNextEngine.duration)) remaining=\(Int(remaining)) creditsStart=\(creditsStart.map { Int($0) }.map(String.init) ?? "none") card=\(controls.upNext != nil) show=\(playbackSettings.showUpNextCard) marker=\(controls.hasCreditsMarker) nearEndByTime=\(controls.isNearEndByTime) active=\(controls.upNextActive) presenting=\(controls.isPresentingUpNext) lead=\(Int(controls.upNextLeadSeconds))")
+        HandoffDiagnostics.emit("upnext-state cDur=\(Int(cDur)) cCur=\(Int(cCur)) eDur=\(Int(host.upNextEngine.duration)) remaining=\(Int(remaining)) creditsStart=\(creditsStart.map { Int($0) }.map(String.init) ?? "none") card=\(controls.upNextCard.info != nil) show=\(playbackSettings.showUpNextCard) marker=\(controls.hasCreditsMarker) nearEndByTime=\(controls.isNearEndByTime) active=\(controls.upNextActive) presenting=\(controls.upNextCard.isPresenting) lead=\(Int(controls.upNextCard.leadSeconds))")
     }
 
     /// Hands the prefetched next-episode resolution to the incoming player and
@@ -330,7 +330,7 @@ final class NextEpisodeCoordinator {
     /// during the closing-credits window (see ``PlayerControlsModel/upNextActive``).
     func updateUpNextCard() {
         guard playbackSettings.showUpNextCard, let next = host?.nextEpisodeCandidate else {
-            controls.upNext = nil
+            controls.upNextCard.info = nil
             return
         }
         let hideThumb = spoilerSettings.shouldHideThumbnail(for: next)
@@ -362,7 +362,7 @@ final class NextEpisodeCoordinator {
             blur = hideThumb // blur mode (the only remaining hidden case)
         }
 
-        controls.upNext = UpNextInfo(
+        controls.upNextCard.info = UpNextInfo(
             episode: next,
             showName: showName,
             metaLine: metaLine,

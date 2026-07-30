@@ -248,6 +248,13 @@ public final class PlayerControlsModel {
     /// beat later.
     public var controlBarFocusArmed: Bool = false
 
+    /// False from the moment an entry starts until the focus engine has run its
+    /// pass, then true for the rest of the session. While false the controls narrow
+    /// the focus order to the single control the entry direction asks for, so the
+    /// engine's pick cannot be anything else. Steering it any other way failed: the
+    /// engine happily overrules a `@FocusState` write that is already in place.
+    public var controlBarEntrySettled: Bool = false
+
     /// The two ways focus enters the control layer, one per direction.
     public enum ControlBarEntry: Equatable, Sendable {
         /// Up from the scrub surface: land in the track row (Speed/Audio/Subtitles).

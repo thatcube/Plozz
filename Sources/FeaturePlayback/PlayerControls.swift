@@ -720,6 +720,7 @@ struct PlayerControls: View {
                 }
                 .playerGlassButton(prominent: openPanel == category)
                 .focused($focus, equals: .button(category))
+                .disabled(entryLocksOut(.button(category)))
                 .background {
                     // Publish the Speed button's leading edge so its panel can
                     // open left-aligned to the button rather than the far edge.
@@ -787,9 +788,9 @@ struct PlayerControls: View {
         .allowsHitTesting(!model.isScrubbing)
         // The tab stays live while its OWN card is open (that's what makes it a tab
         // rather than a button); any other open panel traps focus, so it drops out.
-        // It also drops out until something else in the controls holds focus, so an
-        // Up entry can never land on it (see `infoTabFocusable`).
-        .disabled((openPanel != nil && openPanel != .info) || !infoTabFocusable)
+        // It's also out of the focus order for the entry instant unless the viewer
+        // pressed Down, which is what keeps an Up entry off it (see `entryLocksOut`).
+        .disabled((openPanel != nil && openPanel != .info) || entryLocksOut(.button(.info)))
         // Bridge the horizontal offset between the rows: the track controls sit at
         // the trailing edge and the tab at the leading one, so nothing is
         // geometrically below Speed/Audio/Subtitles and a Down press would simply do
@@ -800,29 +801,29 @@ struct PlayerControls: View {
         .plozzFocusSection()
     }
 
-    /// Whether the Info tab is part of the focus order.
+    /// The one control allowed to hold focus while an entry is in flight, or nil
+    /// once the entry has settled and ordinary navigation resumes.
     ///
-    /// Up must NEVER reach the tab — it's a Down-only destination. Entering the
-    /// controls makes tvOS run its own default-focus pass, so per the focus-engine
-    /// rule we gate what's focusable rather than chase focus after it lands: for the
-    /// one moment the layer takes focus with nothing focused yet, the tab is out of
-    /// the order and the track row is the only candidate. Once focus is somewhere
-    /// the tab joins back in, so Down still reaches it, and a Down entry — which
-    /// targets the tab directly — opts in from the start.
-    ///
-    /// Gated ONLY while the control layer actually owns focus. `.disabled` dims a
-    /// stock button, and the layer sits on screen with nothing focused for the whole
-    /// auto-hide window after Menu returns to the video — during which the tab is
-    /// not reachable anyway (the host's interaction is off), so gating there bought
-    /// nothing and just left the tab looking disabled.
-    ///
-    /// That exemption is also why the container hands UIKit its focus update a turn
-    /// late (see `enterControlBar(entry:)`): the gate is evaluated against the LAST
-    /// RENDERED state, so asking for focus in the same breath as flipping
-    /// `controlBarVisible` would have the engine pick from a hierarchy where the tab
-    /// still looked open for business.
-    private var infoTabFocusable: Bool {
-        !model.controlBarVisible || focus != nil || model.controlBarEntry == .info
+    /// The focus engine decides where focus lands when the control layer becomes
+    /// focusable, and it does NOT defer to a `@FocusState` value that is already in
+    /// place — telemetry caught it moving focus off our intended Subtitles button
+    /// and onto the Info tab. So rather than steering the engine, we narrow what it
+    /// can choose from: for the couple of frames an entry takes, every control
+    /// except the entry's own target leaves the focus order, and the engine's pick
+    /// is correct because it is the only pick available. Down targets the Info tab
+    /// (its card is the destination); Up targets the track row.
+    private var entryFocusTarget: FocusSlot? {
+        guard model.controlBarVisible, !model.controlBarEntrySettled else { return nil }
+        return model.controlBarEntry == .info ? .button(.info) : initialFocus
+    }
+
+    /// Whether `slot` is one of the controls held out of the focus order for the
+    /// duration of an entry. `.disabled` dims a stock button, but the window is a
+    /// couple of frames long and coincides with the transport fading in, so there is
+    /// nothing settled on screen to look dimmed.
+    private func entryLocksOut(_ slot: FocusSlot) -> Bool {
+        guard let target = entryFocusTarget else { return false }
+        return slot != target
     }
 
     /// The now-playing card the Info tab reveals, full width beneath the tab row.

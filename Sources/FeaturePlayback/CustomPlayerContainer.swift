@@ -1254,6 +1254,7 @@ final class PlayerInputViewController: UIViewController {
         // write arrived); waiting for the arm flag means it finds the intended target
         // already in place.
         model.controlBarFocusArmed = false
+        model.controlBarEntrySettled = false
         requestControlBarFocusUpdate()
         // The control bar participates in auto-hide too: navigating its buttons
         // restarts the countdown (see refreshFromEngine) and an open menu pins it,
@@ -1277,6 +1278,12 @@ final class PlayerInputViewController: UIViewController {
             }
             self.setNeedsFocusUpdate()
             self.updateFocusIfNeeded()
+            // The engine has now made its pick from a hierarchy holding exactly one
+            // focusable control. Release the narrowing a turn later, so the rest of
+            // the row (and the Info tab) come back for ordinary navigation.
+            DispatchQueue.main.async { [weak self] in
+                self?.model.controlBarEntrySettled = true
+            }
         }
     }
 
@@ -1296,6 +1303,7 @@ final class PlayerInputViewController: UIViewController {
         focusContext = .surface
         model.controlBarVisible = false
         model.controlBarFocusArmed = false
+        model.controlBarEntrySettled = false
         controlBarHost?.view.isUserInteractionEnabled = false
         playerInputView?.allowsFocus = true
         setSurfaceRecognizers(enabled: true)

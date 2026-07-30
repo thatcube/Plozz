@@ -713,8 +713,12 @@ struct PlayerControls: View {
         // focus, so the open panel becomes the sole focusable region.
         //
         // The row stays focusable in `infoMode` even though it's invisible: that's
-        // what lets Up from the Info tab walk back into it (and bring it back).
+        // what lets Up from the Info tab walk back into it (and bring it back). It
+        // spans the full width (Spacer + buttons) and is its own focus section so
+        // that Up from the leading-edge Info tab reaches these trailing-edge buttons
+        // despite the horizontal offset between them.
         .disabled(openPanel != nil)
+        .frame(maxWidth: .infinity, alignment: .trailing)
         .plozzFocusSection()
     }
 
@@ -749,6 +753,14 @@ struct PlayerControls: View {
         // It also drops out until something else in the controls holds focus, so an
         // Up entry can never land on it (see `infoTabFocusable`).
         .disabled((openPanel != nil && openPanel != .info) || !infoTabFocusable)
+        // Bridge the horizontal offset between the rows: the track controls sit at
+        // the trailing edge and the tab at the leading one, so nothing is
+        // geometrically below Speed/Audio/Subtitles and a Down press would simply do
+        // nothing. The row spans the full width (button + Spacer) and is its own
+        // focus section, so Down from ANY track button routes into it — the same
+        // trick the Info card uses for its Playback Info button.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .plozzFocusSection()
     }
 
     /// Whether the Info tab is part of the focus order.

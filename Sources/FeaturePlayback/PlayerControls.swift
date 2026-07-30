@@ -390,7 +390,7 @@ struct PlayerControls: View {
             // below the tab row (see `infoCard`).
             ZStack(alignment: .bottomLeading) {
                 titleBlock
-                    .opacity(titleVisible ? 1 : 0)
+                    .opacity(titleVisible && !infoMode ? 1 : 0)
                 if let openPanel, openPanel != .info {
                     morphingPanel(for: openPanel)
                         .plozzFocusSection()
@@ -422,6 +422,12 @@ struct PlayerControls: View {
                 VStack(alignment: .leading, spacing: 18) {
                     trackControlRow
                     scrubberRow
+                        // The whole transport steps aside for the Info tab (see
+                        // `infoMode`): faded in place rather than removed, so the
+                        // tab and its card never shift as it goes.
+                        .opacity(infoMode ? 0 : 1)
+                        .allowsHitTesting(!infoMode)
+                        .animation(.easeInOut(duration: 0.28), value: infoMode)
                     tabRow
                 }
                 .background(
@@ -690,37 +696,41 @@ struct PlayerControls: View {
         .opacity(model.isScrubbing ? 0 : 1)
         .offset(y: model.isScrubbing ? 8 : 0)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
-        // Step aside as a whole when the Info card comes up, so the card and its
-        // tab are the only chrome left above the scrubber.
-        .opacity(trackRowVisible ? 1 : 0)
-        .offset(y: trackRowVisible ? 0 : -24)
-        .animation(.easeInOut(duration: 0.28), value: trackRowVisible)
-        .allowsHitTesting(trackRowVisible)
+        // Step aside as a whole once the Info tab takes over, so the tab and its
+        // card are the only chrome left.
+        .opacity(infoMode ? 0 : 1)
+        .offset(y: infoMode ? -24 : 0)
+        .animation(.easeInOut(duration: 0.28), value: infoMode)
+        .allowsHitTesting(!infoMode)
         // Trap focus inside an open panel: while one is up, the transport buttons
         // drop out of the focus engine so directional nav can't wander out of the
         // menu. It closes only by selecting a row or pressing Menu (native-menu
         // behaviour). The scrub surface is already non-focusable while the bar owns
         // focus, so the open panel becomes the sole focusable region.
-        .disabled(openPanel != nil || !trackRowVisible)
+        //
+        // The row stays focusable in `infoMode` even though it's invisible: that's
+        // what lets Up from the Info tab walk back into it (and bring it back).
+        .disabled(openPanel != nil)
         .plozzFocusSection()
     }
 
-    /// Whether the track-control row is on screen: it steps aside for the Info card
-    /// (the transport block it lives in is already gone in the editor).
-    private var trackRowVisible: Bool {
-        openPanel != .info
+    /// True once the Info tab owns the moment — either focused or showing its card.
+    /// The title, the track controls and the scrub bar all fade out then, leaving
+    /// just the tab and (when open) its card, exactly like the Apple TV app.
+    private var infoMode: Bool {
+        focus == .button(.info) || openPanel == .info
     }
 
     /// The tab row beneath the scrub bar. Today a single Info tab; siblings
     /// (Chapters, …) join it here and switch the card below rather than opening
-    /// their own floating panel.
+    /// their own floating panel. Titled, not icon-only — these read as tabs.
     private var tabRow: some View {
         HStack(spacing: 20) {
             Button {
                 toggle(.info)
             } label: {
                 Label("Info", systemImage: "info.circle")
-                    .labelStyle(.iconOnly)
+                    .labelStyle(.titleOnly)
             }
             .playerGlassButton(prominent: openPanel == .info)
             .focused($focus, equals: .button(.info))

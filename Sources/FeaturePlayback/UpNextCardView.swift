@@ -49,14 +49,22 @@ struct UpNextCardView: View {
     /// Outer surface radius, derived so the border stays concentric with the art.
     static var surfaceRadius: CGFloat { artRadius + PlozzTheme.Metrics.cardInset }
 
-    /// Diameter of the trailing play control.
-    static let controlDiameter: CGFloat = 48
+    /// Diameter of the trailing play control. Sized so the glyph clears the ring by
+    /// ~4pt on every side rather than crowding it.
+    static let controlDiameter: CGFloat = 56
 
     /// The countdown ring sits just inside the control.
     static var ringDiameter: CGFloat { controlDiameter - 2 }
 
     /// Shared with the Skip button's ring so the two read as the same component.
     static let ringStroke: CGFloat = 5
+
+    /// Typography comes from the SHARED card scale (`PlozzMetrics`), not ad-hoc
+    /// semantic styles — the same source Home's rails and the episode cards use, so
+    /// this reads as part of the card family and follows the Display Size setting.
+    /// It sits one step down from a browse card because this is a compact overlay
+    /// floating over video, not a page surface.
+    private var metrics: PlozzMetrics { PlozzMetrics.standard }
 
     var body: some View {
         VStack {
@@ -84,28 +92,35 @@ struct UpNextCardView: View {
             HStack(spacing: 22) {
                 thumbnail(for: info)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 5) {
                     info.eyebrow
-                        .font(.caption2.weight(.heavy))
+                        .font(.system(size: metrics.cardSubtitleFontSize * 0.78, weight: .heavy))
                         .tracking(1.2)
                         .textCase(.uppercase)
-                        .foregroundStyle(focused ? Color.black.opacity(0.6) : Color.white.opacity(0.65))
+                        .foregroundStyle(Color.white.opacity(0.65))
                     // Show name leads. It's highly variable (short sitcoms →
                     // very long anime titles), so it shrinks a step, then wraps to
                     // two lines, then truncates — always staying readable.
                     info.showName
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(focused ? Color.black : Color.white)
+                        .font(.system(size: metrics.cardSubtitleFontSize * 1.2, weight: .semibold))
+                        .foregroundStyle(Color.white)
                         .lineLimit(2)
                         .minimumScaleFactor(0.7)
                         .truncationMode(.tail)
                     if let meta = info.metaLine {
                         Text(meta)
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(focused ? Color.black.opacity(0.7) : Color.white.opacity(0.75))
+                            .font(.system(size: metrics.cardSubtitleFontSize * 0.9, weight: .medium))
+                            .foregroundStyle(Color.white.opacity(0.75))
                             .lineLimit(1)
                     }
                 }
+                // Height is added HERE, not to the card's outer padding. The
+                // artwork is sized to this column's measured height and the card's
+                // outer inset must stay at `cardInset` for the corners to remain
+                // concentric — so growing the column grows the artwork and the card
+                // together, while padding the card's edge would break the corner
+                // rule and leave the artwork stranded at its old size.
+                .padding(.vertical, 23)
                 .frame(maxWidth: 420, alignment: .leading)
                 // Publish the text column's height so the artwork can match it.
                 .background(
@@ -126,7 +141,7 @@ struct UpNextCardView: View {
             .padding(.trailing, 24)
             .padding(.vertical, PlozzTheme.Metrics.cardInset)
         }
-        .buttonStyle(UpNextCardStyle(focused: focused))
+        .buttonStyle(UpNextCardStyle(focused: focused, cornerRadius: Self.surfaceRadius))
         .focused($focused)
         .onPreferenceChange(UpNextMediaHeightKey.self) { height in
             if height > 0 { mediaHeight = height }
@@ -185,17 +200,17 @@ struct UpNextCardView: View {
         ZStack {
             // Subtle circular backing so it reads as a tappable play button.
             Circle()
-                .fill(focused ? Color.black.opacity(0.08) : Color.white.opacity(0.15))
+                .fill(Color.white.opacity(0.15))
 
             if model.skipMode == .autoDelay, let deadline = model.upNextCard.advanceAtSeconds {
                 let remaining = deadline - model.currentSeconds
                 let fraction = min(1, max(0, remaining / SkipIntrosMode.autoSkipDelay))
-                CountdownRing(fraction: fraction, focused: focused)
+                CountdownRing(fraction: fraction)
             }
 
             Image(systemName: "play.fill")
                 .font(.system(size: 21, weight: .bold))
-                .foregroundStyle(focused ? Color.black : Color.white)
+                .foregroundStyle(Color.white)
                 // Optical centering — a play triangle reads slightly left of centre.
                 .offset(x: 2)
         }
@@ -207,10 +222,9 @@ struct UpNextCardView: View {
 /// advance, mirroring the Skip button's remaining-time ring.
 private struct CountdownRing: View {
     let fraction: Double
-    let focused: Bool
 
     var body: some View {
-        let foreground = focused ? Color.black : Color.white
+        let foreground = Color.white
         ZStack {
             Circle()
                 .stroke(foreground.opacity(0.22), lineWidth: UpNextCardView.ringStroke)
@@ -224,23 +238,41 @@ private struct CountdownRing: View {
     }
 }
 
-/// High-contrast card surface that brightens on focus, matching the Skip button.
+/// The card's surface: a dark scrim-relative panel that indicates focus with a
+/// **bright ring and a lift**, never by flooding to white.
+///
+/// This is the app's existing "bright ring" focus treatment — the one
+/// `PlozzFocusableCardModifier` uses on its Reduce Transparency path (same 4pt
+/// stroke at 0.9 opacity over the card's own surface, plus a focus shadow), applied
+/// here unconditionally.
+///
+/// Why not `PlozzCardButtonStyle`: its glass path falls back to `palette.liftSurface`
+/// — a solid white lift — whenever Reduce Transparency is on, which is exactly the
+/// heavy white flood this card is trying to avoid, and it would make the card's own
+/// light text illegible.
+///
+/// Why white rather than `palette.primaryText`: the shared version sits on a themed
+/// page, where primary text contrasts with the surface. This card floats over
+/// arbitrary video on a fixed dark panel, so a light theme's dark primary text would
+/// vanish into it. Fixed white matches the rest of this card's scrim-relative
+/// palette.
 private struct UpNextCardStyle: ButtonStyle {
     let focused: Bool
+    let cornerRadius: CGFloat
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(focused ? Color.black : Color.white)
-            .background(
-                RoundedRectangle(cornerRadius: UpNextCardView.surfaceRadius, style: .continuous)
-                    .fill(focused ? Color.white : Color.black.opacity(0.55))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: UpNextCardView.surfaceRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(focused ? 0 : 0.5), lineWidth: 1.5)
-            )
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return configuration.label
+            .background(shape.fill(Color.black.opacity(focused ? 0.72 : 0.55)))
+            .overlay {
+                shape.strokeBorder(
+                    Color.white.opacity(focused ? 0.9 : 0.28),
+                    lineWidth: focused ? 4 : 1
+                )
+            }
+            .clipShape(shape)
             .scaleEffect(configuration.isPressed ? 0.97 : (focused ? 1.04 : 1.0))
-            .shadow(color: .black.opacity(focused ? 0.4 : 0.25), radius: focused ? 18 : 8, y: 6)
+            .shadow(color: .black.opacity(focused ? 0.30 : 0.20), radius: focused ? 14 : 8, y: focused ? 7 : 4)
             .animation(.easeOut(duration: 0.18), value: focused)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }

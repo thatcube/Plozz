@@ -169,6 +169,16 @@ struct PlayerControls: View {
     /// anchored to. See `trackControlButtons`.
     private static let trackControlsSpace = "PlayerTrackControls"
 
+    /// tvOS's horizontal title-safe margin on a 1920pt-wide screen (1740pt safe
+    /// zone). The transport deliberately sits outside it, hugging the edge the way
+    /// Apple's own player does — but a full options menu is a block of readable text,
+    /// so it stays inside, where an overscanning TV can't crop it.
+    private static let titleSafeHorizontal: CGFloat = 90
+
+    /// Extra trailing inset that pulls an open menu from the transport's margin back
+    /// to the title-safe line.
+    private static var panelSafeInset: CGFloat { max(0, titleSafeHorizontal - horizontalMargin) }
+
     /// Side margin of the controls layer. Subtracted from the whole-layer
     /// measurement above so a panel aligned to a button lands in the cluster's own
     /// content coordinates.
@@ -181,6 +191,10 @@ struct PlayerControls: View {
     /// Measured leading-edge X of the Speed button, in `trackControlsSpace`. The
     /// Speed panel left-aligns to this so it opens directly above its own button.
     @State private var speedButtonLeading: CGFloat = 0
+
+    /// Measured width of the track-control row, so a button-aligned menu wider than
+    /// the row can be clamped instead of running off the screen.
+    @State private var trackControlsWidth: CGFloat = 0
 
     /// The transport control that was focused when the current panel was opened.
     /// Restored (deferred) whenever the panel fully closes so focus always lands
@@ -808,6 +822,12 @@ struct PlayerControls: View {
         // measured in ITS space — the offset that aligns the Speed menu to its own
         // button is then just that number.
         .coordinateSpace(name: Self.trackControlsSpace)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: TrackControlsWidthKey.self, value: proxy.size.width)
+            }
+        )
+        .onPreferenceChange(TrackControlsWidthKey.self) { trackControlsWidth = $0 }
     }
 
     /// True while the Info card owns the moment. The track controls and the scrub
@@ -991,6 +1011,11 @@ struct PlayerControls: View {
         if let panel = optionsPanel {
             morphingPanel(for: panel)
                 .plozzFocusSection()
+                // Keep the menu clear of the right-hand title-safe margin. The
+                // transport itself sits outside that line (60pt, hugging the edge like
+                // Apple's player), but a menu is a block of readable text and is only
+                // ever up briefly, so it observes the safe area.
+                .padding(.trailing, Self.panelSafeInset)
                 // Breathing room between the menu and the buttons beneath it.
                 .padding(.bottom, Self.panelLift)
                 // Grow + fade from the corner nearest the button that opened it so it
@@ -1170,6 +1195,17 @@ struct PlayerControls: View {
         }
     }
 
+    /// Where the Speed menu's leading edge sits: under its own button, but pulled
+    /// left when that would push the box past the row's trailing edge.
+    ///
+    /// The clamp matters because the Speed menu (260pt) is wider than the whole
+    /// three-button row, and Speed is its LEADING button — so aligning the two
+    /// naively hangs most of the menu off the right of the screen.
+    private var speedPanelLeading: CGFloat {
+        guard trackControlsWidth > 0 else { return 0 }
+        return min(speedButtonLeading, max(0, trackControlsWidth - panelWidth(for: .speed)))
+    }
+
     /// The tallest a scrollable list (track list / Audio / Speed / Sync) may grow
     /// before it clamps + scrolls, so a long list never overflows. The Style editor
     /// is exempt — it grows to its full natural height.
@@ -1265,7 +1301,7 @@ struct PlayerControls: View {
         // in the whole-layer space, so drop the layer's side margin to express it
         // relative to the cluster's content edge.
         .modifier(PanelHorizontalPlacement(
-            leadingInset: category == .speed ? speedButtonLeading : nil
+            leadingInset: category == .speed ? speedPanelLeading : nil
         ))
     }
 

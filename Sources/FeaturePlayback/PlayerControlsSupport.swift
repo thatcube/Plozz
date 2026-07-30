@@ -318,6 +318,15 @@ struct PanelGlassBackground: ViewModifier {
     }
 }
 
+/// Reports the track-control row's width so a menu aligned to one of its buttons
+/// can be clamped against the row's trailing edge.
+struct TrackControlsWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// Horizontally positions an open control panel within the bottom cluster.
 /// `leadingInset` non-nil → shift the panel right to sit under its own button
 /// (Speed); nil → pin to the trailing edge above the track-button cluster

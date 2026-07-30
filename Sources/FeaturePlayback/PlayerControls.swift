@@ -155,6 +155,11 @@ struct PlayerControls: View {
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
 
+    /// True once focus has *rested* on the Info tab for a runloop turn, as opposed
+    /// to having landed there in the event currently being handled. See the Up
+    /// branch of `handleMove(_:)`.
+    @State private var infoTabSettled = false
+
     /// Named coordinate space spanning the WHOLE controls layer, so the Speed
     /// button's leading edge can be measured in the same frame its panel — laid out
     /// in a different sub-stack of the cluster — is positioned in.
@@ -278,6 +283,24 @@ struct PlayerControls: View {
             // Any focus move between control-bar buttons is activity — bump so the
             // container restarts its idle countdown instead of hiding mid-navigation.
             model.controlBarActivity &+= 1
+            // Invariant: the Info tab is focused ONLY with its card open — the tab is
+            // the card's header, not a standalone button. Whatever route focus took
+            // to get there (our entry write, a Down press, the focus engine), the
+            // card comes with it, so the tab can never sit focused over nothing.
+            if slot == .button(.info), openPanel != .info { openPanel = .info }
+            // `infoTabSettled` distinguishes "the tab has been focused for a beat"
+            // from "focus arrived on the tab in this very event". A move command and
+            // the focus change it causes land in the same turn, and the order isn't
+            // guaranteed — so an Up press walking a card button onto the tab could
+            // otherwise be mistaken for an Up press ON the tab, and would close the
+            // card the viewer was just entering. Settling one runloop turn later
+            // makes the two cases distinguishable without guessing at delivery order.
+            infoTabSettled = false
+            if slot == .button(.info) {
+                DispatchQueue.main.async {
+                    if focus == .button(.info) { infoTabSettled = true }
+                }
+            }
         }
         .onChange(of: openPanel) { _, panel in
             // Surface whether a menu is open so the container pins the transport
@@ -344,42 +367,41 @@ struct PlayerControls: View {
 
     /// Directional presses that the focus engine can't resolve on its own.
     ///
-    /// The scrub bar is the hub: from the track row **Down** hands focus back to it
-    /// (never sideways-and-down to the Info tab), and from the scrub surface Down
-    /// again is what opens Info. **Up** never leaves the controls — nothing sits
-    /// above the track row, so a press there is a no-op and Menu is the way back to
-    /// the video. The one Up that does act is from the Info tab while its card is
-    /// open: it closes the card and lifts focus into the track row, bringing the
-    /// transport back with it.
-    ///
-    /// Guarding on `focus` is safe because `@FocusState` still holds the PREVIOUS
-    /// slot when the move command fires; the engine moves focus afterwards.
+    /// The scrub bar is the hub. From the track row **Down** hands focus back to it
+    /// (never sideways-and-down to the Info tab) and **Up** does nothing — nothing
+    /// sits above that row, so Menu is the way back to the video. The Info tab is
+    /// the card's header: **Up** from it closes the card and returns to the scrub
+    /// bar, while Up from a card button just walks onto the tab (the engine's job,
+    /// and why the tab must have *settled* before its own Up counts).
     private func handleMove(_ direction: PlozzMoveCommandDirection) {
         switch direction {
         case .up:
-            // Only the tab (the card's top edge) backs out; Up from a card button
-            // just walks up to the tab, and Up in the track row does nothing.
-            guard openPanel == .info, focus == .button(.info) else { return }
-            // Route the central close-restore at the track row instead of back onto
-            // the tab, so this reads as one continuous upward move.
-            panelReturnFocus = initialFocus
-            openPanel = nil
+            // The tab is the card's top edge: leaving it upward closes the card and
+            // hands focus back to the scrub bar. `infoTabSettled` keeps the Up that
+            // *arrived* on the tab (from a card button) from being read as an Up
+            // *on* the tab.
+            guard openPanel == .info, focus == .button(.info), infoTabSettled else { return }
+            closeInfoCard()
         case .down:
-            guard openPanel == nil else { return }
-            if focus == .button(.info) {
-                // Down from the tab opens its card, so the tab reads the same whether
-                // you press Select on it or keep pressing Down from the scrub bar.
-                toggle(.info)
-            } else if case .button = focus {
-                // Down from a track control returns to the scrub bar. Handing focus
-                // back to the surface here also takes the whole controls layer out of
-                // the focus order, so the engine can't complete its own move onto the
-                // Info tab — Info stays a deliberate Down-from-the-scrubber gesture.
-                onExitToSurface()
-            }
+            // Down from a track control returns to the scrub bar. Handing focus back
+            // to the surface here also takes the whole controls layer out of the
+            // focus order, so the engine can't complete its own move onto the Info
+            // tab — Info stays a deliberate Down-from-the-scrubber gesture.
+            guard openPanel == nil, case .button(let category) = focus, category != .info else { return }
+            onExitToSurface()
         case .left, .right:
             break
         }
+    }
+
+    /// Dismiss the Info card and hand focus back to the scrub bar.
+    ///
+    /// The card and its tab are one unit, so they always leave together: leaving the
+    /// tab focused over a closed card is exactly the state the focus invariant in
+    /// `onChange(of: focus)` forbids (it would immediately re-open the card).
+    private func closeInfoCard() {
+        openPanel = nil
+        onExitToSurface()
     }
 
     // MARK: Bottom cluster (title / options panel + scrubber + tab row + Info card)
@@ -783,14 +805,20 @@ struct PlayerControls: View {
 
     /// The now-playing card the Info tab reveals, full width beneath the tab row.
     private var infoCard: some View {
-        InfoPanelView(model: model, actions: actions, focus: $focus, onClose: { openPanel = nil })
+        InfoPanelView(model: model, actions: actions, focus: $focus, onClose: closeInfoCard)
             .colorScheme(.dark)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func toggle(_ category: Category) {
         if openPanel == category {
-            openPanel = nil   // focus restoration handled centrally in onChange(of: openPanel)
+            // Closing the Info card also gives up the tab (they're one unit); every
+            // other panel just hands focus back to the button that opened it.
+            if category == .info {
+                closeInfoCard()
+            } else {
+                openPanel = nil   // focus restoration handled centrally in onChange(of: openPanel)
+            }
         } else {
             panelReturnFocus = focus ?? .button(category)
             openPanel = category
@@ -1372,7 +1400,10 @@ struct PlayerControls: View {
             openSubtitleScreen(subtitleScreen.parent)
             return
         }
-        if openPanel != nil {
+        if openPanel == .info {
+            // The card leaves with its tab, straight back to the scrub bar.
+            closeInfoCard()
+        } else if openPanel != nil {
             openPanel = nil   // onChange(of: openPanel) restores the transport focus
         } else {
             onExitToSurface()

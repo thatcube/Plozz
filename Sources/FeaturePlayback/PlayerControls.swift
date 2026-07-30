@@ -754,17 +754,21 @@ struct PlayerControls: View {
 
     /// Whether the Info tab is part of the focus order.
     ///
-    /// Up must NEVER reach the tab — it's a Down-only destination. Steering that
-    /// with a focus *write* loses: entering the controls makes tvOS run its own
-    /// default-focus pass, and whichever of us runs last wins, so the tab
-    /// intermittently stole an Up entry. Per the focus-engine rule, gate what's
-    /// focusable instead of chasing focus after it lands: while nothing in the
-    /// controls holds focus yet (i.e. exactly the moment the engine picks an entry
-    /// target) the tab is out of the order, so the track row is the ONLY candidate.
-    /// Once focus is somewhere the tab joins back in, so Down still reaches it — and
-    /// a Down entry, which targets the tab directly, opts in from the start.
+    /// Up must NEVER reach the tab — it's a Down-only destination. Entering the
+    /// controls makes tvOS run its own default-focus pass, so per the focus-engine
+    /// rule we gate what's focusable rather than chase focus after it lands: for the
+    /// one moment the layer takes focus with nothing focused yet, the tab is out of
+    /// the order and the track row is the only candidate. Once focus is somewhere
+    /// the tab joins back in, so Down still reaches it, and a Down entry — which
+    /// targets the tab directly — opts in from the start.
+    ///
+    /// Gated ONLY while the control layer actually owns focus. `.disabled` dims a
+    /// stock button, and the layer sits on screen with nothing focused for the whole
+    /// auto-hide window after Menu returns to the video — during which the tab is
+    /// not reachable anyway (the host's interaction is off), so gating there bought
+    /// nothing and just left the tab looking disabled.
     private var infoTabFocusable: Bool {
-        focus != nil || model.controlBarEntry == .info
+        !model.controlBarVisible || focus != nil || model.controlBarEntry == .info
     }
 
     /// The now-playing card the Info tab reveals, full width beneath the tab row.

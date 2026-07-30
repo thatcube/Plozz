@@ -228,6 +228,79 @@ public final class UpNextModel {
     public init() {}
 }
 
+/// The seek/skip **gesture** and its transient on-screen feedback.
+///
+/// Split out of `PlayerControlsModel` (a known god object under a decreasing-only
+/// budget in `tools/arch-guard.py`). The intervals are per-profile settings mirrored
+/// for the input controller; the hint fields are write-once-read-once transients
+/// that existed only to drive the ±Ns glyph.
+@MainActor
+@Observable
+public final class SkipGestureModel {
+    /// How many seconds a left-press skips backward (per-profile setting).
+    public var backwardInterval: SkipInterval = .ten
+    /// How many seconds a right-press skips forward (per-profile setting).
+    public var forwardInterval: SkipInterval = .ten
+
+    /// Whether a horizontal scrub gesture works while playing (per-profile setting,
+    /// default true). When false, a swipe during playback is a no-op for the
+    /// timeline (no seek, no pause) — the input controller reads this to gate
+    /// `beginScrub`, so you must pause first and a stray swipe can't move your
+    /// position or pause playback.
+    public var seekWithoutPausing: Bool = true
+
+    /// Whether the last skip was forward; drives which glyph the hint shows.
+    public var hintForward: Bool = true
+    /// True while the transient skip indicator is on screen.
+    public var hintVisible: Bool = false
+    /// Bumped on every skip so the indicator's pop-in transition replays even when
+    /// it's already visible (rapid repeated skips).
+    public var hintToken: Int = 0
+
+    /// Which side of the thumb the loading spinner sits on while a seek resolves:
+    /// the left of the current time after a backward skip, otherwise the right (a
+    /// forward skip or a plain scrub). Mirrors where the ±10s glyph appeared.
+    public var indicatorOnLeft: Bool = false
+
+    public init() {}
+}
+
+/// Server-detected **intro/credits segments** and the Skip button's presentation.
+///
+/// Split out of `PlayerControlsModel` for the same reason as its siblings. Only the
+/// stored values live here — `activeSkipSegment`, `skipButtonVisible` and
+/// `activeSkipWasSeekEntered` stay on `PlayerControlsModel`, since they also weigh
+/// the live playhead and whether Up Next has claimed the credits.
+@MainActor
+@Observable
+public final class SkipSegmentsModel {
+    /// Server-detected skippable segments (intros/credits) for the playing item.
+    /// Populated by the view model only when the per-profile Skip Intros setting is
+    /// on; empty otherwise, so no skip button is ever offered.
+    public var segments: [MediaSegment] = []
+
+    /// Set while the user has dismissed the skip button for the *current* segment,
+    /// so it doesn't keep re-grabbing focus for the rest of that window.
+    public var dismissedSegmentID: String?
+
+    /// Mirrors `CustomPlayerContainer.presentingSkipButton`: true only while the
+    /// container has actually *presented* the Skip button (focused or the passive
+    /// grace-seek present). The SwiftUI `SkipSegmentButton` renders on this — not
+    /// the raw `skipButtonVisible` — so it can never draw on top of an open menu or
+    /// claim the lower-right slot the container hasn't handed it.
+    public var isPresentingButton: Bool = false
+
+    /// Set when a committed seek lands inside a skippable segment, describing how
+    /// the landing relates to that segment so the presentation layer can respect the
+    /// seek: a *deep* landing (`isWithinGrace == false`) suppresses the Skip
+    /// affordance entirely; a *grace-window* landing offers a manual button only (no
+    /// auto-skip/countdown, no focus-steal). Cleared automatically once the live
+    /// position leaves the segment, so a later natural re-entry is unaffected.
+    public var seekLanding: SkipSeekLanding?
+
+    public init() {}
+}
+
 /// Shared, observable state for the custom player's transport overlay.
 ///
 /// `PlayerViewModel` writes live playback facts (position, duration, buffered,
@@ -374,56 +447,16 @@ public final class PlayerControlsModel {
     /// each change, so the transport never hides out from under an active viewer.
     public var controlBarActivity: Int = 0
 
-    // MARK: Skip hint (transient ±Ns indicator)
-    /// How many seconds a left-press skips backward (per-profile setting).
-    public var skipBackwardInterval: SkipInterval = .ten
-    /// How many seconds a right-press skips forward (per-profile setting).
-    public var skipForwardInterval: SkipInterval = .ten
-    /// Whether a horizontal scrub gesture works while playing (per-profile
-    /// setting, default true). When false, a swipe during playback is a no-op
-    /// for the timeline (no seek, no pause) — the input controller reads this to
-    /// gate `beginScrub` so you must pause the video first before scrubbing, and
-    /// a stray swipe can't move your position or pause playback.
-    public var seekWithoutPausing: Bool = true
-    /// Whether the last skip was forward; drives which glyph the hint shows.
-    public var skipHintForward: Bool = true
-    /// True while the transient skip indicator is on screen.
-    public var skipHintVisible: Bool = false
-    /// Bumped on every skip so the indicator's pop-in transition replays even
-    /// when it's already visible (rapid repeated skips).
-    public var skipHintToken: Int = 0
-    /// Which side of the thumb the loading spinner sits on while a seek resolves:
-    /// the left of the current time after a backward skip, otherwise the right
-    /// (forward skip or a plain scrub). Mirrors where the ±10s glyph appeared.
-    public var seekIndicatorOnLeft: Bool = false
+    // MARK: Skipping
+    /// Feedback for the seek/skip gesture: the per-profile intervals and the
+    /// transient ±Ns indicator.
+    public let skipGesture = SkipGestureModel()
+    /// Server-detected intro/credits segments and the Skip button's presentation.
+    public let skipSegments = SkipSegmentsModel()
 
     /// Whether the live playback-diagnostics overlay is shown. Toggleable from
     /// the in-player control bar; seeded from the caller's initial preference.
     public var diagnosticsEnabled: Bool = false
-
-    // MARK: Skip intros/credits
-    /// Server-detected skippable segments (intros/credits) for the playing item.
-    /// Populated by the view model only when the per-profile Skip Intros setting
-    /// is on; empty otherwise, so no skip button is ever offered.
-    public var skippableSegments: [MediaSegment] = []
-    /// True while the user has dismissed the skip button for the *current*
-    /// segment, so it doesn't keep re-grabbing focus for the rest of that window.
-    public var dismissedSegmentID: String?
-
-    /// Mirrors `CustomPlayerContainer.presentingSkipButton`: true only while the
-    /// container has actually *presented* the Skip button (focused or the passive
-    /// grace-seek present). The SwiftUI `SkipSegmentButton` renders on this — not
-    /// the raw `skipButtonVisible` — so it can never draw on top of an open menu
-    /// or steal the lower-right slot the container hasn't handed it.
-    public var isPresentingSkipButton: Bool = false
-
-    /// Set when a committed seek lands inside a skippable segment, describing how
-    /// the landing relates to that segment so the presentation layer can respect
-    /// the seek: a *deep* landing (`isWithinGrace == false`) suppresses the Skip
-    /// affordance entirely; a *grace-window* landing offers a manual button only
-    /// (no auto-skip/countdown, no focus-steal). Cleared automatically once the
-    /// live position leaves the segment, so a later natural re-entry is unaffected.
-    public var seekLanding: SkipSeekLanding?
 
     // MARK: Up Next (closing-credits next-episode card)
     /// The closing-credits next-episode card's own state. A facet for the stored
@@ -458,13 +491,13 @@ public final class PlayerControlsModel {
     /// as a deliberate jump into the segment and therefore respect by offering no
     /// button at all. Drives whether the in-player Skip button is shown/focusable.
     public var activeSkipSegment: MediaSegment? {
-        guard let segment = skippableSegments.activeSkippable(at: currentSeconds) else { return nil }
-        if segment.id == dismissedSegmentID { return nil }
+        guard let segment = skipSegments.segments.activeSkippable(at: currentSeconds) else { return nil }
+        if segment.id == skipSegments.dismissedSegmentID { return nil }
         // Deep-seek suppression: a seek that landed beyond the grace window of
         // this exact segment means the viewer jumped *into* it on purpose — honor
         // the seek and surface nothing. (Grace-window landings keep the segment so
         // a manual, non-focus-stealing button can still be offered.)
-        if let landing = seekLanding, landing.segmentID == segment.id, !landing.isWithinGrace {
+        if let landing = skipSegments.seekLanding, landing.segmentID == segment.id, !landing.isWithinGrace {
             return nil
         }
         return segment
@@ -476,7 +509,7 @@ public final class PlayerControlsModel {
     /// auto-skip, no countdown, and no focus-steal — so a deliberate seek is never
     /// hijacked. Natural entry (this is false) keeps the full per-mode behavior.
     public var activeSkipWasSeekEntered: Bool {
-        guard let landing = seekLanding, let segment = activeSkipSegment else { return false }
+        guard let landing = skipSegments.seekLanding, let segment = activeSkipSegment else { return false }
         return landing.segmentID == segment.id && landing.isWithinGrace
     }
 
@@ -538,7 +571,7 @@ public final class PlayerControlsModel {
     /// Up Next card waits for that (accurate) marker rather than the time fallback;
     /// when it doesn't (SMB shares, unanalysed content), the time fallback applies.
     public var hasCreditsMarker: Bool {
-        skippableSegments.contains { $0.kind == .credits }
+        skipSegments.segments.contains { $0.kind == .credits }
     }
 
     /// Whether the Up Next card should own the lower-right slot right now: there's

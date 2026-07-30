@@ -565,9 +565,9 @@ final class PlayerInputViewController: UIViewController {
         // Clear a stale seek-landing once the live position leaves its segment, so
         // a later NATURAL re-entry into the same segment isn't still treated as a
         // seek (which would otherwise keep suppressing it / forcing manual-only).
-        if let landing = model.seekLanding,
-           model.skippableSegments.activeSkippable(at: model.currentSeconds)?.id != landing.segmentID {
-            model.seekLanding = nil
+        if let landing = model.skipSegments.seekLanding,
+           model.skipSegments.segments.activeSkippable(at: model.currentSeconds)?.id != landing.segmentID {
+            model.skipSegments.seekLanding = nil
         }
 
         // Up Next takes priority over Skip Credits in the shared lower-right slot:
@@ -630,7 +630,7 @@ final class PlayerInputViewController: UIViewController {
 
     private func enterSkipButton(stealFocus: Bool = true) {
         presentingSkipButton = true
-        model.isPresentingSkipButton = true
+        model.skipSegments.isPresentingButton = true
         guard stealFocus else {
             // Passive present (a grace-window seek landed here): the button is
             // visible but the scrub surface keeps focus and stays fully
@@ -655,7 +655,7 @@ final class PlayerInputViewController: UIViewController {
     /// dismissed, or its segment window passes.
     private func exitSkipButton() {
         presentingSkipButton = false
-        model.isPresentingSkipButton = false
+        model.skipSegments.isPresentingButton = false
         autoSkipAtSeconds = nil
         model.autoSkipAtSeconds = nil
         skipButtonHost?.view.isUserInteractionEnabled = false
@@ -869,7 +869,7 @@ final class PlayerInputViewController: UIViewController {
                 translationY: Double(translation.y),
                 velocityX: Double(gesture.velocity(in: view).x),
                 isScrubbing: model.isScrubbing,
-                seekWithoutPausing: model.seekWithoutPausing,
+                seekWithoutPausing: model.skipGesture.seekWithoutPausing,
                 isPaused: model.isPaused)
             switch outcome {
             case .ignore:
@@ -957,7 +957,7 @@ final class PlayerInputViewController: UIViewController {
         if resumeAfterScrub { actions.togglePlayPause() }
         model.isScrubbing = false
         scrubPreviewCoordinator?.clear()
-        model.seekIndicatorOnLeft = false
+        model.skipGesture.indicatorOnLeft = false
         if ScrubDiagnostics.forceScrubRefresh { engine.setScrubRefreshBoost(false) }
         scrubDiag.end("commit")
         scheduleAutoHide()
@@ -1034,11 +1034,11 @@ final class PlayerInputViewController: UIViewController {
 
     @objc private func handleLeft() {
         guard focusContext == .surface else { return }
-        skip(by: -model.skipBackwardInterval.seconds)
+        skip(by: -model.skipGesture.backwardInterval.seconds)
     }
     @objc private func handleRight() {
         guard focusContext == .surface else { return }
-        skip(by: model.skipForwardInterval.seconds)
+        skip(by: model.skipGesture.forwardInterval.seconds)
     }
 
     /// A Down press from the scrub surface reveals the controls and brings the Info
@@ -1096,15 +1096,15 @@ final class PlayerInputViewController: UIViewController {
     /// the timer + bumping the token on each press makes rapid skips re-pop
     /// rather than sit static, matching Apple's player feel.
     private func flashSkipHint(forward: Bool) {
-        model.skipHintForward = forward
-        model.seekIndicatorOnLeft = !forward
-        model.skipHintToken &+= 1
-        model.skipHintVisible = true
+        model.skipGesture.hintForward = forward
+        model.skipGesture.indicatorOnLeft = !forward
+        model.skipGesture.hintToken &+= 1
+        model.skipGesture.hintVisible = true
         skipHintTask?.cancel()
         skipHintTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 550_000_000)
             guard let self, !Task.isCancelled else { return }
-            self.model.skipHintVisible = false
+            self.model.skipGesture.hintVisible = false
         }
     }
 

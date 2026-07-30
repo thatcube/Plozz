@@ -185,7 +185,7 @@ final class NextEpisodeCoordinator {
         guard durUnknown || (remaining > 0 && remaining <= 60) else { return }
         guard Date().timeIntervalSince(lastUpNextDiagAt) >= 8 else { return }
         lastUpNextDiagAt = Date()
-        let creditsStart = controls.skippableSegments.first { $0.kind == .credits }?.start
+        let creditsStart = controls.skipSegments.segments.first { $0.kind == .credits }?.start
         HandoffDiagnostics.emit("upnext-state cDur=\(Int(cDur)) cCur=\(Int(cCur)) eDur=\(Int(host.upNextEngine.duration)) remaining=\(Int(remaining)) creditsStart=\(creditsStart.map { Int($0) }.map(String.init) ?? "none") card=\(controls.upNextCard.info != nil) show=\(playbackSettings.showUpNextCard) marker=\(controls.hasCreditsMarker) nearEndByTime=\(controls.isNearEndByTime) active=\(controls.upNextActive) presenting=\(controls.upNextCard.isPresenting) lead=\(Int(controls.upNextCard.leadSeconds))")
     }
 

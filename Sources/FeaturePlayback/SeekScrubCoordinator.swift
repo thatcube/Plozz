@@ -153,8 +153,8 @@ final class SeekScrubCoordinator {
     /// it. The container clears a stale landing once the live position leaves the
     /// segment, so a later natural re-entry behaves normally.
     private func updateSeekLanding(for target: TimeInterval) {
-        controls.seekLanding = SeekLandingClassifier.landing(
-            forTarget: target, in: controls.skippableSegments)
+        controls.skipSegments.seekLanding = SeekLandingClassifier.landing(
+            forTarget: target, in: controls.skipSegments.segments)
     }
 
     /// Schedules the deferred engine commit for `requestSeek`. Resets on each call

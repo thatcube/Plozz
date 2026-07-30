@@ -86,14 +86,14 @@ struct PlozziOSPlayerControlsOverlay: View {
                         }
                     },
                     onSkipBackward: {
-                        seek(by: -viewModel.controls.skipBackwardInterval.seconds)
+                        seek(by: -viewModel.controls.skipGesture.backwardInterval.seconds)
                     },
                     onPlayPause: {
                         viewModel.togglePlayPause()
                         noteInteraction()
                     },
                     onSkipForward: {
-                        seek(by: viewModel.controls.skipForwardInterval.seconds)
+                        seek(by: viewModel.controls.skipGesture.forwardInterval.seconds)
                     },
                     onShowInfo: {
                         presentedSheet = .info
@@ -550,7 +550,7 @@ private struct PlozziOSPlayerTransport: View {
 
             HStack(spacing: 22) {
                 Button(action: onSkipBackward) {
-                    Image(systemName: "gobackward.\(viewModel.controls.skipBackwardInterval.rawValue)")
+                    Image(systemName: "gobackward.\(viewModel.controls.skipGesture.backwardInterval.rawValue)")
                         .playerTransportGlyph()
                 }
                 .accessibilityLabel("Skip backward")
@@ -568,7 +568,7 @@ private struct PlozziOSPlayerTransport: View {
                 )
 
                 Button(action: onSkipForward) {
-                    Image(systemName: "goforward.\(viewModel.controls.skipForwardInterval.rawValue)")
+                    Image(systemName: "goforward.\(viewModel.controls.skipGesture.forwardInterval.rawValue)")
                         .playerTransportGlyph()
                 }
                 .accessibilityLabel("Skip forward")

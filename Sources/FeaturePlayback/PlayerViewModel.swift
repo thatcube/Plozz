@@ -480,9 +480,9 @@ public final class PlayerViewModel {
         )
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
         self.controls.playbackSpeed = preferencesStore.loadPlaybackSpeed()
-        self.controls.skipBackwardInterval = playbackSettings.skipBackwardInterval
-        self.controls.skipForwardInterval = playbackSettings.skipForwardInterval
-        self.controls.seekWithoutPausing = playbackSettings.seekWithoutPausing
+        self.controls.skipGesture.backwardInterval = playbackSettings.skipBackwardInterval
+        self.controls.skipGesture.forwardInterval = playbackSettings.skipForwardInterval
+        self.controls.skipGesture.seekWithoutPausing = playbackSettings.seekWithoutPausing
         self.controls.upNextCard.leadSeconds = TimeInterval(playbackSettings.upNextLeadSeconds)
         // Seed the overlay with the profile's persisted subtitle appearance so a
         // selected subtitle renders in the user's style from the first cue.
@@ -1210,7 +1210,7 @@ public final class PlayerViewModel {
         segmentsTask = Task { @MainActor [weak self] in
             let segments = (try? await provider.mediaSegments(for: itemID)) ?? []
             guard let self, !Task.isCancelled else { return }
-            self.controls.skippableSegments = segments.filter(\.isSkippable)
+            self.controls.skipSegments.segments = segments.filter(\.isSkippable)
         }
     }
 
@@ -1219,14 +1219,14 @@ public final class PlayerViewModel {
     /// button. No-op when no segment is active.
     public func skipActiveSegment() {
         guard let segment = controls.activeSkipSegment else { return }
-        controls.dismissedSegmentID = segment.id
+        controls.skipSegments.dismissedSegmentID = segment.id
         requestSeek(to: segment.end)
     }
 
     /// Dismisses the skip button for the active segment without seeking (Menu /
     /// swipe-away), so it won't keep stealing focus for the rest of the window.
     public func dismissActiveSkipSegment() {
-        controls.dismissedSegmentID = controls.activeSkipSegment?.id
+        controls.skipSegments.dismissedSegmentID = controls.activeSkipSegment?.id
     }
 
     /// Auto-skips the active segment when the per-profile Auto-skip setting is on:
@@ -1235,7 +1235,7 @@ public final class PlayerViewModel {
     /// per-tick evaluation fires this exactly once per segment.
     public func autoSkipActiveSegment() {
         guard let segment = controls.activeSkipSegment else { return }
-        controls.dismissedSegmentID = segment.id
+        controls.skipSegments.dismissedSegmentID = segment.id
         controls.autoSkipNotice = AutoSkipNotice(label: segment.kind.autoSkippedLabel)
         requestSeek(to: segment.end)
         autoSkipNoticeTask?.cancel()

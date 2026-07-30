@@ -264,7 +264,7 @@ final class NextEpisodeCoordinatorTests: XCTestCase {
             host: host, controls: controls, playbackSettings: settings, spoilerSettings: .default,
             engineFactory: .native)
         coord.updateUpNextCard()
-        XCTAssertNotNil(controls.upNext, "an enabled card with a next episode publishes an UpNextInfo")
+        XCTAssertNotNil(controls.upNextCard.info, "an enabled card with a next episode publishes an UpNextInfo")
     }
 
     func testUpdateUpNextCardClearsWhenDisabled() {
@@ -279,10 +279,10 @@ final class NextEpisodeCoordinatorTests: XCTestCase {
         let coord = NextEpisodeCoordinator(
             host: host, controls: controls, playbackSettings: settings, spoilerSettings: .default,
             engineFactory: .native)
-        controls.upNext = UpNextInfo(episode: host.nextEpisodeCandidate!, showName: Text(verbatim: "x"),
+        controls.upNextCard.info = UpNextInfo(episode: host.nextEpisodeCandidate!, showName: Text(verbatim: "x"),
                                      metaLine: nil, thumbnailURLs: [], blurThumbnail: false)
         coord.updateUpNextCard()
-        XCTAssertNil(controls.upNext, "a disabled card is cleared")
+        XCTAssertNil(controls.upNextCard.info, "a disabled card is cleared")
     }
 
     // MARK: - pure meta formatting

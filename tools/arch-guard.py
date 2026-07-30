@@ -138,7 +138,7 @@ TRACKED_MUTABLE_ALLOWLIST = {
     "AppState": 7,
     # Pre-existing god objects, seeded at their TRUE tracked-mutable counts as debt
     # markers. Lower these as each is split; never raise them.
-    "PlayerControlsModel": 62,
+    "PlayerControlsModel": 35,
     "AudioPlaybackController": 42,
     "UnifiedAddShareModel": 36,
     "PlayerViewModel": 28,

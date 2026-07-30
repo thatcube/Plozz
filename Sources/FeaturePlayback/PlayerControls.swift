@@ -286,7 +286,7 @@ struct PlayerControls: View {
         // Menus animate open/closed on their own clock. Keyed on `optionsPanel`, which
         // is nil for Info, so this can't fire for — or retime — the Info reveal.
         .animation(.easeInOut(duration: 0.2), value: optionsPanel)
-        .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintVisible)
+        .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipGesture.hintVisible)
         .onChange(of: model.controlBarVisible) { _, focused in
             titleVisible = true
             guard focused else {
@@ -672,7 +672,7 @@ struct PlayerControls: View {
             // reach. Outside this edge case the glyph isn't near the end, so the
             // time is never hidden early.
             let glyphShown = !model.isScrubbing
-                && (model.skipHintVisible || (model.isPaused && model.intendsPause) || model.isSeeking)
+                && (model.skipGesture.hintVisible || (model.isPaused && model.intendsPause) || model.isSeeking)
             let glyphReach: CGFloat = glyphShown ? 40 : 0
             // Fade the remaining time once the current time's (or glyph's) right
             // edge closes within the gap.
@@ -746,10 +746,10 @@ struct PlayerControls: View {
     /// `!isScrubbing` keeps the content at none→spinner across the whole
     /// scrub→commit window, so a manual pause is the ONLY thing that ever shows it.
     @ViewBuilder private var statusGlyph: some View {
-        if model.skipHintVisible {
-            Image(systemName: model.skipHintForward
-                ? model.skipForwardInterval.forwardSymbol
-                : model.skipBackwardInterval.backwardSymbol)
+        if model.skipGesture.hintVisible {
+            Image(systemName: model.skipGesture.hintForward
+                ? model.skipGesture.forwardInterval.forwardSymbol
+                : model.skipGesture.backwardInterval.backwardSymbol)
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(.white)
                 .transition(.scale(scale: 0.5).combined(with: .opacity))

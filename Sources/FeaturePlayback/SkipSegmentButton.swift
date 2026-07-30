@@ -11,7 +11,7 @@ import CoreUI
 ///
 /// Select → seek past the segment (`actions.skipSegment`). Menu / swipe-up →
 /// dismiss without seeking (`actions.dismissSkip`). The button only renders when
-/// `model.isPresentingSkipButton` is true and no menu is open
+/// `model.skipSegments.isPresentingButton` is true and no menu is open
 /// (`!controlBarVisible`) — i.e. the container has actually presented it for the
 /// active segment — so it collapses to nothing between segments and never draws
 /// over an open menu or intercepts focus the container hasn't handed it.
@@ -31,7 +31,7 @@ struct SkipSegmentButton: View {
             Spacer()
             HStack {
                 Spacer()
-                if model.isPresentingSkipButton, !model.controlBarVisible, let segment = model.activeSkipSegment {
+                if model.skipSegments.isPresentingButton, !model.controlBarVisible, let segment = model.activeSkipSegment {
                     skipControl(for: segment)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 } else if let notice = model.autoSkipNotice, !model.controlBarVisible {
@@ -46,7 +46,7 @@ struct SkipSegmentButton: View {
             .padding(.bottom, 200)
         }
         .ignoresSafeArea()
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.isPresentingSkipButton)
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.skipSegments.isPresentingButton)
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.autoSkipNotice)
         .onAppear { focused = true }
     }

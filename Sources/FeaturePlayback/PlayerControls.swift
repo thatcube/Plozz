@@ -432,24 +432,6 @@ struct PlayerControls: View {
             // panel (the title/description are repetitive with it, so they fade out).
             // The Info card is NOT part of this slot — it enters from the bottom edge
             // below the tab row (see `infoCard`).
-            titleBlock
-                .opacity(titleVisible ? 1 : 0)
-                // Scoped to the title, NOT the cluster. `titleVisible` flips one
-                // update after a panel opens, and as a cluster-level modifier this
-                // re-timed the in-flight reveal: the probe caught the offset handed
-                // from the 0.42 spring to this 0.28 curve a frame in, which is what
-                // made the transport lurch.
-                .animation(.easeInOut(duration: 0.28), value: titleVisible)
-                // The options menus float ABOVE the title rather than sharing a slot
-                // with it. As a stack member the tallest of them (440pt) set the
-                // slot's height, and with the Info card now permanently in the stack
-                // the cluster no longer fit the screen — so opening Subtitles shoved
-                // the whole transport upward. An overlay draws outside its bounds and
-                // contributes no height, so a menu can be any size without moving a
-                // single control. It also suits what they are: floating menus, not
-                // part of the transport's layout.
-                .overlay(alignment: .bottomLeading) { optionsPanelLayer }
-                .animation(.easeInOut(duration: 0.2), value: optionsPanel)
             // Transport block (track controls + scrubber + tab row). Hidden entirely
             // while the full-height appearance editor is open so the live subtitles
             // behind it are unobstructed; measured otherwise so other panels can size
@@ -457,6 +439,17 @@ struct PlayerControls: View {
             if !styleEditing {
                 VStack(alignment: .leading, spacing: 18) {
                     trackControlRow
+                    // Directly above the scrub bar, so the now-playing text reads as
+                    // labelling the timeline it sits on. The track controls ride
+                    // above it, at the top of the transport.
+                    titleBlock
+                        .opacity(titleVisible ? 1 : 0)
+                        // Scoped to the title, NOT the cluster. `titleVisible` flips
+                        // one update after a panel opens, and as a cluster-level
+                        // modifier this re-timed the in-flight reveal: the probe
+                        // caught the offset handed from the 0.42 spring to this 0.28
+                        // curve a frame in, which is what made the transport lurch.
+                        .animation(.easeInOut(duration: 0.28), value: titleVisible)
                     scrubberRow
                         // The transport steps aside for the Info card: faded in
                         // place rather than removed, so the tab and its card never
@@ -471,6 +464,23 @@ struct PlayerControls: View {
                         Color.clear.preference(key: TransportHeightKey.self, value: proxy.size.height)
                     }
                 )
+                // The options menus float above the transport's top edge — i.e. above
+                // the track controls that open them — and contribute NO layout. As a
+                // stack member the tallest of them (440pt) set its slot's height, and
+                // with the Info card now permanently in the stack the cluster stopped
+                // fitting the screen, so opening Subtitles shoved every control
+                // upward. An overlay draws outside its bounds, so a menu can be any
+                // size without moving anything. It also suits what they are: floating
+                // menus, not part of the transport's layout.
+                .overlay(alignment: .top) {
+                    optionsPanelLayer
+                        // Hang the menu entirely ABOVE the anchor: aligning its top
+                        // guide to its own bottom edge shifts it up by exactly its
+                        // own height, whatever that turns out to be — no measurement
+                        // and no hand-tuned constant.
+                        .alignmentGuide(.top) { $0[.bottom] }
+                }
+                .animation(.easeInOut(duration: 0.2), value: optionsPanel)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             // The Info card is a PERMANENT member of the stack, never inserted or
@@ -957,16 +967,16 @@ struct PlayerControls: View {
         openPanel == .info || entryFocusTarget == .button(.info)
     }
 
-    /// The floating options menu (Speed / Audio / Subtitles), drawn above the title
-    /// block. Grows upward from the title's bottom edge — where it has always
-    /// appeared — but without occupying layout. See the overlay's note.
+    /// The floating options menu (Speed / Audio / Subtitles), drawn above the
+    /// transport's top edge — so it always clears the track controls that open it —
+    /// without occupying layout. See the overlay's note.
     @ViewBuilder
     private var optionsPanelLayer: some View {
         if let panel = optionsPanel {
             morphingPanel(for: panel)
                 .plozzFocusSection()
-                // Sit a touch higher than the title it covers so the box clears the
-                // transport instead of resting on the scrub bar.
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // Breathing room between the menu and the buttons beneath it.
                 .padding(.bottom, Self.panelLift)
                 // Grow + fade from the corner nearest the button that opened it so it
                 // reads as springing from the control rather than zooming out of

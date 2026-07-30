@@ -199,6 +199,13 @@ public protocol MediaProvider: Sendable {
     /// Best-effort: a provider that cannot query by person returns an empty array.
     func items(withPerson personID: String, limit: Int) async throws -> [MediaItem]
 
+    /// The person themselves, when the source can describe one — chiefly for a
+    /// biography, which never comes attached to an item's cast list.
+    ///
+    /// `nil` when the source has no person records or the lookup fails, in which
+    /// case a person page simply shows no biography.
+    func person(id: String) async throws -> MediaPerson?
+
     // MARK: Connection locality
 
     /// How reachable this provider's *currently active* server connection is
@@ -244,6 +251,9 @@ public extension MediaProvider {
     /// for this source rather than failing. Jellyfin/Emby (`PersonIds`), Plex
     /// (`actor`) and the share catalog (its persisted cast) override this.
     func items(withPerson personID: String, limit: Int) async throws -> [MediaItem] { [] }
+
+    /// Default: the source keeps no person records, so no biography.
+    func person(id: String) async throws -> MediaPerson? { nil }
 
     /// Default: ignore the exclusions and run the unscoped search. Providers that
     /// can attribute results to a library (Plex `librarySectionID`) or scope the

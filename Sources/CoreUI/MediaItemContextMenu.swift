@@ -22,6 +22,10 @@ private struct MediaItemNavigatorKey: EnvironmentKey {
     static let defaultValue: ((MediaItem) -> Void)? = nil
 }
 
+private struct MediaPersonNavigatorKey: EnvironmentKey {
+    static let defaultValue: ((MediaPerson) -> Void)? = nil
+}
+
 public extension EnvironmentValues {
     /// The app-supplied handler that builds and performs context-menu actions.
     /// `nil` (the default) disables the menu — e.g. in previews and tests.
@@ -44,6 +48,14 @@ public extension EnvironmentValues {
         get { self[MediaItemNavigatorKey.self] }
         set { self[MediaItemNavigatorKey.self] = newValue }
     }
+
+    /// The view-layer router used to open a person. Installed per navigation
+    /// stack, exactly like ``mediaItemNavigator``. `nil` leaves cast tiles inert,
+    /// which is what every surface without a stack of its own wants.
+    var mediaPersonNavigator: ((MediaPerson) -> Void)? {
+        get { self[MediaPersonNavigatorKey.self] }
+        set { self[MediaPersonNavigatorKey.self] = newValue }
+    }
 }
 
 public extension View {
@@ -62,6 +74,11 @@ public extension View {
     /// Season") use to push a destination for this subtree's navigation stack.
     func mediaItemNavigator(_ navigate: ((MediaItem) -> Void)?) -> some View {
         environment(\.mediaItemNavigator, navigate)
+    }
+
+    /// Installs the router that cast tiles in this subtree use to open a person.
+    func mediaPersonNavigator(_ navigate: ((MediaPerson) -> Void)?) -> some View {
+        environment(\.mediaPersonNavigator, navigate)
     }
 
     /// Attaches the native tvOS press-and-hold menu for `item`, populated from

@@ -56,19 +56,28 @@ public struct MediaPerson: Codable, Hashable, Identifiable, Sendable {
     public var kind: String?
     /// Headshot artwork, when the person has an image on the server.
     public var imageURL: URL?
+    /// The person's biography, when the source can supply one.
+    ///
+    /// Optional and fetched separately: it never arrives with the item's cast
+    /// list, only from a direct lookup of the person, and not every source has
+    /// one. Being `Optional` also keeps decoding compatible with cast records
+    /// persisted before this existed (a missing key decodes to `nil`).
+    public var biography: String?
 
     public init(
         id: String,
         name: String,
         role: String? = nil,
         kind: String? = nil,
-        imageURL: URL? = nil
+        imageURL: URL? = nil,
+        biography: String? = nil
     ) {
         self.id = id
         self.name = name
         self.role = role
         self.kind = kind
         self.imageURL = imageURL
+        self.biography = biography
     }
 
     /// True for on-screen/voice talent (vs. crew), used to build the "Cast" row.

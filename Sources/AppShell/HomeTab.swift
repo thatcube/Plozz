@@ -102,6 +102,10 @@ struct HomeTab: View {
     /// building one inline meant constructing and discarding a view model (and
     /// re-resolving the item's cross-server sources) several times per push.
     @State private var detailViewModels = KeyedViewStateCache<String, ItemDetailViewModel>()
+    /// Person view models, cached for the same reason as `detailViewModels`: the
+    /// destination closure re-runs on every render pass, so building one inline
+    /// constructs and discards a model (and re-issues its credits fetch) on each.
+    @State private var personViewModels = KeyedViewStateCache<String, PersonDetailViewModel>()
     /// Lets a detail page tell whether a child page is pushed on top of it.
     /// See `DetailStackDepth`.
     @State private var detailStackDepth = DetailStackDepth()
@@ -247,6 +251,31 @@ struct HomeTab: View {
                 // Home/Search rows: cross-server-merged, so the detail picker
                 // defaults to the smart best version (no library origin).
                 itemDetail(for: item, libraryOrigin: nil)
+            }
+            .navigationDestination(for: PersonRoute.self) { route in
+                PersonDetailView(
+                    person: route.person,
+                    viewModel: personViewModels.value(
+                        forKey: "person:\(route.person.id)#\(route.sourceAccountID ?? "")"
+                    ) {
+                        PersonDetailViewModel(
+                            person: route.person,
+                            // The person's own source, never the cross-server
+                            // aggregate: credits are answered with that server's
+                            // own person id, and a bare id isn't unique across
+                            // servers.
+                            // `resolveOptionalProvider`, never
+                            // `resolveProvider`: the latter falls back to the
+                            // primary account, which sent Jellyfin and share
+                            // person ids to Plex and got nothing back. No
+                            // account means no credits, not wrong credits.
+                            provider: route.sourceAccountID.flatMap {
+                                resolveOptionalProvider($0, in: accounts)
+                            }
+                        )
+                    },
+                    onSelectItem: { navigate($0, libraryOrigin: route.sourceAccountID) }
+                )
             }
             .navigationDestination(for: LibraryDetailRoute.self) { route in
                 // Opened from a library tile: default detail + playback to THAT
@@ -470,6 +499,9 @@ struct HomeTab: View {
             onPlay: { requestPlay($0) },
             onSelectChild: { navigate($0, libraryOrigin: libraryOrigin) },
             onNavigate: { navigate($0, asOwnSubject: $0.kind == .episode) },
+            onSelectPerson: { person, accountID in
+                path.append(PersonRoute(person: person, sourceAccountID: accountID))
+            },
             stackDepth: detailStackDepth,
             heroTrailerResolver: makeHeroTrailerResolver(),
             preservesHeroTrailerOnDisappear: true,

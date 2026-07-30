@@ -135,6 +135,9 @@ struct SearchTab: View {
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
                     onNavigate: { navigateToItem($0) },
+                    onSelectPerson: { person, accountID in
+                        path.append(PersonRoute(person: person, sourceAccountID: accountID))
+                    },
                     stackDepth: detailStackDepth,
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     initialSeasonID: item.seasonID,
@@ -151,6 +154,19 @@ struct SearchTab: View {
                     },
                     requestActingName: activeSeerrUserName,
                     confirmAdminRequest: confirmAdminRequest
+                )
+            }
+            .navigationDestination(for: PersonRoute.self) { route in
+                PersonDetailView(
+                    person: route.person,
+                    viewModel: PersonDetailViewModel(
+                        person: route.person,
+                        // Never the primary-account fallback — see HomeTab.
+                        provider: route.sourceAccountID.flatMap {
+                            resolveOptionalProvider($0, in: accounts)
+                        }
+                    ),
+                    onSelectItem: { navigateToItem($0) }
                 )
             }
             .navigationDestination(for: EpisodeContextRoute.self) { route in

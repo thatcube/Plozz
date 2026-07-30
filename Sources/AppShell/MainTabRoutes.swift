@@ -31,6 +31,19 @@ struct LibraryDetailRoute: Hashable {
     let originAccountID: String?
 }
 
+/// A navigation value for opening a person page.
+///
+/// Carries the account the person was seen on, because credits are answered by
+/// that source's own server using its own person id — and a bare id is not
+/// globally unique across servers, so this must never resolve through the
+/// cross-server aggregate (see `AggregatedLibraryProvider.item(id:)`).
+struct PersonRoute: Hashable {
+    let person: MediaPerson
+    /// The owning `Account.id` of the item this person was listed on, or `nil`
+    /// when it can't be resolved (then the page shows no library credits).
+    let sourceAccountID: String?
+}
+
 /// A navigation value for opening a *series* page focused on one of its
 /// episodes. Tapping a lone episode (e.g. from "Recently Added") routes through
 /// this instead of pushing the episode itself, so the user always lands on the

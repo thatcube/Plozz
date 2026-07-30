@@ -22,6 +22,13 @@ public struct ItemDetailView: View {
     /// which dropped these actions from every menu inside a detail page while
     /// they kept working on the stack's root content.
     private let onNavigate: ((MediaItem) -> Void)?
+    /// Opens a cast member, told which account the *loaded* detail came from.
+    ///
+    /// The account has to be bound here rather than by the host, because only the
+    /// loaded detail knows its real source: the item a host pushes with is a seed
+    /// (and for a cross-server merged title may name no account at all), whereas
+    /// the cast on screen belongs to whichever server actually answered.
+    private let onSelectPerson: ((MediaPerson, String?) -> Void)?
     /// Detail-page depth for this navigation stack. Passed in for the same reason
     /// as `onNavigate`: a `navigationDestination` destination does not inherit
     /// environment installed on the stack that owns it.
@@ -131,6 +138,7 @@ public struct ItemDetailView: View {
         onPlay: @escaping (MediaItem) -> Void,
         onSelectChild: @escaping (MediaItem) -> Void,
         onNavigate: ((MediaItem) -> Void)? = nil,
+        onSelectPerson: ((MediaPerson, String?) -> Void)? = nil,
         stackDepth: DetailStackDepth? = nil,
         heroTrailerResolver: @escaping HeroTrailerResolving = { _ in nil },
         preservesHeroTrailerOnDisappear: Bool = false,
@@ -151,6 +159,7 @@ public struct ItemDetailView: View {
         self.onPlay = onPlay
         self.onSelectChild = onSelectChild
         self.onNavigate = onNavigate
+        self.onSelectPerson = onSelectPerson
         self.stackDepth = stackDepth
         self.heroTrailerResolver = heroTrailerResolver
         self.preservesHeroTrailerOnDisappear = preservesHeroTrailerOnDisappear
@@ -349,6 +358,12 @@ public struct ItemDetailView: View {
             if ownStackDepth == nil { ownStackDepth = stackDepth?.depth }
         }
         .onDisappear { stackDepth?.pageDismissed() }
+        // Bound from the loaded detail, which is the only thing that knows which
+        // server answered for this title — and therefore whose person ids the
+        // cast list holds.
+        .mediaPersonNavigator { person in
+            onSelectPerson?(person, viewModel.state.value?.item.sourceAccountID)
+        }
     }
 
     private var heroTrailerTaskID: String {

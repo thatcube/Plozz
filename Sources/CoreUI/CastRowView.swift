@@ -69,6 +69,9 @@ private struct CastMemberCard: View {
     let onFocusEntered: (() -> Void)?
 
     @Environment(\.plozzMetrics) private var metrics
+    /// Installed per navigation stack. When absent the tile stays inert, which is
+    /// the right behaviour on surfaces that have nowhere to push a person to.
+    @Environment(\.mediaPersonNavigator) private var navigateToPerson
 
     /// Cast cards read a touch small on the detail page, so scale the whole tile
     /// (avatar + caption type) up 25%. `CastRowView` is detail-page-only, so this
@@ -81,7 +84,7 @@ private struct CastMemberCard: View {
         CircularFocusTile(
             diameter: diameter,
             focusPadding: metrics.circleFocusPadding,
-            action: {},
+            action: { navigateToPerson?(person) },
             onFocusChange: { focused in
                 if focused { onFocusEntered?() }
             },

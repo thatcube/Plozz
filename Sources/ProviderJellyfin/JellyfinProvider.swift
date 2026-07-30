@@ -171,6 +171,23 @@ public struct JellyfinProvider: MediaProvider {
         try await client.latestItems(userID: session.userID, limit: limit).map(map(item:))
     }
 
+    /// The person themselves. In Jellyfin a person *is* an item, so their record
+    /// comes back through the ordinary item fetch and its `Overview` is the
+    /// biography — no third-party lookup, and no extra client method. A server
+    /// that has no record for the id simply throws, which surfaces as "no
+    /// biography" rather than as a failed page.
+    public func person(id: String) async throws -> MediaPerson? {
+        guard let dto = try? await client.item(userID: session.userID, id: id) else { return nil }
+        guard let name = dto.Name, !name.isEmpty else { return nil }
+        let overview = dto.Overview.flatMap { $0.isEmpty ? nil : $0 }
+        return MediaPerson(
+            id: id,
+            name: name,
+            imageURL: client.imageURL(itemID: id, kind: .primary, maxWidth: 400, tag: nil),
+            biography: overview
+        )
+    }
+
     /// Titles in this library featuring a person. The id is Jellyfin's own person
     /// GUID — the same one `map(people:)` puts on `MediaPerson` — so no external
     /// identity lookup is involved and the results are always playable.

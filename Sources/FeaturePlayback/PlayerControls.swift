@@ -511,6 +511,11 @@ struct PlayerControls: View {
                     .padding(.top, Self.infoCardGap - 18)
                     // Even up the bottom inset with the sides (see `infoCardInset`).
                     .padding(.bottom, Self.infoCardBottomPad)
+                    // The extra sliver of travel that buys a gap tighter than the
+                    // tab's margin. No `.animation` of its own — it rides the same
+                    // reveal transaction as the cluster's offset, which is what makes
+                    // the two land together (see `infoCardCatchUp`).
+                    .offset(y: infoMode ? 0 : Self.infoCardCatchUp)
                     // Off-screen but still in the hierarchy, so its buttons must be
                     // out of the focus order. `InfoActionButtonStyle` ignores
                     // `\.isEnabled`, so this doesn't grey the card.
@@ -825,19 +830,24 @@ struct PlayerControls: View {
 
     /// Gap between the tab row and the Info card when the card is open.
     ///
-    /// The SAME number as `bottomMargin`, and it has to be. The cluster travels as
-    /// one rigid unit, so parking it far enough to return the tab to `bottomMargin`
-    /// puts the card's top exactly `bottomMargin − gap` above the screen edge. A
-    /// tighter gap therefore leaves that much card showing at rest — no matter what
-    /// else the layout does (padding below the card cancels out of the arithmetic;
-    /// so does transparent padding inside it). Masking the strip off was worse than
-    /// the problem: the card vanished at an invisible line instead of sliding off
-    /// the screen. Equal gap and margin make the card's top land exactly on the
-    /// bottom edge, so it leaves the way a physical thing would, with nothing hidden.
+    /// Tighter than `bottomMargin`, which a perfectly rigid cluster can't do: parking
+    /// it far enough to return the tab to that margin would leave the top
+    /// `bottomMargin − gap` of the card showing. The shortfall is made up by
+    /// `infoCardCatchUp` instead.
+    private static let infoCardGap: CGFloat = 40
+
+    /// The extra distance the card travels beyond the rest of the cluster, so a gap
+    /// tighter than `bottomMargin` still parks it fully off-screen.
     ///
-    /// To tighten the gap, `bottomMargin` has to come down with it — the tab would
-    /// sit lower. They cannot be tuned apart.
-    private static var infoCardGap: CGFloat { bottomMargin }
+    /// This is a deliberate, measured break from "everything moves as one unit" —
+    /// the rule that made the reveal read as a single object in the first place. It
+    /// survives contact with the eye because of what is NOT broken: the card is
+    /// driven by the same `infoMode` change, through the same spring, so it starts
+    /// and LANDS with everything else. Only its speed differs, by
+    /// `catchUp / totalTravel` — a couple of percent over ~300pt. What reads as
+    /// desynchronised is parts arriving at different times, not parts covering
+    /// slightly different distances together.
+    private static var infoCardCatchUp: CGFloat { max(0, bottomMargin - infoCardGap) }
 
     /// The revealed card's inset from the screen on all three of its free edges.
     /// Equal to the side margin by definition, so the card reads as evenly framed
@@ -870,8 +880,9 @@ struct PlayerControls: View {
     /// offset changed the instant the measurement arrived — and again whenever the
     /// card's metadata did — teleporting the transport. `InfoPanelView` pins its own
     /// height, so this is exact.
-    /// Reduces to `cardHeight + infoCardInset` when the gap equals the bottom margin:
-    /// the card's top then parks exactly on the screen's bottom edge.
+    /// How far the CLUSTER travels — enough to return the tab to `bottomMargin`. The
+    /// card adds `infoCardCatchUp` on top so its own top lands on the screen's bottom
+    /// edge exactly.
     private static let infoCardLift: CGFloat =
         InfoPanelView.cardHeight + infoCardBottomPad + infoCardGap
 

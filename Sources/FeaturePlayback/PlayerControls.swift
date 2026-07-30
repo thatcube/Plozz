@@ -993,7 +993,7 @@ struct PlayerControls: View {
     /// the ONLY focusable thing above the tab, so it has no competition.
     @ViewBuilder
     private var infoExitGuide: some View {
-        if openPanel == .info {
+        if infoExitGuideActive {
             // Not `Color.clear`: UIKit won't focus a fully transparent view.
             Color.black.opacity(0.001)
                 .frame(height: 8)
@@ -1001,6 +1001,25 @@ struct PlayerControls: View {
                 .focusable()
                 .focused($focus, equals: .infoExit)
                 .offset(y: -26)
+        }
+    }
+
+    /// Whether the exit strip is currently in the focus order.
+    ///
+    /// It exists only once focus is already somewhere in the Info region — never
+    /// while focus is arriving. Focusing the strip MEANS "leave the card", so during
+    /// a Down entry it was a trap: it appeared the instant the card opened, the focus
+    /// engine's entry pass picked it (nothing else sits that high), and the reveal
+    /// closed itself — a Down press that bounced straight back to the scrub bar.
+    /// Requiring focus to already be on the tab or a card button means the strip can
+    /// only ever be reached deliberately, by pressing Up from inside the card.
+    private var infoExitGuideActive: Bool {
+        guard openPanel == .info, model.controlBarEntrySettled else { return false }
+        switch focus {
+        case .button(.info), .infoNext, .infoPrev, .infoRestart, .infoStats:
+            return true
+        default:
+            return false
         }
     }
 

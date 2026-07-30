@@ -151,6 +151,8 @@ struct PlayerControls: View {
         }
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var openPanel: Category?
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
@@ -270,7 +272,7 @@ struct PlayerControls: View {
             switch model.controlBarEntry {
             case .info:
                 panelReturnFocus = .button(.info)
-                openPanel = .info
+                revealInfoCard()
                 focus = .button(.info)
             case .trackControls:
                 openPanel = nil
@@ -289,7 +291,7 @@ struct PlayerControls: View {
             // structurally by `infoTabFocusable` (the tab isn't even in the focus
             // order otherwise); this covers the one moment the gate can't — a Down
             // entry, where focus is applied in the same update that opens the card.
-            if slot == .button(.info), openPanel != .info { openPanel = .info }
+            if slot == .button(.info), openPanel != .info { revealInfoCard() }
             // `infoTabSettled` distinguishes "the tab has been focused for a beat"
             // from "focus arrived on the tab in this very event". A move command and
             // the focus change it causes land in the same turn, and the order isn't
@@ -396,13 +398,27 @@ struct PlayerControls: View {
         }
     }
 
+    /// Bring the Info card in, on the reveal clock.
+    ///
+    /// The animation is stated at the call site (rather than left entirely to the
+    /// cluster's `.animation(value: infoMode)`) so the card's arrival can never be
+    /// captured by an ambient transaction from whatever caused it — a focus change,
+    /// a Select press, or the container flipping the transport visible.
+    private func revealInfoCard() {
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : Self.infoReveal) {
+            openPanel = .info
+        }
+    }
+
     /// Dismiss the Info card and hand focus back to the scrub bar.
     ///
     /// The card and its tab are one unit, so they always leave together: leaving the
     /// tab focused over a closed card is exactly the state the focus invariant in
     /// `onChange(of: focus)` forbids (it would immediately re-open the card).
     private func closeInfoCard() {
-        openPanel = nil
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : Self.infoReveal) {
+            openPanel = nil
+        }
         onExitToSurface()
     }
 
@@ -417,7 +433,7 @@ struct PlayerControls: View {
             // below the tab row (see `infoCard`).
             ZStack(alignment: .bottomLeading) {
                 titleBlock
-                    .opacity(titleVisible && !infoMode ? 1 : 0)
+                    .opacity(titleVisible ? 1 : 0)
                 if let openPanel, openPanel != .info {
                     morphingPanel(for: openPanel)
                         .plozzFocusSection()
@@ -449,12 +465,14 @@ struct PlayerControls: View {
                 VStack(alignment: .leading, spacing: 18) {
                     trackControlRow
                     scrubberRow
-                        // The whole transport steps aside for the Info tab (see
-                        // `infoMode`): faded in place rather than removed, so the
-                        // tab and its card never shift as it goes.
+                        // The transport steps aside for the Info card: faded in
+                        // place rather than removed, so the tab and its card never
+                        // shift as it goes. No `.animation` here on purpose — it
+                        // rides the single reveal clock applied to the cluster, and
+                        // a per-view modifier would override that transaction and
+                        // let this travel at its own speed.
                         .opacity(infoMode ? 0 : 1)
                         .allowsHitTesting(!infoMode)
-                        .animation(.easeInOut(duration: 0.28), value: infoMode)
                     tabRow
                 }
                 .background(
@@ -471,11 +489,26 @@ struct PlayerControls: View {
             if openPanel == .info {
                 infoCard
                     .plozzFocusSection()
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    // A pure slide, no cross-fade: the card rises from behind the
+                    // transport and pushes the tab up, exactly like the Apple TV
+                    // app. Combining `.move` with `.opacity` made it read as
+                    // materialising in place instead of arriving from somewhere,
+                    // because most of an opacity curve lands in the first sliver of
+                    // the travel.
+                    .transition(.move(edge: .bottom))
             }
         }
         .onPreferenceChange(TransportHeightKey.self) { transportHeight = $0 }
-        .animation(.easeInOut(duration: 0.2), value: openPanel)
+        // The Info reveal's single clock. Every part of it — the card's slide, the
+        // transport fading back, the track row lifting away — is driven by
+        // `infoMode` and inherits this, so nothing can travel at its own speed.
+        // Reduce Motion drops the movement and keeps a plain cross-fade.
+        .animation(reduceMotion ? .easeInOut(duration: 0.2) : Self.infoReveal, value: infoMode)
+        // The options panels (Speed / Audio / Subtitles) keep their own snappier
+        // curve. Keyed on `optionsPanel`, which is nil for Info, so opening the card
+        // doesn't change it and this modifier can't fire for — and override — the
+        // reveal above.
+        .animation(.easeInOut(duration: 0.2), value: optionsPanel)
         .animation(.easeInOut(duration: 0.28), value: titleVisible)
         .animation(.easeInOut(duration: 0.3), value: styleEditing)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
@@ -724,11 +757,11 @@ struct PlayerControls: View {
         .opacity(model.isScrubbing ? 0 : 1)
         .offset(y: model.isScrubbing ? 8 : 0)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
-        // Step aside as a whole once the Info tab takes over, so the tab and its
-        // card are the only chrome left.
+        // Step aside as a whole once the Info card takes over, so the tab and its
+        // card are the only chrome left. Deliberately no `.animation` — it rides the
+        // cluster's single reveal clock (see `infoReveal`).
         .opacity(infoMode ? 0 : 1)
         .offset(y: infoMode ? -24 : 0)
-        .animation(.easeInOut(duration: 0.28), value: infoMode)
         .allowsHitTesting(!infoMode)
         // Trap focus inside an open panel: while one is up, the transport buttons
         // drop out of the focus engine so directional nav can't wander out of the
@@ -746,12 +779,31 @@ struct PlayerControls: View {
         .plozzFocusSection()
     }
 
-    /// True once the Info tab owns the moment — either focused or showing its card.
-    /// The title, the track controls and the scrub bar all fade out then, leaving
-    /// just the tab and (when open) its card, exactly like the Apple TV app.
+    /// True while the Info card owns the moment. The track controls and the scrub
+    /// bar fade out then, leaving just the tab and its card, like the Apple TV app.
+    ///
+    /// Keyed on the card ALONE — not "card open *or* tab focused". Focus lands on
+    /// the tab one update before the card opens, so including it made the rows start
+    /// fading a frame before the card began to move: the desync that read as jank.
+    /// (The tab can only be focused with the card open anyway — see
+    /// `infoTabFocusable` — so this loses nothing.)
     private var infoMode: Bool {
-        focus == .button(.info) || openPanel == .info
+        openPanel == .info
     }
+
+    /// `openPanel` with Info masked out, so the options panels' own animation can be
+    /// keyed on it and stay clear of the Info reveal's clock.
+    private var optionsPanel: Category? {
+        openPanel == .info ? nil : openPanel
+    }
+
+    /// The single clock the Info card's arrival and departure run on.
+    ///
+    /// A spring, not an ease: the card is a physical thing being pushed up into the
+    /// frame, and `.smooth` is the same family the series-detail hero reveal uses
+    /// (`SeriesHeroRevealTransition.ambient`) — shorter here because this is one
+    /// card, not a whole page.
+    private static let infoReveal: Animation = .smooth(duration: 0.42)
 
     /// The tab row beneath the scrub bar. Today a single Info tab; siblings
     /// (Chapters, …) join it here and switch the card below rather than opening
@@ -836,6 +888,9 @@ struct PlayerControls: View {
             } else {
                 openPanel = nil   // focus restoration handled centrally in onChange(of: openPanel)
             }
+        } else if category == .info {
+            panelReturnFocus = focus ?? .button(.info)
+            revealInfoCard()
         } else {
             panelReturnFocus = focus ?? .button(category)
             openPanel = category

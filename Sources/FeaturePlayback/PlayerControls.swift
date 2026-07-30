@@ -438,18 +438,7 @@ struct PlayerControls: View {
             // to match. Its removal/return animates with the panel's height change.
             if !styleEditing {
                 VStack(alignment: .leading, spacing: 18) {
-                    trackControlRow
-                    // Directly above the scrub bar, so the now-playing text reads as
-                    // labelling the timeline it sits on. The track controls ride
-                    // above it, at the top of the transport.
-                    titleBlock
-                        .opacity(titleVisible ? 1 : 0)
-                        // Scoped to the title, NOT the cluster. `titleVisible` flips
-                        // one update after a panel opens, and as a cluster-level
-                        // modifier this re-timed the in-flight reveal: the probe
-                        // caught the offset handed from the 0.42 spring to this 0.28
-                        // curve a frame in, which is what made the transport lurch.
-                        .animation(.easeInOut(duration: 0.28), value: titleVisible)
+                    titleAndControlsRow
                     scrubberRow
                         // The transport steps aside for the Info card: faded in
                         // place rather than removed, so the tab and its card never
@@ -734,16 +723,37 @@ struct PlayerControls: View {
 
     // MARK: Control rows
 
-    /// The track controls (Speed · Audio · Subtitles), directly ABOVE the scrub bar
-    /// and right-aligned over the trailing edge their panels open from. An open
-    /// options panel takes the slot above this row, so the menu always sits above
-    /// its own buttons.
+    /// The now-playing title and the track controls share ONE line directly above the
+    /// scrub bar: title at the leading edge, controls at the trailing edge, aligned
+    /// along their bottoms. (Stacked, whichever went on top sat a whole block higher
+    /// than the timeline it belongs to.)
+    private var titleAndControlsRow: some View {
+        HStack(alignment: .bottom, spacing: 32) {
+            titleBlock
+                .opacity(titleVisible ? 1 : 0)
+                // Scoped to the title, NOT the cluster. `titleVisible` flips one
+                // update after a panel opens, and as a cluster-level modifier this
+                // re-timed the in-flight reveal: the probe caught the offset handed
+                // from the 0.42 spring to this 0.28 curve a frame in, which is what
+                // made the transport lurch.
+                .animation(.easeInOut(duration: 0.28), value: titleVisible)
+            // The controls are laid out FIRST (higher priority) at their intrinsic
+            // width; the title then takes what's left and truncates. Without this a
+            // long series name would push the buttons off the trailing edge, since
+            // the title's own frame is greedy.
+            trackControlButtons
+                .layoutPriority(1)
+        }
+    }
+
+    /// The track controls (Speed · Audio · Subtitles), at the trailing edge their
+    /// panels open from. An open options panel floats above the whole transport, so
+    /// the menu always sits above its own buttons.
     ///
     /// Faded out — not removed — whenever the Info card is up (the card owns the
     /// screen then), so hiding it never reflows the scrub bar.
-    private var trackControlRow: some View {
+    private var trackControlButtons: some View {
         HStack(spacing: 20) {
-            Spacer(minLength: 20)
             ForEach(model.trackControlCategories, id: \.self) { category in
                 Button {
                     toggle(category)
@@ -785,12 +795,11 @@ struct PlayerControls: View {
         // focus, so the open panel becomes the sole focusable region.
         //
         // The row stays focusable in `infoMode` even though it's invisible: that's
-        // what lets Up from the Info tab walk back into it (and bring it back). It
-        // spans the full width (Spacer + buttons) and is its own focus section so
-        // that Up from the leading-edge Info tab reaches these trailing-edge buttons
-        // despite the horizontal offset between them.
+        // what lets Up from the Info tab walk back into it (and bring it back). Its
+        // own focus section groups the buttons, so a directional move from the
+        // leading-edge Info tab treats them as one region to aim at despite the
+        // horizontal offset between them.
         .disabled(openPanel != nil)
-        .frame(maxWidth: .infinity, alignment: .trailing)
         .plozzFocusSection()
     }
 

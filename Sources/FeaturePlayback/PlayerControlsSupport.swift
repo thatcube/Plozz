@@ -327,34 +327,11 @@ struct TrackControlsWidthKey: PreferenceKey {
     }
 }
 
-/// Horizontally positions an open control panel within the bottom cluster.
-/// `leadingInset` non-nil → shift the panel right to sit under its own button
-/// (Speed); nil → pin to the trailing edge above the track-button cluster
-/// (Subtitles/Audio/Sync).
-struct PanelHorizontalPlacement: ViewModifier {
-    let leadingInset: CGFloat?
-
-    func body(content: Content) -> some View {
-        if let leadingInset {
-            // Use `.offset` — NOT `.padding(.leading,)` — so aligning the Speed
-            // panel to its button has zero effect on the bottom cluster's layout.
-            // Leading padding applied after a fill frame grows the panel's own
-            // width by `leadingInset`, overflowing the row and dragging the whole
-            // control cluster sideways as the panel opens. Offset only moves the
-            // drawn panel; the measured cluster (and the button we align to) stay
-            // put, so there's no layout feedback loop.
-            content.offset(x: max(0, leadingInset))
-        } else {
-            content
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-    }
-}
-
-/// Carries the Speed button's measured leading-edge X up to `PlayerControls` so
-/// the Speed panel can align its left edge to the button. Only the Speed button
-/// publishes a value; sibling buttons contribute the default (0), so the reduce
-/// keeps the largest (the real measurement) rather than letting a 0 clobber it.
+/// Carries the Speed button's measured leading-edge X (within the track-control
+/// row) up to `PlayerControls` so the Speed panel can align to the button. Only the
+/// Speed button publishes a value; sibling buttons contribute the default (0), so
+/// the reduce keeps the largest (the real measurement) rather than letting a 0
+/// clobber it.
 struct SpeedButtonLeadingKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {

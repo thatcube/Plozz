@@ -750,7 +750,7 @@ struct PlayerControls: View {
                 //
                 // Outside `trackControlButtons`'s own `.disabled` on purpose — inside,
                 // the open menu would inherit it and its rows couldn't be selected.
-                .overlay(alignment: .topLeading) {
+                .overlay(alignment: .topTrailing) {
                     optionsPanelLayer
                         // Hang the menu entirely ABOVE the buttons: aligning its top
                         // guide to its own bottom edge shifts it up by exactly its own
@@ -1011,11 +1011,9 @@ struct PlayerControls: View {
         if let panel = optionsPanel {
             morphingPanel(for: panel)
                 .plozzFocusSection()
-                // Keep the menu clear of the right-hand title-safe margin. The
-                // transport itself sits outside that line (60pt, hugging the edge like
-                // Apple's player), but a menu is a block of readable text and is only
-                // ever up briefly, so it observes the safe area.
-                .padding(.trailing, Self.panelSafeInset)
+                // Horizontal placement, measured LEFTWARD from the button row's
+                // trailing edge (the overlay's anchor).
+                .offset(x: -(Self.panelSafeInset + panelTrailingShift(for: panel)))
                 // Breathing room between the menu and the buttons beneath it.
                 .padding(.bottom, Self.panelLift)
                 // Grow + fade from the corner nearest the button that opened it so it
@@ -1195,15 +1193,17 @@ struct PlayerControls: View {
         }
     }
 
-    /// Where the Speed menu's leading edge sits: under its own button, but pulled
-    /// left when that would push the box past the row's trailing edge.
+    /// How far LEFT of the button row's trailing edge a menu sits.
     ///
-    /// The clamp matters because the Speed menu (260pt) is wider than the whole
-    /// three-button row, and Speed is its LEADING button — so aligning the two
-    /// naively hangs most of the menu off the right of the screen.
-    private var speedPanelLeading: CGFloat {
-        guard trackControlsWidth > 0 else { return 0 }
-        return min(speedButtonLeading, max(0, trackControlsWidth - panelWidth(for: .speed)))
+    /// Zero for the wide menus (Audio / Subtitles / Sync): they hang off that trailing
+    /// edge, growing leftward, which is what keeps them on screen — they are wider than
+    /// the row they're anchored to. Speed instead lines up with its own button, so it
+    /// shifts left by however far that button is from the trailing edge, and is clamped
+    /// so a menu wider than the remaining space can't push back out past the edge.
+    private func panelTrailingShift(for category: Category) -> CGFloat {
+        guard category == .speed, trackControlsWidth > 0 else { return 0 }
+        let fromTrailing = trackControlsWidth - speedButtonLeading
+        return max(0, fromTrailing - panelWidth(for: category))
     }
 
     /// The tallest a scrollable list (track list / Audio / Speed / Sync) may grow
@@ -1296,13 +1296,6 @@ struct PlayerControls: View {
                 withAnimation(.easeInOut(duration: 0.28)) { styleBodyHeight = newHeight }
             }
         }
-        // Speed opens left-aligned under its own button; the other panels pin
-        // to the trailing edge above the track-button cluster. The measured X is
-        // in the whole-layer space, so drop the layer's side margin to express it
-        // relative to the cluster's content edge.
-        .modifier(PanelHorizontalPlacement(
-            leadingInset: category == .speed ? speedPanelLeading : nil
-        ))
     }
 
     @ViewBuilder

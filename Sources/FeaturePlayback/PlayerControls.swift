@@ -169,16 +169,6 @@ struct PlayerControls: View {
     /// anchored to. See `trackControlButtons`.
     private static let trackControlsSpace = "PlayerTrackControls"
 
-    /// tvOS's horizontal title-safe margin on a 1920pt-wide screen (1740pt safe
-    /// zone). The transport deliberately sits outside it, hugging the edge the way
-    /// Apple's own player does — but a full options menu is a block of readable text,
-    /// so it stays inside, where an overscanning TV can't crop it.
-    private static let titleSafeHorizontal: CGFloat = 90
-
-    /// Extra trailing inset that pulls an open menu from the transport's margin back
-    /// to the title-safe line.
-    private static var panelSafeInset: CGFloat { max(0, titleSafeHorizontal - horizontalMargin) }
-
     /// Side margin of the controls layer. Subtracted from the whole-layer
     /// measurement above so a panel aligned to a button lands in the cluster's own
     /// content coordinates.
@@ -245,13 +235,9 @@ struct PlayerControls: View {
         ZStack {
             dimScrim
             VStack(spacing: 0) {
-                if !styleEditing { Spacer(minLength: 0) }
+                Spacer(minLength: 0)
                 bottomCluster
                     .opacity(model.controlsVisible ? 1 : 0)
-                // When the appearance editor is open the whole cluster flips to
-                // top-anchored so the panel pins to the top-right corner (top
-                // margin == side margin) instead of growing up from the transport.
-                if styleEditing { Spacer(minLength: 0) }
             }
             .animation(.easeInOut(duration: 0.25), value: model.controlsVisible)
             .animation(.easeInOut(duration: 0.3), value: styleEditing)
@@ -449,29 +435,38 @@ struct PlayerControls: View {
             // panel (the title/description are repetitive with it, so they fade out).
             // The Info card is NOT part of this slot — it enters from the bottom edge
             // below the tab row (see `infoCard`).
-            // Transport block (track controls + scrubber + tab row). Hidden entirely
-            // while the full-height appearance editor is open so the live subtitles
-            // behind it are unobstructed; measured otherwise so other panels can size
-            // to match. Its removal/return animates with the panel's height change.
-            if !styleEditing {
-                VStack(alignment: .leading, spacing: 18) {
-                    titleAndControlsRow
-                    scrubberRow
-                        // The transport steps aside for the Info card: faded in
-                        // place rather than removed, so the tab and its card never
-                        // shift as it goes.
-                        .opacity(infoMode ? 0 : 1)
-                        .allowsHitTesting(!infoMode)
-                        .animation(Self.transportExit(reduceMotion), value: infoMode)
-                    tabRow
-                }
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(key: TransportHeightKey.self, value: proxy.size.height)
-                    }
-                )
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            // Transport block (title + track controls + scrubber + tab row). Faded
+            // out — never removed — while the full-height appearance editor is open,
+            // so the live subtitles behind it are unobstructed.
+            //
+            // It MUST stay mounted: the options menus are an overlay on the track
+            // controls, so removing the block took the open Style editor down with it
+            // and the panel simply never appeared.
+            VStack(alignment: .leading, spacing: 18) {
+                titleAndControlsRow
+                scrubberRow
+                    // The transport steps aside for the Info card: faded in
+                    // place rather than removed, so the tab and its card never
+                    // shift as it goes.
+                    .opacity(infoMode ? 0 : 1)
+                    .allowsHitTesting(!infoMode)
+                    .animation(Self.transportExit(reduceMotion), value: infoMode)
+                    .opacity(chromeHidden ? 0 : 1)
+                    .animation(.easeInOut(duration: 0.3), value: chromeHidden)
+                tabRow
+                    .opacity(chromeHidden ? 0 : 1)
+                    .animation(.easeInOut(duration: 0.3), value: chromeHidden)
             }
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: TransportHeightKey.self, value: proxy.size.height)
+                }
+            )
+            // NOTE: no block-level `.opacity` for the Style editor. Opacity applies
+            // to a view's whole rendered subtree — overlays included — and cannot be
+            // undone from inside, so fading the block faded the open panel with it.
+            // Each piece of chrome hides itself instead (see `chromeHidden`), leaving
+            // the menu overlay, which hangs off the buttons, unaffected.
             // The Info card is a PERMANENT member of the stack, never inserted or
             // removed. That's the whole trick behind the reveal moving as one unit:
             // the layout always holds the revealed arrangement (card at the bottom,
@@ -480,26 +475,24 @@ struct PlayerControls: View {
             // is then a single transform on a fixed stage — nothing appears, nothing
             // reflows, so no part can arrive on its own clock. (Same approach as the
             // series-detail hero/browser reveal; see SeriesEpisodeBrowserLayout.)
-            if !styleEditing {
-                infoCard
-                    .plozzFocusSection()
-                    // Widen the stack's 18pt gap to the cluster's bottom margin. That
-                    // equality is load-bearing: it's what makes ONE offset put the
-                    // card exactly off-screen at rest AND the tab exactly at its
-                    // resting height (see `infoCardLift`).
-                    .padding(.top, Self.infoCardGap - 18)
-                    // Even up the bottom inset with the sides (see `infoCardInset`).
-                    .padding(.bottom, Self.infoCardBottomPad)
-                    // The extra sliver of travel that buys a gap tighter than the
-                    // tab's margin. No `.animation` of its own — it rides the same
-                    // reveal transaction as the cluster's offset, which is what makes
-                    // the two land together (see `infoCardCatchUp`).
-                    .offset(y: infoMode ? 0 : Self.infoCardCatchUp)
-                    // Off-screen but still in the hierarchy, so its buttons must be
-                    // out of the focus order. `InfoActionButtonStyle` ignores
-                    // `\.isEnabled`, so this doesn't grey the card.
-                    .disabled(!infoMode)
-            }
+            infoCard
+                .plozzFocusSection()
+                // Widen the stack's 18pt gap to the cluster's bottom margin. That
+                // equality is load-bearing: it's what makes ONE offset put the
+                // card exactly off-screen at rest AND the tab exactly at its
+                // resting height (see `infoCardLift`).
+                .padding(.top, Self.infoCardGap - 18)
+                // Even up the bottom inset with the sides (see `infoCardInset`).
+                .padding(.bottom, Self.infoCardBottomPad)
+                // The extra sliver of travel that buys a gap tighter than the
+                // tab's margin. No `.animation` of its own — it rides the same
+                // reveal transaction as the cluster's offset, which is what makes
+                // the two land together (see `infoCardCatchUp`).
+                .offset(y: infoMode ? 0 : Self.infoCardCatchUp)
+                // Off-screen but still in the hierarchy, so its buttons must be
+                // out of the focus order. `InfoActionButtonStyle` ignores
+                // `\.isEnabled`, so this doesn't grey the card.
+                .disabled(!infoMode)
         }
         // THE reveal: the entire cluster — options slot, track controls, scrub bar,
         // tab and card — travels as one rigid unit. At rest it's parked far enough
@@ -730,7 +723,7 @@ struct PlayerControls: View {
     private var titleAndControlsRow: some View {
         HStack(alignment: .bottom, spacing: 32) {
             titleBlock
-                .opacity(titleVisible ? 1 : 0)
+                .opacity(titleVisible && !chromeHidden ? 1 : 0)
                 // Scoped to the title, NOT the cluster. `titleVisible` flips one
                 // update after a panel opens, and as a cluster-level modifier this
                 // re-timed the in-flight reveal: the probe caught the offset handed
@@ -798,6 +791,11 @@ struct PlayerControls: View {
         .opacity(model.isScrubbing ? 0 : 1)
         .offset(y: model.isScrubbing ? 8 : 0)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
+        // Applied INSIDE this property, i.e. before `titleAndControlsRow` attaches the
+        // menu overlay — so the buttons fade for the Style editor while the menu
+        // hanging off them does not.
+        .opacity(chromeHidden ? 0 : 1)
+        .animation(.easeInOut(duration: 0.3), value: chromeHidden)
         // Clear out once the Info card takes over, so the tab and its card are the
         // only chrome left. Opacity ONLY — it's already travelling with the rest of
         // the cluster, and an offset of its own is exactly the kind of second
@@ -1012,8 +1010,11 @@ struct PlayerControls: View {
             morphingPanel(for: panel)
                 .plozzFocusSection()
                 // Horizontal placement, measured LEFTWARD from the button row's
-                // trailing edge (the overlay's anchor).
-                .offset(x: -(Self.panelSafeInset + panelTrailingShift(for: panel)))
+                // trailing edge (the overlay's anchor). No safe-area inset of its own:
+                // a menu lines up with the controls it belongs to, and the transport
+                // sets that margin for the whole player. Insetting the menus alone
+                // just made them look misaligned with their own buttons.
+                .offset(x: -panelTrailingShift(for: panel))
                 // Breathing room between the menu and the buttons beneath it.
                 .padding(.bottom, Self.panelLift)
                 // Grow + fade from the corner nearest the button that opened it so it
@@ -1367,6 +1368,15 @@ struct PlayerControls: View {
         case .info: EmptyView()
         }
     }
+
+    /// Whether the transport's chrome (title, buttons, scrub bar, tab) hides itself,
+    /// leaving the live subtitles clear behind the full-height appearance editor.
+    ///
+    /// Each piece applies this to ITSELF rather than the block applying one fade:
+    /// the menus are an overlay on the buttons, and an ancestor's opacity multiplies
+    /// through a subtree's overlays with no way to opt out — so a block-level fade
+    /// took the open Style editor down with it.
+    private var chromeHidden: Bool { styleEditing }
 
     /// True while the ✎ Edit appearance editor (or one of its detail sub-screens)
     /// is open. In this mode we hide the transport chrome and dim gradient and pin

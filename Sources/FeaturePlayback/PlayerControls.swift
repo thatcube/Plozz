@@ -742,7 +742,24 @@ struct PlayerControls: View {
         .allowsHitTesting(!model.isScrubbing)
         // The tab stays live while its OWN card is open (that's what makes it a tab
         // rather than a button); any other open panel traps focus, so it drops out.
-        .disabled(openPanel != nil && openPanel != .info)
+        // It also drops out until something else in the controls holds focus, so an
+        // Up entry can never land on it (see `infoTabFocusable`).
+        .disabled((openPanel != nil && openPanel != .info) || !infoTabFocusable)
+    }
+
+    /// Whether the Info tab is part of the focus order.
+    ///
+    /// Up must NEVER reach the tab — it's a Down-only destination. Steering that
+    /// with a focus *write* loses: entering the controls makes tvOS run its own
+    /// default-focus pass, and whichever of us runs last wins, so the tab
+    /// intermittently stole an Up entry. Per the focus-engine rule, gate what's
+    /// focusable instead of chasing focus after it lands: while nothing in the
+    /// controls holds focus yet (i.e. exactly the moment the engine picks an entry
+    /// target) the tab is out of the order, so the track row is the ONLY candidate.
+    /// Once focus is somewhere the tab joins back in, so Down still reaches it — and
+    /// a Down entry, which targets the tab directly, opts in from the start.
+    private var infoTabFocusable: Bool {
+        focus != nil || model.controlBarEntry == .info
     }
 
     /// The now-playing card the Info tab reveals, full width beneath the tab row.

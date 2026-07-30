@@ -243,6 +243,9 @@ struct PlayerControls: View {
             .animation(.easeInOut(duration: 0.3), value: styleEditing)
         }
         .ignoresSafeArea()
+        // Screen-level, so its top edge is the screen's — not the cluster's.
+        .overlay(alignment: .top) { styleEditorLayer }
+        .animation(.easeInOut(duration: 0.3), value: styleEditing)
         // One space across the whole layer: the Speed button and its panel sit in
         // different sub-stacks of the cluster, so the alignment measurement has to
         // cross them.
@@ -1006,7 +1009,9 @@ struct PlayerControls: View {
     /// without occupying layout. See the overlay's note.
     @ViewBuilder
     private var optionsPanelLayer: some View {
-        if let panel = optionsPanel {
+        // The Style editor is pinned to the top of the screen instead — see
+        // `styleEditorLayer`.
+        if let panel = optionsPanel, !styleEditing {
             morphingPanel(for: panel)
                 .plozzFocusSection()
                 // Horizontal placement, measured LEFTWARD from the button row's
@@ -1031,6 +1036,28 @@ struct PlayerControls: View {
                     )
                     .combined(with: .opacity)
                 )
+        }
+    }
+
+    /// The Subtitle Style editor, pinned to the TOP-RIGHT corner of the screen.
+    ///
+    /// Deliberately not hung off the track controls like the other menus. It's much
+    /// taller and it MORPHS as you walk into its sub-screens (Font, Shadow & Outline,
+    /// …); anchored at the bottom, every height change moved its top edge — the whole
+    /// panel sliding down as a submenu opened — and its full height overflowed the top
+    /// of the screen. Pinned at the top, the morph extends downward from a fixed edge,
+    /// which is how this editor behaved before the menus moved.
+    ///
+    /// Top margin == side margin, so it sits concentric in the corner.
+    @ViewBuilder
+    private var styleEditorLayer: some View {
+        if styleEditing {
+            morphingPanel(for: .subtitles)
+                .plozzFocusSection()
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.horizontal, Self.horizontalMargin)
+                .padding(.top, Self.horizontalMargin)
+                .transition(.scale(scale: 0.9, anchor: .topTrailing).combined(with: .opacity))
         }
     }
 

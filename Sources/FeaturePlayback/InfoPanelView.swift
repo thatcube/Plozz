@@ -80,14 +80,40 @@ struct InfoPanelView: View {
                     // forcing its full height, so a long synopsis can never push
                     // the meta/badge row off the bottom of the card (it stays
                     // pinned by the Spacer below).
+                    //
+                    // `layoutPriority` makes the overview the column's *protected*
+                    // element rather than its elastic one. This column is locked to
+                    // `thumbHeight` (210), and at tvOS metrics that budget is far
+                    // tighter than it looks: .headline is 45.35pt per line and
+                    // .footnote 34.61, so a one-line headline plus three lines of
+                    // overview plus the spacings and the meta row comes to ~205 —
+                    // barely 5pt of slack. The moment the headline wraps to its
+                    // second line it needs 40pt that do not exist, and because
+                    // `lineLimit(3)` is a cap rather than a reservation, the
+                    // overview was the thing that silently gave them up and
+                    // collapsed to two lines.
+                    //
+                    // Sizing the overview first inverts that: it always gets its
+                    // three lines, and the headline takes the remainder — keeping
+                    // both of its lines whenever the synopsis is short enough to
+                    // leave room, and truncating to one when it isn't.
                     Text(model.infoCard.overview)
                         .font(.footnote)
                         .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(3)
                         .truncationMode(.tail)
                         .padding(.top, 1)
+                        .layoutPriority(1)
                 }
-                Spacer(minLength: 8)
+                // Pins the meta/badge row to the card's bottom edge. `minLength: 0`
+                // is load-bearing, not laziness: this column has 210pt, and a
+                // one-line headline plus three lines of overview plus the meta row
+                // and the VStack's own spacings comes to 202.78 — leaving 7.22 here.
+                // An 8pt minimum could not be satisfied by 0.78pt, so the *overview*
+                // paid for it by dropping to two lines, and this Spacer then grew to
+                // ~42pt of dead air. The 6pt VStack spacing on either side already
+                // separates the rows, so the floor bought nothing and cost a line.
+                Spacer(minLength: 0)
                 // Bottom metadata row: season/episode + runtime, then the technical
                 // badges, all on one baseline pinned to the card's bottom edge.
                 HStack(alignment: .center, spacing: 12) {

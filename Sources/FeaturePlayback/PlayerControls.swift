@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 import CoreUI
 import CoreModels
+import CoreNetworking
 
 /// Lightweight value-type bag of options callbacks. Mirrors the tunable subset
 /// of `PlayerActions` so the controls stay presentation-only.
@@ -269,7 +270,10 @@ struct PlayerControls: View {
                 restoreFocus(initialFocus)
             }
         }
-        .onChange(of: focus) { _, _ in
+        .onChange(of: focus) { _, slot in
+            #if DEBUG
+            PlozzLog.playback.debug("PLZFOCUS controls focus=\(String(describing: slot)) entry=\(model.controlBarEntry) panel=\(String(describing: openPanel))")
+            #endif
             // Any focus move between control-bar buttons is activity — bump so the
             // container restarts its idle countdown instead of hiding mid-navigation.
             model.controlBarActivity &+= 1

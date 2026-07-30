@@ -438,6 +438,14 @@ final class PlayerInputViewController: UIViewController {
         host.view.backgroundColor = .clear
         // Off until the viewer drops focus into the bar (swipe-down / Down).
         host.view.isUserInteractionEnabled = false
+        // Do NOT let UIKit restore this region's last-focused item when it becomes
+        // focusable again. That restoration is what made an Up entry land on the
+        // Info tab: the tab was the last thing focused during a previous *Down*
+        // entry, and the remembered item beats both SwiftUI's preferred focus and
+        // our own @FocusState write. With restoration off the engine asks for the
+        // preferred environment instead, so each entry is decided by the direction
+        // the viewer actually pressed (see `enterControlBar(entry:)`).
+        host.restoresFocusAfterTransition = false
         addChild(host)
         host.view.frame = view.bounds
         host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -1230,6 +1238,9 @@ final class PlayerInputViewController: UIViewController {
         model.controlsVisible = true
         model.controlBarEntry = entry
         model.controlBarVisible = true
+        #if DEBUG
+        PlozzLog.playback.debug("PLZFOCUS enter control bar entry=\(entry) categories=\(model.trackControlCategories.count)")
+        #endif
         setSurfaceRecognizers(enabled: false)
         controlBarHost?.view.isUserInteractionEnabled = true
         playerInputView?.allowsFocus = false

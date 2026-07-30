@@ -164,7 +164,11 @@ struct SearchTab: View {
                         // Never the primary-account fallback — see HomeTab.
                         provider: route.sourceAccountID.flatMap {
                             resolveOptionalProvider($0, in: accounts)
-                        }
+                        },
+                        // Every other signed-in server — see HomeTab.
+                        otherProviders: accounts
+                            .filter { $0.account.id != route.sourceAccountID }
+                            .map(\.provider)
                     ),
                     onSelectItem: { navigateToItem($0) }
                 )

@@ -271,7 +271,13 @@ struct HomeTab: View {
                             // account means no credits, not wrong credits.
                             provider: route.sourceAccountID.flatMap {
                                 resolveOptionalProvider($0, in: accounts)
-                            }
+                            },
+                            // Every OTHER signed-in server, asked by name because
+                            // person ids don't cross servers. Empty for the
+                            // single-server case, where this stays one request.
+                            otherProviders: accounts
+                                .filter { $0.account.id != route.sourceAccountID }
+                                .map(\.provider)
                         )
                     },
                     onSelectItem: { navigate($0, libraryOrigin: route.sourceAccountID) }

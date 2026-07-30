@@ -188,6 +188,30 @@ public struct JellyfinProvider: MediaProvider {
         )
     }
 
+    /// The same two lookups by name, used when this server is *not* the one the
+    /// person came from and therefore has never seen their id.
+    public func items(withPersonNamed name: String, limit: Int) async throws -> [MediaItem] {
+        guard !name.isEmpty else { return [] }
+        return try await client.itemsWithPersonNamed(
+            userID: session.userID,
+            name: name,
+            limit: limit
+        ).map(map(item:))
+    }
+
+    public func person(named name: String) async throws -> MediaPerson? {
+        guard !name.isEmpty else { return nil }
+        guard let dto = try? await client.personNamed(name) else { return nil }
+        guard let resolved = dto.Name, !resolved.isEmpty else { return nil }
+        let overview = dto.Overview.flatMap { $0.isEmpty ? nil : $0 }
+        return MediaPerson(
+            id: dto.Id,
+            name: resolved,
+            imageURL: client.imageURL(itemID: dto.Id, kind: .primary, maxWidth: 400, tag: nil),
+            biography: overview
+        )
+    }
+
     /// Titles in this library featuring a person. The id is Jellyfin's own person
     /// GUID — the same one `map(people:)` puts on `MediaPerson` — so no external
     /// identity lookup is involved and the results are always playable.

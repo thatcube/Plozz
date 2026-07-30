@@ -305,6 +305,45 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
     }
 
+    /// `/Users/{id}/Items?Person={name}` — the same library query keyed by the
+    /// person's **name**, for asking a server about someone it did not introduce
+    /// (their id belongs to a different server entirely).
+    func itemsWithPersonNamed(
+        userID: String,
+        name: String,
+        limit: Int
+    ) async throws -> [BaseItemDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items",
+            queryItems: [
+                URLQueryItem(name: "Person", value: name),
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
+                URLQueryItem(name: "SortBy", value: "PremiereDate,SortName"),
+                URLQueryItem(name: "SortOrder", value: "Descending"),
+                URLQueryItem(name: "Limit", value: String(limit)),
+                URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,ProviderIds")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
+    }
+
+    /// `/Persons/{name}` — Jellyfin's by-name person record, whose `Overview` is
+    /// the biography. Lets a second Jellyfin supply a bio for a person first seen
+    /// on a server that keeps none.
+    /// The name goes in **raw**. `HTTPClient` assigns this to `URLComponents.path`,
+    /// which percent-encodes what it is given — so pre-encoding here turned
+    /// "Martin Freeman" into `Martin%2520Freeman` and every lookup 404'd.
+    func personNamed(_ name: String) async throws -> BaseItemDto {
+        let endpoint = Endpoint(
+            path: "/Persons/\(name)",
+            queryItems: [URLQueryItem(name: "Fields", value: "Overview")],
+            headers: authHeaders
+        )
+        return try await http.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL)
+    }
+
     func latestItems(userID: String, limit: Int, parentID: String? = nil) async throws -> [BaseItemDto] {
         var queryItems = [
             URLQueryItem(name: "Limit", value: String(limit)),

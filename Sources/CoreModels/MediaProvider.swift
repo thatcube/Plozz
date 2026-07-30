@@ -206,6 +206,22 @@ public protocol MediaProvider: Sendable {
     /// case a person page simply shows no biography.
     func person(id: String) async throws -> MediaPerson?
 
+    /// The same two lookups keyed by **name** instead of id, for asking a server
+    /// about someone it did not introduce.
+    ///
+    /// Person ids are per-server — a Jellyfin GUID means nothing to Plex — so a
+    /// name is the only identity that crosses them. That is far safer for people
+    /// than it would be for titles: two different actors sharing a name *and*
+    /// both appearing in one personal library is vanishingly rare, whereas title
+    /// collisions are common enough to have their own matcher. These are only
+    /// ever used for the viewer's *other* servers; the one the person came from
+    /// is always asked by its own exact id.
+    func items(withPersonNamed name: String, limit: Int) async throws -> [MediaItem]
+
+    /// A person looked up by name, chiefly so a second server can supply a
+    /// biography the first one lacks — without involving any third party.
+    func person(named name: String) async throws -> MediaPerson?
+
     // MARK: Connection locality
 
     /// How reachable this provider's *currently active* server connection is
@@ -254,6 +270,13 @@ public extension MediaProvider {
 
     /// Default: the source keeps no person records, so no biography.
     func person(id: String) async throws -> MediaPerson? { nil }
+
+    /// Default: cannot look a person up by name, so this source contributes
+    /// nothing to another server's person page.
+    func items(withPersonNamed name: String, limit: Int) async throws -> [MediaItem] { [] }
+
+    /// Default: no person records to search by name.
+    func person(named name: String) async throws -> MediaPerson? { nil }
 
     /// Default: ignore the exclusions and run the unscoped search. Providers that
     /// can attribute results to a library (Plex `librarySectionID`) or scope the

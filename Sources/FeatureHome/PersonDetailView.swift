@@ -30,12 +30,73 @@ public final class PersonDetailViewModel {
 
     private let person: MediaPerson
     private let provider: (any MediaProvider)?
+    /// The viewer's *other* signed-in servers. Empty for the single-server case,
+    /// which is most people — and when it is empty this class does exactly what
+    /// it did before, one request, no extra latency.
+    private let otherProviders: [any MediaProvider]
     private let limit: Int
 
-    public init(person: MediaPerson, provider: (any MediaProvider)?, limit: Int = 40) {
+    public init(
+        person: MediaPerson,
+        provider: (any MediaProvider)?,
+        otherProviders: [any MediaProvider] = [],
+        limit: Int = 40
+    ) {
         self.person = person
         self.provider = provider
+        self.otherProviders = otherProviders
         self.limit = limit
+    }
+
+    /// Folds the viewer's other servers in, keyed by the person's **name** since
+    /// ids do not cross servers.
+    ///
+    /// Additive only: anything these return is extra, and any that fail simply
+    /// contribute nothing. A second server can also supply the biography the
+    /// first one lacked, which is how a Plex-sourced person gets one without any
+    /// third party being involved.
+    private func mergeOtherServers() async {
+        let name = person.name
+        guard !name.isEmpty else { return }
+        let limit = self.limit
+
+        var merged = libraryCredits
+        var seen = Set(merged.map(Self.dedupeKey))
+
+        await withTaskGroup(of: (([MediaItem])?, MediaPerson?).self) { group in
+            for other in otherProviders {
+                group.addTask {
+                    async let items = try? other.items(withPersonNamed: name, limit: limit)
+                    async let record = try? other.person(named: name)
+                    return (await items, await record ?? nil)
+                }
+            }
+            for await (items, record) in group {
+                if biography == nil {
+                    biography = record?.biography.flatMap { $0.isEmpty ? nil : $0 }
+                }
+                for item in items ?? [] where seen.insert(Self.dedupeKey(item)).inserted {
+                    merged.append(item)
+                }
+            }
+        }
+
+        libraryCredits = merged
+        // A server that had nothing to say about the home source's failure should
+        // not leave the page reading "unavailable" when others answered.
+        if !merged.isEmpty { state = .loaded }
+    }
+
+    /// Collapses the same title held on more than one server into one entry.
+    ///
+    /// Title+year rather than external ids: this is a display row, the two copies
+    /// are interchangeable for the viewer, and being wrong costs a duplicate
+    /// poster rather than the wrong thing playing — which is why this can be
+    /// looser than `RelatedTitleMatcher`, where a false match means the wrong
+    /// show starts.
+    private static func dedupeKey(_ item: MediaItem) -> String {
+        let title = MediaItemIdentity.normalizedTitle(item.title)
+        return "\(item.kind.rawValue)|\(title)|\(item.productionYear.map(String.init) ?? "")"
     }
 
     public func load() async {
@@ -44,9 +105,10 @@ public final class PersonDetailViewModel {
             state = .unavailable
             return
         }
-        // Independent, concurrent, and separately fallible: the biography is
-        // additive, so a source that can list credits but keeps no person record
-        // (or the reverse) still gets everything it can actually answer for.
+        // The person's own server, asked by its own exact id. Independent and
+        // separately fallible from the biography: a source can list credits and
+        // keep no person record, or the reverse, and neither absence should
+        // suppress the other.
         async let credits = try? provider.items(withPerson: person.id, limit: limit)
         async let record = try? provider.person(id: person.id)
 
@@ -57,12 +119,17 @@ public final class PersonDetailViewModel {
         let personRecord: MediaPerson? = await record ?? nil
 
         biography = personRecord?.biography.flatMap { $0.isEmpty ? nil : $0 }
-        guard let items else {
+        if let items {
+            libraryCredits = items
+            state = .loaded
+        } else {
             state = .unavailable
-            return
         }
-        libraryCredits = items
-        state = .loaded
+
+        // Render what the home server gave us before consulting anyone else, so
+        // time-to-content never depends on how many servers are signed in.
+        guard !otherProviders.isEmpty else { return }
+        await mergeOtherServers()
     }
 }
 

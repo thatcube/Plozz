@@ -344,12 +344,13 @@ struct PlayerControls: View {
 
     /// Directional presses that the focus engine can't resolve on its own.
     ///
-    /// Up never leaves the controls: there is nothing above the track row, so a
-    /// press there is a no-op (Menu is how you get back to the video). The one Up
-    /// that does something is from the Info tab while its card is open — it backs
-    /// out of the card and lifts focus into the track row, bringing the transport
-    /// back with it. Down from the tab opens the card, matching Down from the scrub
-    /// surface.
+    /// The scrub bar is the hub: from the track row **Down** hands focus back to it
+    /// (never sideways-and-down to the Info tab), and from the scrub surface Down
+    /// again is what opens Info. **Up** never leaves the controls — nothing sits
+    /// above the track row, so a press there is a no-op and Menu is the way back to
+    /// the video. The one Up that does act is from the Info tab while its card is
+    /// open: it closes the card and lifts focus into the track row, bringing the
+    /// transport back with it.
     ///
     /// Guarding on `focus` is safe because `@FocusState` still holds the PREVIOUS
     /// slot when the move command fires; the engine moves focus afterwards.
@@ -364,9 +365,18 @@ struct PlayerControls: View {
             panelReturnFocus = initialFocus
             openPanel = nil
         case .down:
-            // Down from the tab opens its card, so the tab reads the same whether
-            // you press Select on it or keep pressing Down from the scrub bar.
-            if openPanel == nil, focus == .button(.info) { toggle(.info) }
+            guard openPanel == nil else { return }
+            if focus == .button(.info) {
+                // Down from the tab opens its card, so the tab reads the same whether
+                // you press Select on it or keep pressing Down from the scrub bar.
+                toggle(.info)
+            } else if case .button = focus {
+                // Down from a track control returns to the scrub bar. Handing focus
+                // back to the surface here also takes the whole controls layer out of
+                // the focus order, so the engine can't complete its own move onto the
+                // Info tab — Info stays a deliberate Down-from-the-scrubber gesture.
+                onExitToSurface()
+            }
         case .left, .right:
             break
         }

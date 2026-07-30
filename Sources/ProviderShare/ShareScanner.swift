@@ -172,13 +172,65 @@ actor ShareScanner {
            Date().timeIntervalSince1970 - ts < minInterval {
             return .freshNoOp
         }
-        return await scan()
+        // Sidecar/artwork folders are re-verified on a long cadence rather than
+        // every pass — see `directoriesNeedingRelist`. A share that has never
+        // completed one is treated as due, so the first pass after upgrading is
+        // deep and the incremental state it leaves behind is complete.
+        let lastDeep = await store.meta("last_deep_scan_at").flatMap(TimeInterval.init)
+        let deep = lastDeep.map {
+            Date().timeIntervalSince1970 - $0 >= Self.deepScanInterval
+        } ?? true
+        return await scan(deep: deep)
+    }
+
+    /// How often the sidecar/artwork re-verification pass runs.
+    ///
+    /// This is the cadence at which an NFO edited in place, or a poster deleted
+    /// without its folder's mtime moving, is noticed. Daily rather than every ten
+    /// minutes: those are hand edits on a library the viewer is not usually
+    /// watching at the same moment, and the old cadence re-listed essentially
+    /// every leaf folder 144 times a day to catch them.
+    static let deepScanInterval: TimeInterval = 24 * 60 * 60
+
+    /// Parent directories of `paths` — i.e. every directory known to contain a
+    /// subdirectory. A top-level entry's parent is the root, `""`.
+    static func parentPaths(of paths: some Sequence<String>) -> Set<String> {
+        var out: Set<String> = []
+        for path in paths where !path.isEmpty {
+            if let slash = path.lastIndex(of: "/") {
+                out.insert(String(path[path.startIndex..<slash]))
+            } else {
+                out.insert("")
+            }
+        }
+        return out
+    }
+
+    /// How close to "now" a directory mtime may be and still be trusted for
+    /// skipping on a later pass.
+    ///
+    /// The racy-timestamp problem, and the same one git solves for its index: a
+    /// file added in the *same second* the scan reads the directory leaves an
+    /// mtime equal to the one recorded, so the directory would look unchanged
+    /// forever after. Many filesystems and every SMB/NFS server in practice have
+    /// one-second resolution, so the window has to cover a whole tick plus skew.
+    static let racyMTimeWindow: TimeInterval = 2
+
+    /// The mtime to persist, or `nil` when it is too fresh to be trusted.
+    ///
+    /// Recording `nil` costs one listing of that directory on the next pass —
+    /// there is no stored mtime to compare against, so it can't be skipped —
+    /// which is exactly the conservative outcome wanted, and it self-corrects on
+    /// the pass after.
+    static func trustworthyMTime(_ mtime: Date?, now: Date = Date()) -> Date? {
+        guard let mtime else { return nil }
+        return now.timeIntervalSince(mtime) >= racyMTimeWindow ? mtime : nil
     }
 
     /// Full breadth-first walk from the share root, using a pool of independent
     /// connections to list `concurrency` directories at once. Idempotent.
     @discardableResult
-    func scan() async -> ShareScanOutcome {
+    func scan(deep: Bool = true) async -> ShareScanOutcome {
         if isRunning { return .freshNoOp }
         if isInvalidated { return .invalidated }
         if Task.isCancelled { return .cancelled(scanGeneration: nil) }
@@ -238,10 +290,27 @@ actor ShareScanner {
         // Incremental scan state: a directory whose mtime is unchanged since the
         // last scan doesn't need listing. Loaded once for the whole walk.
         let storedDirectoryMTimes = await store.directoryModifiedTimes()
-        // Directories holding metadata (NFO sidecars / local artwork) are never
-        // skipped — see `directoriesRequiringRelist` for why. This is what broke
-        // when incremental scanning first landed.
-        let directoriesNeedingRelist = await store.directoriesRequiringRelist()
+        // Directories known to CONTAIN a subdirectory, derived from the recorded
+        // paths rather than queried per-child.
+        //
+        // Load-bearing for the skip rule below, and the reason it isn't simply
+        // "unchanged ⇒ skip". One listing returns every child *with its mtime*,
+        // so listing a parent is what makes skipping all of its children
+        // possible. Skipping the parent instead forfeits that: its children's
+        // fresh mtimes are unobtainable, so every one of them has to be listed.
+        // For a series folder with ten seasons, skipping saved one listing and
+        // forced ten — the optimization ran backwards on every interior node.
+        let directoriesWithSubdirectories = Self.parentPaths(of: storedDirectoryMTimes.keys)
+        // Sidecar/artwork folders are re-listed on a DEEP pass only.
+        //
+        // They can't be skipped on mtime alone (an NFO edited in place doesn't
+        // move its directory's mtime, and a deleted poster is only observable by
+        // listing), but that guarantee was being bought on every ordinary pass —
+        // and since a well-kept library has a poster or NFO in essentially every
+        // leaf folder, it exempted exactly the folders the skip exists for. The
+        // guarantee is kept, just paid for once a day instead of every ten
+        // minutes.
+        let directoriesNeedingRelist = deep ? await store.directoriesRequiringRelist() : []
         // mtime each directory was reported with by its parent's listing, so the
         // value recorded for a folder is the one a later scan will compare against.
         var listedDirectoryMTimes: [String: Date?] = [:]
@@ -316,7 +385,9 @@ actor ShareScanner {
                     if result.ok {
                         await store.recordDirectory(
                             relPath: result.dir,
-                            modifiedAt: listedDirectoryMTimes[result.dir] ?? nil,
+                            modifiedAt: Self.trustworthyMTime(
+                                listedDirectoryMTimes[result.dir] ?? nil
+                            ),
                             scanID: scanID,
                             scanGeneration: scanGeneration
                         )
@@ -330,6 +401,11 @@ actor ShareScanner {
                         if let mtime = child.modifiedAt,
                            let known = storedDirectoryMTimes[child.relPath],
                            known == mtime,
+                           // Leaves only. A directory with children must be
+                           // listed even when unchanged, because that single
+                           // listing is what yields their mtimes and lets the
+                           // whole level below be skipped.
+                           !directoriesWithSubdirectories.contains(child.relPath),
                            !directoriesNeedingRelist.contains(child.relPath) {
                             dirsSkipped += 1
                             await store.touchDirectoryContents(
@@ -479,6 +555,15 @@ actor ShareScanner {
             String(Date().timeIntervalSince1970),
             scanGeneration: scanGeneration
         )
+        // Only a deep pass may stamp this: an ordinary pass skipped the sidecar
+        // folders, so it cannot claim to have re-verified them.
+        if deep {
+            await store.setMeta(
+                "last_deep_scan_at",
+                String(Date().timeIntervalSince1970),
+                scanGeneration: scanGeneration
+            )
+        }
         // Record the classifier the catalog was built with, so `scanIfStale` only
         // force-reparses once per classifier bump (and doesn't perpetually re-walk).
         await store.setMeta(

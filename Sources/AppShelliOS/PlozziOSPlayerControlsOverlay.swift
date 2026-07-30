@@ -613,7 +613,7 @@ private struct PlozziOSPlayerTransport: View {
         PlozziOSPlaybackOptionsMenu(
             audioOptions: viewModel.controls.audioOptions,
             subtitleOptions: viewModel.controls.subtitleOptions,
-            canSearchRemoteSubtitles: viewModel.controls.canSearchRemoteSubtitles,
+            canSearchRemoteSubtitles: viewModel.controls.subtitleDownload.canSearch,
             supportsPlaybackSpeed: viewModel.controls.engineCapabilities.contains(.playbackSpeed),
             supportsSync: supportsSync,
             supportsDialogEnhance: supportsDialogEnhance,
@@ -755,9 +755,9 @@ private struct PlozziOSSubtitleOptionsSheet: View {
 
     @ViewBuilder
     private var remoteSearch: some View {
-        if viewModel.controls.canSearchRemoteSubtitles {
+        if viewModel.controls.subtitleDownload.canSearch {
             Section("Find More") {
-                switch viewModel.controls.subtitleDownloadState {
+                switch viewModel.controls.subtitleDownload.state {
                 case .idle:
                     searchButton
                 case .searching:

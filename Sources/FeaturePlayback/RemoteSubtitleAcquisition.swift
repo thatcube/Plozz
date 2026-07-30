@@ -10,7 +10,7 @@ import CoreNetworking
 /// network fetch/poll runs off-actor inside the detached tasks.
 @MainActor
 protocol RemoteSubtitleAcquisitionHost: AnyObject {
-    /// Publishes the manual search/download UI state (→ `controls.subtitleDownloadState`).
+    /// Publishes the manual search/download UI state (→ `controls.subtitleDownload.state`).
     func setSubtitleDownloadState(_ state: SubtitleDownloadState)
     /// Registers a freshly downloaded sidecar in the track menu, returning its
     /// assigned synthetic id (never colliding with engine/provider stream ids).

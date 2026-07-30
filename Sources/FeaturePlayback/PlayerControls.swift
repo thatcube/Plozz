@@ -396,7 +396,7 @@ struct PlayerControls: View {
             // while the panel is still at ~0 opacity (mid fade-in), so it's imperceptible.
             restoreFocus(preferredPanelFocus)
         }
-        .onChange(of: model.subtitleDownloadState) { _, state in
+        .onChange(of: model.subtitleDownload.state) { _, state in
             // When search results land (async) while the Download screen is open,
             // move focus onto the first result so it's immediately actionable —
             // instead of leaving it parked on Back. Deferred for the same reason as
@@ -1227,7 +1227,7 @@ struct PlayerControls: View {
                 // Land on the first result when we have them; while still searching
                 // (no rows yet) rest on Back. An async results arrival is handled by
                 // an onChange that moves focus onto the first row.
-                if case .results = model.subtitleDownloadState { return .row(0) }
+                if case .results = model.subtitleDownload.state { return .row(0) }
                 return .subBack
             case .sync:
                 // Land on the − nudge (leftmost control); the value and + sit to
@@ -1587,12 +1587,12 @@ struct PlayerControls: View {
                 .background(.white.opacity(0.12))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-            if model.canSearchRemoteSubtitles {
+            if model.subtitleDownload.canSearch {
                 downloadEntryRow
             }
             #if DEBUG
-            if !model.primarySubtitleDiagnostic.isEmpty {
-                Text(model.primarySubtitleDiagnostic)
+            if !model.subtitleDownload.primaryDiagnostic.isEmpty {
+                Text(model.subtitleDownload.primaryDiagnostic)
                     .font(.caption2)
                     .foregroundStyle(.yellow.opacity(0.85))
                     .lineLimit(1)
@@ -1612,7 +1612,7 @@ struct PlayerControls: View {
             openSubtitleScreen(.download)
             // Kick off a search on entry (idempotent: while results already show,
             // re-opening won't wipe them — the VM only re-searches on demand).
-            if case .results = model.subtitleDownloadState {} else {
+            if case .results = model.subtitleDownload.state {} else {
                 actions.searchRemoteSubtitles(nil)
             }
         } label: {

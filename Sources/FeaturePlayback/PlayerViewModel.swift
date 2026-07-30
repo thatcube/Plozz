@@ -491,7 +491,7 @@ public final class PlayerViewModel {
         // viewer's current style rather than the bare default.
         self.controls.subtitleStyle = style
         // Gate the "Search for subtitles…" row on server-proxied support.
-        self.controls.canSearchRemoteSubtitles = (provider as? CapabilityReporting)?.capabilities.contains(.remoteSubtitles) ?? false
+        self.controls.subtitleDownload.canSearch = (provider as? CapabilityReporting)?.capabilities.contains(.remoteSubtitles) ?? false
         self.subtitleAcquisition = RemoteSubtitleAcquisition(provider: provider, itemID: itemID, host: self)
         self.subtitleOverlay = SubtitleOverlayLoader(host: self)
         self.subtitleController = SubtitleTrackController(host: self)
@@ -1678,7 +1678,7 @@ public final class PlayerViewModel {
 
     /// Manually search the server's subtitle source for the given language (or the
     /// profile's preferred language when `nil`), honouring the SDH/Forced
-    /// preference. Publishes results to `controls.subtitleDownloadState`.
+    /// preference. Publishes results to `controls.subtitleDownload.state`.
     public func searchRemoteSubtitles(language: String? = nil) {
         subtitleAcquisition.search(
             requestedLanguage: language,
@@ -1768,7 +1768,7 @@ extension PlayerViewModel: NextEpisodeCoordinatorHost {
 
 extension PlayerViewModel: RemoteSubtitleAcquisitionHost {
     func setSubtitleDownloadState(_ state: SubtitleDownloadState) {
-        controls.subtitleDownloadState = state
+        controls.subtitleDownload.state = state
     }
 
     func hotLoadDownloadedSubtitle(_ track: MediaTrack, preferredLanguage: String?, forced: Bool) -> Int {

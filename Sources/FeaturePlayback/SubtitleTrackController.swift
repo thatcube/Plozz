@@ -353,7 +353,7 @@ final class SubtitleTrackController {
         guard let host else { return }
         var text = "eng \(host.trackEngineKind) · \(route)"
         if let cues { text += " · \(cues) cues" }
-        host.trackControls.primarySubtitleDiagnostic = text
+        host.trackControls.subtitleDownload.primaryDiagnostic = text
     }
     #endif
 
@@ -372,7 +372,7 @@ final class SubtitleTrackController {
             host.trackSubtitleOverlay.clearPrimary()
             selectedSubtitleTrackID = nil
             #if DEBUG
-            host.trackControls.primarySubtitleDiagnostic = ""
+            host.trackControls.subtitleDownload.primaryDiagnostic = ""
             #endif
             loadTrackOptions()
             return
@@ -560,7 +560,7 @@ final class SubtitleTrackController {
         selectedSecondarySubtitleTrackID = nil
         host.trackControls.secondarySubtitleStatus = .idle
         #if DEBUG
-        host.trackControls.primarySubtitleDiagnostic = ""
+        host.trackControls.subtitleDownload.primaryDiagnostic = ""
         #endif
     }
 

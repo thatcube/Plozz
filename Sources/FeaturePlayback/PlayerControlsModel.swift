@@ -126,6 +126,36 @@ public final class ControlBarEntryModel {
     public init() {}
 }
 
+/// The in-player subtitle **search & download** screen's state.
+///
+/// Split out of `PlayerControlsModel`: only the Subtitles panel's download screen
+/// reads this, and only `RemoteSubtitleAcquisition` writes it, so it has no business
+/// widening the observable surface every transport view type-checks against. (That
+/// type is a known god object under a decreasing-only budget in
+/// `tools/arch-guard.py`.)
+@MainActor
+@Observable
+public final class SubtitleDownloadModel {
+    /// Whether the active provider supports server-proxied subtitle search &
+    /// download (Jellyfin/Plex advertise `.remoteSubtitles`; SMB does not). Gates
+    /// the "Search for subtitles…" entry row.
+    public var canSearch: Bool = false
+
+    /// State of the in-player subtitle search/download screen.
+    public var state: SubtitleDownloadState = .idle
+
+    #if DEBUG
+    /// DEBUG-only readout of how the *primary* selected subtitle is being routed:
+    /// active engine · path (overlay-sidecar / avplayer-draw / live-feed) · live
+    /// cue count. Surfaced at the bottom of the Subtitles list so we can see — on
+    /// a device whose logs are unreadable in this environment — exactly why a
+    /// Plex embedded track lists but never draws. Empty when nothing is selected.
+    public var primaryDiagnostic: String = ""
+    #endif
+
+    public init() {}
+}
+
 /// Shared, observable state for the custom player's transport overlay.
 ///
 /// `PlayerViewModel` writes live playback facts (position, duration, buffered,
@@ -220,21 +250,10 @@ public final class PlayerControlsModel {
     public var secondarySubtitleImagePrimaryFormat: String? = nil
 
     // MARK: Subtitle search / download
-    /// Whether the active provider supports server-proxied subtitle search &
-    /// download (Jellyfin/Plex advertise `.remoteSubtitles`; SMB does not). Gates
-    /// the "Search for subtitles…" entry row.
-    public var canSearchRemoteSubtitles: Bool = false
-    /// State of the in-player subtitle search/download screen.
-    public var subtitleDownloadState: SubtitleDownloadState = .idle
-
-    #if DEBUG
-    /// DEBUG-only readout of how the *primary* selected subtitle is being routed:
-    /// active engine · path (overlay-sidecar / avplayer-draw / live-feed) · live
-    /// cue count. Surfaced at the bottom of the Subtitles list so we can see — on
-    /// a device whose logs are unreadable in this environment — exactly why a
-    /// Plex embedded track lists but never draws. Empty when nothing is selected.
-    public var primarySubtitleDiagnostic: String = ""
-    #endif
+    /// Finding and fetching subtitles the media doesn't ship with. A facet: it's
+    /// one screen's worth of state, read by `SubtitleDownloadScreen` and written by
+    /// `RemoteSubtitleAcquisition`, and nothing else in the transport needs it.
+    public let subtitleDownload = SubtitleDownloadModel()
 
     /// The current subtitle **appearance**, mirrored here so the in-player
     /// appearance editor (hosted in `PlayerControls`) can two-way bind it. The

@@ -8,7 +8,7 @@ import CoreModels
 /// Forced/SDH badges) to pick from, or a friendly empty/error state. Picking a
 /// result downloads it server-side and hot-loads it into the running player.
 ///
-/// Pure content: it reads `model.subtitleDownloadState` and drives
+/// Pure content: it reads `model.subtitleDownload.state` and drives
 /// `actions.downloadRemoteSubtitle`, threading the shared `@FocusState` so its
 /// result rows participate in the same focus engine. No panel morph coupling.
 struct SubtitleDownloadScreen: View {
@@ -18,7 +18,7 @@ struct SubtitleDownloadScreen: View {
 
     @ViewBuilder
     var body: some View {
-        switch model.subtitleDownloadState {
+        switch model.subtitleDownload.state {
         case .idle, .searching:
             subtitleDownloadStatus(
                 systemImage: "magnifyingglass",

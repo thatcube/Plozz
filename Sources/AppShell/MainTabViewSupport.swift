@@ -836,7 +836,7 @@ private func makeCastDetailLoader(
             model.onProgress = { continuation.yield(snapshot(model)) }
             let task = Task { @MainActor in
                 await model.load()
-                continuation.yield(snapshot(model))
+                continuation.yield(snapshot(model, isComplete: true))
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -844,7 +844,10 @@ private func makeCastDetailLoader(
     }
 
     @MainActor
-    func snapshot(_ model: PersonDetailViewModel) -> PlayerCastDetail {
+    func snapshot(
+        _ model: PersonDetailViewModel,
+        isComplete: Bool = false
+    ) -> PlayerCastDetail {
         PlayerCastDetail(
             // Strike what is playing. By id AND by normalized title, since a
             // second server holding the same film answers with its own id.
@@ -852,7 +855,8 @@ private func makeCastDetailLoader(
                 $0.id != playingID && MediaItemIdentity.normalizedTitle($0.title) != playingTitle
             }),
             biography: model.biography,
-            lifeSummary: model.lifeSummary
+            lifeSummary: model.lifeSummary,
+            isComplete: isComplete
         )
     }
 }

@@ -490,6 +490,9 @@ struct MainTabView: View {
         .plozzTabStyle(navigationStyle)
         .onChange(of: selectedTabRaw, initial: true) { _, tab in
             BrowseDiagnostics.event("screen tab=\(tab)")
+            // Keeps person tracing alive across relaunches once it has been
+            // asked for, so restoring the live stream never costs the repro.
+            PersonDiagnostics.armLatchIfTracing()
         }
         .onChange(of: accountScopeKey) {
             homeHeroRuntime.resetForSourceScopeChange()

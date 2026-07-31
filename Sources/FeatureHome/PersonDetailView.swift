@@ -125,40 +125,26 @@ public final class PersonDetailViewModel {
     /// only the order in which the work starts. The cost is one speculative
     /// request on the rare occasion a server does have a biography; it is
     /// keyless, unauthenticated and its result is simply dropped.
-    private func startExternalBiography() -> Task<String?, Never>? {
+    /// STRUCTURED, deliberately — an `async let` owns this, not a `Task`.
+    ///
+    /// It began as `Task.detached`, which does not inherit cancellation, so
+    /// moving to the next face left the previous person's lookup running.
+    /// Browsing a cast row therefore left a pile of orphaned requests competing
+    /// with the ones that mattered, and on device that starved the server
+    /// queries badly enough that one took 19.6 seconds and returned nothing —
+    /// an empty pane for an actor with plenty to show. Cancelled with its
+    /// parent, abandoning a person abandons their lookup too.
+    private func fetchExternalBiography() async -> String? {
         guard !biographyProviders.isEmpty else { return nil }
         let name = person.name
         guard !name.isEmpty else { return nil }
-        let providers = biographyProviders
-        let role = person.kind
-        return Task.detached(priority: .userInitiated) {
-            for provider in providers {
-                if let text = await provider.biography(for: name, role: role), !text.isEmpty {
-                    return text
-                }
-            }
-            return nil
-        }
-    }
-
-    /// Last resort for a biography, after every server has been asked.
-    ///
-    /// Servers first, always: their answer is free, offline, already paid for by
-    /// the library scan, and needs no name matching. Only when none of them
-    /// stored one — common, since a server only keeps the bios it happened to
-    /// download — is an outside source consulted, in order, stopping at the
-    /// first that can confidently identify the person.
-    private func fillBiographyFromExternalSources() async {
-        guard biography == nil, !biographyProviders.isEmpty else { return }
-        let name = person.name
-        guard !name.isEmpty else { return }
         for provider in biographyProviders {
-            if let text = await provider.biography(for: name, role: person.kind),
-               !text.isEmpty {
-                biography = text
-                return
+            if Task.isCancelled { return nil }
+            if let text = await provider.biography(for: name, role: person.kind), !text.isEmpty {
+                return text
             }
         }
+        return nil
     }
 
     /// A provider's family, for telemetry — so a log line says WHICH kind of
@@ -191,11 +177,12 @@ public final class PersonDetailViewModel {
         guard state == .loading else { return }
         let started = Date()
         func elapsed(_ from: Date) -> Int { Int(Date().timeIntervalSince(from) * 1000) }
-        // In flight while the servers are asked; see the method.
-        let externalBiography = startExternalBiography()
+        // In flight while the servers are asked, and cancelled with this task if
+        // the viewer moves on; see the method.
+        async let externalBiography = fetchExternalBiography()
         guard let provider else {
             state = .unavailable
-            externalBiography?.cancel()
+            _ = await externalBiography
             PersonDiagnostics.emit(
                 "person.load name=\(person.name) result=no-provider ms=\(elapsed(started))"
             )
@@ -228,6 +215,8 @@ public final class PersonDetailViewModel {
         )
         onProgress?()
 
+        if Task.isCancelled { return }
+
         // The source's own global handle, where it keeps one. Plex is the only
         // provider that does, and for a Plex-sourced person this is the sole
         // route to a biography — the server itself has no person records at
@@ -257,17 +246,15 @@ public final class PersonDetailViewModel {
             onProgress?()
         }
 
-        if let externalBiography {
-            let stage = Date()
-            let text = await externalBiography.value
-            // Servers still win: this is only consulted because neither had one.
-            if biography == nil, let text, !text.isEmpty { biography = text }
-            PersonDiagnostics.emit(
-                "person.external name=\(person.name) "
-                + "bio=\(biography == nil ? "MISS" : "hit") waited=\(elapsed(stage))"
-            )
-            onProgress?()
-        }
+        let stage = Date()
+        let external = await externalBiography
+        // Servers still win: this is only consulted because none had one.
+        if biography == nil, let external, !external.isEmpty { biography = external }
+        PersonDiagnostics.emit(
+            "person.external name=\(person.name) "
+            + "bio=\(biography == nil ? "MISS" : "hit") waited=\(elapsed(stage))"
+        )
+        onProgress?()
         PersonDiagnostics.emit(
             "person.done name=\(person.name) credits=\(libraryCredits.count) "
             + "bio=\(biography == nil ? "MISS" : "hit") ms=\(elapsed(started))"

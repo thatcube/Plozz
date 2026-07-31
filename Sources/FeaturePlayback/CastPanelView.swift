@@ -26,13 +26,28 @@ struct CastPanelView: View {
     /// Which face was opened, so Back returns to it rather than to the start of
     /// the row.
     @State private var lastOpenedIndex = 0
+    /// Whether the detail has grown to fill the stage. Drives the whole drill.
+    @State private var isExpanded = false
+    /// While returning, the ONLY face allowed in the focus order.
+    ///
+    /// Removing the detail leaves the engine to pick a face for itself — usually
+    /// not the one that was opened — so it scrolled to that card, and the
+    /// correction then scrolled again to the right one. Two scroll-into-view
+    /// passes, seen as a nudge. Narrowing the order to a single candidate means
+    /// the engine's only legal choice IS the right one, so there is no first
+    /// landing to correct. The same device as `entryFocusTarget` in
+    /// `PlayerControls`, which exists for exactly this reason during a Down
+    /// entry.
+    @State private var restoringToIndex: Int?
+    /// Each face card's frame in the panel's space, keyed by person id.
+    @State private var cardFrames: [String: CGRect] = [:]
+    /// The stage's own size, so a card's frame can be expressed as a fraction.
+    @State private var panelSize: CGSize = .zero
 
     /// Ties the row's card to the detail it becomes. Without it the drill-in was
     /// two unrelated events — a row vanishing and a panel appearing — which left
     /// the viewer to work out for themselves that the panel was about the face
     /// they had just chosen.
-    @Namespace private var hero
-
     /// The drill's clock. Same family as the card's own reveal, quicker: this is
     /// one surface growing, not the whole cluster arriving.
     ///
@@ -40,7 +55,6 @@ struct CastPanelView: View {
     /// Menu is pressed, and the two directions have to run on one clock.
     static let drill: Animation = .smooth(duration: 0.38)
 
-    private static func surfaceID(_ person: MediaPerson) -> String { "cast.surface.\(person.id)" }
     private static func faceID(_ person: MediaPerson) -> String { "cast.face.\(person.id)" }
 
     private var people: [MediaPerson] {
@@ -48,60 +62,199 @@ struct CastPanelView: View {
     }
 
     var body: some View {
-        Group {
+        // The row is NEVER torn down. The detail is laid over it and the drill
+        // is animated by hand, from the chosen card's measured frame.
+        //
+        // This began as a `matchedGeometryEffect` between two views swapped in a
+        // `Group`, which animates beautifully but REQUIRES that only one exist at
+        // a time — and destroying the row cost three things at once: its scroll
+        // offset (so it visibly scrolled back), its focus target (so focus
+        // flashed onto the Info tab before landing), and the close animation's
+        // destination (so closing did not animate at all). Keeping it alive
+        // fixes all three, and the transform below replaces what the matched
+        // geometry was doing.
+        ZStack(alignment: .topLeading) {
+            faceRow
+                // Keyed to the DRILL, not to the pane's existence.
+                //
+                // Tied to `detailPerson` the row could only change at the very
+                // end of a close — after the pane had finished shrinking and been
+                // removed — so the cast reappeared in one instant step. Keyed to
+                // `isExpanded` it comes back WITH the shrink: the cards are
+                // already rising as the pane collapses into the one being
+                // returned to, which is what makes the two read as a single
+                // movement.
+                .opacity(isExpanded ? 0 : 1)
+                // NO scale. Scaling the row moves every card horizontally, and
+                // the further one sits from the leading anchor the further it
+                // travels — so the row appeared to slide sideways as it landed,
+                // visibly for a card near the end and not at all for the first.
+                // The fade alone is the softening; the pane shrinking into the
+                // card is what carries the movement.
+                // Deliberately NOT `.disabled` here, on the scroll view.
+                //
+                // Disabling a scroll view whose content holds focus makes tvOS
+                // reclaim its offset toward the leading edge — so every drill
+                // gave back a little of the viewer's scroll position, drifting
+                // the row towards the start a bit at a time. The faces are taken
+                // out of the focus order individually instead (see the cards),
+                // which leaves the scroll view itself untouched.
+                .accessibilityHidden(detailPerson != nil)
+                .animation(.easeOut(duration: 0.28), value: isExpanded)
+
             if let person = detailPerson {
                 CastMemberDetail(
                     person: person,
                     loader: model.infoCard.castDetailLoader,
                     onOpenPage: model.infoCard.openPersonPage,
                     focus: $focus,
-                    hero: hero,
-                    surfaceID: Self.surfaceID(person),
-                    faceID: Self.faceID(person),
-                    onBack: { withAnimation(Self.drill) { detailPerson = nil } }
+                    contentVisible: isExpanded,
+                    isExpanded: isExpanded,
+                    collapsedHeadshot: collapsedHeadshotFrame,
+                    onBack: closeDetail
                 )
-                // No fade on the way IN. The detail's surface is the matched
-                // one, so fading the pane fades that surface too — and a
-                // surface that fades while it grows reads as a new panel
-                // arriving on top of the row rather than as the chosen card
-                // opening out. Its contents fade themselves instead, from
-                // inside, leaving the surface to do nothing but travel. On the
-                // way out it may fade: there is nothing left to confuse it with.
-                .transition(.asymmetric(
-                    insertion: .identity,
-                    removal: .opacity.animation(.easeOut(duration: 0.12))
-                ))
-            } else {
-                // Quick out, so the chosen card's own surface is gone before the
-                // travelling one has covered any distance — two surfaces visible
-                // at once is precisely what made the move feel detached.
-                faceRow.transition(.asymmetric(
-                    insertion: .opacity.animation(.easeIn(duration: 0.22).delay(0.10)),
-                    removal: .opacity.animation(.easeOut(duration: 0.12))
-                ))
+                // A growing MASK, not a scale.
+                //
+                // Scaling the pane scaled everything in it, and since the card
+                // and the stage have very different proportions the x and y
+                // factors differ wildly — so the headshot and the text visibly
+                // squashed on the way in and out. Masking leaves the pane at its
+                // true size throughout and simply reveals more of it, which is
+                // what "this card opening out" actually looks like.
+                .mask(alignment: .topLeading) { revealMask }
+            }
+        }
+        // Every card's frame in this panel's own space, so the drill knows where
+        // to grow from and shrink back to.
+        .coordinateSpace(name: Self.space)
+        .onPreferenceChange(CastCardFrameKey.self) { cardFrames = $0 }
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { panelSize = geometry.size }
+                    .onChange(of: geometry.size) { _, size in panelSize = size }
             }
         }
         .frame(height: InfoPanelView.cardHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // No surface on the container. Unlike the Info panel, which is one slab,
-        // the cast row is a set of separate cards floating over the video — the
-        // glass belongs to each of them, not to a sheet behind them all.
-        // Focus has to be placed across the swap, in both directions. The card
-        // replaces its whole content, so whatever was focused is destroyed — and
-        // with nothing left to hold it the engine falls back to the nearest
-        // candidate, which is the tab row above. That is why selecting a face
-        // jumped focus to the Info tab.
-        //
-        // In `onChange` rather than in the button's action: the destination does
-        // not exist yet at the moment the state changes, so assigning focus there
-        // targets a view that has not been built.
-        .onChange(of: detailPerson) { _, person in
-            focus = person == nil ? .castMember(lastOpenedIndex) : .castBack
+    }
+
+    /// The panel's coordinate space, which card frames are reported in.
+    static let space = "cast.panel"
+
+    /// Out of the focus order while the detail covers the row, and — while
+    /// returning — for every face except the one being returned to.
+    private func isFaceDisabled(_ index: Int) -> Bool {
+        if detailPerson != nil { return true }
+        if let restoringToIndex { return index != restoringToIndex }
+        return false
+    }
+
+    private var openedCardFrame: CGRect? {
+        guard let person = detailPerson else { return nil }
+        return cardFrames[person.id]
+    }
+
+    private var originOfOpenedCard: CGPoint {
+        openedCardFrame?.origin ?? .zero
+    }
+
+    /// The window the pane is seen through: the chosen card's rectangle when
+    /// collapsed, the whole stage when open.
+    /// The chosen card's photo, in the panel's space — where the detail's
+    /// headshot begins and ends its journey.
+    private var collapsedHeadshotFrame: CGRect? {
+        guard let card = openedCardFrame else { return nil }
+        return CGRect(
+            x: card.minX + CastFaceCard.headshotOrigin.x,
+            y: card.minY + CastFaceCard.headshotOrigin.y,
+            width: CastFaceCard.headshot,
+            height: CastFaceCard.headshot
+        )
+    }
+
+    private var revealMask: some View {
+        let collapsed = openedCardFrame ?? CGRect(
+            x: 0, y: 0,
+            width: CastFaceCard.width,
+            height: InfoPanelView.cardHeight
+        )
+        let radius = isExpanded
+            ? PlozzTheme.Metrics.playerPanelCornerRadius
+            : CastFaceCard.cornerRadius
+        return RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .frame(
+                width: isExpanded ? panelSize.width : collapsed.width,
+                height: isExpanded ? panelSize.height : collapsed.height
+            )
+            .offset(
+                x: isExpanded ? 0 : collapsed.minX,
+                y: isExpanded ? 0 : collapsed.minY
+            )
+    }
+
+    private func openDetail(_ person: MediaPerson, at index: Int) {
+        lastOpenedIndex = index
+        // Placed collapsed first, then expanded on the next turn — a view cannot
+        // animate from a state it was never in.
+        detailPerson = person
+        isExpanded = false
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation(Self.drill) { isExpanded = true }
+            // Focus AFTER the pane exists. Assigning it in the same turn targets
+            // a view that has not been built, so the assignment is dropped and
+            // the engine — finding the row now disabled — parks on the Info tab.
+            claimFocus(.castBack)
+        }
+    }
+
+    private func closeDetail() {
+        // Shrink back INTO the card, then remove. Removing first is what left
+        // the close with nothing to animate.
+        withAnimation(Self.drill) { isExpanded = false }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(340))
+            // Narrow the focus order BEFORE the detail goes, so the engine never
+            // has an alternative to choose in the first place.
+            restoringToIndex = lastOpenedIndex
+            detailPerson = nil
+            // The row is alive and re-enabled the moment this clears, so the
+            // face is a real focus target immediately — no waiting for it to be
+            // rebuilt, which is what used to make this unreliable.
+            claimFocus(.castMember(lastOpenedIndex))
+        }
+    }
+
+    /// Holds focus against the engine for a few turns.
+    ///
+    /// Removing the view that had focus makes the engine choose a replacement,
+    /// and its pass runs AFTER whatever we assign in the same turn — so a single
+    /// write loses, and even a second one can. Re-asserting briefly is what
+    /// makes the outcome ours; a few turns is enough that the engine has settled
+    /// and cheap enough to be invisible.
+    private func claimFocus(_ target: PlayerControls.FocusSlot) {
+        Task { @MainActor in
+            // One write, then a correction only if it genuinely did not take.
+            //
+            // Writing twice unconditionally fired two scroll-into-view passes
+            // and nudged the row on landing; writing once was unreliable and
+            // sometimes left the wrong face focused. The middle ground is a
+            // single write plus a check late enough to be TRUE — the earlier
+            // check ran before the engine had published its result, so it always
+            // read "not settled" and always wrote again, which is what made the
+            // double scroll unconditional.
+            focus = target
+            try? await Task.sleep(for: .milliseconds(120))
+            let tookFirstTime = focus == target
+            if !tookFirstTime { focus = target }
+            // Everyone back in the focus order once focus has landed, so
+            // Left/Right work again immediately.
+            restoringToIndex = nil
         }
     }
 
     private var faceRow: some View {
-        ScrollViewReader { proxy in
         ScrollView(.horizontal, showsIndicators: false) {
             // NOT lazy. A LazyHStack builds only what is on screen, and coming
             // back from a person's details rebuilds this row from offset zero —
@@ -113,15 +266,10 @@ struct CastPanelView: View {
             // and the artwork loads lazily regardless.
             HStack(spacing: 20) {
                 ForEach(Array(people.enumerated()), id: \.element.id) { index, person in
-                    Button {
-                        lastOpenedIndex = index
-                        withAnimation(Self.drill) { detailPerson = person }
-                    } label: {
+                    Button { openDetail(person, at: index) } label: {
                         CastFaceCard(
                             person: person,
-                            focused: focus == .castMember(index),
-                            hero: hero,
-                            faceID: Self.faceID(person)
+                            focused: focus == .castMember(index)
                         )
                     }
                     // The same treatment as the Up Next card — the shared style
@@ -133,25 +281,19 @@ struct CastPanelView: View {
                         cornerRadius: CastFaceCard.cornerRadius,
                         focusScale: CastFaceCard.focusScale
                     ))
+                    // Per-card, so the scroll view is never itself disabled.
+                    .disabled(isFaceDisabled(index))
                     .focused($focus, equals: .castMember(index))
                     .id(Self.faceID(person))
-                    // The frame the detail's surface grows out of, published as
-                    // an empty view rather than as the card's own surface: that
-                    // one is drawn inside a ButtonStyle body, and a match
-                    // declared in there never reaches the panel's namespace —
-                    // which is why the headshot travelled and the background
-                    // simply appeared. Invisible, so the card still looks like
-                    // one card, and it carries the focus lift with it.
+                    // Its rectangle in the panel's space, so the drill can grow
+                    // out of exactly this card and shrink back into it.
                     .background {
-                        Color.clear
-                            .matchedGeometryEffect(id: Self.surfaceID(person), in: hero)
-                            // Grown to the focus lift. A layout frame ignores
-                            // `scaleEffect`, so a focused card published a rect
-                            // 10% smaller than the one on screen and the surface
-                            // began by snapping inwards. Negative padding is real
-                            // layout, so it lands where the eye expects.
-                            .padding(.horizontal, -CastFaceCard.lift.width)
-                            .padding(.vertical, -CastFaceCard.lift.height)
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: CastCardFrameKey.self,
+                                value: [person.id: geometry.frame(in: .named(CastPanelView.space))]
+                            )
+                        }
                     }
                 }
             }
@@ -169,14 +311,16 @@ struct CastPanelView: View {
         // left the first and last cards visibly sliced while scrolling; the inset
         // above still holds them off the edge at rest.
         .scrollClipDisabled()
-        // Put the face back on screen as well as in focus. The row is rebuilt at
-        // offset zero, so without this a restored face could hold focus from
-        // somewhere off the right-hand edge.
-        .onAppear {
-            guard people.indices.contains(lastOpenedIndex) else { return }
-            proxy.scrollTo(Self.faceID(people[lastOpenedIndex]), anchor: .center)
-        }
-        }
+        // No `scrollPosition` binding. It existed to restore the offset across a
+        // teardown that no longer happens — the row is never destroyed — and all
+        // it did afterwards was re-centre a row that was already exactly where
+        // the viewer left it, which is the small nudge on landing.
+        // Put focus back on the face the viewer opened, now that it exists.
+        //
+        // Only when returning, never on first open: the cast tab is entered with
+        // focus on its tab button, and claiming focus here would snatch it away
+        // before the viewer had pressed anything.
+
     }
 }
 
@@ -188,16 +332,17 @@ struct CastPanelView: View {
 private struct CastFaceCard: View {
     let person: MediaPerson
     let focused: Bool
-    let hero: Namespace.ID
-    let faceID: String
 
     /// The headshot plus the space that has always sat either side of it, so
     /// enlarging the face widens the CARD rather than crowding it. Previously
     /// 190 and 128 were independent constants and the relationship between them
     /// was accidental; this keeps it at the 31pt it happened to be.
     static var width: CGFloat { headshot + headshotSideSpace * 2 }
-    private static let headshot: CGFloat = 160
+    static let headshot: CGFloat = 160
     private static let headshotSideSpace: CGFloat = 31
+    /// Where the circle sits inside the card, so the drill can start the
+    /// detail's headshot exactly on top of it.
+    static let headshotOrigin = CGPoint(x: headshotSideSpace, y: 18)
     /// The labels' own inset, which is narrower — they may run closer to the
     /// card's edge than the circle does.
     private static let inset: CGFloat = 12
@@ -220,7 +365,6 @@ private struct CastFaceCard: View {
             avatar
                 .frame(width: Self.headshot, height: Self.headshot)
                 .clipShape(Circle())
-                .matchedGeometryEffect(id: faceID, in: hero)
 
             // Names are the one thing on this card that must be readable in
             // full, and a card this narrow truncates plenty of real ones. The
@@ -290,9 +434,14 @@ private struct CastMemberDetail: View {
     let loader: PlayerCastDetailLoading?
     let onOpenPage: ((MediaPerson) -> Void)?
     @FocusState.Binding var focus: PlayerControls.FocusSlot?
-    let hero: Namespace.ID
-    let surfaceID: String
-    let faceID: String
+    /// Whether the pane has finished growing, so its contents know when to fade
+    /// themselves in — they must not appear while it is still travelling.
+    let contentVisible: Bool
+    /// Whether the pane has grown. The headshot travels on this.
+    let isExpanded: Bool
+    /// The face card's photo in the panel's space, so the headshot can start
+    /// exactly on top of it and return to it.
+    let collapsedHeadshot: CGRect?
     let onBack: () -> Void
 
     /// The pane's full height. A face is what the viewer came here to place, so
@@ -319,9 +468,21 @@ private struct CastMemberDetail: View {
     /// instead of stopping well short.
     private static let backButtonLane: CGFloat = 62
 
-    /// Drives the contents' own fade, so the surface behind them can arrive
-    /// without one. See the branch's transition.
-    @State private var contentVisible = false
+    /// How many lines of biography fit, derived from the budget rather than
+    /// guessed at.
+    ///
+    /// The stage is a hard 210pt and the column must also hold the name and the
+    /// "See more" chip; five lines needed 261 and simply overflowed, clipping
+    /// the name at the top and the chip at the bottom. Three is what is left,
+    /// and the chip is there precisely so a longer life story has somewhere to
+    /// be read in full.
+    private static var biographyLineLimit: Int {
+        let budget = contentHeight
+            - 41   // name
+            - 12   // gap above the biography
+            - 58   // "See more" chip and its gap
+        return max(2, Int(budget / PlayerCardText.bodyLineHeight))
+    }
 
     /// `nil` while the request is in flight, which is NOT the same as an empty
     /// result — an empty state shown during a load flashes "nothing known about
@@ -347,6 +508,11 @@ private struct CastMemberDetail: View {
                     alignment: .leading
                 )
                 .frame(maxWidth: hasCredits ? nil : .infinity, alignment: .leading)
+                // Stop short of the Back button in the full-width case too.
+                // With a poster rail beside it the rail reserved this lane; with
+                // no credits the column takes the whole stage and ran straight
+                // under the chevron.
+                .padding(.trailing, hasCredits ? 0 : Self.backButtonLane)
 
             if hasCredits, let credits = detail?.credits {
                 CastCreditsRow(items: credits, focus: $focus)
@@ -391,14 +557,13 @@ private struct CastMemberDetail: View {
         // promise `InfoPanelView` makes about itself.
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: InfoPanelView.cardHeight)
-        .onAppear {
-            withAnimation(.easeIn(duration: 0.22).delay(0.12)) { contentVisible = true }
-        }
         // Keyed on the person: switching between two faces without leaving the
         // detail has to re-ask, and re-asking must not show the previous
         // person's credits while it does.
         .task(id: person.id) {
             detail = nil
+            let opened = Date()
+            var first = true
             guard let loader else { return }
             // Every partial answer, not just the last one — see
             // `PlayerCastDetailLoading`.
@@ -411,6 +576,17 @@ private struct CastMemberDetail: View {
             // arrival is animated by the scoped `.animation(_:value:)` on the
             // content above, which cannot reach the surface.
                 detail = loaded
+                // What the VIEWER experiences, which is the only number that
+                // matters: from pressing Select to the pane showing something,
+                // and to it being complete. The provider timings are measured
+                // separately and do not include image loading or render time.
+                PersonDiagnostics.emit(
+                    "pane.\(first ? "first" : "update") name=\(person.name) "
+                    + "credits=\(loaded.credits.count) "
+                    + "bio=\(loaded.biography == nil ? "no" : "yes") "
+                    + "ms=\(Int(Date().timeIntervalSince(opened) * 1000))"
+                )
+                first = false
             }
         }
         // Literally the chosen card's own surface, grown: the panel does not
@@ -418,7 +594,6 @@ private struct CastMemberDetail: View {
         // this is a pane, and lighting it up would suggest it were selectable.
         .background {
             PlayerOverVideoSurface(cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius)
-                .matchedGeometryEffect(id: surfaceID, in: hero)
         }
     }
 
@@ -446,27 +621,27 @@ private struct CastMemberDetail: View {
             avatar
                 .frame(width: Self.headshot, height: Self.headshot)
                 .clipShape(Circle())
-                .matchedGeometryEffect(id: faceID, in: hero)
+                // Travels between the card's circle and its own.
+                //
+                // A UNIFORM scale, unlike the pane's reveal: both are circles,
+                // so one factor serves and nothing can distort. Anchored at the
+                // top-leading corner so the offset below places that corner
+                // exactly, rather than fighting a centre-anchored scale.
+                .scaleEffect(headshotScale, anchor: .topLeading)
+                .offset(x: headshotOffset.width, y: headshotOffset.height)
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: person.name)
                     .font(PlayerCardText.title)
                     .foregroundStyle(.white)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.7)
+                    // The name holds its size. It is the heading of this pane,
+                    // and shrinking it to buy room for a supporting line got the
+                    // priority exactly backwards.
+                    .minimumScaleFactor(1)
                 // No character name here. It is already on the face card this
                 // pane grew out of, so repeating it spends a line saying what
                 // the viewer just read.
-                // The factual line, above the prose. Shown whenever a source
-                // has it — which is often when it has no biography at all, and
-                // is then the only thing that places the person.
-                if let life = detail?.lifeSummary, !life.isEmpty {
-                    Text(verbatim: life)
-                        .font(PlayerCardText.caption)
-                        .foregroundStyle(.white.opacity(0.55))
-                        .lineLimit(1)
-                        .padding(.top, 10)
-                }
                 if let biography = detail?.biography, !biography.isEmpty {
                     Text(verbatim: biography)
                         .font(PlayerCardText.body)
@@ -474,12 +649,36 @@ private struct CastMemberDetail: View {
                         .lineSpacing(2)
                         // As many lines as the column has room for; with no rail
                         // beside it there is the whole pane to fill.
-                        // What the column has room for at the shared body size
-                        // (see `PlayerCardText`), beside the face and under the
-                        // name; with no rail opposite there is more of the pane
-                        // to fill.
-                        .lineLimit(hasCredits ? 3 : 5)
+                        // What the column can actually HOLD, which is three
+                        // lines either way — see `biographyLineLimit`.
+                        .lineLimit(Self.biographyLineLimit)
                         .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 12)
+                } else if detail?.isComplete == true, detail?.isEmpty == true {
+                    // Said plainly, and ONLY once every source has answered.
+                    // Some people really do have nothing beyond a name and a
+                    // face — no biography anywhere, and their one library credit
+                    // is the film currently playing, which is struck from their
+                    // own list. A blank card reads as broken; this reads as an
+                    // answer.
+                    Text(LocalizedStringResource(
+                        "player.cast.noDetails",
+                        defaultValue: "No further details available.",
+                        comment: "Shown in the in-player cast card when no source has a biography or other titles for this person."
+                    ))
+                    .font(PlayerCardText.body)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .padding(.top, 12)
+                } else if let life = detail?.lifeSummary, !life.isEmpty {
+                    // ONLY when there is no biography. A biography's first
+                    // sentence says where someone was born almost without
+                    // exception, so showing both reads as a stutter — but with
+                    // no biography at all this is the one thing that places
+                    // them, and Plex often has it when it has nothing else.
+                    Text(verbatim: life)
+                        .font(PlayerCardText.body)
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(2)
                         .padding(.top, 12)
                 }
                 if let onOpenPage {
@@ -522,6 +721,25 @@ private struct CastMemberDetail: View {
             .opacity(contentVisible ? 1 : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// The headshot's own position within the pane, which its travel is
+    /// measured from: the pane's inset on both axes.
+    private static var restingOrigin: CGPoint {
+        CGPoint(x: InfoPanelView.contentPadding, y: InfoPanelView.contentPadding)
+    }
+
+    private var headshotScale: CGFloat {
+        guard !isExpanded, let collapsedHeadshot else { return 1 }
+        return collapsedHeadshot.width / Self.headshot
+    }
+
+    private var headshotOffset: CGSize {
+        guard !isExpanded, let collapsedHeadshot else { return .zero }
+        return CGSize(
+            width: collapsedHeadshot.minX - Self.restingOrigin.x,
+            height: collapsedHeadshot.minY - Self.restingOrigin.y
+        )
     }
 
     @ViewBuilder
@@ -751,6 +969,18 @@ private struct CastCreditsRow: View {
                 .lineLimit(4)
                 .padding(6)
         }
+    }
+}
+
+/// Collects every face card's frame, keyed by person id, so the drill knows the
+/// rectangle to grow out of and shrink back into.
+///
+/// A preference rather than a shared observable: the frames are a product of
+/// layout, and layout is the only thing that may report them.
+private struct CastCardFrameKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
     }
 }
 #endif

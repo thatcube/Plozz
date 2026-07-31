@@ -260,6 +260,17 @@ struct PlayerControls: View {
     /// Cleared whenever the Cast card is left, so reopening it always starts at
     /// the row rather than on whoever was last inspected.
     @State private var castDetailPerson: MediaPerson?
+    /// Suppresses tab switching while the cast row is being restored.
+    ///
+    /// Backing out of a person's details rebuilds the row, and for an instant
+    /// there is nothing focusable in it — so the engine falls back to the
+    /// nearest candidate, which is the Info tab, and `selectCardTab` faithfully
+    /// switches the card because it cannot tell a fallback from a deliberate
+    /// move. That is why Back landed on Info instead of the cast row.
+    ///
+    /// The same shape as `entryFocusTarget`, which exists for the identical
+    /// reason during a Down entry.
+    @State private var isRestoringCastRow = false
 
     var body: some View {
         ZStack {
@@ -347,7 +358,16 @@ struct PlayerControls: View {
             // structurally by `infoTabFocusable` (the tab isn't even in the focus
             // order otherwise); this covers the one moment the gate can't — a Down
             // entry, where focus is applied in the same update that opens the card.
-            if slot == .button(.info), openPanel != .info { revealInfoCard() }
+            // Not while the cast row is being restored. Backing out of a
+            // person's details tears the row down, and for an instant it holds
+            // nothing focusable — so the engine parks focus on the nearest
+            // candidate, the Info tab, and this rule faithfully opens the Info
+            // card. That is the whole "Back goes to Info" bug: neither
+            // `toggle` nor `selectCardTab` was ever involved, which is why
+            // guarding those changed nothing.
+            if slot == .button(.info), openPanel != .info, !isRestoringCastRow {
+                revealInfoCard()
+            }
             // Focus reached the strip above the tab, which only a deliberate Up from
             // the tab itself can do: that's the exit gesture. Acting on where focus
             // LANDED — rather than on the press that may have caused it — is what
@@ -1100,6 +1120,15 @@ struct PlayerControls: View {
     /// Whether the Info tab is in the focus order: only while its card is open, or
     /// while a Down entry is on its way to opening it. See the tab's `.disabled`.
     private func tabFocusable(_ tab: Category) -> Bool {
+        // Out of the focus order entirely while a cast drill is in flight.
+        //
+        // Opening and closing a person's details each leave a moment with
+        // nothing focusable in the card, and the engine parks on the nearest
+        // candidate — a tab. Re-asserting focus afterwards corrects it, but the
+        // viewer sees the tab light up first, which reads as a stutter.
+        // Removing the tabs as candidates means the engine cannot choose them in
+        // the first place, so there is nothing to correct.
+        if isRestoringCastRow { return false }
         // Any card tab is reachable while the card is open, so Left/Right moves
         // between them. The invariant that matters is unchanged and still
         // structural: with the card CLOSED no tab is in the focus order, so a Down
@@ -1246,6 +1275,27 @@ struct PlayerControls: View {
             // branch out before the card travels off-screen, so the shadow that
             // forces Info's clip can never escape here.
             CastPanelView(model: model, focus: $focus, detailPerson: $castDetailPerson)
+                .onChange(of: castDetailPerson) { _, _ in
+                    // BOTH directions. Opening disables the row so its faces
+                    // leave the focus order, and closing removes the detail —
+                    // either way there is a moment with nothing focusable in the
+                    // card, and the engine parks on the Info tab, whose
+                    // focus rule then opens the Info card. Guarding only the
+                    // close left opening broken in exactly the same way.
+                    isRestoringCastRow = true
+                    Task { @MainActor in
+                        // Two hops: the first lets the row be built, the second
+                        // lets the focus engine run its pass over it.
+                        // Long enough to outlast the press that started this —
+                        // a couple of runloop turns is not enough, because the
+                        // stray activation arrives with the touch-up event.
+                        // Just long enough for the pane to be built or removed
+                        // and the engine to settle; the tabs are unreachable for
+                        // this whole window, so nothing can grab focus in it.
+                        try? await Task.sleep(for: .milliseconds(220))
+                        isRestoringCastRow = false
+                    }
+                }
         } else {
             // Clip to the card's own silhouette. Liquid Glass draws a soft shadow
             // beyond the shape it's applied to, and that shadow was escaping the
@@ -1274,7 +1324,8 @@ struct PlayerControls: View {
     /// open the card, since focus can be on a tab during a Down entry before the
     /// viewer has chosen anything.
     private func selectCardTab(focusedTo slot: FocusSlot?) {
-        guard Self.usesBottomCard(openPanel),
+        guard !isRestoringCastRow,
+              Self.usesBottomCard(openPanel),
               case let .button(tab)? = slot,
               Self.usesBottomCard(tab),
               tab != openPanel
@@ -1285,6 +1336,17 @@ struct PlayerControls: View {
     }
 
     private func toggle(_ category: Category) {
+        // A card tab cannot be activated while the cast row is coming back.
+        //
+        // Backing out of a person's details destroys the Back button MID-PRESS.
+        // Focus falls to the nearest candidate — the Info tab — and the press
+        // completes on THAT, so the viewer's single Select both closed the
+        // details and silently switched tabs. The trace showed the panel already
+        // changed before `selectCardTab` was even consulted, which is what ruled
+        // that path out as the cause.
+        if isRestoringCastRow, Self.usesBottomCard(category) {
+            return
+        }
         if openPanel == category {
             // Closing the Info card also gives up the tab (they're one unit); every
             // other panel just hands focus back to the button that opened it.

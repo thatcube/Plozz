@@ -26,15 +26,23 @@ public struct PlayerCastDetail: Sendable, Equatable {
     /// routinely knows where someone was born without being able to describe
     /// them, and that line is still worth the space when nothing else lands.
     public var lifeSummary: String?
+    /// Whether every source has now answered.
+    ///
+    /// The difference between "nothing yet" and "nothing at all", which the pane
+    /// must not confuse: an empty state shown mid-load tells the viewer there is
+    /// nothing about someone who is about to be described.
+    public var isComplete: Bool = false
 
     public init(
         credits: [MediaItem] = [],
         biography: String? = nil,
-        lifeSummary: String? = nil
+        lifeSummary: String? = nil,
+        isComplete: Bool = false
     ) {
         self.credits = credits
         self.biography = biography
         self.lifeSummary = lifeSummary
+        self.isComplete = isComplete
     }
 
     /// Nothing found. Distinct from "not asked yet", which is `nil` at the call

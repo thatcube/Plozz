@@ -166,6 +166,11 @@ public final class PersonDetailViewModel {
     }
 
     /// See the known-for merge: title and kind, deliberately without a year.
+    /// Wide enough that no provider's list can run into the next provider's
+    /// range, so ordering stays "everything Wikidata ranked, then everything
+    /// TVmaze ranked" rather than interleaving two incomparable scales.
+    private static let providerRankStride = 1_000
+
     private static func knownForKey(_ item: MediaItem) -> String {
         "\(item.kind.rawValue)|\(MediaItemIdentity.normalizedTitle(item.title))"
     }
@@ -290,6 +295,15 @@ public final class PersonDetailViewModel {
         // Owned copies still win on collision: they are merged in FIRST and
         // dedupe keeps the local entry, so a title held locally stays playable
         // and appears once.
+        //
+        // Winning the collision is NOT the same as leading the row, and
+        // conflating the two was a real bug: because owned titles were merged
+        // first they also came first, so the library decided the order. Martin
+        // Freeman opened on Wakanda Forever, Black Panther and Civil War —
+        // every one of them owned, none of them what he is known for — while
+        // Sherlock and The Hobbit sat off the end of the row. Ownership is a
+        // fact about the viewer's disk, not about the actor, so the ranking
+        // below is applied after the merge and independently of it.
         if !creditsProviders.isEmpty, !Task.isCancelled {
             let stage = Date()
             var merged = libraryCredits
@@ -324,13 +338,56 @@ public final class PersonDetailViewModel {
                 return results
             }
             guard !Task.isCancelled else { return }
-            for credits in ordered {
-                for item in credits where includeCredit(item)
-                    && seen.insert(Self.knownForKey(item)).inserted {
+            // Rank by position in the external lists, which arrive ordered by
+            // fame — Wikidata by how many Wikipedia editions carry an article on
+            // the work, which puts Sherlock and Black Panther at the top where
+            // they belong. A provider's whole list is ranked ahead of the next
+            // provider's, so the fame-ranked source leads and the others fill in
+            // behind it.
+            var rank: [String: Int] = [:]
+            var indexByKey: [String: Int] = [:]
+            for (providerIndex, credits) in ordered.enumerated() {
+                for (position, item) in credits.enumerated() {
+                    // First writer wins, so an earlier provider's opinion of a
+                    // shared title is not overwritten by a later one's.
+                    let key = Self.knownForKey(item)
+                    if rank[key] == nil {
+                        rank[key] = providerIndex * Self.providerRankStride + position
+                    }
+                    guard includeCredit(item) else { continue }
+                    guard seen.insert(key).inserted else {
+                        // Wikidata is ranked first because it knows what a person
+                        // is famous for, but it carries no artwork. When a later
+                        // provider has a poster for a title already held without
+                        // one, take it: the winning entry keeps its identity and
+                        // its rank, and only gains an image it was missing.
+                        if let index = indexByKey[key],
+                           merged[index].posterURL == nil,
+                           let poster = item.posterURL {
+                            merged[index].posterURL = poster
+                        }
+                        continue
+                    }
+                    indexByKey[key] = merged.count
                     merged.append(item)
                 }
             }
-            if merged.count != libraryCredits.count {
+            // Titles nobody outside the library associates with this person sort
+            // last rather than being dropped: the viewer owns them, which is a
+            // reason to keep them reachable, just not to lead with them.
+            merged = merged.enumerated().sorted { lhs, rhs in
+                let lhsRank = rank[Self.knownForKey(lhs.element)] ?? Int.max
+                let rhsRank = rank[Self.knownForKey(rhs.element)] ?? Int.max
+                // Ties broken by original position so the order stays stable and
+                // the row does not reshuffle between openings.
+                return lhsRank == rhsRank ? lhs.offset < rhs.offset : lhsRank < rhsRank
+            }.map(\.element)
+            // Compared by identity and ORDER, not by count. Ranking can leave
+            // the set untouched and still change the row completely — reordering
+            // four owned titles so the famous one leads adds nothing and matters
+            // a great deal — and a count check would silently discard exactly
+            // that case.
+            if merged.map(\.id) != libraryCredits.map(\.id) {
                 libraryCredits = merged
                 state = .loaded
             }

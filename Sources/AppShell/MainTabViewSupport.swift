@@ -833,10 +833,15 @@ private func makeCastDetailLoader(
             biographyProviders: [WikipediaPersonBiographyProvider()],
             // Keyless, and the only thing that can answer for a viewer whose
             // libraries are network shares.
-            // Two open sources with complementary blind spots: TVmaze indexes
-            // episode-level television guest work that Wikidata has no entity
-            // for, and Wikidata covers film, which TVmaze does not carry at all.
-            creditsProviders: [TVmazePersonCreditsProvider(), WikidataPersonCreditsProvider()],
+            // Two open sources with complementary blind spots: Wikidata covers
+            // film, which TVmaze does not carry at all, and TVmaze indexes
+            // episode-level television guest work Wikidata has no entity for.
+            //
+            // Order is load-bearing, not cosmetic. Wikidata leads because it is
+            // ranked by a real fame signal, and the row inherits that ranking;
+            // TVmaze's lists come back in no meaningful order, so leading with
+            // them would put a one-episode guest part above Sherlock.
+            creditsProviders: [WikidataPersonCreditsProvider(), TVmazePersonCreditsProvider()],
             // Strike what is playing. By id AND by normalized title, since a
             // second server holding the same film answers with its own id.
             //

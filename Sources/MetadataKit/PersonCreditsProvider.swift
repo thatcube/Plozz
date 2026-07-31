@@ -166,6 +166,13 @@ public struct TVmazePersonCreditsProvider: PersonCreditsProviding {
 public struct WikidataPersonCreditsProvider: PersonCreditsProviding {
     private let endpoint = "https://query.wikidata.org/sparql"
 
+    /// television series, miniseries, television programme, television special.
+    /// Everything else in the whitelist is a film of some sort. Without this a
+    /// row of Martin Freeman's work labels Sherlock and Fargo as films.
+    private static let televisionTypes: Set<String> = [
+        "Q5398426", "Q1259759", "Q15416", "Q1261214",
+    ]
+
     public init() {}
 
     /// CC0 requires none, which is part of why it is preferred.
@@ -186,9 +193,23 @@ public struct WikidataPersonCreditsProvider: PersonCreditsProviding {
         // GROUP BY, because a work with several release dates (a premiere and a
         // wide release, say) otherwise returns one row per date, and the first
         // page of results is then the same title repeated five times.
+        // Filtered to watchable types SERVER-side, which matters because the
+        // limit is applied after ranking: unfiltered, "P161" also matches film
+        // posters, production companies, individual episodes, SNL sketches and
+        // "The Hobbit trilogy" (a collection, not something you can play), and
+        // that noise eats the handful of slots the row actually has.
+        //
+        // A whitelist rather than a blacklist. Enumerating the junk was tried
+        // and there is no end to it; enumerating what a person can sit and watch
+        // is a short, stable list.
         let query = """
-        SELECT ?work ?workLabel (MIN(?y) AS ?year) (SAMPLE(?sitelinks) AS ?links) WHERE {
-          ?work wdt:P161 wd:\(qid); wikibase:sitelinks ?sitelinks.
+        SELECT ?work ?workLabel (MIN(?y) AS ?year) (SAMPLE(?sitelinks) AS ?links)
+               (SAMPLE(?type) AS ?kind) WHERE {
+          VALUES ?type {
+            wd:Q11424 wd:Q506240 wd:Q24862
+            wd:Q5398426 wd:Q1259759 wd:Q15416 wd:Q1261214
+          }
+          ?work wdt:P161 wd:\(qid); wikibase:sitelinks ?sitelinks; wdt:P31 ?type.
           OPTIONAL { ?work wdt:P577 ?d. BIND(YEAR(?d) AS ?y) }
           SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
         }
@@ -205,7 +226,12 @@ public struct WikidataPersonCreditsProvider: PersonCreditsProviding {
                   // showing "Q12345" as a title is worse than dropping the row.
                   title != id
             else { return nil }
-            var item = MediaItem(id: "wikidata:\(id)", title: title, kind: .movie)
+            let type = row.kind?.value.split(separator: "/").last.map(String.init)
+            var item = MediaItem(
+                id: "wikidata:\(id)",
+                title: title,
+                kind: Self.televisionTypes.contains(type ?? "") ? .series : .movie
+            )
             item.productionYear = row.year.flatMap { Int($0.value) }
             // No artwork: `P18` is a Commons filename needing a second request
             // each, and the title tile the row already falls back to is a better
@@ -271,6 +297,7 @@ public struct WikidataPersonCreditsProvider: PersonCreditsProviding {
             let work: Value?
             let workLabel: Value?
             let year: Value?
+            let kind: Value?
         }
         struct Value: Decodable {
             let value: String

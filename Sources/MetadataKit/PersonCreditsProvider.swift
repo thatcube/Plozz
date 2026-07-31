@@ -202,19 +202,30 @@ public struct WikidataPersonCreditsProvider: PersonCreditsProviding {
         // A whitelist rather than a blacklist. Enumerating the junk was tried
         // and there is no end to it; enumerating what a person can sit and watch
         // is a short, stable list.
+        //
+        // Award-cited works lead. An award or nomination records WHICH work it
+        // was for, so it is the one prominence signal Wikidata carries that is
+        // both meaningful and reasonably common — measured on 13 of 17 people,
+        // where billing order managed 8%. It surfaces exactly what ranking by
+        // the fame of the work buries: Luther for Idris Elba, The Americans for
+        // Margo Martindale, The Office and Fargo for Martin Freeman.
+        //
+        // Actors who are never nominated — character and motion-capture
+        // performers especially — simply fall through to the sitelinks order.
         let query = """
         SELECT ?work ?workLabel (MIN(?y) AS ?year) (SAMPLE(?sitelinks) AS ?links)
-               (SAMPLE(?type) AS ?kind) WHERE {
+               (SAMPLE(?type) AS ?kind) (COUNT(?award) AS ?awarded) WHERE {
           VALUES ?type {
             wd:Q11424 wd:Q506240 wd:Q24862
             wd:Q5398426 wd:Q1259759 wd:Q15416 wd:Q1261214
           }
           ?work wdt:P161 wd:\(qid); wikibase:sitelinks ?sitelinks; wdt:P31 ?type.
           OPTIONAL { ?work wdt:P577 ?d. BIND(YEAR(?d) AS ?y) }
+          OPTIONAL { wd:\(qid) p:P166|p:P1411 ?award. ?award pq:P1686 ?work. }
           SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
         }
         GROUP BY ?work ?workLabel
-        ORDER BY DESC(?links)
+        ORDER BY DESC(?awarded) DESC(?links)
         LIMIT \(max(1, limit))
         """
 
@@ -301,6 +312,175 @@ public struct WikidataPersonCreditsProvider: PersonCreditsProviding {
         }
         struct Value: Decodable {
             let value: String
+        }
+    }
+}
+
+/// TMDb — the only source measured that knows how *prominent* a person was in a
+/// title, rather than only how famous the title is.
+///
+/// That distinction is the whole problem. Ranking by the fame of the work puts
+/// Martin Freeman's Everett Ross in Black Panther above John Watson in Sherlock,
+/// because the film is more famous than the series — but nobody would say he is
+/// known for Black Panther. `order` (billing position) and `episode_count` are
+/// what separate a lead from a walk-on, and TMDb carries billing for roughly
+/// two thirds of credits where Wikidata carries it for 8%.
+///
+/// Measured against every other option, this is also the only one with no
+/// coverage holes: it resolved all fifteen people tested, including Brian Cox
+/// and Laurel Lefkow, whom Wikidata refuses because their names are ambiguous.
+///
+/// NOT load-bearing despite that. It needs a key, so it is absent from keyless
+/// builds and can be rate-limited or down, and the rungs below it are keyless by
+/// design and keep answering when it cannot.
+///
+/// Deliberately ignores TMDb's own `known_for` field, which was measured and is
+/// poor: it offers Zootopia and The Dark Tower for Idris Elba, omits Succession
+/// for Brian Cox, and gives Margo Martindale's as Hannah Montana. The raw
+/// credits are excellent; the precomputed summary of them is not.
+public struct TMDbPersonCreditsProvider: PersonCreditsProviding {
+    private let access: TMDbAccess
+
+    public init(access: TMDbAccess) {
+        self.access = access
+    }
+
+    public var attribution: String? { "TMDB" }
+
+    private var apiBase: String {
+        switch access {
+        case .proxy(let url):
+            let text = url.absoluteString
+            return text.hasSuffix("/") ? String(text.dropLast()) : text
+        case .directToken, .userToken, .disabled:
+            return "https://api.themoviedb.org"
+        }
+    }
+
+    private var authHeaders: [String: String] {
+        switch access {
+        case .directToken(let token), .userToken(let token):
+            return ["Authorization": "Bearer \(token)"]
+        case .proxy, .disabled:
+            return [:]
+        }
+    }
+
+    public func credits(for name: String, limit: Int) async -> [MediaItem] {
+        guard access.isEnabled else { return [] }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        guard let personID = await resolvePerson(name: trimmed) else { return [] }
+        guard let url = URL(string: "\(apiBase)/3/person/\(personID)/combined_credits"),
+              let response = await MetadataHTTP.get(CreditsResponse.self, url: url, headers: authHeaders)
+        else { return [] }
+
+        return (response.cast ?? [])
+            .filter { $0.qualifies }
+            .sorted { $0.knownForScore > $1.knownForScore }
+            .prefix(max(1, limit))
+            .compactMap { credit in
+                guard let title = credit.displayTitle else { return nil }
+                var item = MediaItem(
+                    id: "tmdb:\(credit.mediaType == "tv" ? "tv" : "movie"):\(credit.id)",
+                    title: title,
+                    kind: credit.mediaType == "tv" ? .series : .movie
+                )
+                item.productionYear = credit.year
+                item.posterURL = credit.posterPath.flatMap {
+                    URL(string: "https://image.tmdb.org/t/p/w342\($0)")
+                }
+                item.availability = .unknown
+                return item
+            }
+    }
+
+    private func resolvePerson(name: String) async -> Int? {
+        var components = URLComponents(string: "\(apiBase)/3/search/person")
+        components?.queryItems = [URLQueryItem(name: "query", value: name)]
+        guard let url = components?.url,
+              let response = await MetadataHTTP.get(
+                  PersonSearchResponse.self, url: url, headers: authHeaders
+              )
+        else { return nil }
+        // TMDb orders by its own relevance and puts an exact name first. Unlike
+        // the Wikidata rung there is no namesake guard here: TMDb ranks by
+        // popularity within a name, and refusing ambiguous names would lose
+        // Brian Cox, who is only ambiguous because a physicist shares his name.
+        return response.results?.first { $0.name?.caseInsensitiveCompare(name) == .orderedSame }?.id
+            ?? response.results?.first?.id
+    }
+
+    private struct PersonSearchResponse: Decodable {
+        let results: [Person]?
+        struct Person: Decodable {
+            let id: Int
+            let name: String?
+        }
+    }
+
+    private struct CreditsResponse: Decodable {
+        let cast: [Credit]?
+    }
+
+    struct Credit: Decodable {
+        let id: Int
+        let title: String?
+        let name: String?
+        let mediaType: String?
+        let order: Int?
+        let episodeCount: Int?
+        let voteCount: Int?
+        let posterPath: String?
+        let releaseDate: String?
+        let firstAirDate: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, title, name, order
+            case mediaType = "media_type"
+            case episodeCount = "episode_count"
+            case voteCount = "vote_count"
+            case posterPath = "poster_path"
+            case releaseDate = "release_date"
+            case firstAirDate = "first_air_date"
+        }
+
+        var displayTitle: String? {
+            let text = (title ?? name)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (text?.isEmpty == false) ? text : nil
+        }
+
+        var year: Int? {
+            Int((releaseDate ?? firstAirDate)?.prefix(4) ?? "")
+        }
+
+        /// Excludes the long tail of one-line parts and unreleased projects that
+        /// otherwise crowd out real work. A recurring television role is kept
+        /// regardless of votes, because episode count is itself the evidence.
+        var qualifies: Bool {
+            displayTitle != nil && ((voteCount ?? 0) >= 800 || (episodeCount ?? 0) >= 10)
+        }
+
+        /// Fame of the work, damped, multiplied by how prominent the person was
+        /// in it.
+        ///
+        /// The exponent is the whole argument. At 1.0 the vote count dominates
+        /// and the ranking collapses back into "famous things they appeared in"
+        /// — Idris Elba loses The Wire to Zootopia. Below about 0.5 billing
+        /// dominates instead and a lead role in a forgotten film outranks
+        /// everything. 0.6 was picked by comparing the top five for fifteen
+        /// people against what those actors are actually known for.
+        var knownForScore: Double {
+            let votes = Double(voteCount ?? 0)
+            // An absent billing position is treated as mid-cast rather than as
+            // a lead: TMDb omits `order` for most television, and defaulting it
+            // to 0 would rank every guest appearance as a starring role.
+            let billing = 1.0 / (1.0 + Double(order ?? 8))
+            // A regular on 40+ episodes is as prominent as a film lead, and
+            // capping there stops a 600-episode cartoon run from dwarfing
+            // everything else purely on longevity.
+            let recurring = mediaType == "tv" ? min(Double(episodeCount ?? 0), 40) / 40 : 0
+            return pow(votes, 0.6) * (billing + recurring)
         }
     }
 }

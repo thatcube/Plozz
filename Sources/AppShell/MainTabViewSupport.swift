@@ -3,6 +3,7 @@ import SwiftUI
 import AppRuntime
 import CoreModels
 import CoreUI
+import FeatureAuthCore
 import FeatureHome
 import FeatureHomeCore
 import FeatureMusic
@@ -831,17 +832,29 @@ private func makeCastDetailLoader(
             provider: ownProvider,
             otherProviders: otherProviders,
             biographyProviders: [WikipediaPersonBiographyProvider()],
-            // Keyless, and the only thing that can answer for a viewer whose
-            // libraries are network shares.
-            // Two open sources with complementary blind spots: Wikidata covers
-            // film, which TVmaze does not carry at all, and TVmaze indexes
-            // episode-level television guest work Wikidata has no entity for.
+            // A ladder, because no single source answers for everyone and the
+            // row must not depend on one. Order is load-bearing rather than
+            // cosmetic: the merge inherits the ranking of whichever rung ranked
+            // a title first.
             //
-            // Order is load-bearing, not cosmetic. Wikidata leads because it is
-            // ranked by a real fame signal, and the row inherits that ranking;
-            // TVmaze's lists come back in no meaningful order, so leading with
-            // them would put a one-episode guest part above Sherlock.
-            creditsProviders: [WikidataPersonCreditsProvider(), TVmazePersonCreditsProvider()],
+            // TMDb leads where it is available. It is the only source measured
+            // that knows how prominent a person was in a title rather than only
+            // how famous the title is, and prominence is the entire question —
+            // it carries billing for roughly two thirds of credits against
+            // Wikidata's 8%, plus episode counts that identify a series regular.
+            //
+            // Wikidata follows, keyless and CC0, ranking award-cited work
+            // first. TVmaze last: it alone indexes episode-level guest parts,
+            // but its lists come back in no meaningful order, so leading with
+            // it would put a one-episode walk-on above Sherlock.
+            //
+            // The lower two are what answer for a viewer whose libraries are
+            // network shares, and for any build without a TMDb key.
+            creditsProviders: [
+                TMDbPersonCreditsProvider(access: resolvedTMDbAccess()),
+                WikidataPersonCreditsProvider(),
+                TVmazePersonCreditsProvider(),
+            ],
             // Strike what is playing. By id AND by normalized title, since a
             // second server holding the same film answers with its own id.
             //
@@ -1209,3 +1222,19 @@ extension View {
     }
 }
 #endif
+
+
+/// TMDb access resolved the same way the share pipeline resolves it: the built-in
+/// path (proxy, maintainer token, or disabled) with the household BYOK key
+/// layered over the top.
+///
+/// The `withUserToken` step is not optional. Reading the bundle alone silently
+/// ignores a key the viewer entered themselves, which would look exactly like
+/// TMDb being unavailable while Settings insists it is configured.
+@MainActor
+func resolvedTMDbAccess() -> TMDbAccess {
+    let store = TMDBUserKeyStore(
+        secureStore: KeychainStore(service: "com.plozz.app.household")
+    )
+    return MetadataProviderConfig.resolved().withUserToken(store.load()).tmdb
+}

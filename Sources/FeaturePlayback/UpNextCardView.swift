@@ -276,6 +276,13 @@ struct PlayerOverVideoCardStyle: ButtonStyle {
     /// near the screen's width, where that much growth just pushes it off the
     /// edges — so it keeps the gentler default.
     var focusScale: CGFloat = 1.04
+    /// How far a press depresses the card, as a factor of `focusScale`.
+    ///
+    /// `1` disables it. Worth doing where a card is the SOURCE of a transition:
+    /// the depress moves the card while Select is held, so anything measuring it
+    /// to animate out of is measuring a position the viewer is actively
+    /// changing.
+    var pressScale: CGFloat = 0.94
 
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -292,7 +299,7 @@ struct PlayerOverVideoCardStyle: ButtonStyle {
                 )
             }
             .clipShape(shape)
-            .scaleEffect(configuration.isPressed ? focusScale * 0.94 : (focused ? focusScale : 1.0))
+            .scaleEffect(configuration.isPressed ? focusScale * pressScale : (focused ? focusScale : 1.0))
             .shadow(color: .black.opacity(focused ? 0.30 : 0.20), radius: focused ? 14 : 8, y: focused ? 7 : 4)
             .animation(.easeOut(duration: 0.18), value: focused)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)

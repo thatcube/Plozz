@@ -3,7 +3,6 @@ import SwiftUI
 import AppRuntime
 import CoreModels
 import CoreUI
-import FeatureAuthCore
 import FeatureHome
 import FeatureHomeCore
 import FeatureMusic
@@ -821,6 +820,11 @@ private func makeCastDetailLoader(
     let playingTitle = MediaItemIdentity.normalizedTitle(item.title)
 
     let playingLabel = item.title
+    // Completed answers for this item's cast, so returning to a face costs
+    // nothing. Scoped to this loader, and therefore to the title on screen:
+    // the current title is filtered OUT of the credits, so a cached answer
+    // stops being correct the moment something else is playing.
+    let cache = PlayerCastDetailCache()
 
     return { person in
         // What is playing, alongside who was opened. Without it a trace can say
@@ -851,7 +855,7 @@ private func makeCastDetailLoader(
             // The lower two are what answer for a viewer whose libraries are
             // network shares, and for any build without a TMDb key.
             creditsProviders: [
-                TMDbPersonCreditsProvider(access: resolvedTMDbAccess()),
+                TMDbPersonCreditsProvider(access: MetadataProviderConfig.resolved().tmdb),
                 WikidataPersonCreditsProvider(),
                 TVmazePersonCreditsProvider(),
             ],
@@ -871,13 +875,24 @@ private func makeCastDetailLoader(
             limit: 24
         )
         return AsyncStream { continuation in
+            if let cached = cache.value(for: person.id) {
+                PersonDiagnostics.emit("cast.cache-hit person=\(person.name)")
+                continuation.yield(cached)
+                continuation.finish()
+                return
+            }
             // Yield after every rung, so the credits the viewer's own server
             // already returned appear immediately instead of waiting behind a
             // biography lookup that may take a second or never answer at all.
             model.onProgress = { continuation.yield(snapshot(model)) }
             let task = Task { @MainActor in
                 await model.load()
-                continuation.yield(snapshot(model, isComplete: true))
+                let final = snapshot(model, isComplete: true)
+                // Only the finished answer is kept. Caching a partial one would
+                // pin whatever a slow rung had not yet returned, and a person
+                // whose row was still loading would be permanently short.
+                cache.store(final, for: person.id)
+                continuation.yield(final)
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -892,7 +907,16 @@ private func makeCastDetailLoader(
         PlayerCastDetail(
             // Strike what is playing. By id AND by normalized title, since a
             // second server holding the same film answers with its own id.
-            credits: foldDuplicateCredits(model.libraryCredits),
+            // Withheld until the ORDER is settled, not merely until credits
+            // exist. They arrive within ~30ms from the viewer's own server and
+            // are then re-sorted by role prominence once the outside rungs land,
+            // so publishing them early meant the row appeared in library order
+            // and visibly reshuffled itself under the viewer a second later.
+            //
+            // The row simply arrives a beat later instead, in one piece. The
+            // biography and headshot are unaffected and still stream, so the
+            // pane is never empty while this waits.
+            credits: model.creditsAreFinal ? foldDuplicateCredits(model.libraryCredits) : [],
             biography: model.biography,
             lifeSummary: model.lifeSummary,
             isComplete: isComplete
@@ -1221,20 +1245,21 @@ extension View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
-#endif
 
 
-/// TMDb access resolved the same way the share pipeline resolves it: the built-in
-/// path (proxy, maintainer token, or disabled) with the household BYOK key
-/// layered over the top.
+/// Finished cast answers for the title currently playing.
 ///
-/// The `withUserToken` step is not optional. Reading the bundle alone silently
-/// ignores a key the viewer entered themselves, which would look exactly like
-/// TMDb being unavailable while Settings insists it is configured.
+/// Deliberately per-loader rather than global: the credits deliberately exclude
+/// whatever is on screen, so an entry is only valid for the item it was built
+/// for. A global cache would hand a viewer the wrong list the moment they
+/// started something else.
 @MainActor
-func resolvedTMDbAccess() -> TMDbAccess {
-    let store = TMDBUserKeyStore(
-        secureStore: KeychainStore(service: "com.plozz.app.household")
-    )
-    return MetadataProviderConfig.resolved().withUserToken(store.load()).tmdb
+final class PlayerCastDetailCache {
+    private var entries: [String: PlayerCastDetail] = [:]
+
+    func value(for id: String) -> PlayerCastDetail? { entries[id] }
+
+    func store(_ detail: PlayerCastDetail, for id: String) { entries[id] = detail }
 }
+
+#endif

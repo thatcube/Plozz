@@ -70,6 +70,8 @@ struct CastPanelView: View {
     @State private var restoringToIndex: Int?
     /// Each face card's frame in the panel's space, keyed by person id.
     @State private var cardFrames: [String: CGRect] = [:]
+    /// Each card's PHOTO, in the same space — measured, not derived.
+    @State private var photoFrames: [String: CGRect] = [:]
     /// The stage's own size, so a card's frame can be expressed as a fraction.
     @State private var panelSize: CGSize = .zero
 
@@ -82,7 +84,21 @@ struct CastPanelView: View {
     ///
     /// Not private: `PlayerControls.handleExit` reverses this same drill when
     /// Menu is pressed, and the two directions have to run on one clock.
-    static let drill: Animation = .smooth(duration: 0.38)
+    static let drillDuration: TimeInterval = 0.38
+    static let drill: Animation = .smooth(duration: drillDuration)
+    /// How long to hold the detail alive after asking it to shrink.
+    ///
+    /// DERIVED from the curve above, never written out again. These were
+    /// independent numbers — 340ms against a 380ms curve — so the pane was torn
+    /// down 40ms before its headshot finished travelling, and the card's own
+    /// face was already sitting at the exact resting position underneath. The
+    /// handoff moved the circle by a few points, right at the very end, which
+    /// is the hardest kind of glitch to place: the animation looks fine and
+    /// then something twitches after it.
+    ///
+    /// The margin covers the frame the curve settles on; landing a frame late
+    /// costs nothing and landing a frame early is the bug.
+    static let drillTeardown: Duration = .milliseconds(Int(drillDuration * 1000) + 30)
 
     private static func faceID(_ person: MediaPerson) -> String { "cast.face.\(person.id)" }
 
@@ -158,6 +174,7 @@ struct CastPanelView: View {
         // to grow from and shrink back to.
         .coordinateSpace(name: Self.space)
         .onPreferenceChange(CastCardFrameKey.self) { cardFrames = $0 }
+        .onPreferenceChange(CastPhotoFrameKey.self) { photoFrames = $0 }
         .background {
             GeometryReader { geometry in
                 Color.clear
@@ -184,6 +201,11 @@ struct CastPanelView: View {
         return false
     }
 
+    /// Whether this card is the one the detail pane grew out of.
+    private func isDrillSource(_ person: MediaPerson) -> Bool {
+        detailPerson?.id == person.id
+    }
+
     private var openedCardFrame: CGRect? {
         guard let person = detailPerson else { return nil }
         return cardFrames[person.id]
@@ -197,17 +219,51 @@ struct CastPanelView: View {
     /// collapsed, the whole stage when open.
     /// The chosen card's photo, in the panel's space — where the detail's
     /// headshot begins and ends its journey.
+    /// Where the chosen card's photo actually is — measured by the card, not
+    /// reconstructed from its constants.
+    ///
+    /// Reconstruction was tried twice and failed twice. Once naively, which
+    /// ignored that a focused card is DRAWN 10% larger than it is laid out; then
+    /// with the lift added back, which landed the face 13pt high because the
+    /// card is not drawn lifted at the instant the pane hands off to it. Neither
+    /// attempt could have accounted for the press depress either, which moves
+    /// the photo the moment Select goes down.
+    ///
+    /// Falls back to the arithmetic only if a measurement has not arrived —
+    /// which, since the card is on screen before it can be chosen, means never
+    /// in practice.
     private var collapsedHeadshotFrame: CGRect? {
-        guard let card = openedCardFrame else { return nil }
-        return CGRect(
-            x: card.minX + CastFaceCard.headshotOrigin.x,
-            y: card.minY + CastFaceCard.headshotOrigin.y,
-            width: CastFaceCard.headshot,
-            height: CastFaceCard.headshot
-        )
+        guard let person = detailPerson else { return nil }
+        guard let measured = photoFrames[person.id] else {
+            // Only before the row has laid out, which cannot happen for a card
+            // the viewer has just chosen.
+            return openedCardFrame.map {
+                CGRect(
+                    x: $0.minX + CastFaceCard.headshotOrigin.x,
+                    y: $0.minY + CastFaceCard.headshotOrigin.y,
+                    width: CastFaceCard.headshot,
+                    height: CastFaceCard.headshot
+                )
+            }
+        }
+        // The measurement, used AS MEASURED.
+        //
+        // The card also reports the factor it is drawn at, and multiplying by it
+        // looks like the last honest gap — a measured frame is the card at rest,
+        // while a focused card is drawn a tenth larger. It was tried and it puts
+        // a visible hitch in the middle of the transition, because that factor
+        // is not constant during it: opening the detail disables this card, so
+        // focus leaves, so the lift unwinds — and the rectangle the animation is
+        // flying toward changes underneath it.
+        //
+        // A target that moves mid-flight is worse than one that is 10% off, and
+        // the resting frame is what the card returns to anyway.
+        return measured
     }
 
     private var revealMask: some View {
+        // As measured, matching the headshot above — see the note there on why
+        // the reported focus scale is deliberately not applied.
         let collapsed = openedCardFrame ?? CGRect(
             x: 0, y: 0,
             width: CastFaceCard.width,
@@ -248,7 +304,7 @@ struct CastPanelView: View {
         // the close with nothing to animate.
         withAnimation(Self.drill) { isExpanded = false }
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(340))
+            try? await Task.sleep(for: Self.drillTeardown)
             // Only take focus back if it is still INSIDE the detail.
             //
             // Pressing Up out of a person's details moves focus to the tab and
@@ -333,8 +389,28 @@ struct CastPanelView: View {
                     .buttonStyle(PlayerOverVideoCardStyle(
                         focused: focus == .castMember(index),
                         cornerRadius: CastFaceCard.cornerRadius,
-                        focusScale: CastFaceCard.focusScale
+                        focusScale: CastFaceCard.focusScale,
+                        // No depress. This card is what the detail pane grows
+                        // out of, and a press that shifts it means the rectangle
+                        // the drill starts from moves while Select is held down.
+                        pressScale: 1
                     ))
+                    // The source card is not faded with the row — it is
+                    // switched off outright, the instant the pane exists.
+                    //
+                    // The pane IS this card as far as the viewer is concerned,
+                    // so the two must never be on screen together. Fading it
+                    // over the drill left its surface, its photo and its white
+                    // focus ring sitting under a second surface growing out of
+                    // the same place, which is what made one object read as
+                    // two — and made every pixel of disagreement between them
+                    // visible for the whole animation instead of for none of it.
+                    .opacity(isDrillSource(person) ? 0 : 1)
+                    // Instant in both directions. Anything gradual here is the
+                    // overlap this exists to remove.
+                    .transaction { transaction in
+                        if isDrillSource(person) { transaction.animation = nil }
+                    }
                     // Per-card, so the scroll view is never itself disabled.
                     .disabled(isFaceDisabled(index))
                     .focused($focus, equals: .castMember(index))
@@ -419,6 +495,24 @@ private struct CastFaceCard: View {
             avatar
                 .frame(width: Self.headshot, height: Self.headshot)
                 .clipShape(Circle())
+                // The photo reports where it actually IS, rather than the drill
+                // reconstructing it from this card's internal constants.
+                //
+                // Those constants were only ever a description of this layout at
+                // one moment: change the padding, the name's font, or the
+                // accessibility text size, and the circle moves while the drill
+                // keeps aiming at where it used to be. Measuring is the only
+                // version of this that survives the page being edited.
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear
+                            .preference(
+                                key: CastPhotoFrameKey.self,
+                                value: [person.id: geometry.frame(in: .named(CastPanelView.space))]
+                            )
+
+                    }
+                }
 
             // Names are the one thing on this card that must be readable in
             // full, and a card this narrow truncates plenty of real ones. The
@@ -569,22 +663,44 @@ private struct CastMemberDetail: View {
                 // biography can run properly instead of hugging one edge with
                 // half the pane left empty.
                 .frame(
-                    width: hasCredits ? Self.identityWidth : nil,
+                    width: expectsCredits ? Self.identityWidth : nil,
                     alignment: .leading
                 )
-                .frame(maxWidth: hasCredits ? nil : .infinity, alignment: .leading)
+                .frame(maxWidth: expectsCredits ? nil : .infinity, alignment: .leading)
                 // Stop short of the Back button in the full-width case too.
                 // With a poster rail beside it the rail reserved this lane; with
                 // no credits the column takes the whole stage and ran straight
                 // under the chevron.
-                .padding(.trailing, hasCredits ? 0 : Self.backButtonLane)
+                .padding(.trailing, expectsCredits ? 0 : Self.backButtonLane)
 
-            if hasCredits, let credits = detail?.credits {
-                CastCreditsRow(
-                    items: credits,
-                    focus: $focus,
-                    onOpenTitle: onOpenTitle
-                )
+            if expectsCredits {
+                // The lane is CLAIMED for the whole load, not only once there
+                // are posters to put in it.
+                //
+                // The Back button is an overlay pinned to the pane's trailing
+                // edge, so the pane's width has to be settled before the row
+                // arrives. With nothing holding this space the pane measured
+                // only as wide as the identity column, parking the button
+                // halfway across and snapping it outward when the posters
+                // landed — the same travel the overlay exists to prevent.
+                Group {
+                    if hasCredits, let credits = detail?.credits {
+                        CastCreditsRow(
+                            items: credits,
+                            focus: $focus,
+                            onOpenTitle: onOpenTitle
+                        )
+                    } else {
+                        // Enough to read as a row continuing past the edge,
+                        // which is what the real one almost always does.
+                        CastCreditsRow(
+                            items: [],
+                            focus: $focus,
+                            onOpenTitle: nil,
+                            placeholderCount: 5
+                        )
+                    }
+                }
                 .frame(maxWidth: .infinity)
                 .opacity(contentVisible ? 1 : 0)
                 // Stop short of the Back button. Without this the row ran under
@@ -666,6 +782,23 @@ private struct CastMemberDetail: View {
         }
     }
 
+    /// Whether to reserve the poster lane — asked of what we EXPECT, not of
+    /// what has arrived.
+    ///
+    /// Credits are withheld until their order is settled, so for the first
+    /// half-second there are none yet for almost everybody who has some. Keying
+    /// the layout on arrival meant the biography opened full width and then
+    /// visibly collapsed to half as the row appeared.
+    ///
+    /// So the split layout is the assumption while loading, and the full-width
+    /// one is adopted only once we KNOW there is nothing to show. That puts the
+    /// single unavoidable layout change on the rare case — a person with no
+    /// credits anywhere — instead of on the common one.
+    private var expectsCredits: Bool {
+        if let detail, detail.isComplete { return !detail.credits.isEmpty }
+        return true
+    }
+
     private var hasCredits: Bool { !(detail?.credits.isEmpty ?? true) }
 
     /// Who they are: face, name, character, and what we can say about them.
@@ -698,6 +831,21 @@ private struct CastMemberDetail: View {
                 // exactly, rather than fighting a centre-anchored scale.
                 .scaleEffect(headshotScale, anchor: .topLeading)
                 .offset(x: headshotOffset.width, y: headshotOffset.height)
+                // Pinned to the drill curve EXPLICITLY, rather than inheriting
+                // the transaction that set `isExpanded`.
+                //
+                // This circle sits inside the subtree carrying
+                // `.animation(_:value: detail)`, and a scoped animation
+                // swallows ambient transactions for everything beneath it — so
+                // the headshot was travelling on that 0.25s ease while the
+                // pane it is travelling across revealed on a 0.38s smooth.
+                // Close enough to look almost right, which is why it read as
+                // slightly off rather than plainly wrong: the face arrived
+                // ahead of the panel and on a different easing.
+                //
+                // Narrow on purpose — attached to the leaf, not the cluster.
+                // An animation modifier further up retimes the whole reveal.
+                .animation(CastPanelView.drill, value: isExpanded)
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: person.name)
@@ -852,6 +1000,15 @@ private struct CastCreditsRow: View {
     @FocusState.Binding var focus: PlayerControls.FocusSlot?
     /// Opens a title's own page, ending playback. `nil` leaves the posters inert.
     let onOpenTitle: ((MediaItem) -> Void)?
+    /// Renders this many placeholder tiles instead of posters.
+    ///
+    /// A mode of this row rather than a view beside it, because the two have to
+    /// occupy EXACTLY the same place. A separate view was tried and could only
+    /// ever approximate this one's geometry — the scroll container, its content
+    /// margins, the fixed height and the edge mask all move the first tile — so
+    /// the posters landed a few points off their placeholders. Sharing the
+    /// container makes that class of drift impossible rather than merely fixed.
+    var placeholderCount: Int?
 
     /// Each title label's rendered height, so its scrim can be sized to it.
     @State private var labelHeights: [String: CGFloat] = [:]
@@ -871,6 +1028,7 @@ private struct CastCreditsRow: View {
         InfoPanelView.cardHeight - InfoPanelView.contentPadding * 2
     }
     private static var width: CGFloat { (height * 2 / 3).rounded() }
+
     private var posterHeight: CGFloat { Self.height }
     private var posterWidth: CGFloat { Self.width }
     /// Modest on purpose: every percent of growth is height the poster gives up
@@ -964,6 +1122,22 @@ private struct CastCreditsRow: View {
 
     @ViewBuilder
     private var content: some View {
+        if let placeholderCount {
+            ForEach(0..<placeholderCount, id: \.self) { index in
+                CastCreditPlaceholderTile(
+                    width: posterWidth,
+                    height: posterHeight,
+                    cornerRadius: Self.cornerRadius,
+                    delay: Double(index) * 0.08
+                )
+            }
+        } else {
+            realContent
+        }
+    }
+
+    @ViewBuilder
+    private var realContent: some View {
         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 let isFocused = focus == .castCredit(index)
                 // Select opens the title's own page, ending playback — the same
@@ -1118,10 +1292,49 @@ private struct CastCreditLabelHeightKey: PreferenceKey {
     }
 }
 
+/// Where each card's photo is, in the panel's coordinate space.
+///
+/// Separate from `CastCardFrameKey`: that one is the whole card, which sizes the
+/// pane's reveal, while this is the circle the headshot flies to and from. They
+/// are measured independently so neither has to know how the other is laid out.
+private struct CastPhotoFrameKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 private struct CastCardFrameKey: PreferenceKey {
     static let defaultValue: [String: CGRect] = [:]
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
         value.merge(nextValue()) { _, new in new }
     }
 }
+
+/// One poster-shaped gap in the lane while the row loads.
+///
+/// Sized by the row that owns it rather than by its own constants, so it cannot
+/// drift from the poster that replaces it.
+private struct CastCreditPlaceholderTile: View {
+    let width: CGFloat
+    let height: CGFloat
+    let cornerRadius: CGFloat
+    /// Staggered per tile, so the lane reads as one object breathing rather
+    /// than five rectangles flashing in unison.
+    let delay: Double
+
+    @State private var dim = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(.white.opacity(dim ? 0.05 : 0.11))
+            .frame(width: width, height: height)
+            .animation(
+                .easeInOut(duration: 0.9).repeatForever(autoreverses: true).delay(delay),
+                value: dim
+            )
+            .onAppear { dim = true }
+    }
+}
+
 #endif

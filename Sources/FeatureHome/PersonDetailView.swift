@@ -24,6 +24,18 @@ public final class PersonDetailViewModel {
 
     public private(set) var state: LoadState = .loading
     public private(set) var libraryCredits: [MediaItem] = []
+    /// Whether the credit ORDER is settled.
+    ///
+    /// The list grows in rungs, and the last rung re-sorts everything by how
+    /// prominent the person was. A surface that shows credits the moment they
+    /// exist therefore shows them in the wrong order and visibly reshuffles a
+    /// second later. Anywhere that cannot afford that — the in-player card,
+    /// which the viewer is watching at the moment it happens — waits for this
+    /// instead of for the whole load.
+    ///
+    /// Distinct from "everything finished": the biography can still be in
+    /// flight, and it renders in its own place without disturbing the row.
+    public private(set) var creditsAreFinal = false
     /// Filled only if the source keeps person records with one. Loaded alongside
     /// the credits and independently of them: a source can answer for one and not
     /// the other, and neither absence should block the other from showing.
@@ -170,6 +182,41 @@ public final class PersonDetailViewModel {
     /// range, so ordering stays "everything Wikidata ranked, then everything
     /// TVmaze ranked" rather than interleaving two incomparable scales.
     private static let providerRankStride = 1_000
+
+    /// How long any one rung gets before the row goes on without it.
+    ///
+    /// Measured p50 20ms and p90 922ms, against a 12s HTTP timeout — so the
+    /// tail here is not a slow answer, it is no answer at all. Waiting the full
+    /// timeout held the row for twelve seconds to eventually add nothing.
+    ///
+    /// Well clear of normal completion, so this never truncates a rung that was
+    /// going to answer; it only bounds the case where one never will. These run
+    /// concurrently, so capping each one caps the stage.
+    private static let rungDeadline: TimeInterval = 4
+
+    /// A rung's credits, or nothing if it takes too long.
+    ///
+    /// The row is an enhancement rather than the pane's reason for existing:
+    /// the viewer already has a face, a name and a biography while this runs.
+    /// Nothing here is worth twelve seconds of an empty lane.
+    private static func creditsBeforeDeadline(
+        from provider: any PersonCreditsProviding,
+        name: String,
+        limit: Int
+    ) async -> [MediaItem] {
+        await withTaskGroup(of: [MediaItem]?.self) { group in
+            group.addTask { await provider.credits(for: name, limit: limit) }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(rungDeadline * 1_000_000_000))
+                return nil
+            }
+            // Whichever lands first decides it; the loser is cancelled rather
+            // than left running against a pane the viewer may have closed.
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? []
+        }
+    }
 
     private static func knownForKey(_ item: MediaItem) -> String {
         "\(item.kind.rawValue)|\(MediaItemIdentity.normalizedTitle(item.title))"
@@ -331,7 +378,21 @@ public final class PersonDetailViewModel {
                 of: (Int, [MediaItem]).self
             ) { group in
                 for (index, provider) in creditsProviders.enumerated() {
-                    group.addTask { (index, await provider.credits(for: name, limit: limit)) }
+                    group.addTask {
+                        let started = Date()
+                        let items = await Self.creditsBeforeDeadline(
+                            from: provider, name: name, limit: limit
+                        )
+                        // Per rung, because "the row was slow" is not something
+                        // anyone can act on. One stalled request used to hold
+                        // the whole row for the full 12s HTTP timeout, and
+                        // without this there was no way to tell which.
+                        PersonDiagnostics.emit(
+                            "person.credits-rung index=\(index) name=\(name) "
+                            + "items=\(items.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
+                        )
+                        return (index, items)
+                    }
                 }
                 var results = [[MediaItem]](repeating: [], count: creditsProviders.count)
                 for await (index, credits) in group { results[index] = credits }
@@ -391,12 +452,17 @@ public final class PersonDetailViewModel {
                 libraryCredits = merged
                 state = .loaded
             }
+            creditsAreFinal = true
             PersonDiagnostics.emit(
                 "person.known-for name=\(person.name) total=\(libraryCredits.count) "
                 + "ms=\(elapsed(stage))"
             )
             onProgress?()
         }
+        // Every exit settles the order, including the ones that never reached
+        // the ranking rung — cancelled, no providers configured, or nothing
+        // found. A surface waiting on this must never be left waiting forever.
+        creditsAreFinal = true
 
         PersonDiagnostics.emit(
             "person.done name=\(person.name) credits=\(libraryCredits.count) "

@@ -52,6 +52,11 @@ struct ScrubBar: View {
     var leadingInset: CGFloat = 0
     var trailingInset: CGFloat = 0
 
+    /// The track is the widest single piece of glass in the player, so it gives
+    /// its up with the panel rather than staying behind as the one refracting
+    /// element left on screen.
+    @Environment(\.plozzReducePanelGlass) private var reducePanelGlass
+
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
@@ -110,7 +115,11 @@ struct ScrubBar: View {
     /// translucent-fill fallback on older systems.
     @ViewBuilder
     private func glassTrack(height: CGFloat) -> some View {
-        if #available(iOS 26.0, tvOS 26.0, *) {
+        if reducePanelGlass {
+            Capsule()
+                .fill(PlozzFrostedSurface.base)
+                .frame(height: height)
+        } else if #available(iOS 26.0, tvOS 26.0, *) {
             Capsule()
                 .fill(.clear)
                 .frame(height: height)
@@ -241,6 +250,10 @@ struct PlayerTabButtonStyle: ButtonStyle {
     var selected: Bool = false
 
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
+    /// Safe to branch on for the same reason `reduceTransparency` is: it changes
+    /// when playback starts and stops, never while focus is moving, so the view
+    /// tree stays a stable shape mid-swipe.
+    @Environment(\.plozzReducePanelGlass) private var reducePanelGlass
 
     func makeBody(configuration: Configuration) -> some View {
         // ONE geometry for both states: the label, font and padding are applied
@@ -269,6 +282,18 @@ struct PlayerTabButtonStyle: ButtonStyle {
         let shape = Capsule(style: .continuous)
         if focused {
             shape.fill(.white)
+        } else if reducePanelGlass {
+            // The same material the panel behind these falls back to. Matching
+            // it is the whole point: a glass pill sitting on a frosted panel
+            // reads as two materials that do not belong together.
+            //
+            // Plus a hairline edge. Frost takes its brightness from what is
+            // behind it, so over a dark scene it very nearly disappears — glass
+            // has a specular edge of its own that does this for free, and
+            // without it these pills vanish against the letterboxing.
+            shape
+                .fill(selected ? PlozzFrostedSurface.raised : PlozzFrostedSurface.base)
+                .plozzFrostedBorder(shape)
         } else if !reduceTransparency, #available(iOS 26.0, tvOS 26.0, *) {
             // Selected keeps the glass and only tints it. Swapping in a flat
             // fill made an open tab a different material from a closed one,
@@ -323,6 +348,11 @@ extension View {
     /// category / enabled toggle.
     @ViewBuilder
     func playerGlassButton(prominent: Bool) -> some View {
+        modifier(PlayerGlassButtonModifier(prominent: prominent))
+    }
+
+    @ViewBuilder
+    fileprivate func playerSystemGlassButton(prominent: Bool) -> some View {
         if #available(iOS 26.0, tvOS 26.0, *) {
             if prominent {
                 buttonStyle(.glassProminent)
@@ -345,16 +375,37 @@ extension View {
 ///
 /// Still **no `.shadow`** — a soft drop shadow was the original frame-drop
 /// culprit over Dolby Vision (a per-frame offscreen blur recomposited on the
-/// moving HDR signal). A 1px stroke gives edge separation instead. The glass is
-/// a *bounded* backdrop sample (the panel is only 760pt wide), so keep an eye on
-/// the diagnostics FPS over DV content and fall back to the solid fill if it
-/// ever stutters.
+/// moving HDR signal). A 1px stroke gives edge separation instead.
+///
+/// The note that used to sit here said to watch the diagnostics FPS over Dolby
+/// Vision and fall back to the solid fill if it ever stuttered. It did, and that
+/// fallback is now automatic: `plozzReducePanelGlass` carries it, so this panel
+/// gives up its glass for demanding content while the transport buttons keep
+/// theirs.
 struct PanelGlassBackground: ViewModifier {
     var cornerRadius: CGFloat = 32
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: cornerRadius, style: .continuous) }
 
+    @Environment(\.plozzReducePanelGlass) private var reducePanelGlass
+
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, tvOS 26.0, *) {
+        if reducePanelGlass {
+            // A frosted MATERIAL, not a flat black wash.
+            //
+            // `.thickMaterial` is a static system blur: it still separates the
+            // panel from the footage and still reads as a surface, but it is
+            // not the live per-frame refraction that costs. The plain
+            // `Color.black.opacity` this replaced was cheap in both senses —
+            // it looked like a rectangle laid over the video rather than a
+            // panel floating above it.
+            //
+            // The thick variant rather than `.ultraThinMaterial` used elsewhere
+            // because this one sits over moving video: a thin frost lets enough
+            // of a bright scene through to fight the text on top of it.
+            content
+                .background(PlozzFrostedSurface.base, in: shape)
+                .plozzFrostedBorder(shape)
+        } else if #available(iOS 26.0, tvOS 26.0, *) {
             content
                 .glassEffect(.regular, in: shape)
                 .overlay(shape.stroke(.white.opacity(0.12), lineWidth: 1))
@@ -461,5 +512,58 @@ extension View {
         #else
         self
         #endif
+    }
+}
+
+/// The transport buttons' stand-in when live glass is too expensive.
+///
+/// A style rather than a background modifier because these use the SYSTEM
+/// `.glass` / `.glassProminent` button styles, which cannot be told to fall
+/// back — hence their staying glass while everything around them had changed,
+/// and visibly swapping material the moment a menu opened and re-rendered them.
+struct PlayerFrostedButtonStyle: ButtonStyle {
+    var prominent: Bool
+
+    @Environment(\.isFocused) private var isFocused
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = Capsule(style: .continuous)
+        // Focus takes the same solid white the system glass style uses, so the
+        // focused state is identical either way and only the resting one differs.
+        let focusedFill = AnyShapeStyle(Color.white)
+        let restingFill = AnyShapeStyle(
+            prominent ? PlozzFrostedSurface.raised : PlozzFrostedSurface.base
+        )
+        configuration.label
+            .font(.body.weight(.semibold))
+            .foregroundStyle(isFocused ? Color.black : Color.white)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .background(shape.fill(isFocused ? focusedFill : restingFill))
+            // Dropped when focused, where the white fill is its own boundary and
+            // an edge on top of it reads as an outline rather than a shape.
+            .plozzFrostedBorder(shape, visible: !isFocused)
+            .contentShape(shape)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+
+/// Chooses between the system glass button style and the frosted stand-in.
+///
+/// A modifier rather than a branch inside `playerGlassButton`, because a
+/// `View` extension cannot read the environment and the choice depends on it.
+private struct PlayerGlassButtonModifier: ViewModifier {
+    let prominent: Bool
+
+    @Environment(\.plozzReducePanelGlass) private var reducePanelGlass
+
+    func body(content: Content) -> some View {
+        if reducePanelGlass {
+            content.buttonStyle(PlayerFrostedButtonStyle(prominent: prominent))
+        } else {
+            content.playerSystemGlassButton(prominent: prominent)
+        }
     }
 }

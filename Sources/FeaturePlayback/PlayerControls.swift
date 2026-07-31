@@ -174,6 +174,7 @@ struct PlayerControls: View {
     }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.plozzHDRDisplayActive) private var hdrDisplayActive
 
     @State private var openPanel: Category?
     @State private var subtitleScreen: SubtitleScreen = .tracks
@@ -1611,12 +1612,27 @@ struct PlayerControls: View {
     /// - Because the track list and the Style editor share this one container, tapping
     ///   Edit *morphs* the box height from the track-list height up to the Style
     ///   height instead of swapping one panel for another (which read as a jump).
+    /// A separator matched to the surface it is drawn on.
+    ///
+    /// Replaces `Divider().background(...)`, which draws TWO things: the
+    /// system divider and a white wash behind it. Over glass the refraction hid
+    /// the doubling; over frost, which is lighter and flat, it read as a
+    /// brighter, thicker line than the panel's own edge — the same idea at two
+    /// different weights on one surface.
+    private var frostAwareDivider: some View {
+        // HDR-compensated like the borders, and for the same reason: this sits
+        // inside the panel whose edge it has to match, and both are drawn into a
+        // signal that maps SDR white brighter than SDR mode does.
+        PlozzFrostedSurface.dividerColor(hdrDisplayActive: hdrDisplayActive)
+            .frame(height: PlozzFrostedSurface.dividerHeight)
+    }
+
     @ViewBuilder
     private func morphingPanel(for category: Category) -> some View {
         let styleFamily = category == .subtitles && subtitleScreen.isStyleFamily
         VStack(alignment: .leading, spacing: 0) {
             panelHeader(for: category)
-            Divider().background(.white.opacity(0.15))
+            frostAwareDivider
             morphingBody(styleFamily: styleFamily, category: category) { panelBodyContent(for: category) }
         }
         // Hard-swap the panel chrome + content on the tracks↔Style flip instead of
@@ -1895,8 +1911,7 @@ struct PlayerControls: View {
             } else {
                 PlayerMenuRowStack(rows: rows, palette: palette, focus: $focus)
             }
-            Divider()
-                .background(.white.opacity(0.12))
+            frostAwareDivider
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
             if model.subtitleDownload.canSearch {

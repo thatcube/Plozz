@@ -20,6 +20,9 @@ public final class GlassPerformanceModel {
     /// clears a suspension the arriving one just set, restoring glass over
     /// exactly the content that asked for it to go.
     private var demandingSources = 0
+    /// Counted alongside, and for the same reason: overlapping playback must not
+    /// let a departing player clear a state the arriving one just set.
+    private var hdrSources = 0
 
     public init(physicalMemoryBytes: UInt64 = ProcessInfo.processInfo.physicalMemory) {
         budget = .forHardware(physicalMemoryBytes: physicalMemoryBytes)
@@ -30,14 +33,16 @@ public final class GlassPerformanceModel {
     /// Balanced by `endDemandingPlayback`, and safe to call for content that is
     /// NOT demanding — it simply does nothing, so callers need no conditional
     /// and cannot leak a suspension by forgetting one.
-    public func beginDemandingPlayback() {
+    public func beginDemandingPlayback(isHDR: Bool = false) {
         demandingSources += 1
+        if isHDR { hdrSources += 1 }
         refresh()
     }
 
-    public func endDemandingPlayback() {
+    public func endDemandingPlayback(isHDR: Bool = false) {
         guard demandingSources > 0 else { return }
         demandingSources -= 1
+        if isHDR, hdrSources > 0 { hdrSources -= 1 }
         refresh()
     }
 
@@ -45,13 +50,15 @@ public final class GlassPerformanceModel {
     /// guarantee its balance — the alternative to a leak here is glass that
     /// never comes back until the app is relaunched.
     public func resetPlaybackDemand() {
-        guard demandingSources != 0 else { return }
+        guard demandingSources != 0 || hdrSources != 0 else { return }
         demandingSources = 0
+        hdrSources = 0
         refresh()
     }
 
     private func refresh() {
         budget.contentIsDemanding = demandingSources > 0
+        budget.contentIsHDR = hdrSources > 0
     }
 }
 #endif

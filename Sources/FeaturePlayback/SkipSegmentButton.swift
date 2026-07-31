@@ -25,6 +25,7 @@ struct SkipSegmentButton: View {
     let onDismiss: () -> Void
     let onPlayPause: () -> Void
     @FocusState private var focused: Bool
+    @Environment(\.plozzReducePanelGlass) private var reducePanelGlass
 
     var body: some View {
         VStack {
@@ -105,7 +106,11 @@ struct SkipSegmentButton: View {
         .padding(.horizontal, 28)
         .padding(.vertical, 14)
 
-        if #available(iOS 26.0, tvOS 26.0, *) {
+        if reducePanelGlass {
+            label
+                .background(Capsule(style: .continuous).fill(PlozzFrostedSurface.base))
+                .plozzFrostedBorder(Capsule(style: .continuous))
+        } else if #available(iOS 26.0, tvOS 26.0, *) {
             label.glassEffect(.regular, in: Capsule(style: .continuous))
         } else {
             label.background(

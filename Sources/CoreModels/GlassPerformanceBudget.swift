@@ -36,9 +36,24 @@ public struct GlassPerformanceBudget: Equatable, Sendable {
     /// Whether the content currently playing is demanding enough to suspend it.
     public var contentIsDemanding: Bool
 
-    public init(hardwareAllowsGlass: Bool = true, contentIsDemanding: Bool = false) {
+    /// Whether the display is being driven in HDR for what is playing.
+    ///
+    /// The same classification that decides `contentIsDemanding` rather than a
+    /// second opinion about the same file — almost everything that suspends
+    /// glass is HDR, so this is that fact kept rather than recomputed. It exists
+    /// separately only because the two do not coincide exactly: a 60Mbps SDR
+    /// remux suspends glass without an HDR switch, and an Apple TV HD frosts
+    /// everything regardless of what is playing.
+    public var contentIsHDR: Bool
+
+    public init(
+        hardwareAllowsGlass: Bool = true,
+        contentIsDemanding: Bool = false,
+        contentIsHDR: Bool = false
+    ) {
         self.hardwareAllowsGlass = hardwareAllowsGlass
         self.contentIsDemanding = contentIsDemanding
+        self.contentIsHDR = contentIsHDR
     }
 
     /// The budget for a device with this much memory.
@@ -103,17 +118,26 @@ public struct GlassPerformanceBudget: Equatable, Sendable {
     /// being read, decoded and tone-mapped is still Dolby Vision — and it is the
     /// work, not the delivered format, that costs.
     public static func contentIsDemanding(source: MediaSourceMetadata?) -> Bool {
-        guard let video = source?.video else { return false }
+        demand(for: source).isDemanding
+    }
+
+    /// Both facts from one classification, so nothing asks the same question of
+    /// the same file twice and gets two answers.
+    public static func demand(
+        for source: MediaSourceMetadata?
+    ) -> (isDemanding: Bool, isHDR: Bool) {
+        guard let video = source?.video else { return (false, false) }
         let hdr = PlaybackDiagnostics.classifyHDR(
             videoRange: video.videoRange,
             videoRangeType: video.videoRangeType,
             colorTransfer: video.colorTransfer,
             isDolbyVision: (video.dolbyVisionProfile ?? 0) > 0
         )
-        return contentIsDemanding(
+        let demanding = contentIsDemanding(
             hdrFormat: hdr,
             width: video.width,
             bitrate: video.bitrate.map(Double.init)
         )
+        return (demanding, hdr != .sdr && hdr != .unknown)
     }
 }

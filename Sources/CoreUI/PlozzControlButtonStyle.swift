@@ -77,6 +77,7 @@ public struct PlozzSeasonTabStyle: ButtonStyle {
         let isSelected: Bool
         @Environment(\.isFocused) private var isFocused
         @Environment(\.plozzReduceTransparency) private var reduceTransparency
+        @Environment(\.plozzReducePanelGlass) private var reducePanelGlass
         @Environment(\.themePalette) private var palette
 
         /// Whether the tab shows its pill (focused tab, or the active season).
@@ -151,6 +152,19 @@ public struct PlozzSeasonTabStyle: ButtonStyle {
         private func basePill(_ shape: Capsule) -> some View {
             if reduceTransparency {
                 shape.fill(palette.cardSurface)
+            } else if reducePanelGlass {
+                // Matches whatever panel this control is sitting on. These pills
+                // are cheap enough to keep their glass on cost alone, but a
+                // refracting button on a frosted panel reads as two materials
+                // that do not belong together — and that looks worse than either
+                // material does everywhere.
+                //
+                // The hairline edge replaces the specular one glass draws for
+                // itself; frost takes its brightness from behind, so over a dark
+                // scene it would otherwise have no boundary at all.
+                shape
+                    .fill(PlozzFrostedSurface.base)
+                    .plozzFrostedBorder(shape)
             } else if #available(iOS 26.0, tvOS 26.0, *) {
                 shape.fill(.clear).glassEffect(.regular, in: shape)
             } else {

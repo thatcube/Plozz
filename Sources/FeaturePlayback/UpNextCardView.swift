@@ -314,7 +314,13 @@ struct PlayerOverVideoSurface: View {
     var focused: Bool = false
     let cornerRadius: CGFloat
 
+    /// Accessibility and user intent. Takes the flat scrim, because a viewer who
+    /// asked for less transparency wants exactly that.
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
+    /// Performance. Takes a frosted material instead — the goal here is to stop
+    /// paying for live refraction, NOT to stop being translucent, and the two
+    /// wants are different enough to deserve different surfaces.
+    @Environment(\.plozzReducePanelGlass) private var reducePanelGlass
 
     var body: some View {
         surface(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -339,6 +345,23 @@ struct PlayerOverVideoSurface: View {
             // shared card's `liftSurface`, which is a solid white lift: over video
             // that floods the card and inverts its labels.
             scrim
+        } else if reducePanelGlass {
+            // Frosted, not flat. A static system blur still separates the card
+            // from the footage and still reads as a floating surface; it simply
+            // does not resample the video every frame. Focus keeps its lighter
+            // fill so the affordance survives.
+            //
+            // The edge is the same one every other frosted surface wears. These
+            // cards sit in a row over footage that is often dark at the bottom
+            // of the frame, where frost alone leaves them without a boundary.
+            // Dropped on focus, which already has a white ring of its own.
+            shape
+                .fill(
+                    focused
+                        ? AnyShapeStyle(PlozzFrostedSurface.raised)
+                        : AnyShapeStyle(PlozzFrostedSurface.base)
+                )
+                .plozzFrostedBorder(shape, visible: !focused)
         } else if #available(iOS 26.0, tvOS 26.0, *) {
             // Glass at rest as well as on focus — a card over live video is what
             // the material is for, and showing it only on focus is why this read

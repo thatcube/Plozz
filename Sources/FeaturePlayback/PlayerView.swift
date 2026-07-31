@@ -27,6 +27,9 @@ public struct PlayerView: View {
     /// that could disagree with the first — the request can change under a
     /// transcode retry — and leak or over-release.
     @State private var suspendedGlass = false
+    /// Whether the suspension this player raised was an HDR one, so it releases
+    /// the same thing it took.
+    @State private var suspendedGlassWasHDR = false
     /// Smooths the HDR/Dolby-Vision HDMI display-mode switch by fading to black
     /// around it (with a timeout so it can never strand on black).
     @State private var hdrTransition = HDRTransitionModel()
@@ -365,20 +368,23 @@ public struct PlayerView: View {
     /// a transcode changes what is actually delivered, and the decision has to
     /// describe the stream being played.
     private func updateGlassSuspension() {
-        let demanding = GlassPerformanceBudget.contentIsDemanding(source: viewModel.sourceMetadata)
-        guard demanding != suspendedGlass else { return }
-        if demanding {
-            glassPerformance?.beginDemandingPlayback()
+        let demand = GlassPerformanceBudget.demand(for: viewModel.sourceMetadata)
+        guard demand.isDemanding != suspendedGlass else { return }
+        if demand.isDemanding {
+            glassPerformance?.beginDemandingPlayback(isHDR: demand.isHDR)
+            suspendedGlassWasHDR = demand.isHDR
         } else {
-            glassPerformance?.endDemandingPlayback()
+            glassPerformance?.endDemandingPlayback(isHDR: suspendedGlassWasHDR)
+            suspendedGlassWasHDR = false
         }
-        suspendedGlass = demanding
+        suspendedGlass = demand.isDemanding
     }
 
     private func releaseGlassSuspension() {
         guard suspendedGlass else { return }
         suspendedGlass = false
-        glassPerformance?.endDemandingPlayback()
+        glassPerformance?.endDemandingPlayback(isHDR: suspendedGlassWasHDR)
+        suspendedGlassWasHDR = false
     }
 
     private func startSampling() {

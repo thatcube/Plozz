@@ -2366,6 +2366,11 @@ actor ShareCatalogStore {
     /// Resolve any catalog id to a rich `MediaItem`, or `nil` if unknown here.
     func item(id: String) -> MediaItem? { ensureOpen(); return readQueries.item(id: id) }
 
+    func itemsWithPerson(id personID: String?, name: String, limit: Int) -> [MediaItem] {
+        ensureOpen()
+        return readQueries.itemsWithPerson(id: personID, name: name, limit: limit)
+    }
+
     /// The best default file to play for a logical movie when no version is named.
     func defaultMovieRelPath(forKey key: String) -> String? {
         ensureOpen(); return readQueries.defaultMovieRelPath(forKey: key)

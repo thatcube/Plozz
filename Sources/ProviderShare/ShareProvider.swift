@@ -200,6 +200,22 @@ public struct ShareProvider: MediaProvider {
         return await watchState.stamp(items)
     }
 
+    /// Titles on this share featuring a person, answered entirely from the local
+    /// catalog.
+    ///
+    /// A share has no person records of its own — its cast is resolved at scan
+    /// time and persisted with the item — so both lookups run against that stored
+    /// cast. The id path serves a person opened from this share (whose id is a
+    /// TMDb one); the name path serves a person opened from a Jellyfin or Plex
+    /// item, whose id means nothing here.
+    public func items(withPerson personID: String, limit: Int) async throws -> [MediaItem] {
+        await catalog.itemsWithPerson(id: personID, name: "", limit: limit)
+    }
+
+    public func items(withPersonNamed name: String, limit: Int) async throws -> [MediaItem] {
+        await catalog.itemsWithPerson(id: nil, name: name, limit: limit)
+    }
+
     public func item(id: String) async throws -> MediaItem {
         // Indexed items (movies/series/seasons/episodes) resolve from the catalog;
         // raw file-tree ids (`share:root`, `d:`) fall back to the live browser.

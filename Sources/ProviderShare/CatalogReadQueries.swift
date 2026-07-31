@@ -518,6 +518,49 @@ struct CatalogReadQueries {
 
     /// Resolve any catalog id to a rich `MediaItem`, or `nil` if unknown here
     /// (caller falls back to the raw browser for `share:root` / `d:` ids).
+    /// Items whose persisted cast includes `personID` or `name`, newest first.
+    ///
+    /// A share has only files, so its cast is resolved externally at scan time and
+    /// stored as JSON on the enrichment row — there is no person table and nothing
+    /// to join against. Matching therefore happens in two steps: SQL narrows by
+    /// substring, which the index cannot help with but which is cheap enough
+    /// against one text column, and the survivors are decoded and checked
+    /// properly. The decode is what makes it correct — a raw `LIKE` would match
+    /// "Chris Evans" inside "Chris Evanson", and a person id inside a longer id.
+    ///
+    /// Both keys are accepted because a share's `MediaPerson.id` is a TMDb id
+    /// (`tmdb:person:1892`) while another server's is its own, so a person opened
+    /// from Jellyfin or Plex can only be found here by name.
+    func itemsWithPerson(id personID: String?, name: String, limit: Int) -> [MediaItem] {
+        guard db != nil, limit > 0, castColumn == "cast_json" else { return [] }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty || personID?.isEmpty == false else { return [] }
+
+        var matches: [String] = []
+        // Ordered by discovery so the newest work leads, matching Recently Added.
+        query("""
+        SELECT item_id, cast_json FROM enrichment
+        WHERE cast_json IS NOT NULL AND (cast_json LIKE ?1 OR cast_json LIKE ?2)
+        ORDER BY enriched_at DESC;
+        """, bind: { stmt in
+            self.bindText(stmt, 1, "%\(trimmedName)%")
+            self.bindText(stmt, 2, personID.map { "%\($0)%" } ?? "\u{0}")
+        }) { stmt in
+            guard matches.count < limit,
+                  let itemID = self.columnText(stmt, 0),
+                  let json = self.columnText(stmt, 1),
+                  let people = CatalogJSON.decode([MediaPerson].self, json)
+            else { return }
+            let hit = people.contains { person in
+                if let personID, !personID.isEmpty, person.id == personID { return true }
+                return !trimmedName.isEmpty
+                    && person.name.compare(trimmedName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }
+            if hit { matches.append(itemID) }
+        }
+        return matches.compactMap { item(id: $0) }
+    }
+
     func item(id: String) -> MediaItem? {
         guard db != nil else { return nil }
         if let mkey = ShareCatalogID.movieKey(forMovieID: id) {

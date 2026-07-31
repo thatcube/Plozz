@@ -44,6 +44,14 @@ public protocol ShareCatalogReading: Sendable {
     /// A single indexed item, or nil for un-indexed raw file ids.
     func item(id: String) async -> MediaItem?
 
+    /// Items whose persisted cast includes this person, by TMDb id or by name.
+    /// Fully local — a share resolves its cast at scan time, so a person page
+    /// works offline and needs no third party at read time.
+    ///
+    /// Defaulted, so a conformer with no cast to search (test doubles, readers
+    /// built before this existed) reports none rather than failing to compile.
+    func itemsWithPerson(id personID: String?, name: String, limit: Int) async -> [MediaItem]
+
     /// The default playable file rel-path for a logical movie key.
     func defaultMovieRelPath(forKey key: String) async -> String?
 
@@ -62,3 +70,8 @@ public protocol ShareCatalogReading: Sendable {
 /// synchronous actor-isolated reads, which satisfy the `async` requirements when
 /// the store is used through `any ShareCatalogReading`.
 extension ShareCatalogStore: ShareCatalogReading {}
+
+public extension ShareCatalogReading {
+    /// Default: no searchable cast.
+    func itemsWithPerson(id personID: String?, name: String, limit: Int) async -> [MediaItem] { [] }
+}

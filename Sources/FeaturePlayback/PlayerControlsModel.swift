@@ -196,6 +196,13 @@ public final class InfoCardModel {
     /// browsing. Resume position is written on the way out, so returning
     /// continues where it stopped. `nil` hides the control entirely.
     public var openPersonPage: ((MediaPerson) -> Void)?
+    /// Leave the film and open one of a person's credits.
+    ///
+    /// Same contract as `openPersonPage`: a deliberate press that ends playback
+    /// with the resume position written, never a side effect of browsing. The
+    /// title may or may not be in the library — the detail page it lands on
+    /// handles both, offering Play for one and a request for the other.
+    public var openTitlePage: ((MediaItem) -> Void)?
     /// Ordered artwork candidates (image → backdrop → poster) for the thumbnail.
     public var artworkURLs: [URL] = []
     /// Pre-formatted runtime label (e.g. "37 min") for the meta line.

@@ -819,12 +819,35 @@ private func makeCastDetailLoader(
     let playingID = item.id
     let playingTitle = MediaItemIdentity.normalizedTitle(item.title)
 
+    let playingLabel = item.title
+
     return { person in
+        // What is playing, alongside who was opened. Without it a trace can say
+        // a person had no credits but not what they had no credits IN, which
+        // makes a report impossible to reconstruct afterwards.
+        PersonDiagnostics.emit("cast.open person=\(person.name) in=\(playingLabel)")
         let model = PersonDetailViewModel(
             person: person,
             provider: ownProvider,
             otherProviders: otherProviders,
             biographyProviders: [WikipediaPersonBiographyProvider()],
+            // Keyless, and the only thing that can answer for a viewer whose
+            // libraries are network shares.
+            // Two open sources with complementary blind spots: TVmaze indexes
+            // episode-level television guest work that Wikidata has no entity
+            // for, and Wikidata covers film, which TVmaze does not carry at all.
+            creditsProviders: [TVmazePersonCreditsProvider(), WikidataPersonCreditsProvider()],
+            // Strike what is playing. By id AND by normalized title, since a
+            // second server holding the same film answers with its own id.
+            //
+            // Given to the view model rather than applied to its output: it
+            // branches on whether the servers found anything, and everyone in
+            // this cast is in the film on screen — so filtering afterwards left
+            // that branch permanently unreachable.
+            includeCredit: { item in
+                item.id != playingID
+                    && MediaItemIdentity.normalizedTitle(item.title) != playingTitle
+            },
             // Enough to fill the rail several times over. The person page is
             // where the complete list lives.
             limit: 24
@@ -851,9 +874,7 @@ private func makeCastDetailLoader(
         PlayerCastDetail(
             // Strike what is playing. By id AND by normalized title, since a
             // second server holding the same film answers with its own id.
-            credits: foldDuplicateCredits(model.libraryCredits.filter {
-                $0.id != playingID && MediaItemIdentity.normalizedTitle($0.title) != playingTitle
-            }),
+            credits: foldDuplicateCredits(model.libraryCredits),
             biography: model.biography,
             lifeSummary: model.lifeSummary,
             isComplete: isComplete
@@ -1009,7 +1030,9 @@ extension View {
         themePalette: ThemePalette,
         onSubtitleStyleChanged: @escaping (SubtitleStyle) -> Void,
         /// Leave the film for a person's own page (in-player Cast card).
-        onOpenPerson: @escaping (MediaPerson, String?) -> Void
+        onOpenPerson: @escaping (MediaPerson, String?) -> Void,
+        /// Leave the film for one of a person's credits (in-player Cast card).
+        onOpenTitle: @escaping (MediaItem) -> Void
     ) -> some View {
         fullScreenCover(item: playRequest) { request in
             PlayerPresentation(
@@ -1041,6 +1064,7 @@ extension View {
                     model.controls.infoCard.openPersonPage = { person in
                         onOpenPerson(person, request.item.sourceAccountID)
                     }
+                    model.controls.infoCard.openTitlePage = onOpenTitle
                     return model
                 },
                 makeFailover: { failedItem, tried in

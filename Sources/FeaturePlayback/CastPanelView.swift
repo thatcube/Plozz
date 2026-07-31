@@ -136,6 +136,7 @@ struct CastPanelView: View {
                     person: person,
                     loader: model.infoCard.castDetailLoader,
                     onOpenPage: model.infoCard.openPersonPage,
+                    onOpenTitle: model.infoCard.openTitlePage,
                     focus: $focus,
                     contentVisible: isExpanded,
                     isExpanded: isExpanded,
@@ -486,6 +487,8 @@ private struct CastMemberDetail: View {
     let person: MediaPerson
     let loader: PlayerCastDetailLoading?
     let onOpenPage: ((MediaPerson) -> Void)?
+    /// Leave the film for one of these titles.
+    let onOpenTitle: ((MediaItem) -> Void)?
     @FocusState.Binding var focus: PlayerControls.FocusSlot?
     /// Whether the pane has finished growing, so its contents know when to fade
     /// themselves in — they must not appear while it is still travelling.
@@ -577,7 +580,11 @@ private struct CastMemberDetail: View {
                 .padding(.trailing, hasCredits ? 0 : Self.backButtonLane)
 
             if hasCredits, let credits = detail?.credits {
-                CastCreditsRow(items: credits, focus: $focus)
+                CastCreditsRow(
+                    items: credits,
+                    focus: $focus,
+                    onOpenTitle: onOpenTitle
+                )
                 .frame(maxWidth: .infinity)
                 .opacity(contentVisible ? 1 : 0)
                 // Stop short of the Back button. Without this the row ran under
@@ -843,6 +850,8 @@ private struct CastMemberDetail: View {
 private struct CastCreditsRow: View {
     let items: [MediaItem]
     @FocusState.Binding var focus: PlayerControls.FocusSlot?
+    /// Opens a title's own page, ending playback. `nil` leaves the posters inert.
+    let onOpenTitle: ((MediaItem) -> Void)?
 
     /// Each title label's rendered height, so its scrim can be sized to it.
     @State private var labelHeights: [String: CGFloat] = [:]
@@ -862,6 +871,8 @@ private struct CastCreditsRow: View {
         InfoPanelView.cardHeight - InfoPanelView.contentPadding * 2
     }
     private static var width: CGFloat { (height * 2 / 3).rounded() }
+    private var posterHeight: CGFloat { Self.height }
+    private var posterWidth: CGFloat { Self.width }
     /// Modest on purpose: every percent of growth is height the poster gives up
     /// at rest to make room for it.
     private static let focusScale: CGFloat = 1.06
@@ -893,7 +904,7 @@ private struct CastCreditsRow: View {
         // the lift.
         // Its own exact height too, so a ScrollView (whose ideal height is its
         // content's) can never report the focused poster's grown size.
-        .frame(height: Self.height)
+        .frame(height: posterHeight)
         .contentMargins(.horizontal, Self.fade, for: .scrollContent)
         // The scroll view's own clip is off, and the mask below does ALL the
         // clipping instead — because the two axes want opposite things. A
@@ -955,12 +966,17 @@ private struct CastCreditsRow: View {
     private var content: some View {
         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 let isFocused = focus == .castCredit(index)
-                // A button so it can take focus and grow. Focus is what makes a
-                // 140pt poster readable — and the title label it reveals is what
-                // makes it certain, for the covers where the art alone isn't.
-                Button {} label: {
+                // Select opens the title's own page, ending playback — the same
+                // contract "See more" has.
+                //
+                // Not merely focusable: a focusable control that does nothing
+                // reads as broken, and these spent a build like that. It applies
+                // to every entry, owned or not; the detail page is what knows
+                // the difference, offering Play for a title in the library and a
+                // request for one that is not.
+                Button { onOpenTitle?(item) } label: {
                     poster(for: item)
-                        .frame(width: Self.width, height: Self.height)
+                        .frame(width: posterWidth, height: posterHeight)
                         // Scrim and label as separate layers over the whole
                         // poster, not one box at its foot: a gradient sized to
                         // the text can only ever be as tall as the text, which

@@ -51,6 +51,19 @@ public final class PersonDetailViewModel {
     /// drop them all and the page still shows who the person is and what the
     /// viewer owns with them.
     private let biographyProviders: [any PersonBiographyProvider]
+    /// Consulted only when no server the viewer owns has a single title with
+    /// this person. For a share-only library that is always — shares keep no
+    /// person records at all — which is the whole reason this rung exists.
+    private let creditsProviders: [any PersonCreditsProviding]
+    /// Drops credits the caller does not want counted — in practice the title
+    /// currently playing, which every one of its own cast is trivially in.
+    ///
+    /// Applied HERE rather than by the caller, because the ladder branches on
+    /// whether anything was found: filtering afterwards meant the servers always
+    /// looked like they had answered (a person is always in what you are
+    /// watching), so the rung that exists for when they have not could never
+    /// fire.
+    private let includeCredit: @Sendable (MediaItem) -> Bool
     private let limit: Int
 
     public init(
@@ -58,12 +71,16 @@ public final class PersonDetailViewModel {
         provider: (any MediaProvider)?,
         otherProviders: [any MediaProvider] = [],
         biographyProviders: [any PersonBiographyProvider] = [],
+        creditsProviders: [any PersonCreditsProviding] = [],
+        includeCredit: @escaping @Sendable (MediaItem) -> Bool = { _ in true },
         limit: Int = 40
     ) {
         self.person = person
         self.provider = provider
         self.otherProviders = otherProviders
         self.biographyProviders = biographyProviders
+        self.creditsProviders = creditsProviders
+        self.includeCredit = includeCredit
         self.limit = limit
     }
 
@@ -99,7 +116,8 @@ public final class PersonDetailViewModel {
                     + "record=\(record == nil ? "nil" : "yes") "
                     + "bio=\(record?.biography?.isEmpty == false ? "yes" : "no")"
                 )
-                for item in items ?? [] where seen.insert(Self.dedupeKey(item)).inserted {
+                for item in items ?? [] where includeCredit(item)
+                    && seen.insert(Self.dedupeKey(item)).inserted {
                     merged.append(item)
                 }
             }
@@ -145,6 +163,11 @@ public final class PersonDetailViewModel {
             }
         }
         return nil
+    }
+
+    /// See the known-for merge: title and kind, deliberately without a year.
+    private static func knownForKey(_ item: MediaItem) -> String {
+        "\(item.kind.rawValue)|\(MediaItemIdentity.normalizedTitle(item.title))"
     }
 
     /// A provider's family, for telemetry — so a log line says WHICH kind of
@@ -203,7 +226,7 @@ public final class PersonDetailViewModel {
 
         biography = personRecord?.biography.flatMap { $0.isEmpty ? nil : $0 }
         if let items {
-            libraryCredits = items
+            libraryCredits = items.filter(includeCredit)
             state = .loaded
         } else {
             state = .unavailable
@@ -255,6 +278,69 @@ public final class PersonDetailViewModel {
             + "bio=\(biography == nil ? "MISS" : "hit") waited=\(elapsed(stage))"
         )
         onProgress?()
+        // What they are KNOWN FOR, always — not only when the viewer's servers
+        // came up empty.
+        //
+        // Someone opens this pane because they half-recognise a face, and the
+        // answer is whatever that person is famous for; whether the viewer
+        // happens to own it is a detail of their library, not of the question.
+        // Asking only on failure meant the row showed a character actor's two
+        // obscure titles and hid the one everybody knows them from.
+        //
+        // Owned copies still win on collision: they are merged in FIRST and
+        // dedupe keeps the local entry, so a title held locally stays playable
+        // and appears once.
+        if !creditsProviders.isEmpty, !Task.isCancelled {
+            let stage = Date()
+            var merged = libraryCredits
+            // Keyed on title alone, NOT title+year like the cross-server merge.
+            //
+            // An outside source dates a series by its premiere while a library
+            // dates it by whatever the scanner found, and the two disagree often
+            // enough that a year-sensitive key let the same show appear twice.
+            // In a known-for row a duplicate poster is the worse failure: the
+            // titles are famous ones, so a genuine collision between two works
+            // of the same name is rare, and losing one to the other costs a row
+            // entry rather than something the viewer owns.
+            var seen = Set(merged.map(Self.knownForKey))
+            // Concurrent, but merged in declaration order. Serially these cost
+            // the sum of the slowest of each — Wikidata's SPARQL endpoint alone
+            // runs to seconds — and the row cannot appear until the last one
+            // lands. Fanning out costs the slowest single provider instead.
+            //
+            // Order still matters after the fact: dedupe keeps whichever entry
+            // arrives first, so a stable declaration order is what stops the
+            // same person's row from being assembled differently run to run.
+            let name = person.name
+            let limit = limit
+            let ordered: [[MediaItem]] = await withTaskGroup(
+                of: (Int, [MediaItem]).self
+            ) { group in
+                for (index, provider) in creditsProviders.enumerated() {
+                    group.addTask { (index, await provider.credits(for: name, limit: limit)) }
+                }
+                var results = [[MediaItem]](repeating: [], count: creditsProviders.count)
+                for await (index, credits) in group { results[index] = credits }
+                return results
+            }
+            guard !Task.isCancelled else { return }
+            for credits in ordered {
+                for item in credits where includeCredit(item)
+                    && seen.insert(Self.knownForKey(item)).inserted {
+                    merged.append(item)
+                }
+            }
+            if merged.count != libraryCredits.count {
+                libraryCredits = merged
+                state = .loaded
+            }
+            PersonDiagnostics.emit(
+                "person.known-for name=\(person.name) total=\(libraryCredits.count) "
+                + "ms=\(elapsed(stage))"
+            )
+            onProgress?()
+        }
+
         PersonDiagnostics.emit(
             "person.done name=\(person.name) credits=\(libraryCredits.count) "
             + "bio=\(biography == nil ? "MISS" : "hit") ms=\(elapsed(started))"

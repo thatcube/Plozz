@@ -64,6 +64,9 @@ struct SearchTab: View {
     /// has closed. Non-nil only while THIS tab is the one on screen, so the two
     /// tabs that observe it can never both push the same page.
     @Binding var pendingPersonRoute: PersonRoute?
+    /// A title raised by the in-player Cast card, pushed once the player has
+    /// closed. Non-nil only while THIS tab is on screen — see the person route.
+    @Binding var pendingTitleRoute: MediaItem?
 
     @State private var path = NavigationPath()
     /// Lets a detail page tell whether a child page is pushed on top of it, so
@@ -159,6 +162,11 @@ struct SearchTab: View {
                     requestActingName: activeSeerrUserName,
                     confirmAdminRequest: confirmAdminRequest
                 )
+            }
+            .onChange(of: pendingTitleRoute) { _, item in
+                guard let item else { return }
+                pendingTitleRoute = nil
+                path.append(item)
             }
             .onChange(of: pendingPersonRoute) { _, route in
                 // Raised by the in-player Cast card and pushed once the player

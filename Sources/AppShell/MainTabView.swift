@@ -57,6 +57,14 @@ struct MainTabView: View {
         )
     }
 
+    /// As `personRoute(for:)`, for a title opened from a person's credits.
+    private func titleRoute(for tab: MainTab) -> Binding<MediaItem?> {
+        Binding(
+            get: { selectedTabRaw == tab.rawValue ? pendingTitleRoute : nil },
+            set: { pendingTitleRoute = $0 }
+        )
+    }
+
     private enum MainTab: String {
         case home, search, music, settings
     }
@@ -269,6 +277,9 @@ struct MainTabView: View {
     /// Consumed by whichever tab is on screen — see `personRoute(for:)`. Held
     /// here because the player that raises it is presented at this level.
     @State private var pendingPersonRoute: PersonRoute?
+    /// A title the in-player Cast card asked for, waiting to be pushed once the
+    /// player has closed. Same hand-off as `pendingPersonRoute`.
+    @State private var pendingTitleRoute: MediaItem?
 
     private var selectedTab: Binding<MainTab> {
         Binding(
@@ -413,6 +424,7 @@ struct MainTabView: View {
                 playRequest: $playRequest,
                 resumePrompt: $resumePrompt,
                 pendingPersonRoute: personRoute(for: .home),
+                pendingTitleRoute: titleRoute(for: .home),
                 runtime: homeRuntime
             )
             .id(accountScopeKey)
@@ -446,7 +458,8 @@ struct MainTabView: View {
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
                 playRequest: $playRequest,
                 resumePrompt: $resumePrompt,
-                pendingPersonRoute: personRoute(for: .search)
+                pendingPersonRoute: personRoute(for: .search),
+                pendingTitleRoute: titleRoute(for: .search)
             )
             .id(accountScopeKey)
     }
@@ -540,6 +553,10 @@ struct MainTabView: View {
             onOpenPerson: { person, accountID in
                 playRequest = nil
                 pendingPersonRoute = PersonRoute(person: person, sourceAccountID: accountID)
+            },
+            onOpenTitle: { item in
+                playRequest = nil
+                pendingTitleRoute = item
             }
         )
         .environment(\.themeMusicController, themeMusicController)

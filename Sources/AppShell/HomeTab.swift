@@ -98,6 +98,9 @@ struct HomeTab: View {
     /// has closed. Non-nil only while THIS tab is the one on screen, so the two
     /// tabs that observe it can never both push the same page.
     @Binding var pendingPersonRoute: PersonRoute?
+    /// A title raised by the in-player Cast card, pushed once the player has
+    /// closed. Non-nil only while THIS tab is on screen — see the person route.
+    @Binding var pendingTitleRoute: MediaItem?
 
     @State private var path = NavigationPath()
     /// Handles owned above the tab so tab re-hosting cannot destroy them.
@@ -258,6 +261,11 @@ struct HomeTab: View {
                 // Home/Search rows: cross-server-merged, so the detail picker
                 // defaults to the smart best version (no library origin).
                 itemDetail(for: item, libraryOrigin: nil)
+            }
+            .onChange(of: pendingTitleRoute) { _, item in
+                guard let item else { return }
+                pendingTitleRoute = nil
+                path.append(item)
             }
             .onChange(of: pendingPersonRoute) { _, route in
                 // Raised by the in-player Cast card and pushed once the player

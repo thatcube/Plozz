@@ -15,7 +15,12 @@ import CoreModels
 /// `PlayerControls` — so this is a pure content extraction.
 struct InfoPanelView: View {
     /// Fixed 16:9 thumbnail height; the card's height is derived from it.
-    static let thumbHeight: CGFloat = 210
+    ///
+    /// Raised from 210 to give BOTH tabs of the card real room — the Cast tab
+    /// shares this stage, and at 210 its credit posters, biography and face
+    /// cards were all fighting for the same scarce lines. Everything that sizes
+    /// off `cardHeight` follows automatically.
+    static let thumbHeight: CGFloat = 250
     /// Padding between the card's content and its glass edge.
     static let contentPadding: CGFloat = 24
 
@@ -83,7 +88,7 @@ struct InfoPanelView: View {
                     //
                     // `layoutPriority` makes the overview the column's *protected*
                     // element rather than its elastic one. This column is locked to
-                    // `thumbHeight` (210), and the budget is tighter than it looks:
+                    // `thumbHeight`, and the budget is tighter than it looks:
                     // a one-line title plus three lines of overview plus the
                     // spacings and the meta row uses most of it. Because
                     // `lineLimit(3)` is a cap rather than a reservation, the
@@ -102,7 +107,9 @@ struct InfoPanelView: View {
                     Text(model.infoCard.overview)
                         .font(PlayerCardText.body)
                         .foregroundStyle(.white.opacity(0.82))
-                        .lineLimit(3)
+                        // Four lines now that the card is 40pt taller. Still a
+                        // cap rather than a reservation — see the note above.
+                        .lineLimit(4)
                         .truncationMode(.tail)
                         .padding(.top, 1)
                         .layoutPriority(1)

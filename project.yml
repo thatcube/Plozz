@@ -137,8 +137,9 @@ targets:
         # which disables OMDb enrichment and shows only Jellyfin-native ratings.
         OMDBAPIKey: "$(OMDB_API_KEY)"
         # TMDb API Read Access Token (v4 bearer) — the BUNDLED, always-included
-        # TMDb key. Powers movie/western-TV backdrops, posters, logos and episode
-        # stills, and is preferred wherever it is the best source. Substituted from
+        # TMDb key. It ships because TMDb is currently the best FREE source for
+        # movie/western-TV backdrops, posters, logos and episode stills, not because
+        # TMDb is preferred by policy. Substituted from
         # the TMDB_BEARER_TOKEN build setting (gitignored Config/Secrets.local.xcconfig,
         # symlinked from the canonical secrets file). Nothing depends on it: every
         # TMDb-backed capability falls back to TheTVDB/TVmaze/AniList/Kitsu/Wikidata

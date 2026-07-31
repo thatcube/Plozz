@@ -1,9 +1,10 @@
 # MetadataKit
 
 Artwork & metadata enrichment for media items, on top of the art that the
-user's own server already supplies. TMDb leads where it's the best source and
-a **fallback chain** stands behind every field, so no single provider —
-keyed or keyless — is load-bearing.
+user's own server already supplies. Each chain is ordered by whichever **free**
+source currently gives the best result for that field — no provider is favoured
+by policy, keyed or keyless — and a **fallback chain** stands behind every field
+so none of them is load-bearing.
 
 See `docs/METADATA_ARCHITECTURE.md` for the full design and the
 provider/fallback rationale.
@@ -30,8 +31,9 @@ provider/fallback rationale.
   - **Music artwork** (`MusicArtworkProviders`) — Deezer artist
     `picture_xl` + Cover Art Archive / MusicBrainz album covers.
   - **TMDb** (`TMDbMetadataProvider`) — bundled keyed source for backdrops
-    / posters / per-episode stills / logos; first choice for movies and
-    western TV, but always behind a fallback chain. Attribution required.
+    / posters / per-episode stills / logos; currently the best free art for
+    movies and western TV, always with a fallback chain behind it.
+    Attribution required.
 - `MetadataDiskCache` — small persistent KV cache for resolved URLs so a
   library is enriched with a one-time burst of calls, then effectively
   none.
@@ -43,8 +45,10 @@ provider/fallback rationale.
 - **No user keys required.** The shipped keys (TMDb, TheTVDB) are bundled;
   a user *may* supply their own TMDb token in Settings, but never has to.
 - **No single provider is load-bearing.** Every field resolves through a
-  fallback chain, so a revoked, throttled or retired key degrades quality,
-  never function. See `MetadataProviderConfig`.
+  fallback chain, so a revoked, throttled, retired — or newly paid — source
+  degrades quality, never function. See `MetadataProviderConfig`.
+- **Free sources only.** A provider that costs money to use is not a
+  candidate, however good its data.
 - **No UI imports.** Pure logic. Compiles on Linux.
 - **Best-effort, non-throwing at the seam.** A failed provider returns
   `nil` URLs — features never block on metadata.

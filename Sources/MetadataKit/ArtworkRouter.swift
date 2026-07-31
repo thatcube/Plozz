@@ -7,8 +7,8 @@ import CoreModels
 /// Given a ``MediaItem`` and an ``ArtworkKind``, the router:
 ///   1. classifies the item's ``ContentType`` (anime / movie / tvShow / music),
 ///   2. runs an ordered, content-type-specific fallback chain of providers
-///      (the bundled TMDb/TheTVDB tiers where they're the best source, backed by
-///      keyless per-IP APIs so no single provider is load-bearing),
+///      (ordered by which free source currently gives the best result for that
+///      field, keyed or not, with independent sources behind every leader),
 ///   3. memoizes the resolved URL in the persistent ``MetadataDiskCache`` so the
 ///      whole library is enriched with a small one-time burst of calls, then
 ///      effectively none — which is what lets the provider set serve any
@@ -94,9 +94,10 @@ public actor ArtworkRouter {
     }
 
     /// The ordered provider chain for a content type + artwork kind, straight from
-    /// ``CurrentMetadataPriority``. TMDb generally leads for movies/TV where its art
-    /// is best, anime leads with AniList/Kitsu — and every chain keeps non-TMDb
-    /// sources behind it, so the app never depends on one provider.
+    /// ``CurrentMetadataPriority``. The ordering is a judgement about which free
+    /// source currently gives the best result for that field — no provider is
+    /// favoured by policy — and every chain keeps independent sources behind the
+    /// leader, so the app never depends on one of them.
     private func chain(for type: ContentType, kind: ArtworkKind) -> [any ArtworkProvider] {
         CurrentMetadataPriority.artworkSources(for: type, kind: kind).compactMap {
             provider(for: $0)

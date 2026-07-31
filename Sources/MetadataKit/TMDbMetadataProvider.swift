@@ -4,12 +4,15 @@ import Foundation
 /// TMDb-backed artwork (backdrops, posters, logos, per-episode stills) reached via
 /// ``TMDbAccess`` (bundled token, optional proxy, or the user's own key).
 ///
-/// TMDb is the gold standard for western movie/TV heroes, clear logos and episode
-/// stills, so Plozz ships a key and prefers it where it wins. It is never
-/// load-bearing though: callers route through the fallback chains in
-/// ``ArtworkRouter``, so a disabled, throttled or failing TMDb tier just falls
-/// through to TheTVDB/TVmaze/AniList/Kitsu/Wikidata and the user's own server art.
-/// The JSON metadata calls go through `access`; the image *bytes* always come
+/// TMDb is in the provider set on the only grounds that matter: for western
+/// movie/TV heroes, clear logos and episode stills it currently produces the best
+/// result of any **free** source, so Plozz ships a key rather than give the user
+/// worse art. That is a standing judgement, not a preference for TMDb — if a source
+/// with better free coverage appears, or TMDb starts charging, it gets reordered or
+/// dropped. Nothing here is load-bearing either: callers route through the fallback
+/// chains in ``ArtworkRouter``, so a disabled, throttled or failing TMDb tier just
+/// falls through to TheTVDB/TVmaze/AniList/Kitsu/Wikidata and the user's own server
+/// art. The JSON metadata calls go through `access`; the image *bytes* always come
 /// straight from TMDb's keyless CDN (`image.tmdb.org`), keeping any proxy tiny and
 /// the byte path uncapped.
 public struct TMDbMetadataProvider: ArtworkProvider {

@@ -1,6 +1,6 @@
 # Plozz Metadata & Artwork Architecture
 
-> Resilient, no-setup metadata/artwork enrichment for a tvOS home‑media client.
+> Resilient, no‑setup metadata/artwork enrichment for a tvOS home‑media client.
 > Designed for **anime‑first** excellence, gorgeous heroes/episode
 > thumbnails/posters/logos for **movies, TV, anime and music**, and **useful**
 > ratings — with **no "bring your own API key" (BYOK)** required of the user.
@@ -10,17 +10,36 @@
 ## 1. The policy, stated plainly
 
 Plozz enriches a user's own Jellyfin/Plex library with external artwork, metadata
-and ratings.
+and ratings. Which provider answers a given field is decided by three rules, in
+this order:
 
-**Plozz ships API keys.** A TMDb v4 read token and a TheTVDB v4 key are baked into
-release builds at build time (from a gitignored secrets file — never committed to
-the repo), and the app uses them wherever they are the best source. TMDb usually is,
-for movie/western‑TV backdrops, posters, logos and per‑episode stills.
+1. **Whatever gives the user the best result.** Coverage, artwork quality, correct
+   matches, speed. Nothing else outranks this.
+2. **It must be free to use.** Plozz will not take on a provider that costs money
+   — not for the maintainer, not for the user. A source that is only good behind a
+   paid tier is not a candidate.
+3. **Nothing may be load‑bearing.** Every field has a fallback chain, so any single
+   provider can vanish without breaking the app.
 
-**What Plozz does not do is *rely* on any one of them.** A key can be revoked,
-throttled, repriced or retired, and a provider can change its terms. So the rule is:
+**No provider is preferred as a matter of policy — TMDb included.** There is no
+"TMDb‑first" rule and no "keyless‑first" rule. Each chain is just an ordering of
+whichever free sources currently produce the best result for that content type and
+field, and any of them can be reordered or dropped the moment something better or
+cheaper exists.
 
-> **Prefer the best source; never be load‑bearing on it.**
+**Keys are neither preferred nor avoided.** A key is not a badge of quality and not
+a disqualifier — it's an implementation detail of reaching a source. Where a field
+needs no key to be answered well, no key is used. Where the best free answer happens
+to sit behind a key, Plozz ships that key rather than degrading the experience, and
+**picks the best key for that job**. TMDb and TheTVDB tokens are baked into release
+builds at build time (from a gitignored secrets file — never committed to the repo)
+purely on that basis.
+
+**What Plozz does not do is *rely* on any of them.** A key can be revoked,
+throttled, repriced or retired, and a provider can change its terms — at which
+point rule 2 alone would remove it. So the rule is:
+
+> **Use whatever serves the user best for free; never be load‑bearing on it.**
 
 Every field resolves through an ordered **fallback chain**. If TMDb is disabled,
 rate‑limited or failing, the same field is answered by TheTVDB, TVmaze, AniList,
@@ -29,47 +48,55 @@ provider costs *quality*, never *function*, and never requires a code change.
 
 > ⚠️ **Retired claim.** Earlier revisions of this document said TMDb's terms
 > forbid shipping a key and that public builds therefore have TMDb disabled. That
-> was wrong. There is no "keyless build" policy: builds ship the key, and the
-> keyless providers exist as fallbacks and scale insurance, not as a substitute.
+> was wrong. There is no "keyless build" policy: builds ship the key when it earns
+> its place, and the keyless providers are chain members on their own merits — not
+> a moral alternative to keys.
 
-A secondary reason the fallback chains exist: **anime coverage.** TMDb/OMDb are
-western‑media first, and AniList/AniDB/MAL ids and art matter a great deal for the
-anime‑heavy libraries Plozz targets — so for some fields a keyless provider is
-genuinely the *better* source, not just the backup.
+Anime is the clearest illustration that this is not a keyed‑vs‑keyless question at
+all: TMDb/OMDb are western‑media first, so for the anime‑heavy libraries Plozz
+targets, AniList/Kitsu ids and art are simply *better* — and they lead those chains
+for that reason, not because they're free of a key.
 
-## 2. Why the chains are built the way they are
+## 2. Why the chains are ordered the way they are
+
+Rules 1 and 2 decide *who's in* a chain. Ordering within it also weighs how each
+source behaves **at scale**, since a provider that collapses under load stops
+serving users well (rule 1) and can start costing money (rule 2).
 
 > **Per‑IP APIs scale infinitely; shared‑key APIs have a blast radius.**
 
-When a device calls an API **directly from its own IP** with **no key**, there is no
-shared quota to exhaust and no key to ban: 100k users = 100k independent rate‑limit
-buckets. Shared credentials are different — one bad actor or a traffic spike can
-take a key down for *everyone* at once.
+When a device calls an API **directly from its own IP**, there is no shared quota to
+exhaust and no key to ban: 100k users = 100k independent rate‑limit buckets. A
+shared credential is different — one traffic spike can take a source down for
+*everyone* at once.
 
-That doesn't mean avoiding keyed providers; it means placing them deliberately:
+So:
 
 - TMDb rate‑limits **by requesting IP** rather than by key, so every household gets
-  its own budget however many people run the app. That makes it safe to lead with.
+  its own budget however many people run the app — which is why shipping its key is
+  cheap and safe, and why it can sit early in a chain when its art is the best.
 - Providers whose credential carries a shared blast radius (e.g. Trakt, which has
   firewall‑blocked a distributed app's client id over runaway traffic) sit **later**
   in a chain, answering only what the earlier source couldn't — keeping aggregate
   traffic on them low.
-- Keyless per‑IP providers make excellent unlimited backstops, and for anime they
-  are frequently first choice on quality alone.
+- Providers with hard *global* free ceilings (OMDb's 1,000 requests/day **total**)
+  can never be load‑bearing at all, however good their data is.
+- Keyless per‑IP sources make excellent unlimited backstops — and for anime they're
+  frequently the best answer outright.
 
-## 3. The provider tiers
+## 3. The provider set
 
-### Bundled keyed sources (shipped, preferred where they win)
+### Sources reached with a bundled key
 
 | Provider | Content | Capabilities | Limits |
 |---|---|---|---|
-| **TMDb** | Movies, western TV, anime | backdrops/heroes, posters, **clear logos**, **per‑episode stills**, cast | per‑IP, generous |
-| **TheTVDB** | Movies, TV | posters, wide backdrops, ids/overview, cast, air schedule | per‑key, FOSS‑friendly licensing |
+| **TMDb** | Movies, western TV, anime | backdrops/heroes, posters, **clear logos**, **per‑episode stills**, cast | free; per‑IP, generous |
+| **TheTVDB** | Movies, TV | posters, wide backdrops, ids/overview, cast, air schedule | free under $50k/yr parent‑company revenue (FOSS discount); per‑key |
 
 The image *bytes* for TMDb always come straight from its keyless CDN
 (`image.tmdb.org`), so only the small JSON calls consume any budget.
 
-### Keyless per‑IP sources (fallbacks — and first choice for anime)
+### Sources that need no key
 
 Every device talks to these directly. No key, no account, no proxy.
 
@@ -82,7 +109,7 @@ Every device talks to these directly. No key, no account, no proxy.
 | **Deezer** | Music | artist `picture_xl` (hero), album `cover_xl` | ✅ public | generous |
 | **MusicBrainz + Cover Art Archive** | Music | album front cover (fallback) | ✅ (UA required) | ~1 req/s |
 
-### Optional extras (never required)
+### Optional extras (never required, never charged for)
 
 - **Self‑hosted TMDb caching proxy** (`TMDB_PROXY_BASE_URL`). When set it takes
   precedence over the bundled token: the small JSON calls traverse a proxy that
@@ -124,9 +151,15 @@ live ordering is data in `CurrentMetadataPriority`:
 | **TV** | TMDb → TheTVDB → Wikidata → Wikipedia | TMDb → TVmaze → TheTVDB → Wikidata → Wikipedia | TMDb → **TVmaze** | TMDb → Wikidata → Wikipedia | TVmaze | OMDb |
 | **Music** | Deezer (artist) | Deezer/MB+CAA (album) | — | — | — | — |
 
-Note that no row is a single cell: every field TMDb leads has at least one non‑TMDb
-source behind it. That is the policy expressed as data — adding a TMDb‑only chain
-for a *new* field is the thing to avoid.
+Read the orderings as *current judgements about quality*, not as a ranking of
+providers: TMDb heads several video chains today because its art is the best free
+art available for those fields, and AniList/Kitsu/TVmaze head others for exactly the
+same reason. Reordering a chain when a source gets better or worse is expected and
+requires no architectural change.
+
+Note that no row is a single cell: every field a keyed source heads has at least one
+independent source behind it. That is rule 3 expressed as data — adding a
+single‑source chain for a *new* field is the thing to avoid.
 
 The user's **own server art is always tried first** by the view layer; these
 providers fill gaps and upgrade junk/missing art. With the TMDb tier off, anime, TV
@@ -135,27 +168,29 @@ Wikidata/Wikipedia and server art.
 
 ## 5. Why the user never needs a key
 
-1. **The keys that matter ship with the app.** TMDb and TheTVDB are bundled; no
-   account, no key paste, no setup screen to get through.
+1. **Where a key is needed, the app brings its own.** TMDb and TheTVDB are bundled;
+   no account, no key paste, no setup screen to get through.
 2. **Anime, episode thumbnails and music also work with no key at all** via the
    per‑IP tier — the parts the primary user cares about most keep working even in
    a build with every key stripped out.
 3. **User‑supplied credentials are strictly additive.** A user's own TMDb token
-   (and the maintainer's optional OMDb key) improve or personalize enrichment; they
-   are never required for a good default experience.
+   (and the optional OMDb key) can personalize or raise the ceiling of enrichment;
+   neither is required for a good default experience, and neither costs the user
+   anything to skip.
 
 So BYOK is not merely discouraged — it is **structurally unnecessary**, both when
 the shipped keys are present and if they ever go away.
 
 ## 6. Scaling story for 100k+ users
 
-- **The keyless tier is embarrassingly parallel.** 100k devices = 100k separate
+- **The keyless sources are embarrassingly parallel.** 100k devices = 100k separate
   per‑IP rate buckets against AniList/Kitsu/TVmaze/Wikidata/Deezer/MusicBrainz. No
   shared quota, no key to ban. Each device also makes few calls: results are cached
   on disk (below), so steady‑state traffic per device is near zero.
-- **TMDb is per‑IP too**, so the bundled key scales with the user base rather than
-  against it. If that ever changes, the optional proxy collapses 100k users into a
-  few thousand unique upstream calls, and the chains keep working regardless.
+- **TMDb is per‑IP too**, so its bundled key scales with the user base rather than
+  against it — one of the reasons it's affordable to ship. If that ever changes, the
+  optional proxy collapses 100k users into a few thousand unique upstream calls, and
+  the chains keep working regardless.
 - **Three‑layer cache** minimizes every kind of request:
   1. **In‑memory** `ArtworkImageCache` (decoded UIImages).
   2. **Persistent disk** `MetadataDiskCache` — caches *resolved URLs* per
@@ -214,6 +249,9 @@ Sources/MetadataKit/
   back to TheTVDB/TVmaze/Wikidata and the user's own server art — visibly worse in
   places, still working everywhere. Keeping that true is a review requirement for
   any new metadata feature.
+- **"Free" is a live constraint, not a one‑time check.** Any provider that starts
+  charging, or gates its useful data behind a paid tier, has to be demoted or
+  dropped — which is workable precisely because nothing is load‑bearing.
 - **Music view wiring is deferred.** Deezer/MusicBrainz providers and the router's
   music methods exist and are callable, but the music feature views are not yet
   fully switched over.

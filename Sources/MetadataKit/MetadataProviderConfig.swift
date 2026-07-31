@@ -1,9 +1,11 @@
 import Foundation
 import CryptoKit
 
-/// How the TMDb tier is reached. Plozz **ships a TMDb key** and uses TMDb wherever
-/// it's the best source; what it avoids is *reliance* — every TMDb-backed capability
-/// has a fallback, so a revoked or throttled key degrades quality, not function.
+/// How the TMDb tier is reached. Plozz **ships a TMDb key** because for several
+/// video fields TMDb is currently the best *free* source — not because TMDb is
+/// preferred as a matter of policy. What Plozz avoids is *reliance*: every
+/// TMDb-backed capability has a fallback, so a revoked, throttled or newly-paid
+/// key degrades quality, not function.
 /// There are four modes:
 ///
 ///  - ``proxy``: an optional self-hostable caching proxy that holds a TMDb key

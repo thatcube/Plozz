@@ -84,11 +84,45 @@ struct CatalogReadQueries {
         return (movies, tv, anime)
     }
 
+    /// Discovery times are bucketed to five minutes before ordering.
+    ///
+    /// Sized to a scan, not to a day. It has to be long enough to swallow one
+    /// walk, so that a rebuild's per-row jitter — which encodes directory order,
+    /// not recency — collapses instead of masquerading as a ranking. And it has to
+    /// stay short enough to preserve discoveries that are genuinely apart: two
+    /// files found minutes from each other really were added in that order, and an
+    /// hour-wide bucket threw that away.
+    static let discoveryBucketSeconds = 300
+
     /// Recently added: movies + one entry per series (stamped with the series'
     /// newest episode discovery time), newest first. Non-network — Home hot path safe.
+    ///
+    /// Ordered by *discovery hour*, then by the file's own modification time.
+    ///
+    /// `first_seen_at` alone is not enough, for two reasons that compound. It is
+    /// stamped per row as the walk reaches it, so everything a single scan finds
+    /// differs only by milliseconds — and those milliseconds encode **directory
+    /// walk order**, which looks like a meaningful ordering and is not. And it
+    /// resets wholesale whenever rows are re-inserted (a share re-added, a catalog
+    /// rebuilt), which leaves the entire library claiming to have arrived at once.
+    /// Measured on a real device mid-development: 8,195 of 8,195 assets had been
+    /// first seen within the hour, so Recently Added was sorting eight thousand
+    /// items by walk order and burying that day's genuinely new arrivals.
+    ///
+    /// Bucketing discovery to the hour collapses that jitter, and the file's own
+    /// mtime then orders within it. Both cases come out right:
+    ///
+    ///  * a file that arrives now lands in the newest bucket alone, so it sorts
+    ///    first whatever its mtime says — a decade-old film added today is still
+    ///    "recently added";
+    ///  * after a rebuild everything shares one bucket, so mtime decides, which is
+    ///    the only true recency signal left once discovery time has been erased.
+    ///
+    /// The id is the final tiebreaker, so the sequence can never depend on the
+    /// order SQLite happens to return rows in.
     func latest(limit: Int) -> [MediaItem] {
         guard db != nil, limit > 0 else { return [] }
-        var out: [(added: Double, item: MediaItem)] = []
+        var out: [(bucket: Int64, mtime: Double, item: MediaItem)] = []
 
         // Movies — grouped by movie_key so a multi-file film is one Recently Added
         // card, dated by the FIRST version discovered (when the movie appeared).
@@ -97,10 +131,12 @@ struct CatalogReadQueries {
           CASE WHEN MIN(COALESCE(movie_group_key, movie_key)) IS NOT NULL
                THEN 'movie:' || MIN(COALESCE(movie_group_key, movie_key))
                ELSE 'f:' || MIN(rel_path) END AS logical_id,
-          MIN(title), MAX(year), MIN(first_seen_at) AS added
+          MIN(title), MAX(year),
+          CAST(MIN(first_seen_at) / \(Self.discoveryBucketSeconds) AS INTEGER) AS bucket,
+          MAX(modified_at) AS mtime
         FROM assets WHERE library='movies' AND kind='movie'
         GROUP BY COALESCE(movie_group_key, movie_key, rel_path)
-        ORDER BY added DESC LIMIT ?;
+        ORDER BY bucket DESC, mtime DESC, logical_id ASC LIMIT ?;
         """, bind: { sqlite3_bind_int64($0, 1, Int64(limit)) }) { stmt in
             let item = MediaItem(
                 id: self.columnText(stmt, 0) ?? "",
@@ -109,22 +145,41 @@ struct CatalogReadQueries {
                 productionYear: self.columnOptInt(stmt, 2),
                 libraryID: ShareCatalogID.moviesLibrary
             )
-            out.append((self.columnDouble(stmt, 3), item))
+            out.append((sqlite3_column_int64(stmt, 3), self.columnDouble(stmt, 4), item))
         }
 
         // Series (tv + anime), represented by the series card, dated by newest episode.
         query("""
-        SELECT series_key, series_title, library, MAX(first_seen_at) AS added, MAX(year)
+        SELECT series_key, series_title, library,
+          CAST(MAX(first_seen_at) / \(Self.discoveryBucketSeconds) AS INTEGER) AS bucket,
+          MAX(year), MAX(modified_at) AS mtime
         FROM assets WHERE kind='episode' AND series_key IS NOT NULL
-        GROUP BY series_key, library ORDER BY added DESC LIMIT ?;
+        GROUP BY series_key, library
+        ORDER BY bucket DESC, mtime DESC, series_key ASC LIMIT ?;
         """, bind: { sqlite3_bind_int64($0, 1, Int64(limit)) }) { stmt in
             guard let key = self.columnText(stmt, 0) else { return }
             let lib = CatalogLibrary(rawValue: self.columnText(stmt, 2) ?? "tv") ?? .tv
-            out.append((self.columnDouble(stmt, 3), ShareCatalogReadProjection.seriesItem(key: key, title: self.columnText(stmt, 1) ?? key, library: lib, year: self.columnOptInt(stmt, 4))))
+            out.append((
+                sqlite3_column_int64(stmt, 3),
+                self.columnDouble(stmt, 5),
+                ShareCatalogReadProjection.seriesItem(
+                    key: key,
+                    title: self.columnText(stmt, 1) ?? key,
+                    library: lib,
+                    year: self.columnOptInt(stmt, 4)
+                )
+            ))
         }
 
+        // The same ordering as the queries, since this merges two already-sorted
+        // sets and `sorted(by:)` is not guaranteed stable — equal keys would
+        // otherwise re-order here even though the SQL is deterministic.
         return withEnrichment(
-            out.sorted { $0.added > $1.added }.prefix(limit).map(\.item)
+            out.sorted { lhs, rhs in
+                if lhs.bucket != rhs.bucket { return lhs.bucket > rhs.bucket }
+                if lhs.mtime != rhs.mtime { return lhs.mtime > rhs.mtime }
+                return lhs.item.id < rhs.item.id
+            }.prefix(limit).map(\.item)
         )
     }
 

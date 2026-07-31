@@ -54,6 +54,97 @@ final class CatalogReadQueriesTests: XCTestCase {
             """))
     }
 
+
+    // MARK: - Recently Added ordering
+
+    /// Seeds a movie with explicit discovery and file-modification times.
+    private func seedMovieTimed(
+        _ conn: CatalogConnection,
+        relPath: String,
+        title: String,
+        firstSeen: Double,
+        modified: Double
+    ) {
+        XCTAssertTrue(conn.exec("""
+            INSERT INTO assets(
+              rel_path, basename, size, modified_at, first_seen_at, last_scan,
+              kind, library, title, sort_title, year, movie_key)
+            VALUES('\(relPath)', 'base', 10, \(modified), \(firstSeen), 1,
+              'movie', 'movies', '\(title)', '\(title.lowercased())', 2020, '\(title.lowercased())');
+            """))
+    }
+
+    /// A film discovered now comes first even though its file is decades old.
+    /// Recently Added means recently added to *this library*, so an old release
+    /// downloaded today must still lead — the newest discovery bucket wins outright
+    /// and the file's own mtime never gets a say across buckets.
+    func testANewlyDiscoveredItemLeadsRegardlessOfFileAge() {
+        let (conn, _) = openConnection()
+        let now = Date().timeIntervalSince1970
+        seedMovieTimed(conn, relPath: "M/Old.mkv", title: "Old Film",
+                       firstSeen: now, modified: now - 40 * 365 * 86_400)
+        seedMovieTimed(conn, relPath: "M/Recent.mkv", title: "Recent Film",
+                       firstSeen: now - 7 * 86_400, modified: now - 86_400)
+
+        let titles = makeQueries(conn).latest(limit: 10).map(\.title)
+        XCTAssertEqual(titles.first, "Old Film")
+    }
+
+    /// The case that broke on device. A rebuilt catalog stamps every row with
+    /// essentially the same `first_seen_at`, differing only by the milliseconds it
+    /// took the walk to reach each one — which encodes directory order, not
+    /// recency. Bucketing collapses that, leaving the file's own mtime to order
+    /// them, so the genuinely newest files surface instead of whichever the walk
+    /// happened to reach last.
+    func testAfterACatalogRebuildFileTimeDecidesTheOrder() {
+        let (conn, _) = openConnection()
+        let rebuild = Date().timeIntervalSince1970
+        // Discovered in walk order, which is unrelated to when they arrived.
+        seedMovieTimed(conn, relPath: "M/A.mkv", title: "Alpha",
+                       firstSeen: rebuild + 0.001, modified: rebuild - 300 * 86_400)
+        seedMovieTimed(conn, relPath: "M/B.mkv", title: "Bravo",
+                       firstSeen: rebuild + 0.002, modified: rebuild - 86_400)
+        seedMovieTimed(conn, relPath: "M/C.mkv", title: "Charlie",
+                       firstSeen: rebuild + 0.003, modified: rebuild - 100 * 86_400)
+
+        let titles = makeQueries(conn).latest(limit: 10).map(\.title)
+        XCTAssertEqual(titles, ["Bravo", "Charlie", "Alpha"])
+    }
+
+    /// Identical on every read. Ordering that depends on the order SQLite returns
+    /// rows in makes Recently Added visibly reshuffle whenever Home reloads.
+    func testOrderingIsStableAcrossRepeatedReads() {
+        let (conn, _) = openConnection()
+        let now = Date().timeIntervalSince1970
+        for index in 0..<12 {
+            seedMovieTimed(conn, relPath: "M/\(index).mkv", title: "Film \(index)",
+                           firstSeen: now, modified: now)
+        }
+        let queries = makeQueries(conn)
+        let first = queries.latest(limit: 12).map(\.id)
+        XCTAssertEqual(first, queries.latest(limit: 12).map(\.id))
+        XCTAssertEqual(first.count, 12)
+    }
+
+    /// Series are ranked the same way, and against movies, so one merged row can
+    /// hold both without either kind clumping.
+    func testSeriesAndMoviesInterleaveByTheSameRule() {
+        let (conn, _) = openConnection()
+        let now = Date().timeIntervalSince1970
+        seedMovieTimed(conn, relPath: "M/Old.mkv", title: "Old Movie",
+                       firstSeen: now - 30 * 86_400, modified: now - 30 * 86_400)
+        XCTAssertTrue(conn.exec("""
+            INSERT INTO assets(
+              rel_path, basename, size, modified_at, first_seen_at, last_scan,
+              kind, library, title, sort_title, series_title, series_key, season, episode)
+            VALUES('TV/S/E1.mkv', 'base', 10, \(now), \(now), 1,
+              'episode', 'tv', 'Ep 1', 'ep 1', 'New Show', 'new-show', 1, 1);
+            """))
+
+        let titles = makeQueries(conn).latest(limit: 10).map(\.title)
+        XCTAssertEqual(titles.first, "New Show", "the newer discovery leads regardless of kind")
+    }
+
     // MARK: - empty / counts
 
     func testEmptyCatalog() {

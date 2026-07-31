@@ -15,6 +15,18 @@ public struct MediaRowView: View {
     /// name (provider content), and only the caller knows which. `nil` renders no
     /// heading (previously spelled as an empty string).
     private let title: Text?
+    /// Row contents, guaranteed to hold each `id` once.
+    ///
+    /// `ForEach` over `Identifiable` requires unique ids; duplicates are
+    /// undefined behaviour and render as a blank slot where a card should be —
+    /// the row reserves space for the repeat and then draws nothing in it.
+    ///
+    /// This is reachable in normal use, not a theoretical guard. Two media shares
+    /// can point at the *same* storage — the same server over NFS and over SMB,
+    /// say — and identical relative paths then produce identical catalog ids.
+    /// Cross-server merging unions by external identity (TMDb and the like), so
+    /// until enrichment has supplied those ids it has nothing to match on and
+    /// both copies survive into the row.
     private let items: [MediaItem]
     private let presentation: Presentation
     private let spoilerSettings: SpoilerSettings
@@ -168,7 +180,7 @@ public struct MediaRowView: View {
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.title = title
-        self.items = items
+        self.items = Self.uniqued(items)
         self.presentation = presentation
         self.spoilerSettings = spoilerSettings
         self.initialFocusID = initialFocusID
@@ -274,6 +286,14 @@ public struct MediaRowView: View {
             && !focusEngaged
             && !hasBrowsedSinceTargetChange
             && item.id != gateTarget
+    }
+
+    /// First occurrence wins, order otherwise preserved: callers have already
+    /// sorted these (Recently Added by date, Continue Watching by progress), so
+    /// the survivor must be the one the ordering chose.
+    static func uniqued(_ items: [MediaItem]) -> [MediaItem] {
+        var seen = Set<String>()
+        return items.filter { seen.insert($0.id).inserted }
     }
 
     public var body: some View {

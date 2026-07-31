@@ -136,26 +136,29 @@ targets:
         # → optional, gitignored Config/Secrets.local.xcconfig). Empty by default,
         # which disables OMDb enrichment and shows only Jellyfin-native ratings.
         OMDBAPIKey: "$(OMDB_API_KEY)"
-        # TMDb API Read Access Token (v4 bearer). Powers the canonical-poster
-        # fallback for items whose provider artwork is missing or junk. Substituted
-        # from the TMDB_BEARER_TOKEN build setting (gitignored Config/Secrets.local.xcconfig).
-        # Empty by default, which disables the TMDb fallback.
+        # TMDb API Read Access Token (v4 bearer) — the BUNDLED, always-included
+        # TMDb key. Powers movie/western-TV backdrops, posters, logos and episode
+        # stills, and is preferred wherever it is the best source. Substituted from
+        # the TMDB_BEARER_TOKEN build setting (gitignored Config/Secrets.local.xcconfig,
+        # symlinked from the canonical secrets file). Nothing depends on it: every
+        # TMDb-backed capability falls back to TheTVDB/TVmaze/AniList/Kitsu/Wikidata
+        # and the user's own server art, so a lost key degrades quality, not function.
+        # Empty by default (e.g. a contributor without the key).
         TMDBBearerToken: "$(TMDB_BEARER_TOKEN)"
-        # Optional base URL of a self-hostable TMDb caching proxy that holds ONE
-        # TMDb key server-side (TMDb terms forbid shipping a key in an open-source
-        # client). When set, TMDb-grade movie/western-TV backdrops, logos and
-        # episode stills are served compliantly and scalably for any number of
-        # users. Empty by default: the app then relies on the keyless providers
-        # (AniList/Kitsu/TVmaze/Deezer/MusicBrainz) and the user's own server art.
+        # OPTIONAL base URL of a self-hostable TMDb caching proxy that holds a TMDb
+        # key server-side. An enhancement, not a requirement: when set it takes
+        # precedence over the bundled token and absorbs TMDb traffic behind an edge
+        # cache (handy at scale, or to rotate the key without shipping a build).
+        # Empty by default, in which case the bundled TMDBBearerToken is used directly.
         TMDBProxyBaseURL: "$(TMDB_PROXY_BASE_URL)"
-        # TheTVDB v4 API key — the BUNDLED, always-included keyed metadata/artwork
-        # provider (the keyless base's primary keyed layer). Substituted from the
+        # TheTVDB v4 API key — a BUNDLED, always-included keyed metadata/artwork
+        # provider alongside TMDb (and one of its fallbacks). Substituted from the
         # TVDB_API_KEY build setting (gitignored Config/Secrets.local.xcconfig,
         # symlinked from the canonical secrets file). TheTVDB licenses by parent-
         # company revenue (free under $50k/yr, FOSS-friendly) — an objective test
         # with no "commercial-use" gray area — so it ships in every build. Empty by
         # default (e.g. a contributor without the key), which disables the TVDB tier
-        # and leaves the keyless providers powering enrichment. Attribution required.
+        # and leaves the remaining providers powering enrichment. Attribution required.
         TVDBAPIKey: "$(TVDB_API_KEY)"
         # Trakt OAuth application credentials, powering per-profile watch-history
         # sync (scrobbling). Substituted from the TRAKT_CLIENT_ID /

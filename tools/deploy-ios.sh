@@ -124,7 +124,8 @@ fi
 
 BUILD_SETTING_OVERRIDES=()
 if [[ "$INCLUDE_METADATA_KEYS" != "1" ]]; then
-  # Only when --keyless is passed explicitly, to exercise the no-key path.
+  # Only when --keyless is passed explicitly, to exercise the fallback path the
+  # app must always keep working (TheTVDB/TVmaze/AniList/Kitsu/Wikidata + server art).
   BUILD_SETTING_OVERRIDES+=("TMDB_BEARER_TOKEN=" "OMDB_API_KEY=")
 fi
 

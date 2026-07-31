@@ -2,7 +2,7 @@
 
 External-ratings enrichment for `MediaItem`s. Adds rating badges (IMDb, RT,
 Metacritic, AniList) on top of any score the user's own server already
-provides, with a strong preference for **keyless** sources.
+provides. Sources are layered so no single one is load-bearing.
 
 ## Responsibility
 
@@ -26,8 +26,9 @@ provides, with a strong preference for **keyless** sources.
 
 - **Non-throwing at the seam.** Missing key, absent external id, or
   network error always returns `[]`.
-- **Keyless by default.** Plozz pursues a keyless app — AniList is on by
-  default; OMDb activates only when a key is supplied.
+- **No single source is required.** Ratings degrade gracefully: AniList is on
+  by default with no key, OMDb activates only when a key is supplied, and a
+  missing source simply drops that badge.
 - **No UI imports.** Pure logic, Linux-portable.
 - **No secrets logged.** API keys are never written to logs.
 

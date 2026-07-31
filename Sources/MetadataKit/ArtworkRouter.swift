@@ -7,10 +7,11 @@ import CoreModels
 /// Given a ``MediaItem`` and an ``ArtworkKind``, the router:
 ///   1. classifies the item's ``ContentType`` (anime / movie / tvShow / music),
 ///   2. runs an ordered, content-type-specific fallback chain of providers
-///      (keyless per-IP APIs first, the optional TMDb tier as backup),
+///      (the bundled TMDb/TheTVDB tiers where they're the best source, backed by
+///      keyless per-IP APIs so no single provider is load-bearing),
 ///   3. memoizes the resolved URL in the persistent ``MetadataDiskCache`` so the
 ///      whole library is enriched with a small one-time burst of calls, then
-///      effectively none — which is what lets the keyless backbone serve any
+///      effectively none — which is what lets the provider set serve any
 ///      number of users without ever straining a shared quota.
 ///
 /// It self-configures from the app bundle, so call sites just use
@@ -43,7 +44,7 @@ public actor ArtworkRouter {
         self.tmdb = TMDbMetadataProvider(access: config.tmdb)
     }
 
-    /// `true` when the optional TMDb tier is configured (proxy or local token).
+    /// `true` when the TMDb tier is available (bundled token, proxy, or user key).
     public var isTMDbEnabled: Bool { tmdb.isEnabled }
 
     // MARK: - Video artwork
@@ -92,9 +93,10 @@ public actor ArtworkRouter {
         return nil
     }
 
-    /// The ordered provider chain for a content type + artwork kind. Keyless,
-    /// per-IP providers come first (they scale infinitely and cover anime/episodes
-    /// best); the optional TMDb tier backs them up for heroes/logos/stills.
+    /// The ordered provider chain for a content type + artwork kind, straight from
+    /// ``CurrentMetadataPriority``. TMDb generally leads for movies/TV where its art
+    /// is best, anime leads with AniList/Kitsu — and every chain keeps non-TMDb
+    /// sources behind it, so the app never depends on one provider.
     private func chain(for type: ContentType, kind: ArtworkKind) -> [any ArtworkProvider] {
         CurrentMetadataPriority.artworkSources(for: type, kind: kind).compactMap {
             provider(for: $0)

@@ -201,9 +201,9 @@ public struct MetadataQuery: Sendable, Hashable {
     }
 }
 
-/// One source of artwork for a content type. Implementations are free, keyless,
-/// per-IP APIs wherever possible (so they scale to any number of users), with the
-/// optional TMDb tier behind a self-hostable proxy.
+/// One source of artwork for a content type. Implementations are a mix of bundled
+/// keyed tiers (TMDb, TheTVDB) and free, keyless, per-IP APIs — chained so that
+/// losing any one of them costs quality, not function.
 public protocol ArtworkProvider: Sendable {
     /// A short stable identifier, for logging/cache scoping.
     var id: String { get }

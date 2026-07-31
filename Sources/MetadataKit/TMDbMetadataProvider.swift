@@ -2,14 +2,16 @@ import CoreModels
 import Foundation
 
 /// TMDb-backed artwork (backdrops, posters, logos, per-episode stills) reached via
-/// the optional, maintainer-controlled ``TMDbAccess`` (proxy or local token).
+/// ``TMDbAccess`` (bundled token, optional proxy, or the user's own key).
 ///
 /// TMDb is the gold standard for western movie/TV heroes, clear logos and episode
-/// stills, but its terms forbid distributing a key in an open-source client. So
-/// this provider is *only* enabled when a self-hostable caching proxy or a local
-/// token is configured (never in the public build). The JSON metadata calls go
-/// through `access`; the image *bytes* always come straight from TMDb's keyless
-/// CDN (`image.tmdb.org`), keeping any proxy tiny and the byte path uncapped.
+/// stills, so Plozz ships a key and prefers it where it wins. It is never
+/// load-bearing though: callers route through the fallback chains in
+/// ``ArtworkRouter``, so a disabled, throttled or failing TMDb tier just falls
+/// through to TheTVDB/TVmaze/AniList/Kitsu/Wikidata and the user's own server art.
+/// The JSON metadata calls go through `access`; the image *bytes* always come
+/// straight from TMDb's keyless CDN (`image.tmdb.org`), keeping any proxy tiny and
+/// the byte path uncapped.
 public struct TMDbMetadataProvider: ArtworkProvider {
     public let id = "tmdb"
     private let access: TMDbAccess

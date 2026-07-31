@@ -49,9 +49,9 @@ enum CurrentMetadataPriority {
     ]
 
     /// Which schedule provider owns a series' next-episode lookup, by content type.
-    /// Anime leads with AniList (its `nextAiringEpisode` is exact and keyless); other
-    /// TV leads with TheTVDB then TVmaze (TheTVDB is key-gated and inert on keyless
-    /// builds, so keyless devices fall straight through to TVmaze). Movies have no
+    /// Anime leads with AniList (its `nextAiringEpisode` is exact and needs no key);
+    /// other TV leads with TheTVDB then TVmaze (TheTVDB is key-gated, so a build
+    /// without that key falls straight through to TVmaze). Movies have no
     /// episode schedule.
     private static let scheduleRules: [MetadataPriorityRule] = [
         cast(.movie, [.tmdb]),

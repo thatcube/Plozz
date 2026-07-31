@@ -1,25 +1,26 @@
 import Foundation
 import CryptoKit
 
-/// How the optional TMDb tier is reached. TMDb's terms forbid embedding an API key
-/// in an open-source/client app, so Plozz never ships one. Instead it supports three
-/// *maintainer-controlled* (never user-facing) modes, the user-supplied BYOK mode,
-/// plus "off":
+/// How the TMDb tier is reached. Plozz **ships a TMDb key** and uses TMDb wherever
+/// it's the best source; what it avoids is *reliance* — every TMDb-backed capability
+/// has a fallback, so a revoked or throttled key degrades quality, not function.
+/// There are four modes:
 ///
-///  - ``proxy``: point at a self-hostable caching proxy that holds ONE TMDb key
-///    server-side (terms-compliant) and caches responses at the edge. This is the
-///    scalable, no-BYOK default for movie/western-TV backdrops, logos and stills.
-///  - ``directToken``: a raw v4 read token, used only for the maintainer's own
-///    local/TestFlight builds (never committed). Convenient, not for distribution.
-///  - ``userToken``: the **Step 9 bring-your-own-key** mode — a v4 read token the
+///  - ``proxy``: an optional self-hostable caching proxy that holds a TMDb key
+///    server-side and caches responses at the edge. An enhancement (traffic
+///    absorption, key rotation without a new build), not a requirement.
+///  - ``directToken``: the **bundled** v4 read token baked into the build from the
+///    gitignored secrets file. This is the normal path.
+///  - ``userToken``: the **bring-your-own-key** mode — a v4 read token the
 ///    *user* entered in Settings, held in the Keychain. Reached exactly like
 ///    ``directToken`` (direct to TMDb with a bearer), but distinguished as its own
 ///    case so it — and only it — carries a ``credentialID`` folded into the result
 ///    cache + circuit-breaker keys. That keeps one user's private results / bad-key
 ///    401 from ever being conflated with the built-in path or another key, while the
-///    built-in (maintainer/proxy/disabled) path stays byte-identical to pre-Step-9.
-///  - ``disabled``: no TMDb tier — the app leans entirely on the keyless providers
-///    (AniList/Kitsu/TVmaze/Deezer/MusicBrainz) and the user's own server art.
+///    built-in (bundled-token/proxy/disabled) path stays byte-identical.
+///  - ``disabled``: no TMDb tier — e.g. a contributor build without the key, or if
+///    the key is ever retired. The app leans on the other providers
+///    (TheTVDB/TVmaze/AniList/Kitsu/Wikidata) and the user's own server art.
 public enum TMDbAccess: Sendable, Equatable {
     case proxy(baseURL: URL)
     case directToken(String)
@@ -54,9 +55,10 @@ public enum TMDbAccess: Sendable, Equatable {
 
 /// Resolves how external metadata providers are reached, from the app bundle.
 ///
-/// Everything here is keyless *to the user*: the only configurable values are
-/// maintainer infrastructure (a proxy URL) or a local-only token, both optional
-/// and absent from the public build — which still gets the full keyless backbone.
+/// The TMDb key is bundled at build time (never committed to the repo); a proxy URL
+/// can optionally front it. Neither is user-facing — the user can supply their own
+/// token, but never has to. A build with neither simply runs the TMDb tier off and
+/// falls back to the other providers.
 public struct MetadataProviderConfig: Sendable {
     public var tmdb: TMDbAccess
 
@@ -64,9 +66,10 @@ public struct MetadataProviderConfig: Sendable {
         self.tmdb = tmdb
     }
 
-    /// Reads configuration from the app's Info.plist. A `TMDBProxyBaseURL` wins
-    /// (scalable, compliant); otherwise a local `TMDBBearerToken` is honored; with
-    /// neither, the TMDb tier is disabled and the keyless providers carry the app.
+    /// Reads configuration from the app's Info.plist. A `TMDBProxyBaseURL` wins when
+    /// present (edge caching / key rotation); otherwise the bundled `TMDBBearerToken`
+    /// is used; with neither, the TMDb tier is disabled and the other providers carry
+    /// the app.
     public static func resolved(bundle: Bundle = .main) -> MetadataProviderConfig {
         if let proxy = sanitized(bundle.object(forInfoDictionaryKey: "TMDBProxyBaseURL") as? String),
            let url = URL(string: proxy), url.scheme != nil {
@@ -88,11 +91,11 @@ public struct MetadataProviderConfig: Sendable {
     }
 
     /// Returns a copy with the user's **bring-your-own-key** TMDb token layered on
-    /// top of the built-in resolution (Step 9). A present, non-empty key wins over
-    /// the maintainer proxy/token and the disabled default, so the TMDb tier runs
+    /// top of the built-in resolution. A present, non-empty key wins over the
+    /// bundled token and the proxy, so the TMDb tier runs
     /// under the *user's* credential (its own attribution, rate limit, and cache /
     /// breaker namespace). An absent/blank key returns `self` unchanged, so the
-    /// built-in path is byte-identical to pre-Step-9.
+    /// built-in path is byte-identical.
     public func withUserToken(_ token: String?) -> MetadataProviderConfig {
         guard let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else { return self }

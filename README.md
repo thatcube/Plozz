@@ -61,8 +61,8 @@ app target generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 | [`ProviderJellyfin`](Sources/ProviderJellyfin/README.md) | Shared Jellyfin/Emby MediaBrowser client, DTOs, compatibility shims, device profile, and `MediaProvider` implementation. |
 | [`ProviderPlex`](Sources/ProviderPlex/README.md) | Plex client, DTOs, PIN/auth, connection resolver/selector, and a `MediaProvider` implementation. |
 | [`ProviderTrailers`](Sources/ProviderTrailers/README.md) | Synthetic `MediaProvider` for online (YouTube) trailers, with stream extraction via YouTubeKit. |
-| [`MetadataKit`](Sources/MetadataKit/README.md) | Keyless-first artwork & metadata enrichment (AniList, Kitsu, TVmaze, Deezer, MusicBrainz/CAA, Wikidata/Wikipedia) routed by content type with a persistent on-disk cache. Bundled TheTVDB tier + optional maintainer-hosted TMDb tier. |
-| [`RatingsService`](Sources/RatingsService/README.md) | External ratings enrichment (OMDb optional key, keyless AniList) with on-disk cache. |
+| [`MetadataKit`](Sources/MetadataKit/README.md) | Artwork & metadata enrichment (TMDb, TheTVDB, AniList, Kitsu, TVmaze, Deezer, MusicBrainz/CAA, Wikidata/Wikipedia) routed by content type through fallback chains, with a persistent on-disk cache. Bundled TMDb + TheTVDB tiers; optional self-hosted TMDb proxy or user-supplied TMDb key. |
+| [`RatingsService`](Sources/RatingsService/README.md) | External ratings enrichment (OMDb optional key, AniList) with on-disk cache. |
 | [`TraktService`](Sources/TraktService/README.md) | Optional Trakt OAuth, scrobbling, and watched/sync helpers. |
 | [`TopShelfKit`](Sources/TopShelfKit/README.md) | Domain-to-snapshot mapping for the Top Shelf extension; writes to the shared App Group container. |
 | [`FeatureDiscovery`](Sources/FeatureDiscovery/README.md) | LAN (UDP) discovery, server validation, server-picker UI, last-server persistence. |

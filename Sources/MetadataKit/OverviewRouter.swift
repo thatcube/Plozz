@@ -8,8 +8,8 @@ import CoreModels
 /// cache (positive *and* negative), exactly one lightweight JSON request per lookup,
 /// never throws, and is kept **off the critical path** by its single caller (the
 /// detail page's speculative enrichment, which is cancellable and dwell-gated). No
-/// TMDb — this is the free/keyless backbone, so it never risks TMDb's commercial
-/// terms and works forever in the public build:
+/// TMDb here — deliberately, so plot text keeps working even if the TMDb tier is
+/// throttled, disabled or retired:
 ///   - TV (series / season / episode): **TVmaze** — the episode summary when a
 ///     season+episode is known, else the show summary.
 ///   - Movie / anime / unknown: **Wikipedia** — one search-scoped `extract` call

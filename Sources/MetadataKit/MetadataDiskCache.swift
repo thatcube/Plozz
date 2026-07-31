@@ -7,7 +7,8 @@ import Foundation
 /// search + an images lookup, 1–2 third-party API calls). Caching the *result*
 /// across app launches means a user's library is enriched with a small one-time
 /// burst of calls, then effectively zero — so even the per-IP keyless APIs are
-/// touched lightly, and the optional TMDb proxy sees almost no upstream traffic.
+/// touched lightly, and the shipped TMDb key (or an optional proxy in front of it)
+/// sees almost no upstream traffic.
 ///
 /// Negative results are cached too (with a shorter TTL) so a title nothing could
 /// resolve isn't re-queried on every scroll.

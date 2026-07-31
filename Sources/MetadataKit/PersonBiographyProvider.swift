@@ -54,9 +54,14 @@ public struct WikipediaPersonBiographyProvider: PersonBiographyProvider {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         guard let url = searchURL(for: trimmed) else { return nil }
+        let started = Date()
         guard let response = await MetadataHTTP.get(SearchResponse.self, url: url) else {
+            PersonDiagnostics.emit(
+                "wiki.http name=\(trimmed) result=FAILED ms=\(Int(Date().timeIntervalSince(started) * 1000))"
+            )
             return nil
         }
+        let httpMS = Int(Date().timeIntervalSince(started) * 1000)
 
         // Best-ranked first. `index` is the search rank; where it's absent the
         // array order already is the ranking, so a stable sort preserves it.
@@ -72,8 +77,21 @@ public struct WikipediaPersonBiographyProvider: PersonBiographyProvider {
             guard let extract = page.extract?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !extract.isEmpty
             else { continue }
+            PersonDiagnostics.emit(
+                "wiki.http name=\(trimmed) result=hit title=\(page.title ?? "?") "
+                + "candidates=\(candidates.count) ms=\(httpMS)"
+            )
             return Self.trimmed(extract, to: maximumLength)
         }
+        // Which half rejected it matters: a namesake guard turning candidates
+        // away is a correctness decision, an empty candidate list is a lookup
+        // that found nothing at all, and the two need opposite fixes.
+        PersonDiagnostics.emit(
+            "wiki.http name=\(trimmed) result=REJECTED candidates=\(candidates.count) "
+            + "titles=[\(candidates.prefix(4).map { $0.title ?? "?" }.joined(separator: "|"))] "
+            + "descs=[\(candidates.prefix(4).map { $0.description ?? "-" }.joined(separator: "|"))] "
+            + "ms=\(httpMS)"
+        )
         return nil
     }
 

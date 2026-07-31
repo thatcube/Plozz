@@ -208,6 +208,15 @@ public struct ShareProvider: MediaProvider {
     /// cast. The id path serves a person opened from this share (whose id is a
     /// TMDb one); the name path serves a person opened from a Jellyfin or Plex
     /// item, whose id means nothing here.
+    /// Like `PlexProvider`, this deliberately implements only the two credit
+    /// lookups and not `person(id:)`/`person(named:)`, taking the protocol
+    /// defaults that answer `nil` without any work.
+    ///
+    /// A share is a filesystem: the catalog knows which people appear in which
+    /// title (from the `<actor>` elements in an NFO), but an NFO's actor block
+    /// carries only name, role, order and thumb — no biography. Kodi and
+    /// Jellyfin both define standalone `person` NFO files that DO carry an
+    /// `<Overview>`, so this could one day answer; nothing writes them here yet.
     public func items(withPerson personID: String, limit: Int) async throws -> [MediaItem] {
         await catalog.itemsWithPerson(id: personID, name: "", limit: limit)
     }

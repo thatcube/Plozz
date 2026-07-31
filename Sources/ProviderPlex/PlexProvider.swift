@@ -177,6 +177,65 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
     /// An entry Plex gave no numeric id falls back to the person's name, which
     /// these filters don't accept, so those return nothing rather than matching
     /// the wrong person.
+    /// A person's biography, from the Discover service.
+    ///
+    /// The local server cannot answer this: a PMS has no person records at all,
+    /// only actor TAGS on titles, and there is no route — no `ratingKey`, no
+    /// include parameter — to anything richer. Plex's own apps render their
+    /// person pages from `discover.provider.plex.tv/library/people/<guid>`,
+    /// keyed by the account-level guid a `<Role>` carries as `tagKey`. That is
+    /// what this uses, with the same account token the watchlist calls use.
+    ///
+    /// Keyed on `externalID`, never the person's `id`: the latter is a
+    /// per-section tag id that means nothing to an account-level service.
+    /// Without a guid there is simply no answer, and the caller falls through to
+    /// its next rung.
+    public func person(id: String) async throws -> MediaPerson? { nil }
+
+    /// The guid-keyed lookup the cast card uses, since `person(id:)` receives a
+    /// tag id that no account-level service can resolve.
+    public func person(externalID: String, name: String) async -> MediaPerson? {
+        // A `<Role>`'s `tagKey` is ALREADY the bare hex — unlike a title's guid,
+        // which is a full `plex://movie/<hex>` URI. Both forms are accepted so
+        // this cannot break if Plex ever normalises them.
+        let hex = PlexClient.watchlistMetadataID(fromGuid: externalID) ?? externalID
+        guard !hex.isEmpty else {
+            PersonDiagnostics.emit("plex.person name=\(name) guid=\(externalID) result=NO-HEX")
+            return nil
+        }
+        let record: PlexPersonRecord
+        do {
+            record = try await client.discoverPerson(id: hex)
+        } catch {
+            PersonDiagnostics.emit("plex.person name=\(name) hex=\(hex) result=THREW err=\(error)")
+            return nil
+        }
+        // A record with no summary is still worth returning when it carries the
+        // life line — Plex has people it can place but not describe.
+        let summary = record.summary.flatMap { $0.isEmpty ? nil : $0 }
+        let life = [record.birthYear, record.birthPlace]
+            .compactMap { $0?.isEmpty == false ? $0 : nil }
+            .joined(separator: " · ")
+        guard summary != nil || !life.isEmpty else {
+            PersonDiagnostics.emit("plex.person name=\(name) hex=\(hex) result=NO-SUMMARY")
+            return nil
+        }
+        return MediaPerson(
+            id: externalID,
+            name: record.displayName ?? name,
+            biography: summary,
+            externalID: externalID,
+            lifeSummary: life.isEmpty ? nil : life
+        )
+    }
+
+    /// The same lookup for a person carried in from elsewhere.
+    ///
+    /// The protocol's by-name entry point, but Plex has no person-by-name route
+    /// on any host, so this can only answer for a person this provider itself
+    /// described — which the id-keyed path already covers.
+    public func person(named name: String) async throws -> MediaPerson? { nil }
+
     public func items(withPerson personID: String, limit: Int) async throws -> [MediaItem] {
         let parts = personID.split(separator: ":", maxSplits: 1)
         guard parts.count == 2 else { return [] }
@@ -1159,7 +1218,10 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
                     name: name,
                     role: entry.role.flatMap { $0.isEmpty ? nil : $0 },
                     kind: kind,
-                    imageURL: personImageURL(entry.thumb)
+                    imageURL: personImageURL(entry.thumb),
+                    // The account-level guid, carried so a biography lookup has
+                    // something global to key on — see `person(id:)`.
+                    externalID: entry.tagKey
                 )
             }
         }

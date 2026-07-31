@@ -207,8 +207,40 @@ struct InfoActionButtonStyle: ButtonStyle {
 /// `SettingsFocusButtonStyle` in CoreUI). The tab needs that because it is only
 /// focusable while its card is open, yet must look completely normal the rest of
 /// the time. Focus colours swap instantly, like the Info card's own actions.
+/// One type scale for both bottom-card tabs.
+///
+/// The Info panel was on semantic fonts and the Cast pane on fixed point sizes,
+/// so the two tabs of one card set text at different sizes — and since they
+/// swap in place, that difference is visible as a jump rather than as variety.
+///
+/// Fixed sizes rather than semantic ones because tvOS has no user text-size
+/// control for them to answer to, and because the card's height is a hard
+/// constant: a layout budget cannot be reasoned about in terms that might change
+/// underneath it. The semantic values these replace were `.headline` (45.35pt
+/// per line) and `.footnote` (34.61) — both a size larger than this card, at
+/// three metres, actually needs.
+enum PlayerCardText {
+    /// Titles: the episode/film name, a person's name.
+    static let title: Font = .system(size: 34, weight: .bold)
+    /// Running prose: a synopsis, a biography.
+    static let body: Font = .system(size: 25)
+    /// Its line height, for height budgeting.
+    static let bodyLineHeight: CGFloat = 30
+    /// Supporting detail: the meta row, a character name.
+    static let caption: Font = .system(size: 22, weight: .medium)
+}
+
 struct PlayerTabButtonStyle: ButtonStyle {
     let focused: Bool
+    /// Whether this tab's card is the one showing.
+    ///
+    /// Separate from `focused`, and the reason the row reads as a segmented
+    /// control rather than a pair of buttons: focus moves down into the card, and
+    /// without a selected state nothing then indicates which tab is open. The
+    /// season bar on the detail page draws the same distinction.
+    var selected: Bool = false
+
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
 
     func makeBody(configuration: Configuration) -> some View {
         // ONE geometry for both states: the label, font and padding are applied
@@ -220,12 +252,16 @@ struct PlayerTabButtonStyle: ButtonStyle {
         configuration.label
             .font(.callout.weight(.semibold))
             .foregroundStyle(focused ? .black : .white)
+            .opacity(focused || selected ? 1 : 0.65)
             .padding(.horizontal, 26)
             .padding(.vertical, 14)
             .background { background }
             .clipShape(Capsule(style: .continuous))
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            // The surface swap stays instant — see above — but the lift is a
+            // transform, not layout, so it can travel without moving the stack.
             .animation(nil, value: focused)
+            .scaleEffect(configuration.isPressed ? 1.02 : (focused ? 1.08 : 1))
+            .animation(.easeOut(duration: 0.15), value: focused)
     }
 
     @ViewBuilder
@@ -233,10 +269,16 @@ struct PlayerTabButtonStyle: ButtonStyle {
         let shape = Capsule(style: .continuous)
         if focused {
             shape.fill(.white)
-        } else if #available(iOS 26.0, tvOS 26.0, *) {
-            shape.fill(.clear).glassEffect(.regular, in: shape)
+        } else if !reduceTransparency, #available(iOS 26.0, tvOS 26.0, *) {
+            // Selected keeps the glass and only tints it. Swapping in a flat
+            // fill made an open tab a different material from a closed one,
+            // when the only thing that changes is which of them is open.
+            Color.clear.glassEffect(
+                selected ? .regular.tint(.white.opacity(0.30)) : .regular,
+                in: shape
+            )
         } else {
-            shape.fill(.white.opacity(0.16))
+            shape.fill(.white.opacity(selected ? 0.34 : 0.16))
         }
     }
 }

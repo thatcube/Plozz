@@ -145,4 +145,49 @@ final class HomeLibraryProvenanceTests: XCTestCase {
         // And the derived union covers both libraries so ANY-visible works.
         XCTAssertEqual(card.homeVisibilityLibraryKeys, ["plex:P1", "jelly:J9"])
     }
+
+    // MARK: isVisibleOnHome agrees with the key set
+
+    /// `isVisibleOnHome` walks the sources directly instead of building
+    /// `homeVisibilityLibraryKeys`, for speed — it is called for every item of
+    /// every Home row on every render pass, and the allocation there blew the
+    /// scene-update watchdog. This pins the two implementations together so the
+    /// fast path can never quietly disagree with the readable definition.
+    func testIsVisibleOnHomeMatchesKeySetForEveryVisibilityCombination() {
+        var merged = MediaItem(id: "m", title: "X", kind: .movie,
+                               sourceAccountID: "plex", libraryID: "P1")
+        merged.sources = [
+            MediaSourceRef(accountID: "plex", itemID: "p", libraryID: "P1"),
+            MediaSourceRef(accountID: "jelly", itemID: "j", libraryID: "J9")
+        ]
+        var partial = MediaItem(id: "p", title: "X", kind: .movie)
+        partial.sources = [
+            MediaSourceRef(accountID: "plex", itemID: "p", libraryID: "P1"),
+            MediaSourceRef(accountID: "jelly", itemID: "j")
+        ]
+        let items: [MediaItem] = [
+            MediaItem(id: "a", title: "X", kind: .movie, sourceAccountID: "acct", libraryID: "L1"),
+            MediaItem(id: "b", title: "X", kind: .movie),
+            MediaItem(id: "c", title: "X", kind: .movie, sourceAccountID: "acct"),
+            MediaItem(id: "d", title: "X", kind: .movie, libraryID: "L1"),
+            merged,
+            partial
+        ]
+        // Every subset of the keys any of these items can produce.
+        let universe = Array(Set(items.flatMap(\.homeVisibilityLibraryKeys))).sorted()
+        for mask in 0..<(1 << universe.count) {
+            let visible = Set(universe.enumerated().compactMap { index, key in
+                (mask & (1 << index)) != 0 ? key : nil
+            })
+            for item in items {
+                let keys = item.homeVisibilityLibraryKeys
+                let expected = keys.isEmpty || keys.contains { visible.contains($0) }
+                XCTAssertEqual(
+                    item.isVisibleOnHome(isLibraryVisible: { visible.contains($0) }),
+                    expected,
+                    "mask \(mask) disagreed for keys \(keys.sorted())"
+                )
+            }
+        }
+    }
 }

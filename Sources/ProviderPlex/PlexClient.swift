@@ -671,6 +671,48 @@ public struct PlexClient: Sendable {
         }
     }
 
+    /// `GET https://discover.provider.plex.tv/library/people/{id}` — a person's
+    /// account-level record, and the ONLY route to a Plex biography.
+    ///
+    /// A Plex Media Server keeps no person records whatsoever: an actor is a
+    /// plain tag on a title, carrying a name, a per-section tag id and a
+    /// thumbnail. Plex's own apps render their person pages from this Discover
+    /// host, keyed by the global `plex://person/<hex>` guid, which is why the
+    /// `tagKey` on a `<Role>` is worth decoding.
+    ///
+    /// Same host, token and headers as the watchlist and Discover metadata
+    /// calls, so this bypasses the per-server connection resolver exactly as
+    /// they do.
+    func discoverPerson(id: String) async throws -> PlexPersonRecord {
+        let endpoint = Endpoint(
+            path: "/library/people/\(id)",
+            queryItems: [URLQueryItem(name: "X-Plex-Token", value: token)],
+            headers: headers
+        )
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await http.send(endpoint, baseURL: Self.watchlistBase)
+        } catch {
+            PersonDiagnostics.emit("plex.person.http id=\(id) result=SEND-THREW err=\(error)")
+            throw error
+        }
+        _ = response
+        // The whole body while this is being characterised: the official spec
+        // documents the PMS route as returning a bare tag with no biography and
+        // says only that `tagKey` "can be used to fetch additional information
+        // from plex.tv" — without documenting what that information is. So the
+        // shape here has to be read off a live response rather than a schema.
+        PersonDiagnostics.emit(
+            "plex.person id=\(id) bytes=\(data.count) "
+            + "body=\(String(decoding: data.prefix(1200), as: UTF8.self))"
+        )
+        guard let record = try? JSONDecoder.plozz
+            .decode(PlexPersonResponse.self, from: data)
+            .MediaContainer.firstPerson
+        else { throw AppError.notFound }
+        return record
+    }
+
     /// `PUT https://discover.provider.plex.tv/actions/{addToWatchlist|
     /// removeFromWatchlist}?ratingKey={metadataID}` — adds/removes the item from
     /// the account watchlist. `metadataID` is the guid tail (see

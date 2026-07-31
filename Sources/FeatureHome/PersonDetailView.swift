@@ -28,6 +28,17 @@ public final class PersonDetailViewModel {
     /// the credits and independently of them: a source can answer for one and not
     /// the other, and neither absence should block the other from showing.
     public private(set) var biography: String?
+    /// "1937 · Memphis, Tennessee, USA", when a source can say. Independent of
+    /// the biography: a source can place someone it cannot describe.
+    public private(set) var lifeSummary: String?
+
+    /// Fired after each rung of the ladder lands, so a caller that cannot
+    /// observe this object directly can still render progressively.
+    ///
+    /// The page itself needs no such thing — it observes the properties — but
+    /// the in-player card takes a snapshot through a closure, and without this
+    /// it could only take one: at the very end, behind the slowest rung.
+    public var onProgress: (@MainActor () -> Void)?
 
     private let person: MediaPerson
     private let provider: (any MediaProvider)?
@@ -83,6 +94,11 @@ public final class PersonDetailViewModel {
                 if biography == nil {
                     biography = record?.biography.flatMap { $0.isEmpty ? nil : $0 }
                 }
+                PersonDiagnostics.emit(
+                    "person.server name=\(name) items=\(items?.count ?? -1) "
+                    + "record=\(record == nil ? "nil" : "yes") "
+                    + "bio=\(record?.biography?.isEmpty == false ? "yes" : "no")"
+                )
                 for item in items ?? [] where seen.insert(Self.dedupeKey(item)).inserted {
                     merged.append(item)
                 }
@@ -93,6 +109,36 @@ public final class PersonDetailViewModel {
         // A server that had nothing to say about the home source's failure should
         // not leave the page reading "unavailable" when others answered.
         if !merged.isEmpty { state = .loaded }
+    }
+
+    /// The keyless biography lookup, started EARLY and consulted late.
+    ///
+    /// Measured on device: the person's own server answers in 11-28ms, the other
+    /// servers in 120-380ms, and Wikipedia in 200-335ms — but Wikipedia is where
+    /// the biography actually comes from every single time, because a server
+    /// only keeps the bios it happened to download and in practice has none. So
+    /// running it strictly last meant waiting 140-400ms for two servers to say
+    /// "no" before even starting the request that answers.
+    ///
+    /// Kicked off alongside them instead, and still consulted only after both
+    /// have failed to supply one — the ladder's ORDER of preference is unchanged,
+    /// only the order in which the work starts. The cost is one speculative
+    /// request on the rare occasion a server does have a biography; it is
+    /// keyless, unauthenticated and its result is simply dropped.
+    private func startExternalBiography() -> Task<String?, Never>? {
+        guard !biographyProviders.isEmpty else { return nil }
+        let name = person.name
+        guard !name.isEmpty else { return nil }
+        let providers = biographyProviders
+        let role = person.kind
+        return Task.detached(priority: .userInitiated) {
+            for provider in providers {
+                if let text = await provider.biography(for: name, role: role), !text.isEmpty {
+                    return text
+                }
+            }
+            return nil
+        }
     }
 
     /// Last resort for a biography, after every server has been asked.
@@ -113,6 +159,13 @@ public final class PersonDetailViewModel {
                 return
             }
         }
+    }
+
+    /// A provider's family, for telemetry — so a log line says WHICH kind of
+    /// server answered, not just that one did.
+    private static func kind(of provider: any MediaProvider) -> String {
+        String(describing: type(of: provider))
+            .replacingOccurrences(of: "Provider", with: "")
     }
 
     /// Collapses the same title held on more than one server into one entry.
@@ -136,8 +189,16 @@ public final class PersonDetailViewModel {
 
     public func load() async {
         guard state == .loading else { return }
+        let started = Date()
+        func elapsed(_ from: Date) -> Int { Int(Date().timeIntervalSince(from) * 1000) }
+        // In flight while the servers are asked; see the method.
+        let externalBiography = startExternalBiography()
         guard let provider else {
             state = .unavailable
+            externalBiography?.cancel()
+            PersonDiagnostics.emit(
+                "person.load name=\(person.name) result=no-provider ms=\(elapsed(started))"
+            )
             return
         }
         // The person's own server, asked by its own exact id. Independent and
@@ -160,13 +221,57 @@ public final class PersonDetailViewModel {
         } else {
             state = .unavailable
         }
+        PersonDiagnostics.emit(
+            "person.own name=\(person.name) provider=\(Self.kind(of: provider)) "
+            + "credits=\(items?.count ?? -1) record=\(personRecord == nil ? "nil" : "yes") "
+            + "bio=\(biography == nil ? "no" : "yes") ms=\(elapsed(started))"
+        )
+        onProgress?()
+
+        // The source's own global handle, where it keeps one. Plex is the only
+        // provider that does, and for a Plex-sourced person this is the sole
+        // route to a biography — the server itself has no person records at
+        // all, only actor tags on titles.
+        if biography == nil, let externalID = person.externalID, !externalID.isEmpty {
+            let stage = Date()
+            let record = await provider.person(externalID: externalID, name: person.name)
+            if let text = record?.biography, !text.isEmpty { biography = text }
+            if let life = record?.lifeSummary, !life.isEmpty { lifeSummary = life }
+            PersonDiagnostics.emit(
+                "person.external-id name=\(person.name) "
+                + "bio=\(biography == nil ? "MISS" : "hit") ms=\(elapsed(stage))"
+            )
+            onProgress?()
+        }
 
         // Render what the home server gave us before consulting anyone else, so
         // time-to-content never depends on how many servers are signed in.
         if !otherProviders.isEmpty {
+            let stage = Date()
             await mergeOtherServers()
+            PersonDiagnostics.emit(
+                "person.others name=\(person.name) servers=\(otherProviders.count) "
+                + "credits=\(libraryCredits.count) bio=\(biography == nil ? "no" : "yes") "
+                + "ms=\(elapsed(stage))"
+            )
+            onProgress?()
         }
-        await fillBiographyFromExternalSources()
+
+        if let externalBiography {
+            let stage = Date()
+            let text = await externalBiography.value
+            // Servers still win: this is only consulted because neither had one.
+            if biography == nil, let text, !text.isEmpty { biography = text }
+            PersonDiagnostics.emit(
+                "person.external name=\(person.name) "
+                + "bio=\(biography == nil ? "MISS" : "hit") waited=\(elapsed(stage))"
+            )
+            onProgress?()
+        }
+        PersonDiagnostics.emit(
+            "person.done name=\(person.name) credits=\(libraryCredits.count) "
+            + "bio=\(biography == nil ? "MISS" : "hit") ms=\(elapsed(started))"
+        )
     }
 }
 

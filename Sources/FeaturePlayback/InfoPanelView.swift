@@ -71,7 +71,7 @@ struct InfoPanelView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.infoCard.headline.isEmpty ? "Now Playing" : model.infoCard.headline)
-                    .font(.headline.weight(.bold))
+                    .font(PlayerCardText.title)
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .truncationMode(.tail)
@@ -83,22 +83,24 @@ struct InfoPanelView: View {
                     //
                     // `layoutPriority` makes the overview the column's *protected*
                     // element rather than its elastic one. This column is locked to
-                    // `thumbHeight` (210), and at tvOS metrics that budget is far
-                    // tighter than it looks: .headline is 45.35pt per line and
-                    // .footnote 34.61, so a one-line headline plus three lines of
-                    // overview plus the spacings and the meta row comes to ~205 —
-                    // barely 5pt of slack. The moment the headline wraps to its
-                    // second line it needs 40pt that do not exist, and because
+                    // `thumbHeight` (210), and the budget is tighter than it looks:
+                    // a one-line title plus three lines of overview plus the
+                    // spacings and the meta row uses most of it. Because
                     // `lineLimit(3)` is a cap rather than a reservation, the
-                    // overview was the thing that silently gave them up and
-                    // collapsed to two lines.
+                    // overview is what silently gives up lines when the title
+                    // wraps — which is exactly what it used to do.
+                    //
+                    // The shared scale (see `PlayerCardText`) is smaller than the
+                    // semantic fonts this used to use — .headline 45.35pt per line
+                    // and .footnote 34.61 — so there is now real slack here rather
+                    // than the ~5pt there was.
                     //
                     // Sizing the overview first inverts that: it always gets its
                     // three lines, and the headline takes the remainder — keeping
                     // both of its lines whenever the synopsis is short enough to
                     // leave room, and truncating to one when it isn't.
                     Text(model.infoCard.overview)
-                        .font(.footnote)
+                        .font(PlayerCardText.body)
                         .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(3)
                         .truncationMode(.tail)
@@ -119,7 +121,7 @@ struct InfoPanelView: View {
                 HStack(alignment: .center, spacing: 12) {
                     if !infoMetaLine.isEmpty {
                         Text(infoMetaLine)
-                            .font(.footnote.weight(.medium))
+                            .font(PlayerCardText.caption)
                             .foregroundStyle(.white.opacity(0.6))
                             .lineLimit(1)
                     }

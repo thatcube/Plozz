@@ -46,6 +46,17 @@ struct DebugSettingsActions {
 struct MainTabView: View {
     /// Stable identifiers for the root tabs, used to persist and restore the
     /// selected tab across MainTabView being rebuilt (see `selectedTab`).
+    /// The pending person route, visible ONLY to the tab that is showing.
+    ///
+    /// Both tabs observe the same value, so without this gate both would push
+    /// the same page and the hidden one would keep it on its stack.
+    private func personRoute(for tab: MainTab) -> Binding<PersonRoute?> {
+        Binding(
+            get: { selectedTabRaw == tab.rawValue ? pendingPersonRoute : nil },
+            set: { pendingPersonRoute = $0 }
+        )
+    }
+
     private enum MainTab: String {
         case home, search, music, settings
     }
@@ -253,6 +264,11 @@ struct MainTabView: View {
     /// the onboarding chooser, and on return we want to land back on the tab the
     /// user left from (usually Settings), not reset to Home.
     @SceneStorage("mainTab.selection") private var selectedTabRaw = MainTab.home.rawValue
+    /// A person page the in-player Cast card asked for, waiting to be pushed.
+    ///
+    /// Consumed by whichever tab is on screen — see `personRoute(for:)`. Held
+    /// here because the player that raises it is presented at this level.
+    @State private var pendingPersonRoute: PersonRoute?
 
     private var selectedTab: Binding<MainTab> {
         Binding(
@@ -396,6 +412,7 @@ struct MainTabView: View {
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
                 playRequest: $playRequest,
                 resumePrompt: $resumePrompt,
+                pendingPersonRoute: personRoute(for: .home),
                 runtime: homeRuntime
             )
             .id(accountScopeKey)
@@ -428,7 +445,8 @@ struct MainTabView: View {
                 identitySources: identitySources,
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
                 playRequest: $playRequest,
-                resumePrompt: $resumePrompt
+                resumePrompt: $resumePrompt,
+                pendingPersonRoute: personRoute(for: .search)
             )
             .id(accountScopeKey)
     }
@@ -511,7 +529,15 @@ struct MainTabView: View {
             identitySources: identitySources,
             showDiagnostics: diagnosticsModel.settings.isEnabled,
             themePalette: resolvedPalette,
-            onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
+            onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
+            // Close the player, then hand the person to whichever tab is
+            // showing. The player is hosted here on the root TabView while the
+            // navigation stacks live inside the tabs, so this is the only place
+            // that can see both.
+            onOpenPerson: { person, accountID in
+                playRequest = nil
+                pendingPersonRoute = PersonRoute(person: person, sourceAccountID: accountID)
+            }
         )
         .environment(\.themeMusicController, themeMusicController)
         .environment(\.themeMusicSettings, themeMusicModel.settings)

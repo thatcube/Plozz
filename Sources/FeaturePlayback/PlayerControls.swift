@@ -63,7 +63,7 @@ struct PlayerControls: View {
     let onExitToSurface: () -> Void
 
     enum Category: Hashable {
-        case subtitles, audio, speed, sync, info
+        case subtitles, audio, speed, sync, info, cast
 
         var title: LocalizedStringResource {
             switch self {
@@ -97,6 +97,12 @@ struct PlayerControls: View {
                     defaultValue: "Info",
                     comment: "Tab in the in-player options panel showing playback details."
                 )
+            case .cast:
+                return LocalizedStringResource(
+                    "player.category.cast",
+                    defaultValue: "Cast",
+                    comment: "Tab beneath the in-player scrub bar listing the cast of what is playing."
+                )
             }
         }
 
@@ -107,6 +113,7 @@ struct PlayerControls: View {
             case .speed: return "speedometer"
             case .sync: return "slider.horizontal.below.square.and.square.filled"
             case .info: return "info.circle"
+            case .cast: return "person.2"
             }
         }
     }
@@ -120,6 +127,19 @@ struct PlayerControls: View {
         case infoPrev       // Info panel: Previous Episode
         case infoRestart    // Info panel: Restart
         case infoStats      // Info panel: Playback Info (diagnostics) toggle
+        /// One face in the Cast card, by position in the row.
+        case castMember(Int)
+        /// Back out of a cast member's details to the row.
+        case castBack
+        /// One title in a cast member's credits row, by position.
+        ///
+        /// Focusable purely so it can be READ: at the pane's fixed height a
+        /// poster is 140pt wide, which is legible as art but not as type until
+        /// something enlarges it. Focus is the only enlargement tvOS offers
+        /// without stealing height from the row itself.
+        case castCredit(Int)
+        /// Leave the film for this person's own page.
+        case castMore
         case row(Int)
         case edit       // Subtitles header ✎ Edit (appearance) button
         case download   // Trailing "Search for subtitles…" row
@@ -236,6 +256,10 @@ struct PlayerControls: View {
     /// focus lands consistently on the active row. (For Subtitles we only cache the
     /// tracks-screen height, since a fresh open always starts on the track list.)
     @State private var cachedPanelHeight: [Category: CGFloat] = [:]
+    /// The cast member whose details fill the Cast card, or `nil` for the row.
+    /// Cleared whenever the Cast card is left, so reopening it always starts at
+    /// the row rather than on whoever was last inspected.
+    @State private var castDetailPerson: MediaPerson?
 
     var body: some View {
         ZStack {
@@ -338,6 +362,9 @@ struct PlayerControls: View {
             // makes the two cases distinguishable without guessing at delivery order.
         }
         .onChange(of: openPanel) { _, panel in
+            // Leaving Cast always returns it to the row, so reopening never lands
+            // mid-detail on whoever was last inspected.
+            if panel != .cast { castDetailPerson = nil }
             // Surface whether a menu is open so the container pins the transport
             // visible while one is up, and count the open/close as bar activity.
             // Deliberately EXCLUDES the Info card. `isPanelOpen` pins the transport
@@ -447,8 +474,8 @@ struct PlayerControls: View {
     /// cluster's `.animation(value: infoMode)`) so the card's arrival can never be
     /// captured by an ambient transaction from whatever caused it — a focus change,
     /// a Select press, or the container flipping the transport visible.
-    private func revealInfoCard() {
-        withAnimation(revealClock) { openPanel = .info }
+    private func revealInfoCard(_ category: Category = .info) {
+        withAnimation(revealClock) { openPanel = category }
     }
 
     /// The reveal's animation, honouring Reduce Motion.
@@ -893,13 +920,27 @@ struct PlayerControls: View {
     /// (The tab can only be focused with the card open anyway — see
     /// `infoTabFocusable` — so this loses nothing.)
     private var infoMode: Bool {
-        openPanel == .info
+        Self.usesBottomCard(openPanel)
+    }
+
+    /// Whether a category is shown in the bottom card rather than the floating
+    /// options menu.
+    ///
+    /// The card is a permanent, fixed-height member of the stack — the reveal is
+    /// one transform on a fixed stage, which is why nothing arrives on its own
+    /// clock. A sibling tab therefore switches the card's *content*; it never
+    /// mounts a second card, which would reflow the stage and break that.
+    static func usesBottomCard(_ category: Category?) -> Bool {
+        category == .info || category == .cast
     }
 
     /// `openPanel` with Info masked out, so the options panels' own animation can be
     /// keyed on it and stay clear of the Info reveal's clock.
     private var optionsPanel: Category? {
-        openPanel == .info ? nil : openPanel
+        // EVERY card tab is masked, not just Info. A card tab that leaks through
+        // opens the floating menu on top of its own card — and that menu takes
+        // focus, which is why the Cast faces could not be reached.
+        Self.usesBottomCard(openPanel) ? nil : openPanel
     }
 
     /// The cluster's bottom margin: how far the tab row rests above the screen edge
@@ -988,8 +1029,25 @@ struct PlayerControls: View {
                 Label("Info", systemImage: "info.circle")
                     .labelStyle(.titleOnly)
             }
-            .buttonStyle(PlayerTabButtonStyle(focused: focus == .button(.info)))
+            .buttonStyle(PlayerTabButtonStyle(focused: focus == .button(.info), selected: openPanel == .info))
             .focused($focus, equals: .button(.info))
+            .disabled(!tabFocusable(.info))
+            .onChange(of: focus) { _, slot in selectCardTab(focusedTo: slot) }
+
+            // Hidden entirely when what is playing has no cast: a tab that opens
+            // an empty card is worse than an absent one, and `.disabled` alone
+            // would leave it visible but dead.
+            if isTabVisible(.cast) {
+                Button {
+                    toggle(.cast)
+                } label: {
+                    Label(Category.cast.title, systemImage: Category.cast.icon)
+                        .labelStyle(.titleOnly)
+                }
+                .buttonStyle(PlayerTabButtonStyle(focused: focus == .button(.cast), selected: openPanel == .cast))
+                .focused($focus, equals: .button(.cast))
+                .disabled(!tabFocusable(.cast))
+            }
 
             Spacer(minLength: 20)
         }
@@ -1005,7 +1063,6 @@ struct PlayerControls: View {
         // never sit focused over nothing. `PlayerTabButtonStyle` ignores
         // `\.isEnabled`, so this removes the tab from the focus order WITHOUT
         // greying it out.
-        .disabled(!infoTabFocusable)
         // Bridge the horizontal offset between the rows: the track controls sit at
         // the trailing edge and the tab at the leading one, so nothing is
         // geometrically below Speed/Audio/Subtitles and a Down press would simply do
@@ -1042,8 +1099,20 @@ struct PlayerControls: View {
 
     /// Whether the Info tab is in the focus order: only while its card is open, or
     /// while a Down entry is on its way to opening it. See the tab's `.disabled`.
-    private var infoTabFocusable: Bool {
-        openPanel == .info || entryFocusTarget == .button(.info)
+    private func tabFocusable(_ tab: Category) -> Bool {
+        // Any card tab is reachable while the card is open, so Left/Right moves
+        // between them. The invariant that matters is unchanged and still
+        // structural: with the card CLOSED no tab is in the focus order, so a Down
+        // press from a track control cannot land on one and no tab can sit focused
+        // over nothing.
+        if Self.usesBottomCard(openPanel) { return isTabVisible(tab) }
+        return entryFocusTarget == .button(tab)
+    }
+
+    /// Cast hides itself when what is playing has no cast to show — a tab that
+    /// opens an empty card is worse than an absent one.
+    private func isTabVisible(_ tab: Category) -> Bool {
+        tab == .cast ? !model.infoCard.cast.isEmpty : true
     }
 
     /// The floating options menu (Speed · Audio · Subtitles), including the Subtitle
@@ -1155,10 +1224,29 @@ struct PlayerControls: View {
     }
 
     /// The now-playing card the Info tab reveals, full width beneath the tab row.
-    private var infoCard: some View {
-        InfoPanelView(model: model, actions: actions, focus: $focus, onClose: closeInfoCard)
-            .colorScheme(.dark)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    /// What the bottom card is showing.
+    ///
+    /// One card, switched content — never two cards. The stage is fixed and the
+    /// reveal is a single transform over it, so mounting a second card would
+    /// reflow the layout and the transport would jump. Both panels are therefore
+    /// sized to `InfoPanelView.cardHeight`.
+    ///
+    /// The Cast panel stays mounted while Info is showing (and vice versa) only in
+    /// the sense that the *card* does; the inactive panel is not built, because
+    /// its focusable faces would otherwise join the focus order behind the visible
+    /// one.
+    @ViewBuilder
+    private var cardContent: some View {
+        if openPanel == .cast {
+            // Deliberately NOT clipped, unlike Info. The cast row is a set of
+            // separate cards that GROW on focus, and clipping to the stage sliced
+            // the lift — the leading card lost its outline and part of itself
+            // against the left edge. It can go unclipped because it is never the
+            // parked content: closing sets `openPanel` to nil, which swaps this
+            // branch out before the card travels off-screen, so the shadow that
+            // forces Info's clip can never escape here.
+            CastPanelView(model: model, focus: $focus, detailPerson: $castDetailPerson)
+        } else {
             // Clip to the card's own silhouette. Liquid Glass draws a soft shadow
             // beyond the shape it's applied to, and that shadow was escaping the
             // strip masked off at the bottom of the screen — so the card announced
@@ -1166,24 +1254,56 @@ struct PlayerControls: View {
             // the shadow is no loss here: the panels deliberately don't use one, a
             // per-frame offscreen blur over Dolby Vision being the original
             // frame-drop culprit. See `PanelGlassBackground`.)
-            .clipShape(RoundedRectangle(
-                cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius,
-                style: .continuous
-            ))
+            InfoPanelView(model: model, actions: actions, focus: $focus, onClose: closeInfoCard)
+                .clipShape(RoundedRectangle(
+                    cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius,
+                    style: .continuous
+                ))
+        }
+    }
+
+    private var infoCard: some View {
+        cardContent
+            .colorScheme(.dark)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Move between card tabs by *moving focus*, with no press needed — the
+    /// behaviour of the season bar on the detail page, and what a row of tabs
+    /// implies. Only ever switches between already-open card tabs: it must not
+    /// open the card, since focus can be on a tab during a Down entry before the
+    /// viewer has chosen anything.
+    private func selectCardTab(focusedTo slot: FocusSlot?) {
+        guard Self.usesBottomCard(openPanel),
+              case let .button(tab)? = slot,
+              Self.usesBottomCard(tab),
+              tab != openPanel
+        else { return }
+        // No `withAnimation`: the card is already revealed, so this is a content
+        // swap. Replaying the reveal would slide the card out and back.
+        openPanel = tab
     }
 
     private func toggle(_ category: Category) {
         if openPanel == category {
             // Closing the Info card also gives up the tab (they're one unit); every
             // other panel just hands focus back to the button that opened it.
-            if category == .info {
+            if Self.usesBottomCard(category) {
                 closeInfoCard()
             } else {
                 openPanel = nil   // focus restoration handled centrally in onChange(of: openPanel)
             }
-        } else if category == .info {
-            panelReturnFocus = focus ?? .button(.info)
-            revealInfoCard()
+        } else if Self.usesBottomCard(category) {
+            // Switching BETWEEN card tabs must not re-run the reveal: the card is
+            // already up, and replaying the transform would slide it out and back
+            // for a content swap. Only an opening from closed animates.
+            if Self.usesBottomCard(openPanel) {
+                openPanel = category
+                focus = .button(category)
+            } else {
+                panelReturnFocus = focus ?? .button(category)
+                revealInfoCard(category)
+            }
         } else {
             panelReturnFocus = focus ?? .button(category)
             openPanel = category
@@ -1214,11 +1334,11 @@ struct PlayerControls: View {
     private var preferredPanelFocus: FocusSlot? {
         guard let panel = openPanel else { return nil }
         switch panel {
-        case .info:
+        case .info, .cast:
             // The tab, not the card: the row above the card behaves like a
             // segmented control, so opening lands there and a further Down press
             // steps into the card's actions.
-            return .button(.info)
+            return .button(panel)
         case .subtitles:
             switch subtitleScreen {
             case .tracks:
@@ -1437,7 +1557,8 @@ struct PlayerControls: View {
         case .audio: AudioPaneView(rows: audioRows, palette: palette, focus: $focus)
         case .speed: SpeedPaneView(model: model, palette: palette, actions: actions, focus: $focus)
         case .sync: SyncPaneView(model: model, actions: actions, focus: $focus)
-        case .info: EmptyView()
+        // Card tabs render in the bottom card, never in the floating menu.
+        case .info, .cast: EmptyView()
         }
     }
 
@@ -1766,7 +1887,7 @@ struct PlayerControls: View {
             return Self.speedPresets.firstIndex(where: { abs(model.playbackSpeed - $0) < 0.001 }) ?? 0
         case .sync:
             return 0
-        case .info:
+        case .info, .cast:
             return 0
         }
     }
@@ -1776,6 +1897,15 @@ struct PlayerControls: View {
         // does Menu close the whole panel.
         if openPanel == .subtitles && subtitleScreen != .tracks {
             openSubtitleScreen(subtitleScreen.parent)
+            return
+        }
+        // Exactly the same rule one level down in the Cast tab, which it was
+        // missing: Menu backs out of a person's details to the row of faces
+        // first, and only closes the card once you are already on the row.
+        // Without this, one press from a person's credits dismissed the whole
+        // pane and the only way back to the row was the on-screen button.
+        if openPanel == .cast, castDetailPerson != nil {
+            withAnimation(CastPanelView.drill) { castDetailPerson = nil }
             return
         }
         if openPanel == .info {

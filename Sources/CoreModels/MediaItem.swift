@@ -63,6 +63,22 @@ public struct MediaPerson: Codable, Hashable, Identifiable, Sendable {
     /// one. Being `Optional` also keeps decoding compatible with cast records
     /// persisted before this existed (a missing key decodes to `nil`).
     public var biography: String?
+    /// The source's own GLOBAL handle for this person, when it keeps one that
+    /// differs from `id`.
+    ///
+    /// Plex needs this and nothing else does: its `id` here is a per-section tag
+    /// id, meaningless outside the library it came from, while a `<Role>` also
+    /// carries `plex://person/<hex>` — an account-level guid, and the only
+    /// handle that resolves against the service where Plex actually keeps
+    /// biographies. Kept as its own field rather than packed into `id`, which is
+    /// parsed for the tag id that person-credit filters need.
+    ///
+    /// Optional, so records persisted before it existed still decode.
+    public var externalID: String?
+    /// A short factual line about the person — birth year and birthplace, when
+    /// the source keeps them. Already formatted, because what is available
+    /// varies by source and only the source knows which parts it has.
+    public var lifeSummary: String?
 
     public init(
         id: String,
@@ -70,7 +86,9 @@ public struct MediaPerson: Codable, Hashable, Identifiable, Sendable {
         role: String? = nil,
         kind: String? = nil,
         imageURL: URL? = nil,
-        biography: String? = nil
+        biography: String? = nil,
+        externalID: String? = nil,
+        lifeSummary: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -78,6 +96,8 @@ public struct MediaPerson: Codable, Hashable, Identifiable, Sendable {
         self.kind = kind
         self.imageURL = imageURL
         self.biography = biography
+        self.externalID = externalID
+        self.lifeSummary = lifeSummary
     }
 
     /// True for on-screen/voice talent (vs. crew), used to build the "Cast" row.
@@ -591,10 +611,32 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// provenance (empty key set ⇒ visible); otherwise visible when **any** of
     /// its contributing libraries is visible (so a merged card surfacing a hidden
     /// and a visible server still shows).
+    /// Deliberately does NOT go through `homeVisibilityLibraryKeys`.
+    ///
+    /// That getter allocates a `Set<String>` and interpolates a key per source,
+    /// and this is called for every item of every Home row from inside
+    /// `HomeView.body` — so it ran on every render pass, over the whole library.
+    /// On device it blew the 10-second scene-update watchdog, with the profile
+    /// naming `homeVisibilityLibraryKeys.getter` directly.
+    ///
+    /// Walking the sources instead costs one interpolation per source *until the
+    /// first visible one*, and no allocation at all. Almost every item is
+    /// visible, so in practice it stops at the first key. The key set remains as
+    /// the readable definition of the rule, and the two are held together by
+    /// `HomeLibraryProvenanceTests`.
     public func isVisibleOnHome(isLibraryVisible: (String) -> Bool) -> Bool {
-        let keys = homeVisibilityLibraryKeys
-        if keys.isEmpty { return true }
-        return keys.contains { isLibraryVisible($0) }
+        var hasAnyKey = false
+        for source in sources {
+            guard let libraryID = source.libraryID else { continue }
+            hasAnyKey = true
+            if isLibraryVisible("\(source.accountID):\(libraryID)") { return true }
+        }
+        if let libraryID, let accountID = sourceAccountID {
+            hasAnyKey = true
+            if isLibraryVisible("\(accountID):\(libraryID)") { return true }
+        }
+        // Fail open: no resolvable provenance means nothing to hide it by.
+        return !hasAnyKey
     }
 
     /// Returns a copy of this item with `selectedVersionID` set, so a `Play`

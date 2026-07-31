@@ -783,7 +783,118 @@ private func makePlayerViewModel(
         adoptedResolved: adoptedResolved
     )
     episodeViewModel.onSubtitleStyleChanged = onSubtitleStyleChanged
+    // What the in-player Cast tab can say about a person beyond their face.
+    //
+    // Built here because it needs the signed-in accounts and their provider
+    // sessions, which `FeaturePlayback` has no access to and should not: the
+    // player declares what it wants and stays ignorant of where it comes from.
+    //
+    // Deliberately the SAME ladder as the full person page, by reusing its view
+    // model outright rather than restating it: own server by its own person id,
+    // every other server by name, biography from whichever server has one and
+    // Wikipedia only if none does. Two implementations of that would drift.
+    episodeViewModel.controls.infoCard.castDetailLoader = makeCastDetailLoader(
+        for: request.item,
+        accounts: accounts
+    )
     return episodeViewModel
+}
+
+/// See the call site. Split out only so the assignment above stays readable.
+@MainActor
+private func makeCastDetailLoader(
+    for item: MediaItem,
+    accounts: [ResolvedAccount]
+) -> PlayerCastDetailLoading {
+    // Captured once, outside the returned closure: these are the same for every
+    // person in this item's cast.
+    let sourceAccountID = item.sourceAccountID
+    // `resolveOptionalProvider`, never `resolveProvider`: the latter falls back
+    // to the primary account, which sent Jellyfin and share person ids to Plex
+    // and got nothing back. No account means no credits, not wrong credits.
+    let ownProvider = sourceAccountID.flatMap { resolveOptionalProvider($0, in: accounts) }
+    let otherProviders = accounts
+        .filter { $0.account.id != sourceAccountID }
+        .map(\.provider)
+    let playingID = item.id
+    let playingTitle = MediaItemIdentity.normalizedTitle(item.title)
+
+    return { person in
+        let model = PersonDetailViewModel(
+            person: person,
+            provider: ownProvider,
+            otherProviders: otherProviders,
+            biographyProviders: [WikipediaPersonBiographyProvider()],
+            // Enough to fill the rail several times over. The person page is
+            // where the complete list lives.
+            limit: 24
+        )
+        return AsyncStream { continuation in
+            // Yield after every rung, so the credits the viewer's own server
+            // already returned appear immediately instead of waiting behind a
+            // biography lookup that may take a second or never answer at all.
+            model.onProgress = { continuation.yield(snapshot(model)) }
+            let task = Task { @MainActor in
+                await model.load()
+                continuation.yield(snapshot(model))
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    @MainActor
+    func snapshot(_ model: PersonDetailViewModel) -> PlayerCastDetail {
+        PlayerCastDetail(
+            // Strike what is playing. By id AND by normalized title, since a
+            // second server holding the same film answers with its own id.
+            credits: foldDuplicateCredits(model.libraryCredits.filter {
+                $0.id != playingID && MediaItemIdentity.normalizedTitle($0.title) != playingTitle
+            }),
+            biography: model.biography,
+            lifeSummary: model.lifeSummary
+        )
+    }
+}
+
+/// Collapses the same title held on more than one server into one poster.
+///
+/// The person page's own fold keys on title+year and falls back to the id when a
+/// year is missing — right for a page that lists everything, where wrongly
+/// merging two films would hide one the viewer owns. A ten-poster glance strip
+/// has the opposite bias: the same film four times (which is what a share and a
+/// Jellyfin library holding one copy each actually produced) is a worse failure
+/// than two same-named films sharing a slot. So a year-less copy is folded into
+/// a titled one, while two copies that BOTH state a year and disagree stay
+/// apart — which is what keeps Dune (1984) and Dune (2021) separate.
+private func foldDuplicateCredits(_ items: [MediaItem]) -> [MediaItem] {
+    func titleKey(_ item: MediaItem) -> String {
+        "\(item.kind.rawValue)|\(MediaItemIdentity.normalizedTitle(item.title))"
+    }
+
+    var byExactKey: [String: MediaItem] = [:]
+    var order: [String] = []
+    for item in items {
+        let key = "\(titleKey(item))|\(item.productionYear.map(String.init) ?? "")"
+        if let existing = byExactKey[key] {
+            // Keep whichever copy can actually show a poster; a row of grey
+            // title tiles is the one outcome worse than a duplicate.
+            let hasArt = !item.artworkReferences(for: .poster).isEmpty
+            let existingHasArt = !existing.artworkReferences(for: .poster).isEmpty
+            if hasArt, !existingHasArt { byExactKey[key] = item }
+        } else {
+            byExactKey[key] = item
+            order.append(key)
+        }
+    }
+
+    let titlesWithAYear = Set(
+        order.compactMap { byExactKey[$0] }
+            .filter { $0.productionYear != nil }
+            .map(titleKey)
+    )
+    return order.compactMap { byExactKey[$0] }
+        .filter { $0.productionYear != nil || !titlesWithAYear.contains(titleKey($0)) }
 }
 
 /// Builds the periodic mid-play convergence hook. Mirrors
@@ -892,13 +1003,15 @@ extension View {
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
         showDiagnostics: Bool,
         themePalette: ThemePalette,
-        onSubtitleStyleChanged: @escaping (SubtitleStyle) -> Void
+        onSubtitleStyleChanged: @escaping (SubtitleStyle) -> Void,
+        /// Leave the film for a person's own page (in-player Cast card).
+        onOpenPerson: @escaping (MediaPerson, String?) -> Void
     ) -> some View {
         fullScreenCover(item: playRequest) { request in
             PlayerPresentation(
                 request: request,
                 make: { request, adopted in
-                    makePlayerViewModel(
+                    let model = makePlayerViewModel(
                         for: request,
                         accounts: accounts,
                         networkFileResolver: networkFileResolver,
@@ -917,6 +1030,14 @@ extension View {
                         onSubtitleStyleChanged: onSubtitleStyleChanged,
                         adoptedResolved: adopted
                     )
+                    // Set here rather than inside the factory: leaving the film
+                    // is a navigation concern, and navigation lives with the
+                    // shell that presented the player, not with the code that
+                    // builds one.
+                    model.controls.infoCard.openPersonPage = { person in
+                        onOpenPerson(person, request.item.sourceAccountID)
+                    }
+                    return model
                 },
                 makeFailover: { failedItem, tried in
                     failoverPlayItem(

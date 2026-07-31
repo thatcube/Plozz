@@ -1599,6 +1599,9 @@ public final class PlayerViewModel {
         controls.subtitle = lines.secondary
         controls.infoCard.overview = request.item.overview ?? ""
         controls.infoCard.headline = request.item.title
+        controls.infoCard.cast = request.item.people.filter(\.isCast)
+        controls.infoCard.sourceAccountID = request.item.sourceAccountID
+        controls.infoCard.sourceItemID = request.item.id
         controls.infoCard.episodeTag = Self.episodeTag(for: request.item)
         controls.infoCard.badges = request.item.technicalBadges
         controls.infoCard.artworkURLs = [request.item.backdropURL, request.item.heroBackdropURL, request.item.fallbackArtworkURL, request.item.posterURL].compactMap { $0 }

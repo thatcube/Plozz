@@ -1003,10 +1003,118 @@ final class ShareCatalogStoreTests: XCTestCase {
         await store.recordDirectory(relPath: "Movies", modifiedAt: nil, scanID: 1)
         // Only a COMPLETED scan's rows are skippable, so mark it complete first.
         await store.markDirectoryStateComplete(scanID: 1)
-        let stored = await store.directoryModifiedTimes()["Movies"]
-        XCTAssertEqual(stored, Date(timeIntervalSince1970: 0))
-        // The walk compares against a real mtime, which can never equal this.
-        XCTAssertNotEqual(stored, Date(timeIntervalSince1970: 1_700_000_000))
+        // Omitted entirely rather than returned as 0. The requirement is that a
+        // directory whose mtime the server never reported can't be skipped, and
+        // absence guarantees that more strongly than a sentinel value does —
+        // there is nothing for a real mtime to be compared against.
+        let stored = await store.directoryModifiedSeconds()["Movies"]
+        XCTAssertNil(stored)
+    }
+
+
+    // MARK: Incremental skip: precision and batching
+
+    /// A sub-second mtime must survive storage and still compare equal.
+    ///
+    /// This is why the comparison is done in raw seconds rather than on `Date`.
+    /// `Date` counts from 2001 internally, so a round trip through
+    /// `timeIntervalSince1970` adds and subtracts 978307200 — about nine
+    /// significant digits of a double. Whole-second values survive that exactly;
+    /// sub-second ones fail roughly half the time. Every directory whose mtime
+    /// had a fractional part then looked changed on every pass and was re-listed
+    /// forever, which is most of them on a real server.
+    func testSubSecondDirectoryMTimeRoundTripsExactly() async {
+        let store = ShareCatalogStore(accountKey: "incrPrecision", directory: tempDir())
+        let mtime = Date(timeIntervalSince1970: 1_763_000_000.123456)
+        await store.recordDirectory(relPath: "Movies", modifiedAt: mtime, scanID: 1)
+        await store.markDirectoryStateComplete(scanID: 1)
+
+        let stored = await store.directoryModifiedSeconds()["Movies"]
+        XCTAssertEqual(
+            stored,
+            mtime.timeIntervalSince1970,
+            "a stored mtime must compare equal to the value a listing reports"
+        )
+    }
+
+    /// The batched stamp keeps the per-directory version's semantics: a skipped
+    /// directory's own files survive the prune, and a deeper file does not — a
+    /// touch that reached into subdirectories would mask a genuine deletion.
+    func testBatchedTouchStampsDirectChildrenOnly() async {
+        let store = ShareCatalogStore(accountKey: "incrBatch", directory: tempDir())
+        let assets = [
+            CatalogAsset(
+                relPath: "Movies/Alpha (2020).mkv", basename: "Alpha (2020).mkv",
+                size: 1, modifiedAt: Date(), kind: .movie, library: .movies,
+                title: "Alpha", year: 2020, seriesTitle: nil, seriesKey: nil,
+                season: nil, episode: nil, movieKey: "mk-alpha", movieTitleKey: "mtk-alpha"
+            ),
+            CatalogAsset(
+                relPath: "Movies/Deep/Beta (2021).mkv", basename: "Beta (2021).mkv",
+                size: 1, modifiedAt: Date(), kind: .movie, library: .movies,
+                title: "Beta", year: 2021, seriesTitle: nil, seriesKey: nil,
+                season: nil, episode: nil, movieKey: "mk-beta", movieTitleKey: "mtk-beta"
+            )
+        ]
+        await store.upsert(assets, scanID: 1)
+        let seeded = await store.movies(offset: 0, limit: 10)
+        XCTAssertEqual(seeded.count, 2)
+
+        await store.touchDirectoryContents(relPaths: ["Movies"], scanID: 2)
+        await store.pruneNotSeen(inScan: 2)
+
+        let titles = Set(await store.movies(offset: 0, limit: 10).map(\.title))
+        XCTAssertTrue(titles.contains("Alpha"), "a skipped directory's own file must survive")
+        XCTAssertFalse(titles.contains("Beta"), "the stamp must not reach into subdirectories")
+    }
+
+    /// Many directories in one call, which is the whole point of the batch.
+    func testBatchedTouchHandlesManyDirectories() async {
+        let store = ShareCatalogStore(accountKey: "incrBatchMany", directory: tempDir())
+        let assets = (0..<50).map { index in
+            CatalogAsset(
+                relPath: "M\(index)/Film (2020).mkv", basename: "Film (2020).mkv",
+                size: 1, modifiedAt: Date(), kind: .movie, library: .movies,
+                title: "Film \(index)", year: 2020, seriesTitle: nil, seriesKey: nil,
+                season: nil, episode: nil,
+                movieKey: "mk-\(index)", movieTitleKey: "mtk-\(index)"
+            )
+        }
+        await store.upsert(assets, scanID: 1)
+
+        await store.touchDirectoryContents(
+            relPaths: (0..<50).map { "M\($0)" },
+            scanID: 2
+        )
+        await store.pruneNotSeen(inScan: 2)
+
+        let survivors = await store.movies(offset: 0, limit: 100)
+        XCTAssertEqual(
+            survivors.count, 50,
+            "every batched directory's file must survive the prune"
+        )
+    }
+
+    /// An empty batch must be a no-op, not a statement that stamps everything or
+    /// leaves a transaction open.
+    func testBatchedTouchWithNoDirectoriesIsHarmless() async {
+        let store = ShareCatalogStore(accountKey: "incrBatchEmpty", directory: tempDir())
+        await store.upsert(
+            [CatalogAsset(
+                relPath: "Movies/Alpha (2020).mkv", basename: "Alpha (2020).mkv",
+                size: 1, modifiedAt: Date(), kind: .movie, library: .movies,
+                title: "Alpha", year: 2020, seriesTitle: nil, seriesKey: nil,
+                season: nil, episode: nil, movieKey: "mk-alpha", movieTitleKey: "mtk-alpha"
+            )],
+            scanID: 1
+        )
+        await store.touchDirectoryContents(relPaths: [], scanID: 2)
+        await store.pruneNotSeen(inScan: 2)
+        let remaining = await store.movies(offset: 0, limit: 10)
+        XCTAssertTrue(
+            remaining.isEmpty,
+            "an empty batch stamps nothing, so scan 1's rows are correctly pruned"
+        )
     }
 
     /// Directory rows follow the same prune rule as everything else, so a folder
@@ -1017,7 +1125,7 @@ final class ShareCatalogStoreTests: XCTestCase {
         await store.recordDirectory(relPath: "Kept", modifiedAt: Date(), scanID: 2)
         await store.pruneDirectoryStateNotSeen(inScan: 2)
         await store.markDirectoryStateComplete(scanID: 2)
-        let remaining = await store.directoryModifiedTimes()
+        let remaining = await store.directoryModifiedSeconds()
         XCTAssertNil(remaining["Gone"])
         XCTAssertNotNil(remaining["Kept"])
     }
@@ -1036,22 +1144,22 @@ final class ShareCatalogStoreTests: XCTestCase {
         let store = ShareCatalogStore(accountKey: "incr5", directory: tempDir())
         // Scan 1 listed these but never finished.
         await store.recordDirectory(relPath: "Movies", modifiedAt: Date(timeIntervalSince1970: 100), scanID: 1)
-        let beforeCompletion = await store.directoryModifiedTimes()
+        let beforeCompletion = await store.directoryModifiedSeconds()
         XCTAssertTrue(beforeCompletion.isEmpty, "no completed scan yet — nothing may be skipped")
 
         // Scan 2 completed.
         await store.recordDirectory(relPath: "Movies", modifiedAt: Date(timeIntervalSince1970: 200), scanID: 2)
         await store.markDirectoryStateComplete(scanID: 2)
-        let afterCompletion = await store.directoryModifiedTimes()
+        let afterCompletion = await store.directoryModifiedSeconds()
         XCTAssertEqual(
-            afterCompletion["Movies"], Date(timeIntervalSince1970: 200),
+            afterCompletion["Movies"], 200,
             "a completed scan's rows are trustworthy"
         )
 
         // Scan 3 was interrupted: its rows must not be trusted, and the stale
         // completed-scan rows must not resurface either.
         await store.recordDirectory(relPath: "Movies", modifiedAt: Date(timeIntervalSince1970: 300), scanID: 3)
-        let afterInterruption = await store.directoryModifiedTimes()
+        let afterInterruption = await store.directoryModifiedSeconds()
         XCTAssertNil(
             afterInterruption["Movies"],
             "an interrupted scan's rows must not be skippable"

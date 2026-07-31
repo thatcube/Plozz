@@ -1246,6 +1246,56 @@ actor ShareCatalogStore {
     /// `failurePoint` is test-only; forcing a failure after any phase must roll the
     /// whole transaction back so a reopen sees the complete old or complete
     /// corrected state, never a partial mutation.
+    /// Whether a completed pass found the catalog **materially unchanged**, so the
+    /// expensive clean-scan reconciliation can be skipped entirely.
+    ///
+    /// `finalizeCleanScan` prunes orphans, regroups movies, recomputes sidecar
+    /// associations and rematerializes every projection — in one transaction, on
+    /// every clean pass. Measured on device it was the single largest remaining
+    /// cost of scanning an unchanged share, larger than the network walk and the
+    /// writes combined. None of it can produce a different result when no row
+    /// arrived and none went away.
+    ///
+    /// Two cheap counts decide it, and they are only *jointly* sufficient:
+    ///
+    ///  * nothing is stale in **any** scan-scoped table — no row missed this
+    ///    pass's stamp, so nothing would be pruned;
+    ///  * the catalog is the same size as before the walk — so nothing was added.
+    ///
+    /// Every scan-scoped table has to be checked, not just `assets`. Deleting a
+    /// sidecar or a poster leaves the asset count untouched while orphaning a row
+    /// in `local_metadata_files` / `local_artwork_files`, and skipping the
+    /// reconciliation then strands metadata the file no longer supplies — caught
+    /// by `testDeletingExactSidecarReusesUnchangedGenericCacheAsFallback`.
+    ///
+    /// Either alone is not enough: a pass that added one file and lost another
+    /// leaves the size unchanged, and staleness alone says nothing about
+    /// additions.
+    ///
+    /// A file replaced *in place* (same path, new size or mtime) is deliberately
+    /// not treated as a change here. Its row is updated by the upsert either way,
+    /// and everything the reconciliation derives — grouping, series keys,
+    /// projections — comes from the path, which did not move.
+    func isMateriallyUnchanged(inScan scanID: Int64, priorAssetCount: Int) -> Bool {
+        ensureOpen()
+        guard db != nil else { return false }
+        for table in ["assets", "local_metadata_files", "local_artwork_files", "dir_state"] {
+            var stale = 0
+            query(
+                "SELECT COUNT(*) FROM \(table) WHERE last_scan <> ?;",
+                bind: { sqlite3_bind_int64($0, 1, scanID) }
+            ) { stmt in
+                stale = Int(sqlite3_column_int64(stmt, 0))
+            }
+            guard stale == 0 else { return false }
+        }
+        var total = 0
+        query("SELECT COUNT(*) FROM assets;") { stmt in
+            total = Int(sqlite3_column_int64(stmt, 0))
+        }
+        return total == priorAssetCount
+    }
+
     func finalizeCleanScan(
         inScan scanID: Int64,
         scanGeneration: UUID? = nil,
@@ -2428,19 +2478,37 @@ extension ShareCatalogStore {
     /// on the first device run. Restricting to a completed scan's rows makes the
     /// invariant explicit — a directory is only skippable if a scan that walked
     /// its ENTIRE subtree recorded it.
-    func directoryModifiedTimes() -> [String: Date] {
+    /// Recorded directory mtimes as **raw seconds since 1970** — the exact values
+    /// persisted, never rebuilt into `Date`.
+    ///
+    /// The type is the fix. These are compared for equality against the mtime a
+    /// listing reports, and a `Date` reconstructed from storage can't be compared
+    /// to one built by a transport: `Date` counts from 2001 internally, so the
+    /// round trip through `timeIntervalSince1970` adds and subtracts 978307200,
+    /// which costs about nine significant digits of a double. Whole-second values
+    /// survive that exactly; sub-second ones fail roughly half the time —
+    /// measured at 46% over random offsets. Every such directory then looked
+    /// changed on every pass and was re-listed forever.
+    ///
+    /// Comparing in the stored domain makes both sides take the identical
+    /// conversion, so equality is exact and no tolerance has to be invented.
+    /// `0` means "no mtime reported" (see `recordDirectory`) and is omitted, so
+    /// it can never match a real one.
+    func directoryModifiedSeconds() -> [String: TimeInterval] {
         ensureOpen()
         guard db != nil,
               let completed = meta(Self.completedDirectoryStateScanKey),
               let completedScanID = Int64(completed)
         else { return [:] }
-        var out: [String: Date] = [:]
+        var out: [String: TimeInterval] = [:]
         query(
             "SELECT rel_path, modified_at FROM dir_state WHERE last_scan = ?;",
             bind: { sqlite3_bind_int64($0, 1, completedScanID) }
         ) { stmt in
             guard let path = self.columnText(stmt, 0) else { return }
-            out[path] = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 1))
+            let seconds = sqlite3_column_double(stmt, 1)
+            guard seconds != 0 else { return }
+            out[path] = seconds
         }
         return out
     }
@@ -2514,6 +2582,108 @@ extension ShareCatalogStore {
     /// Without this the subsequent `pruneNotSeen` — `DELETE ... WHERE last_scan
     /// <> ?` — would delete every file in the skipped folder, i.e. the
     /// optimization would silently erase the library.
+    /// Stamp `scanID` onto everything recorded inside **many** skipped
+    /// directories, in a fixed number of statements.
+    ///
+    /// The per-directory form below costs five statements each, three of them
+    /// `LIKE` + `instr` scans over `assets`. Measured on device, that made the
+    /// *skip* path 85% of a whole scan — 149 of 175 seconds, against 1.9 seconds
+    /// actually spent waiting on the network. Skipping a directory cost ~15ms
+    /// while listing one was effectively free, so the optimization cost far more
+    /// than the work it avoided.
+    ///
+    /// Batched, the same work is four statements no matter how many directories
+    /// were skipped. The paths go into a temporary table so each update is a
+    /// single indexed pass instead of one scan per directory:
+    ///
+    ///  * `assets` has no parent column, but it does carry `basename`, so the
+    ///    parent is `substr(rel_path, 1, length(rel_path) - length(basename) - 1)`
+    ///    — exact, and no pattern matching.
+    ///  * the sidecar and artwork tables already store an indexed `parent_dir`.
+    ///
+    /// Semantics are unchanged: the same rows end up with the same `last_scan`,
+    /// so the prune behaves exactly as before.
+    func touchDirectoryContents(
+        relPaths: [String],
+        scanID: Int64,
+        scanGeneration: UUID? = nil
+    ) {
+        ensureOpen()
+        guard admits(scanGeneration), db != nil, !relPaths.isEmpty else { return }
+
+        _ = exec("CREATE TEMP TABLE IF NOT EXISTS skipped_dirs(rel_path TEXT PRIMARY KEY);")
+        _ = exec("DELETE FROM skipped_dirs;")
+        // Guarded, and the COMMIT is conditional on it: an unguarded BEGIN that
+        // fails because a transaction is already open would leave the later
+        // COMMIT to close *that* one early, ending someone else's write halfway.
+        let owningTransaction = exec("BEGIN IMMEDIATE;")
+
+        var insert: OpaquePointer?
+        if sqlite3_prepare_v2(
+            db, "INSERT OR IGNORE INTO skipped_dirs(rel_path) VALUES(?);", -1, &insert, nil
+        ) == SQLITE_OK {
+            for path in relPaths {
+                sqlite3_reset(insert)
+                bindText(insert, 1, path)
+                _ = sqlite3_step(insert)
+            }
+        }
+        sqlite3_finalize(insert)
+
+        // Files directly inside a skipped directory. `basename` makes the parent
+        // exactly computable, so this is one pass rather than a pattern match per
+        // directory.
+        stampScan(
+            "UPDATE assets SET last_scan=? WHERE substr(rel_path, 1, length(rel_path) - length(basename) - 1) IN (SELECT rel_path FROM skipped_dirs);",
+            scanID: scanID
+        )
+        for table in ["local_metadata_files", "local_artwork_files"] {
+            stampScan(
+                "UPDATE \(table) SET last_scan=? WHERE parent_dir IN (SELECT rel_path FROM skipped_dirs);",
+                scanID: scanID
+            )
+        }
+        stampScan(
+            "UPDATE dir_state SET last_scan=? WHERE rel_path IN (SELECT rel_path FROM skipped_dirs);",
+            scanID: scanID
+        )
+        if owningTransaction, !exec("COMMIT;") { _ = exec("ROLLBACK;") }
+        _ = exec("DELETE FROM skipped_dirs;")
+    }
+
+    /// Total assets in the catalog, and how many were first seen within the last
+    /// `seconds`.
+    ///
+    /// The honest "did this pass find anything new" signal. A scan's `files=`
+    /// count only covers directories it actually listed, so it moves when the
+    /// incremental state settles as well as when content arrives — it cannot
+    /// distinguish the two. The catalog's own size can.
+    func assetDiscoveryStats(newerThan seconds: TimeInterval) -> (total: Int, recent: Int) {
+        ensureOpen()
+        guard db != nil else { return (0, 0) }
+        var total = 0
+        var recent = 0
+        let cutoff = Date().timeIntervalSince1970 - seconds
+        query("SELECT COUNT(*) FROM assets;") { stmt in
+            total = Int(sqlite3_column_int64(stmt, 0))
+        }
+        query(
+            "SELECT COUNT(*) FROM assets WHERE first_seen_at >= ?;",
+            bind: { sqlite3_bind_double($0, 1, cutoff) }
+        ) { stmt in
+            recent = Int(sqlite3_column_int64(stmt, 0))
+        }
+        return (total, recent)
+    }
+
+    private func stampScan(_ sql: String, scanID: Int64) {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, scanID)
+        _ = sqlite3_step(stmt)
+    }
+
     func touchDirectoryContents(
         relPath: String,
         scanID: Int64,

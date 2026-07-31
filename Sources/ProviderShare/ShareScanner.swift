@@ -148,9 +148,14 @@ actor ShareScanner {
     /// Run a scan unless one already ran within `minInterval` (or is running).
     /// Called fire-and-forget from the Home hot path, so it must be cheap to no-op.
     @discardableResult
-    func scanIfStale(minInterval: TimeInterval = 600) async -> ShareScanOutcome {
+    /// Default interval kept in step with the coordinator's spawn coalesce, so a
+    /// spawn is only allowed once a walk would actually run.
+    func scanIfStale(minInterval requestedInterval: TimeInterval = 180) async -> ShareScanOutcome {
         if isRunning { return .freshNoOp }
         if isInvalidated { return .invalidated }
+        // Developer override so back-to-back measurement passes are possible on a
+        // device; `nil` in every normal build. See `ShareScanDebug`.
+        let minInterval = ShareScanDebug.scanInterval ?? requestedInterval
         // Force a walk (ignoring the staleness throttle) when the CLASSIFIER changed
         // since the last completed pass, so every already-indexed file is
         // reclassified under the new movie/episode rules right away instead of
@@ -177,10 +182,10 @@ actor ShareScanner {
         // completed one is treated as due, so the first pass after upgrading is
         // deep and the incremental state it leaves behind is complete.
         let lastDeep = await store.meta("last_deep_scan_at").flatMap(TimeInterval.init)
-        let deep = lastDeep.map {
+        let dueForDeep = lastDeep.map {
             Date().timeIntervalSince1970 - $0 >= Self.deepScanInterval
         } ?? true
-        return await scan(deep: deep)
+        return await scan(deep: ShareScanDebug.forceDeep ?? dueForDeep)
     }
 
     /// How often the sidecar/artwork re-verification pass runs.
@@ -289,7 +294,7 @@ actor ShareScanner {
         }
         // Incremental scan state: a directory whose mtime is unchanged since the
         // last scan doesn't need listing. Loaded once for the whole walk.
-        let storedDirectoryMTimes = await store.directoryModifiedTimes()
+        let storedDirectoryMTimes = await store.directoryModifiedSeconds()
         // Directories known to CONTAIN a subdirectory, derived from the recorded
         // paths rather than queried per-child.
         //
@@ -317,6 +322,17 @@ actor ShareScanner {
         var dirsWalked = 0
         var dirsSkipped = 0
         var filesFound = 0
+        // TEMPORARY instrumentation: how much of the walk is spent in the store,
+        // and how much of THAT is the skip path's per-child round trips.
+        var storeNanos: UInt64 = 0
+        var skipStoreNanos: UInt64 = 0
+        var listWaitNanos: UInt64 = 0
+        var unchangedPass = false
+        // Directories skipped this pass, stamped in one batch once the walk ends.
+        var skippedDirectories: [String] = []
+        // Catalog size before the walk, so an unchanged pass can be recognised
+        // and skip the clean-scan reconciliation entirely.
+        let priorAssetCount = await store.assetDiscoveryStats(newerThan: 0).total
         let progressClock = ContinuousClock()
         var lastProgressReport = progressClock.now
         // Set if ANY directory listing failed this pass (transient SMB timeout, auth
@@ -357,7 +373,9 @@ actor ShareScanner {
                 // Fill the pool.
                 for _ in 0..<concurrency { spawnNext() }
                 // Drain results, committing each directory and launching the next.
+                var waitStart = DispatchTime.now().uptimeNanoseconds
                 while let result = await group.next() {
+                    listWaitNanos += DispatchTime.now().uptimeNanoseconds - waitStart
                     guard !isInvalidated else {
                         group.cancelAll()
                         continue
@@ -382,6 +400,7 @@ actor ShareScanner {
                         free.append(fresh)
                     }
                     dirsWalked += 1
+                    let storeStart = DispatchTime.now().uptimeNanoseconds
                     if result.ok {
                         await store.recordDirectory(
                             relPath: result.dir,
@@ -400,7 +419,10 @@ actor ShareScanner {
                         listedDirectoryMTimes[child.relPath] = child.modifiedAt
                         if let mtime = child.modifiedAt,
                            let known = storedDirectoryMTimes[child.relPath],
-                           known == mtime,
+                           // Compared as raw seconds, the form persisted, so both
+                           // sides take the identical conversion — see
+                           // `directoryModifiedSeconds`.
+                           known == mtime.timeIntervalSince1970,
                            // Leaves only. A directory with children must be
                            // listed even when unchanged, because that single
                            // listing is what yields their mtimes and lets the
@@ -408,14 +430,16 @@ actor ShareScanner {
                            !directoriesWithSubdirectories.contains(child.relPath),
                            !directoriesNeedingRelist.contains(child.relPath) {
                             dirsSkipped += 1
-                            await store.touchDirectoryContents(
-                                relPath: child.relPath,
-                                scanID: scanID,
-                                scanGeneration: scanGeneration
-                            )
-                            nextFrontier.append(
-                                contentsOf: await store.recordedSubdirectories(of: child.relPath)
-                            )
+                            // Collected, not stamped here. Stamping per directory
+                            // cost five statements each and dominated the whole
+                            // scan; one batched pass at the end does the same work
+                            // in four. See `touchDirectoryContents(relPaths:)`.
+                            skippedDirectories.append(child.relPath)
+                            // No `recordedSubdirectories` lookup: the skip
+                            // condition above requires this directory to have no
+                            // recorded subdirectories, so that query is provably
+                            // empty here. It was one actor hop and one LIKE scan
+                            // per skip to fetch a guaranteed-empty result.
                         } else {
                             nextFrontier.append(child.relPath)
                         }
@@ -442,6 +466,7 @@ actor ShareScanner {
                             scanGeneration: scanGeneration
                         )
                     }
+                    storeNanos += DispatchTime.now().uptimeNanoseconds - storeStart
                     let now = progressClock.now
                     if dirsWalked == 1
                         || lastProgressReport.duration(to: now) >= .milliseconds(250) {
@@ -464,6 +489,7 @@ actor ShareScanner {
                         await pacer.paceIfBrowsing()
                         spawnNext()
                     }
+                    waitStart = DispatchTime.now().uptimeNanoseconds
                 }
             }
 
@@ -496,6 +522,18 @@ actor ShareScanner {
         }
         reporter.scanFrontierProgress(shareID, dirsWalked, 0, filesFound)
 
+        // Stamp every skipped directory's contents in one batch, BEFORE the prune
+        // below — the prune deletes rows whose `last_scan` isn't this pass, so a
+        // skipped directory's files must be stamped first or they are deleted as
+        // if they had vanished from the share.
+        let skipStampStart = DispatchTime.now().uptimeNanoseconds
+        await store.touchDirectoryContents(
+            relPaths: skippedDirectories,
+            scanID: scanID,
+            scanGeneration: scanGeneration
+        )
+        skipStoreNanos += DispatchTime.now().uptimeNanoseconds - skipStampStart
+
         // Completed a full pass. Only prune (drop assets no longer on the share) when
         // EVERY directory listed cleanly — a partial walk (some listing failed) must
         // not delete content that's merely temporarily unreachable. Still stamp the
@@ -522,7 +560,16 @@ actor ShareScanner {
             await store.markDirectoryStateComplete(
                 scanID: scanID, scanGeneration: scanGeneration
             )
-            let finalized = await store.finalizeCleanScan(
+            // Nothing arrived and nothing vanished: the reconciliation below can
+            // only reproduce what is already stored, so skip it. Directory state
+            // is still marked complete above, which is what keeps the next pass
+            // able to skip — the saving is the reconciliation, never the
+            // bookkeeping that makes incremental scanning work.
+            unchangedPass = await store.isMateriallyUnchanged(
+                inScan: scanID,
+                priorAssetCount: priorAssetCount
+            )
+            let finalized = unchangedPass ? true : await store.finalizeCleanScan(
                 inScan: scanID,
                 scanGeneration: scanGeneration
             )
@@ -587,6 +634,13 @@ actor ShareScanner {
             await store.markSidecarsPendingForParserUpgrade()
             await store.setMeta("nfo_parser_version", nfoParserCurrent, scanGeneration: scanGeneration)
         }
+        // Only a pass that altered the catalog is worth telling anyone about; a
+        // clean no-op pass must not cause any UI work.
+        if !unchangedPass, !anyListingFailed {
+            reporter.scanChangedCatalog(shareID)
+        }
+        // Catalog truth, independent of which directories this pass listed.
+        let discovery = await store.assetDiscoveryStats(newerThan: 3600)
         let failureSummary = listFailureCounts.isEmpty
             ? "none"
             : listFailureCounts
@@ -594,7 +648,7 @@ actor ShareScanner {
                 .map { "\($0.key.rawValue):\($0.value)" }
                 .joined(separator: ",")
         PlozzLog.boot(
-            "share.scan done scanID=\(scanID) dirs=\(dirsWalked) skipped=\(dirsSkipped) files=\(filesFound) pruned=\(!anyListingFailed) failed=\(listFailureCounts.values.reduce(0, +)) failures=[\(failureSummary)] elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
+            "share.scan done scanID=\(scanID) deep=\(deep) dirs=\(dirsWalked) skipped=\(dirsSkipped) storeMs=\(storeNanos / 1_000_000) skipStoreMs=\(skipStoreNanos / 1_000_000) listWaitMs=\(listWaitNanos / 1_000_000) interior=\(directoriesWithSubdirectories.count) relistForced=\(directoriesNeedingRelist.count) files=\(filesFound) catalog=\(discovery.total) newLastHour=\(discovery.recent) unchanged=\(unchangedPass) pruned=\(!anyListingFailed) failed=\(listFailureCounts.values.reduce(0, +)) failures=[\(failureSummary)] elapsed=\(Int(Date().timeIntervalSince(started) * 1_000))ms"
         )
         await finishScan(listers: pool)
         // A completed pass earns a completion stamp. When some listing failed the pass

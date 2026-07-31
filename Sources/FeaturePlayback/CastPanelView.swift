@@ -19,6 +19,35 @@ struct CastPanelView: View {
     /// panel choreography.
     @Binding var detailPerson: MediaPerson?
 
+    /// Set by `PlayerControls` when Menu is pressed, so the remote's Back runs
+    /// the SAME close as the on-screen button.
+    ///
+    /// Menu used to clear `detailPerson` directly, which skipped the shrink
+    /// entirely — the pane simply vanished — and skipped the focus narrowing
+    /// with it, leaving the row disabled except for one face. A binding rather
+    /// than a callback because the request has to survive the view being
+    /// re-created.
+    @Binding var closeRequest: Int
+    /// Whether the card this panel fills is open.
+    ///
+    /// Used to shed the row's glass BEFORE the card parks. Every face wears a
+    /// live `glassEffect`, so translating the row off-screen means moving ~20
+    /// backdrop blurs over Dolby Vision video — the same per-frame offscreen
+    /// cost this player already refuses to pay for shadows, and why leaving from
+    /// Cast stuttered while leaving from Info did not, despite identical code.
+    ///
+    /// Costs nothing visually: this panel draws no surface of its own, so once
+    /// its cards go there is nothing left to watch travel.
+    ///
+    /// Handled HERE rather than by the card, so the fade is scoped to this
+    /// subtree — an animation modifier at cluster level retimes the whole
+    /// reveal, which is exactly what it did to the Info card when I tried it
+    /// there.
+    let isCardOpen: Bool
+    /// The clock the card travels on, so anything this panel does while it parks
+    /// happens as part of that one movement rather than on a timer of its own.
+    let revealClock: Animation
+
     /// Enough faces to answer the question, few enough that the row stays a
     /// glance rather than a browse.
     private static let maximumFaces = 20
@@ -137,6 +166,10 @@ struct CastPanelView: View {
         }
         .frame(height: InfoPanelView.cardHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: closeRequest) { _, _ in
+            guard detailPerson != nil else { return }
+            closeDetail()
+        }
     }
 
     /// The panel's coordinate space, which card frames are reported in.
@@ -215,14 +248,34 @@ struct CastPanelView: View {
         withAnimation(Self.drill) { isExpanded = false }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(340))
-            // Narrow the focus order BEFORE the detail goes, so the engine never
-            // has an alternative to choose in the first place.
-            restoringToIndex = lastOpenedIndex
+            // Only take focus back if it is still INSIDE the detail.
+            //
+            // Pressing Up out of a person's details moves focus to the tab and
+            // asks for this close — and restoring unconditionally then dragged
+            // focus straight back down onto a face, so the viewer's next Up
+            // started from the row again and never reached the scrub bar. It
+            // looked as though Up did nothing.
+            let shouldRestoreFocus = Self.isInsideDetail(focus)
+            if shouldRestoreFocus {
+                // Narrow the focus order BEFORE the detail goes, so the engine
+                // never has an alternative to choose in the first place.
+                restoringToIndex = lastOpenedIndex
+            }
             detailPerson = nil
             // The row is alive and re-enabled the moment this clears, so the
             // face is a real focus target immediately — no waiting for it to be
             // rebuilt, which is what used to make this unreliable.
-            claimFocus(.castMember(lastOpenedIndex))
+            if shouldRestoreFocus {
+                claimFocus(.castMember(lastOpenedIndex))
+            }
+        }
+    }
+
+    /// Whether a focus slot belongs to the person-detail pane.
+    private static func isInsideDetail(_ slot: PlayerControls.FocusSlot?) -> Bool {
+        switch slot {
+        case .castBack, .castMore, .castCredit: return true
+        default: return false
         }
     }
 
@@ -496,6 +549,15 @@ private struct CastMemberDetail: View {
         // recognise from a sofa, which defeats the entire point of showing art.
         HStack(alignment: .top, spacing: 28) {
             identity
+                // A focus SECTION, so Left from the Back button reaches the
+                // "See more" chip.
+                //
+                // tvOS moves focus by searching in the pressed direction, and
+                // with no credits the chip sits far to the left AND well below
+                // Back — outside the corridor that search considers, so Left
+                // found nothing at all. A section is reachable as a unit rather
+                // than by the geometry of whatever is inside it.
+                .plozzFocusSection()
                 // Centred, not top-aligned. Beside a rail of full-height posters
                 // a short text block pinned to the top left an obvious well of
                 // empty card beneath it.
@@ -712,6 +774,19 @@ private struct CastMemberDetail: View {
                     .buttonStyle(PlozzPanelHeaderButtonStyle())
                     .focusEffectDisabled()
                     .focused($focus, equals: .castMore)
+                    // Right returns to Back, explicitly.
+                    //
+                    // With no credits the two sit at opposite corners, too far
+                    // apart on both axes for the engine's directional search to
+                    // pair them — the identity column being a focus section
+                    // gets focus HERE, but nothing gets it back. Making Back a
+                    // section too was the symmetrical fix and it worked, but it
+                    // also changed where the engine looks when the pane opens,
+                    // which closed the details instantly. Naming the
+                    // destination affects nothing but this one key.
+                    .onMoveCommand { direction in
+                        if direction == .right { focus = .castBack }
+                    }
                     .padding(.top, 14)
                 }
             }
@@ -768,6 +843,9 @@ private struct CastMemberDetail: View {
 private struct CastCreditsRow: View {
     let items: [MediaItem]
     @FocusState.Binding var focus: PlayerControls.FocusSlot?
+
+    /// Each title label's rendered height, so its scrim can be sized to it.
+    @State private var labelHeights: [String: CGFloat] = [:]
 
     /// The pane's usable height, less the room a focused poster needs to grow
     /// into. The row is now clipped to the pane — it has to be, or a scrolled
@@ -826,6 +904,7 @@ private struct CastCreditsRow: View {
         .scrollClipDisabled()
         .frame(maxWidth: .infinity, alignment: .leading)
         .mask { fadeMask }
+        .onPreferenceChange(CastCreditLabelHeightKey.self) { labelHeights = $0 }
     }
 
     /// Clips the sides and feathers them; deliberately taller than the row it
@@ -886,7 +965,12 @@ private struct CastCreditsRow: View {
                         // poster, not one box at its foot: a gradient sized to
                         // the text can only ever be as tall as the text, which
                         // is what made it a hard black band pasted on the art.
-                        .overlay { captionScrim(shown: isFocused) }
+                        .overlay(alignment: .bottom) {
+                            captionScrim(
+                                shown: isFocused,
+                                labelHeight: labelHeights[item.id] ?? 0
+                            )
+                        }
                         .overlay(alignment: .bottom) { titleLabel(item, shown: isFocused) }
                         .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
                         .animation(.easeOut(duration: 0.2), value: isFocused)
@@ -923,20 +1007,46 @@ private struct CastCreditsRow: View {
     /// Watching cards, which ramp through the lower half rather than switching
     /// on. Its ramp is a fraction of the poster, so it stays in proportion
     /// whatever height the card gives the row.
-    private func captionScrim(shown: Bool) -> some View {
+    /// Sized to the LABEL, not to the poster.
+    ///
+    /// The stops used to be fractions of the poster's height, so the darkening
+    /// began at a fixed point regardless of how much text sat over it — fine for
+    /// one line, and a four-line title climbed out of the dark part and into the
+    /// artwork. Measuring the label and adding a fade above it keeps every line
+    /// equally legible whatever the title's length.
+    private func captionScrim(shown: Bool, labelHeight: CGFloat) -> some View {
+        // The ORIGINAL curve, over a variable height.
+        //
+        // These are the stops the fixed version used, re-expressed as fractions
+        // of the ramp itself rather than of the poster — so the softness is
+        // identical and only the distance changes. My first attempt replaced
+        // them with a two-stop fade above a solid block, which is why it read as
+        // harsher.
         LinearGradient(
             stops: [
-                .init(color: .clear, location: 0.30),
-                .init(color: .black.opacity(0.12), location: 0.52),
-                .init(color: .black.opacity(0.48), location: 0.72),
-                .init(color: .black.opacity(0.80), location: 0.88),
+                .init(color: .clear, location: 0.0),
+                .init(color: .black.opacity(0.12), location: 0.314),
+                .init(color: .black.opacity(0.48), location: 0.6),
+                .init(color: .black.opacity(0.80), location: 0.829),
                 .init(color: .black.opacity(0.88), location: 1.0)
             ],
             startPoint: .top,
             endPoint: .bottom
         )
+        .frame(height: max(labelHeight, Self.singleLineLabelHeight) + Self.scrimRamp)
+        .frame(maxWidth: .infinity)
         .opacity(shown ? 1 : 0)
     }
+
+    /// A one-line label at this size, so an unmeasured label still gets the
+    /// scrim it will need.
+    private static let singleLineLabelHeight: CGFloat = 38
+    /// The clear-to-dark distance above the text.
+    ///
+    /// Chosen so a single-line title reproduces the old fixed ramp exactly —
+    /// which spanned 70% of a 210pt poster, i.e. 147pt, of which 38 sat behind
+    /// the text itself.
+    private static let scrimRamp: CGFloat = 109
 
     /// The title over the foot of the poster, on focus only.
     ///
@@ -956,6 +1066,14 @@ private struct CastCreditsRow: View {
             .padding(.horizontal, 7)
             .padding(.bottom, 10)
             .frame(maxWidth: .infinity)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: CastCreditLabelHeightKey.self,
+                        value: [item.id: geometry.size.height]
+                    )
+                }
+            }
             .opacity(shown ? 1 : 0)
     }
 
@@ -977,6 +1095,13 @@ private struct CastCreditsRow: View {
 ///
 /// A preference rather than a shared observable: the frames are a product of
 /// layout, and layout is the only thing that may report them.
+private struct CastCreditLabelHeightKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 private struct CastCardFrameKey: PreferenceKey {
     static let defaultValue: [String: CGRect] = [:]
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {

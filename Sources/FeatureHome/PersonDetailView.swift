@@ -313,7 +313,13 @@ public struct PersonDetailView: View {
                 // records and can return loose video. Kept under the original
                 // heading rather than dropped, since these are still titles the
                 // viewer owns with this person.
-                creditRow("Also in your library", kinds: nil)
+                creditRow(
+                    LocalizedStringResource(
+                        "Also in your library",
+                        comment: "Heading for a shelf of titles the viewer owns featuring this person, shown on a person's page beneath Movies and TV Shows. Catches anything that is neither."
+                    ),
+                    kinds: nil
+                )
             }
         case .loading:
             creditlessState { ProgressView().scaleEffect(1.5) }
@@ -322,7 +328,10 @@ public struct PersonDetailView: View {
             // else are indistinguishable here, and either way the honest thing to
             // say is that there is nothing to show.
             creditlessState {
-                Text("Nothing else in your library with \(person.name).")
+                Text(
+                    "Nothing else in your library with \(person.name).",
+                    comment: "Empty state on a person's page. The placeholder is a person's name. Means the viewer owns nothing else featuring them, not that a lookup failed."
+                )
                     .font(.system(size: metrics.sectionHeaderFontSize))
                     .multilineTextAlignment(.center)
                     .plozzForeground(.secondary)

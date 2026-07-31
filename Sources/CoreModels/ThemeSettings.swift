@@ -242,4 +242,24 @@ public enum TransparencyPreference: String, CaseIterable, Identifiable, Codable,
         case .off: return true
         }
     }
+
+    /// As above, but also letting the device and whatever is playing suppress
+    /// glass on performance grounds.
+    ///
+    /// `on` deliberately still wins. It is documented as "Always use translucent
+    /// liquid-glass panels and cards", and quietly not doing that would make the
+    /// setting a lie — someone who turned glass on and watches it disappear
+    /// during a film has no way to tell that from a bug. The automatic path
+    /// belongs to `system`, which is the default and says it follows the
+    /// environment.
+    public func reducesTransparency(
+        systemReduceTransparency: Bool,
+        performance: GlassPerformanceBudget
+    ) -> Bool {
+        switch self {
+        case .system: return systemReduceTransparency || performance.reducesTransparency
+        case .on: return false
+        case .off: return true
+        }
+    }
 }

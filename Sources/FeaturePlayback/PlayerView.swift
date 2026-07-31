@@ -17,6 +17,16 @@ import CoreUI
 public struct PlayerView: View {
     @State private var viewModel: PlayerViewModel
     @State private var diagnosticsSampler = PlaybackDiagnosticsSampler()
+    /// Suspends Liquid Glass while demanding video is on screen.
+    ///
+    /// Optional so a player hosted outside the app root — previews, tests —
+    /// simply does nothing rather than trapping on a missing dependency.
+    @Environment(GlassPerformanceModel.self) private var glassPerformance: GlassPerformanceModel?
+    /// Whether THIS player raised a suspension, so it releases exactly what it
+    /// took. Reading the source again at teardown would be a second judgement
+    /// that could disagree with the first — the request can change under a
+    /// transcode retry — and leak or over-release.
+    @State private var suspendedGlass = false
     /// Smooths the HDR/Dolby-Vision HDMI display-mode switch by fading to black
     /// around it (with a timeout so it can never strand on black).
     @State private var hdrTransition = HDRTransitionModel()
@@ -85,6 +95,7 @@ public struct PlayerView: View {
         }
         .onDisappear {
             diagnosticsSampler.stop()
+            releaseGlassSuspension()
             Task { await viewModel.stop() }
         }
     }
@@ -121,6 +132,12 @@ public struct PlayerView: View {
             } else {
                 diagnosticsSampler.stop()
             }
+        }
+        // The resolved source, which is where the stream's real characteristics
+        // first exist — the item that was tapped knows nothing about what a
+        // transcode decided to deliver.
+        .onChange(of: viewModel.diagnosticsToken) { _, _ in
+            updateGlassSuspension()
         }
         .onChange(of: viewModel.diagnosticsToken) { _, _ in
             // A request resolved (initial load, cross-engine swap, or transcode
@@ -342,6 +359,28 @@ public struct PlayerView: View {
     /// is the live `AVPlayer` for the native engine and `nil` for Plozzigen — in
     /// the latter case the sampler publishes the metadata-only baseline plus the
     /// engine name, so the overlay works on every engine.
+    /// Suspends glass if what is about to play is demanding, once per player.
+    ///
+    /// Driven by the resolved request rather than by the item that was tapped:
+    /// a transcode changes what is actually delivered, and the decision has to
+    /// describe the stream being played.
+    private func updateGlassSuspension() {
+        let demanding = GlassPerformanceBudget.contentIsDemanding(source: viewModel.sourceMetadata)
+        guard demanding != suspendedGlass else { return }
+        if demanding {
+            glassPerformance?.beginDemandingPlayback()
+        } else {
+            glassPerformance?.endDemandingPlayback()
+        }
+        suspendedGlass = demanding
+    }
+
+    private func releaseGlassSuspension() {
+        guard suspendedGlass else { return }
+        suspendedGlass = false
+        glassPerformance?.endDemandingPlayback()
+    }
+
     private func startSampling() {
         diagnosticsSampler.start(
             player: viewModel.player,

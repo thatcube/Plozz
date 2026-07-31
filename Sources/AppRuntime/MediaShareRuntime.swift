@@ -85,6 +85,11 @@ public protocol MediaShareRuntime: Sendable {
     /// (used when the account is removed).
     func invalidate(accountKey: String) async
 
+    /// Gives every registered share a chance to notice new files, without
+    /// disturbing anything on screen. Default no-op so conformers that manage no
+    /// shares (tests, previews) need not implement it.
+    func pollForChanges() async
+
     /// Retires the transport sessions bound to one account's credential
     /// revision (used on credential rotation and account removal).
     func retire(accountID: String, credentialRevision: CredentialRevision) async
@@ -124,6 +129,9 @@ public extension MediaShareRuntime {
     func clearMetadataCaches() async {}
     func validateTMDBUserKey(_ token: String) async -> TMDBKeyValidationResult { .unreachable }
     func invalidateTMDBCredential(forToken token: String) async {}
+
+    /// Default: nothing to poll.
+    func pollForChanges() async {}
 }
 
 /// The single production `MediaShareRuntime`. Construct it only through
@@ -292,6 +300,10 @@ public final class DefaultMediaShareRuntime: MediaShareRuntime {
     public func invalidate(accountKey: String) async {
         await coordinator.invalidate(accountKey: accountKey)
         await artworkCacheLifecycle.purge(accountID: accountKey)
+    }
+
+    public func pollForChanges() async {
+        await coordinator.pollForChanges()
     }
 
     public func retire(accountID: String, credentialRevision: CredentialRevision) async {

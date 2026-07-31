@@ -180,6 +180,10 @@ struct MainTabView: View {
     let onRemoveAccountEverywhere: (Account) -> Void
     var offersRemoveEverywhere: Bool = false
     let onRescanShare: (String) -> Void
+    /// Lets Home poke the media shares on a timer, so content that arrives while
+    /// the viewer sits there is noticed. Injected like `onRescanShare` rather than
+    /// reached through an environment object.
+    let onPollShares: () -> Void
     let onSignOutAll: () -> Void
     let onSwitchProfile: () -> Void
     let debugActions: DebugSettingsActions
@@ -366,6 +370,7 @@ struct MainTabView: View {
                 heroSettings: heroSettingsModel,
                 heroBackground: heroBackgroundModel,
                 heroTrailerController: heroTrailerController,
+                onPollShares: onPollShares,
                 heroRuntime: homeHeroRuntime,
                 navigationStyle: navigationStyle,
                 behavior: subtitleBehaviorModel.settings,

@@ -78,6 +78,9 @@ public struct HomeView: View {
     private var heroSettings: HeroSettingsModel?
     private var heroBackground: HeroBackgroundSettingsModel
     private let heroTrailerController: HeroTrailerController
+    /// Lets Home give the media shares a chance to notice new files while the
+    /// viewer sits on it. `nil` disables polling (previews, hosts with no shares).
+    private let onPollShares: () -> Void
     private let heroTrailerResolver: HeroTrailerResolving
     private let heroIsFrontmost: Bool
     private let heroCurator: HeroCurator
@@ -163,6 +166,7 @@ public struct HomeView: View {
         heroSettings: HeroSettingsModel? = nil,
         heroBackground: HeroBackgroundSettingsModel,
         heroTrailerController: HeroTrailerController,
+        onPollShares: @escaping () -> Void = {},
         heroIsFrontmost: Bool,
         heroRuntime: HomeHeroRuntimeState,
         heroCurator: HeroCurator = HeroCurator(),
@@ -197,6 +201,7 @@ public struct HomeView: View {
         self.heroSettings = heroSettings
         self.heroBackground = heroBackground
         self.heroTrailerController = heroTrailerController
+        self.onPollShares = onPollShares
         self.heroTrailerResolver = heroTrailerResolver
         self.heroIsFrontmost = heroIsFrontmost
         self.heroRuntime = heroRuntime
@@ -513,6 +518,15 @@ public struct HomeView: View {
                 Task { await viewModel.load() }
             }
         }
+        // New content that lands while the viewer sits on Home appears without a
+        // navigation round trip. Zero-size and render-isolated — see the type.
+        .background(
+            HomeShareScanRefreshObserver(
+                onRefresh: { Task { await viewModel.load(showLoadingState: false) } },
+                isTrailerPlaying: heroTrailerController.isPlaying,
+                onPollShares: onPollShares
+            )
+        )
         .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
             // The cross-server index warmed further; re-fold the fuller source set
             // into the loaded cards in place so a title that cold-loaded before its
@@ -984,6 +998,114 @@ enum HomeHeroDisplayResolver {
 /// a bare gray box), so the empty state is a themed accent→surface gradient with
 /// a large, low-contrast per-kind glyph rather than a flat fill — an imageless
 /// library still reads as an intentional, on-brand tile.
+
+/// Keeps Home current while the viewer sits on it: polls the share catalogs, and
+/// reloads when a scan finishes.
+///
+/// Both halves are needed, and neither works alone. A media-share scan only
+/// spawns when something *queries* the catalog, and Home queries once when it
+/// loads — so an idle home screen never triggered a scan at all, and a download
+/// that finished while the viewer sat there stayed invisible indefinitely, not
+/// merely for the ten-minute throttle. `LibraryBrowseView` has reloaded on scan
+/// completion for a while; Home never did either.
+///
+/// Polling is honest here rather than wasteful: an unchanged pass costs a
+/// handful of directory listings and a few seconds of background work, and it
+/// stops early on its own when nothing moved. The re-query is what spawns the
+/// scan; the scanner's own throttle still decides whether a walk actually runs,
+/// so this can't cause one to run more often than the interval allows.
+///
+/// Render-isolated for the same reason as the browse observer: scan and
+/// enrichment progress mutate the status dictionary many times a second, and
+/// observing that from Home's own body would rebuild every rail on each tick.
+/// This view draws nothing, so the invalidation stops here.
+///
+/// Keyed on the newest completion across all shares rather than one id, since
+/// Home aggregates every account.
+private struct HomeShareScanRefreshObserver: View {
+    /// Silent — the loaded rows stay on screen while fresher ones swap in, so a
+    /// background poll never flashes a skeleton or moves focus.
+    let onRefresh: () -> Void
+    /// Whether a hero trailer is playing. Stillness alone is not idleness: a
+    /// viewer watching a trailer sends no move commands for its whole duration,
+    /// so the idle window would elapse mid-playback and the reload would tear the
+    /// trailer down under them.
+    let isTrailerPlaying: Bool
+    /// Gives the shares a chance to notice new files. Deliberately separate from
+    /// `onRefresh`: polling must cost no UI work, so this pokes the scanner and
+    /// nothing else. A reload happens only if that pass reports a real change.
+    let onPollShares: () -> Void
+
+    @Environment(ShareScanStatusModel.self) private var status: ShareScanStatusModel?
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Slightly under the scanner's own throttle, so a poll is never the reason a
+    /// walk is declined for being too soon.
+    private static let pollInterval: Duration = .seconds(120)
+
+    /// When the viewer last moved. A zero-size view still receives move commands
+    /// while Home holds focus, which is exactly the window a refresh must avoid.
+    @State private var lastInteractionAt: ContinuousClock.Instant = .now
+
+    /// Whether content may be swapped in without disturbing the viewer: they have
+    /// been still for a while *and* nothing is playing.
+    private var isSafeToRefresh: Bool {
+        !isTrailerPlaying && lastInteractionAt.duration(to: .now) >= Self.idleGrace
+    }
+
+    /// The newest *change*, not the newest scan. A pass that found nothing must
+    /// not move this, or Home reloads on every poll for no reason.
+    private var latestChangeAt: Date? {
+        status?.byShare.values.compactMap(\.lastChangeAt).max()
+    }
+
+    /// Only poll where there is something to poll. A viewer with no media share
+    /// gets no timer at all — server-backed accounts report their own changes.
+    private var hasShares: Bool { !(status?.byShare.isEmpty ?? true) }
+
+    /// How long the viewer must have been still before a poll may swap content in.
+    ///
+    /// Reloading Home re-fetches and re-sorts every rail, so rows can reorder
+    /// under the cursor mid-browse — content moving while someone is reading it
+    /// is worse than seeing it a minute late. A refresh therefore waits for a
+    /// quiet moment, which on a living-room screen is the overwhelmingly common
+    /// state.
+    private static let idleGrace: Duration = .seconds(30)
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: latestChangeAt) { oldValue, newValue in
+                guard newValue != nil, newValue != oldValue else { return }
+                // Same rule as the poll: a scan finishing is not a reason to
+                // reorder rows under someone mid-browse.
+                guard isSafeToRefresh else { return }
+                onRefresh()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // Returning from background is the one moment a visible reshuffle
+                // is expected rather than jarring, and the most likely time for
+                // something to have arrived.
+                if phase == .active { onRefresh() }
+            }
+            .task(id: hasShares) {
+                guard hasShares else { return }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: Self.pollInterval)
+                    guard !Task.isCancelled, scenePhase == .active else { continue }
+                    // Never swap content in under an active viewer: wait for the
+                    // remote to be still. Re-querying the catalog is what spawns a
+                    // scan; the reload then picks up whatever that pass found.
+                    // Poking costs nothing on screen, so it needs no idle check —
+                    // only the reload that a real change triggers does.
+                    onPollShares()
+                }
+            }
+            .onMoveCommand { _ in lastInteractionAt = .now }
+            .accessibilityHidden(true)
+    }
+}
+
 private struct LibraryCardView: View {
     let aggregated: AggregatedLibrary
     let subtitle: String   // l10n:content — library card subtitle from the server

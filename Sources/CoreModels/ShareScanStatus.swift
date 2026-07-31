@@ -37,6 +37,10 @@ public struct ShareScanState: Sendable, Equatable, Identifiable {
     public var enrichTotal: Int
     /// When the last full scan completed (nil until the first completes).
     public var lastScanAt: Date?
+    /// When a pass last actually changed the catalog — as opposed to merely
+    /// finishing. This is what a UI should watch: a scan that found nothing has
+    /// nothing to show.
+    public var lastChangeAt: Date?
 
     public init(name: String, isScanning: Bool = false, isEnriching: Bool = false,
                 itemsFound: Int = 0, directoriesScanned: Int = 0,
@@ -225,6 +229,7 @@ public final class ShareScanStatusModel {
         case scanStarted(id: String, name: String)
         case scanProgress(id: String, directories: Int, pending: Int, items: Int)
         case scanFinished(id: String)
+        case scanChangedCatalog(id: String)
         case enrichStarted(id: String, total: Int)
         case enrichProgress(id: String, done: Int)
         case enrichFinished(id: String)
@@ -244,6 +249,7 @@ public final class ShareScanStatusModel {
                 itemsFound: items
             )
         case let .scanFinished(id): scanFinished(shareID: id)
+        case let .scanChangedCatalog(id): catalogChanged(shareID: id)
         case let .enrichStarted(id, total): enrichStarted(shareID: id, total: total)
         case let .enrichProgress(id, done): enrichProgress(shareID: id, done: done)
         case let .enrichFinished(id): enrichFinished(shareID: id)
@@ -343,6 +349,18 @@ public final class ShareScanStatusModel {
         )
     }
 
+    /// Record that a completed pass actually altered the catalog.
+    ///
+    /// Distinct from `lastScanAt` on purpose: a scan finishing is not news, and
+    /// treating it as news made Home reload on every poll. Only a pass that added
+    /// or removed something can change what is on screen, so only that should
+    /// cause a refresh.
+    public func catalogChanged(shareID: String) {
+        guard var state = byShare[shareID] else { return }
+        state.lastChangeAt = Date()
+        byShare[shareID] = state
+    }
+
     public func scanFinished(shareID: String) {
         guard var state = byShare[shareID] else { return }
         state.isScanning = false
@@ -403,6 +421,7 @@ public final class ShareScanStatusModel {
                 c.yield(.scanProgress(id: id, directories: directories, pending: pending, items: items))
             },
             scanFinished: { id in c.yield(.scanFinished(id: id)) },
+            scanChangedCatalog: { id in c.yield(.scanChangedCatalog(id: id)) },
             enrichStarted: { id, total in c.yield(.enrichStarted(id: id, total: total)) },
             enrichProgress: { id, done in c.yield(.enrichProgress(id: id, done: done)) },
             enrichFinished: { id in c.yield(.enrichFinished(id: id)) },
@@ -431,6 +450,8 @@ public struct ShareScanReporter: Sendable {
         _ itemsFound: Int
     ) -> Void
     public var scanFinished: @Sendable (_ shareID: String) -> Void
+    /// Called only when a completed pass actually changed the catalog.
+    public var scanChangedCatalog: @Sendable (_ shareID: String) -> Void
     public var enrichStarted: @Sendable (_ shareID: String, _ total: Int) -> Void
     public var enrichProgress: @Sendable (_ shareID: String, _ done: Int) -> Void
     public var enrichFinished: @Sendable (_ shareID: String) -> Void
@@ -443,6 +464,9 @@ public struct ShareScanReporter: Sendable {
         scanDetailedProgress: (@Sendable (String, Int, Int) -> Void)? = nil,
         scanFrontierProgress: (@Sendable (String, Int, Int, Int) -> Void)? = nil,
         scanFinished: @escaping @Sendable (String) -> Void,
+        // Optional so every existing reporter (tests, fakes) keeps compiling and
+        // simply never reports a change.
+        scanChangedCatalog: (@Sendable (String) -> Void)? = nil,
         enrichStarted: @escaping @Sendable (String, Int) -> Void,
         enrichProgress: @escaping @Sendable (String, Int) -> Void,
         enrichFinished: @escaping @Sendable (String) -> Void,
@@ -451,6 +475,7 @@ public struct ShareScanReporter: Sendable {
         self.shareRegistered = shareRegistered
         self.scanStarted = scanStarted
         self.scanProgress = scanProgress
+        self.scanChangedCatalog = scanChangedCatalog ?? { _ in }
         let resolvedDetailed = scanDetailedProgress ?? { id, _, items in
             scanProgress(id, items)
         }

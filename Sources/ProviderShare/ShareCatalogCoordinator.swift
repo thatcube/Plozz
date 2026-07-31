@@ -48,7 +48,12 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     /// no-op. If the two ever drift, degradation is graceful: at worst one no-op
     /// spawn per window (never the per-render thrash, never a blocked needed scan
     /// as long as this stays ≤ the scanIfStale interval).
-    private static let backgroundScanCoalesceInterval: TimeInterval = 600
+    ///
+    /// Three minutes, lowered from ten. The old figure was set when an unchanged
+    /// pass re-walked the entire tree and took minutes; incremental scanning now
+    /// settles one in a few seconds, so the throttle was costing far more freshness
+    /// than it was saving work.
+    private static let backgroundScanCoalesceInterval: TimeInterval = 180
     /// Where scan/enrich progress is reported for the Home banner + Settings.
     /// Wired once by the app (`AppState`); `.noop` until then (tests/previews).
     private var reporter: ShareScanReporter = .noop
@@ -328,6 +333,26 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     /// safe even if an auto-scan is already in flight. No-op only if the share was
     /// never registered (its scanner doesn't exist) — callers ensure it does by
     /// touching the provider's catalog first (see `ShareProvider.rescan()`).
+    /// Give every registered share a chance to notice new files, without
+    /// disturbing anything on screen.
+    ///
+    /// A scan only spawns when something *queries* a catalog, which meant an idle
+    /// Home screen never triggered one — a download finishing while the viewer sat
+    /// there stayed invisible indefinitely. Home now calls this on a timer instead
+    /// of reloading itself, so polling costs a walk that ends in seconds when
+    /// nothing moved and produces no UI work at all unless a pass actually finds
+    /// something.
+    ///
+    /// Deliberately not `rescan(accountKey:)`: that is the Settings "Scan now"
+    /// action, which cancels any in-flight pass and ignores the staleness
+    /// throttle. This defers to both, so a poll can never displace real work or
+    /// scan more often than the interval allows.
+    public func pollForChanges() async {
+        for (accountKey, _) in runtimes {
+            await ensureScanning(accountKey)
+        }
+    }
+
     public func rescan(accountKey: String) async {
         while let invalidationTask = runtimes[accountKey]?.invalidationTask {
             await invalidationTask.value
@@ -556,8 +581,11 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
               !runtime.hasActiveScanTasks,
               !runtime.restarting,
               let scanner = runtime.scanner else { return }
+        // The developer override opens this gate too. Both gates have to yield or
+        // a forced pass is still swallowed here, before the scanner is consulted.
+        let coalesce = ShareScanDebug.scanInterval ?? Self.backgroundScanCoalesceInterval
         if let completedAt = runtime.lastBackgroundScanCompletedAt,
-           Date().timeIntervalSince(completedAt) < Self.backgroundScanCoalesceInterval {
+           Date().timeIntervalSince(completedAt) < coalesce {
             return
         }
         await startScan(accountKey: accountKey, runtime: runtime, scanner: scanner, force: false)

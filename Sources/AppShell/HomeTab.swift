@@ -55,6 +55,8 @@ struct HomeTab: View {
     let heroSettings: HeroSettingsModel
     let heroBackground: HeroBackgroundSettingsModel
     let heroTrailerController: HeroTrailerController
+    /// Lets Home poke the media shares while the viewer sits on it.
+    let onPollShares: () -> Void
     let heroRuntime: HomeHeroRuntimeState
     /// App-wide navigation style, so the carousel's left-edge focus behaviour
     /// (escape to sidebar vs. wrap) matches the surrounding chrome.
@@ -152,6 +154,7 @@ struct HomeTab: View {
                 heroSettings: heroSettings,
                 heroBackground: heroBackground,
                 heroTrailerController: heroTrailerController,
+                onPollShares: onPollShares,
                 heroIsFrontmost: path.isEmpty,
                 heroRuntime: heroRuntime,
                 heroFeaturedProvider: makeHeroFeaturedProvider(

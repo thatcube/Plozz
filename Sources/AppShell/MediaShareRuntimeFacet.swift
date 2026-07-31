@@ -122,6 +122,18 @@ public final class MediaShareRuntimeFacet {
     /// token for a guest share, which `provider(forAccountID:)` would reject) and
     /// asks it to rescan — registering its catalog/scanner if needed, so this works
     /// even when Home never queried the share, and it drives the scan indicator.
+    /// Gives every registered share a chance to notice new files.
+    ///
+    /// Home calls this on a timer so an idle screen still sees content that
+    /// arrives while the viewer sits there — a scan otherwise only spawns when
+    /// something queries a catalog, which Home does once on load. Costs nothing on
+    /// screen: it pokes the scanner, and the catalog reports back separately if a
+    /// pass actually changed anything.
+    public func pollSharesForChanges() {
+        let runtime = runtime
+        Task { await runtime.pollForChanges() }
+    }
+
     public func rescanShare(accountID: String) {
         rescanService.rescan(accountID: accountID)
     }

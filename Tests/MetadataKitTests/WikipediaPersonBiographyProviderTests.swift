@@ -57,6 +57,25 @@ final class WikipediaPersonBiographyProviderTests: XCTestCase {
         ))
     }
 
+    /// A longer name that merely *contains* the requested one is a different
+    /// person. "Michael B. Jordan" holds both tokens of "Michael Jordan" and is
+    /// genuinely an actor, so the occupation check clears him on his own merits —
+    /// only comparing the token sets both ways separates them.
+    func testRejectsALongerNameContainingTheRequestedOne() {
+        XCTAssertFalse(accepts(
+            page("Michael B. Jordan", "American actor (born 1987)"),
+            as: "Michael Jordan"
+        ))
+    }
+
+    /// Wikipedia's parenthetical qualifier is not an extra name token.
+    func testAcceptsAParentheticalQualifier() {
+        XCTAssertTrue(accepts(
+            page("Richard Armitage (actor)", "British actor (born 1971)"),
+            as: "Richard Armitage"
+        ))
+    }
+
     /// A server may hold a name in the opposite order to Wikipedia: "Kayano Ai"
     /// against "Ai Kayano". Substring matching rejects every Japanese voice
     /// actor on that basis, which is why the title check is token-wise.

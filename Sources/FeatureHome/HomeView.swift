@@ -81,6 +81,9 @@ public struct HomeView: View {
     /// Lets Home give the media shares a chance to notice new files while the
     /// viewer sits on it. `nil` disables polling (previews, hosts with no shares).
     private let onPollShares: () -> Void
+    /// When the viewer last pressed a direction. Tracked on Home's own body,
+    /// which IS an ancestor of the focused rails, so it actually sees their moves.
+    @State private var lastInteractionAt: ContinuousClock.Instant = .now
     private let heroTrailerResolver: HeroTrailerResolving
     private let heroIsFrontmost: Bool
     private let heroCurator: HeroCurator
@@ -520,11 +523,13 @@ public struct HomeView: View {
         }
         // New content that lands while the viewer sits on Home appears without a
         // navigation round trip. Zero-size and render-isolated — see the type.
+        .onMoveCommand { _ in lastInteractionAt = .now }
         .background(
             HomeShareScanRefreshObserver(
                 onRefresh: { Task { await viewModel.load(showLoadingState: false) } },
                 isTrailerPlaying: heroTrailerController.isPlaying,
-                onPollShares: onPollShares
+                onPollShares: onPollShares,
+                lastInteractionAt: lastInteractionAt
             )
         )
         .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
@@ -1043,12 +1048,29 @@ private struct HomeShareScanRefreshObserver: View {
     /// walk is declined for being too soon.
     private static let pollInterval: Duration = .seconds(120)
 
-    /// When the viewer last moved. A zero-size view still receives move commands
-    /// while Home holds focus, which is exactly the window a refresh must avoid.
-    @State private var lastInteractionAt: ContinuousClock.Instant = .now
+    /// When the viewer last moved, supplied by Home itself.
+    ///
+    /// Deliberately not observed here: this view is a zero-size `.background`, so
+    /// it is a *sibling* of the focused rails rather than an ancestor, and
+    /// `onMoveCommand` attached to it never sees the moves those rails dispatch.
+    /// The gate would then always read as idle — which is how a refresh could land
+    /// mid-browse, the exact thing it exists to prevent.
+    let lastInteractionAt: ContinuousClock.Instant
 
     /// Whether content may be swapped in without disturbing the viewer: they have
     /// been still for a while *and* nothing is playing.
+    /// A change is waiting for a quiet moment to be shown.
+    @State private var hasPendingChange = false
+
+    /// Show a pending change once nothing is in the way. Called both when a change
+    /// arrives and on every poll tick, so a viewer who is mid-browse when new
+    /// content lands still sees it as soon as they stop.
+    private func refreshIfSafe() {
+        guard hasPendingChange, isSafeToRefresh else { return }
+        hasPendingChange = false
+        onRefresh()
+    }
+
     private var isSafeToRefresh: Bool {
         !isTrailerPlaying && lastInteractionAt.duration(to: .now) >= Self.idleGrace
     }
@@ -1077,10 +1099,12 @@ private struct HomeShareScanRefreshObserver: View {
             .frame(width: 0, height: 0)
             .onChange(of: latestChangeAt) { oldValue, newValue in
                 guard newValue != nil, newValue != oldValue else { return }
-                // Same rule as the poll: a scan finishing is not a reason to
-                // reorder rows under someone mid-browse.
-                guard isSafeToRefresh else { return }
-                onRefresh()
+                // Latched, not dropped. A change arriving while the viewer is
+                // busy must not be discarded: `latestChangeAt` won't move again
+                // until the *next* real change, and unchanged scans never move
+                // it, so returning here left new content invisible indefinitely.
+                hasPendingChange = true
+                refreshIfSafe()
             }
             .onChange(of: scenePhase) { _, phase in
                 // Returning from background is the one moment a visible reshuffle
@@ -1099,9 +1123,11 @@ private struct HomeShareScanRefreshObserver: View {
                     // Poking costs nothing on screen, so it needs no idle check —
                     // only the reload that a real change triggers does.
                     onPollShares()
+                    // Deliver anything that arrived while the viewer was busy.
+                    refreshIfSafe()
                 }
             }
-            .onMoveCommand { _ in lastInteractionAt = .now }
+
             .accessibilityHidden(true)
     }
 }

@@ -195,11 +195,17 @@ public struct MediaRowView: View {
         self.statusCue = statusCue
         self.playsOnSelect = playsOnSelect
         self.onSelect = onSelect
-        self.itemIDSet = Set(items.map(\.id))
+        // Every derived table is built from the DEDUPED array, never from the
+        // caller's. Building them from the original left indices pointing at
+        // pre-collapse offsets — with [A, A, B], B rendered at 1 but was recorded
+        // at 2, which aborted artwork prefetch — and `byID` holding the *discarded*
+        // duplicate, so focusing the surviving card reported the wrong item.
+        let uniqueItems = self.items
+        self.itemIDSet = Set(uniqueItems.map(\.id))
         var indexByID: [String: Int] = [:]
         var byID: [String: MediaItem] = [:]
-        for (offset, item) in items.enumerated() {
-            if indexByID[item.id] == nil { indexByID[item.id] = offset }
+        for (offset, item) in uniqueItems.enumerated() {
+            indexByID[item.id] = offset
             byID[item.id] = item
         }
         self.itemIndexByID = indexByID

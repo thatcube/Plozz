@@ -305,7 +305,12 @@ actor ShareScanner {
         // fresh mtimes are unobtainable, so every one of them has to be listed.
         // For a series folder with ten seasons, skipping saved one listing and
         // forced ten — the optimization ran backwards on every interior node.
-        let directoriesWithSubdirectories = Self.parentPaths(of: storedDirectoryMTimes.keys)
+        // From ALL recorded directories, not just the skippable ones: a child the
+        // server gave no mtime for is absent from `storedDirectoryMTimes`, and
+        // deriving shape from those keys made its parent look childless and
+        // therefore skippable — orphaning the child and pruning its media.
+        let directoriesWithSubdirectories =
+            Self.parentPaths(of: await store.recordedDirectoryPaths())
         // Sidecar/artwork folders are re-listed on a DEEP pass only.
         //
         // They can't be skipped on mtime alone (an NFO edited in place doesn't
@@ -508,6 +513,23 @@ actor ShareScanner {
                 )
                 await finishScan(listers: pool)
                 return isInvalidated ? .invalidated : .cancelled(scanGeneration: scanGeneration)
+            }
+            // Stamp this level's skipped directories NOW, not at the end of the
+            // walk. A cancelled scan saves its frontier and resumes under the SAME
+            // scan id, but the in-memory list does not survive — so anything
+            // skipped before the interruption would never be stamped, and the
+            // resumed pass's prune would delete its media as though it had
+            // vanished from the share. Flushing per level bounds that to nothing,
+            // and bounds the list's memory too.
+            if !skippedDirectories.isEmpty {
+                let flushStart = DispatchTime.now().uptimeNanoseconds
+                await store.touchDirectoryContents(
+                    relPaths: skippedDirectories,
+                    scanID: scanID,
+                    scanGeneration: scanGeneration
+                )
+                skipStoreNanos += DispatchTime.now().uptimeNanoseconds - flushStart
+                skippedDirectories.removeAll(keepingCapacity: true)
             }
             frontier = nextFrontier
             // Checkpoint at every level boundary, not only on graceful

@@ -119,11 +119,19 @@ public struct WikipediaPersonBiographyProvider: PersonBiographyProvider {
         // than a loose contains, so a search for "Martin Freeman" cannot settle
         // on "Joe Freeman", who is also an English actor and so passes the
         // occupation check on his own merits.
-        let titleTokens = Set(tokens(of: title))
+        // The title's tokens, minus any parenthetical qualifier Wikipedia adds to
+        // disambiguate ("Richard Armitage (actor)").
+        let titleTokens = tokens(of: title.replacingOccurrences(
+            of: "\\([^)]*\\)", with: " ", options: .regularExpression
+        ))
         let nameTokens = tokens(of: name)
-        guard !nameTokens.isEmpty, nameTokens.allSatisfy(titleTokens.contains) else {
-            return false
-        }
+        guard !nameTokens.isEmpty else { return false }
+        // Every requested token must appear, AND the title may not carry extra
+        // ones. Containment alone accepts a longer, different name: "Michael B.
+        // Jordan" holds both tokens of "Michael Jordan" and is genuinely an actor,
+        // so the occupation check clears it too. Comparing the sets both ways is
+        // what separates a qualifier from a different person.
+        guard Set(nameTokens) == Set(titleTokens) else { return false }
 
         let description = (page.description ?? "").lowercased()
         guard !description.isEmpty else { return false }

@@ -531,6 +531,56 @@ struct CatalogReadQueries {
     /// Both keys are accepted because a share's `MediaPerson.id` is a TMDb id
     /// (`tmdb:person:1892`) while another server's is its own, so a person opened
     /// from Jellyfin or Plex can only be found here by name.
+    /// A `LIKE` "contains" pattern for `value`, or one that can never match when
+    /// there is nothing to look for.
+    ///
+    /// Both halves matter. An absent key must not degrade to `%%`, which matches
+    /// every row and would send the whole catalog through JSON decoding — the
+    /// id-only lookup passes no name, so that is the ordinary case, not an edge
+    /// one. And `%` or `_` inside a name are `LIKE` wildcards: "Jean_Luc" would
+    /// widen the prefilter rather than narrow it, so they are escaped. Neither
+    /// affects correctness — every candidate is decoded and verified — but both
+    /// decide how much work the verification is handed.
+    private static func containsPattern(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return Self.neverMatchesPattern }
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        return "%\(escaped)%"
+    }
+
+    /// A `LIKE` pattern on the longest stretch of `name` that survives diacritic
+    /// folding unchanged, so an accented spelling can still be reached.
+    ///
+    /// "Penelope Cruz" folds to a stored "Penélope Cruz" only at the decode step;
+    /// this gets that row *to* the decode by matching on "lope Cruz" — the longest
+    /// run whose characters are identical either way. Deliberately loose: it only
+    /// widens the candidate set, and every candidate is verified properly.
+    private static func asciiFoldedProbe(_ name: String) -> String {
+        guard !name.isEmpty else { return Self.neverMatchesPattern }
+        var best = ""
+        var current = ""
+        for character in name {
+            let folded = String(character).folding(
+                options: .diacriticInsensitive, locale: nil
+            )
+            if folded == String(character) {
+                current.append(character)
+                if current.count > best.count { best = current }
+            } else {
+                current = ""
+            }
+        }
+        let trimmed = best.trimmingCharacters(in: .whitespaces)
+        // Too short a run matches most of the catalog and buys nothing.
+        guard trimmed.count >= 4 else { return Self.neverMatchesPattern }
+        return Self.containsPattern(trimmed)
+    }
+
+    /// No stored cast JSON can contain a NUL, so this matches nothing.
+    private static let neverMatchesPattern = "\u{0}"
+
     func itemsWithPerson(id personID: String?, name: String, limit: Int) -> [MediaItem] {
         guard db != nil, limit > 0, castColumn == "cast_json" else { return [] }
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -540,11 +590,18 @@ struct CatalogReadQueries {
         // Ordered by discovery so the newest work leads, matching Recently Added.
         query("""
         SELECT item_id, cast_json FROM enrichment
-        WHERE cast_json IS NOT NULL AND (cast_json LIKE ?1 OR cast_json LIKE ?2)
+        WHERE cast_json IS NOT NULL
+          AND (cast_json LIKE ?1 ESCAPE '\\' OR cast_json LIKE ?2 ESCAPE '\\'
+               OR cast_json LIKE ?3 ESCAPE '\\')
         ORDER BY enriched_at DESC;
         """, bind: { stmt in
-            self.bindText(stmt, 1, "%\(trimmedName)%")
-            self.bindText(stmt, 2, personID.map { "%\($0)%" } ?? "\u{0}")
+            self.bindText(stmt, 1, Self.containsPattern(trimmedName))
+            self.bindText(stmt, 2, Self.containsPattern(personID))
+            // SQLite's LIKE is not Unicode-aware, but the verification below folds
+            // diacritics — so "Penelope Cruz" would never even look at a row
+            // storing "Penélope Cruz". Widening on the longest accent-free run
+            // gets such a row into the candidate set; the decode still decides.
+            self.bindText(stmt, 3, Self.asciiFoldedProbe(trimmedName))
         }) { stmt in
             guard matches.count < limit,
                   let itemID = self.columnText(stmt, 0),

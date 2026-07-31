@@ -124,7 +124,14 @@ public final class PersonDetailViewModel {
     /// show starts.
     private static func dedupeKey(_ item: MediaItem) -> String {
         let title = MediaItemIdentity.normalizedTitle(item.title)
-        return "\(item.kind.rawValue)|\(title)|\(item.productionYear.map(String.init) ?? "")"
+        guard let year = item.productionYear else {
+            // No year is not evidence of sameness. Two different films can share a
+            // normalized title, and collapsing them would silently remove one the
+            // viewer owns — a worse outcome than the duplicate poster this exists
+            // to prevent. Fall back to the id, which never merges anything.
+            return "id|\(item.id)"
+        }
+        return "\(item.kind.rawValue)|\(title)|\(year)"
     }
 
     public func load() async {

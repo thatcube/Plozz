@@ -2499,6 +2499,30 @@ extension ShareCatalogStore {
     /// conversion, so equality is exact and no tolerance has to be invented.
     /// `0` means "no mtime reported" (see `recordDirectory`) and is omitted, so
     /// it can never match a real one.
+    /// Every directory a completed scan recorded, mtime or not.
+    ///
+    /// Separate from `directoryModifiedSeconds` on purpose. That dictionary omits
+    /// directories the server reported no mtime for, because they must never be
+    /// skippable — but the walk also uses it to work out which directories have
+    /// children, and an omitted child made its parent look like a leaf. The parent
+    /// could then be skipped, and the child never walked and never stamped, so the
+    /// prune deleted its media. Tree shape has to come from the full row set.
+    func recordedDirectoryPaths() -> Set<String> {
+        ensureOpen()
+        guard db != nil,
+              let completed = meta(Self.completedDirectoryStateScanKey),
+              let completedScanID = Int64(completed)
+        else { return [] }
+        var out: Set<String> = []
+        query(
+            "SELECT rel_path FROM dir_state WHERE last_scan = ?;",
+            bind: { sqlite3_bind_int64($0, 1, completedScanID) }
+        ) { stmt in
+            if let path = self.columnText(stmt, 0) { out.insert(path) }
+        }
+        return out
+    }
+
     func directoryModifiedSeconds() -> [String: TimeInterval] {
         ensureOpen()
         guard db != nil,

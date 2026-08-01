@@ -111,6 +111,21 @@ public struct PlayerTouchCardStrip: View {
         .onChange(of: openPanel) { _, panel in
             let open = panel != nil
             if isCardOpen != open { isCardOpen = open }
+            // Leaving the Cast tab by ANY route drops the person it was showing.
+            //
+            // `castDetailPerson` is owned out here so the panel can be rebuilt
+            // without losing it, but the panel's own `isExpanded` is not — it is
+            // internal state that dies with the view. So a card dismissed from
+            // outside (tapping the video, switching to Info, hiding the controls)
+            // came back holding a person with the drill collapsed: the pane
+            // renders, its contents are hidden because the drill never "opened",
+            // and every face stays disabled behind it because a detail is
+            // notionally still up. Hence a dead list and a nameless pane until
+            // the player was closed and reopened.
+            //
+            // Only Back cleared it before, being the one exit that runs the
+            // panel's own close.
+            if panel != .cast { castDetailPerson = nil }
         }
         .onChange(of: isCardOpen) { _, open in
             // Dismissed from outside — a tap on the video. Same curve as opening,

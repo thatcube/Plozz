@@ -187,13 +187,6 @@ struct CastPanelView: View {
         .coordinateSpace(name: Self.space)
         .onPreferenceChange(CastCardFrameKey.self) { cardFrames = $0 }
         .onPreferenceChange(CastPhotoFrameKey.self) { photoFrames = $0 }
-        .background {
-            GeometryReader { geometry in
-                Color.clear
-                    .onAppear { panelSize = geometry.size }
-                    .onChange(of: geometry.size) { _, size in panelSize = size }
-            }
-        }
         .modifier(PlayerCardHeight(metrics: metrics))
         // The vertical panel takes the height its rows actually need, up to the
         // ceiling — a four-person cast should not leave two thirds of a card
@@ -202,6 +195,22 @@ struct CastPanelView: View {
         // drilling into a short cast does not leave the biography in a letterbox.
         .frame(height: metrics.isVertical ? verticalPanelHeight : nil)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Measured AFTER the frames above, which is the whole point of it
+        // sitting here rather than up beside the preference readers.
+        //
+        // Applied before them it reported the ZStack's INTRINSIC size — the
+        // width the face row happens to want — and the drill's reveal mask is
+        // sized from this, so the detail pane was masked to the row's width
+        // instead of the card's. On tvOS the row is long enough to fill the card
+        // and the two agree by accident; on a smaller card, with fewer and
+        // narrower face cards, the pane visibly stopped short of every edge.
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { panelSize = geometry.size }
+                    .onChange(of: geometry.size) { _, size in panelSize = size }
+            }
+        }
         .onChange(of: closeRequest) { _, _ in
             guard detailPerson != nil else { return }
             closeDetail()
@@ -806,6 +815,20 @@ private struct CastMemberDetail: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .modifier(PlayerCardHeight(metrics: metrics))
+        // Literally the chosen card's own surface, grown: the panel does not
+        // draw one of its own, it inherits the matched one. No focus state —
+        // this is a pane, and lighting it up would suggest it were selectable.
+        //
+        // OUTERMOST, and that is the fix rather than a tidy-up. Applied at the
+        // foot of the horizontal body it wrapped the bare content — inside the
+        // padding and before the width frame — so the glass hugged the headshot
+        // and the posters and stopped well short of the card's edges. A
+        // background draws around whatever it is attached to, so it has to be
+        // attached to the finished card, not to what goes in it. The vertical
+        // body had no surface at all for the same reason.
+        .background {
+            PlayerOverVideoSurface(cornerRadius: metrics.panelCornerRadius)
+        }
         // Keyed on the person: switching between two faces without leaving the
         // detail has to re-ask, and re-asking must not show the previous
         // person's credits while it does.
@@ -962,12 +985,6 @@ private struct CastMemberDetail: View {
             }
         }
         .frame(height: contentHeight, alignment: .topLeading)
-        // Literally the chosen card's own surface, grown: the panel does not
-        // draw one of its own, it inherits the matched one. No focus state —
-        // this is a pane, and lighting it up would suggest it were selectable.
-        .background {
-            PlayerOverVideoSurface(cornerRadius: metrics.panelCornerRadius)
-        }
     }
 
     private func load() async {

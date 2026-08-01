@@ -718,16 +718,14 @@ public struct PersonDetailView: View {
                 }
             }
         case .loading, .loaded where !viewModel.creditsAreFinal:
-            VStack(alignment: .leading, spacing: PlozzTheme.Spacing.large) {
-                creditShelfSkeleton
-                // Keeps a focus target on the page while every shelf is a
-                // placeholder. The skeleton itself is deliberately not
-                // focusable, so without this focus has nowhere to rest.
-                goBackButton
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            }
-            .defaultFocus($backFocused, true)
+            // No Back button here, unlike the creditless state below.
+            //
+            // A full-width button under two placeholder shelves is a lot of
+            // furniture for a state that lasts a second, and it is not what the
+            // eye should land on. The page still has a way out: Menu pops the
+            // navigation stack whether or not anything here holds focus, and the
+            // shelves that replace this are focusable the moment they arrive.
+            creditShelfSkeleton
         case .loaded, .unavailable:
             // A source that couldn't answer and a person with genuinely nothing
             // else are indistinguishable here, and either way the honest thing to

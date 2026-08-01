@@ -26,6 +26,10 @@ private struct MediaPersonNavigatorKey: EnvironmentKey {
     static let defaultValue: ((MediaPerson) -> Void)? = nil
 }
 
+private struct MediaPersonSourceNavigatorKey: EnvironmentKey {
+    static let defaultValue: ((MediaPerson, String?) -> Void)? = nil
+}
+
 public extension EnvironmentValues {
     /// The app-supplied handler that builds and performs context-menu actions.
     /// `nil` (the default) disables the menu — e.g. in previews and tests.
@@ -56,6 +60,20 @@ public extension EnvironmentValues {
         get { self[MediaPersonNavigatorKey.self] }
         set { self[MediaPersonNavigatorKey.self] = newValue }
     }
+
+    /// The same router, told WHICH server listed this person.
+    ///
+    /// A person id only means something to the server that issued it, and
+    /// `MediaPerson` does not carry its origin — so a page that opens one has to
+    /// say where it came from, or the person's own server cannot be asked for
+    /// their credits at all. tvOS solves this by having each page install a
+    /// navigator closed over its own account; this is the same idea expressed as
+    /// one router that takes the account, so a single destination can serve every
+    /// surface that pushes a person.
+    var mediaPersonSourceNavigator: ((MediaPerson, String?) -> Void)? {
+        get { self[MediaPersonSourceNavigatorKey.self] }
+        set { self[MediaPersonSourceNavigatorKey.self] = newValue }
+    }
 }
 
 public extension View {
@@ -79,6 +97,13 @@ public extension View {
     /// Installs the router that cast tiles in this subtree use to open a person.
     func mediaPersonNavigator(_ navigate: ((MediaPerson) -> Void)?) -> some View {
         environment(\.mediaPersonNavigator, navigate)
+    }
+
+    /// See ``EnvironmentValues/mediaPersonSourceNavigator``.
+    func mediaPersonSourceNavigator(
+        _ navigate: ((MediaPerson, String?) -> Void)?
+    ) -> some View {
+        environment(\.mediaPersonSourceNavigator, navigate)
     }
 
     /// Attaches the native tvOS press-and-hold menu for `item`, populated from

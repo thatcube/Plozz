@@ -36,7 +36,7 @@ struct PlozziOSPlayerView: View {
     /// contract they have on tvOS.
     @Environment(\.mediaItemNavigator) private var navigateToItem
     /// Likewise for "See more" on a cast member, which opens their own page.
-    @Environment(\.mediaPersonNavigator) private var navigateToPerson
+    @Environment(\.mediaPersonSourceNavigator) private var navigateToPerson
     @State private var viewModel: PlayerViewModel?
     @State private var playerIdentity = UUID()
     @State private var handoffTask: Task<Void, Never>?
@@ -245,7 +245,9 @@ struct PlozziOSPlayerView: View {
         if let navigateToPerson {
             viewModel.controls.infoCard.openPersonPage = { person in
                 dismiss()
-                navigateToPerson(person)
+                // The account travels with them: the cast list came from this
+                // item's server, so that is whose person ids it holds.
+                navigateToPerson(person, item.sourceAccountID)
             }
         }
         return viewModel

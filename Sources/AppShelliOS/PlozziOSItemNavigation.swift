@@ -17,10 +17,19 @@ import SwiftUI
 /// This adds a value-typed destination alongside the existing links: the menu
 /// sets the item, the stack builds the page once. Applied per navigation stack,
 /// so a push lands in the tab the user is actually in.
+/// A person plus the server that listed them — see
+/// ``EnvironmentValues/mediaPersonSourceNavigator``.
+private struct PlozziOSPersonRoute: Identifiable, Hashable {
+    let person: MediaPerson
+    let sourceAccountID: String?
+
+    var id: String { "\(person.id)#\(sourceAccountID ?? "")" }
+}
+
 private struct PlozziOSItemNavigationModifier: ViewModifier {
     let appModel: PlozziOSAppModel
     @State private var navigatedItem: MediaItem?
-    @State private var navigatedPerson: MediaPerson?
+    @State private var navigatedPerson: PlozziOSPersonRoute?
 
     func body(content: Content) -> some View {
         content
@@ -52,26 +61,34 @@ private struct PlozziOSItemNavigationModifier: ViewModifier {
                     )
                 }
             }
-            .navigationDestination(item: $navigatedPerson) { person in
+            .navigationDestination(item: $navigatedPerson) { route in
+                let person = route.person
                 let accounts = appModel.accountsProviders.resolvedActiveAccounts
                 PersonDetailView(
                     person: person,
                     viewModel: PersonDetailViewModel(
                         person: person,
-                        // NO id-scoped provider, deliberately.
+                        // The person's OWN server, by its own person id.
                         //
-                        // A person id is only meaningful to the server that
-                        // issued it, and `MediaPerson` does not carry which one
-                        // that was — tvOS supplies it separately, from the page
-                        // that loaded the title. This router is installed per
-                        // navigation stack and has no such context, so it asks
-                        // every server BY NAME instead, which is the same rung
-                        // the view model falls back to and cannot return another
-                        // server's person by mistake. It costs one request per
-                        // server; sending a Jellyfin id to Plex costs a wrong
-                        // answer, which is worse.
-                        provider: nil,
-                        otherProviders: accounts.map(\.provider),
+                        // Load STOPS here without one — the view model returns
+                        // `.unavailable` before it ever fans out — so passing nil
+                        // and relying on the by-name rung, as this briefly did,
+                        // reported "nothing else in your library" for everybody.
+                        // The account travels with the route because a person id
+                        // means nothing to any other server.
+                        //
+                        // `resolveOptional`, never a fallback to the primary
+                        // account: that sent Jellyfin and share person ids to
+                        // Plex and got nothing back. No account means no credits,
+                        // not wrong credits.
+                        provider: route.sourceAccountID.flatMap { id in
+                            accounts.first(where: { $0.account.id == id })?.provider
+                        },
+                        // Every OTHER signed-in server, asked by name, since
+                        // person ids do not cross servers.
+                        otherProviders: accounts
+                            .filter { $0.account.id != route.sourceAccountID }
+                            .map(\.provider),
                         // Keyless, so it works for every user out of the box, and
                         // only reached when no server stored a biography.
                         biographyProviders: [WikipediaPersonBiographyProvider()],
@@ -89,7 +106,13 @@ private struct PlozziOSItemNavigationModifier: ViewModifier {
             // destination outside the environment, so navigation actions are
             // dropped from every menu on a pushed page.
             .mediaItemNavigator { navigatedItem = $0 }
-            .mediaPersonNavigator { navigatedPerson = $0 }
+            // Account-less: for surfaces that have a person but no idea which
+            // server listed them. Their credits come from the keyless ladder and
+            // whatever the other servers can match by name.
+            .mediaPersonNavigator { navigatedPerson = .init(person: $0, sourceAccountID: nil) }
+            .mediaPersonSourceNavigator { person, accountID in
+                navigatedPerson = .init(person: person, sourceAccountID: accountID)
+            }
     }
 }
 

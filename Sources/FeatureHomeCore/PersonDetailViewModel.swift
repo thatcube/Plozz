@@ -428,6 +428,11 @@ public final class PersonDetailViewModel {
             // of the same name is rare, and losing one to the other costs a row
             // entry rather than something the viewer owns.
             var seen = Set(merged.map(Self.knownForKey))
+            // Snapshotted before the external rungs are folded in, so the log
+            // below can show what the servers actually answered with.
+            let ownedKeysForDiagnostics = merged.map {
+                "\($0.kind.rawValue)|\($0.title)|\($0.productionYear.map(String.init) ?? "-")"
+            }
             // Concurrent, but merged in declaration order. Serially these cost
             // the sum of the slowest of each — Wikidata's SPARQL endpoint alone
             // runs to seconds — and the row cannot appear until the last one
@@ -516,6 +521,21 @@ public final class PersonDetailViewModel {
                 libraryCredits = merged
                 state = .loaded
             }
+            // TEMPORARY (issue: owned titles wearing the not-in-library mark).
+            // Counts alone cannot say WHICH entry failed to dedupe, so list the
+            // keys on both sides: what the servers own, and what survived from
+            // the external rungs still flagged unowned. The overlap between
+            // those two lists is the bug.
+            PersonDiagnostics.emit(
+                "person.owned-keys name=\(person.name) "
+                + ownedKeysForDiagnostics.joined(separator: " ~ ")
+            )
+            PersonDiagnostics.emit(
+                "person.unowned-keys name=\(person.name) "
+                + merged.filter(\.isNotInLibraryDiscovery)
+                    .map { "\($0.kind.rawValue)|\($0.title)|\($0.productionYear.map(String.init) ?? "-")" }
+                    .joined(separator: " ~ ")
+            )
             // Announced BEFORE artwork is fetched, deliberately.
             //
             // The order is settled at this point, which is all a surface is

@@ -137,26 +137,25 @@ struct IndicatorGlyphBadge: View {
     /// Optical size of the glyph. Scales with the card — a mark sized for a
     /// 280pt poster is a quarter of the width of a 167pt player-panel poster.
     var size: CGFloat = IndicatorCardSize.glyphSize(forCardWidth: PlozzTheme.Metrics.posterWidth)
-    /// Draws the symbol as ONE solid shape instead of layering it.
+    /// Alpha of the symbol's SECONDARY layer — for `plus.circle.fill`, the disc
+    /// behind the plus. `nil` keeps plain `.hierarchical`.
     ///
-    /// `.hierarchical` gives a multi-part symbol depth by rendering its lesser
-    /// layers at reduced alpha — good for `binoculars.fill`, where the lenses
-    /// reading darker than the body is the whole shape. It is wrong for
-    /// `plus.circle.fill`: the disc IS the secondary layer, so hierarchical
-    /// renders it semi-transparent and the artwork shows straight through it.
-    /// `.monochrome` draws the disc at full strength with the plus knocked out.
-    var solid: Bool = false
-    /// Alpha of the mark. Only meaningful with `solid` — it exists so a solid
-    /// disc can be made opaque WITHOUT being made brighter: dropping alpha lets
-    /// the artwork tint it, where lowering the white would just make it grey.
-    var opacity: Double = 1
+    /// `.hierarchical` is the right look: the plus reading stronger than the disc
+    /// is what gives the mark depth, and flattening it to `.monochrome` loses
+    /// that. Its problem is only that it picks the secondary alpha itself, at
+    /// roughly half, which is see-through enough that artwork shows through the
+    /// disc. `.palette` draws the identical layer structure while letting the
+    /// alpha be named — so this is hierarchical with the disc turned up, NOT a
+    /// different rendering.
+    ///
+    /// Both layers are the SAME white on purpose. Raising alpha makes the disc
+    /// more solid without making it brighter; lightening the colour instead would
+    /// have made it glare.
+    var discOpacity: Double?
 
     var body: some View {
         if IndicatorSymbolAvailability.exists(symbol) {
-            Image(systemName: symbol)
-                .font(.system(size: size, weight: .semibold))
-                .symbolRenderingMode(solid ? .monochrome : .hierarchical)
-                .foregroundStyle(.white.opacity(solid ? opacity : 1))
+            glyph
                 // Just enough to hold an edge where the scrim has already
                 // thinned out. The scrim does the real work.
                 .shadow(color: .black.opacity(0.5), radius: size * 0.14, y: size * 0.03)
@@ -168,6 +167,21 @@ struct IndicatorGlyphBadge: View {
                 .foregroundStyle(.white)
                 .padding(size * 0.2)
                 .background(Circle().fill(.red))
+        }
+    }
+
+    @ViewBuilder
+    private var glyph: some View {
+        let image = Image(systemName: symbol)
+            .font(.system(size: size, weight: .semibold))
+        if let discOpacity {
+            image
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, .white.opacity(discOpacity))
+        } else {
+            image
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.white)
         }
     }
 }
@@ -186,6 +200,9 @@ enum ChosenIndicator {
     /// plus, gained the disc: the outline `plus.circle` the Request button uses
     /// loses its ring at player-card size.
     static let request = "plus.circle.fill"
+    /// How opaque the request disc is. Hierarchical's own choice (about half) let
+    /// the artwork through it; this is the same white, just turned up.
+    static let requestDiscOpacity: Double = 0.85
 }
 
 /// SF Symbols vary by OS version, and an unknown name renders as an empty view.
@@ -385,10 +402,8 @@ struct IndicatorPosterTile: View {
     let sample: IndicatorArtworkSample
     var glyph: String?
     var size: IndicatorCardSize = .personPage
-    /// See `IndicatorGlyphBadge.solid`.
-    var solidGlyph: Bool = false
-    /// See `IndicatorGlyphBadge.opacity`.
-    var glyphOpacity: Double = 1
+    /// See `IndicatorGlyphBadge.discOpacity`.
+    var discOpacity: Double?
     /// Always the top-right — the watch-status slot, which is free for an unowned
     /// title because watch state cannot apply to something you don't have.
     private let alignment: Alignment = .topTrailing
@@ -452,13 +467,8 @@ struct IndicatorPosterTile: View {
     @ViewBuilder
     private var badge: some View {
         if let glyph {
-            IndicatorGlyphBadge(
-                symbol: glyph,
-                size: glyphSize,
-                solid: solidGlyph,
-                opacity: glyphOpacity
-            )
-            .padding(badgeInset)
+            IndicatorGlyphBadge(symbol: glyph, size: glyphSize, discOpacity: discOpacity)
+                .padding(badgeInset)
         }
     }
 
@@ -692,8 +702,7 @@ public struct LibraryIndicatorGalleryView: View {
                     GalleryFocusTile {
                         chosenTile(
                             symbol: ChosenIndicator.notInLibrary,
-                            solid: false,
-                            opacity: 1,
+                            discOpacity: nil,
                             caption: "not in your library",
                             note: "hierarchical — the lenses reading darker than the body is the shape"
                         )
@@ -701,10 +710,9 @@ public struct LibraryIndicatorGalleryView: View {
                     GalleryFocusTile {
                         chosenTile(
                             symbol: ChosenIndicator.request,
-                            solid: true,
-                            opacity: Self.requestOpacitySteps[2],
+                            discOpacity: ChosenIndicator.requestDiscOpacity,
                             caption: "you can request this",
-                            note: "solid disc at \(Int(Self.requestOpacitySteps[2] * 100))% — see the ladder below"
+                            note: "hierarchical, disc turned up to \(Int(ChosenIndicator.requestDiscOpacity * 100))% — see the ladder below"
                         )
                     }
                 }
@@ -717,8 +725,7 @@ public struct LibraryIndicatorGalleryView: View {
 
     private func chosenTile(
         symbol: String,
-        solid: Bool,
-        opacity: Double,
+        discOpacity: Double?,
         caption: String,  // l10n:content — DEBUG-only design-preview label; never shipped, never translated
         note: String
     ) -> some View {
@@ -730,15 +737,13 @@ public struct LibraryIndicatorGalleryView: View {
                             sample: .pale,
                             glyph: symbol,
                             size: size,
-                            solidGlyph: solid,
-                            glyphOpacity: opacity
+                            discOpacity: discOpacity
                         )
                         IndicatorPosterTile(
                             sample: .dark,
                             glyph: symbol,
                             size: size,
-                            solidGlyph: solid,
-                            glyphOpacity: opacity
+                            discOpacity: discOpacity
                         )
                         cardSizeCaption(size)
                     }
@@ -750,19 +755,17 @@ public struct LibraryIndicatorGalleryView: View {
 
     // MARK: 0b — how solid the request disc should be
 
-    /// The disc looked see-through because `.hierarchical` draws it as the
-    /// symbol's lesser layer at reduced alpha. Monochrome fixes that, but at full
-    /// strength a solid white disc reads BRIGHTER, which isn't wanted either — so
-    /// the choice is an alpha, and an alpha is not something to guess at. Same
-    /// white throughout; only opacity changes, left (most see-through, closest to
-    /// what shipped) to right (fully solid).
-    private static let requestOpacitySteps: [Double] = [0.70, 0.82, 0.90, 1.0]
+    /// Hierarchical throughout — only the disc's alpha changes. Left is closest
+    /// to what hierarchical picks on its own (about half, the see-through one);
+    /// right is a fully solid disc. The white is identical in every step, so none
+    /// of them is brighter than another.
+    private static let requestOpacitySteps: [Double] = [0.65, 0.75, 0.85, 0.95, 1.0]
 
     private var requestOpacityLadder: some View {
         GallerySection(
             marker: "0b",
             title: "How solid should the request disc be?",
-            subtitle: "Only the alpha changes — the white is identical in all four, so none of these is brighter, just less see-through. Pick a number and I'll set it."
+            subtitle: "Still hierarchical — the plus stays stronger than the disc. Only the disc's alpha moves, and the white is identical in every step, so none is brighter, just less see-through. The last tile is plain hierarchical for reference."
         ) {
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 44) {
@@ -776,22 +779,20 @@ public struct LibraryIndicatorGalleryView: View {
                                                 sample: .pale,
                                                 glyph: ChosenIndicator.request,
                                                 size: size,
-                                                solidGlyph: true,
-                                                glyphOpacity: step
+                                                discOpacity: step
                                             )
                                             IndicatorPosterTile(
                                                 sample: .dark,
                                                 glyph: ChosenIndicator.request,
                                                 size: size,
-                                                solidGlyph: true,
-                                                glyphOpacity: step
+                                                discOpacity: step
                                             )
                                         }
                                     }
                                 }
                                 GalleryCaption(
-                                    title: "\(Int(step * 100))% solid",
-                                    note: step == 1.0 ? "fully opaque" : nil,
+                                    title: "disc \(Int(step * 100))%",
+                                    note: step == ChosenIndicator.requestDiscOpacity ? "current" : nil,
                                     width: railTileWidth
                                 )
                             }
@@ -816,8 +817,8 @@ public struct LibraryIndicatorGalleryView: View {
                                 }
                             }
                             GalleryCaption(
-                                title: "hierarchical",
-                                note: "what it looked like before — the see-through one",
+                                title: "plain hierarchical",
+                                note: "the see-through one — what it looked like before",
                                 width: railTileWidth
                             )
                         }

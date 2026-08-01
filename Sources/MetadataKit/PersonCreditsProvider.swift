@@ -381,11 +381,26 @@ public struct TMDbPersonCreditsProvider: PersonCreditsProviding {
             .prefix(max(1, limit))
             .compactMap { credit in
                 guard let title = credit.displayTitle else { return nil }
+                let isTV = credit.mediaType == "tv"
                 var item = MediaItem(
-                    id: "tmdb:\(credit.mediaType == "tv" ? "tv" : "movie"):\(credit.id)",
+                    id: "tmdb:\(isTV ? "tv" : "movie"):\(credit.id)",
                     title: title,
-                    kind: credit.mediaType == "tv" ? .series : .movie
+                    kind: isTV ? .series : .movie
                 )
+                // The id TMDb itself gave us, stamped where enrichment looks for
+                // it.
+                //
+                // Without this the detail page has only a title to go on and
+                // searches for it — and TMDb ranks search by popularity, so
+                // "The Circle" resolves to Kingsman: The Golden Circle and the
+                // page fills with the wrong film's artwork and synopsis. An
+                // exact id cannot be misread, and it skips the search entirely.
+                item.providerIDs[ProviderIDNamespace.tmdb.canonicalKey] = String(credit.id)
+                if isTV {
+                    // Series enrichment reads the series-scoped key, since an
+                    // episode's own id is not the show's.
+                    item.providerIDs[ProviderIDNamespace.seriesTmdb.canonicalKey] = String(credit.id)
+                }
                 item.productionYear = credit.year
                 item.posterURL = credit.posterPath.flatMap {
                     URL(string: "https://image.tmdb.org/t/p/w342\($0)")

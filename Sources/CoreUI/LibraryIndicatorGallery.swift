@@ -137,13 +137,26 @@ struct IndicatorGlyphBadge: View {
     /// Optical size of the glyph. Scales with the card — a mark sized for a
     /// 280pt poster is a quarter of the width of a 167pt player-panel poster.
     var size: CGFloat = IndicatorCardSize.glyphSize(forCardWidth: PlozzTheme.Metrics.posterWidth)
+    /// Draws the symbol as ONE solid shape instead of layering it.
+    ///
+    /// `.hierarchical` gives a multi-part symbol depth by rendering its lesser
+    /// layers at reduced alpha — good for `binoculars.fill`, where the lenses
+    /// reading darker than the body is the whole shape. It is wrong for
+    /// `plus.circle.fill`: the disc IS the secondary layer, so hierarchical
+    /// renders it semi-transparent and the artwork shows straight through it.
+    /// `.monochrome` draws the disc at full strength with the plus knocked out.
+    var solid: Bool = false
+    /// Alpha of the mark. Only meaningful with `solid` — it exists so a solid
+    /// disc can be made opaque WITHOUT being made brighter: dropping alpha lets
+    /// the artwork tint it, where lowering the white would just make it grey.
+    var opacity: Double = 1
 
     var body: some View {
         if IndicatorSymbolAvailability.exists(symbol) {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.white)
+                .symbolRenderingMode(solid ? .monochrome : .hierarchical)
+                .foregroundStyle(.white.opacity(solid ? opacity : 1))
                 // Just enough to hold an edge where the scrim has already
                 // thinned out. The scrim does the real work.
                 .shadow(color: .black.opacity(0.5), radius: size * 0.14, y: size * 0.03)
@@ -157,6 +170,22 @@ struct IndicatorGlyphBadge: View {
                 .background(Circle().fill(.red))
         }
     }
+}
+
+/// The two marks that were chosen off this screen, so the pair has one place it
+/// is defined rather than being spelled out at each use site.
+enum ChosenIndicator {
+    /// "Not in your library." Picked over the external-arrow idiom (which claims
+    /// we open elsewhere — we don't), the cloud (says "streaming", not "not
+    /// held") and the negations (`eye.slash`, `minus.circle`, `nosign`, which all
+    /// read as prohibitions). Binoculars say "something to look at that isn't
+    /// here", which is the actual meaning, and the silhouette survives 25pt on
+    /// the player card.
+    static let notInLibrary = "binoculars.fill"
+    /// "You can request this", shown only while Seerr is connected. Kept the
+    /// plus, gained the disc: the outline `plus.circle` the Request button uses
+    /// loses its ring at player-card size.
+    static let request = "plus.circle.fill"
 }
 
 /// SF Symbols vary by OS version, and an unknown name renders as an empty view.
@@ -356,6 +385,10 @@ struct IndicatorPosterTile: View {
     let sample: IndicatorArtworkSample
     var glyph: String?
     var size: IndicatorCardSize = .personPage
+    /// See `IndicatorGlyphBadge.solid`.
+    var solidGlyph: Bool = false
+    /// See `IndicatorGlyphBadge.opacity`.
+    var glyphOpacity: Double = 1
     /// Always the top-right — the watch-status slot, which is free for an unowned
     /// title because watch state cannot apply to something you don't have.
     private let alignment: Alignment = .topTrailing
@@ -419,8 +452,13 @@ struct IndicatorPosterTile: View {
     @ViewBuilder
     private var badge: some View {
         if let glyph {
-            IndicatorGlyphBadge(symbol: glyph, size: glyphSize)
-                .padding(badgeInset)
+            IndicatorGlyphBadge(
+                symbol: glyph,
+                size: glyphSize,
+                solid: solidGlyph,
+                opacity: glyphOpacity
+            )
+            .padding(badgeInset)
         }
     }
 
@@ -524,7 +562,7 @@ private struct GalleryCaption: View {
 }
 
 private struct GallerySection<Content: View>: View {
-    let number: Int
+    let marker: String
     let title: String  // l10n:content — DEBUG-only design-preview label; never shipped, never translated
     let subtitle: String  // l10n:content — DEBUG-only design-preview label; never shipped, never translated
     @ViewBuilder let content: Content
@@ -532,7 +570,7 @@ private struct GallerySection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(verbatim: "\(number). \(title)")
+                Text(verbatim: "\(marker). \(title)")
                     .font(.system(size: 34, weight: .bold))
                     .foregroundStyle(.white)
                 Text(verbatim: subtitle)
@@ -604,6 +642,8 @@ public struct LibraryIndicatorGalleryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 64) {
                 header
+                chosenPair
+                requestOpacityLadder
                 notInLibraryShapes
                 notInLibraryOnPosters
                 nonGlyphTreatments
@@ -636,11 +676,165 @@ public struct LibraryIndicatorGalleryView: View {
         }
     }
 
+    // MARK: 0 — the chosen pair
+
+    /// What was actually picked, at the top, at both real sizes, so the decision
+    /// can be sanity-checked in one glance instead of scrolling back through the
+    /// candidates it beat.
+    private var chosenPair: some View {
+        GallerySection(
+            marker: "0",
+            title: "Chosen",
+            subtitle: "binoculars.fill for \"not in your library\"; plus.circle.fill for \"you can request this\" (Seerr connected only). Both at the person-page size and the in-player cast size, over both posters."
+        ) {
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 44) {
+                    GalleryFocusTile {
+                        chosenTile(
+                            symbol: ChosenIndicator.notInLibrary,
+                            solid: false,
+                            opacity: 1,
+                            caption: "not in your library",
+                            note: "hierarchical — the lenses reading darker than the body is the shape"
+                        )
+                    }
+                    GalleryFocusTile {
+                        chosenTile(
+                            symbol: ChosenIndicator.request,
+                            solid: true,
+                            opacity: Self.requestOpacitySteps[2],
+                            caption: "you can request this",
+                            note: "solid disc at \(Int(Self.requestOpacitySteps[2] * 100))% — see the ladder below"
+                        )
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+            }
+            .scrollClipDisabled()
+        }
+    }
+
+    private func chosenTile(
+        symbol: String,
+        solid: Bool,
+        opacity: Double,
+        caption: String,  // l10n:content — DEBUG-only design-preview label; never shipped, never translated
+        note: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 20) {
+                ForEach(IndicatorCardSize.allCases) { size in
+                    VStack(alignment: .leading, spacing: 12) {
+                        IndicatorPosterTile(
+                            sample: .pale,
+                            glyph: symbol,
+                            size: size,
+                            solidGlyph: solid,
+                            glyphOpacity: opacity
+                        )
+                        IndicatorPosterTile(
+                            sample: .dark,
+                            glyph: symbol,
+                            size: size,
+                            solidGlyph: solid,
+                            glyphOpacity: opacity
+                        )
+                        cardSizeCaption(size)
+                    }
+                }
+            }
+            GalleryCaption(title: caption, note: "\(symbol) — \(note)", width: railTileWidth)
+        }
+    }
+
+    // MARK: 0b — how solid the request disc should be
+
+    /// The disc looked see-through because `.hierarchical` draws it as the
+    /// symbol's lesser layer at reduced alpha. Monochrome fixes that, but at full
+    /// strength a solid white disc reads BRIGHTER, which isn't wanted either — so
+    /// the choice is an alpha, and an alpha is not something to guess at. Same
+    /// white throughout; only opacity changes, left (most see-through, closest to
+    /// what shipped) to right (fully solid).
+    private static let requestOpacitySteps: [Double] = [0.70, 0.82, 0.90, 1.0]
+
+    private var requestOpacityLadder: some View {
+        GallerySection(
+            marker: "0b",
+            title: "How solid should the request disc be?",
+            subtitle: "Only the alpha changes — the white is identical in all four, so none of these is brighter, just less see-through. Pick a number and I'll set it."
+        ) {
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 44) {
+                    ForEach(Self.requestOpacitySteps, id: \.self) { step in
+                        GalleryFocusTile {
+                            VStack(alignment: .leading, spacing: 14) {
+                                HStack(alignment: .top, spacing: 20) {
+                                    ForEach(IndicatorCardSize.allCases) { size in
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            IndicatorPosterTile(
+                                                sample: .pale,
+                                                glyph: ChosenIndicator.request,
+                                                size: size,
+                                                solidGlyph: true,
+                                                glyphOpacity: step
+                                            )
+                                            IndicatorPosterTile(
+                                                sample: .dark,
+                                                glyph: ChosenIndicator.request,
+                                                size: size,
+                                                solidGlyph: true,
+                                                glyphOpacity: step
+                                            )
+                                        }
+                                    }
+                                }
+                                GalleryCaption(
+                                    title: "\(Int(step * 100))% solid",
+                                    note: step == 1.0 ? "fully opaque" : nil,
+                                    width: railTileWidth
+                                )
+                            }
+                        }
+                    }
+                    GalleryFocusTile {
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(alignment: .top, spacing: 20) {
+                                ForEach(IndicatorCardSize.allCases) { size in
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        IndicatorPosterTile(
+                                            sample: .pale,
+                                            glyph: ChosenIndicator.request,
+                                            size: size
+                                        )
+                                        IndicatorPosterTile(
+                                            sample: .dark,
+                                            glyph: ChosenIndicator.request,
+                                            size: size
+                                        )
+                                    }
+                                }
+                            }
+                            GalleryCaption(
+                                title: "hierarchical",
+                                note: "what it looked like before — the see-through one",
+                                width: railTileWidth
+                            )
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+            }
+            .scrollClipDisabled()
+        }
+    }
+
     // MARK: 1 — not-in-library glyph shapes
 
     private var notInLibraryShapes: some View {
         GallerySection(
-            number: 1,
+            marker: "1",
             title: "\"Not in your library\" — shapes",
             subtitle: "Each candidate on near-white, mid grey and near-black, under the same scrim the real card draws. If it fails here it fails everywhere."
         ) {
@@ -652,7 +846,7 @@ public struct LibraryIndicatorGalleryView: View {
 
     private var notInLibraryOnPosters: some View {
         GallerySection(
-            number: 2,
+            marker: "2",
             title: "\"Not in your library\" — on posters",
             subtitle: "Top-right corner. Each candidate is shown four ways: person-page card (left column) and in-player cast card (right column), each over a pale poster and a dark one. Scroll right."
         ) {
@@ -664,7 +858,7 @@ public struct LibraryIndicatorGalleryView: View {
 
     private var nonGlyphTreatments: some View {
         GallerySection(
-            number: 3,
+            marker: "3",
             title: "\"Not in your library\" — without an icon",
             subtitle: "Whole-poster treatments, on equal footing with the glyphs. A dashed edge or a drained poster may say \"not held\" better than any symbol, and it reads from further away."
         ) {
@@ -702,7 +896,7 @@ public struct LibraryIndicatorGalleryView: View {
 
     private var requestShapes: some View {
         GallerySection(
-            number: 4,
+            marker: "4",
             title: "\"You can request this\" — shapes",
             subtitle: "Only ever shown when Seerr is connected. Same bare treatment, so the two marks are compared on equal terms."
         ) {
@@ -712,7 +906,7 @@ public struct LibraryIndicatorGalleryView: View {
 
     private var requestOnPosters: some View {
         GallerySection(
-            number: 5,
+            marker: "5",
             title: "\"You can request this\" — on posters",
             subtitle: "Same corner, same scrim, both card sizes."
         ) {

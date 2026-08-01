@@ -550,6 +550,31 @@ private struct GalleryFocusTile<Content: View>: View {
     }
 }
 
+/// A focusable matrix ROW. Deliberately does not scale or move on focus — a row
+/// is 1300pt of comparison, and anything that shifts it changes the very thing
+/// being compared. A rim is enough to say where you are.
+private struct MatrixRow<Content: View>: View {
+    @ViewBuilder let content: Content
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        content
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.white.opacity(isFocused ? 0.10 : 0))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(ThemePalette.brandBlue.opacity(isFocused ? 1 : 0), lineWidth: 3)
+            }
+            .focusable(true)
+            .focused($isFocused)
+            .animation(.easeOut(duration: 0.12), value: isFocused)
+    }
+}
+
 /// Caption under every swatch: the symbol name (the thing to write down) plus the
 /// developer note explaining why it's a candidate.
 private struct GalleryCaption: View {
@@ -903,53 +928,76 @@ public struct LibraryIndicatorGalleryView: View {
         GallerySection(
             marker: "0c",
             title: "Every grey against every opacity",
-            subtitle: "10 greys down, 70→100% opacity across. Each cell is the in-player cast card at its real 167×250, so this is the hardest version of the test. Labelled grey/opacity — read one off and I'll set it."
+            subtitle: "10 greys down, 70→100% opacity across. Each cell is the in-player cast card at its real 167×250, so this is the hardest version of the test. Up/Down moves a whole row at a time; the grey is labelled at the left of each row and the opacity along the top."
         ) {
-            VStack(alignment: .leading, spacing: 40) {
+            VStack(alignment: .leading, spacing: 44) {
                 matrixBlock(for: .dark)
                 matrixBlock(for: .pale)
             }
         }
     }
 
-    private func matrixBlock(for sample: IndicatorArtworkSample) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(verbatim: sample.id == "dark" ? "over dark artwork" : "over pale artwork")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.75))
+    /// Width of the leading label column, holding each row's grey value.
+    private static let matrixLabelWidth: CGFloat = 92
+    private static let matrixCellSpacing: CGFloat = 14
 
-            // Lazy on purpose: 70 cells per artwork, each carrying a poster
-            // image, and a non-lazy stack would build all 140 up front.
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(
-                        .fixed(IndicatorCardSize.playerCast.width(metrics: metrics)),
-                        spacing: 14,
-                        alignment: .topLeading
-                    ),
-                    count: Self.matrixAlphas.count
-                ),
-                alignment: .leading,
-                spacing: 20
-            ) {
+    /// One artwork's full matrix.
+    ///
+    /// A ROW is the focus unit, not a cell. The first version made all 70 cells
+    /// individually focusable inside a `LazyVGrid`, which was unusable: a lazy
+    /// grid hasn't realized its offscreen rows, so the focus engine has no
+    /// candidate to move to and focus either stalls or jumps somewhere unrelated.
+    /// One focus target per row means directional movement is always Up/Down
+    /// between adjacent, realized views — and it reads better anyway, since a row
+    /// IS the comparison: one grey swept across every alpha.
+    private func matrixBlock(for sample: IndicatorArtworkSample) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(verbatim: sample.id == "dark" ? "over dark artwork" : "over pale artwork")
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.8))
+
+            matrixHeader
+
+            // Lazy vertically only: 70 poster images per artwork is too many to
+            // build up front, and rows are cheap to realize one at a time.
+            LazyVStack(alignment: .leading, spacing: 10) {
                 ForEach(Self.matrixGreys, id: \.self) { grey in
-                    ForEach(Self.matrixAlphas, id: \.self) { alpha in
-                        GalleryFocusTile {
-                            VStack(alignment: .leading, spacing: 6) {
-                                IndicatorPosterTile(
-                                    sample: sample,
-                                    glyph: ChosenIndicator.request,
-                                    size: .playerCast,
-                                    markStyle: IndicatorMarkStyle(
-                                        disc: Color(white: grey).opacity(alpha)
-                                    )
-                                )
-                                Text(verbatim: "\(Int(grey * 100)) / \(Int(alpha * 100))%")
-                                    .font(.system(size: 16, design: .monospaced))
-                                    .foregroundStyle(.white.opacity(0.5))
-                            }
-                        }
-                    }
+                    matrixRow(grey: grey, sample: sample)
+                }
+            }
+        }
+    }
+
+    /// Opacity labels, sized and spaced identically to the cells below so each
+    /// sits over its own column.
+    private var matrixHeader: some View {
+        HStack(spacing: Self.matrixCellSpacing) {
+            Color.clear.frame(width: Self.matrixLabelWidth, height: 1)
+            ForEach(Self.matrixAlphas, id: \.self) { alpha in
+                Text(verbatim: "\(Int(alpha * 100))%")
+                    .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .frame(width: IndicatorCardSize.playerCast.width(metrics: metrics), alignment: .leading)
+            }
+        }
+    }
+
+    private func matrixRow(grey: Double, sample: IndicatorArtworkSample) -> some View {
+        MatrixRow {
+            HStack(spacing: Self.matrixCellSpacing) {
+                Text(verbatim: "grey \(Int(grey * 100))")
+                    .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .frame(width: Self.matrixLabelWidth, alignment: .leading)
+                ForEach(Self.matrixAlphas, id: \.self) { alpha in
+                    IndicatorPosterTile(
+                        sample: sample,
+                        glyph: ChosenIndicator.request,
+                        size: .playerCast,
+                        markStyle: IndicatorMarkStyle(
+                            disc: Color(white: grey).opacity(alpha)
+                        )
+                    )
                 }
             }
         }

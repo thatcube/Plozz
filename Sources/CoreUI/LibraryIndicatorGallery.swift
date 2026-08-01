@@ -137,28 +137,19 @@ struct IndicatorGlyphBadge: View {
     /// Optical size of the glyph. Scales with the card — a mark sized for a
     /// 280pt poster is a quarter of the width of a 167pt player-panel poster.
     var size: CGFloat = IndicatorCardSize.glyphSize(forCardWidth: PlozzTheme.Metrics.posterWidth)
-    /// Alpha of the symbol's SECONDARY layer — for `plus.circle.fill`, the disc
-    /// behind the plus. `nil` keeps plain `.hierarchical`.
-    ///
-    /// `.hierarchical` is the right look: the plus reading stronger than the disc
-    /// is what gives the mark depth, and flattening it to `.monochrome` loses
-    /// that. Its problem is only that it picks the secondary alpha itself, at
-    /// roughly half, which is see-through enough that artwork shows through the
-    /// disc. `.palette` draws the identical layer structure while letting the
-    /// alpha be named — so this is hierarchical with the disc turned up, NOT a
-    /// different rendering.
-    ///
-    /// Both layers are the SAME white on purpose. Raising alpha makes the disc
-    /// more solid without making it brighter; lightening the colour instead would
-    /// have made it glare.
-    var discOpacity: Double?
+    /// How the symbol's layers are painted. `nil` leaves plain `.hierarchical`.
+    var style: IndicatorMarkStyle?
 
     var body: some View {
         if IndicatorSymbolAvailability.exists(symbol) {
             glyph
                 // Just enough to hold an edge where the scrim has already
                 // thinned out. The scrim does the real work.
-                .shadow(color: .black.opacity(0.5), radius: size * 0.14, y: size * 0.03)
+                .shadow(
+                    color: .black.opacity(style?.shadowOpacity ?? 0.5),
+                    radius: size * 0.14,
+                    y: size * 0.03
+                )
         } else {
             // A missing symbol renders as nothing, which would silently look like
             // "this candidate is invisible". Say so instead.
@@ -173,17 +164,37 @@ struct IndicatorGlyphBadge: View {
     @ViewBuilder
     private var glyph: some View {
         let image = Image(systemName: symbol)
-            .font(.system(size: size, weight: .semibold))
-        if let discOpacity {
+            .font(.system(size: size, weight: style?.weight ?? .semibold))
+        if let style, let disc = style.disc {
+            // `.palette` draws the SAME layer structure hierarchical does — it
+            // just lets both layers' colours be named instead of deriving the
+            // second from the first.
             image
                 .symbolRenderingMode(.palette)
-                .foregroundStyle(.white, .white.opacity(discOpacity))
+                .foregroundStyle(style.glyph, disc)
         } else {
             image
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.white)
+                .foregroundStyle(style?.glyph ?? .white)
         }
     }
+}
+
+/// How a two-layer symbol like `plus.circle.fill` is painted.
+///
+/// The reason this exists rather than a single opacity: the mark is a white plus
+/// on a white disc, so those two layers are only told apart by the alpha gap
+/// between them. Closing that gap — which is exactly what raising the disc's
+/// opacity does — makes the disc solid AND makes the plus disappear into it. The
+/// disc can only be made more solid if the plus stops being the same colour.
+struct IndicatorMarkStyle {
+    /// The symbol's primary layer — for `plus.circle.fill`, the plus itself.
+    var glyph: Color = .white
+    /// The secondary layer — the disc. `nil` means "let hierarchical choose",
+    /// which is the see-through rendering.
+    var disc: Color?
+    var weight: Font.Weight = .semibold
+    var shadowOpacity: Double = 0.5
 }
 
 /// The two marks that were chosen off this screen, so the pair has one place it
@@ -200,9 +211,9 @@ enum ChosenIndicator {
     /// plus, gained the disc: the outline `plus.circle` the Request button uses
     /// loses its ring at player-card size.
     static let request = "plus.circle.fill"
-    /// How opaque the request disc is. Hierarchical's own choice (about half) let
-    /// the artwork through it; this is the same white, just turned up.
-    static let requestDiscOpacity: Double = 0.85
+    /// Placeholder until a variant is picked from section 0b — plain
+    /// hierarchical, one of the two Brandon rated best.
+    static let requestStyle: IndicatorMarkStyle? = nil
 }
 
 /// SF Symbols vary by OS version, and an unknown name renders as an empty view.
@@ -402,8 +413,8 @@ struct IndicatorPosterTile: View {
     let sample: IndicatorArtworkSample
     var glyph: String?
     var size: IndicatorCardSize = .personPage
-    /// See `IndicatorGlyphBadge.discOpacity`.
-    var discOpacity: Double?
+    /// See `IndicatorGlyphBadge.style`.
+    var markStyle: IndicatorMarkStyle?
     /// Always the top-right — the watch-status slot, which is free for an unowned
     /// title because watch state cannot apply to something you don't have.
     private let alignment: Alignment = .topTrailing
@@ -467,7 +478,7 @@ struct IndicatorPosterTile: View {
     @ViewBuilder
     private var badge: some View {
         if let glyph {
-            IndicatorGlyphBadge(symbol: glyph, size: glyphSize, discOpacity: discOpacity)
+            IndicatorGlyphBadge(symbol: glyph, size: glyphSize, style: markStyle)
                 .padding(badgeInset)
         }
     }
@@ -654,6 +665,7 @@ public struct LibraryIndicatorGalleryView: View {
                 header
                 chosenPair
                 requestOpacityLadder
+                notInLibraryVariants
                 notInLibraryShapes
                 notInLibraryOnPosters
                 nonGlyphTreatments
@@ -702,7 +714,7 @@ public struct LibraryIndicatorGalleryView: View {
                     GalleryFocusTile {
                         chosenTile(
                             symbol: ChosenIndicator.notInLibrary,
-                            discOpacity: nil,
+                            markStyle: nil,
                             caption: "not in your library",
                             note: "hierarchical — the lenses reading darker than the body is the shape"
                         )
@@ -710,9 +722,9 @@ public struct LibraryIndicatorGalleryView: View {
                     GalleryFocusTile {
                         chosenTile(
                             symbol: ChosenIndicator.request,
-                            discOpacity: ChosenIndicator.requestDiscOpacity,
+                            markStyle: ChosenIndicator.requestStyle,
                             caption: "you can request this",
-                            note: "hierarchical, disc turned up to \(Int(ChosenIndicator.requestDiscOpacity * 100))% — see the ladder below"
+                            note: "plain hierarchical for now — pick a variant in 0b"
                         )
                     }
                 }
@@ -725,7 +737,7 @@ public struct LibraryIndicatorGalleryView: View {
 
     private func chosenTile(
         symbol: String,
-        discOpacity: Double?,
+        markStyle: IndicatorMarkStyle?,
         caption: String,  // l10n:content — DEBUG-only design-preview label; never shipped, never translated
         note: String
     ) -> some View {
@@ -737,13 +749,13 @@ public struct LibraryIndicatorGalleryView: View {
                             sample: .pale,
                             glyph: symbol,
                             size: size,
-                            discOpacity: discOpacity
+                            markStyle: markStyle
                         )
                         IndicatorPosterTile(
                             sample: .dark,
                             glyph: symbol,
                             size: size,
-                            discOpacity: discOpacity
+                            markStyle: markStyle
                         )
                         cardSizeCaption(size)
                     }
@@ -753,23 +765,68 @@ public struct LibraryIndicatorGalleryView: View {
         }
     }
 
-    // MARK: 0b — how solid the request disc should be
+    // MARK: 0b — making the request mark legible
 
-    /// Hierarchical throughout — only the disc's alpha changes. Left is closest
-    /// to what hierarchical picks on its own (about half, the see-through one);
-    /// right is a fully solid disc. The white is identical in every step, so none
-    /// of them is brighter than another.
-    private static let requestOpacitySteps: [Double] = [0.65, 0.75, 0.85, 0.95, 1.0]
+    /// Why raising the disc's alpha backfired: `plus.circle.fill` is a white plus
+    /// on a white disc, and the ONLY thing separating them is the alpha gap
+    /// hierarchical puts between the layers. Closing that gap makes the disc
+    /// solid and swallows the plus at the same time — which is why 85% was harder
+    /// to read than 65%, and 65% harder than plain hierarchical.
+    ///
+    /// So the disc cannot be made more solid while the plus stays the same
+    /// colour. These are the ways out, all built on the two that rated best.
+    private static let requestVariants: [(label: String, note: String, style: IndicatorMarkStyle?)] = [
+        (
+            "plain hierarchical",
+            "baseline — the one you liked. Everything below tries to beat it",
+            nil
+        ),
+        (
+            "bolder plus",
+            "same rendering, heavier stroke. Costs nothing and helps most at 25pt",
+            IndicatorMarkStyle(weight: .bold)
+        ),
+        (
+            "bolder + deeper shadow",
+            "as above with the drop shadow doubled, so the mark holds its own edge",
+            IndicatorMarkStyle(weight: .bold, shadowOpacity: 0.85)
+        ),
+        (
+            "white plus, dark disc 45%",
+            "stops fighting itself: the disc goes DOWN in tone, not up in alpha",
+            IndicatorMarkStyle(disc: .black.opacity(0.45))
+        ),
+        (
+            "white plus, dark disc 65%",
+            "same idea, more of it. Closest to a chip without being one",
+            IndicatorMarkStyle(disc: .black.opacity(0.65))
+        ),
+        (
+            "dark plus, solid white disc",
+            "inverted. The disc can be fully solid because the plus is knocked out of it",
+            IndicatorMarkStyle(glyph: Color(white: 0.12), disc: .white)
+        ),
+        (
+            "dark plus, white disc 88%",
+            "inverted, letting a little artwork through so it sits in the card",
+            IndicatorMarkStyle(glyph: Color(white: 0.12), disc: .white.opacity(0.88))
+        ),
+        (
+            "dark bold plus, solid white disc",
+            "inverted with the heavier stroke — the most legible thing here, probably too loud",
+            IndicatorMarkStyle(glyph: Color(white: 0.12), disc: .white, weight: .bold)
+        )
+    ]
 
     private var requestOpacityLadder: some View {
         GallerySection(
             marker: "0b",
-            title: "How solid should the request disc be?",
-            subtitle: "Still hierarchical — the plus stays stronger than the disc. Only the disc's alpha moves, and the white is identical in every step, so none is brighter, just less see-through. The last tile is plain hierarchical for reference."
+            title: "Making the request mark readable",
+            subtitle: "Raising the disc's alpha made it WORSE because the plus is white too — closing the gap between them hides the plus. These change the relationship instead: a heavier plus, a darker disc, or a dark plus knocked out of a solid one. First tile is the plain-hierarchical baseline."
         ) {
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 44) {
-                    ForEach(Self.requestOpacitySteps, id: \.self) { step in
+                    ForEach(Array(Self.requestVariants.enumerated()), id: \.offset) { _, variant in
                         GalleryFocusTile {
                             VStack(alignment: .leading, spacing: 14) {
                                 HStack(alignment: .top, spacing: 20) {
@@ -779,48 +836,83 @@ public struct LibraryIndicatorGalleryView: View {
                                                 sample: .pale,
                                                 glyph: ChosenIndicator.request,
                                                 size: size,
-                                                discOpacity: step
+                                                markStyle: variant.style
                                             )
                                             IndicatorPosterTile(
                                                 sample: .dark,
                                                 glyph: ChosenIndicator.request,
                                                 size: size,
-                                                discOpacity: step
+                                                markStyle: variant.style
                                             )
                                         }
                                     }
                                 }
                                 GalleryCaption(
-                                    title: "disc \(Int(step * 100))%",
-                                    note: step == ChosenIndicator.requestDiscOpacity ? "current" : nil,
+                                    title: variant.label,
+                                    note: variant.note,
                                     width: railTileWidth
                                 )
                             }
                         }
                     }
-                    GalleryFocusTile {
-                        VStack(alignment: .leading, spacing: 14) {
-                            HStack(alignment: .top, spacing: 20) {
-                                ForEach(IndicatorCardSize.allCases) { size in
-                                    VStack(alignment: .leading, spacing: 12) {
-                                        IndicatorPosterTile(
-                                            sample: .pale,
-                                            glyph: ChosenIndicator.request,
-                                            size: size
-                                        )
-                                        IndicatorPosterTile(
-                                            sample: .dark,
-                                            glyph: ChosenIndicator.request,
-                                            size: size
-                                        )
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+            }
+            .scrollClipDisabled()
+        }
+    }
+
+    // MARK: 0c — the same question for binoculars
+
+    /// `binoculars.fill` has the opposite problem to the plus: its layers are
+    /// *supposed* to differ in tone (the lenses reading darker than the body is
+    /// the shape), so hierarchical is right and the only question is whether it
+    /// survives 25pt on the player card. These push weight and shadow rather than
+    /// colour, plus one darkened-lens variant for contrast.
+    private static let notInLibraryVariantList: [(label: String, note: String, style: IndicatorMarkStyle?)] = [
+        ("plain hierarchical", "baseline — what's in Chosen now", nil),
+        ("bolder", "heavier stroke; the shape has more to lose at 25pt than the plus does", IndicatorMarkStyle(weight: .bold)),
+        ("bolder + deeper shadow", "as above, drop shadow doubled", IndicatorMarkStyle(weight: .bold, shadowOpacity: 0.85)),
+        ("darker lenses", "lenses pushed further from the body so the silhouette is unmistakable", IndicatorMarkStyle(disc: .black.opacity(0.55))),
+        ("bold, darker lenses", "both at once", IndicatorMarkStyle(disc: .black.opacity(0.55), weight: .bold))
+    ]
+
+    private var notInLibraryVariants: some View {
+        GallerySection(
+            marker: "0c",
+            title: "Making the binoculars readable",
+            subtitle: "Same exercise for the not-in-library mark. Hierarchical is already right here — the lenses reading darker than the body IS the shape — so these push weight and shadow instead of colour."
+        ) {
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 44) {
+                    ForEach(Array(Self.notInLibraryVariantList.enumerated()), id: \.offset) { _, variant in
+                        GalleryFocusTile {
+                            VStack(alignment: .leading, spacing: 14) {
+                                HStack(alignment: .top, spacing: 20) {
+                                    ForEach(IndicatorCardSize.allCases) { size in
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            IndicatorPosterTile(
+                                                sample: .pale,
+                                                glyph: ChosenIndicator.notInLibrary,
+                                                size: size,
+                                                markStyle: variant.style
+                                            )
+                                            IndicatorPosterTile(
+                                                sample: .dark,
+                                                glyph: ChosenIndicator.notInLibrary,
+                                                size: size,
+                                                markStyle: variant.style
+                                            )
+                                        }
                                     }
                                 }
+                                GalleryCaption(
+                                    title: variant.label,
+                                    note: variant.note,
+                                    width: railTileWidth
+                                )
                             }
-                            GalleryCaption(
-                                title: "plain hierarchical",
-                                note: "the see-through one — what it looked like before",
-                                width: railTileWidth
-                            )
                         }
                     }
                 }

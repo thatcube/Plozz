@@ -263,6 +263,8 @@ struct PlozziOSDetailHeroSection: View {
     let onSelectVersion: (String) -> Void
     let actionHandler: any MediaItemActionHandling
     let onPlay: (MediaItem, Bool) -> Void
+    var trailerItem: MediaItem?
+    var onPlayTrailer: ((MediaItem) -> Void)?
     var heroRequest: PlozziOSHeroRequest?
     /// Forwarded to the action row — see `offersParentNavigation` there.
     var offersParentNavigation: Bool = false
@@ -316,6 +318,8 @@ struct PlozziOSDetailHeroSection: View {
                 style: style,
                 actionHandler: actionHandler,
                 onPlay: onPlay,
+                trailerItem: trailerItem,
+                onPlayTrailer: onPlayTrailer,
                 heroRequest: heroRequest,
                 offersParentNavigation: offersParentNavigation,
                 presentsEpisodeStill: presentsEpisodeStill
@@ -1128,6 +1132,8 @@ private struct PlozziOSDetailHeroForeground: View {
     let style: HeroArtworkStyle
     let actionHandler: any MediaItemActionHandling
     let onPlay: (MediaItem, Bool) -> Void
+    var trailerItem: MediaItem?
+    var onPlayTrailer: ((MediaItem) -> Void)?
     var heroRequest: PlozziOSHeroRequest?
     /// Whether this hero fronts an item with a parent page worth returning to —
     /// an episode on its own page, reachable from Continue Watching or Search
@@ -1345,6 +1351,7 @@ private struct PlozziOSDetailHeroForeground: View {
         return HStack(spacing: 12) {
             playActionButton
             heroRequestButton
+            trailerActionButton
             ForEach(inline) { extra in
                 inlineExtraButton(extra)
             }
@@ -1380,6 +1387,18 @@ private struct PlozziOSDetailHeroForeground: View {
     private var heroRequestButton: some View {
         if let heroRequest {
             PlozziOSHeroRequestButton(item: item, request: heroRequest)
+        }
+    }
+
+    @ViewBuilder
+    private var trailerActionButton: some View {
+        if let trailerItem, let onPlayTrailer {
+            Button {
+                onPlayTrailer(trailerItem)
+            } label: {
+                Label("Trailer", systemImage: "film.fill")
+            }
+            .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .secondary))
         }
     }
 

@@ -97,10 +97,10 @@ struct RelatedRowView: View {
     /// are clipped at the trailing edge exactly as real cards are.
     private static let placeholderCount = 8
 
-    private var items: [MediaItem] { entries.compactMap(\.libraryItem) }
+    private var items: [MediaItem] { entries.map(\.item) }
     private var continuationItemIDs: Set<String> {
         Set(entries.compactMap { entry in
-            entry.isContinuation ? entry.libraryItem?.id : nil
+            entry.isContinuation ? entry.item.id : nil
         })
     }
 }

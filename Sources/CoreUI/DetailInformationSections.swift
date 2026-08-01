@@ -40,6 +40,7 @@ public struct DetailInformationSections: View {
     private let horizontalInset: CGFloat
     private let selectedSource: MediaSourceRef?
     private let selectedVersion: MediaVersion?
+    private let externalAvailability: ExternalTitleAvailability?
 
     @State private var showsFullOverview = false
     @State private var overviewCardHeight: CGFloat = 0
@@ -62,12 +63,14 @@ public struct DetailInformationSections: View {
         item: MediaItem,
         horizontalInset: CGFloat,
         selectedSource: MediaSourceRef? = nil,
-        selectedVersion: MediaVersion? = nil
+        selectedVersion: MediaVersion? = nil,
+        externalAvailability: ExternalTitleAvailability? = nil
     ) {
         self.item = item
         self.horizontalInset = horizontalInset
         self.selectedSource = selectedSource
         self.selectedVersion = selectedVersion
+        self.externalAvailability = externalAvailability
     }
 
     public var body: some View {
@@ -764,6 +767,11 @@ public struct DetailInformationSections: View {
         [
             InformationGroup(id: "details", title: "Details", facts: detailFacts),
             InformationGroup(id: "crew", title: "Crew", facts: crewFacts),
+            InformationGroup(
+                id: "availability",
+                title: "Release & Availability",
+                facts: availabilityFacts
+            ),
             InformationGroup(id: "playback", title: "Playback", facts: playbackFacts)
         ]
         .filter { !$0.facts.isEmpty }
@@ -806,6 +814,79 @@ public struct DetailInformationSections: View {
         appendListFact(id: "writers", label: "Written By", values: crew(kind: "writer"), to: &facts)
         appendListFact(id: "studios", label: "Studios", values: item.studios, to: &facts)
         return facts
+    }
+
+    private var availabilityFacts: [InformationFact] {
+        guard let availability = externalAvailability else { return [] }
+        let locale = Locale.current
+        let region = locale.localizedString(
+            forRegionCode: availability.regionCode
+        ) ?? availability.regionCode
+        var facts: [InformationFact] = []
+        for event in availability.releaseEvents.sorted(by: { $0.date < $1.date }) {
+            let label: LocalizedStringKey
+            switch event.kind {
+            case .premiere: label = "Premiere"
+            case .theatricalLimited: label = "Limited Theatrical"
+            case .theatrical: label = "Theatrical"
+            case .digital: label = "Digital"
+            case .physical: label = "Physical"
+            case .television: label = "TV Premiere"
+            }
+            facts.append(InformationFact(
+                id: "release-\(event.kind.rawValue)-\(event.date.timeIntervalSinceReferenceDate)",
+                label: label,
+                value: "\(event.date.formatted(.dateTime.month(.abbreviated).day().year())) · \(region)"
+            ))
+        }
+        let streaming = providerNames(
+            availability.watchOffers.filter {
+                $0.kind == .subscription || $0.kind == .free || $0.kind == .ads
+            }
+        )
+        if !streaming.isEmpty {
+            facts.append(InformationFact(
+                id: "streaming",
+                label: "Streaming",
+                value: streaming
+            ))
+        }
+        let rent = providerNames(
+            availability.watchOffers.filter { $0.kind == .rent }
+        )
+        if !rent.isEmpty {
+            facts.append(InformationFact(
+                id: "rent",
+                label: "Rent",
+                value: rent
+            ))
+        }
+        let buy = providerNames(
+            availability.watchOffers.filter { $0.kind == .buy }
+        )
+        if !buy.isEmpty {
+            facts.append(InformationFact(
+                id: "buy",
+                label: "Buy",
+                value: buy
+            ))
+        }
+        if !availability.watchOffers.isEmpty {
+            facts.append(InformationFact(
+                id: "availability-attribution",
+                label: "Availability Data",
+                value: "JustWatch"
+            ))
+        }
+        return facts
+    }
+
+    private func providerNames(_ offers: [TitleWatchOffer]) -> String {
+        var seen = Set<Int>()
+        return offers
+            .filter { seen.insert($0.providerID).inserted }
+            .map(\.providerName)
+            .joined(separator: " · ")
     }
 
     /// "Playback" — everything about *this copy* in one place: where it streams

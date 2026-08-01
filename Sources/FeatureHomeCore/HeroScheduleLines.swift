@@ -1,5 +1,6 @@
 import Foundation
 import CoreModels
+import CoreNetworking
 import MetadataKit
 
 /// The air-schedule line for each series in the Home hero, keyed by item id.
@@ -20,7 +21,7 @@ public final class HeroScheduleLines {
     /// appear here, so a missing entry means "no badge" rather than "not loaded".
     public private(set) var lines: [String: LocalizedStringResource] = [:]
 
-    /// Items already sent to the network. Re-fronting a slide is normal in a
+    /// Metadata identities already sent to the network. Re-fronting a slide is normal in a
     /// carousel — the same three or four come round repeatedly — and without this
     /// each pass would re-request a schedule the resolver has already answered.
     private var fetched: Set<String> = []
@@ -29,6 +30,15 @@ public final class HeroScheduleLines {
 
     public func line(for item: MediaItem) -> LocalizedStringResource? {
         lines[item.id]
+    }
+
+    /// Changes when a slide with the same card id gains external provider ids.
+    /// Initial Home slides can front before metadata enrichment lands; keying the
+    /// task only by `item.id` permanently cached that first unresolvable attempt.
+    public func fetchKey(for item: MediaItem?) -> String {
+        guard let item else { return "-" }
+        let identity = MetadataQuery(item).seriesScoped.enrichmentCacheKey
+        return "\(item.id)|\(identity)"
     }
 
     /// Publishes every schedule already on disk for `items`. **Zero network**, so
@@ -48,7 +58,33 @@ public final class HeroScheduleLines {
     /// nothing; `fetched` covers the rest, where a stale record would otherwise be
     /// re-requested every time the carousel came back round.
     public func refreshFronted(_ item: MediaItem) async {
-        guard Self.carriesSchedule(item), fetched.insert(item.id).inserted else { return }
+        let fetchKey = fetchKey(for: item)
+        if Self.carriesExternalAvailability(item) {
+            // The resolver owns positive/negative TTLs. Re-entering the slide is
+            // a cheap actor/cache hit and becomes a real refresh only when due.
+            let availability =
+                await ExternalTitleMetadataResolver.shared.availability(
+                    for: item,
+                    regionCode:
+                        Locale.current.region?.identifier ?? "US"
+                )
+            let line = availability.primaryLine()
+            PlozzLog.boot(
+                "HeroAvailability title=\(item.title) key=\(fetchKey) "
+                    + "offers=\(availability.watchOffers.count) "
+                    + "events=\(availability.releaseEvents.count) "
+                    + "line=\(line == nil ? "no" : "yes")"
+            )
+            if lines[item.id] != line {
+                lines[item.id] = line
+            }
+            // A current watch offer ("Streaming on Apple TV") is more useful
+            // than a series cadence. With no availability line, fall through to
+            // the existing multi-provider TV schedule.
+            if line != nil || !Self.carriesSchedule(item) { return }
+        }
+        guard Self.carriesSchedule(item) else { return }
+        guard fetched.insert(fetchKey).inserted else { return }
         let query = MetadataQuery(item).seriesScoped
         // The viewer is looking at this slide right now, so it goes ahead of the
         // passive backlog — the same tier a detail page uses.
@@ -81,5 +117,12 @@ public final class HeroScheduleLines {
         case .series, .season, .episode: return true
         default: return false
         }
+    }
+
+    static func carriesExternalAvailability(_ item: MediaItem) -> Bool {
+        item.isNotInLibraryDiscovery
+            && (item.kind == .movie
+                || item.kind == .video
+                || item.kind == .series)
     }
 }

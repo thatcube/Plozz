@@ -828,12 +828,22 @@ struct DetailHeroView: View, Equatable {
                     )
                 }
             }
-            if isDiscoveryItem ? showsRequestPill : ((playTitle != nil && onPlay != nil) || onPlayTrailer != nil || hasHeroActionButtons) {
+            if isDiscoveryItem
+                ? (showsRequestPill || onPlayTrailer != nil)
+                : ((playTitle != nil && onPlay != nil) || onPlayTrailer != nil || hasHeroActionButtons) {
                 HStack(spacing: 24) {
                     if isDiscoveryItem {
-                        // A not-in-library discovery title offers only a request /
-                        // status pill; every library-only affordance is suppressed.
-                        requestPill()
+                        // Discovery keeps library-only actions suppressed but a
+                        // trailer remains useful whether or not Seerr is installed.
+                        if showsRequestPill { requestPill() }
+                        if let onPlayTrailer {
+                            Button(action: onPlayTrailer) {
+                                Label("Trailer", systemImage: "film.fill")
+                            }
+                            .modifier(HeroActionButtonStyle(prominent: !showsRequestPill))
+                            .prefersDefaultFocus(!showsRequestPill, in: heroActionsScope)
+                            .focused($heroActionRowFocus, equals: .trailer)
+                        }
                     } else {
                     if let playTitle, let onPlay {
                         playButton(title: playTitle, action: onPlay)

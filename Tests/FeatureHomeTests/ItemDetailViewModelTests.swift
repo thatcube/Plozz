@@ -17,6 +17,148 @@ final class ItemDetailViewModelTests: XCTestCase {
         MediaItem(id: id, title: "Episode \(number)", kind: .episode, episodeNumber: number, resumePosition: resume)
     }
 
+    func testDiscoveryLoadsRichMetadataWithoutCallingMediaProvider() async {
+        var seed = MediaItem(
+            id: "seer:movie:42",
+            title: "External Movie",
+            kind: .movie,
+            providerIDs: ["Tmdb": "42"],
+            availability: .unknown
+        )
+        seed.posterURL = URL(string: "https://image.test/seed.jpg")
+        let provider = FakeMediaProvider(allItems: [])
+        let release = TitleReleaseEvent(
+            kind: .digital,
+            date: Date(timeIntervalSince1970: 1_900_000_000),
+            regionCode: "US"
+        )
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: seed.id,
+            initialItem: seed,
+            isDiscoveryItem: true,
+            externalMetadataResolver: { _, region in
+                ExternalTitleMetadata(
+                    enrichment: MetadataEnrichment(
+                        overview: SourcedValue(
+                            value: "A rich external overview.",
+                            source: .tmdb
+                        ),
+                        genres: SourcedValue(
+                            value: ["Drama"],
+                            source: .tmdb
+                        ),
+                        cast: SourcedValue(
+                            value: [
+                                MediaPerson(
+                                    id: "person:1",
+                                    name: "Actor",
+                                    kind: "Actor"
+                                )
+                            ],
+                            source: .tmdb
+                        )
+                    ),
+                    availability: ExternalTitleAvailability(
+                        regionCode: region,
+                        releaseEvents: [release]
+                    )
+                )
+            },
+            availabilityRegionCode: "US",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(provider.itemCallCount(for: seed.id), 0)
+        XCTAssertEqual(vm.state.value?.item.overview, "A rich external overview.")
+        XCTAssertEqual(vm.state.value?.item.genres, ["Drama"])
+        XCTAssertEqual(
+            vm.state.value?.item.cast.map { $0.name },
+            ["Actor"]
+        )
+        XCTAssertEqual(
+            vm.state.value?.externalAvailability?.releaseEvents,
+            [release]
+        )
+        XCTAssertEqual(vm.state.value?.childrenLoaded, true)
+    }
+
+    func testLateDiscoveryStatusRefreshPreservesRichMetadata() async {
+        let seed = MediaItem(
+            id: "seer:movie:42",
+            title: "External Movie",
+            kind: .movie,
+            providerIDs: ["Tmdb": "42"],
+            availability: .unknown
+        )
+        let provider = FakeMediaProvider(allItems: [])
+        let firstStatusGate = AsyncGate()
+        let statusCalls = LockedCounter()
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: seed.id,
+            initialItem: seed,
+            isDiscoveryItem: true,
+            discoveryStatusRefresh: { _ in
+                if statusCalls.increment() == 1 {
+                    await firstStatusGate.wait()
+                }
+                return (.processing, nil)
+            },
+            externalMetadataResolver: { _, region in
+                ExternalTitleMetadata(
+                    enrichment: MetadataEnrichment(
+                        overview: SourcedValue(
+                            value: "Enriched while status was in flight.",
+                            source: .tmdb
+                        )
+                    ),
+                    availability: ExternalTitleAvailability(
+                        regionCode: region,
+                        watchOffers: [
+                            TitleWatchOffer(
+                                providerID: 1,
+                                providerName: "Max",
+                                kind: .subscription,
+                                regionCode: region
+                            )
+                        ]
+                    )
+                )
+            },
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        let staleRefresh = Task {
+            await vm.refreshDiscoveryStatusNow()
+        }
+        await waitUntil { statusCalls.value >= 1 }
+        await vm.load()
+        XCTAssertEqual(
+            vm.state.value?.item.overview,
+            "Enriched while status was in flight."
+        )
+
+        firstStatusGate.open()
+        await staleRefresh.value
+
+        XCTAssertEqual(
+            vm.state.value?.item.overview,
+            "Enriched while status was in flight."
+        )
+        XCTAssertEqual(
+            vm.state.value?.externalAvailability?.watchOffers.first?.providerName,
+            "Max"
+        )
+        XCTAssertEqual(vm.state.value?.item.availability, .processing)
+    }
+
     func testLoadFetchesSeasonsAsChildren() async {
         let provider = FakeMediaProvider(allItems: [])
         provider.childrenByParent = [
@@ -1835,6 +1977,26 @@ private final class LockedFlag: @unchecked Sendable {
     private var flag = false
     func set() { lock.lock(); flag = true; lock.unlock() }
     var value: Bool { lock.lock(); defer { lock.unlock() }; return flag }
+}
+
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    @discardableResult
+    func increment() -> Int {
+        lock.lock()
+        count += 1
+        let result = count
+        lock.unlock()
+        return result
+    }
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
 }
 
 @MainActor

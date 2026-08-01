@@ -196,11 +196,10 @@ public struct ItemDetailView: View {
                 // unaffected — so the page re-inflates in place when uncovered.
                 Color.clear
             } else if isDiscoveryItem {
-                // A not-in-library discovery title (movie OR series) has no library
-                // children/sources to render, and must NOT enter SeriesDetailView
-                // (which expects real seasons/episodes). Show a request-focused
-                // hero built from the seeded TMDB metadata.
-                discoveryDetail(detail)
+                // Rich provider-independent detail: same hero/information/cast/
+                // related composition as an owned title, with Play/library
+                // mutations gated off and Request/Trailer left available.
+                container(detail)
             } else if detail.item.kind == .series {
                 SeriesDetailView(
                     series: detail.item,
@@ -377,68 +376,6 @@ public struct ItemDetailView: View {
     /// a single rail of children. Movies and episodes show just the hero + Play.
     private static let topAnchorID = "item-hero-top"
 
-    /// The detail page for a not-in-library discovery (Seerr) title: a full-screen
-    /// hero built entirely from the seeded TMDB metadata (poster/backdrop/overview)
-    /// with a single Request / Requested / Downloading pill. There is no children
-    /// rail, server/version picker, or watchlist/watched action — none apply to a
-    /// title that isn't in any library.
-    private func discoveryDetail(_ detail: ItemDetailViewModel.Detail) -> some View {
-        let effectiveAvailability = requestOverride ?? detail.item.availability
-        let cta = MediaItem.heroCTA(
-            availability: effectiveAvailability,
-            downloadProgress: detail.item.downloadProgress,
-            seerConnected: seerConnected
-        )
-        // TEMPORARY (issue: a discovery title that turns out to be owned shows no
-        // buttons at all) — kept while the fix is watched on device.
-        //
-        // Keyed to the STATE, never emitted from the body. Written inline first,
-        // it fired on every render pass, and this page can re-render in a tight
-        // loop — so three synchronous writes (os_log, stdout, file) per pass ran
-        // thousands of times on the main thread and turned a re-render churn into
-        // a jetsam kill. Telemetry must never be a side effect of `body`.
-        let discoveryTraceKey = "\(detail.item.id)|\(cta)|\(String(describing: effectiveAvailability))"
-        return ScrollView {
-            DetailHeroView(
-                item: detail.item,
-                heroHeightFraction: 1.0,
-                spoilerSettings: spoilerSettings,
-                playTitle: nil,
-                onPlay: nil,
-                isDiscoveryItem: true,
-                requestCTA: cta,
-                // Show "Request as <name>" before the press so a shared-TV
-                // request's identity is visible up front.
-                requestActingName: requestActingName,
-                onRequest: (detail.item.kind == .movie && onRequest != nil && cta == .request)
-                    ? { requestTapped(detail.item) }
-                    : nil,
-                seasonRequestAvailability: detail.item.kind == .series ? seasonRequestAvailability : nil,
-                seasonRequestAvailabilityResolved: seasonRequestAvailabilityResolved,
-                seasonRequestAvailabilityFailed: seasonRequestAvailabilityFailed,
-                isRequestingSeasons: isSeasonRequestInFlight,
-                onRequestSeasons: onRequestSeasons == nil ? nil : { seasons in
-                    requestTapped(detail.item, seasons: seasons)
-                },
-                onRetrySeasonRequestAvailability: {
-                    seasonRequestRetryToken &+= 1
-                }
-            )
-            .id(Self.topAnchorID)
-        }
-        // Never clip the focused request pill's lift/shadow.
-        .scrollClipDisabled()
-        // Fires once per distinct state rather than once per render — see
-        // `discoveryTraceKey`.
-        .task(id: discoveryTraceKey) {
-            PersonDiagnostics.emit(
-                "detail.discovery title=\(detail.item.title) seer=\(seerConnected) "
-                + "availability=\(String(describing: effectiveAvailability)) cta=\(cta) "
-                + "tmdb=\(detail.item.providerIDs["Tmdb"] ?? "-") id=\(detail.item.id)"
-            )
-        }
-    }
-
     /// Handles a Request tap: confirm ONCE for the unmapped admin case in a
     /// household (see `confirmAdminRequest`) so a member on an unmapped profile is
     /// told their request goes as the unrestricted admin — but only until they've
@@ -589,6 +526,24 @@ public struct ItemDetailView: View {
         // Cross-server discovery restores Play the instant it folds in a real copy.
         let canPlay = isPlayable(detail.item)
             && detail.item.hasPlayableLibraryTarget(additionalSources: sources)
+        let effectiveAvailability = requestOverride ?? detail.item.availability
+        let requestCTA = MediaItem.heroCTA(
+            availability: effectiveAvailability,
+            downloadProgress: detail.item.downloadProgress,
+            seerConnected: seerConnected
+        )
+        let discoveryStatusLine: LocalizedStringResource? = {
+            guard isDiscoveryItem else { return nil }
+            if detail.item.kind == .series,
+               let schedule = detail.upcomingSchedule {
+                return SeriesUpcoming.heroLine(
+                    nextEpisode: schedule.upcomingEpisode,
+                    cadence: schedule.cadence,
+                    schedule: schedule.upcomingEpisodes
+                )
+            }
+            return detail.externalAvailability?.primaryLine()
+        }()
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 32) {
@@ -600,6 +555,7 @@ public struct ItemDetailView: View {
                         // entirely — so offer a way over to it.
                         offersParentNavigation: presentsEpisodeAsSubject,
                         presentsEpisodeStill: presentsEpisodeAsSubject,
+                        scheduleLine: discoveryStatusLine,
                         spoilerSettings: spoilerSettings,
                         playTitle: canPlay ? viewModel.playButtonTitle(for: detail.item) : nil,
                         onPlay: canPlay ? {
@@ -625,27 +581,52 @@ public struct ItemDetailView: View {
                         playRemainingText: canPlay ? detail.item.resumeRemainingText : nil,
                         playSeasonEpisodeText: canPlay ? HeroForegroundModelBuilder.seasonEpisodeButtonText(for: detail.item) : nil,
                         onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
-                        versions: effectiveVersions,
+                        versions: isDiscoveryItem ? [] : effectiveVersions,
                         selectedVersionID: effectiveVersionID,
                         onSelectVersion: { id in selectVersion(id, for: detail.item) },
-                        sources: serverChoices,
+                        sources: isDiscoveryItem ? [] : serverChoices,
                         offlineSourceAccountIDs: viewModel.unreachableSourceAccountIDs,
                         selectedSourceAccountID: effectiveSource?.accountID,
                         onSelectSource: serverChoices.count > 1 ? { id in selectSource(id) } : nil,
                         fallbackTechnicalBadges: detail.children.representativeTechnicalBadges,
                         playButtonFocus: $playFocused,
                         // Whenever focus lands on (or moves between) any hero action
-                        // button, re-pin the page to the hero top. The row is
-                        // bottom-anchored in a full-height hero (childless movie),
-                        // so tvOS auto-scrolls the page down to reveal a focused
-                        // button; this snaps it back — for every button, not just
-                        // Play — killing the horizontal-navigation drift. Same
-                        // animation as the Play-regains-focus case below.
+                        // button, re-pin the page to the hero top.
                         onHeroActionFocused: {
                             withAnimation(.easeInOut(duration: 0.4)) {
                                 proxy.scrollTo(Self.topAnchorID, anchor: .top)
                             }
-                        }
+                        },
+                        isDiscoveryItem: isDiscoveryItem,
+                        requestCTA: requestCTA,
+                        requestActingName: requestActingName,
+                        onRequest: (
+                            isDiscoveryItem
+                                && detail.item.kind == .movie
+                                && onRequest != nil
+                                && requestCTA == .request
+                        ) ? { requestTapped(detail.item) } : nil,
+                        seasonRequestAvailability:
+                            isDiscoveryItem && detail.item.kind == .series
+                                ? seasonRequestAvailability
+                                : nil,
+                        seasonRequestAvailabilityResolved:
+                            seasonRequestAvailabilityResolved,
+                        seasonRequestAvailabilityFailed:
+                            seasonRequestAvailabilityFailed,
+                        isRequestingSeasons: isSeasonRequestInFlight,
+                        onRequestSeasons:
+                            isDiscoveryItem && onRequestSeasons != nil
+                                ? { seasons in
+                                    requestTapped(
+                                        detail.item,
+                                        seasons: seasons
+                                    )
+                                }
+                                : nil,
+                        onRetrySeasonRequestAvailability: isDiscoveryItem
+                            ? { seasonRequestRetryToken &+= 1 }
+                            : nil
                     )
                     .id(Self.topAnchorID)
                     if !detail.children.isEmpty {
@@ -669,7 +650,8 @@ public struct ItemDetailView: View {
                         leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
                         relatedEntries: viewModel.relatedTitlesLoader?.entries ?? [],
                         relatedHasResolved: viewModel.relatedTitlesLoader?.hasResolved ?? true,
-                        onSelectRelated: onSelectChild
+                        onSelectRelated: onSelectChild,
+                        externalAvailability: detail.externalAvailability
                     )
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)

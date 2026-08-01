@@ -53,7 +53,8 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         backdropCandidates: [SourcedValue<URL>] = [],
         upcomingEpisode: UpcomingEpisode? = nil,
         upcomingEpisodes: [UpcomingEpisode] = [],
-        cadence: AirCadence? = nil
+        cadence: AirCadence? = nil,
+        cast: SourcedValue<[MediaPerson]>? = nil
     ) {
         self.externalIDs = externalIDs
         self.title = title
@@ -69,6 +70,7 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
         self.upcomingEpisode = upcomingEpisode
         self.upcomingEpisodes = upcomingEpisodes
         self.cadence = cadence
+        self.cast = cast
     }
 
     public var isEmpty: Bool {
@@ -76,6 +78,7 @@ public struct MetadataEnrichment: Sendable, Equatable, Codable {
             && tagline == nil && posterURL == nil && logoURL == nil
             && episodeStillURL == nil && bannerURL == nil && score == nil
             && backdropCandidates.isEmpty && upcomingEpisode == nil
+            && upcomingEpisodes.isEmpty && cast == nil && cadence == nil
     }
 
     /// The best backdrop for the full-bleed home hero (the top-ranked candidate).

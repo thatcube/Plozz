@@ -11,10 +11,14 @@ import TraktService
 /// the viewer actually has, so with nothing to search there is nothing to show and
 /// the whole feature stays inert rather than spending provider calls.
 @MainActor
-func makeRelatedTitlesLoader(in accounts: [ResolvedAccount]) -> RelatedTitlesLoader? {
+func makeRelatedTitlesLoader(
+    in accounts: [ResolvedAccount],
+    displayMode: RelatedTitlesLoader.DisplayMode = .libraryOnly
+) -> RelatedTitlesLoader? {
     guard let search = relatedTitleLibrarySearch(in: accounts) else { return nil }
     return RelatedTitlesLoader(
         resolver: .production(traktClientID: TraktConfig.resolved().clientID),
-        search: search
+        search: search,
+        displayMode: displayMode
     )
 }

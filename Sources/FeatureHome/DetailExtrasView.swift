@@ -38,6 +38,7 @@ struct DetailExtrasView: View {
     /// it is still working instead of appearing late and shoving the cast down.
     var relatedHasResolved: Bool = true
     var onSelectRelated: ((MediaItem) -> Void)? = nil
+    var externalAvailability: ExternalTitleAvailability? = nil
 
     /// Extra gap below the cast row on tvOS so a 3-line name wrapping out
     /// of its circle doesn't overlap the About header below.
@@ -90,6 +91,7 @@ struct DetailExtrasView: View {
             || item.people.contains { !$0.isCast }
             || selectedSource != nil
             || selectedVersion != nil
+            || externalAvailability?.isEmpty == false
     }
 
     var body: some View {
@@ -142,7 +144,8 @@ struct DetailExtrasView: View {
                     item: item,
                     horizontalInset: leadingInset,
                     selectedSource: selectedSource,
-                    selectedVersion: selectedVersion
+                    selectedVersion: selectedVersion,
+                    externalAvailability: externalAvailability
                 )
                 .id("detail-extras-info")
             }

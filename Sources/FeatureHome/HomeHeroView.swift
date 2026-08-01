@@ -618,7 +618,7 @@ struct HomeHeroView: View {
         // Only the slide on screen is fetched. The carousel advances on its own, so
         // the rest fill in as they front rather than firing a burst of requests at
         // first paint, when Home has better things to be doing.
-        .task(id: current?.id) {
+        .task(id: schedules.fetchKey(for: current)) {
             guard let item = current else { return }
             await schedules.refreshFronted(item)
         }

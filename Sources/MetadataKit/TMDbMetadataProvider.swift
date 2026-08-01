@@ -66,6 +66,43 @@ public struct TMDbMetadataProvider: ArtworkProvider {
         )
     }
 
+    /// Regional release events and current watch offers for an external-title
+    /// detail page. Best-effort and empty when TMDb is unavailable.
+    public func externalAvailability(
+        for query: MetadataQuery,
+        regionCode: String
+    ) async -> ExternalTitleAvailability {
+        let region = regionCode.uppercased()
+        guard access.isEnabled,
+              query.contentType != .music,
+              let id = await resolveID(for: query) else {
+            return ExternalTitleAvailability(regionCode: region)
+        }
+
+        async let offers = watchOffers(
+            id: id,
+            isTV: query.isTV,
+            regionCode: region
+        )
+        if query.isTV {
+            let resolvedOffers = await offers
+            return ExternalTitleAvailability(
+                regionCode: region,
+                watchOffers: resolvedOffers.offers,
+                watchProvidersURL: resolvedOffers.link
+            )
+        }
+
+        async let releaseDates = movieReleaseDates(id: id, regionCode: region)
+        let (events, resolvedOffers) = await (releaseDates, offers)
+        return ExternalTitleAvailability(
+            regionCode: region,
+            releaseEvents: events,
+            watchOffers: resolvedOffers.offers,
+            watchProvidersURL: resolvedOffers.link
+        )
+    }
+
     /// Ordered wide-backdrop URLs (best first), up to `limit`. Retaining a *set*
     /// (not just the single best) lets one response serve both the home hero and a
     /// distinct detail backdrop without a second search.
@@ -279,6 +316,111 @@ public struct TMDbMetadataProvider: ArtworkProvider {
         return await MetadataHTTP.get(ImagesResponse.self, url: url, headers: authHeaders)
     }
 
+    private func movieReleaseDates(
+        id: String,
+        regionCode: String
+    ) async -> [TitleReleaseEvent] {
+        guard let url = url("/3/movie/\(id)/release_dates"),
+              let response = await MetadataHTTP.get(
+                  ReleaseDatesResponse.self,
+                  url: url,
+                  headers: authHeaders
+              ),
+              let region = response.results.first(where: {
+                  $0.iso_3166_1?.uppercased() == regionCode
+              }) else { return [] }
+
+        var seen = Set<String>()
+        return region.release_dates.compactMap { release in
+            guard let kind = Self.releaseKind(release.type),
+                  let date = Self.releaseDate(release.release_date) else {
+                return nil
+            }
+            let key = "\(kind.rawValue)|\(date.timeIntervalSinceReferenceDate)"
+            guard seen.insert(key).inserted else { return nil }
+            return TitleReleaseEvent(
+                kind: kind,
+                date: date,
+                regionCode: regionCode,
+                certification: release.certification?.tmdbNonEmpty,
+                note: release.note?.tmdbNonEmpty
+            )
+        }
+        .sorted { $0.date < $1.date }
+    }
+
+    private func watchOffers(
+        id: String,
+        isTV: Bool,
+        regionCode: String
+    ) async -> (offers: [TitleWatchOffer], link: URL?) {
+        guard let url = url("/3/\(isTV ? "tv" : "movie")/\(id)/watch/providers"),
+              let response = await MetadataHTTP.get(
+                  WatchProvidersResponse.self,
+                  url: url,
+                  headers: authHeaders
+              ),
+              let region = response.results[regionCode] else {
+            return ([], nil)
+        }
+
+        let groups: [(TitleWatchOffer.Kind, [WatchProvider]?)] = [
+            (.subscription, region.flatrate),
+            (.free, region.free),
+            (.ads, region.ads),
+            (.rent, region.rent),
+            (.buy, region.buy),
+        ]
+        var seen = Set<String>()
+        let offers = groups.flatMap { kind, providers in
+            (providers ?? []).compactMap { provider -> TitleWatchOffer? in
+                guard let providerID = provider.provider_id,
+                      let name = provider.provider_name?.tmdbNonEmpty else {
+                    return nil
+                }
+
+                let key = "\(kind.rawValue)|\(providerID)"
+                guard seen.insert(key).inserted else { return nil }
+                return TitleWatchOffer(
+                    providerID: providerID,
+                    providerName: name,
+                    kind: kind,
+                    regionCode: regionCode,
+                    logoURL: provider.logo_path.flatMap {
+                        URL(string: "\(imageBase)/w92\($0)")
+                    }
+                )
+            }
+        }
+
+        return (offers, region.link.flatMap(URL.init(string:)))
+    }
+
+    static func releaseDate(_ value: String?) -> Date? {
+        guard let value, value.count >= 10 else { return nil }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        // TMDb release records are civil dates. Parse in the viewer's timezone
+        // instead of treating midnight UTC as an instant (which displays the
+        // previous day in the Americas).
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: String(value.prefix(10)))
+    }
+
+    static func releaseKind(_ raw: Int?) -> TitleReleaseEvent.Kind? {
+        switch raw {
+        case 1: .premiere
+        case 2: .theatricalLimited
+        case 3: .theatrical
+        case 4: .digital
+        case 5: .physical
+        case 6: .television
+        default: nil
+        }
+    }
+
     /// Builds a TMDb API URL against `apiBase`, attaching the bearer token only in
     /// direct-token mode (the proxy injects auth itself).
     private func url(_ path: String) -> URL? {
@@ -354,6 +496,35 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     struct OriginalLanguageResponse: Decodable {
         let original_language: String?
     }
+    struct ReleaseDatesResponse: Decodable {
+        let results: [ReleaseRegion]
+    }
+    struct ReleaseRegion: Decodable {
+        let iso_3166_1: String?
+        let release_dates: [ReleaseDate]
+    }
+    struct ReleaseDate: Decodable {
+        let certification: String?
+        let note: String?
+        let release_date: String?
+        let type: Int?
+    }
+    struct WatchProvidersResponse: Decodable {
+        let results: [String: WatchProviderRegion]
+    }
+    struct WatchProviderRegion: Decodable {
+        let link: String?
+        let flatrate: [WatchProvider]?
+        let free: [WatchProvider]?
+        let ads: [WatchProvider]?
+        let rent: [WatchProvider]?
+        let buy: [WatchProvider]?
+    }
+    struct WatchProvider: Decodable {
+        let provider_id: Int?
+        let provider_name: String?
+        let logo_path: String?
+    }
     struct CreditsResponse: Decodable {
         let cast: [CreditEntry]?
     }
@@ -389,5 +560,12 @@ public struct TMDbMetadataProvider: ArtworkProvider {
         let file_path: String?
         let iso_639_1: String?
         let vote_average: Double?
+    }
+}
+
+private extension String {
+    var tmdbNonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

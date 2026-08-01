@@ -20,6 +20,21 @@ public struct RelatedEntry: Sendable, Equatable, Identifiable {
     public var title: String {  // l10n:content — provider/server-supplied media title
         libraryItem?.title ?? related.title
     }
+
+    /// Library copy when available; otherwise a navigable external discovery
+    /// item carrying the provider's ids/artwork.
+    public var item: MediaItem {
+        if let libraryItem { return libraryItem }
+        return MediaItem(
+            id: "related:\(related.id)",
+            title: related.title,
+            kind: related.kind,
+            productionYear: related.year,
+            posterURL: related.posterURL,
+            providerIDs: related.providerIDs,
+            availability: .unknown
+        )
+    }
 }
 
 /// Builds the Related row: resolves related titles, then binds each to the
@@ -32,6 +47,10 @@ public struct RelatedEntry: Sendable, Equatable, Identifiable {
 @MainActor
 @Observable
 public final class RelatedTitlesLoader {
+    public enum DisplayMode: Sendable, Equatable {
+        case libraryOnly
+        case includeExternal
+    }
     public private(set) var entries: [RelatedEntry] = []
     public private(set) var isLoading = false
     /// Whether a load has finished for the current item. Distinguishes "still
@@ -44,17 +63,20 @@ public final class RelatedTitlesLoader {
     private let store: RelatedTitlesStore
     private let search: @Sendable (String, Int) async -> [MediaItem]
     private let now: @Sendable () -> Date
+    private let displayMode: DisplayMode
     private var loadedSeedKey: String?
 
     public init(
         resolver: RelatedTitlesResolver,
         store: RelatedTitlesStore = .shared,
         search: @escaping @Sendable (String, Int) async -> [MediaItem],
+        displayMode: DisplayMode = .libraryOnly,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.resolver = resolver
         self.store = store
         self.search = search
+        self.displayMode = displayMode
         self.now = now
     }
 
@@ -84,6 +106,19 @@ public final class RelatedTitlesLoader {
         let titles = await resolvedTitles(for: query, key: key)
         guard !titles.isEmpty else { return }
         guard loadedSeedKey == key else { return }  // page changed while resolving
+        if displayMode == .includeExternal {
+            // External detail pages can navigate these provider items directly;
+            // the destination's identity index resolves an owned copy at select
+            // time. Searching every candidate against every server here is pure
+            // speculative cost (up to 24 titles × all accounts) and delays a row
+            // that already has everything it needs to render.
+            var seen = Set<String>()
+            entries = titles
+                .filter { seen.insert($0.id).inserted }
+                .prefix(Self.maximumEntries)
+                .map { RelatedEntry(related: $0, libraryItem: nil) }
+            return
+        }
         await matchToLibrary(titles, seedKey: key)
     }
 
@@ -109,6 +144,7 @@ public final class RelatedTitlesLoader {
         var seenItemIDs = Set<String>()
         let clock = ContinuousClock()
         var lastPublish = clock.now
+        var completed = 0
 
         await withTaskGroup(of: (Int, MediaItem?).self) { group in
             var next = 0
@@ -129,6 +165,7 @@ public final class RelatedTitlesLoader {
                 next += 1
             }
             for await (index, hit) in group {
+                completed += 1
                 // Navigating away must stop the remaining searches, not just discard
                 // their results: each is a real query against every signed-in server,
                 // and a viewer moving through pages would otherwise leave a growing
@@ -158,7 +195,7 @@ public final class RelatedTitlesLoader {
                 // arrive in bursts, so coalescing on a short window collapses those
                 // six passes into one or two while keeping the row's early fill.
                 let now = clock.now
-                let isFinalMatch = matched.count == ordered.count
+                let isFinalMatch = completed == ordered.count
                 guard isFinalMatch || lastPublish.duration(to: now) >= Self.publishInterval else {
                     continue
                 }
@@ -166,9 +203,18 @@ public final class RelatedTitlesLoader {
                 seenItemIDs.removeAll(keepingCapacity: true)
                 entries = ordered.enumerated()
                     .compactMap { index, related -> RelatedEntry? in
-                        guard let item = matched[index] else { return nil }
-                        guard seenItemIDs.insert(item.id).inserted else { return nil }
-                        return RelatedEntry(related: related, libraryItem: item)
+                        let item = matched[index]
+                        guard displayMode == .includeExternal || item != nil else {
+                            return nil
+                        }
+                        let identity = item?.id ?? related.id
+                        guard seenItemIDs.insert(identity).inserted else {
+                            return nil
+                        }
+                        return RelatedEntry(
+                            related: related,
+                            libraryItem: item
+                        )
                     }
                     .prefix(Self.maximumEntries)
                     .map { $0 }

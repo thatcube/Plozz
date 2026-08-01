@@ -47,6 +47,9 @@ public final class ItemDetailViewModel {
         /// invalidates readers, and the schedule only ever changes alongside a
         /// re-publish of it.
         public var upcomingSchedule: SeriesScheduleRecord?
+        /// Regional release/watch facts for a synthetic external title. `nil` on
+        /// ordinary library details and when no provider could answer.
+        public var externalAvailability: ExternalTitleAvailability?
     }
 
     public private(set) var state: LoadState<Detail> = .idle
@@ -234,6 +237,9 @@ public final class ItemDetailViewModel {
     /// "Downloading" state instead of the stale "Request" seeded from the search
     /// result. `nil` (or a `nil` result) leaves the seeded state untouched.
     private let discoveryStatusRefresh: (@Sendable (MediaItem) async -> (MediaAvailabilityStatus, Double?)?)?
+    private let externalMetadataResolver:
+        @Sendable (MediaItem, String) async -> ExternalTitleMetadata
+    private let availabilityRegionCode: String
 
     /// The currently *active* source the page is showing. Defaults to the base
     /// `provider`/`itemID`/`sourceAccountID` the page was opened with, but is
@@ -453,6 +459,14 @@ public final class ItemDetailViewModel {
         initialItem: MediaItem? = nil,
         isDiscoveryItem: Bool = false,
         discoveryStatusRefresh: (@Sendable (MediaItem) async -> (MediaAvailabilityStatus, Double?)?)? = nil,
+        externalMetadataResolver: @escaping @Sendable (MediaItem, String) async -> ExternalTitleMetadata = {
+            await ExternalTitleMetadataResolver.shared.resolve(
+                item: $0,
+                regionCode: $1
+            )
+        },
+        availabilityRegionCode: String =
+            Locale.current.region?.identifier ?? "US",
         ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider(),
         sourceAccountID: String? = nil,
         originSourceAccountID: String? = nil,
@@ -472,6 +486,8 @@ public final class ItemDetailViewModel {
         self.activeItemID = itemID
         self.isDiscoveryItem = isDiscoveryItem
         self.discoveryStatusRefresh = discoveryStatusRefresh
+        self.externalMetadataResolver = externalMetadataResolver
+        self.availabilityRegionCode = availabilityRegionCode
         // Fall back to the library-origin account when a direct source tag is
         // absent, so a played item is always attributed to the account it was
         // browsed from (a local media share persists resume/played state keyed by
@@ -549,12 +565,13 @@ public final class ItemDetailViewModel {
     }
 
     public func load() async {
-        // Discovery (Seerr) items aren't backed by a resolvable library provider,
-        // so the library fetch below would only 404. Instead of the fetch, refresh
-        // the title's request/availability state from Seerr (so a reopened title
-        // reflects a request made earlier) and keep the seeded item otherwise.
+        // Discovery items have synthetic ids no media server can resolve, but
+        // "not playable" does not mean "no useful detail." Skip only the library
+        // provider path; enrich the seed through provider-independent metadata,
+        // release/watch facts, ratings, online trailers, related titles and TV
+        // schedule.
         guard !isDiscoveryItem else {
-            await refreshDiscoveryStatus()
+            await loadDiscoveryDetail()
             return
         }
         alternateSourceEnrichmentTask?.cancel()
@@ -752,6 +769,130 @@ public final class ItemDetailViewModel {
         }
     }
 
+    /// Loads a synthetic external title without ever pretending its id belongs to
+    /// a media server.
+    private func loadDiscoveryDetail() async {
+        await refreshDiscoveryStatus()
+        guard !Task.isCancelled, let seed = state.value?.item else { return }
+
+        let generation = sourceGeneration
+        async let metadata = externalMetadataResolver(
+            seed,
+            availabilityRegionCode
+        )
+        async let ratings = ratingsProvider.ratings(for: seed)
+        let (resolved, externalRatings) = await (metadata, ratings)
+        guard !Task.isCancelled,
+              sourceGeneration == generation,
+              case var .loaded(detail) = state,
+              detail.item.id == seed.id else { return }
+
+        detail.item = Self.applying(
+            resolved.enrichment,
+            to: detail.item
+        )
+        if !externalRatings.isEmpty {
+            detail.item.ratings =
+                detail.item.ratings.mergedWithAuthoritative(externalRatings)
+        }
+        detail.externalAvailability =
+            resolved.availability.isEmpty ? nil : resolved.availability
+        detail.childrenLoaded = true
+        state = .loaded(detail)
+        hasPaintedFreshDetail = true
+
+        let enriched = detail.item
+        if enriched.kind == .series {
+            loadUpcomingSchedule(for: enriched)
+        }
+        loadRelatedTitles(for: enriched)
+        await loadDiscoveryTrailer(
+            for: enriched,
+            sourceGeneration: generation
+        )
+    }
+
+    private static func applying(
+        _ enrichment: MetadataEnrichment,
+        to item: MediaItem
+    ) -> MediaItem {
+        var copy = item
+        if copy.overview?.isEmpty != false, let overview = enrichment.overview {
+            copy.overview = overview.value
+            copy.metadataProvenance.set(overview, for: .overview)
+        }
+        if copy.genres.isEmpty, let genres = enrichment.genres {
+            copy.genres = genres.value
+            copy.metadataProvenance.set(genres, for: .genres)
+        }
+        if copy.taglines.isEmpty, let tagline = enrichment.tagline {
+            copy.taglines = [tagline.value]
+            copy.metadataProvenance.set(tagline, for: .taglines)
+        }
+        if copy.posterURL == nil, let poster = enrichment.posterURL {
+            copy.posterURL = poster.value
+            copy.metadataProvenance.set(poster, for: .posterURL)
+        }
+        if copy.logoURL == nil, let logo = enrichment.logoURL {
+            copy.logoURL = logo.value
+            copy.metadataProvenance.set(logo, for: .logoURL)
+        }
+        if copy.heroBackdropURL == nil,
+           let backdrop = enrichment.detailBackdrop {
+            copy.heroBackdropURL = backdrop.value
+            copy.metadataProvenance.set(backdrop, for: .detailBackdrop)
+        }
+        if copy.cast.isEmpty, let cast = enrichment.cast {
+            copy.people = cast.value
+            copy.metadataProvenance.set(cast, for: .cast)
+        }
+        for (key, value) in enrichment.externalIDs
+        where copy.providerIDs[key] == nil {
+            copy.providerIDs[key] = value.value
+            copy.metadataProvenance.set(
+                value,
+                for: .providerID(key)
+            )
+        }
+        return copy
+    }
+
+    private func loadDiscoveryTrailer(
+        for item: MediaItem,
+        sourceGeneration: UInt64
+    ) async {
+        if let cached = trailerCache.outcome(for: item.id) {
+            switch cached {
+            case .working(let id): surfaceTrailer(videoID: id, for: item)
+            case .none: trailers = []
+            }
+            return
+        }
+        if Self.trailerExtractionDwellNanos > 0 {
+            try? await Task.sleep(
+                nanoseconds: Self.trailerExtractionDwellNanos
+            )
+        }
+        guard isStillLoaded(item, sourceGeneration: sourceGeneration) else {
+            return
+        }
+        let candidates = orderedUnique(
+            await onlineTrailerResolver(item)
+                .compactMap(\.youTubeTrailerVideoID)
+        )
+        let workingID = await playableVideoIDResolver(candidates)
+        guard isStillLoaded(item, sourceGeneration: sourceGeneration) else {
+            return
+        }
+        if let workingID {
+            surfaceTrailer(videoID: workingID, for: item)
+            trailerCache.record(.working(workingID), for: item.id)
+        } else {
+            trailers = []
+            trailerCache.record(.none, for: item.id)
+        }
+    }
+
     /// Refreshes a discovery (Seerr) title's request/availability + download
     /// progress from Seerr on (re)open, so a title requested in an earlier visit
     /// shows "Requested"/"Downloading" rather than a stale "Request" seeded from
@@ -759,24 +900,27 @@ public final class ItemDetailViewModel {
     /// state is only republished when something actually changed (no needless
     /// re-render / focus churn).
     private func refreshDiscoveryStatus() async {
-        guard let current = state.value?.item else {
+        guard let requestedItem = state.value?.item else {
             if state.value == nil { state = .empty }
             return
         }
         guard let discoveryStatusRefresh,
-              let (availability, downloadProgress) = await discoveryStatusRefresh(current),
+              let (availability, downloadProgress) =
+                  await discoveryStatusRefresh(requestedItem),
               !Task.isCancelled
         else { return }
-        guard current.availability != availability || current.downloadProgress != downloadProgress else { return }
-        var updated = current
-        updated.availability = availability
-        updated.downloadProgress = downloadProgress
-        state = .loaded(Detail(
-            item: updated,
-            children: current.kind == .series ? (state.value?.children ?? []) : [],
-            childrenLoaded: state.value?.childrenLoaded ?? true,
-            upcomingSchedule: state.value?.upcomingSchedule
-        ))
+        // Re-read after the await. Rich metadata, cast, ratings and release facts
+        // can land while Seerr is responding; rebuilding from the pre-await item
+        // would erase all of them.
+        guard case var .loaded(latest) = state,
+              latest.item.id == requestedItem.id,
+              latest.item.availability != availability
+                  || latest.item.downloadProgress != downloadProgress else {
+            return
+        }
+        latest.item.availability = availability
+        latest.item.downloadProgress = downloadProgress
+        state = .loaded(latest)
     }
 
     /// Public entry so the detail view can poll a discovery title's live Seerr

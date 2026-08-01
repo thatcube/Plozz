@@ -704,6 +704,7 @@ let package = Package(
                 "MediaTransportWebDAV",
                 "ProviderPlex",
                 "ProviderShare",
+                "RatingsService",
                 "SeerService",
                 "TraktService",
                 "SimklService",

@@ -83,4 +83,24 @@ final class TMDbSearchMatchTests: XCTestCase {
         XCTAssertNil(TMDbMetadataProvider.normalizedLanguage("  "))
         XCTAssertNil(TMDbMetadataProvider.normalizedLanguage(nil))
     }
+
+    func testReleaseTypeMappingKeepsDigitalDistinctFromStreaming() {
+        XCTAssertEqual(TMDbMetadataProvider.releaseKind(3), .theatrical)
+        XCTAssertEqual(TMDbMetadataProvider.releaseKind(4), .digital)
+        XCTAssertEqual(TMDbMetadataProvider.releaseKind(5), .physical)
+        XCTAssertNil(TMDbMetadataProvider.releaseKind(99))
+    }
+
+    func testReleaseDateParsesCivilDateFromTimestamp() {
+        let date = TMDbMetadataProvider.releaseDate(
+            "2026-08-03T00:00:00.000Z"
+        )
+        let components = Calendar.current.dateComponents(
+            [.year, .month, .day],
+            from: try! XCTUnwrap(date)
+        )
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 8)
+        XCTAssertEqual(components.day, 3)
+    }
 }

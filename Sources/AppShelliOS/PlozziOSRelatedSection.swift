@@ -51,12 +51,12 @@ struct PlozziOSRelatedSection: View {
         }
     }
 
-    private var items: [MediaItem] { entries.compactMap(\.libraryItem) }
+    private var items: [MediaItem] { entries.map(\.item) }
 
     /// Library ids of the entries that continue the seed's own story, so the cue
     /// follows the *relation* rather than anything about the matched item.
     private var continuationItemIDs: Set<String> {
-        Set(entries.compactMap { $0.isContinuation ? $0.libraryItem?.id : nil })
+        Set(entries.compactMap { $0.isContinuation ? $0.item.id : nil })
     }
 }
 #endif

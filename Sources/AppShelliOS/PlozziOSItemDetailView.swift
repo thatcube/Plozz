@@ -5,6 +5,7 @@ import CoreUI
 import FeatureHomeCore
 import MediaDownloads
 import MetadataKit
+import RatingsService
 import SeerService
 import TraktService
 import SwiftUI
@@ -197,7 +198,9 @@ private struct PlozziOSCanonicalItemDetailView: View {
         self.initialEpisode = initialEpisode
         self.presentsEpisodeAsSubject = presentsEpisodeAsSubject
         _seriesPlayTarget = State(initialValue: initialEpisode)
-        let isDiscoveryItem = item.isNotInLibraryDiscovery
+        let identitySources = appModel.identityIndex.identitySourcesProvider
+        let isDiscoveryItem =
+            item.isNotInLibraryDiscovery && identitySources(item).isEmpty
         self.isDiscoveryItem = isDiscoveryItem
         let discoveryStatusRefresh:
             (@Sendable (MediaItem) async -> (MediaAvailabilityStatus, Double?)?)?
@@ -225,7 +228,6 @@ private struct PlozziOSCanonicalItemDetailView: View {
         } ?? provider
         self.initialSources = initialSources
         let accounts = appModel.accountsProviders.homeAccounts
-        let identitySources = appModel.identityIndex.identitySourcesProvider
         _viewModel = State(
             initialValue: ItemDetailViewModel(
                 provider: selectedProvider,
@@ -233,6 +235,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
                 initialItem: selectedItem,
                 isDiscoveryItem: isDiscoveryItem,
                 discoveryStatusRefresh: discoveryStatusRefresh,
+                ratingsProvider: RatingsServiceFactory.make(),
                 sourceAccountID: selectedSource?.accountID ?? item.sourceAccountID,
                 originSourceAccountID: originSourceAccountID,
                 initialSources: initialSources,
@@ -245,14 +248,14 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         in: accounts,
                         identitySources: identitySources
                     ),
-                // A discovery title isn't in the library, so there is nothing to
-                // relate it to that the viewer could actually open.
-                relatedTitlesLoader: isDiscoveryItem
-                    ? nil
-                    : relatedTitleLibrarySearch(in: accounts).map { search in
+                relatedTitlesLoader:
+                    relatedTitleLibrarySearch(in: accounts).map { search in
                         RelatedTitlesLoader(
                             resolver: .production(traktClientID: TraktConfig.resolved().clientID),
-                            search: search
+                            search: search,
+                            displayMode: isDiscoveryItem
+                                ? .includeExternal
+                                : .libraryOnly
                         )
                     }
             )
@@ -378,7 +381,13 @@ private struct PlozziOSCanonicalItemDetailView: View {
                     playableItem: playableHeroTarget,
                     downloadItem: playableHeroTarget,
                     sources: options.sources,
-                    scheduleLine: upcomingHeroLine,
+                    scheduleLine: isDiscoveryItem
+                        ? (
+                            detail.item.kind == .series
+                                ? upcomingHeroLine
+                                : detail.externalAvailability?.primaryLine()
+                        )
+                        : upcomingHeroLine,
                     selectedSourceAccountID: options.selectedSourceAccountID,
                     versions: options.versions,
                     selectedVersionID: options.selectedVersionID,
@@ -400,6 +409,8 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         let liveTarget = seriesPlayTarget ?? detail.item
                         play(playbackItem(for: liveTarget), fromBeginning: fromBeginning)
                     },
+                    trailerItem: viewModel.trailers.first,
+                    onPlayTrailer: { play($0, fromBeginning: true) },
                     heroRequest: heroRequest(for: detail.item),
                     // An episode's own page can be reached from Continue Watching
                     // or Search, where Back leaves the show entirely — so offer a
@@ -409,7 +420,7 @@ private struct PlozziOSCanonicalItemDetailView: View {
                     pullDistance: heroPullDistance
                 )
 
-                if detail.item.kind == .series {
+                if detail.item.kind == .series, !isDiscoveryItem {
                     PlozziOSInlineSeriesBrowser(
                         viewModel: viewModel,
                         seasons: detail.children.filter { $0.kind == .season },
@@ -470,7 +481,8 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         ? nil
                         : options.versions.first {
                             $0.id == options.selectedVersionID
-                        } ?? MediaVersion.synthesized(from: heroTarget)
+                        } ?? MediaVersion.synthesized(from: heroTarget),
+                    externalAvailability: detail.externalAvailability
                 )
             }
             // No trailing padding here. The information band is the last thing in

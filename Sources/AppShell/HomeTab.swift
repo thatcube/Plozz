@@ -550,7 +550,12 @@ struct HomeTab: View {
             crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
             ratingsProvider: ratingsProvider,
             discoveryStatusRefresh: { await seer.availability(for: $0) },
-            makeRelatedTitlesLoader: { makeRelatedTitlesLoader(in: accounts) },
+            makeRelatedTitlesLoader: {
+                makeRelatedTitlesLoader(
+                    in: accounts,
+                    displayMode: $0
+                )
+            },
             snapshotCache: detailSnapshotCache
         )
     }

@@ -336,7 +336,7 @@ public struct MediaRowView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: layoutMetrics.cardSpacing) {
                             ForEach(items) { item in
-                                card(for: item)
+                                tappableCard(for: item)
                             }
                         }
                         .padding(.leading, leadingInset)
@@ -441,6 +441,30 @@ public struct MediaRowView: View {
                 }
             }
         }
+    }
+
+    /// The card, plus whatever it takes to select it on this platform.
+    ///
+    /// tvOS drives selection through the card's own `.focusable` + tap, which
+    /// `focusableCard` installs — deliberately not a `Button`, because a Button
+    /// paints the system focus platter behind it. That branch does nothing off
+    /// tvOS, though: it applies a content shape and no gesture, because every
+    /// other iOS surface wraps its cards in a `NavigationLink` and supplies the
+    /// tap that way. This row does not — it takes an `onSelect` closure — so its
+    /// cards did nothing at all when tapped.
+    ///
+    /// Wrapped HERE rather than fixed in `focusableCard`, which those
+    /// NavigationLink surfaces also use: a tap gesture added there would sit
+    /// inside the link's label and could swallow the link's own tap.
+    @ViewBuilder
+    private func tappableCard(for item: MediaItem) -> some View {
+        #if os(tvOS)
+        card(for: item)
+        #else
+        Button { onSelect(item) } label: { card(for: item) }
+            // Plain, so the card keeps its own colours and chrome.
+            .buttonStyle(.plain)
+        #endif
     }
 
     @ViewBuilder

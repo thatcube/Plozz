@@ -465,7 +465,15 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        TabView(selection: selectedTab) {
+        // TEMPORARY. MainTabView was the one view in the detail-page loop with no
+        // probe, and the loop is driven through the bindings IT creates: the
+        // capture showed HomeTab reporting only `_pendingPersonRoute,
+        // _pendingTitleRoute changed`, 3,559 times, with its own state and
+        // `__path` untouched. Those two bindings are built inline here, so a
+        // re-run of this body hands HomeTab fresh ones every pass. Without this
+        // probe the cycle is invisible at exactly the point it turns over.
+        let _ = plozzPrintChanges { Self._printChanges() }
+        return TabView(selection: selectedTab) {
             Tab("Home", systemImage: "house.fill", value: MainTab.home) {
             homeTabContent
             }

@@ -729,7 +729,10 @@ private struct PlozziOSPlayerTransport: View {
                         .font(.title3)
                 }
                 .buttonStyle(PlayerGlassCircleButtonStyle(diameter: 44))
-                .accessibilityLabel("Playback speed")
+                .accessibilityLabel(Text(
+                    "Playback speed",
+                    comment: "VoiceOver label for the speedometer button beneath the player's scrub bar; opens the playback-speed picker."
+                ))
             }
 
             if !viewModel.controls.audioOptions.isEmpty {
@@ -758,7 +761,10 @@ private struct PlozziOSPlayerTransport: View {
                         .clipShape(Circle())
                         .contentShape(Circle())
                 }
-                .accessibilityLabel("Audio track")
+                .accessibilityLabel(Text(
+                    "Audio track",
+                    comment: "VoiceOver label for the waveform button beneath the player's scrub bar; opens the audio-track menu."
+                ))
             }
 
             Button(action: onShowSubtitles) {

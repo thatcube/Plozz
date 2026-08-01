@@ -587,6 +587,9 @@ private struct PlozziOSPlayerTransport: View {
     let onShowSync: () -> Void
     @Binding var isCardOpen: Bool
     let onInteraction: () -> Void
+    /// The player's own bounds, which decide the card's layout — see the
+    /// geometry reader at the foot of `body`.
+    @State private var availableSize: CGSize = .zero
 
     var body: some View {
         VStack(spacing: 12) {
@@ -666,6 +669,7 @@ private struct PlozziOSPlayerTransport: View {
             // card grows upward out of them.
             PlayerTouchCardStrip(
                 model: viewModel.controls,
+                availableSize: availableSize,
                 isCardOpen: $isCardOpen,
                 onRestart: { viewModel.requestSeek(to: 0) },
                 onNextEpisode: { viewModel.playNextEpisode() },
@@ -685,6 +689,17 @@ private struct PlozziOSPlayerTransport: View {
         .padding(.horizontal, 24)
         .padding(.bottom, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        // Measured HERE rather than inside the strip, because the strip is only
+        // as tall as its own content — its height says nothing about how much of
+        // the screen a card is allowed to take. This frame is the player's, so
+        // it is the one that can answer.
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { availableSize = geometry.size }
+                    .onChange(of: geometry.size) { _, size in availableSize = size }
+            }
+        }
     }
 
     /// Speed · Audio · Subtitles, as three peers.

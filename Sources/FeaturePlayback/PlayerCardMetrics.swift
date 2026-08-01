@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import CoreUI
 
 /// Every number the player's Info and Cast cards are built from, in one value
 /// chosen at layout time from the width actually available.
@@ -16,7 +17,19 @@ import SwiftUI
 /// all derive from `contentHeight` and `contentPadding`, so they follow from two
 /// values here — and the drill animation, which measures card frames and grows a
 /// pane between them, keeps working untouched because both ends move together.
+enum PlayerCardLayout {
+    /// The tvOS/iPad card: a wide, short band of columns sitting under the
+    /// transport, so as little of the video as possible is covered.
+    case horizontal
+    /// The phone card: a tall column. A narrow screen has height to spare and no
+    /// width at all, and the video — letterboxed into a strip across the middle —
+    /// leaves most of the screen black anyway, so covering it costs nothing.
+    /// Apple's own player does exactly this between portrait and landscape.
+    case vertical
+}
+
 struct PlayerCardMetrics: Equatable {
+    var layout: PlayerCardLayout
     /// The height of the card's content — the thumbnail when there is one, and
     /// the columns beside it either way.
     var contentHeight: CGFloat
@@ -48,6 +61,16 @@ struct PlayerCardMetrics: Equatable {
     var castIdentityWidth: CGFloat
     /// How many lines of synopsis the Info card shows.
     var overviewLineLimit: Int
+    /// The card's own corner radius.
+    ///
+    /// Scaled down with the card, because a radius is only ever right relative to
+    /// the box it rounds: 52 reads as a softly rounded edge on a 240pt band and
+    /// as a lozenge on a 152pt one.
+    var panelCornerRadius: CGFloat
+    /// How much to shrink the capability badges — see `mediaBadgeScale`.
+    var badgeScale: CGFloat
+    /// In the vertical layout, the height of one cast row.
+    var castRowHeight: CGFloat
 
     /// The card's **exact** laid-out height, known up front rather than measured.
     ///
@@ -57,6 +80,8 @@ struct PlayerCardMetrics: Equatable {
     /// parked offset changed the moment the measurement landed (and again
     /// whenever metadata arrived), which showed up as the transport jumping.
     var cardHeight: CGFloat { contentHeight + contentPadding * 2 }
+    /// Whether the card is a tall column rather than a wide band.
+    var isVertical: Bool { layout == .vertical }
     /// A cast face card's width: the headshot plus the space either side.
     var castCardWidth: CGFloat { castHeadshot + castHeadshotSideSpace * 2 }
     /// Where the circle sits inside a face card, so the drill can start the
@@ -67,6 +92,7 @@ struct PlayerCardMetrics: Equatable {
 
     /// Across a room, from a remote.
     static let tv = PlayerCardMetrics(
+        layout: .horizontal,
         contentHeight: 250,
         contentPadding: 24,
         showsThumbnail: true,
@@ -78,11 +104,15 @@ struct PlayerCardMetrics: Equatable {
         castHeadshotSideSpace: 31,
         castVerticalInset: 18,
         castIdentityWidth: 900,
-        overviewLineLimit: 4
+        overviewLineLimit: 4,
+        panelCornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius,
+        badgeScale: 1,
+        castRowHeight: 0
     )
 
     /// A tablet at arm's length, with room for the full three-column card.
     static let regular = PlayerCardMetrics(
+        layout: .horizontal,
         contentHeight: 208,
         contentPadding: 16,
         showsThumbnail: true,
@@ -94,27 +124,37 @@ struct PlayerCardMetrics: Equatable {
         castHeadshotSideSpace: 24,
         castVerticalInset: 12,
         castIdentityWidth: 900,
-        overviewLineLimit: 4
+        overviewLineLimit: 4,
+        panelCornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius,
+        badgeScale: 1,
+        castRowHeight: 0
     )
 
     /// A phone, or an iPad window narrowed to about one.
     ///
-    /// 128 + 12 padding lands the card at 152 — roughly a third of an iPhone's
-    /// landscape height, which is as much as a card *describing* the video can
-    /// take before it buries it.
+    /// `contentHeight` is a **ceiling** here rather than a fixed height: the card
+    /// grows to its content and stops there, because a vertical card holds a list
+    /// whose length is not known up front. It is overwritten by `resolved` with a
+    /// share of the height actually available.
     static let compact = PlayerCardMetrics(
-        contentHeight: 128,
-        contentPadding: 12,
+        layout: .vertical,
+        contentHeight: 320,
+        contentPadding: 14,
         showsThumbnail: false,
         titleFont: .system(size: 17, weight: .semibold),
         bodyFont: .system(size: 13),
         bodyLineHeight: 17,
         captionFont: .system(size: 11, weight: .medium),
-        castHeadshot: 72,
+        castHeadshot: 44,
         castHeadshotSideSpace: 12,
         castVerticalInset: 8,
         castIdentityWidth: 380,
-        overviewLineLimit: 2
+        overviewLineLimit: 4,
+        // A radius is only right relative to the box it rounds; 52 on a card this
+        // narrow reads as a lozenge.
+        panelCornerRadius: 22,
+        badgeScale: 0.62,
+        castRowHeight: 64
     )
 
     #if os(tvOS)
@@ -133,18 +173,59 @@ struct PlayerCardMetrics: Equatable {
     /// was showing.
     static let thumbnailLayoutMinimumWidth: CGFloat = 900
 
-    /// Pick the metrics for the width the card has actually been given.
-    static func resolved(forWidth width: CGFloat) -> PlayerCardMetrics {
+    /// The share of the screen a vertical card may take.
+    ///
+    /// It is a share rather than a number because the two orientations it has to
+    /// serve are nothing alike: a portrait phone has ~800pt to spend and the
+    /// video occupies a strip across the middle, while the same phone in
+    /// landscape has ~390 and the video fills it. Bounded at both ends so the
+    /// card is never too short to hold a list, nor tall enough to swallow a
+    /// portrait screen.
+    private static let verticalHeightShare: CGFloat = 0.46
+    private static let verticalHeightRange: ClosedRange<CGFloat> = 190...460
+
+    /// Pick the metrics for the space the card has actually been given.
+    static func resolved(forWidth width: CGFloat, height: CGFloat) -> PlayerCardMetrics {
         #if os(tvOS)
         return .tv
         #else
         // Zero on the very first pass, before the geometry reader has reported.
-        // Assume the roomy layout rather than the cramped one: a card that
-        // starts full and stays full is the common case, and guessing compact
-        // would make every iPad open with a visible re-layout.
+        // Assume the roomy layout rather than the cramped one: a card that starts
+        // full and stays full is the common case, and guessing compact would make
+        // every iPad open with a visible re-layout.
         guard width > 0 else { return .regular }
-        return width >= thumbnailLayoutMinimumWidth ? .regular : .compact
+        guard width < thumbnailLayoutMinimumWidth else { return .regular }
+
+        var metrics = compact
+        if height > 0 {
+            let budget = (height * verticalHeightShare).rounded()
+            metrics.contentHeight = min(
+                max(budget, verticalHeightRange.lowerBound),
+                verticalHeightRange.upperBound
+            ) - metrics.contentPadding * 2
+        }
+        return metrics
         #endif
+    }
+}
+
+/// Pins the card's height in the horizontal layout and caps it in the vertical
+/// one.
+///
+/// The horizontal card promises an exact height, because tvOS parks the
+/// transport by it before the first frame — measuring it instead meant the
+/// parked offset moved the moment the measurement landed. A vertical card cannot
+/// make that promise: it holds a list, and its length is not known up front. It
+/// takes what it needs and stops at the ceiling.
+struct PlayerCardHeight: ViewModifier {
+    let metrics: PlayerCardMetrics
+
+    func body(content: Content) -> some View {
+        if metrics.isVertical {
+            content.frame(maxHeight: metrics.cardHeight)
+        } else {
+            content.frame(height: metrics.cardHeight)
+        }
     }
 }
 

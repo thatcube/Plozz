@@ -72,10 +72,14 @@ struct InfoPanelView: View {
             }
         }
         .padding(contentPad)
-        // Pin the height so `cardHeight` is a promise, not an estimate.
-        .frame(height: metrics.cardHeight)
+        // Pinned in the horizontal layout, where `cardHeight` is a promise the
+        // transport's parking offset depends on. The vertical card takes its
+        // content's height instead and stops at the ceiling: a column of text
+        // has no business holding a fixed height, and a short synopsis would
+        // leave a well of empty glass under it.
+        .modifier(PlayerCardHeight(metrics: metrics))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(PanelGlassBackground(cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius))
+        .modifier(PanelGlassBackground(cornerRadius: metrics.panelCornerRadius))
     }
 
     /// The phone card: no thumbnail, and the three columns folded into rows.
@@ -88,34 +92,40 @@ struct InfoPanelView: View {
     /// The actions keep their two groups but swap axis, riding the bottom line
     /// with the metadata rather than standing in a column of their own.
     private var compactBody: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(model.infoCard.headline.isEmpty ? "Now Playing" : model.infoCard.headline)
-                .font(metrics.titleFont)
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .truncationMode(.tail)
+        VStack(alignment: .leading, spacing: 10) {
+            // Title and synopsis SCROLL, rather than truncating to a line count.
+            //
+            // The horizontal card truncates because it is a band across the
+            // video and cannot grow. This one is a column with room to spare, so
+            // a long synopsis can simply be read — and the ellipsis that a fixed
+            // line limit forces is the thing a viewer opening "Info" is least
+            // likely to want.
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(model.infoCard.headline.isEmpty ? "Now Playing" : model.infoCard.headline)
+                        .font(metrics.titleFont)
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
 
-            if !model.infoCard.overview.isEmpty {
-                Text(model.infoCard.overview)
-                    .font(metrics.bodyFont)
-                    .foregroundStyle(.white.opacity(0.82))
-                    .lineLimit(metrics.overviewLineLimit)
-                    .truncationMode(.tail)
-                    .layoutPriority(1)
+                    if !model.infoCard.overview.isEmpty {
+                        Text(model.infoCard.overview)
+                            .font(metrics.bodyFont)
+                            .foregroundStyle(.white.opacity(0.82))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Spacer(minLength: 0)
-
-            // Metadata gets its own line, and gives up its badges rather than
-            // clipping them.
+            // Metadata gives up its badges rather than clipping them.
             //
             // `ViewThatFits` because the badge row's width is content, not
             // layout: four badges on a 4K Dolby Vision Atmos file are far wider
             // than the one on a plain SDR episode, so no fixed breakpoint gets
             // this right. It takes the full row when it fits and the meta line
-            // alone when it does not — which is the correct thing to drop, the
-            // badges being available on the item's detail page while the
-            // season/episode/runtime is the line that says WHERE you are.
+            // alone when it does not — the badges being available on the item's
+            // detail page, while the season/episode/runtime is the line that
+            // says WHERE you are.
             ViewThatFits(in: .horizontal) {
                 metaRow(includingBadges: true)
                 metaRow(includingBadges: false)

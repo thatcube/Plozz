@@ -43,20 +43,25 @@ public struct PlayerTouchCardStrip: View {
     /// layout. Measured rather than inferred from idiom or size class: an iPad
     /// window can be dragged to any width, and the card has to answer for the
     /// one it got.
-    @State private var availableWidth: CGFloat = 0
+    /// The space the player has, which the HOST measures: this view is only as
+    /// tall as its own content, so its height says nothing about how much of the
+    /// screen a card may take.
+    private let availableSize: CGSize
 
     private var metrics: PlayerCardMetrics {
-        .resolved(forWidth: availableWidth)
+        .resolved(forWidth: availableSize.width, height: availableSize.height)
     }
 
     public init(
         model: PlayerControlsModel,
+        availableSize: CGSize,
         isCardOpen: Binding<Bool>,
         onRestart: @escaping () -> Void,
         onNextEpisode: @escaping () -> Void,
         onPreviousEpisode: @escaping () -> Void
     ) {
         self.model = model
+        self.availableSize = availableSize
         self._isCardOpen = isCardOpen
         self.onRestart = onRestart
         self.onNextEpisode = onNextEpisode
@@ -80,15 +85,7 @@ public struct PlayerTouchCardStrip: View {
         .animation(.easeInOut(duration: 0.24), value: openPanel)
         .frame(maxWidth: .infinity, alignment: .leading)
         .environment(\.playerCardMetrics, metrics)
-        .background {
-            GeometryReader { geometry in
-                Color.clear
-                    .onAppear { availableWidth = geometry.size.width }
-                    .onChange(of: geometry.size.width) { _, width in
-                        availableWidth = width
-                    }
-            }
-        }
+        .environment(\.mediaBadgeScale, metrics.badgeScale)
         // Kept in step both ways: this view decides WHICH tab is open, the host
         // only ever needs to know THAT one is, and to be able to close it.
         .onChange(of: openPanel) { _, panel in
@@ -153,7 +150,7 @@ public struct PlayerTouchCardStrip: View {
                 )
             }
         }
-        .frame(height: metrics.cardHeight)
+        .modifier(PlayerCardHeight(metrics: metrics))
         // Deliberately NOT clipped to the panel's rounded rectangle.
         //
         // Both panels already draw their own rounded glass, so a clip here buys

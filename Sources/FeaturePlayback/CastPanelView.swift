@@ -120,7 +120,7 @@ struct CastPanelView: View {
         // fixes all three, and the transform below replaces what the matched
         // geometry was doing.
         ZStack(alignment: .topLeading) {
-            faceRow
+            castCollection
                 // Keyed to the DRILL, not to the pane's existence.
                 //
                 // Tied to `detailPerson` the row could only change at the very
@@ -168,7 +168,18 @@ struct CastPanelView: View {
                 // squashed on the way in and out. Masking leaves the pane at its
                 // true size throughout and simply reveals more of it, which is
                 // what "this card opening out" actually looks like.
-                .mask(alignment: .topLeading) { revealMask }
+                // The drill is a HORIZONTAL-card effect: it grows a pane out of
+                // one portrait card in a row. A vertical list has no such card to
+                // grow from — the row is full-width, so "expanding" it is just
+                // the pane appearing — and the pane's own layout is a column
+                // there. So the mask is skipped and the two cross-fade.
+                .mask(alignment: .topLeading) {
+                    if metrics.isVertical {
+                        Rectangle()
+                    } else {
+                        revealMask
+                    }
+                }
             }
         }
         // Every card's frame in this panel's own space, so the drill knows where
@@ -183,7 +194,7 @@ struct CastPanelView: View {
                     .onChange(of: geometry.size) { _, size in panelSize = size }
             }
         }
-        .frame(height: metrics.cardHeight)
+        .modifier(PlayerCardHeight(metrics: metrics))
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: closeRequest) { _, _ in
             guard detailPerson != nil else { return }
@@ -362,6 +373,50 @@ struct CastPanelView: View {
             // Everyone back in the focus order once focus has landed, so
             // Left/Right work again immediately.
             restoringToIndex = nil
+        }
+    }
+
+    /// The cast, laid out for the card's shape.
+    ///
+    /// A row of portrait cards is the right answer on a wide card and the wrong
+    /// one on a narrow column: at phone width barely two fit, so the row becomes
+    /// a horizontal scroll through a list the viewer cannot see the length of.
+    /// A vertical list shows six at once in the same space. Apple's own player
+    /// makes exactly this swap between landscape and portrait.
+    @ViewBuilder
+    private var castCollection: some View {
+        if metrics.isVertical {
+            castList
+        } else {
+            faceRow
+        }
+    }
+
+    /// The narrow-card cast: a vertical list of rows.
+    private var castList: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            LazyVStack(spacing: 8) {
+                ForEach(Array(people.enumerated()), id: \.element.id) { index, person in
+                    Button { openDetail(person, at: index) } label: {
+                        CastListRow(person: person)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isFaceDisabled(index))
+                    .focused($focus, equals: .castMember(index))
+                    .id(Self.faceID(person))
+                    // Its rectangle in the panel's space, so a drill — if this
+                    // layout ever grows one — has somewhere to start.
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: CastCardFrameKey.self,
+                                value: [person.id: geometry.frame(in: .named(CastPanelView.space))]
+                            )
+                        }
+                    }
+                }
+            }
+            .padding(metrics.contentPadding)
         }
     }
 
@@ -558,6 +613,78 @@ private struct CastFaceCard: View {
     }
 }
 
+/// One person as a full-width row: circular headshot, name and character.
+///
+/// The narrow-card counterpart to ``CastFaceCard``. A row rather than a card
+/// because width is the scarce thing here and a row spends none of it: the
+/// headshot is small, and the name gets the entire remaining span rather than
+/// the ~150pt a portrait card could offer — so it reads in full instead of
+/// needing the marquee the card resorts to.
+private struct CastListRow: View {
+    @Environment(\.playerCardMetrics) private var metrics
+    let person: MediaPerson
+
+    var body: some View {
+        HStack(spacing: 12) {
+            CastAvatar(person: person)
+                .frame(width: metrics.castHeadshot, height: metrics.castHeadshot)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(person.name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let role = person.role, !role.isEmpty {
+                    Text(role)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: metrics.castRowHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .plozzFrostedBackground(
+            RoundedRectangle(cornerRadius: 14, style: .continuous),
+            raised: true
+        )
+        // The whole row takes the tap, not just the name.
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// A person's headshot, or their initials when there is no photo.
+private struct CastAvatar: View {
+    let person: MediaPerson
+
+    var body: some View {
+        if let url = person.imageURL {
+            FallbackAsyncImage(urls: [url], variant: .personHeadshot) { placeholder }
+        } else {
+            placeholder
+        }
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Circle().fill(.white.opacity(0.12))
+            Text(verbatim: initials)
+                .font(.system(size: 38, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.7))
+                .minimumScaleFactor(0.4)
+        }
+    }
+
+    private var initials: String {
+        person.name.split(separator: " ").prefix(2)
+            .compactMap(\.first).map(String.init).joined().uppercased()
+    }
+}
+
 /// One person's details, filling the card in place of the row.
 ///
 /// Deliberately terminal: it says who they are and stops. Anything leading
@@ -627,6 +754,123 @@ private struct CastMemberDetail: View {
     @State private var detail: PlayerCastDetail?
 
     var body: some View {
+        Group {
+            if metrics.isVertical {
+                verticalBody
+            } else {
+                horizontalBody
+            }
+        }
+        // Scoped to this subtree on purpose — see the loader below.
+        .animation(.easeOut(duration: 0.25), value: detail)
+        .padding(metrics.contentPadding)
+        // An OVERLAY, not the last item in the row. In the flow its position
+        // depended on how wide its neighbour was — so it started beside the
+        // name and flew across the pane the instant the credits loaded. Pinned
+        // to the corner it belongs to, it simply fades in where it will stay.
+        .overlay(alignment: .topTrailing) {
+            // The same control the Subtitles sub-screens use. Hand-rolling the
+            // focused look left TWO highlights on it: the custom fill plus the
+            // system's own focus effect, which `.focusEffectDisabled()` is what
+            // suppresses.
+            Button(action: onBack) {
+                Image(systemName: "chevron.backward")
+            }
+            .buttonStyle(PlozzPanelHeaderButtonStyle())
+            .focusEffectDisabled()
+            .focused($focus, equals: .castBack)
+            .opacity(contentVisible ? 1 : 0)
+            .padding(metrics.contentPadding)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .modifier(PlayerCardHeight(metrics: metrics))
+        // Keyed on the person: switching between two faces without leaving the
+        // detail has to re-ask, and re-asking must not show the previous
+        // person's credits while it does.
+        .task(id: person.id) { await load() }
+    }
+
+    /// The narrow card: the person as a column.
+    ///
+    /// The face shrinks to a row-sized circle and the biography takes the width
+    /// the poster rail cannot have here — a rail of 2:3 posters beside a text
+    /// column simply does not fit, so the credits go underneath and the pane
+    /// reads top to bottom like the list it opened from.
+    private var verticalBody: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                CastAvatar(person: person)
+                    .frame(width: metrics.castHeadshot, height: metrics.castHeadshot)
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(verbatim: person.name)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    if let role = person.role, !role.isEmpty {
+                        Text(verbatim: role)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(1)
+                    }
+                }
+                // Clear of the Back button, which is an overlay pinned to this
+                // corner rather than a member of the row.
+                Spacer(minLength: Self.backButtonLane)
+            }
+
+            // No line limit: the column scrolls, so a long life story is read
+            // rather than truncated with nowhere else to go.
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 12) {
+                    biographyBlock(lineLimit: nil)
+
+                    if expectsCredits {
+                        Group {
+                            if hasCredits, let credits = detail?.credits {
+                                CastCreditsRow(
+                                    items: credits,
+                                    focus: $focus,
+                                    onOpenTitle: onOpenTitle
+                                )
+                            } else {
+                                CastCreditsRow(
+                                    items: [],
+                                    focus: $focus,
+                                    onOpenTitle: nil,
+                                    placeholderCount: 5
+                                )
+                            }
+                        }
+                        .opacity(contentVisible ? 1 : 0)
+                    }
+
+                    if let onOpenPage {
+                        Button { onOpenPage(person) } label: {
+                            HStack(spacing: 8) {
+                                Text(LocalizedStringResource(
+                                    "player.cast.openPersonPage",
+                                    defaultValue: "See more",
+                                    comment: "Button in the in-player cast card; opens the person's own page, which ends playback."
+                                ))
+                                Image(systemName: "chevron.forward")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .font(.system(size: 13, weight: .medium))
+                        }
+                        .buttonStyle(PlozzPanelHeaderButtonStyle())
+                        .focusEffectDisabled()
+                        .focused($focus, equals: .castMore)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .opacity(contentVisible ? 1 : 0)
+    }
+
+    private var horizontalBody: some View {
         // Identity in a column on the left, so whatever we know about them gets
         // the pane's FULL height rather than what is left under a name. With the
         // name above them, posters could only be 88pt wide — too small to
@@ -696,76 +940,41 @@ private struct CastMemberDetail: View {
             }
         }
         .frame(height: contentHeight, alignment: .topLeading)
-        // Scoped to this subtree on purpose — see the loader below.
-        .animation(.easeOut(duration: 0.25), value: detail)
-        .padding(metrics.contentPadding)
-        // An OVERLAY, not the last item in the row. In the flow its position
-        // depended on how wide its neighbour was — so it started beside the
-        // name and flew across the pane the instant the credits loaded. Pinned
-        // to the corner it belongs to, it simply fades in where it will stay.
-        .overlay(alignment: .topTrailing) {
-            // The same control the Subtitles sub-screens use. Hand-rolling the
-            // focused look left TWO highlights on it: the custom fill plus the
-            // system's own focus effect, which `.focusEffectDisabled()` is what
-            // suppresses.
-            Button(action: onBack) {
-                Image(systemName: "chevron.backward")
-            }
-            .buttonStyle(PlozzPanelHeaderButtonStyle())
-            .focusEffectDisabled()
-            .focused($focus, equals: .castBack)
-            .opacity(contentVisible ? 1 : 0)
-            .padding(metrics.contentPadding)
+        // Literally the chosen card's own surface, grown: the panel does not
+        // draw one of its own, it inherits the matched one. No focus state —
+        // this is a pane, and lighting it up would suggest it were selectable.
+        .background {
+            PlayerOverVideoSurface(cornerRadius: metrics.panelCornerRadius)
         }
-        // Pinned to the stage in BOTH axes. Height was left to the content, so
-        // the pane opened at the height of a name and grew the moment the
-        // credits arrived — and since its background is the matched surface,
-        // the surface grew with it. The stage is a fixed height; the pane fills
-        // it and stays put however much or little there is to say.
-        // An EXACT height, not `maxHeight: .infinity`. "At most the proposal" is
-        // only as fixed as the proposal is, and the pane is one branch of a
-        // Group whose other branch is the Info panel — so the moment the credits
-        // arrived the pane could ask for more and get it. This is the same
-        // promise `InfoPanelView` makes about itself.
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .frame(height: metrics.cardHeight)
-        // Keyed on the person: switching between two faces without leaving the
-        // detail has to re-ask, and re-asking must not show the previous
-        // person's credits while it does.
-        .task(id: person.id) {
-            detail = nil
-            let opened = Date()
-            var first = true
-            guard let loader else { return }
-            // Every partial answer, not just the last one — see
-            // `PlayerCastDetailLoading`.
-            for await loaded in loader(person) {
-                guard !Task.isCancelled else { return }
+    }
+
+    private func load() async {
+        detail = nil
+        let opened = Date()
+        var first = true
+        guard let loader else { return }
+        // Every partial answer, not just the last one — see
+        // `PlayerCastDetailLoading`.
+        for await loaded in loader(person) {
+            guard !Task.isCancelled else { return }
             // Assigned WITHOUT `withAnimation`. That opened a global transaction,
             // and a global transaction re-resolves the matched-geometry surface
             // this pane stands on — so the whole panel re-ran its grow every time
             // the credits landed, dragging the Back button along with it. The
             // arrival is animated by the scoped `.animation(_:value:)` on the
             // content above, which cannot reach the surface.
-                detail = loaded
-                // What the VIEWER experiences, which is the only number that
-                // matters: from pressing Select to the pane showing something,
-                // and to it being complete. The provider timings are measured
-                // separately and do not include image loading or render time.
-                PersonDiagnostics.emit(
-                    "pane.\(first ? "first" : "update") name=\(person.name) "
-                    + "credits=\(loaded.credits.count) "
-                    + "bio=\(loaded.biography == nil ? "no" : "yes") "
-                    + "ms=\(Int(Date().timeIntervalSince(opened) * 1000))"
-                )
-                first = false
-            }
-        }
-        // Literally the chosen card's own surface, grown: the panel does not
-        // draw one of its own, it inherits the matched one. No focus state —
-        // this is a pane, and lighting it up would suggest it were selectable.
-        .background {
-            PlayerOverVideoSurface(cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius)
+            detail = loaded
+            // What the VIEWER experiences, which is the only number that
+            // matters: from pressing Select to the pane showing something, and to
+            // it being complete. The provider timings are measured separately and
+            // do not include image loading or render time.
+            PersonDiagnostics.emit(
+                "pane.\(first ? "first" : "update") name=\(person.name) "
+                + "credits=\(loaded.credits.count) "
+                + "bio=\(loaded.biography == nil ? "no" : "yes") "
+                + "ms=\(Int(Date().timeIntervalSince(opened) * 1000))"
+            )
+            first = false
         }
     }
 
@@ -794,6 +1003,56 @@ private struct CastMemberDetail: View {
     /// credits for the same slot. They answer different questions — "who is
     /// that" and "where do I know them from" — and having them take turns meant
     /// a well-stocked library could never show a biography at all.
+
+    /// Whatever we actually know about them: a biography, failing that the
+    /// life summary that places them, and failing both a plain admission.
+    ///
+    /// Shared by the two layouts. `lineLimit` is `nil` in the vertical card,
+    /// where the column scrolls and a life story can simply be read; the
+    /// horizontal card has a fixed stage and must cap it — see
+    /// `biographyLineLimit`.
+    @ViewBuilder
+    private func biographyBlock(lineLimit: Int?) -> some View {
+            if let biography = detail?.biography, !biography.isEmpty {
+                Text(verbatim: biography)
+                    .font(metrics.bodyFont)
+                    .foregroundStyle(.white.opacity(0.82))
+                    .lineSpacing(2)
+                    // As many lines as the column has room for; with no rail
+                    // beside it there is the whole pane to fill.
+                    // What the column can actually HOLD, which is three
+                    // lines either way — see `biographyLineLimit`.
+                    .lineLimit(lineLimit)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
+            } else if detail?.isComplete == true, detail?.isEmpty == true {
+                // Said plainly, and ONLY once every source has answered.
+                // Some people really do have nothing beyond a name and a
+                // face — no biography anywhere, and their one library credit
+                // is the film currently playing, which is struck from their
+                // own list. A blank card reads as broken; this reads as an
+                // answer.
+                Text(LocalizedStringResource(
+                    "player.cast.noDetails",
+                    defaultValue: "No further details available.",
+                    comment: "Shown in the in-player cast card when no source has a biography or other titles for this person."
+                ))
+                .font(metrics.bodyFont)
+                .foregroundStyle(.white.opacity(0.5))
+                .padding(.top, 12)
+            } else if let life = detail?.lifeSummary, !life.isEmpty {
+                // ONLY when there is no biography. A biography's first
+                // sentence says where someone was born almost without
+                // exception, so showing both reads as a stutter — but with
+                // no biography at all this is the one thing that places
+                // them, and Plex often has it when it has nothing else.
+                Text(verbatim: life)
+                    .font(metrics.bodyFont)
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(2)
+                    .padding(.top, 12)
+            }
+    }
 
     private var identity: some View {
         // The face, then ONE text column beside it — name, character and
@@ -846,45 +1105,7 @@ private struct CastMemberDetail: View {
                 // No character name here. It is already on the face card this
                 // pane grew out of, so repeating it spends a line saying what
                 // the viewer just read.
-                if let biography = detail?.biography, !biography.isEmpty {
-                    Text(verbatim: biography)
-                        .font(metrics.bodyFont)
-                        .foregroundStyle(.white.opacity(0.82))
-                        .lineSpacing(2)
-                        // As many lines as the column has room for; with no rail
-                        // beside it there is the whole pane to fill.
-                        // What the column can actually HOLD, which is three
-                        // lines either way — see `biographyLineLimit`.
-                        .lineLimit(biographyLineLimit)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 12)
-                } else if detail?.isComplete == true, detail?.isEmpty == true {
-                    // Said plainly, and ONLY once every source has answered.
-                    // Some people really do have nothing beyond a name and a
-                    // face — no biography anywhere, and their one library credit
-                    // is the film currently playing, which is struck from their
-                    // own list. A blank card reads as broken; this reads as an
-                    // answer.
-                    Text(LocalizedStringResource(
-                        "player.cast.noDetails",
-                        defaultValue: "No further details available.",
-                        comment: "Shown in the in-player cast card when no source has a biography or other titles for this person."
-                    ))
-                    .font(metrics.bodyFont)
-                    .foregroundStyle(.white.opacity(0.5))
-                    .padding(.top, 12)
-                } else if let life = detail?.lifeSummary, !life.isEmpty {
-                    // ONLY when there is no biography. A biography's first
-                    // sentence says where someone was born almost without
-                    // exception, so showing both reads as a stutter — but with
-                    // no biography at all this is the one thing that places
-                    // them, and Plex often has it when it has nothing else.
-                    Text(verbatim: life)
-                        .font(metrics.bodyFont)
-                        .foregroundStyle(.white.opacity(0.72))
-                        .lineLimit(2)
-                        .padding(.top, 12)
-                }
+                biographyBlock(lineLimit: biographyLineLimit)
                 if let onOpenPage {
                     // The control itself, not a hint at one.
                     //

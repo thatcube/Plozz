@@ -4,6 +4,25 @@ import CoreModels
 
 /// A horizontally-scrolling, focusable row of media cards with a title.
 /// Reused by Home (Continue Watching, Latest) and detail (episodes, related).
+/// The one definition of a rail heading's type.
+///
+/// Shared so a skeleton standing in for a rail can reserve exactly the height the
+/// real heading will take. A placeholder that guesses is a placeholder that
+/// shifts the page when the content lands.
+public enum PlozzRailTitle {
+    /// The platform's own section header, not a tvOS size shrunk down.
+    /// `sectionHeaderFontSize` is tuned for a screen read across a room and takes
+    /// no account of Dynamic Type; `.title2` is what every other iOS surface in
+    /// this app titles a rail with, and it scales with the user's text size.
+    public static func font(sectionHeaderFontSize: CGFloat) -> Font {
+        #if os(tvOS)
+        return .system(size: sectionHeaderFontSize, weight: .bold)
+        #else
+        return .title2.bold()
+        #endif
+    }
+}
+
 public struct MediaRowView: View {
     public enum Presentation: Equatable, Sendable {
         case poster
@@ -307,7 +326,9 @@ public struct MediaRowView: View {
             VStack(alignment: .leading, spacing: layoutMetrics.sectionTitleSpacing) {
                 if let title {
                     title
-                        .font(.system(size: layoutMetrics.sectionHeaderFontSize, weight: .bold))
+                        .font(PlozzRailTitle.font(
+                            sectionHeaderFontSize: layoutMetrics.sectionHeaderFontSize
+                        ))
                         .padding(.leading, leadingInset)
                 }
 
@@ -315,7 +336,7 @@ public struct MediaRowView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: layoutMetrics.cardSpacing) {
                             ForEach(items) { item in
-                                card(for: item)
+                                tappableCard(for: item)
                             }
                         }
                         .padding(.leading, leadingInset)
@@ -420,6 +441,30 @@ public struct MediaRowView: View {
                 }
             }
         }
+    }
+
+    /// The card, plus whatever it takes to select it on this platform.
+    ///
+    /// tvOS drives selection through the card's own `.focusable` + tap, which
+    /// `focusableCard` installs — deliberately not a `Button`, because a Button
+    /// paints the system focus platter behind it. That branch does nothing off
+    /// tvOS, though: it applies a content shape and no gesture, because every
+    /// other iOS surface wraps its cards in a `NavigationLink` and supplies the
+    /// tap that way. This row does not — it takes an `onSelect` closure — so its
+    /// cards did nothing at all when tapped.
+    ///
+    /// Wrapped HERE rather than fixed in `focusableCard`, which those
+    /// NavigationLink surfaces also use: a tap gesture added there would sit
+    /// inside the link's label and could swallow the link's own tap.
+    @ViewBuilder
+    private func tappableCard(for item: MediaItem) -> some View {
+        #if os(tvOS)
+        card(for: item)
+        #else
+        Button { onSelect(item) } label: { card(for: item) }
+            // Plain, so the card keeps its own colours and chrome.
+            .buttonStyle(.plain)
+        #endif
     }
 
     @ViewBuilder

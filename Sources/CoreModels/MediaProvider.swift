@@ -206,6 +206,15 @@ public protocol MediaProvider: Sendable {
     /// case a person page simply shows no biography.
     func person(id: String) async throws -> MediaPerson?
 
+    /// A person keyed by the source's own GLOBAL handle, when it keeps one
+    /// distinct from the id carried on a title's cast list.
+    ///
+    /// Exists for Plex, where the two really are different things: a `<Role>`
+    /// carries a per-section tag id AND an account-level `plex://person/<hex>`
+    /// guid, and only the guid resolves against the service that holds
+    /// biographies. Every other provider ignores this and answers `nil`.
+    func person(externalID: String, name: String) async -> MediaPerson?
+
     /// The same two lookups keyed by **name** instead of id, for asking a server
     /// about someone it did not introduce.
     ///
@@ -270,6 +279,7 @@ public extension MediaProvider {
 
     /// Default: the source keeps no person records, so no biography.
     func person(id: String) async throws -> MediaPerson? { nil }
+    func person(externalID: String, name: String) async -> MediaPerson? { nil }
 
     /// Default: cannot look a person up by name, so this source contributes
     /// nothing to another server's person page.

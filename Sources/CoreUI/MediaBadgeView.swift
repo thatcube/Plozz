@@ -2,9 +2,30 @@
 import SwiftUI
 import CoreModels
 
+/// How much to shrink the badges, for surfaces that show them somewhere tighter
+/// than the detail hero they were drawn for.
+///
+/// A scale rather than a second set of numbers: a badge is a wordmark built from
+/// a dozen interlocking measurements — the dts dash is positioned against the
+/// `H` beside it, the Dolby format word sits under its double-D — and a second
+/// hand-tuned set would drift out of agreement with the first. Scaling keeps the
+/// one set of relationships and changes only how big it is drawn.
+private struct MediaBadgeScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+extension EnvironmentValues {
+    /// See ``MediaBadgeScaleKey``. 1 is the size the badges were designed at.
+    public var mediaBadgeScale: CGFloat {
+        get { self[MediaBadgeScaleKey.self] }
+        set { self[MediaBadgeScaleKey.self] = newValue }
+    }
+}
+
 /// A horizontal row of capability badges (`TV-14`, `4K`, `HDR`, `Dolby Vision`,
 /// `Dolby Atmos`, `5.1`, …) for the detail hero. Renders nothing when empty.
 public struct MediaBadgeRow: View {
+    @Environment(\.mediaBadgeScale) private var scale
     private let badges: [MediaBadge]
 
     public init(badges: [MediaBadge]) {
@@ -13,7 +34,7 @@ public struct MediaBadgeRow: View {
 
     public var body: some View {
         if !badges.isEmpty {
-            HStack(alignment: .center, spacing: 10) {
+            HStack(alignment: .center, spacing: 10 * scale) {
                 ForEach(badges) { badge in
                     MediaBadgeChip(badge: badge)
                 }
@@ -45,54 +66,56 @@ public struct MediaBadgeChip: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
 
+    @Environment(\.mediaBadgeScale) private var scale
+
     /// Shared type scale so every treatment lines up to the same cap height.
-    private static let textFont = Font.system(size: 21, weight: .semibold)
+    private var textFont: Font { .system(size: 21 * scale, weight: .semibold) }
     /// Smaller scale for the resolution pill (`4K`, `1080P`, `.prominent`) and the
     /// `.spec` codec/channel pills, which read as chunky at the shared size —
     /// deliberately more compact than the HDR/SDR/DTS marks, which keep their size.
-    private static let specFont = Font.system(size: 14, weight: .bold)
-    private static let specPillHeight: CGFloat = 22
-    private static let specHPadding: CGFloat = 8
+    private var specFont: Font { .system(size: 14 * scale, weight: .bold) }
+    private var specPillHeight: CGFloat { 22 * scale }
+    private var specHPadding: CGFloat { 8 * scale }
     /// A rounder radius for the resolution/spec pills specifically, so they read
     /// as softer chips than the sharper rating/HDR treatments.
-    private static let specCornerRadius: CGFloat = 8
-    private static let dolbyWordFont = Font.system(size: 13, weight: .semibold)
-    private static let dolbyFormatFont = Font.system(size: 10, weight: .medium)
+    private var specCornerRadius: CGFloat { 8 * scale }
+    private var dolbyWordFont: Font { .system(size: 13 * scale, weight: .semibold) }
+    private var dolbyFormatFont: Font { .system(size: 10 * scale, weight: .medium) }
     /// Heavy weights for the HDR/SDR wordmark so it reads as a bold logo: the
     /// format name (`HDR`/`HLG`/`SDR`) and its numeric variant (`10`, `10+`). The
     /// numeric suffix keeps its own size so shrinking the head leaves `10+` intact.
-    private static let hdrHeadFont = Font.system(size: 18, weight: .black)
-    private static let hdrSuffixFont = Font.system(size: 14, weight: .heavy)
+    private var hdrHeadFont: Font { .system(size: 18 * scale, weight: .black) }
+    private var hdrSuffixFont: Font { .system(size: 14 * scale, weight: .heavy) }
     /// DTS wordmark weights: a heavy lowercase `dts` head with the `-HD` suffix
     /// rendered as one connected gray unit — a short `HD` (about as tall as the
     /// `s`) with the dash drawn as a solid bar fused to the `H`.
-    private static let dtsHeadFont = Font.system(size: 22, weight: .black)
-    private static let dtsSuffixFont = Font.system(size: 17, weight: .black)
+    private var dtsHeadFont: Font { .system(size: 22 * scale, weight: .black) }
+    private var dtsSuffixFont: Font { .system(size: 17 * scale, weight: .black) }
     /// The fused dash bar of the dts-HD mark: sized to the shorter `HD`, raised
     /// to the `H`'s mid-height, gapped from the `dts` on its left and overlapped
     /// into the `H` on its right so the two connect.
-    private static let dtsDashWidth: CGFloat = 7
-    private static let dtsDashThickness: CGFloat = 3
-    private static let dtsDashRaise: CGFloat = 6
-    private static let dtsDashLeading: CGFloat = 2
-    private static let dtsDashOverlap: CGFloat = 2
+    private var dtsDashWidth: CGFloat { 7 * scale }
+    private var dtsDashThickness: CGFloat { 3 * scale }
+    private var dtsDashRaise: CGFloat { 6 * scale }
+    private var dtsDashLeading: CGFloat { 2 * scale }
+    private var dtsDashOverlap: CGFloat { 2 * scale }
     /// Plain trailing channel-layout number appended to a format logo (the `5.1`
     /// beside a Dolby mark). Sized to the smaller Dolby wordmark.
-    private static let channelFont = Font.system(size: 15, weight: .semibold)
+    private var channelFont: Font { .system(size: 15 * scale, weight: .semibold) }
     /// A bolder channel number for the dts-HD mark specifically.
-    private static let dtsChannelFont = Font.system(size: 18, weight: .heavy)
+    private var dtsChannelFont: Font { .system(size: 18 * scale, weight: .heavy) }
     /// The oversized `X` of the dts:X mark, larger than the `dts` head and
     /// filled with the orange dts:X gradient.
-    private static let dtsXFont = Font.system(size: 32, weight: .black)
-    private static let cornerRadius: CGFloat = 6
-    private static let hPadding: CGFloat = 11
+    private var dtsXFont: Font { .system(size: 32 * scale, weight: .black) }
+    private var cornerRadius: CGFloat { 6 * scale }
+    private var hPadding: CGFloat { 11 * scale }
     /// Tighter horizontal padding for the borderless HDR wordmark, which has no
     /// pill background and so doesn't need the inset the filled pills use.
-    private static let hdrHPadding: CGFloat = 2
-    private static let vPadding: CGFloat = 5
+    private var hdrHPadding: CGFloat { 2 * scale }
+    private var vPadding: CGFloat { 5 * scale }
     /// Shared pill height so every pill badge (rating, resolution, spec) lines
     /// up to the exact same height regardless of the font it uses.
-    private static let pillHeight: CGFloat = 36
+    private var pillHeight: CGFloat { 36 * scale }
 
     public init(badge: MediaBadge) {
         self.badge = badge
@@ -110,7 +133,7 @@ public struct MediaBadgeChip: View {
                     hPadding: ratingHPadding
                 )
                     .overlay(
-                        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .strokeBorder(
                                 palette.primaryText.opacity(0.65),
                                 lineWidth: ratingBorderWidth
@@ -127,12 +150,12 @@ public struct MediaBadgeChip: View {
                 label(
                     badge.label,
                     textColor: palette.backgroundBase,
-                    font: Self.specFont,
-                    height: Self.specPillHeight,
-                    hPadding: Self.specHPadding
+                    font: specFont,
+                    height: specPillHeight,
+                    hPadding: specHPadding
                 )
                     .background(
-                        RoundedRectangle(cornerRadius: Self.specCornerRadius, style: .continuous)
+                        RoundedRectangle(cornerRadius: specCornerRadius, style: .continuous)
                             .fill(palette.primaryText)
                     )
                     .accessibilityLabel(badge.label)
@@ -140,12 +163,12 @@ public struct MediaBadgeChip: View {
                 label(
                     badge.label,
                     textColor: palette.primaryText,
-                    font: Self.specFont,
-                    height: Self.specPillHeight,
-                    hPadding: Self.specHPadding
+                    font: specFont,
+                    height: specPillHeight,
+                    hPadding: specHPadding
                 )
                     .background(
-                        RoundedRectangle(cornerRadius: Self.specCornerRadius, style: .continuous)
+                        RoundedRectangle(cornerRadius: specCornerRadius, style: .continuous)
                             .fill(palette.primaryText.opacity(0.16))
                     )
                     .accessibilityLabel(badge.label)
@@ -156,30 +179,30 @@ public struct MediaBadgeChip: View {
                 sdrBrushedLabel(badge.label)
                     .accessibilityLabel(badge.label)
             case .dts:
-                HStack(alignment: .center, spacing: 6) {
+                HStack(alignment: .center, spacing: 6 * scale) {
                     dtsLabel(badge.label)
                     if let detail = badge.detail {
                         // DTS-HD: nudge the channel number down/left to sit better
                         // against the shorter, baseline-aligned dts-HD wordmark, and
                         // render it a little bolder.
-                        channelText(detail, font: Self.dtsChannelFont)
-                            .offset(x: -2, y: 2)
+                        channelText(detail, font: dtsChannelFont)
+                            .offset(x: -2 * scale, y: 2 * scale)
                     }
                 }
                 .accessibilityLabel(badge.accessibilityText)
             case .dolby:
-                HStack(alignment: .center, spacing: 6) {
-                    VStack(alignment: .center, spacing: -2) {
-                        HStack(alignment: .center, spacing: 4) {
+                HStack(alignment: .center, spacing: 6 * scale) {
+                    VStack(alignment: .center, spacing: -2 * scale) {
+                        HStack(alignment: .center, spacing: 4 * scale) {
                             DolbyDoubleD()
                                 .fill(palette.primaryText)
-                                .frame(width: 14, height: 10)
+                                .frame(width: 14 * scale, height: 10 * scale)
                             Text("Dolby")
-                                .font(Self.dolbyWordFont)
+                                .font(dolbyWordFont)
                                 .foregroundStyle(palette.primaryText)
                         }
                         Text(badge.dolbyFormatWord.uppercased())
-                            .font(Self.dolbyFormatFont)
+                            .font(dolbyFormatFont)
                             .foregroundStyle(palette.primaryText)
                             .tracking(0.4)
                             .lineLimit(1)
@@ -200,9 +223,9 @@ public struct MediaBadgeChip: View {
 
     /// A trailing channel-layout number (`5.1`/`7.1`) rendered as plain white
     /// text with no pill, so it reads as part of the preceding format logo.
-    private func channelText(_ text: String, font: Font = Self.channelFont) -> some View {
+    private func channelText(_ text: String, font: Font? = nil) -> some View {
         Text(text)
-            .font(font)
+            .font(font ?? channelFont)
             .foregroundStyle(palette.primaryText)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
@@ -212,32 +235,32 @@ public struct MediaBadgeChip: View {
         #if os(iOS)
         return .custom(
             "Bungee-Regular",
-            size: horizontalSizeClass == .compact ? 13 : 15
+            size: (horizontalSizeClass == .compact ? 13 : 15) * scale
         )
         #else
-        return .custom("Bungee-Regular", size: 18)
+        return .custom("Bungee-Regular", size: 18 * scale)
         #endif
     }
 
     private var ratingPillHeight: CGFloat {
         #if os(iOS)
-        return horizontalSizeClass == .compact ? 28 : 32
+        return (horizontalSizeClass == .compact ? 28 : 32) * scale
         #else
-        return Self.pillHeight
+        return pillHeight
         #endif
     }
 
     private var ratingHPadding: CGFloat {
         #if os(iOS)
-        return horizontalSizeClass == .compact ? 8 : 9
+        return (horizontalSizeClass == .compact ? 8 : 9) * scale
         #else
-        return Self.hPadding
+        return hPadding
         #endif
     }
 
     private var ratingBorderWidth: CGFloat {
         #if os(iOS)
-        return 2
+        return 2 * scale
         #else
         return 3
         #endif
@@ -247,18 +270,18 @@ public struct MediaBadgeChip: View {
         _ text: String,
         textColor: Color,
         font: Font? = nil,
-        height: CGFloat = MediaBadgeChip.pillHeight,
-        hPadding: CGFloat = MediaBadgeChip.hPadding
+        height: CGFloat? = nil,
+        hPadding: CGFloat? = nil
     ) -> some View {
         Text(text)
-            .font(font ?? Self.textFont)
+            .font(font ?? textFont)
             .foregroundStyle(textColor)
             .textCase(.uppercase)
             .tracking(0.5)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
-            .padding(.horizontal, hPadding)
-            .frame(height: height)
+            .padding(.horizontal, hPadding ?? self.hPadding)
+            .frame(height: height ?? pillHeight)
     }
 
     /// A two-weight HDR wordmark filled with the HDR gradient (no pill behind
@@ -269,10 +292,10 @@ public struct MediaBadgeChip: View {
         let parts = Self.splitHDR(text)
         return HStack(alignment: .firstTextBaseline, spacing: 1) {
             Text(parts.head)
-                .font(Self.hdrHeadFont)
+                .font(hdrHeadFont)
             if let suffix = parts.suffix {
                 Text(suffix)
-                    .font(Self.hdrSuffixFont)
+                    .font(hdrSuffixFont)
                     .baselineOffset(1)
             }
         }
@@ -280,8 +303,8 @@ public struct MediaBadgeChip: View {
         .tracking(0.5)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
-        .padding(.horizontal, Self.hdrHPadding)
-        .frame(height: Self.pillHeight)
+        .padding(.horizontal, hdrHPadding)
+        .frame(height: pillHeight)
     }
 
     /// The SDR counterpart to ``hdrLabel``: the same borderless heavy wordmark
@@ -291,14 +314,14 @@ public struct MediaBadgeChip: View {
     /// row as a peer.
     private func sdrBrushedLabel(_ text: String) -> some View {
         Text(text)
-            .font(Self.hdrHeadFont)
+            .font(hdrHeadFont)
             .textCase(.uppercase)
             .foregroundStyle(sdrBrushedGradient)
             .tracking(0.5)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
-            .padding(.horizontal, Self.hdrHPadding)
-            .frame(height: Self.pillHeight)
+            .padding(.horizontal, hdrHPadding)
+            .frame(height: pillHeight)
     }
 
     /// Diagonal satin sheen for the brushed-metal SDR wordmark: a mid-neutral base
@@ -341,12 +364,12 @@ public struct MediaBadgeChip: View {
         let isX = parts.suffix?.uppercased() == "X"
         return HStack(alignment: isX ? .center : .firstTextBaseline, spacing: isX ? 1 : 0) {
             Text(parts.head)
-                .font(Self.dtsHeadFont)
+                .font(dtsHeadFont)
                 .tracking(-0.5)
                 .foregroundStyle(palette.primaryText)
             if isX {
                 Text("X")
-                    .font(Self.dtsXFont)
+                    .font(dtsXFont)
                     .foregroundStyle(Self.dtsXGradient)
             } else if parts.separator == "-", let suffix = parts.suffix {
                 // dts-HD: a short, much smaller `HD` sitting on the dts baseline,
@@ -354,25 +377,25 @@ public struct MediaBadgeChip: View {
                 // overlapped into it so the two fuse. The whole unit is gray.
                 Rectangle()
                     .fill(dtsHDColor)
-                    .frame(width: Self.dtsDashWidth, height: Self.dtsDashThickness)
-                    .padding(.leading, Self.dtsDashLeading)
-                    .padding(.trailing, -Self.dtsDashOverlap)
+                    .frame(width: dtsDashWidth, height: dtsDashThickness)
+                    .padding(.leading, dtsDashLeading)
+                    .padding(.trailing, -dtsDashOverlap)
                     .alignmentGuide(.firstTextBaseline) { _ in
-                        Self.dtsDashThickness / 2 + Self.dtsDashRaise
+                        dtsDashThickness / 2 + dtsDashRaise
                     }
                 Text(suffix)
-                    .font(Self.dtsSuffixFont)
+                    .font(dtsSuffixFont)
                     .foregroundStyle(dtsHDColor)
             } else {
                 Text(verbatim: (parts.separator ?? "") + (parts.suffix ?? ""))
-                    .font(Self.dtsSuffixFont)
+                    .font(dtsSuffixFont)
                     .foregroundStyle(dtsHDColor)
             }
         }
         .lineLimit(1)
         .minimumScaleFactor(0.75)
-        .padding(.horizontal, Self.hdrHPadding)
-        .frame(height: Self.pillHeight)
+        .padding(.horizontal, hdrHPadding)
+        .frame(height: pillHeight)
     }
 
     /// The orange dts:X gradient (light orange highlight → deep orange) used to

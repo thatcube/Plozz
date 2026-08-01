@@ -58,6 +58,11 @@ public struct RootView: View {
     /// Appearance) and injected as `\.plozzReduceTransparency`. `tvOS Default`
     /// follows this OS value; `On` forces glass; `Off` forces solid.
     @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
+    /// Whether this device, playing whatever is playing, can afford glass.
+    ///
+    /// Owned here so a change reaches every surface at once, and injected so the
+    /// player can raise and lower it without reaching back up through the app.
+    @State private var glassPerformance = GlassPerformanceModel()
     /// Window-level black veil that survives the player's dismiss into Home so it
     /// can cover the TV's *physical* HDR/DV → SDR panel switch (which on some TVs
     /// lags ~1s behind tvOS's `displayDidSettle`). Injected into the environment so
@@ -342,7 +347,28 @@ public struct RootView: View {
         .environment(\.plozzCardStyle, appState.profileSettings.cardStyleModel.style)
         .environment(\.plozzWatchStatusIndicator, appState.profileSettings.watchStatusIndicatorModel.indicator)
         .environment(\.plozzNavigationStyle, appState.profileSettings.navigationStyleModel.style)
-        .environment(\.plozzReduceTransparency, appState.profileSettings.transparencyModel.preference.reducesTransparency(systemReduceTransparency: systemReduceTransparency))
+        // Accessibility and user intent only. Performance does NOT enter here:
+        // this reaches every glass surface in the app, including controls small
+        // enough that their backdrop sample costs nothing worth reclaiming.
+        .environment(
+            \.plozzReduceTransparency,
+            appState.profileSettings.transparencyModel.preference.reducesTransparency(
+                systemReduceTransparency: systemReduceTransparency
+            )
+        )
+        // The same, plus performance — read by panels and cards, whose backdrop
+        // sample is the whole reason the frame rate suffers.
+        .environment(
+            \.plozzReducePanelGlass,
+            appState.profileSettings.transparencyModel.preference.reducesTransparency(
+                systemReduceTransparency: systemReduceTransparency,
+                performance: glassPerformance.budget
+            )
+        )
+        // So a hairline tuned against an SDR backdrop can compensate for SDR
+        // white being mapped brighter once the panel switches to HDR.
+        .environment(\.plozzHDRDisplayActive, glassPerformance.budget.contentIsHDR)
+        .environment(glassPerformance)
         .environment(displayVeil)
         // Push the theme's effective scheme DOWN into the tree instead of forcing
         // it on the window via `preferredColorScheme`. A downward environment value

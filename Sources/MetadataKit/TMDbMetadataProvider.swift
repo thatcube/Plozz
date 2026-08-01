@@ -196,7 +196,36 @@ public struct TMDbMetadataProvider: ArtworkProvider {
             path += "&\(isTV ? "first_air_date_year" : "year")=\(year)"
         }
         guard let url = url(path) else { return nil }
-        return await MetadataHTTP.get(SearchResponse.self, url: url, headers: authHeaders)?.results.first
+        let results = await MetadataHTTP.get(
+            SearchResponse.self, url: url, headers: authHeaders
+        )?.results ?? []
+        return Self.bestMatch(for: query, among: results)
+    }
+
+    /// The result that is actually the title asked for.
+    ///
+    /// TMDb ranks search results by POPULARITY, not by how well they match — so
+    /// taking the first one silently returns the most famous title containing
+    /// the words. Searching "The Circle" (2017) returns Kingsman: The Golden
+    /// Circle above it, and the page then showed one film under the other's
+    /// name. The wrong answer is worse than none here, because nothing on screen
+    /// says it was a guess.
+    ///
+    /// An exact title match wins, preferring one whose year also agrees; failing
+    /// that, TMDb's own order stands, since a title the viewer's server spells
+    /// differently is still usually the popular one.
+    static func bestMatch(for query: MetadataQuery, among results: [SearchResult]) -> SearchResult? {
+        let wanted = MediaItemIdentity.normalizedTitle(query.title)
+        guard !wanted.isEmpty else { return results.first }
+        let exact = results.filter {
+            guard let title = $0.displayTitle else { return false }
+            return MediaItemIdentity.normalizedTitle(title) == wanted
+        }
+        guard !exact.isEmpty else { return results.first }
+        if let year = query.year, let dated = exact.first(where: { $0.year == year }) {
+            return dated
+        }
+        return exact.first
     }
 
     private func images(forID id: String, isTV: Bool) async -> ImagesResponse? {
@@ -266,6 +295,14 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     struct SearchResult: Decodable {
         let id: Int?
         let poster_path: String?
+        /// Films carry `title`, series carry `name`.
+        let title: String?
+        let name: String?
+        let release_date: String?
+        let first_air_date: String?
+
+        var displayTitle: String? { title ?? name }
+        var year: Int? { Int((release_date ?? first_air_date)?.prefix(4) ?? "") }
     }
     struct CreditsResponse: Decodable {
         let cast: [CreditEntry]?

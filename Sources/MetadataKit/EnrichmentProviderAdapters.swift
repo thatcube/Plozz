@@ -221,7 +221,17 @@ public struct TMDbEnrichmentProvider: MetadataEnrichmentProvider {
     private let provider: any TMDbEnriching
     private let backdropLimit: Int
 
-    public init(provider: any TMDbEnriching, backdropLimit: Int = 4, policy: ProviderPolicy = ProviderPolicy()) {
+    /// `version: 2` — a title search now prefers an EXACT title match over
+    /// TMDb's own popularity order, so it can answer with a different (correct)
+    /// title than before. Searching "The Circle" used to resolve to Kingsman:
+    /// The Golden Circle, and that answer is cached under version 1: without a
+    /// bump the fixed matcher would never run for any title already looked up,
+    /// and the wrong artwork and metadata would keep being served.
+    public init(
+        provider: any TMDbEnriching,
+        backdropLimit: Int = 4,
+        policy: ProviderPolicy = ProviderPolicy(version: 2)
+    ) {
         self.provider = provider
         self.backdropLimit = backdropLimit
         self.policy = policy

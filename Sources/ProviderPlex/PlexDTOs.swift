@@ -278,13 +278,21 @@ struct PlexRole: Decodable {
     let tag: String?
     let role: String?
     let thumb: String?
+    /// The person's ACCOUNT-level Plex guid, `plex://person/<hex>`.
+    ///
+    /// Distinct from `id`, which is a per-section tag id that means nothing
+    /// outside the library it came from. This one is global, and is the only
+    /// handle that resolves against the Discover service — the sole place Plex
+    /// keeps a person's biography (a PMS has no person records at all).
+    let tagKey: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, tag, role, thumb
+        case id, tag, role, thumb, tagKey
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        tagKey = try? c.decodeIfPresent(String.self, forKey: .tagKey)
         id = c.flexibleInt(.id)
         tag = c.flexibleString(.tag)
         role = c.flexibleString(.role)
@@ -647,4 +655,48 @@ enum PlexTime {
     static func milliseconds(fromSeconds seconds: TimeInterval) -> Int {
         Int((seconds * 1000.0).rounded())
     }
+}
+
+
+/// A person as the plex.tv Discover service describes them.
+///
+/// Deliberately tolerant about WHERE the record sits in the container: the
+/// official spec documents this route only for a PMS, where the payload is a
+/// bare tag under `Directory`, and says nothing about the plex.tv response
+/// beyond that `tagKey` can "fetch additional information". Both shapes are
+/// accepted so the richer one is used when present.
+struct PlexPersonRecord: Decodable {
+    let tag: String?
+    let title: String?  // l10n:content — the person's name, as Plex records it
+    let summary: String?  // l10n:content — biography text from Plex
+    let thumb: String?
+    /// ISO date, e.g. `1937-06-01`.
+    let bornAt: String?
+    /// e.g. `Memphis, Tennessee, USA`.
+    let birthPlace: String?
+
+    var displayName: String? {
+        [title, tag].compactMap { $0 }.first { !$0.isEmpty }
+    }
+
+    /// The birth year alone. A full date reads as trivia at three metres; the
+    /// year is what places someone.
+    var birthYear: String? {
+        guard let bornAt, bornAt.count >= 4 else { return nil }
+        let year = String(bornAt.prefix(4))
+        return Int(year) == nil ? nil : year
+    }
+}
+
+struct PlexPersonResponse: Decodable {
+    struct Container: Decodable {
+        let Directory: [PlexPersonRecord]?
+        let Metadata: [PlexPersonRecord]?
+        let Tag: [PlexPersonRecord]?
+
+        var firstPerson: PlexPersonRecord? {
+            Metadata?.first ?? Directory?.first ?? Tag?.first
+        }
+    }
+    let MediaContainer: Container
 }

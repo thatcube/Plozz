@@ -783,8 +783,23 @@ private func makePlayerViewModel(
         adoptedResolved: adoptedResolved
     )
     episodeViewModel.onSubtitleStyleChanged = onSubtitleStyleChanged
+    // What the in-player Cast tab can say about a person beyond their face.
+    //
+    // Built here because it needs the signed-in accounts and their provider
+    // sessions, which `FeaturePlayback` has no access to and should not: the
+    // player declares what it wants and stays ignorant of where it comes from.
+    //
+    // Deliberately the SAME ladder as the full person page, by reusing its view
+    // model outright rather than restating it: own server by its own person id,
+    // every other server by name, biography from whichever server has one and
+    // Wikipedia only if none does. Two implementations of that would drift.
+    episodeViewModel.controls.infoCard.castDetailLoader = makeCastDetailLoader(
+        for: request.item,
+        accounts: accounts
+    )
     return episodeViewModel
 }
+
 
 /// Builds the periodic mid-play convergence hook. Mirrors
 /// ``makePlaybackStoppedHandler`` but **enqueue-only**: it does NOT end the live
@@ -892,13 +907,17 @@ extension View {
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
         showDiagnostics: Bool,
         themePalette: ThemePalette,
-        onSubtitleStyleChanged: @escaping (SubtitleStyle) -> Void
+        onSubtitleStyleChanged: @escaping (SubtitleStyle) -> Void,
+        /// Leave the film for a person's own page (in-player Cast card).
+        onOpenPerson: @escaping (MediaPerson, String?) -> Void,
+        /// Leave the film for one of a person's credits (in-player Cast card).
+        onOpenTitle: @escaping (MediaItem) -> Void
     ) -> some View {
         fullScreenCover(item: playRequest) { request in
             PlayerPresentation(
                 request: request,
                 make: { request, adopted in
-                    makePlayerViewModel(
+                    let model = makePlayerViewModel(
                         for: request,
                         accounts: accounts,
                         networkFileResolver: networkFileResolver,
@@ -917,6 +936,15 @@ extension View {
                         onSubtitleStyleChanged: onSubtitleStyleChanged,
                         adoptedResolved: adopted
                     )
+                    // Set here rather than inside the factory: leaving the film
+                    // is a navigation concern, and navigation lives with the
+                    // shell that presented the player, not with the code that
+                    // builds one.
+                    model.controls.infoCard.openPersonPage = { person in
+                        onOpenPerson(person, request.item.sourceAccountID)
+                    }
+                    model.controls.infoCard.openTitlePage = onOpenTitle
+                    return model
                 },
                 makeFailover: { failedItem, tried in
                     failoverPlayItem(
@@ -1054,4 +1082,6 @@ extension View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
+
 #endif
+

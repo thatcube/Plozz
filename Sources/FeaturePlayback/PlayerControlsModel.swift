@@ -173,6 +173,36 @@ public final class InfoCardModel {
     public var overview: String = ""   // l10n:content — media metadata from the server
     /// Technical badges (resolution/codec/HDR/etc.).
     public var badges: [MediaBadge] = []
+    /// On-screen talent for what is playing, driving the in-player Cast tab.
+    ///
+    /// Arrives with the item, so it needs no request of its own — and the tab
+    /// hides itself when this is empty rather than opening an empty card.
+    public var cast: [MediaPerson] = []   // l10n:content — media metadata from the server
+    /// The account the item came from, so a person can be looked up on the server
+    /// that actually knows their id. Person ids are per-server, so this cannot be
+    /// inferred later.
+    public var sourceAccountID: String?
+    /// What is playing, so it can be struck from a person's credits — listing the
+    /// film you are watching under "where else you know them from" is noise.
+    public var sourceItemID: String?
+    /// Supplied by the app, because resolving a person's credits needs accounts
+    /// and provider sessions that live above this module. `nil` leaves the Cast
+    /// tab showing faces and names, exactly as it did before.
+    public var castDetailLoader: PlayerCastDetailLoading?
+    /// Leave the film and open this person's own page.
+    ///
+    /// The ONE thing in the Cast card that ends playback, which is why it is a
+    /// deliberate press on a labelled control and never a side effect of
+    /// browsing. Resume position is written on the way out, so returning
+    /// continues where it stopped. `nil` hides the control entirely.
+    public var openPersonPage: ((MediaPerson) -> Void)?
+    /// Leave the film and open one of a person's credits.
+    ///
+    /// Same contract as `openPersonPage`: a deliberate press that ends playback
+    /// with the resume position written, never a side effect of browsing. The
+    /// title may or may not be in the library — the detail page it lands on
+    /// handles both, offering Play for one and a request for the other.
+    public var openTitlePage: ((MediaItem) -> Void)?
     /// Ordered artwork candidates (image → backdrop → poster) for the thumbnail.
     public var artworkURLs: [URL] = []
     /// Pre-formatted runtime label (e.g. "37 min") for the meta line.

@@ -94,6 +94,13 @@ struct HomeTab: View {
     /// Home). These bindings drive that root-level host.
     @Binding var playRequest: PlayRequest?
     @Binding var resumePrompt: MediaItem?
+    /// A person page raised by the in-player Cast card, to push once the player
+    /// has closed. Non-nil only while THIS tab is the one on screen, so the two
+    /// tabs that observe it can never both push the same page.
+    @Binding var pendingPersonRoute: PersonRoute?
+    /// A title raised by the in-player Cast card, pushed once the player has
+    /// closed. Non-nil only while THIS tab is on screen — see the person route.
+    @Binding var pendingTitleRoute: MediaItem?
 
     @State private var path = NavigationPath()
     /// Handles owned above the tab so tab re-hosting cannot destroy them.
@@ -255,6 +262,20 @@ struct HomeTab: View {
                 // defaults to the smart best version (no library origin).
                 itemDetail(for: item, libraryOrigin: nil)
             }
+            .onChange(of: pendingTitleRoute) { _, item in
+                guard let item else { return }
+                pendingTitleRoute = nil
+                path.append(item)
+            }
+            .onChange(of: pendingPersonRoute) { _, route in
+                // Raised by the in-player Cast card and pushed once the player
+                // has gone. Cleared immediately so the same person can be
+                // opened again later — and so the other tab, which watches the
+                // same value, never sees it.
+                guard let route else { return }
+                pendingPersonRoute = nil
+                path.append(route)
+            }
             .navigationDestination(for: PersonRoute.self) { route in
                 PersonDetailView(
                     person: route.person,
@@ -284,7 +305,22 @@ struct HomeTab: View {
                             // Only reached when no server stored a biography.
                             // Wikipedia needs no key or account, so this rung
                             // works for every user out of the box.
-                            biographyProviders: [WikipediaPersonBiographyProvider()]
+                            biographyProviders: [WikipediaPersonBiographyProvider()],
+                            // The same ladder the in-player Cast card uses, and
+                            // for the same reason: without it this page can only
+                            // answer with what the viewer already owns, which is
+                            // not what "known for" means.
+                            //
+                            // TMDb leads where a key is available — it alone
+                            // knows how prominent a person was in a title rather
+                            // than only how famous the title is. Wikidata and
+                            // TVmaze are keyless and carry the rest.
+                            creditsProviders: PlayerCastCredits.providers,
+                            // Artwork only, applied after ranking. Never a
+                            // ranking input: letting the source with the best
+                            // artwork reach further down the row was measured
+                            // making the order worse.
+                            artworkResolver: PlayerCastCredits.artworkResolver
                         )
                     },
                     onSelectItem: { navigate($0, libraryOrigin: route.sourceAccountID) }

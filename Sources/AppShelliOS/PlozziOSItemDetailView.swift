@@ -454,7 +454,10 @@ private struct PlozziOSCanonicalItemDetailView: View {
                 }
 
                 if !detail.item.people.filter(\.isCast).isEmpty {
-                    PlozziOSCastSection(people: detail.item.people.filter(\.isCast))
+                    PlozziOSCastSection(
+                        people: detail.item.people.filter(\.isCast),
+                        sourceAccountID: detail.item.sourceAccountID
+                    )
                 }
 
                 DetailInformationSections(
@@ -2113,7 +2116,13 @@ private struct PlozziOSCastSection: View {
     // mirroring the space above the About header rather than a fixed gap.
     @ScaledMetric(relativeTo: .subheadline) private var regularBottomPadding: CGFloat = 32
     @ScaledMetric(relativeTo: .subheadline) private var compactBottomPadding: CGFloat = 24
+    /// Opens a person's own page, told which server listed them — their credits
+    /// are answered with that server's own person id.
+    @Environment(\.mediaPersonSourceNavigator) private var openPerson
     let people: [MediaPerson]
+    /// The server this title came from, and therefore whose person ids its cast
+    /// list holds.
+    let sourceAccountID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -2124,6 +2133,9 @@ private struct PlozziOSCastSection: View {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 20) {
                     ForEach(people.prefix(20)) { person in
+                        Button {
+                            openPerson?(person, sourceAccountID)
+                        } label: {
                         VStack(alignment: .leading, spacing: 8) {
                             AsyncImage(url: person.imageURL) { image in
                                 image
@@ -2164,6 +2176,13 @@ private struct PlozziOSCastSection: View {
                         }
                         .frame(width: 164, alignment: .top)
                         .multilineTextAlignment(.center)
+                        }
+                        // Plain, so the tile keeps its own colours: a bordered
+                        // style would tint the name and role blue.
+                        .buttonStyle(.plain)
+                        // The whole tile takes the tap, not just the artwork.
+                        .contentShape(Rectangle())
+                        .disabled(openPerson == nil)
                     }
                 }
             }

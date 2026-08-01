@@ -141,7 +141,7 @@ struct UpNextCardView: View {
             .padding(.trailing, 24)
             .padding(.vertical, PlozzTheme.Metrics.cardInset)
         }
-        .buttonStyle(UpNextCardStyle(focused: focused, cornerRadius: Self.surfaceRadius))
+        .buttonStyle(PlayerOverVideoCardStyle(focused: focused, cornerRadius: Self.surfaceRadius))
         .focused($focused)
         .onPreferenceChange(UpNextMediaHeightKey.self) { height in
             if height > 0 { mediaHeight = height }
@@ -256,25 +256,122 @@ private struct CountdownRing: View {
 /// arbitrary video on a fixed dark panel, so a light theme's dark primary text would
 /// vanish into it. Fixed white matches the rest of this card's scrim-relative
 /// palette.
-private struct UpNextCardStyle: ButtonStyle {
+/// The focus treatment for a card floating over live video.
+///
+/// Shared by the Up Next card and the Cast tab's people, because they are the
+/// same problem: a surface with arbitrary footage behind it. The app's ordinary
+/// glass card fills with a light lift, which over video reads as the card
+/// changing colour and inverts its labels — so this keeps the card's own dark
+/// scrim and marks focus with a bright ring and a lift instead, leaving the
+/// content legible whatever is playing underneath.
+///
+/// Deliberately fixed white rather than the theme's primary text: a light theme's
+/// near-black would vanish into this dark panel.
+struct PlayerOverVideoCardStyle: ButtonStyle {
     let focused: Bool
     let cornerRadius: CGFloat
+    /// How far the card grows on focus.
+    ///
+    /// Small cards want the full tvOS card lift; the Up Next card is already
+    /// near the screen's width, where that much growth just pushes it off the
+    /// edges — so it keeps the gentler default.
+    var focusScale: CGFloat = 1.04
+    /// How far a press depresses the card, as a factor of `focusScale`.
+    ///
+    /// `1` disables it. Worth doing where a card is the SOURCE of a transition:
+    /// the depress moves the card while Select is held, so anything measuring it
+    /// to animate out of is measuring a position the viewer is actively
+    /// changing.
+    var pressScale: CGFloat = 0.94
 
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         return configuration.label
-            .background(shape.fill(Color.black.opacity(focused ? 0.72 : 0.55)))
+            .background { PlayerOverVideoSurface(focused: focused, cornerRadius: cornerRadius) }
             .overlay {
+                // Focus only. A resting hairline reads as an outline rather than
+                // an edge — tolerable on one floating card, busy repeated across a
+                // row of them — and the scrim already separates the card from the
+                // footage behind it.
                 shape.strokeBorder(
-                    Color.white.opacity(focused ? 0.9 : 0.28),
-                    lineWidth: focused ? 4 : 1
+                    Color.white.opacity(focused ? 0.9 : 0),
+                    lineWidth: focused ? 4 : 0
                 )
             }
             .clipShape(shape)
-            .scaleEffect(configuration.isPressed ? 0.97 : (focused ? 1.04 : 1.0))
+            .scaleEffect(configuration.isPressed ? focusScale * pressScale : (focused ? focusScale : 1.0))
             .shadow(color: .black.opacity(focused ? 0.30 : 0.20), radius: focused ? 14 : 8, y: focused ? 7 : 4)
             .animation(.easeOut(duration: 0.18), value: focused)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+}
+
+/// The surface a `PlayerOverVideoCardStyle` card sits on, on its own so a panel
+/// that isn't a button — the cast detail, which the row's card grows into — can
+/// wear exactly the same one rather than an approximation of it.
+struct PlayerOverVideoSurface: View {
+    var focused: Bool = false
+    let cornerRadius: CGFloat
+
+    /// Accessibility and user intent. Takes the flat scrim, because a viewer who
+    /// asked for less transparency wants exactly that.
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
+    /// Performance. Takes a frosted material instead — the goal here is to stop
+    /// paying for live refraction, NOT to stop being translucent, and the two
+    /// wants are different enough to deserve different surfaces.
+    @Environment(\.plozzReducePanelGlass) private var reducePanelGlass
+
+    var body: some View {
+        surface(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+
+    /// Real Liquid Glass on focus, a plain scrim otherwise.
+    ///
+    /// Focus is where glass earns its keep — one card at a time, refracting the
+    /// footage behind it, which is exactly the material's purpose. At rest a scrim
+    /// keeps the label legible over arbitrary video without paying for a live
+    /// backdrop blur on every card in the row.
+    ///
+    /// Reduce Transparency takes the scrim in both states. Deliberately NOT the
+    /// shared card's `liftSurface`, which is a solid white lift: over video that
+    /// floods the card and inverts its labels, which is the reason this style
+    /// exists rather than `PlozzCardButtonStyle`.
+    @ViewBuilder
+    private func surface(_ shape: RoundedRectangle) -> some View {
+        let scrim = shape.fill(Color.black.opacity(focused ? 0.72 : 0.55))
+        if reduceTransparency {
+            // Never lean on translucency. Deliberately the scrim rather than the
+            // shared card's `liftSurface`, which is a solid white lift: over video
+            // that floods the card and inverts its labels.
+            scrim
+        } else if reducePanelGlass {
+            // Frosted, not flat. A static system blur still separates the card
+            // from the footage and still reads as a floating surface; it simply
+            // does not resample the video every frame. Focus keeps its lighter
+            // fill so the affordance survives.
+            //
+            // The edge is the same one every other frosted surface wears. These
+            // cards sit in a row over footage that is often dark at the bottom
+            // of the frame, where frost alone leaves them without a boundary.
+            // Dropped on focus, which already has a white ring of its own.
+            shape
+                .fill(.clear)
+                .plozzFrostedBackground(shape, raised: focused)
+                .plozzFrostedBorder(shape, visible: !focused)
+        } else if #available(iOS 26.0, tvOS 26.0, *) {
+            // Glass at rest as well as on focus — a card over live video is what
+            // the material is for, and showing it only on focus is why this read
+            // as a flat scrim. Drawn as a background underlay rather than wrapped
+            // around the content: wrapping `.glassEffect` hangs tvOS 27's focus
+            // engine (see PlozzGlassCardModifier).
+            Color.clear.glassEffect(
+                focused ? .regular.tint(.white.opacity(0.18)) : .regular,
+                in: .rect(cornerRadius: cornerRadius)
+            )
+        } else {
+            scrim
+        }
     }
 }
 

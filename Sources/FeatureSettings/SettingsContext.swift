@@ -74,6 +74,12 @@ enum SettingsRoute: Hashable {
     case recentActivity
     case plexUser(accountID: String)
     case server(key: String)
+    #if DEBUG
+    /// Debug-only design preview: side-by-side candidates for the
+    /// "not in your library" and "you can request this" poster marks. Removed once
+    /// an option is picked (see `LibraryIndicatorGalleryView`).
+    case indicatorGallery
+    #endif
 }
 
 extension EdgeInsets {

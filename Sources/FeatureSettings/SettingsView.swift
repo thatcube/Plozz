@@ -845,6 +845,10 @@ public struct SettingsView: View {
             PlexLinkedUserDetailView(context: context, accountID: accountID)
         case let .server(key):
             ServerDetailView(context: context, serverKey: key)
+        #if DEBUG
+        case .indicatorGallery:
+            LibraryIndicatorGalleryView()
+        #endif
         }
     }
 

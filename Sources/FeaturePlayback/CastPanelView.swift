@@ -468,11 +468,21 @@ private struct CastFaceCard: View {
     /// 190 and 128 were independent constants and the relationship between them
     /// was accidental; this keeps it at the 31pt it happened to be.
     static var width: CGFloat { headshot + headshotSideSpace * 2 }
+    /// Scaled with the card on iPad, where it is read at arm's length rather
+    /// than across a room, and again on a phone. Kept to multiples of 8 so the
+    /// row's rhythm survives.
+    #if os(tvOS)
     static let headshot: CGFloat = 160
     private static let headshotSideSpace: CGFloat = 31
+    private static let verticalInset: CGFloat = 18
+    #else
+    static let headshot: CGFloat = PlayerCardSurface.isCompact ? 72 : 128
+    private static let headshotSideSpace: CGFloat = PlayerCardSurface.isCompact ? 12 : 24
+    private static let verticalInset: CGFloat = PlayerCardSurface.isCompact ? 8 : 12
+    #endif
     /// Where the circle sits inside the card, so the drill can start the
     /// detail's headshot exactly on top of it.
-    static let headshotOrigin = CGPoint(x: headshotSideSpace, y: 18)
+    static let headshotOrigin = CGPoint(x: headshotSideSpace, y: verticalInset)
     /// The labels' own inset, which is narrower — they may run closer to the
     /// card's edge than the circle does.
     private static let inset: CGFloat = 12
@@ -541,7 +551,7 @@ private struct CastFaceCard: View {
             // the label enough that names started scrolling well short of the
             // edge, with dead card either side of them.
         }
-        .padding(.vertical, 18)
+        .padding(.vertical, Self.verticalInset)
         .padding(.horizontal, Self.inset)
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
@@ -601,8 +611,10 @@ private struct CastMemberDetail: View {
     private static var headshot: CGFloat { contentHeight }
     /// Wide enough for a name beside the headshot and a biography that reads as
     /// prose beneath it. The artwork pays for every point of this, but the row
-    /// scrolls and a truncated sentence does not.
-    private static let identityWidth: CGFloat = 900
+    /// scrolls and a truncated sentence does not. A phone cannot spend 900 —
+    /// that is wider than the screen — so it takes what a landscape iPhone has
+    /// left once the headshot and the Back lane are paid for.
+    private static let identityWidth: CGFloat = PlayerCardSurface.isCompact ? 380 : 900
     /// The stage, less its inset. Everything in the pane is pinned to this: a
     /// column that exceeds it pushes the whole HStack past the frame that is
     /// meant to contain it, and the overflow is then split between the top and

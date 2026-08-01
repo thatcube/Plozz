@@ -65,9 +65,54 @@ struct PlozziOSPlayerControlsOverlay: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
+                // Skip / play / skip, centred — where a thumb reaches on a
+                // held device. Hidden while a card is open, matching tvOS,
+                // where the card owns the screen.
+                if !isCardOpen {
+                    HStack(spacing: 48) {
+                        Button {
+                            seek(by: -viewModel.controls.skipGesture.backwardInterval.seconds)
+                        } label: {
+                            Image(systemName: "gobackward.\(viewModel.controls.skipGesture.backwardInterval.rawValue)")
+                                .font(.system(size: 34))
+                                .foregroundStyle(.white)
+                                .frame(width: 64, height: 64)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("Skip backward")
+
+                        Button {
+                            viewModel.togglePlayPause()
+                            noteInteraction()
+                        } label: {
+                            Image(systemName: viewModel.controls.intendsPause ? "play.fill" : "pause.fill")
+                                .font(.system(size: 48))
+                                .foregroundStyle(.white)
+                                .frame(width: 76, height: 76)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel(viewModel.controls.intendsPause ? "Play" : "Pause")
+
+                        Button {
+                            seek(by: viewModel.controls.skipGesture.forwardInterval.seconds)
+                        } label: {
+                            Image(systemName: "goforward.\(viewModel.controls.skipGesture.forwardInterval.rawValue)")
+                                .font(.system(size: 34))
+                                .foregroundStyle(.white)
+                                .frame(width: 64, height: 64)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("Skip forward")
+                    }
+                    .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
+                }
+
                 PlozziOSPlayerTopBar(
-                    title: viewModel.controls.title,
-                    subtitle: viewModel.controls.subtitle,
+                    pictureInPictureAvailable: pictureInPicture.isAvailable,
+                    onTogglePictureInPicture: {
+                        pictureInPicture.toggle()
+                        noteInteraction()
+                    },
                     onClose: onClose
                 )
 
@@ -159,6 +204,7 @@ struct PlozziOSPlayerControlsOverlay: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: controlsVisible)
+        .onChange(of: isCardOpen) { _, _ in cardOpenChanged() }
         .onAppear { scheduleAutoHide() }
         .onAppear { configureScrubPreview() }
         .onAppear { attachPictureInPicture() }
@@ -229,6 +275,15 @@ struct PlozziOSPlayerControlsOverlay: View {
         noteInteraction()
     }
 
+    /// Re-arms or suspends auto-hide when the card opens or closes.
+    private func cardOpenChanged() {
+        if isCardOpen {
+            cancelAutoHide()
+        } else {
+            scheduleAutoHide()
+        }
+    }
+
     private func noteInteraction() {
         controlsVisible = true
         scheduleAutoHide()
@@ -236,7 +291,15 @@ struct PlozziOSPlayerControlsOverlay: View {
 
     private func scheduleAutoHide() {
         cancelAutoHide()
-        guard !viewModel.controls.intendsPause, presentedSheet == nil, !isScrubbing else {
+        // An open Info / Cast card counts as being in use, like an open sheet.
+        // Reading a synopsis or scrolling a cast row involves long stretches
+        // with no taps, and the timer cannot tell that from abandonment — so it
+        // took the card away mid-read. It resumes when the card closes.
+        guard !viewModel.controls.intendsPause,
+              presentedSheet == nil,
+              !isScrubbing,
+              !isCardOpen
+        else {
             return
         }
         // Auto-hide exists to get the chrome out of the way of the video. With
@@ -346,13 +409,19 @@ private struct PlozziOSAirPlayRouteButton: UIViewRepresentable {
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }
 
+/// Close, AirPlay and Picture in Picture — all leading.
+///
+/// The title moved out of here to sit above the scrub bar, matching tvOS, where
+/// the name of what you are watching belongs with the timeline rather than in a
+/// corner. Route and PiP join it on the left because they are the same class of
+/// thing: WHERE this is playing, not what.
 private struct PlozziOSPlayerTopBar: View {
-    let title: String   // l10n:content — media title from the server
-    let subtitle: String   // l10n:content — media subtitle from the server
+    let pictureInPictureAvailable: Bool
+    let onTogglePictureInPicture: () -> Void
     let onClose: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: 12) {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.headline)
@@ -361,24 +430,22 @@ private struct PlozziOSPlayerTopBar: View {
             }
             .accessibilityLabel("Close player")
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.headline)
-                    .lineLimit(1)
-                if !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .plozzForeground(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.top, 3)
-
-            Spacer(minLength: 0)
-
             PlozziOSAirPlayRouteButton()
                 .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
                 .accessibilityLabel(Text(verbatim: "AirPlay"))
+
+            if pictureInPictureAvailable {
+                Button(action: onTogglePictureInPicture) {
+                    Image(systemName: "pip.enter")
+                        .font(.headline)
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel("Picture in Picture")
+            }
+
+            Spacer(minLength: 0)
         }
         .foregroundStyle(.white)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -523,24 +590,6 @@ private struct PlozziOSPlayerTransport: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            // The shared Info / Cast card, above the scrubber and growing
-            // upward — the same view tvOS uses, not a reimplementation of it.
-            PlayerTouchCardStrip(
-                model: viewModel.controls,
-                isCardOpen: $isCardOpen,
-                onRestart: { viewModel.requestSeek(to: 0) },
-                onNextEpisode: { viewModel.playNextEpisode() },
-                onPreviousEpisode: {
-                    if let previous = viewModel.previousEpisode {
-                        viewModel.playEpisode(previous)
-                    }
-                }
-            )
-            .padding(.horizontal, 24)
-            // Any touch in here is deliberate interaction, so the controls must
-            // not auto-hide out from under someone reading a synopsis.
-            .onTapGesture { onInteraction() }
-
             if isScrubbing, showsScrubPreview {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12)
@@ -564,68 +613,69 @@ private struct PlozziOSPlayerTransport: View {
                 .shadow(color: .black.opacity(0.45), radius: 12, y: 4)
             }
 
-            HStack {
-                Text(playbackTime(displayedSeconds))
-                Spacer()
-                Text(verbatim: "-\(playbackTime(max(viewModel.controls.duration - displayedSeconds, 0)))")
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.85))
-
-            Slider(
-                value: Binding(
-                    get: { displayedSeconds },
-                    set: onScrubChanged
-                ),
-                in: 0...max(viewModel.controls.duration, 1),
-                onEditingChanged: onScrubEditingChanged
-            )
-            .tint(.white)
-            .accessibilityLabel("Playback position")
-
-            HStack(spacing: 22) {
-                Button(action: onSkipBackward) {
-                    Image(systemName: "gobackward.\(viewModel.controls.skipGesture.backwardInterval.rawValue)")
-                        .playerTransportGlyph()
-                }
-                .accessibilityLabel("Skip backward")
-
-                Button(action: onPlayPause) {
-                    Image(
-                        systemName: viewModel.controls.intendsPause
-                            ? "play.fill"
-                            : "pause.fill"
-                    )
-                    .playerTransportGlyph(font: .title)
-                }
-                .accessibilityLabel(
-                    viewModel.controls.intendsPause ? "Play" : "Pause"
-                )
-
-                Button(action: onSkipForward) {
-                    Image(systemName: "goforward.\(viewModel.controls.skipGesture.forwardInterval.rawValue)")
-                        .playerTransportGlyph()
-                }
-                .accessibilityLabel("Skip forward")
-
-                Spacer(minLength: 8)
-
-                playbackOptions
-
-                if pictureInPictureAvailable {
-                    Button(action: onTogglePictureInPicture) {
-                        Image(systemName: "pip.enter")
-                            .playerTransportGlyph()
+            HStack(alignment: .bottom, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(viewModel.controls.title)
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(1)
+                    if !viewModel.controls.subtitle.isEmpty {
+                        Text(viewModel.controls.subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.7))
+                            .lineLimit(1)
                     }
-                    .accessibilityLabel("Picture in Picture")
                 }
 
-                Button(action: onShowInfo) {
-                    Image(systemName: "info.circle")
-                        .playerTransportGlyph()
-                }
-                .accessibilityLabel("Playback information")
+                Spacer(minLength: 12)
+
+                // Speed, audio and subtitles as three peers at the trailing
+                // edge, level with the title. They were one "..." menu in the
+                // bottom-right corner, which hid three routine choices behind a
+                // generic glyph and put them nowhere near what they affect.
+                trackControls
             }
+            .foregroundStyle(.white)
+            .opacity(isCardOpen ? 0 : 1)
+            .allowsHitTesting(!isCardOpen)
+
+            // Times flank the scrubber rather than sitting above it, so the row
+            // reads as one timeline instead of three stacked things.
+            HStack(spacing: 16) {
+                // Each label is exactly as wide as the longest string THIS video
+                // can produce, so the bar's ends never drift as the digits tick
+                // over, and no dead space is reserved for an hours digit a
+                // 42-minute episode will never show. A hardcoded width has to
+                // assume the worst case for every video.
+                playbackTimeLabel(playbackTime(displayedSeconds))
+
+                PlayerTouchScrubBar(
+                    currentSeconds: displayedSeconds,
+                    duration: viewModel.controls.duration,
+                    bufferedFraction: viewModel.controls.bufferedFraction,
+                    onScrub: onScrubChanged,
+                    onScrubbingChanged: onScrubEditingChanged
+                )
+                .accessibilityLabel("Playback position")
+
+                playbackTimeLabel("-\(playbackTime(max(viewModel.controls.duration - displayedSeconds, 0)))")
+            }
+            .opacity(isCardOpen ? 0 : 1)
+            .allowsHitTesting(!isCardOpen)
+
+            // Info / Cast tabs sit BELOW the scrubber, matching tvOS, and the
+            // card grows upward out of them.
+            PlayerTouchCardStrip(
+                model: viewModel.controls,
+                isCardOpen: $isCardOpen,
+                onRestart: { viewModel.requestSeek(to: 0) },
+                onNextEpisode: { viewModel.playNextEpisode() },
+                onPreviousEpisode: {
+                    if let previous = viewModel.previousEpisode {
+                        viewModel.playEpisode(previous)
+                    }
+                }
+            )
+
             // Deliberately no .font / .foregroundStyle / .buttonStyle here. Those
             // travel through the environment into a Menu's POPUP content, not just
             // its label, so the menu's rows rendered white-on-light with the plain
@@ -635,6 +685,51 @@ private struct PlozziOSPlayerTransport: View {
         .padding(.horizontal, 24)
         .padding(.bottom, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+
+    /// Speed · Audio · Subtitles, as three peers.
+    ///
+    /// Each opens the thing it names rather than a menu of menus. Audio is a
+    /// `Menu` because its choice is a short list that can be made in place;
+    /// speed and subtitles open sheets because theirs are not.
+    @ViewBuilder
+    private var trackControls: some View {
+        HStack(spacing: 18) {
+            if viewModel.controls.engineCapabilities.contains(.playbackSpeed) {
+                Button(action: onShowSpeed) {
+                    Image(systemName: "speedometer")
+                        .playerTransportGlyph()
+                }
+                .accessibilityLabel("Playback speed")
+            }
+
+            if !viewModel.controls.audioOptions.isEmpty {
+                Menu {
+                    ForEach(viewModel.controls.audioOptions) { option in
+                        Button {
+                            viewModel.selectAudioOption(id: option.id)
+                            onInteraction()
+                        } label: {
+                            if option.isSelected {
+                                Label { option.title } icon: { Image(systemName: "checkmark") }
+                            } else {
+                                option.title
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "waveform")
+                        .playerTransportGlyph()
+                }
+                .accessibilityLabel("Audio track")
+            }
+
+            Button(action: onShowSubtitles) {
+                Image(systemName: "captions.bubble")
+                    .playerTransportGlyph()
+            }
+            .accessibilityLabel("Subtitles")
+        }
     }
 
     private var playbackOptions: some View {
@@ -675,6 +770,24 @@ private struct PlozziOSPlayerTransport: View {
 
     private var supportsDialogEnhance: Bool {
         viewModel.controls.engineCapabilities.contains(.dialogEnhance)
+    }
+
+    // Sized by the longest string this video can produce — remaining time at
+    // its maximum, which is the duration itself plus the minus sign. Elapsed
+    // and remaining both fit it, so neither label resizes mid-playback and the
+    // bar's ends stay put. Minutes are not zero-padded, so width changes at
+    // 9:59 → 10:00 as well as at the hour; deriving the template from the
+    // duration covers both without enumerating cases.
+    private func playbackTimeLabel(_ text: String) -> some View {
+        Text(verbatim: "-\(playbackTime(viewModel.controls.duration))")
+            .font(.caption.monospacedDigit())
+            .hidden()
+            .accessibilityHidden(true)
+            .overlay {
+                Text(verbatim: text)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.85))
+            }
     }
 
     private func playbackTime(_ seconds: TimeInterval) -> String {

@@ -20,9 +20,26 @@ struct InfoPanelView: View {
     /// shares this stage, and at 210 its credit posters, biography and face
     /// cards were all fighting for the same scarce lines. Everything that sizes
     /// off `cardHeight` follows automatically.
+    /// Height of the card's thumbnail, and the peg everything else hangs off.
+    ///
+    /// Smaller on iPad, where the same card is read at arm's length rather than
+    /// across a room: 250 + 24 padding gives a 298pt card that is right at three
+    /// metres and overbearing on an 11-inch display. 208 + 16 lands the card at
+    /// exactly 240 — a fifth shorter, and every value here a multiple of 8, so
+    /// the rhythm survives the change.
+    #if os(tvOS)
     static let thumbHeight: CGFloat = 250
     /// Padding between the card's content and its glass edge.
     static let contentPadding: CGFloat = 24
+    #else
+    /// On a phone the card carries no thumbnail at all (see `body`), so this is
+    /// the content's height rather than any picture's. 128 + 12 padding lands
+    /// the card at 152 — about a third of an iPhone's landscape height, which is
+    /// as much as a card describing the video can take before it buries it.
+    static let thumbHeight: CGFloat = PlayerCardSurface.isCompact ? 128 : 208
+    /// Padding between the card's content and its glass edge.
+    static let contentPadding: CGFloat = PlayerCardSurface.isCompact ? 12 : 16
+    #endif
 
     /// The card's **exact** laid-out height, known up front rather than measured.
     ///
@@ -71,7 +88,96 @@ struct InfoPanelView: View {
         let contentPad = Self.contentPadding
         let thumbHeight = Self.thumbHeight
 
-        return HStack(alignment: .top, spacing: 28) {
+        return Group {
+            if PlayerCardSurface.isCompact {
+                compactBody
+            } else {
+                regularBody(thumbRadius: thumbRadius, thumbHeight: thumbHeight)
+            }
+        }
+        .padding(contentPad)
+        // Pin the height so `cardHeight` is a promise, not an estimate.
+        .frame(height: Self.cardHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(PanelGlassBackground(cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius))
+    }
+
+    /// The phone card: no thumbnail, and the three columns folded into rows.
+    ///
+    /// Dropping the artwork is not just a space saving, though it is the biggest
+    /// one available — a 16:9 still is 370pt wide at this height, more than half
+    /// an iPhone's landscape width. It is also the single most redundant thing on
+    /// the card: the video it depicts is playing at full size directly behind it.
+    ///
+    /// The actions keep their two groups but swap axis, riding the bottom line
+    /// with the metadata rather than standing in a column of their own.
+    private var compactBody: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(model.infoCard.headline.isEmpty ? "Now Playing" : model.infoCard.headline)
+                .font(PlayerCardText.title)
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            if !model.infoCard.overview.isEmpty {
+                Text(model.infoCard.overview)
+                    .font(PlayerCardText.body)
+                    .foregroundStyle(.white.opacity(0.82))
+                    .lineLimit(3)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+            }
+
+            Spacer(minLength: 0)
+
+            // One bottom line, because there is no room for two: Playback Info
+            // at the far left — kept apart from the three transport actions,
+            // being a diagnostics toggle rather than something you reach for
+            // while watching — then the metadata, then the actions at the right.
+            HStack(spacing: 10) {
+                infoActionButton(
+                    title: "Playback Info",
+                    icon: "cpu",
+                    prominent: model.diagnosticsEnabled,
+                    slot: .infoStats
+                ) {
+                    model.diagnosticsEnabled.toggle()
+                }
+
+                if !infoMetaLine.isEmpty {
+                    Text(infoMetaLine)
+                        .font(PlayerCardText.caption)
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                }
+                if !model.infoCard.badges.isEmpty {
+                    MediaBadgeRow(badges: model.infoCard.badges)
+                }
+
+                Spacer(minLength: 8)
+
+                infoActionButton(title: "Restart", icon: "arrow.counterclockwise", prominent: false, slot: .infoRestart) {
+                    actions.restart()
+                    onClose()
+                }
+                if model.infoCard.hasPreviousEpisode {
+                    infoActionButton(title: "Previous", icon: "backward.end.fill", prominent: false, slot: .infoPrev) {
+                        actions.playPreviousEpisode()
+                    }
+                }
+                if model.infoCard.hasNextEpisode {
+                    infoActionButton(title: "Next Episode", icon: "forward.end.fill", prominent: true, slot: .infoNext) {
+                        actions.playNextEpisode()
+                    }
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func regularBody(thumbRadius: CGFloat, thumbHeight: CGFloat) -> some View {
+        HStack(alignment: .top, spacing: 28) {
             infoThumbnail(cornerRadius: thumbRadius, height: thumbHeight)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -187,11 +293,6 @@ struct InfoPanelView: View {
             .frame(height: thumbHeight, alignment: .topTrailing)
             .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(contentPad)
-        // Pin the height so `cardHeight` is a promise, not an estimate.
-        .frame(height: Self.cardHeight)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(PanelGlassBackground(cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius))
     }
 
     private func infoThumbnail(cornerRadius: CGFloat, height: CGFloat) -> some View {

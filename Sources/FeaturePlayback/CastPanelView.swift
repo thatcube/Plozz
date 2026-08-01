@@ -939,7 +939,9 @@ private struct CastMemberDetail: View {
                     // also changed where the engine looks when the pane opens,
                     // which closed the details instantly. Naming the
                     // destination affects nothing but this one key.
-                    .onMoveCommand { direction in
+                    // Through the shared wrapper, because `onMoveCommand` is
+                    // tvOS-only and this file also builds for iPad.
+                    .plozzMoveCommand { direction in
                         if direction == .right { focus = .castBack }
                     }
                     .padding(.top, 14)

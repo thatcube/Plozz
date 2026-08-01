@@ -221,26 +221,20 @@ public struct TVmazeClient: TVmazeEnriching {
         let today = Calendar.current.startOfDay(for: Date())
         let sourceURL = URL(string: "https://api.tvmaze.com/shows/\(showID)")
         let upcoming = (listing ?? []).compactMap { ep -> ProviderNextEpisode? in
-            let airDate: Date
-            let precision: AirDatePrecision
-            if let stamp = ScheduleDateParsing.instant(ep.airstamp) {
-                airDate = stamp
-                precision = .dateAndTime
-            } else if let day = ScheduleDateParsing.calendarDate(ep.airdate) {
-                airDate = day
-                precision = .dateOnly
-            } else {
-                return nil
-            }
+            guard let resolved = Self.scheduleDate(
+                airstamp: ep.airstamp,
+                airdate: ep.airdate,
+                airtime: ep.airtime
+            ) else { return nil }
             guard ScheduleEntryPolicy.isRegularEpisode(seasonNumber: ep.season),
-                  airDate >= today
+                  resolved.date >= today
             else { return nil }
             return ProviderNextEpisode(
                 seasonNumber: ep.season,
                 episodeNumber: ep.number,
                 title: ep.name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyOrNil,
-                airDate: airDate,
-                datePrecision: precision,
+                airDate: resolved.date,
+                datePrecision: resolved.precision,
                 sourceURL: sourceURL
             )
         }
@@ -257,6 +251,29 @@ public struct TVmazeClient: TVmazeEnriching {
             episodes: Array(upcoming),
             cadence: cadence.isEmpty ? nil : cadence
         )
+    }
+
+    /// Resolves TVmaze's schedule fields without mistaking its placeholder noon
+    /// timestamp for an announced release time.
+    ///
+    /// TVmaze always emits `airstamp`; when a streaming title has no known
+    /// `airtime`, that stamp is synthesized at noon in the channel timezone.
+    /// Futurama had `airtime: ""` and `airstamp: 16:00Z` (noon New York), which
+    /// is not evidence Hulu releases it at noon. Only a non-empty `airtime`
+    /// makes the timestamp precise; otherwise retain the calendar date.
+    static func scheduleDate(
+        airstamp: String?,
+        airdate: String?,
+        airtime: String?
+    ) -> (date: Date, precision: AirDatePrecision)? {
+        if airtime?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+           let stamp = ScheduleDateParsing.instant(airstamp) {
+            return (stamp, .dateAndTime)
+        }
+        if let day = ScheduleDateParsing.calendarDate(airdate) {
+            return (day, .dateOnly)
+        }
+        return nil
     }
 
     /// TVmaze names its airing days ("Friday"); map them to `Calendar` weekday
@@ -324,6 +341,7 @@ public struct TVmazeClient: TVmazeEnriching {
         let number: Int?
         let name: String?
         let airdate: String?
+        let airtime: String?
         let airstamp: String?
     }
 
@@ -383,10 +401,11 @@ public struct TVmazeEnrichmentProvider: MetadataEnrichmentProvider {
     /// binding a title search to a show whose ids contradict the query's, and started
     /// resolving by TVDB id where one is known, so any same-title mismatch already
     /// cached has to be dropped. v5: season-0 specials are no longer returned as
-    /// upcoming episodes.
+    /// upcoming episodes. v6: an `airstamp` with blank `airtime` is now date-only;
+    /// TVmaze synthesizes noon for streaming titles whose real time is unknown.
     public init(
         client: any TVmazeEnriching = TVmazeClient(),
-        policy: ProviderPolicy = ProviderPolicy(version: 5)
+        policy: ProviderPolicy = ProviderPolicy(version: 6)
     ) {
         self.client = client
         self.policy = policy

@@ -21,7 +21,12 @@ public struct SeriesScheduleRecord: Codable, Sendable, Equatable {
     /// v13: TheTVDB and TVmaze both changed which show a title search binds to, and
     /// a series that resolved to "nothing upcoming" under the old behaviour caches
     /// that for three days — long enough to outlive the fix.
-    public static let currentSchemaVersion = 13
+    /// v15: briefly preferring TVmaze's aired order globally proved too broad.
+    /// Production and aired order are both legitimate library choices, and the
+    /// app cannot infer which one a server uses from one mismatched title. Restore
+    /// TheTVDB's canonical priority and force any v14 TVmaze-first records to
+    /// refresh rather than serving their alternate season numbering until TTL.
+    public static let currentSchemaVersion = 15
 
     /// The schema version this record was written with; `1` for records persisted
     /// before the field existed.

@@ -11,7 +11,8 @@ final class SeriesUpcomingTests: XCTestCase {
         season: Int?,
         episode: Int?,
         daysFromNow: Int,
-        title: String? = nil
+        title: String? = nil,
+        precision: AirDatePrecision = .dateOnly
     ) -> UpcomingEpisode {
         UpcomingEpisode(
             seriesIdentity: .external(source: "tvdb", value: "1"),
@@ -19,7 +20,7 @@ final class SeriesUpcomingTests: XCTestCase {
             episodeNumber: episode,
             title: title,
             airDate: now.addingTimeInterval(Double(daysFromNow) * 86_400),
-            datePrecision: .dateOnly,
+            datePrecision: precision,
             source: .tvdb,
             refreshedAt: now
         )
@@ -227,6 +228,41 @@ final class SeriesUpcomingTests: XCTestCase {
 
     func testSaysNothingWithoutASchedule() {
         XCTAssertNil(SeriesUpcoming.heroLine(nextEpisode: nil, cadence: nil, now: now, calendar: calendar))
+    }
+
+    func testExactTimestampIncludesDeviceLocalizedTime() {
+        let episode = upcoming(
+            season: 3,
+            episode: 5,
+            daysFromNow: 2,
+            precision: .dateAndTime
+        )
+        let line = SeriesUpcoming.heroLine(
+            nextEpisode: episode,
+            cadence: nil,
+            schedule: [episode],
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertTrue(
+            english(line)?.contains(" at ") == true,
+            "date-and-time providers should surface the release time"
+        )
+    }
+
+    func testDateOnlyScheduleNeverInventsATimeFromUnzonedCadence() {
+        let episode = upcoming(season: 3, episode: 5, daysFromNow: 2)
+        let line = SeriesUpcoming.heroLine(
+            nextEpisode: episode,
+            cadence: AirCadence(weekdays: [6], airsTime: "20:00"),
+            schedule: [episode],
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertFalse(
+            english(line)?.contains(" at ") == true,
+            "TheTVDB airsTime has no timezone and cannot be localized safely"
+        )
     }
 
     // MARK: Card caption

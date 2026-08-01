@@ -306,6 +306,14 @@ public final class PersonDetailViewModel {
 
     public func load() async {
         guard state == .loading else { return }
+        // Settled on EVERY exit, including the early ones.
+        //
+        // Surfaces wait on this before drawing a row, so a path that returns
+        // without setting it leaves them on a spinner forever — and the paths
+        // that do return early are the failure ones, which is exactly when that
+        // is least acceptable. A `defer` makes it structural rather than
+        // something each new branch has to remember.
+        defer { creditsAreFinal = true }
         let started = Date()
         func elapsed(_ from: Date) -> Int { Int(Date().timeIntervalSince(from) * 1000) }
         // In flight while the servers are asked, and cancelled with this task if
@@ -508,6 +516,13 @@ public final class PersonDetailViewModel {
                 libraryCredits = merged
                 state = .loaded
             }
+            // Announced BEFORE artwork is fetched, deliberately.
+            //
+            // The order is settled at this point, which is all a surface is
+            // waiting on; artwork only ever adds a poster to a row already in
+            // its final sequence. Waiting for it too would hold the row for
+            // another network pass to change nothing about what is in it or
+            // where. The `defer` above still covers the early exits.
             creditsAreFinal = true
             await backfillArtwork()
             PersonDiagnostics.emit(
@@ -516,10 +531,7 @@ public final class PersonDetailViewModel {
             )
             onProgress?()
         }
-        // Every exit settles the order, including the ones that never reached
-        // the ranking rung — cancelled, no providers configured, or nothing
-        // found. A surface waiting on this must never be left waiting forever.
-        creditsAreFinal = true
+
 
         PersonDiagnostics.emit(
             "person.done name=\(person.name) credits=\(libraryCredits.count) "
@@ -670,7 +682,16 @@ public struct PersonDetailView: View {
     @ViewBuilder
     private var credits: some View {
         switch viewModel.state {
-        case .loaded where !viewModel.libraryCredits.isEmpty:
+        // Waits for the ORDER to settle, not merely for credits to exist.
+        //
+        // The viewer's own server answers in tens of milliseconds and the
+        // outside rungs take up to a few seconds, and the last thing they do is
+        // re-sort everything by how prominent the person was — so rendering on
+        // arrival puts the page up in library order and visibly reshuffles it
+        // underneath whoever is already reading it. The header, headshot and
+        // biography are unaffected and still appear immediately, so the page is
+        // never blank while this waits.
+        case .loaded where !viewModel.libraryCredits.isEmpty && viewModel.creditsAreFinal:
             // Rows are focusable, so this is the one state that needs no Back
             // button of its own.
             VStack(alignment: .leading, spacing: 0) {
@@ -696,7 +717,7 @@ public struct PersonDetailView: View {
                     shelfBody(group.title.text, items: group.items)
                 }
             }
-        case .loading:
+        case .loading, .loaded where !viewModel.creditsAreFinal:
             creditlessState { ProgressView().scaleEffect(1.5) }
         case .loaded, .unavailable:
             // A source that couldn't answer and a person with genuinely nothing

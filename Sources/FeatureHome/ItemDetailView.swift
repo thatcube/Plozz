@@ -388,14 +388,14 @@ public struct ItemDetailView: View {
             seerConnected: seerConnected
         )
         // TEMPORARY (issue: a discovery title that turns out to be owned shows no
-        // buttons at all). Records the exact state behind that: the page is in
-        // discovery layout, so Play is suppressed by construction, and if the CTA
-        // has become `.play` the request pill is suppressed too — leaving nothing.
-        PersonDiagnostics.emit(
-            "detail.discovery title=\(detail.item.title) seer=\(seerConnected) "
-            + "availability=\(String(describing: effectiveAvailability)) cta=\(cta) "
-            + "tmdb=\(detail.item.providerIDs["Tmdb"] ?? "-") id=\(detail.item.id)"
-        )
+        // buttons at all) — kept while the fix is watched on device.
+        //
+        // Keyed to the STATE, never emitted from the body. Written inline first,
+        // it fired on every render pass, and this page can re-render in a tight
+        // loop — so three synchronous writes (os_log, stdout, file) per pass ran
+        // thousands of times on the main thread and turned a re-render churn into
+        // a jetsam kill. Telemetry must never be a side effect of `body`.
+        let discoveryTraceKey = "\(detail.item.id)|\(cta)|\(String(describing: effectiveAvailability))"
         return ScrollView {
             DetailHeroView(
                 item: detail.item,
@@ -426,6 +426,15 @@ public struct ItemDetailView: View {
         }
         // Never clip the focused request pill's lift/shadow.
         .scrollClipDisabled()
+        // Fires once per distinct state rather than once per render — see
+        // `discoveryTraceKey`.
+        .task(id: discoveryTraceKey) {
+            PersonDiagnostics.emit(
+                "detail.discovery title=\(detail.item.title) seer=\(seerConnected) "
+                + "availability=\(String(describing: effectiveAvailability)) cta=\(cta) "
+                + "tmdb=\(detail.item.providerIDs["Tmdb"] ?? "-") id=\(detail.item.id)"
+            )
+        }
     }
 
     /// Handles a Request tap: confirm ONCE for the unmapped admin case in a

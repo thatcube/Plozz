@@ -1,4 +1,5 @@
 #if canImport(SwiftUI)
+import CoreNetworking
 import SwiftUI
 import Observation
 import CoreModels
@@ -19,7 +20,64 @@ import UIKit
 @MainActor
 @Observable
 final class SeriesHeroRecedeModel {
-    var isReceded = false
+    var isReceded = false {
+        didSet {
+            guard oldValue != isReceded else { return }
+            SeriesFocusTrace.record(isReceded ? "recede" : "restore")
+        }
+    }
+}
+
+/// TEMPORARY. Falsifies (or confirms) the leading explanation for the detail-page
+/// hang: a focus ping-pong between the receded hero and the episode browser.
+///
+/// The hero is deliberately hidden with a MASK rather than `.opacity`, because
+/// UIKit will not focus a zero-alpha view and the hero must stay reachable with
+/// UP from the season bar (see `DetailHeroView`'s mask). That means invisible
+/// hero controls remain valid focus candidates the whole time the browser is up.
+/// If the focus engine lands on one, `handleHeroFocus` restores the hero, the
+/// browser reclaims focus, `revealBrowser` recedes it again — a cycle with no
+/// latch, since `suppressesDuplicateHeroFocus` is cleared on the next runloop
+/// turn and so only ever suppresses a same-turn duplicate.
+///
+/// This records the TRANSITIONS that theory predicts. If a hang shows these
+/// counters climbing into the thousands in a strict alternation, it is confirmed.
+/// If focus is stable while the app is wedged, the theory is dead and the driver
+/// is elsewhere — which is just as useful.
+///
+/// Rate-limited to one line a second on purpose. Logging every transition during
+/// a storm is itself enough to saturate the main thread; that mistake already
+/// turned one capture into a jetsam kill earlier in this investigation.
+@MainActor
+enum SeriesFocusTrace {
+    private static var counts: [String: Int] = [:]
+    private static var lastEmit = ContinuousClock.now
+    private static var recent: [String] = []
+    private static var warned = false
+
+    static func record(_ event: String) {  // l10n:content — developer-facing diagnostic
+        counts[event, default: 0] += 1
+        recent.append(event)
+        if recent.count > 8 { recent.removeFirst() }
+
+        let total = counts.values.reduce(0, +)
+        // No real interaction produces this many focus/recede transitions. The
+        // first crossing is worth a line on its own, before any rate limit.
+        if total > 60, !warned {
+            warned = true
+            PlozzLog.boot("SeriesFocus RUNAWAY total=\(total) \(summary())")
+        }
+        let now = ContinuousClock.now
+        guard lastEmit.duration(to: now) >= .seconds(1) else { return }
+        lastEmit = now
+        PlozzLog.boot("SeriesFocus \(summary()) last=\(recent.joined(separator: ">"))")
+    }
+
+    private static func summary() -> String {  // l10n:content — developer-facing diagnostic
+        counts.sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: " ")
+    }
 }
 
 enum SeriesHeroRevealTransition {

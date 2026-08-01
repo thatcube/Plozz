@@ -694,6 +694,7 @@ struct SeriesDetailView: View {
     /// Coming down from the hero the page is already at 0, so this is a no-op,
     /// and Season → Episode moves cost nothing either.
     private func revealBrowser(using proxy: ScrollViewProxy) {
+        SeriesFocusTrace.record("revealBrowser")
         withAnimation(.smooth(duration: Self.recedeAnimationDuration)) {
             recedeModel.isReceded = true
             proxy.scrollTo(Self.topAnchorID, anchor: .top)
@@ -701,7 +702,9 @@ struct SeriesDetailView: View {
     }
 
     private func handleHeroFocus(using proxy: ScrollViewProxy) {
+        SeriesFocusTrace.record("heroFocus")
         guard !suppressesDuplicateHeroFocus else { return }
+        SeriesFocusTrace.record("heroFocusAccepted")
         rearmEpisodeRailOnHeroFocusIfNeeded()
         seasonBarEngaged = false
         browserHoldsFocus = false

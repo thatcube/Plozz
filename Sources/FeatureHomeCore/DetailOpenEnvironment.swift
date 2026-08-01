@@ -80,7 +80,22 @@ public struct DetailOpenEnvironment {
         isDiscovery: Bool,
         identitySources: (MediaItem) -> [MediaSourceRef]
     ) -> [MediaSourceRef] {
-        let indexed = isDiscovery ? [] : identitySources(item)
+        // The index is consulted for a discovery title TOO.
+        //
+        // It used to be skipped (`isDiscovery ? []`), which quietly guaranteed
+        // that a title flagged "not in your library" could never be shown to be
+        // in it. That is how an owned show reached a dead page: opened from a
+        // person's credits as a discovery title, Seerr then answered
+        // `partiallyAvailable` (the viewer has some seasons), the CTA became
+        // `.play` — and the discovery layout suppresses Play by construction
+        // while the request pill hides itself for `.play`, so the page rendered
+        // no buttons at all. The index knew the title all along; nothing asked.
+        //
+        // Safe for a genuinely absent title: matching is by strong external id
+        // (TMDb/IMDb/TVDB), kind-scoped, with the same split-guard that governs
+        // playback targeting — so a title nobody owns simply resolves to nothing
+        // and `isDiscovery` stands.
+        let indexed = identitySources(item)
         var seen = Set<String>()
         return (item.sources + indexed).filter { seen.insert($0.id).inserted }
     }
@@ -131,7 +146,12 @@ public struct DetailOpenEnvironment {
     /// - Parameter libraryOrigin: soft tie-break for otherwise-equivalent sources;
     ///   locality and managed-server priority remain authoritative.
     public func makeViewModel(for item: MediaItem, libraryOrigin: String?) -> ItemDetailViewModel {
-        let isDiscovery = item.isNotInLibraryDiscovery
+        // "Flagged not in the library" and "actually absent" are different
+        // questions, and only the second one should strip the page of its
+        // library affordances. An external credit carries `availability
+        // == .unknown` because the provider that supplied it has no idea what
+        // the viewer owns — not as a finding about their library.
+        let isDiscovery = item.isNotInLibraryDiscovery && identitySources(item).isEmpty
         let selection = Self.initialSourceSelection(
             for: item,
             isDiscovery: isDiscovery,

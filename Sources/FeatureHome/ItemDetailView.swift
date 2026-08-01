@@ -387,6 +387,15 @@ public struct ItemDetailView: View {
             downloadProgress: detail.item.downloadProgress,
             seerConnected: seerConnected
         )
+        // TEMPORARY (issue: a discovery title that turns out to be owned shows no
+        // buttons at all). Records the exact state behind that: the page is in
+        // discovery layout, so Play is suppressed by construction, and if the CTA
+        // has become `.play` the request pill is suppressed too — leaving nothing.
+        PersonDiagnostics.emit(
+            "detail.discovery title=\(detail.item.title) seer=\(seerConnected) "
+            + "availability=\(String(describing: effectiveAvailability)) cta=\(cta) "
+            + "tmdb=\(detail.item.providerIDs["Tmdb"] ?? "-") id=\(detail.item.id)"
+        )
         return ScrollView {
             DetailHeroView(
                 item: detail.item,

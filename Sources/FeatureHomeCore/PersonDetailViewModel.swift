@@ -77,6 +77,22 @@ public final class PersonDetailViewModel {
     /// watching), so the rung that exists for when they have not could never
     /// fire.
     private let includeCredit: @Sendable (MediaItem) -> Bool
+    /// The viewer's own copies of a title, by strong external id, from the eager
+    /// identity index.
+    ///
+    /// External credits arrive stamped `availability == .unknown` because the
+    /// provider that supplied them has no idea what the viewer owns — it is a
+    /// statement about TMDb, not about the library. Believing it literally put a
+    /// "not in your library" mark on shows the viewer owns, because a server's
+    /// person query is the wrong instrument for the question: Jellyfin returns
+    /// only titles whose own People list names the person, and a series records
+    /// its main cast rather than a guest voice part. For Hugh Jackman that meant
+    /// 18 credits back, every one a film and not a single series, while The
+    /// Simpsons and Rick and Morty — both owned — came back from TMDb flagged
+    /// absent.
+    ///
+    /// Asking the index by id closes that gap without another network call.
+    private let librarySources: @Sendable (MediaItem) -> [MediaSourceRef]
     private let limit: Int
 
     public init(
@@ -87,6 +103,7 @@ public final class PersonDetailViewModel {
         creditsProviders: [any PersonCreditsProviding] = [],
         artworkResolver: (any PersonCreditArtworkResolving)? = nil,
         includeCredit: @escaping @Sendable (MediaItem) -> Bool = { _ in true },
+        librarySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
         limit: Int = 40
     ) {
         self.person = person
@@ -96,6 +113,7 @@ public final class PersonDetailViewModel {
         self.creditsProviders = creditsProviders
         self.artworkResolver = artworkResolver
         self.includeCredit = includeCredit
+        self.librarySources = librarySources
         self.limit = limit
     }
 
@@ -272,6 +290,28 @@ public final class PersonDetailViewModel {
             group.cancelAll()
             return first ?? []
         }
+    }
+
+    /// Rewrites an external credit the viewer turns out to own.
+    ///
+    /// Clears `availability` — the field is what marks a title as discovery, and
+    /// keeping it while attaching real sources would leave the item claiming both
+    /// — and attaches the index's source refs so the detail page can select a
+    /// server and resolve the real library item id (the credit's own id is a
+    /// provider id like `tmdb:tv:456`, which no server can load).
+    ///
+    /// Leaves everything else alone, including artwork and rank: ownership
+    /// changes what the viewer can DO with a title, not what it is or how well
+    /// known it is.
+    private func reconciledWithLibrary(_ item: MediaItem) -> MediaItem {
+        guard item.isNotInLibraryDiscovery else { return item }
+        let owned = librarySources(item)
+        guard !owned.isEmpty else { return item }
+        var resolved = item
+        resolved.availability = nil
+        var seen = Set<String>()
+        resolved.sources = (item.sources + owned).filter { seen.insert($0.id).inserted }
+        return resolved
     }
 
     private static func knownForKey(_ item: MediaItem) -> String {
@@ -502,6 +542,12 @@ public final class PersonDetailViewModel {
                     merged.append(item)
                 }
             }
+            // Before anything is ranked or displayed, ask the index which of
+            // these the viewer actually owns. A credit that resolves stops being
+            // a discovery title everywhere at once: no "not in your library"
+            // mark on its poster, and its detail page opens on the real library
+            // copy with Play instead of a request pill.
+            merged = merged.map(reconciledWithLibrary)
             // Titles nobody outside the library associates with this person sort
             // last rather than being dropped: the viewer owns them, which is a
             // reason to keep them reachable, just not to lead with them.

@@ -795,7 +795,13 @@ private func makePlayerViewModel(
     // Wikipedia only if none does. Two implementations of that would drift.
     episodeViewModel.controls.infoCard.castDetailLoader = makeCastDetailLoader(
         for: request.item,
-        accounts: accounts
+        accounts: accounts,
+        // So a credit the viewer owns isn't marked absent. A server's person
+        // query only returns titles whose own People list names the person, and
+        // a series records its main cast rather than a guest voice part — so
+        // owned shows arrive from TMDb flagged `.unknown` and nothing else in
+        // this row can tell otherwise.
+        librarySources: identitySources
     )
     return episodeViewModel
 }

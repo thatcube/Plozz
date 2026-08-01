@@ -138,7 +138,12 @@ private struct PlozziOSPersonPage: View {
                     // it this page can only answer with what the viewer
                     // already owns, which is not what "known for" means.
                     creditsProviders: PlayerCastCredits.providers,
-                    artworkResolver: PlayerCastCredits.artworkResolver
+                    artworkResolver: PlayerCastCredits.artworkResolver,
+                    // So a credit the viewer owns isn't marked absent — see the
+                    // tvOS person page and `PersonDetailViewModel`.
+                    librarySources: { [identityIndex = appModel.identityIndex] item in
+                        identityIndex.identitySnapshot.sourceRefs(for: item)
+                    }
                 ),
             onSelectItem: { navigatedItem = $0 }
         )

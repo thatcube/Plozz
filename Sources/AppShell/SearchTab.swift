@@ -208,7 +208,14 @@ struct SearchTab: View {
                         // ranking input: letting the source with the best
                         // artwork reach further down the row was measured
                         // making the order worse.
-                        artworkResolver: PlayerCastCredits.artworkResolver
+                        artworkResolver: PlayerCastCredits.artworkResolver,
+                        // So a credit the viewer owns isn't marked absent:
+                        // a server's person query only returns titles whose
+                        // own People list names the person, and a series
+                        // records its main cast rather than a guest voice
+                        // part — so owned shows arrive from TMDb flagged
+                        // `.unknown` with nothing else able to tell.
+                        librarySources: identitySources
                     ),
                     onSelectItem: { navigateToItem($0) }
                 )

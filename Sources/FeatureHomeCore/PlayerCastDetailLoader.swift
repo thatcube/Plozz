@@ -14,7 +14,12 @@ import MetadataKit
 @MainActor
 public func makeCastDetailLoader(
     for item: MediaItem,
-    accounts: [ResolvedAccount]
+    accounts: [ResolvedAccount],
+    /// The viewer's own copies of a credit, from the eager identity index. See
+    /// `PersonDetailViewModel.librarySources` for why a credits row cannot answer
+    /// "do I own this?" from a server's person query alone. Defaults to "cannot
+    /// tell", which only costs an owned title a mark it shouldn't have.
+    librarySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
 ) -> PlayerCastDetailLoading {
     // Captured once, outside the returned closure: these are the same for every
     // person in this item's cast.
@@ -62,6 +67,7 @@ public func makeCastDetailLoader(
                 item.id != playingID
                     && MediaItemIdentity.normalizedTitle(item.title) != playingTitle
             },
+            librarySources: librarySources,
             // Enough to fill the rail several times over. The person page is
             // where the complete list lives.
             limit: 24

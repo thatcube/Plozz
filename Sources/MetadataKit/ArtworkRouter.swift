@@ -4,6 +4,11 @@ import CoreModels
 /// The single front door for resolving external artwork — the piece that makes the
 /// provider set *scalable and content-aware*.
 ///
+/// Scope: this resolves the **external** half only. Per rule 0 of the metadata
+/// policy the user's own server art is tried first by the view layer, and these
+/// providers fill gaps and upgrade junk — unless the user enabled
+/// `preferOnlineArtwork`, which moves them ahead for artwork alone.
+///
 /// Given a ``MediaItem`` and an ``ArtworkKind``, the router:
 ///   1. classifies the item's ``ContentType`` (anime / movie / tvShow / music),
 ///   2. runs an ordered, content-type-specific fallback chain of providers

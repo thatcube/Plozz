@@ -1,10 +1,12 @@
 # MetadataKit
 
-Artwork & metadata enrichment for media items, on top of the art that the
-user's own server already supplies. Each chain is ordered by whichever **free**
-source currently gives the best result for that field — no provider is favoured
-by policy, keyed or keyless — and a **fallback chain** stands behind every field
-so none of them is load-bearing.
+Artwork & metadata enrichment for media items, layered on top of what the
+user's own server already supplies. The server comes **first** for anything it
+has (it's instant, free and often the user's deliberate choice); these providers
+**fill gaps and upgrade junk**. Among themselves they're ordered by whichever
+**free** source currently gives the best result for that field — no provider is
+favoured by policy, keyed or keyless — and a **fallback chain** stands behind
+every field so none of them is load-bearing.
 
 See `docs/METADATA_ARCHITECTURE.md` for the full design and the
 provider/fallback rationale.
@@ -42,6 +44,9 @@ provider/fallback rationale.
 
 ## Invariants
 
+- **The server outranks every provider here**, except for artwork when the user
+  turns on `preferOnlineArtwork`. Identity is always server-authoritative:
+  enrichment may *add* external ids, never overrule one the server stamped.
 - **No user keys required.** The shipped keys (TMDb, TheTVDB) are bundled;
   a user *may* supply their own TMDb token in Settings, but never has to.
 - **No single provider is load-bearing.** Every field resolves through a

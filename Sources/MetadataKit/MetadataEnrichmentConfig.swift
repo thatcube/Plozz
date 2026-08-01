@@ -94,8 +94,16 @@ public struct MetadataEnrichmentConfig: Sendable {
     }
 
     /// Full source precedence for one field, including local/server sources that sit
-    /// outside the external-provider pipeline. OFF preserves today's local-authoritative
-    /// order. ON moves configured, enabled external providers ahead for artwork only.
+    /// outside the external-provider pipeline.
+    ///
+    /// This is **rule 0** of the metadata policy in code: the user's own server (and
+    /// local NFO/artwork/embedded tags) leads for anything it actually has, because
+    /// that data is instant, free, offline-capable and often the user's deliberate
+    /// choice — external providers exist to fill gaps and upgrade junk, not to
+    /// replace curated data. `preferOnlineArtwork` is the single opt-in that flips
+    /// it, and only for **artwork**: text and identity stay local-authoritative
+    /// either way, so an id the server stamped is never overruled by one an external
+    /// provider inferred from a title match.
     public func precedenceSources(for field: MetadataField, query: MetadataQuery) -> [MetadataSource] {
         let online = orderedSources(for: field, query: query)
         let local: [MetadataSource] = [.localNFO, .server, .localArtwork, .embedded]

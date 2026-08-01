@@ -10,16 +10,56 @@
 ## 1. The policy, stated plainly
 
 Plozz enriches a user's own Jellyfin/Plex library with external artwork, metadata
-and ratings. Which provider answers a given field is decided by three rules, in
-this order:
+and ratings. Which source answers a given field is decided by four rules, in this
+order:
 
-1. **Whatever gives the user the best result.** Coverage, artwork quality, correct
-   matches, speed. Nothing else outranks this.
+0. **The user's own server comes first, for anything it actually has.** External
+   providers *fill gaps and upgrade junk* — they do not replace what the server
+   already supplies. See "Rule 0" below, since this is the rule most easily got
+   wrong.
+1. **Otherwise, whatever gives the user the best result.** Coverage, artwork
+   quality, correct matches, speed. Nothing else outranks this.
 2. **It must be free to use.** Plozz will not take on a provider that costs money
    — not for the maintainer, not for the user. A source that is only good behind a
    paid tier is not a candidate.
 3. **Nothing may be load‑bearing.** Every field has a fallback chain, so any single
    provider can vanish without breaking the app.
+
+### Rule 0 — the user's server is a first‑class source, not a last resort
+
+It is tempting to read the server as the sad fallback you land on when every real
+provider failed. That is backwards. The server usually *wins* rule 1 outright:
+
+- **It's instant.** The data is already on the LAN, or already in the payload that
+  drew the screen. No search call, no id resolution, no round trip. A marginally
+  nicer poster that pops in 800 ms later is a *worse* experience, not a better one.
+- **It's free at any scale and works offline** — the only source of which both are
+  unconditionally true (rule 2, and the reason rule 3 is satisfiable at all).
+- **It's often more *correct in intent*.** The user may have deliberately set custom
+  art or fixed a title, and their other clients show it. Silently overriding curated
+  data with a fuzzy title match is a bug, not an upgrade.
+
+The server is also frequently **wrong or empty** — missing episode stills, no clear
+logos, no wide backdrops, a bad scrape. That is precisely the gap external providers
+exist to fill, and why they must never be *removed* on rule‑0 grounds. So:
+
+> **Server first for whatever it actually has; external providers fill gaps and
+> upgrade junk; user‑curated data is never silently overridden.**
+
+Two boundaries make that safe in practice:
+
+- **Identity is server‑authoritative.** An id the server already stamped outranks
+  any id an external provider inferred from a title match. Enrichment may *add*
+  ids, never overrule them.
+- **Artwork is the only field a user may flip.** `preferOnlineArtwork` (default
+  **off**) lets someone who knows their server art is poor put configured external
+  providers ahead of it — for artwork only. It never reorders text or identity.
+
+In code this is `MetadataEnrichmentConfig.precedenceSources(for:query:)`, which
+returns `[.localNFO, .server, .localArtwork, .embedded] + online` by default and
+only moves `online` ahead when `preferOnlineArtwork` is set on an artwork field.
+
+### Rules 1–3 — choosing among the external providers
 
 **No provider is preferred as a matter of policy — TMDb included.** There is no
 "TMDb‑first" rule and no "keyless‑first" rule. Each chain is just an ordering of
@@ -43,7 +83,7 @@ point rule 2 alone would remove it. So the rule is:
 
 Every field resolves through an ordered **fallback chain**. If TMDb is disabled,
 rate‑limited or failing, the same field is answered by TheTVDB, TVmaze, AniList,
-Kitsu, Wikidata/Wikipedia — or ultimately the user's own server art. Losing a
+Kitsu, Wikidata/Wikipedia — and under all of them, the user's own server. Losing a
 provider costs *quality*, never *function*, and never requires a code change.
 
 > ⚠️ **Retired claim.** Earlier revisions of this document said TMDb's terms
@@ -59,9 +99,10 @@ for that reason, not because they're free of a key.
 
 ## 2. Why the chains are ordered the way they are
 
-Rules 1 and 2 decide *who's in* a chain. Ordering within it also weighs how each
-source behaves **at scale**, since a provider that collapses under load stops
-serving users well (rule 1) and can start costing money (rule 2).
+Rules 1 and 2 decide *who's in* a chain (rule 0 having already given the server
+first refusal). Ordering within it also weighs how each source behaves **at
+scale**, since a provider that collapses under load stops serving users well
+(rule 1) and can start costing money (rule 2).
 
 > **Per‑IP APIs scale infinitely; shared‑key APIs have a blast radius.**
 
@@ -161,10 +202,11 @@ Note that no row is a single cell: every field a keyed source heads has at least
 independent source behind it. That is rule 3 expressed as data — adding a
 single‑source chain for a *new* field is the thing to avoid.
 
-The user's **own server art is always tried first** by the view layer; these
-providers fill gaps and upgrade junk/missing art. With the TMDb tier off, anime, TV
-and music still get great art; western‑movie heroes/logos degrade to TheTVDB,
-Wikidata/Wikipedia and server art.
+This table covers only the **external** half of the chain. Per rule 0 the user's
+own server art is tried first and these providers fill gaps and upgrade junk —
+unless the user has turned on `preferOnlineArtwork`, which moves them ahead for
+artwork only. With the TMDb tier off, anime, TV and music still get great art;
+western‑movie heroes/logos degrade to TheTVDB, Wikidata/Wikipedia and server art.
 
 ## 5. Why the user never needs a key
 
@@ -201,6 +243,9 @@ the shipped keys are present and if they ever go away.
 - **Graceful degradation.** Every provider call is best‑effort and returns `nil`
   on any failure (never throws), and a circuit breaker sheds a provider that starts
   erroring. A dead provider just falls through the chain.
+- **Rule 0 is also the cheapest path.** Because the server answers first for
+  everything it has, the external providers are only ever asked about genuine gaps
+  — so a well‑scraped library generates almost no third‑party traffic at all.
 
 ## 7. Code architecture
 

@@ -773,56 +773,77 @@ public struct LibraryIndicatorGalleryView: View {
     /// solid and swallows the plus at the same time — which is why 85% was harder
     /// to read than 65%, and 65% harder than plain hierarchical.
     ///
-    /// So the disc cannot be made more solid while the plus stays the same
-    /// colour. These are the ways out, all built on the two that rated best.
+    /// The way out isn't a different rendering, it's a different colour. What
+    /// hierarchical actually paints is white at roughly half alpha, so what
+    /// reaches the eye is a GREY — but a grey mixed live with whatever artwork is
+    /// behind it, which is both why it looks see-through and why it isn't stable
+    /// from poster to poster. Naming that grey directly and drawing it opaque
+    /// gives the identical tone with none of the bleed-through, and because the
+    /// disc is darker than the plus rather than the same white, making it more
+    /// solid now *helps* the plus stand out instead of erasing it.
+    ///
+    /// The pairs below walk that grey from light (closest to today) to dark, all
+    /// fully opaque unless noted. Reference points: white at 50% over black
+    /// artwork composites to about grey 0.50; over white artwork, about 0.75. So
+    /// the middle of this range is where "the same look" lives.
     private static let requestVariants: [(label: String, note: String, style: IndicatorMarkStyle?)] = [
         (
             "plain hierarchical",
-            "baseline — the one you liked. Everything below tries to beat it",
+            "baseline — the see-through one. Everything below is opaque",
             nil
         ),
         (
-            "bolder plus",
-            "same rendering, heavier stroke. Costs nothing and helps most at 25pt",
-            IndicatorMarkStyle(weight: .bold)
+            "grey 80% — opaque",
+            "lightest. Closest to hierarchical over PALE artwork, but it no longer changes with the poster",
+            IndicatorMarkStyle(disc: Color(white: 0.80))
         ),
         (
-            "bolder + deeper shadow",
-            "as above with the drop shadow doubled, so the mark holds its own edge",
-            IndicatorMarkStyle(weight: .bold, shadowOpacity: 0.85)
+            "grey 72% — opaque",
+            "still light. The plus has a little less to push against here",
+            IndicatorMarkStyle(disc: Color(white: 0.72))
         ),
         (
-            "white plus, dark disc 45%",
-            "stops fighting itself: the disc goes DOWN in tone, not up in alpha",
-            IndicatorMarkStyle(disc: .black.opacity(0.45))
+            "grey 65% — opaque",
+            "middle of the range — about what hierarchical averages to across artwork",
+            IndicatorMarkStyle(disc: Color(white: 0.65))
         ),
         (
-            "white plus, dark disc 65%",
-            "same idea, more of it. Closest to a chip without being one",
-            IndicatorMarkStyle(disc: .black.opacity(0.65))
+            "grey 58% — opaque",
+            "the plus starts to read clearly at 25pt around here",
+            IndicatorMarkStyle(disc: Color(white: 0.58))
         ),
         (
-            "dark plus, solid white disc",
-            "inverted. The disc can be fully solid because the plus is knocked out of it",
-            IndicatorMarkStyle(glyph: Color(white: 0.12), disc: .white)
+            "grey 50% — opaque",
+            "matches hierarchical over DARK artwork; strongest plus contrast so far",
+            IndicatorMarkStyle(disc: Color(white: 0.50))
         ),
         (
-            "dark plus, white disc 88%",
-            "inverted, letting a little artwork through so it sits in the card",
-            IndicatorMarkStyle(glyph: Color(white: 0.12), disc: .white.opacity(0.88))
+            "grey 42% — opaque",
+            "darker than the mark ever gets today. Reads as a deliberate disc, not a wash",
+            IndicatorMarkStyle(disc: Color(white: 0.42))
         ),
         (
-            "dark bold plus, solid white disc",
-            "inverted with the heavier stroke — the most legible thing here, probably too loud",
-            IndicatorMarkStyle(glyph: Color(white: 0.12), disc: .white, weight: .bold)
+            "grey 65% at 92%",
+            "same tone, a hint of artwork left in it, so it still sits in the card",
+            IndicatorMarkStyle(disc: Color(white: 0.65).opacity(0.92))
+        ),
+        (
+            "grey 55% at 92%",
+            "darker version of the same compromise",
+            IndicatorMarkStyle(disc: Color(white: 0.55).opacity(0.92))
+        ),
+        (
+            "grey 58%, bolder plus",
+            "the tone that looked right, with the heavier stroke on top — best case at 25pt",
+            IndicatorMarkStyle(disc: Color(white: 0.58), weight: .bold)
         )
     ]
 
     private var requestOpacityLadder: some View {
         GallerySection(
             marker: "0b",
-            title: "Making the request mark readable",
-            subtitle: "Raising the disc's alpha made it WORSE because the plus is white too — closing the gap between them hides the plus. These change the relationship instead: a heavier plus, a darker disc, or a dark plus knocked out of a solid one. First tile is the plain-hierarchical baseline."
+            title: "Same look, opaque disc — a darker grey",
+            subtitle: "Hierarchical paints the disc as white at about half alpha, so what you see is a grey mixed with the artwork behind it. Naming that grey and drawing it OPAQUE gives the same tone with nothing showing through — and since the disc is now darker than the plus rather than the same white, more solid helps the plus instead of hiding it. Light to dark, left to right."
         ) {
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 44) {
@@ -874,15 +895,17 @@ public struct LibraryIndicatorGalleryView: View {
         ("plain hierarchical", "baseline — what's in Chosen now", nil),
         ("bolder", "heavier stroke; the shape has more to lose at 25pt than the plus does", IndicatorMarkStyle(weight: .bold)),
         ("bolder + deeper shadow", "as above, drop shadow doubled", IndicatorMarkStyle(weight: .bold, shadowOpacity: 0.85)),
-        ("darker lenses", "lenses pushed further from the body so the silhouette is unmistakable", IndicatorMarkStyle(disc: .black.opacity(0.55))),
-        ("bold, darker lenses", "both at once", IndicatorMarkStyle(disc: .black.opacity(0.55), weight: .bold))
+        ("grey 65% — opaque", "the same named-grey trick as the plus: hierarchical's tone, nothing showing through", IndicatorMarkStyle(disc: Color(white: 0.65))),
+        ("grey 55% — opaque", "darker, so the lenses separate harder from the body", IndicatorMarkStyle(disc: Color(white: 0.55))),
+        ("grey 45% — opaque", "darkest. Silhouette is unmistakable but the mark gets heavy", IndicatorMarkStyle(disc: Color(white: 0.45))),
+        ("grey 55%, bolder", "both at once — best case at 25pt", IndicatorMarkStyle(disc: Color(white: 0.55), weight: .bold))
     ]
 
     private var notInLibraryVariants: some View {
         GallerySection(
             marker: "0c",
             title: "Making the binoculars readable",
-            subtitle: "Same exercise for the not-in-library mark. Hierarchical is already right here — the lenses reading darker than the body IS the shape — so these push weight and shadow instead of colour."
+            subtitle: "Same exercise for the not-in-library mark, including the named-grey opaque versions. Hierarchical is already closer to right here — the lenses reading darker than the body IS the shape — but it has the same bleed-through, and the same 25pt test to pass."
         ) {
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 44) {

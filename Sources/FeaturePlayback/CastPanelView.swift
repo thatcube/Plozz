@@ -195,6 +195,12 @@ struct CastPanelView: View {
             }
         }
         .modifier(PlayerCardHeight(metrics: metrics))
+        // The vertical panel takes the height its rows actually need, up to the
+        // ceiling — a four-person cast should not leave two thirds of a card
+        // empty. Computed rather than measured: every row is exactly
+        // `castRowHeight`, so there is nothing to find out. Floored so that
+        // drilling into a short cast does not leave the biography in a letterbox.
+        .frame(height: metrics.isVertical ? verticalPanelHeight : nil)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: closeRequest) { _, _ in
             guard detailPerson != nil else { return }
@@ -204,6 +210,13 @@ struct CastPanelView: View {
 
     /// The panel's coordinate space, which card frames are reported in.
     static let space = "cast.panel"
+
+    private var verticalPanelHeight: CGFloat {
+        let rows = CGFloat(people.count)
+        let natural = metrics.contentPadding * 2 + rows * metrics.castRowHeight
+            + max(rows - 1, 0) * 8
+        return min(max(natural, 260), metrics.cardHeight)
+    }
 
     /// Out of the focus order while the detail covers the row, and — while
     /// returning — for every face except the one being returned to.
@@ -400,7 +413,17 @@ struct CastPanelView: View {
                     Button { openDetail(person, at: index) } label: {
                         CastListRow(person: person)
                     }
-                    .buttonStyle(.plain)
+                    // The SAME surface the face cards use. A row and a card are
+                    // two shapes of one thing, and giving them different
+                    // materials made switching orientation look like switching
+                    // apps. No lift or depress: nothing focuses on a touch
+                    // surface, and a row this wide has nowhere to grow.
+                    .buttonStyle(PlayerOverVideoCardStyle(
+                        focused: false,
+                        cornerRadius: metrics.panelCornerRadius - 6,
+                        focusScale: 1,
+                        pressScale: 0.98
+                    ))
                     .disabled(isFaceDisabled(index))
                     .focused($focus, equals: .castMember(index))
                     .id(Self.faceID(person))
@@ -416,7 +439,12 @@ struct CastPanelView: View {
                     }
                 }
             }
-            .padding(metrics.contentPadding)
+            // NO horizontal inset. These rows stand in the Info card's place when
+            // the tab switches, so their edges have to be its edges — and that
+            // card's glass runs to the strip's own edge. An inset here made the
+            // cast sit narrower than everything around it, which reads as the two
+            // tabs having different margins rather than as breathing room.
+            .padding(.vertical, metrics.contentPadding)
         }
     }
 
@@ -430,7 +458,7 @@ struct CastPanelView: View {
             // "Back sends me to Info" bug, and why it only happened after
             // scrolling. Capped at 20 faces, so building them all is cheap —
             // and the artwork loads lazily regardless.
-            HStack(spacing: 20) {
+            HStack(spacing: metrics.columnSpacing) {
                 ForEach(Array(people.enumerated()), id: \.element.id) { index, person in
                     Button { openDetail(person, at: index) } label: {
                         CastFaceCard(
@@ -644,12 +672,8 @@ private struct CastListRow: View {
         .padding(.horizontal, 10)
         .frame(height: metrics.castRowHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .plozzFrostedBackground(
-            RoundedRectangle(cornerRadius: 14, style: .continuous),
-            raised: true
-        )
-        // The whole row takes the tap, not just the name.
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        // Surface comes from PlayerOverVideoCardStyle, exactly as the face
+        // cards' does.
     }
 }
 
@@ -868,7 +892,7 @@ private struct CastMemberDetail: View {
         // the pane's FULL height rather than what is left under a name. With the
         // name above them, posters could only be 88pt wide — too small to
         // recognise from a sofa, which defeats the entire point of showing art.
-        HStack(alignment: .top, spacing: 28) {
+        HStack(alignment: .top, spacing: metrics.columnSpacing) {
             identity
                 // A focus SECTION, so Left from the Back button reaches the
                 // "See more" chip.
@@ -1058,7 +1082,7 @@ private struct CastMemberDetail: View {
         // Centred against the face rather than top-aligned: at full height the
         // headshot sets this block's height, so hanging the text from its top
         // edge would strand it against the middle of a large circle.
-        HStack(alignment: .center, spacing: 24) {
+        HStack(alignment: .center, spacing: metrics.columnSpacing) {
             avatar
                 .frame(width: headshot, height: headshot)
                 .clipShape(Circle())

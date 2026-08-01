@@ -67,11 +67,19 @@ struct InfoPanelView: View {
         return Group {
             if metrics.showsThumbnail {
                 regularBody(thumbRadius: thumbRadius, thumbHeight: metrics.contentHeight)
+                    .padding(contentPad)
             } else {
                 compactBody
+                    .padding(contentPad)
+                    // Hugs its content rather than filling to the ceiling: a
+                    // three-line synopsis should not leave a well of empty glass
+                    // under it. The natural copy is the NON-scrolling column —
+                    // see the modifier.
+                    .playerCardNaturalHeight(cap: metrics.cardHeight) {
+                        compactNaturalBody.padding(contentPad)
+                    }
             }
         }
-        .padding(contentPad)
         // Pinned in the horizontal layout, where `cardHeight` is a promise the
         // transport's parking offset depends on. The vertical card takes its
         // content's height instead and stops at the ceiling: a column of text
@@ -92,26 +100,35 @@ struct InfoPanelView: View {
     /// The actions keep their two groups but swap axis, riding the bottom line
     /// with the metadata rather than standing in a column of their own.
     private var compactBody: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Title and synopsis SCROLL, rather than truncating to a line count.
+        compactStack {
+            // Title and synopsis SCROLL rather than truncating to a line count —
+            // but only when they have to.
             //
-            // The horizontal card truncates because it is a band across the
-            // video and cannot grow. This one is a column with room to spare, so
-            // a long synopsis can simply be read — and the ellipsis that a fixed
-            // line limit forces is the thing a viewer opening "Info" is least
-            // likely to want.
-            // Scrolls ONLY when it has to.
-            //
-            // A ScrollView always accepts the full height it is offered, so
-            // wrapping the text unconditionally made every card as tall as its
-            // ceiling — a three-line synopsis with a well of empty glass beneath
-            // it. `ViewThatFits` takes the plain column when it fits, which sizes
-            // to its content and lets the card shrink around it, and falls back
-            // to the scrolling copy only for a synopsis long enough to need one.
+            // The horizontal card truncates because it is a band across the video
+            // and cannot grow. This one is a column with room to spare, so a long
+            // synopsis can simply be read. A ScrollView always accepts the full
+            // height it is offered, though, so wrapping the text unconditionally
+            // made every card as tall as its ceiling; `ViewThatFits` takes the
+            // plain column when it fits and the scrolling copy only when it does
+            // not.
             ViewThatFits(in: .vertical) {
                 infoTextColumn
                 ScrollView(.vertical, showsIndicators: false) { infoTextColumn }
             }
+        }
+    }
+
+    /// The same card with the text at its natural height and no scroll view, so
+    /// it can be measured — a `ScrollView` has no ideal height to report.
+    private var compactNaturalBody: some View {
+        compactStack { infoTextColumn }
+    }
+
+    private func compactStack<TextColumn: View>(
+        @ViewBuilder textColumn: () -> TextColumn
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            textColumn()
 
             // Metadata gives up its badges rather than clipping them.
             //
@@ -188,6 +205,9 @@ struct InfoPanelView: View {
                     .font(metrics.captionFont)
                     .foregroundStyle(.white.opacity(0.6))
                     .lineLimit(1)
+                    // Holds its size, like the badges beside it — see the note at
+                    // the call site.
+                    .fixedSize(horizontal: true, vertical: false)
             }
             if includingBadges, !model.infoCard.badges.isEmpty {
                 MediaBadgeRow(badges: model.infoCard.badges)
@@ -197,7 +217,7 @@ struct InfoPanelView: View {
     }
 
     private func regularBody(thumbRadius: CGFloat, thumbHeight: CGFloat) -> some View {
-        HStack(alignment: .top, spacing: 28) {
+        HStack(alignment: .top, spacing: metrics.columnSpacing) {
             infoThumbnail(cornerRadius: thumbRadius, height: thumbHeight)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -221,7 +241,7 @@ struct InfoPanelView: View {
                     // overview is what silently gives up lines when the title
                     // wraps — which is exactly what it used to do.
                     //
-                    // The shared scale (see `PlayerCardText`) is smaller than the
+                    // The shared scale (see `PlayerCardMetrics`) is smaller than the
                     // semantic fonts this used to use — .headline 45.35pt per line
                     // and .footnote 34.61 — so there is now real slack here rather
                     // than the ~5pt there was.
@@ -251,22 +271,26 @@ struct InfoPanelView: View {
                 Spacer(minLength: 0)
                 // Bottom metadata row: season/episode + runtime, then the technical
                 // badges, all on one baseline pinned to the card's bottom edge.
-                HStack(alignment: .center, spacing: 12) {
-                    if !infoMetaLine.isEmpty {
-                        Text(infoMetaLine)
-                            .font(metrics.captionFont)
-                            .foregroundStyle(.white.opacity(0.6))
-                            .lineLimit(1)
-                    }
-                    if !model.infoCard.badges.isEmpty {
-                        MediaBadgeRow(badges: model.infoCard.badges)
-                    }
+                //
+                // Every badge is `fixedSize`, so in a row that overflows the meta
+                // line was the only thing that could give — and "S2 · E9 · 1h"
+                // truncated to "S2…" while the badges kept every pixel. It is the
+                // shorter string AND the more useful one, so it holds its size and
+                // the badges are dropped instead when the row will not fit.
+                ViewThatFits(in: .horizontal) {
+                    metaRow(includingBadges: true)
+                    metaRow(includingBadges: false)
                 }
             }
-            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: metrics.textColumnMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: thumbHeight, alignment: .topLeading)
 
-            Spacer(minLength: 32)
+            // NO Spacer here. A Spacer is flexible and so is the text column, so
+            // the two split the width left over by the thumbnail and the action
+            // column — which is why the synopsis truncated with obvious empty
+            // card beside it. The text column takes the whole remainder now, and
+            // the HStack's own spacing does what the Spacer was for.
 
             // Right column: icon action row pinned top, Playback Info toggle
             // pinned bottom. Both are full-width focus sections so a Down press

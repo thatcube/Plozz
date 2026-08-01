@@ -80,7 +80,7 @@ struct ScrubBar: View {
             let knobHeight: CGFloat = focused ? (model.isScrubbing ? 40 : 32) : barHeight
 
             ZStack(alignment: .leading) {
-                glassTrack(height: barHeight)
+                PlayerScrubTrackSurface(height: barHeight)
                 Capsule()
                     .fill(.white.opacity(0.14))
                     .frame(width: width * CGFloat(model.bufferedFraction), height: barHeight)
@@ -111,26 +111,6 @@ struct ScrubBar: View {
         }
     }
 
-    /// The base scrub track rendered as Liquid Glass on tvOS 26+, with a
-    /// translucent-fill fallback on older systems.
-    @ViewBuilder
-    private func glassTrack(height: CGFloat) -> some View {
-        if reducePanelGlass {
-            Capsule()
-                .fill(.clear)
-                .frame(height: height)
-                .plozzFrostedBackground(Capsule())
-        } else if #available(iOS 26.0, tvOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .frame(height: height)
-                .glassEffect(.regular, in: Capsule())
-        } else {
-            Capsule()
-                .fill(.white.opacity(0.22))
-                .frame(height: height)
-        }
-    }
 
     @ViewBuilder
     private func thumbnailPreview(width: CGFloat, knobX: CGFloat) -> some View {
@@ -233,21 +213,104 @@ struct InfoActionButtonStyle: ButtonStyle {
 /// underneath it. The semantic values these replace were `.headline` (45.35pt
 /// per line) and `.footnote` (34.61) — both a size larger than this card, at
 /// three metres, actually needs.
-/// The player card's type scale at its **regular** size.
+/// The scrub bar's base track: Liquid Glass on 26+, frosted when panel glass is
+/// reduced, a translucent fill before that.
 ///
-/// Kept as a name rather than inlined because it is the scale the cards were
-/// designed at, and `PlayerCardMetrics` carries the compact variant beside it.
-/// Views should read the fonts from the metrics, not from here — this exists so
-/// the regular numbers have somewhere to live that is not a preset literal.
-enum PlayerCardText {
-    /// Titles: the episode/film name, a person's name.
-    static let title: Font = PlayerCardMetrics.regular.titleFont
-    /// Running prose: a synopsis, a biography.
-    static let body: Font = PlayerCardMetrics.regular.bodyFont
-    /// Its line height, for height budgeting.
-    static let bodyLineHeight: CGFloat = PlayerCardMetrics.regular.bodyLineHeight
-    /// Supporting detail: the meta row, a character name.
-    static let caption: Font = PlayerCardMetrics.regular.captionFont
+/// Shared by the remote and touch scrub bars. They had drifted apart — the touch
+/// one drew a plain white fill — which is how the same control ended up looking
+/// like two different controls on two platforms.
+public struct PlayerScrubTrackSurface: View {
+    public let height: CGFloat
+
+    @Environment(\.plozzReducePanelGlass) private var reducePanelGlass
+
+    public init(height: CGFloat) {
+        self.height = height
+    }
+
+    public var body: some View {
+        if reducePanelGlass {
+            Capsule()
+                .fill(.clear)
+                .frame(height: height)
+                .plozzFrostedBackground(Capsule())
+        } else if #available(iOS 26.0, tvOS 26.0, *) {
+            Capsule()
+                .fill(.clear)
+                .frame(height: height)
+                .glassEffect(.regular, in: Capsule())
+        } else {
+            Capsule()
+                .fill(.white.opacity(0.22))
+                .frame(height: height)
+        }
+    }
+}
+
+/// The circular glass surface behind a transport control.
+///
+/// Separate from the button style because not every control that needs it IS a
+/// button — the AirPlay route picker is a `UIView` wrapper — and two copies of a
+/// material is precisely how the cast rows ended up looking unlike the cast
+/// cards.
+public struct PlayerGlassCircleSurface: View {
+    @Environment(\.plozzReducePanelGlass) private var reducePanelGlass
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
+
+    public init() {}
+
+    public var body: some View {
+        let shape = Circle()
+        if reducePanelGlass || reduceTransparency {
+            shape
+                .fill(.clear)
+                .plozzFrostedBackground(shape)
+                .plozzFrostedBorder(shape)
+        } else if #available(iOS 26.0, tvOS 26.0, *) {
+            Color.clear.glassEffect(.regular, in: shape)
+        } else {
+            shape.fill(.white.opacity(0.18))
+        }
+    }
+}
+
+/// A circular Liquid Glass button for the player's transport controls.
+///
+/// Public and shared rather than drawn per platform: the tvOS card, the scrub
+/// track and these all draw the same glass, and the three-branch shape below is
+/// the repo's established one — frosted when panel glass is reduced, native glass
+/// on 26+, a translucent fill before that. A second hand-rolled copy in the iOS
+/// shell is how the cast rows ended up on a different material from the cast
+/// cards.
+///
+/// Deliberately NOT a `Material`. A material has no backdrop sample on its first
+/// frame, so it paints its own flat base colour and then repaints once it has
+/// one — the white flash the player panels were chasing for a long time. Glass
+/// and a plain translucent fill both avoid it.
+public struct PlayerGlassCircleButtonStyle: ButtonStyle {
+    /// The button's full circular size, which is also its touch target.
+    public let diameter: CGFloat
+
+    public init(diameter: CGFloat) {
+        self.diameter = diameter
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.white)
+            .frame(width: diameter, height: diameter)
+            .background { PlayerGlassCircleSurface() }
+            .clipShape(Circle())
+            // The whole circle takes the tap, not just the glyph inside it.
+            .contentShape(Circle())
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            // Its own curve. Inheriting the ambient one means a press that
+            // coincides with some other animation settles on that animation's
+            // schedule — which is what made the tab row look like its two
+            // buttons were moving at different speeds.
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
 }
 
 struct PlayerTabButtonStyle: ButtonStyle {
@@ -276,7 +339,11 @@ struct PlayerTabButtonStyle: ButtonStyle {
         configuration.label
             .font(.callout.weight(.semibold))
             .foregroundStyle(focused ? .black : .white)
-            .opacity(focused || selected ? 1 : 0.65)
+            // 0.65 was too far down over glass: the pill's own brightness eats
+            // most of the remaining contrast, and a closed tab read as disabled
+            // rather than merely inactive. Selection is carried by the tint
+            // behind the label; this only needs to be a step, not a fade.
+            .opacity(focused || selected ? 1 : 0.86)
             .padding(.horizontal, 26)
             .padding(.vertical, 14)
             .background { background }
@@ -284,8 +351,33 @@ struct PlayerTabButtonStyle: ButtonStyle {
             // The surface swap stays instant — see above — but the lift is a
             // transform, not layout, so it can travel without moving the stack.
             .animation(nil, value: focused)
+            // NOTHING for `selected` here, deliberately.
+            //
+            // `.animation(nil, value: selected)` looks like the natural companion
+            // to the line above, and it is a trap: it suppresses animation for
+            // this view for the whole transaction in which `selected` changes —
+            // and that is the same transaction that moves the row, because
+            // selection changes precisely when the card opens. The tapped tab
+            // therefore SNAPPED to its new position while its neighbour, whose
+            // `selected` did not change, travelled normally. Two tabs in one
+            // HStack cannot really move at different speeds; that is what it
+            // looked like.
+            //
+            // The surface does not need it either: both states now draw the same
+            // glass, with selection painted on top (see `background`).
             .scaleEffect(configuration.isPressed ? 1.02 : (focused ? 1.08 : 1))
             .animation(.easeOut(duration: 0.15), value: focused)
+            // The press scale needs a curve of its OWN, and this is the whole
+            // reason the tapped tab looked slower than the one beside it.
+            //
+            // Releasing a tap is what opens the card, so `isPressed` returns to
+            // false in the very transaction that animates the strip. With no
+            // animation named for it, the scale inherited that transaction and
+            // took the card's full 0.24s to settle — so the tab you pressed was
+            // still growing back while its neighbour, which had nothing to
+            // settle, simply travelled. Both moved together; only one was also
+            // finishing a scale.
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 
     @ViewBuilder
@@ -310,6 +402,12 @@ struct PlayerTabButtonStyle: ButtonStyle {
             // Selected keeps the glass and only tints it. Swapping in a flat
             // fill made an open tab a different material from a closed one,
             // when the only thing that changes is which of them is open.
+            //
+            // Tried and reverted: drawing one plain glass for both states and
+            // painting selection as an overlay on top. It reads as a different
+            // material — an opaque wash sitting ON the glass rather than the
+            // glass itself being coloured — and it left the label looking greyed
+            // out, as though the tab were disabled.
             Color.clear.glassEffect(
                 selected ? .regular.tint(.white.opacity(0.30)) : .regular,
                 in: shape

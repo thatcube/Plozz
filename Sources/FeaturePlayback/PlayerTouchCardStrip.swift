@@ -48,6 +48,10 @@ public struct PlayerTouchCardStrip: View {
     /// screen a card may take.
     private let availableSize: CGSize
 
+    /// The curve the card opens and closes on, and therefore the curve the tab
+    /// row travels on.
+    private static let cardCurve: Animation = .easeInOut(duration: 0.24)
+
     private var metrics: PlayerCardMetrics {
         .resolved(forWidth: availableSize.width, height: availableSize.height)
     }
@@ -82,7 +86,23 @@ public struct PlayerTouchCardStrip: View {
                     )
             }
         }
-        .animation(.easeInOut(duration: 0.24), value: openPanel)
+        // NO `.animation(_:value: openPanel)` here, and that is the fix rather
+        // than an omission.
+        //
+        // The tab row does not move because anything inside this VStack moves. It
+        // moves because the VStack gets TALLER and its parent is bottom-anchored,
+        // so the parent re-lays it out higher up. A child's `.animation` modifier
+        // scopes to that child's own attributes and cannot reach a repositioning
+        // performed by its parent — so the row's travel was not animated at all.
+        //
+        // Both tabs therefore jumped... except the one just tapped, which had a
+        // live animation scope of its own (`value: isPressed`) that caught the
+        // geometry change and eased it. That is the whole "one tab animates
+        // slowly, the other snaps into place" — not two rates, but one animated
+        // tab and one unanimated one.
+        //
+        // `withAnimation` at each mutation opens a GLOBAL transaction instead,
+        // which every dependent layout inherits — including the parent's.
         .frame(maxWidth: .infinity, alignment: .leading)
         .environment(\.playerCardMetrics, metrics)
         .environment(\.mediaBadgeScale, metrics.badgeScale)
@@ -93,7 +113,11 @@ public struct PlayerTouchCardStrip: View {
             if isCardOpen != open { isCardOpen = open }
         }
         .onChange(of: isCardOpen) { _, open in
-            if !open, openPanel != nil { openPanel = nil }
+            // Dismissed from outside — a tap on the video. Same curve as opening,
+            // and the same reason for the global transaction.
+            if !open, openPanel != nil {
+                withAnimation(Self.cardCurve) { openPanel = nil }
+            }
         }
     }
 
@@ -113,7 +137,9 @@ public struct PlayerTouchCardStrip: View {
         Button {
             // Tapping the open tab closes it, so the same control both opens and
             // dismisses — there is no Menu button to fall back on here.
-            openPanel = (openPanel == category) ? nil : category
+            withAnimation(Self.cardCurve) {
+                openPanel = (openPanel == category) ? nil : category
+            }
         } label: {
             title
         }
@@ -224,11 +250,14 @@ public struct PlayerTouchScrubBar: View {
             let knobX = width * fraction
             let barHeight = isTouching ? Self.touchedHeight : Self.restingHeight
             let knobWidth: CGFloat = isTouching ? 8 : 4
-            let knobHeight: CGFloat = isTouching ? 40 : 24
+            // FLUSH at rest, exactly as `ScrubBar` is: the knob is the bar's own
+            // height until the bar is touched, so nothing protrudes above or
+            // below the track. It was 24 against a 12pt bar, which is what made
+            // the whole control read as oversized when nothing was happening.
+            let knobHeight: CGFloat = isTouching ? 40 : barHeight
 
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.22))
-                    .frame(height: barHeight)
+                PlayerScrubTrackSurface(height: barHeight)
                 Capsule().fill(.white.opacity(0.14))
                     .frame(width: width * CGFloat(min(max(bufferedFraction, 0), 1)), height: barHeight)
                 // Square trailing edge so the played portion meets the knob
@@ -242,11 +271,13 @@ public struct PlayerTouchScrubBar: View {
                 )
                 .fill(.white.opacity(isTouching ? 0.9 : 0.62))
                 .frame(width: knobX, height: barHeight)
-                RoundedRectangle(cornerRadius: knobWidth / 2, style: .continuous)
+                // Square at rest, rounded once lifted — a rounded cap on a knob
+                // the same height as the track just erodes the played edge.
+                RoundedRectangle(cornerRadius: isTouching ? knobWidth / 2 : 0, style: .continuous)
                     .fill(.white)
                     .frame(width: knobWidth, height: knobHeight)
                     .offset(x: knobX - knobWidth / 2)
-                    .shadow(radius: 4)
+                    .shadow(radius: isTouching ? 4 : 0)
             }
             .frame(maxHeight: .infinity, alignment: .center)
             .animation(.easeOut(duration: 0.12), value: isTouching)

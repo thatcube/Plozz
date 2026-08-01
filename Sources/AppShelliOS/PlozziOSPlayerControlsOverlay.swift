@@ -28,6 +28,11 @@ struct PlozziOSPlayerControlsOverlay: View {
     /// the strip because dismissing it is this view's job: the tap that closes
     /// it lands on the video, above the card, which the strip does not cover.
     @State private var isCardOpen = false
+    /// Whole turns the skip glyphs have made — one per press, signed by
+    /// direction. A running total rather than a flag, so pressing again
+    /// mid-spin adds a turn instead of restarting the one in flight.
+    @State private var backwardSpins = 0
+    @State private var forwardSpins = 0
     @State private var autoHideTask: Task<Void, Never>?
     @StateObject private var pictureInPicture = PlozziOSPictureInPictureController()
 
@@ -69,16 +74,19 @@ struct PlozziOSPlayerControlsOverlay: View {
                 // held device. Hidden while a card is open, matching tvOS,
                 // where the card owns the screen.
                 if !isCardOpen {
-                    HStack(spacing: 48) {
+                    HStack(spacing: 28) {
                         Button {
                             seek(by: -viewModel.controls.skipGesture.backwardInterval.seconds)
+                            backwardSpins -= 1
                         } label: {
-                            Image(systemName: "gobackward.\(viewModel.controls.skipGesture.backwardInterval.rawValue)")
-                                .font(.system(size: 34))
-                                .foregroundStyle(.white)
-                                .frame(width: 64, height: 64)
-                                .contentShape(Rectangle())
+                            PlozziOSSkipGlyph(
+                                seconds: viewModel.controls.skipGesture.backwardInterval.rawValue,
+                                direction: .backward,
+                                size: 30,
+                                turns: backwardSpins
+                            )
                         }
+                        .buttonStyle(PlayerGlassCircleButtonStyle(diameter: 64))
                         .accessibilityLabel("Skip backward")
 
                         Button {
@@ -86,22 +94,23 @@ struct PlozziOSPlayerControlsOverlay: View {
                             noteInteraction()
                         } label: {
                             Image(systemName: viewModel.controls.intendsPause ? "play.fill" : "pause.fill")
-                                .font(.system(size: 48))
-                                .foregroundStyle(.white)
-                                .frame(width: 76, height: 76)
-                                .contentShape(Rectangle())
+                                .font(.system(size: 32))
                         }
+                        .buttonStyle(PlayerGlassCircleButtonStyle(diameter: 76))
                         .accessibilityLabel(viewModel.controls.intendsPause ? "Play" : "Pause")
 
                         Button {
                             seek(by: viewModel.controls.skipGesture.forwardInterval.seconds)
+                            forwardSpins += 1
                         } label: {
-                            Image(systemName: "goforward.\(viewModel.controls.skipGesture.forwardInterval.rawValue)")
-                                .font(.system(size: 34))
-                                .foregroundStyle(.white)
-                                .frame(width: 64, height: 64)
-                                .contentShape(Rectangle())
+                            PlozziOSSkipGlyph(
+                                seconds: viewModel.controls.skipGesture.forwardInterval.rawValue,
+                                direction: .forward,
+                                size: 30,
+                                turns: forwardSpins
+                            )
                         }
+                        .buttonStyle(PlayerGlassCircleButtonStyle(diameter: 64))
                         .accessibilityLabel("Skip forward")
                     }
                     .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
@@ -425,23 +434,22 @@ private struct PlozziOSPlayerTopBar: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.headline)
-                    .frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
             }
+            .buttonStyle(PlayerGlassCircleButtonStyle(diameter: 44))
             .accessibilityLabel("Close player")
 
             PlozziOSAirPlayRouteButton()
                 .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
+                .background { PlayerGlassCircleSurface() }
+                .clipShape(Circle())
                 .accessibilityLabel(Text(verbatim: "AirPlay"))
 
             if pictureInPictureAvailable {
                 Button(action: onTogglePictureInPicture) {
                     Image(systemName: "pip.enter")
                         .font(.headline)
-                        .frame(width: 44, height: 44)
-                        .background(.ultraThinMaterial, in: Circle())
                 }
+                .buttonStyle(PlayerGlassCircleButtonStyle(diameter: 44))
                 .accessibilityLabel("Picture in Picture")
             }
 
@@ -709,12 +717,13 @@ private struct PlozziOSPlayerTransport: View {
     /// speed and subtitles open sheets because theirs are not.
     @ViewBuilder
     private var trackControls: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 12) {
             if viewModel.controls.engineCapabilities.contains(.playbackSpeed) {
                 Button(action: onShowSpeed) {
                     Image(systemName: "speedometer")
-                        .playerTransportGlyph()
+                        .font(.title3)
                 }
+                .buttonStyle(PlayerGlassCircleButtonStyle(diameter: 44))
                 .accessibilityLabel("Playback speed")
             }
 
@@ -733,16 +742,25 @@ private struct PlozziOSPlayerTransport: View {
                         }
                     }
                 } label: {
+                    // A Menu, not a Button, so the shared style cannot apply —
+                    // its surface is used directly instead, which is the point of
+                    // `PlayerGlassCircleSurface` being separate from the style.
                     Image(systemName: "waveform")
-                        .playerTransportGlyph()
+                        .font(.title3)
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background { PlayerGlassCircleSurface() }
+                        .clipShape(Circle())
+                        .contentShape(Circle())
                 }
                 .accessibilityLabel("Audio track")
             }
 
             Button(action: onShowSubtitles) {
                 Image(systemName: "captions.bubble")
-                    .playerTransportGlyph()
+                    .font(.title3)
             }
+            .buttonStyle(PlayerGlassCircleButtonStyle(diameter: 44))
             .accessibilityLabel("Subtitles")
         }
     }
@@ -814,6 +832,76 @@ private struct PlozziOSPlayerTransport: View {
             return String(format: "%d:%02d:%02d", hours, minutes, remainder)
         }
         return String(format: "%d:%02d", minutes, remainder)
+    }
+}
+
+
+/// The skip-back / skip-forward glyph: a ring that spins one full turn per
+/// press, with the interval stationary inside it.
+///
+/// Composed rather than using `gobackward.10` and friends, for two reasons. The
+/// composite symbols bake the number into the artwork, so rotating one rotates
+/// the number with it — and Apple only ships numbered variants for 5, 10, 15,
+/// 30, 45, 60, 75 and 90. Interpolating the raw value into a symbol name, which
+/// is what this used to do, produced `gobackward.1` for a one-second interval:
+/// not a symbol, so the button rendered as nothing at all. Drawing the ring and
+/// the number separately supports every interval by construction.
+private struct PlozziOSSkipGlyph: View {
+    enum Direction { case backward, forward }
+
+    let seconds: Int
+    let direction: Direction
+    let size: CGFloat
+    /// Signed whole turns. The rotation follows the skip: back winds
+    /// anticlockwise, forward clockwise.
+    let turns: Int
+
+    /// Where the circle's centre sits inside the glyph's bounding box.
+    ///
+    /// Not the box's centre, and that is the whole difficulty: the arrowhead
+    /// protrudes above the circle, so the box is taller than the circle by that
+    /// protrusion and its top edge is the arrowhead's tip. The circle's centre
+    /// therefore sits half the protrusion BELOW the box's centre — and rotating
+    /// about the box's centre swung the ring through a small arc rather than
+    /// turning it in place, which is the bob. Fitting the glyph to a square frame
+    /// fixed the text-metrics half of this; the asymmetry is the other half, and
+    /// no amount of framing removes it.
+    private static let ringCentre = UnitPoint(x: 0.5, y: 0.54)
+
+    var body: some View {
+        ZStack {
+            // Sized as an IMAGE, not as text.
+            //
+            // A symbol laid out with `.font` gets text metrics — the box it
+            // occupies includes descender space the glyph does not use, so its
+            // centre sits below the ring's. Rotating about that point swung the
+            // ring through a small arc instead of spinning it in place, which
+            // read as the arrow bobbing up and down. Resizing to a square frame
+            // makes the glyph's own bounds the frame, so its centre and the
+            // rotation anchor are the same point.
+            Image(systemName: direction == .backward ? "gobackward" : "goforward")
+                .resizable()
+                .scaledToFit()
+                .fontWeight(.regular)
+                .frame(width: size, height: size)
+                .rotationEffect(.degrees(Double(turns) * 360), anchor: Self.ringCentre)
+                // Keyed to the running total, so a press mid-spin extends the
+                // turn rather than snapping back and starting over.
+                .animation(.easeInOut(duration: 0.45), value: turns)
+
+            // Deliberately outside the rotation. The ring is the thing that
+            // moves; a number that spun with it would be unreadable at exactly
+            // the moment it is being checked.
+            Text(verbatim: "\(seconds)")
+                // Proportional to the ring, matching how Apple's own composite
+                // glyphs scale their numerals.
+                .font(.system(size: size * 0.42, weight: .semibold))
+                // The ring is not vertically symmetric — its opening and
+                // arrowhead sit at the top — so the space the numeral occupies
+                // is centred a little below the circle's own centre.
+                .offset(y: size * 0.06)
+        }
+        .foregroundStyle(.white)
     }
 }
 

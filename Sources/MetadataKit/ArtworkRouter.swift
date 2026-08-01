@@ -29,6 +29,12 @@ public actor ArtworkRouter {
     /// Bundled TheTVDB backdrop tier (hero art only). Nil-safe when unconfigured.
     private let tvdb = TVDBArtworkProvider(client: TVDBClient(config: .resolved()))
     private let cache: MetadataDiskCache
+    /// Original language is show/movie-level metadata, so every episode in a
+    /// series shares one answer. Keep positive and negative results separately:
+    /// a plain `[String: String?]` cannot retain nil (assigning nil removes the
+    /// entry), which would repeat the network lookup on every episode.
+    private var originalLanguages: [String: String] = [:]
+    private var missingOriginalLanguages = Set<String>()
 
     public init(
         config: MetadataProviderConfig = .resolved(),
@@ -45,6 +51,27 @@ public actor ArtworkRouter {
 
     /// `true` when the optional TMDb tier is configured (proxy or local token).
     public var isTMDbEnabled: Bool { tmdb.isEnabled }
+
+    /// Best available original spoken language for playback policy.
+    ///
+    /// Anime has a local, stronger answer (`ja`) and never needs a network call.
+    /// Other video asks TMDb once per title; a miss stays a miss for this router
+    /// session so episode hand-offs never add repeated metadata latency.
+    public func originalAudioLanguage(for item: MediaItem) async -> String? {
+        if let classified = ContentClassifier.originalAudioLanguage(for: item) {
+            return classified
+        }
+        let query = MetadataQuery(item)
+        let key = "original-language|\(query.cacheKey(for: .poster))"
+        if let cached = originalLanguages[key] { return cached }
+        if missingOriginalLanguages.contains(key) { return nil }
+        guard let language = await tmdb.originalLanguage(for: query) else {
+            missingOriginalLanguages.insert(key)
+            return nil
+        }
+        originalLanguages[key] = language
+        return language
+    }
 
     // MARK: - Video artwork
 

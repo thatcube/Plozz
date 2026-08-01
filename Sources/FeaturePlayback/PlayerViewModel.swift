@@ -900,8 +900,18 @@ public final class PlayerViewModel {
                 sourceProvider: provider.kind,
                 sourceFileName: localURL.lastPathComponent
             )
+            let originalLanguage = await resolvedOriginalAudioLanguage(
+                for: offlineItem
+            )
             request.preferredAudioLanguages =
-                preferredAudioLanguages(for: offlineItem)
+                preferredAudioLanguages(
+                    for: offlineItem,
+                    originalLanguage: originalLanguage
+                )
+            request.preferredAudioTrackID = AudioLanguagePolicy.fallbackTrackID(
+                preferredLanguages: request.preferredAudioLanguages,
+                tracks: request.audioTracks
+            )
             let kind = routeEngine(for: request, forceTranscode: false)
             return PrefetchedPlayback(
                 itemID: itemID,
@@ -925,7 +935,21 @@ public final class PlayerViewModel {
         // fallback, which reuse self.request) inherits it. Subtitle language
         // steering is intentionally left empty — Plozz owns subtitle selection
         // via the SDR overlay, so the engine must not activate its own track.
-        request.preferredAudioLanguages = preferredAudioLanguages(for: request.item)
+        let originalLanguage = await resolvedOriginalAudioLanguage(
+            for: request.item
+        )
+        request.preferredAudioLanguages = preferredAudioLanguages(
+            for: request.item,
+            originalLanguage: originalLanguage
+        )
+        request.preferredAudioTrackID = AudioLanguagePolicy.fallbackTrackID(
+            preferredLanguages: request.preferredAudioLanguages,
+            tracks: request.audioTracks
+        )
+        traceAudioLanguageDecision(
+            request,
+            originalLanguage: originalLanguage
+        )
         let kind = routeEngine(for: request, forceTranscode: forceTranscode)
         return PrefetchedPlayback(itemID: itemID, request: request, engineKind: kind)
     }
@@ -983,12 +1007,65 @@ public final class PlayerViewModel {
     /// Resolves the ordered audio-language preference for a load from per-series
     /// memory (when enabled) and the per-content-type audio policy. A remembered
     /// per-series language takes precedence ahead of the policy preference.
-    private func preferredAudioLanguages(for item: MediaItem) -> [String] {
+    private func preferredAudioLanguages(
+        for item: MediaItem,
+        originalLanguage: String?
+    ) -> [String] {
         AudioLanguagePolicy.preferredAudioLanguages(
             remembered: rememberedAudioLanguage(for: item),
             preference: effectiveAudioPreference(for: item),
-            originalLanguage: ContentClassifier.originalAudioLanguage(for: item),
+            originalLanguage: originalLanguage,
             deviceLanguage: LanguageMatch.deviceLanguageCode
+        )
+    }
+
+    /// Resolves original language only when it can affect the decision.
+    ///
+    /// A remembered per-series language and an explicit/device preference both
+    /// outrank original language, so a metadata request there would add latency
+    /// for information we throw away. Original-language lookups are cached by
+    /// `ArtworkRouter` at show/movie scope, so only the first episode pays.
+    private func resolvedOriginalAudioLanguage(
+        for item: MediaItem
+    ) async -> String? {
+        if rememberedAudioLanguage(for: item) != nil { return nil }
+        guard effectiveAudioPreference(for: item) == .original else {
+            return nil
+        }
+        return await ArtworkRouter.shared.originalAudioLanguage(for: item)
+    }
+
+    /// TEMPORARY playback-language trace. One line per resolved load, never per
+    /// frame, and intentionally free of URLs/tokens.
+    ///
+    /// "Original" currently has no original-language metadata for ordinary TV:
+    /// `ContentClassifier` only knows anime → Japanese, so every other title
+    /// emits no preference and lets the container's default track win. Futurama
+    /// selecting Portuguese could therefore be correct execution of a bad proxy
+    /// (Portuguese marked default), or a downstream language-selection bug. The
+    /// available tracks and their default flags distinguish those cases.
+    private func traceAudioLanguageDecision(
+        _ request: PlaybackRequest,
+        originalLanguage: String?
+    ) {
+        let item = request.item
+        let preference = effectiveAudioPreference(for: item)
+        let remembered = rememberedAudioLanguage(for: item) ?? "-"
+        let original = originalLanguage ?? "-"
+        let preferred = request.preferredAudioLanguages.isEmpty
+            ? "-"
+            : request.preferredAudioLanguages.joined(separator: ",")
+        let tracks = request.audioTracks.map { track in
+            let language = track.language ?? "-"
+            let marker = track.isDefault ? "default" : "other"
+            return "\(track.id):\(language):\(marker):\(track.displayTitle)"
+        }.joined(separator: " | ")
+        PlozzLog.boot(
+            "AudioLanguage title=\(item.title) item=\(item.id) "
+                + "pref=\(preference.token) remembered=\(remembered) "
+                + "original=\(original) preferred=\(preferred) "
+                + "fallbackTrack=\(request.preferredAudioTrackID.map(String.init) ?? "-") "
+                + "tracks=[\(tracks)]"
         )
     }
 

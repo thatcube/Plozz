@@ -40,6 +40,32 @@ public struct TMDbMetadataProvider: ArtworkProvider {
 
     public var isEnabled: Bool { access.isEnabled }
 
+    /// The work's original spoken language (ISO-639-1), when TMDb knows it.
+    ///
+    /// This is not a cosmetic metadata lookup. Playback's "Original" audio
+    /// preference needs a real language: deferring to the container default is
+    /// only a proxy, and real files can carry contradictory defaults. One
+    /// Futurama episode reported both Portuguese and English as default; with no
+    /// language requested, the demuxer picked the first one (Portuguese).
+    ///
+    /// A stamped TMDb id takes the exact details endpoint. Without one, the
+    /// normal title/year matcher supplies the search result's `original_language`.
+    public func originalLanguage(for query: MetadataQuery) async -> String? {
+        guard access.isEnabled, query.contentType != .music else { return nil }
+        if let id = stampedID(for: query),
+           let url = url("/3/\(query.isTV ? "tv" : "movie")/\(id)"),
+           let details = await MetadataHTTP.get(
+               OriginalLanguageResponse.self,
+               url: url,
+               headers: authHeaders
+           ) {
+            return Self.normalizedLanguage(details.original_language)
+        }
+        return Self.normalizedLanguage(
+            await search(query)?.original_language
+        )
+    }
+
     /// Ordered wide-backdrop URLs (best first), up to `limit`. Retaining a *set*
     /// (not just the single best) lets one response serve both the home hero and a
     /// distinct detail backdrop without a second search.
@@ -171,12 +197,24 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     }
 
     private func resolveID(for query: MetadataQuery, forceTV: Bool = false) async -> String? {
+        if let stamped = stampedID(for: query, forceTV: forceTV) { return stamped }
+        return await search(query, forceTV: forceTV)?.id.map(String.init)
+    }
+
+    /// Exact TMDb id already carried by the item/query, if any.
+    ///
+    /// An episode/season's own `Tmdb` id names the child rather than the show, so
+    /// TV queries prefer `SeriesTmdb` and only trust plain `Tmdb` on a series.
+    private func stampedID(
+        for query: MetadataQuery,
+        forceTV: Bool = false
+    ) -> String? {
         let isTV = forceTV || query.isTV
-        if isTV, let series = query.providerIDs.providerID(.seriesTmdb), !series.isEmpty {
+        if isTV,
+           let series = query.providerIDs.providerID(.seriesTmdb),
+           !series.isEmpty {
             return series
         }
-        // An episode/season's own `Tmdb` id is the episode, not the show, so only
-        // trust a stamped `Tmdb` for series/movies.
         switch query.kind {
         case .movie, .video, .series:
             if let own = query.providerIDs.providerID(.tmdb), !own.isEmpty {
@@ -185,7 +223,15 @@ public struct TMDbMetadataProvider: ArtworkProvider {
         default:
             break
         }
-        return await search(query, forceTV: forceTV)?.id.map(String.init)
+        return nil
+    }
+
+    static func normalizedLanguage(_ language: String?) -> String? {
+        guard let language else { return nil }
+        let normalized = language
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized.isEmpty ? nil : normalized
     }
 
     private func search(_ query: MetadataQuery, forceTV: Bool = false) async -> SearchResult? {
@@ -300,9 +346,13 @@ public struct TMDbMetadataProvider: ArtworkProvider {
         let name: String?
         let release_date: String?
         let first_air_date: String?
+        let original_language: String?
 
         var displayTitle: String? { title ?? name }
         var year: Int? { Int((release_date ?? first_air_date)?.prefix(4) ?? "") }
+    }
+    struct OriginalLanguageResponse: Decodable {
+        let original_language: String?
     }
     struct CreditsResponse: Decodable {
         let cast: [CreditEntry]?

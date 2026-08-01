@@ -110,4 +110,75 @@ final class AudioLanguagePolicyTests: XCTestCase {
         )
         XCTAssertEqual(result, [], "A blank explicit language is treated as no preference.")
     }
+
+    // MARK: Untagged-track fallback
+
+    func testTaggedLanguageMatchDoesNotForceProviderDefault() {
+        let tracks = [
+            MediaTrack(
+                id: 1,
+                kind: .audio,
+                displayTitle: "Portuguese",
+                language: "pt-BR",
+                isDefault: true
+            ),
+            MediaTrack(
+                id: 2,
+                kind: .audio,
+                displayTitle: "English",
+                language: "en"
+            )
+        ]
+        XCTAssertNil(
+            AudioLanguagePolicy.fallbackTrackID(
+                preferredLanguages: ["en"],
+                tracks: tracks
+            ),
+            "Aether should resolve the tagged English track by language"
+        )
+    }
+
+    func testUntaggedTracksFallBackToProviderDefault() {
+        let tracks = [
+            MediaTrack(
+                id: 1,
+                kind: .audio,
+                displayTitle: "DTS 7.1",
+                language: nil,
+                isDefault: true
+            ),
+            MediaTrack(
+                id: 6,
+                kind: .audio,
+                displayTitle: "DTS 5.1",
+                language: nil
+            )
+        ]
+        XCTAssertEqual(
+            AudioLanguagePolicy.fallbackTrackID(
+                preferredLanguages: ["en"],
+                tracks: tracks
+            ),
+            1,
+            "An untagged file should honor the provider-declared default, not FFmpeg's best-stream pick"
+        )
+    }
+
+    func testNoResolvedLanguageDoesNotForceATrack() {
+        let tracks = [
+            MediaTrack(
+                id: 1,
+                kind: .audio,
+                displayTitle: "Track 1",
+                language: nil,
+                isDefault: true
+            )
+        ]
+        XCTAssertNil(
+            AudioLanguagePolicy.fallbackTrackID(
+                preferredLanguages: [],
+                tracks: tracks
+            )
+        )
+    }
 }

@@ -15,7 +15,8 @@ final class TMDbSearchMatchTests: XCTestCase {
             title: title,
             name: nil,
             release_date: year.map { "\($0)-01-01" },
-            first_air_date: nil
+            first_air_date: nil,
+            original_language: "en"
         )
     }
 
@@ -69,5 +70,17 @@ final class TMDbSearchMatchTests: XCTestCase {
             for: query("The Circle", year: 2017), among: results
         )
         XCTAssertEqual(best?.displayTitle, "The Circle")
+    }
+
+    func testOriginalLanguageIsNormalizedForPlayback() {
+        XCTAssertEqual(
+            TMDbMetadataProvider.normalizedLanguage(" EN "),
+            "en"
+        )
+    }
+
+    func testBlankOriginalLanguageIsUnknown() {
+        XCTAssertNil(TMDbMetadataProvider.normalizedLanguage("  "))
+        XCTAssertNil(TMDbMetadataProvider.normalizedLanguage(nil))
     }
 }

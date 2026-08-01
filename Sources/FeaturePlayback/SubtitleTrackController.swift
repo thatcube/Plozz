@@ -111,6 +111,9 @@ final class SubtitleTrackController {
     /// subtitle with no provider language tag is parsed for the overlay, so the
     /// menu can label an otherwise-anonymous "Track 8".
     private var detectedSubtitleLanguages: [Int: String] = [:]
+    /// Deduplicates the temporary provider-vs-engine audio trace. Track options
+    /// rebuild more than once as Plozzigen's demux facts arrive.
+    private var lastAudioTraceSignature: String?
 
     init(host: SubtitleTrackControllerHost) {
         self.host = host
@@ -144,6 +147,12 @@ final class SubtitleTrackController {
         let audio = engine.audioTracks.map { track in
             track.enriched(withProvider: providerAudio.first { $0.id == track.id })
         }
+        traceAudioTracksIfChanged(
+            engine: engine,
+            engineTracks: audio,
+            providerTracks: providerAudio,
+            preferred: host.trackRequest?.preferredAudioLanguages ?? []
+        )
         // Resolve which audio row shows as selected: an in-flight pick
         // (optimistic) → the engine's resolved active track (ground truth) → the
         // default-flag heuristic only before either is known.
@@ -156,16 +165,22 @@ final class SubtitleTrackController {
         selectedAudioTrackID = audioResolution.selected
         if audioResolution.clearPending { pendingAudioTrackID = nil }
 
-        // Preferred languages, highest priority first: the viewer's explicit
-        // choice (or device language) leads, the device language backs it up.
-        let preferred: [String?] = [
+        // Audio rows use the EXACT ordered preference playback used at load.
+        // They previously reused subtitle/device preferences, so an English
+        // device moved English to the first menu row even when "Original" had
+        // expressed no audio preference and the engine selected Portuguese.
+        // The menu order therefore looked like playback should pick English
+        // while describing a completely different policy.
+        let preferredAudio = (host.trackRequest?.preferredAudioLanguages ?? [])
+            .map(Optional.some)
+        let preferredSubtitle: [String?] = [
             host.trackBehavior.resolvedPreferredLanguage,
             LanguageMatch.deviceLanguageCode
         ]
         host.trackControls.audioOptions = TrackMenuBuilder.audioOptions(
             tracks: audio,
             selectedID: selectedAudioTrackID,
-            preferred: preferred,
+            preferred: preferredAudio,
             locale: host.trackAppLocale
         )
 
@@ -183,7 +198,7 @@ final class SubtitleTrackController {
         host.trackControls.subtitleOptions = TrackMenuBuilder.subtitleOptions(
             tracks: subtitles,
             selectedID: selectedSubtitleTrackID,
-            preferred: preferred,
+            preferred: preferredSubtitle,
             detectedLanguages: detectedSubtitleLanguages,
             locale: host.trackAppLocale
         )
@@ -204,6 +219,7 @@ final class SubtitleTrackController {
             if engine.capabilities.contains(.dualSubtitleDecode) {
                 engine.selectSecondarySubtitleTrack(nil)
             }
+
             host.trackLiveSubtitles.loadSecondary(nil)
             host.trackControls.secondarySubtitleStatus = .idle
             if host.trackStyle.secondary != nil {
@@ -215,10 +231,41 @@ final class SubtitleTrackController {
         host.trackControls.secondarySubtitleOptions = TrackMenuBuilder.secondaryOptions(
             eligible: secondaryEligible,
             selectedID: selectedSecondarySubtitleTrackID,
-            preferred: preferred,
+            preferred: preferredSubtitle,
             detectedLanguages: detectedSubtitleLanguages,
             locale: host.trackAppLocale
         )
+    }
+
+    /// TEMPORARY. Compares the provider's stream list with Plozzigen's demuxed
+    /// list and active id, once per distinct state.
+    ///
+    /// The Fast and the Furious resolved original language correctly (`en`) but
+    /// Plozzigen selected "Track 6 (DTS 5.1)" while Plex reported only track 1.
+    /// That can be a provider/engine id-space mismatch, missing language tags in
+    /// the demuxer, or multiple English tracks where language alone cannot name
+    /// the original. This trace separates those cases without logging URLs or
+    /// credentials.
+    private func traceAudioTracksIfChanged(
+        engine: any VideoEngine,
+        engineTracks: [MediaTrack],
+        providerTracks: [MediaTrack],
+        preferred: [String]
+    ) {
+        func describe(_ track: MediaTrack) -> String {
+            "\(track.id):\(track.language ?? "-"):"
+                + "\(track.codec ?? "-"):\(track.channels ?? 0):"
+                + "\(track.isDefault ? "default" : "other"):"
+                + "\(track.displayTitle)"
+        }
+        let engineDescription = engineTracks.map(describe).joined(separator: " | ")
+        let providerDescription = providerTracks.map(describe).joined(separator: " | ")
+        let signature = "active=\(engine.currentAudioTrackID.map(String.init) ?? "-") "
+            + "preferred=\(preferred.joined(separator: ",")) "
+            + "engine=[\(engineDescription)] provider=[\(providerDescription)]"
+        guard signature != lastAudioTraceSignature else { return }
+        lastAudioTraceSignature = signature
+        PlozzLog.boot("AudioTracks \(signature)")
     }
 
     // MARK: Audio selection

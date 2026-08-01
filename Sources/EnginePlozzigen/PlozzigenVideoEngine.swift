@@ -310,7 +310,8 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 try await engine.load(
                     source: source,
                     startPosition: startPosition > 0 ? startPosition : nil,
-                    options: options
+                    options: options,
+                    audioSourceStreamIndex: request.preferredAudioTrackID.map(Int32.init)
                 )
             } else {
                 let source = request.localRemuxSource?.originalSource
@@ -334,7 +335,8 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 try await engine.load(
                     url: url,
                     startPosition: startPosition > 0 ? startPosition : nil,
-                    options: options
+                    options: options,
+                    audioSourceStreamIndex: request.preferredAudioTrackID.map(Int32.init)
                 )
             }
             // Engine state can already be `.playing` by the time load returns,

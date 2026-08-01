@@ -50,6 +50,33 @@ public enum AudioLanguagePolicy {
             return []
         }
     }
+
+    /// Explicit provider track to use when language matching is impossible.
+    ///
+    /// AetherEngine resolves a requested language from container tags and falls
+    /// back to FFmpeg's best/default stream when none match. Some real files have
+    /// no language tags on any audio stream; The Fast and the Furious had seven
+    /// such tracks, so requesting `en` could not distinguish them and FFmpeg
+    /// picked track 6 even though Plex marked track 1 as default/original.
+    ///
+    /// Keep language matching authoritative whenever at least one track matches.
+    /// Only when the resolved preference matches nothing do we supply the
+    /// provider's default stream id as the deterministic original-language proxy.
+    public static func fallbackTrackID(
+        preferredLanguages: [String],
+        tracks: [MediaTrack]
+    ) -> Int? {
+        let preferred = preferredLanguages.compactMap(LanguageMatch.normalized)
+        guard !preferred.isEmpty, !tracks.isEmpty else { return nil }
+        let hasLanguageMatch = tracks.contains { track in
+            guard let language = LanguageMatch.normalized(track.language) else {
+                return false
+            }
+            return preferred.contains(language)
+        }
+        guard !hasLanguageMatch else { return nil }
+        return tracks.first(where: \.isDefault)?.id
+    }
 }
 
 private extension String {

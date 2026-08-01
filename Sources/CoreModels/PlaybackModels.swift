@@ -352,6 +352,12 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// express no preference (engine uses the container default). Not part of the
     /// memberwise init so the many provider construction sites stay untouched.
     public var preferredAudioLanguages: [String] = []
+    /// Explicit provider/container stream index used only when a resolved
+    /// language cannot match because every audio track is untagged. Language
+    /// matching remains authoritative whenever tags exist; this deterministic
+    /// fallback prevents FFmpeg's unrelated best-stream heuristic from selecting
+    /// another untagged track over the provider-declared default.
+    public var preferredAudioTrackID: Int?
     /// Ordered ISO-639 subtitle languages to steer the engine's initial subtitle
     /// selection at load, the subtitle counterpart to `preferredAudioLanguages`.
     public var preferredSubtitleLanguages: [String] = []

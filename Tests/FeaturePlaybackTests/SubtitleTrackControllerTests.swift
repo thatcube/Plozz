@@ -162,6 +162,48 @@ final class SubtitleTrackControllerTests: XCTestCase {
 
     // MARK: - Optimistic pending audio
 
+    func testAudioMenuUsesPlaybackLanguageOrder() {
+        let (sut, host, engine) = makeSUT(engineKind: .plozzigen)
+        var request = PlaybackRequest(
+            item: MediaItem(id: "e1", title: "Episode", kind: .episode),
+            streamURL: URL(string: "https://example.test/e.mkv")!
+        )
+        request.preferredAudioLanguages = ["en"]
+        host.request = request
+        engine.audioTracks = [
+            audio(1, language: "pt-BR", isDefault: true),
+            audio(2, language: "en", isDefault: true)
+        ]
+
+        sut.loadTrackOptions()
+
+        XCTAssertEqual(
+            host.controls.audioOptions.map(\.id),
+            [2, 1],
+            "the menu must describe the same language order playback used"
+        )
+    }
+
+    func testAudioMenuPreservesSourceOrderWithoutPlaybackPreference() {
+        let (sut, host, engine) = makeSUT(engineKind: .plozzigen)
+        host.request = PlaybackRequest(
+            item: MediaItem(id: "e1", title: "Episode", kind: .episode),
+            streamURL: URL(string: "https://example.test/e.mkv")!
+        )
+        engine.audioTracks = [
+            audio(1, language: "pt-BR", isDefault: true),
+            audio(2, language: "en", isDefault: true)
+        ]
+
+        sut.loadTrackOptions()
+
+        XCTAssertEqual(
+            host.controls.audioOptions.map(\.id),
+            [1, 2],
+            "no playback preference means no unrelated device-language re-sort"
+        )
+    }
+
     func testSelectAudioShowsTargetOptimisticallyBeforeEngineConfirms() {
         let (sut, host, engine) = makeSUT(engineKind: .plozzigen)
         engine.audioTracks = [audio(1, language: "en", isDefault: true), audio(2, language: "ja")]

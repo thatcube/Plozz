@@ -34,7 +34,59 @@ final class ExternalTitleAvailabilityTests: XCTestCase {
                 now: now,
                 calendar: calendar,
                 locale: Locale(identifier: "en_US")
-            ))?.hasPrefix("Streaming on Max") == true
+            ))?.hasPrefix("Streaming on HBO Max") == true
+        )
+    }
+
+    func testDirectStreamingServiceBeatsMarketplaceChannel() {
+        let availability = ExternalTitleAvailability(
+            regionCode: "US",
+            watchOffers: [
+                TitleWatchOffer(
+                    providerID: 1,
+                    providerName: "HBO Max Amazon Channel",
+                    kind: .subscription,
+                    regionCode: "US"
+                ),
+                TitleWatchOffer(
+                    providerID: 2,
+                    providerName: "Max",
+                    kind: .subscription,
+                    regionCode: "US"
+                ),
+            ]
+        )
+
+        XCTAssertEqual(
+            english(availability.primaryLine(
+                now: now,
+                calendar: calendar,
+                locale: Locale(identifier: "en_US")
+            )),
+            "Streaming on HBO Max"
+        )
+    }
+
+    func testChannelNameRemainsWhenItIsTheOnlyOffer() {
+        let availability = ExternalTitleAvailability(
+            regionCode: "US",
+            watchOffers: [
+                TitleWatchOffer(
+                    providerID: 1,
+                    providerName: "HBO Max Amazon Channel",
+                    kind: .subscription,
+                    regionCode: "US"
+                )
+            ]
+        )
+
+        XCTAssertEqual(
+            english(availability.primaryLine(
+                now: now,
+                calendar: calendar,
+                locale: Locale(identifier: "en_US")
+            )),
+            "Streaming on HBO Max Amazon Channel"
         )
     }
 
@@ -55,7 +107,7 @@ final class ExternalTitleAvailabilityTests: XCTestCase {
             calendar: calendar,
             locale: Locale(identifier: "en_US")
         ))
-        XCTAssertTrue(line?.hasPrefix("Digital ") == true)
+        XCTAssertTrue(line?.hasPrefix("Available digitally ") == true)
         XCTAssertFalse(line?.localizedCaseInsensitiveContains("streaming") == true)
     }
 
@@ -78,7 +130,7 @@ final class ExternalTitleAvailabilityTests: XCTestCase {
                 calendar: calendar,
                 locale: Locale(identifier: "en_US")
             )),
-            "Digital on Apple TV"
+            "Available digitally on Apple TV"
         )
     }
 
@@ -126,7 +178,7 @@ final class ExternalTitleAvailabilityTests: XCTestCase {
                 now: now,
                 calendar: calendar,
                 locale: Locale(identifier: "en_US")
-            ))?.hasPrefix("In theaters · Digital ") == true
+            ))?.hasPrefix("In theaters · Available digitally ") == true
         )
     }
 

@@ -1,5 +1,6 @@
 import XCTest
 import CoreModels
+import RatingsService
 @testable import AppShell
 
 final class HeroMetadataEnricherTests: XCTestCase {
@@ -70,6 +71,7 @@ final class HeroMetadataEnricherTests: XCTestCase {
             title: "The Getaway",
             kind: .episode,
             seriesID: "plex-series",
+            providerIDs: ["SeriesTmdb": "125988"],
             sourceAccountID: "plex-account",
             sources: [
                 MediaSourceRef(
@@ -86,13 +88,15 @@ final class HeroMetadataEnricherTests: XCTestCase {
             seasonNumber: 1,
             episodeNumber: 4,
             seriesID: "jellyfin-series",
-            seasonID: "jellyfin-season"
+            seasonID: "jellyfin-season",
+            providerIDs: ["Tmdb": "episode-4"]
         )
         let series = MediaItem(
             id: "jellyfin-series",
             title: "Silo",
             kind: .series,
-            genres: ["Science Fiction"]
+            genres: ["Science Fiction"],
+            providerIDs: ["Tmdb": "125988", "Tvdb": "403245"]
         )
         let account = resolved(
             accountID,
@@ -112,6 +116,47 @@ final class HeroMetadataEnricherTests: XCTestCase {
         XCTAssertEqual(result[0].sourceAccountID, accountID)
         XCTAssertEqual(result[0].seriesID, series.id)
         XCTAssertEqual(result[0].seasonID, hydratedEpisode.seasonID)
+        XCTAssertEqual(result[0].providerID(.tmdb), "episode-4")
+        XCTAssertEqual(result[0].providerID(.seriesTmdb), "125988")
+        XCTAssertEqual(result[0].providerID(.seriesTvdb), "403245")
+    }
+
+    func testMergesSharedCachedRatingsWithoutStartingProviderWork() async {
+        let accountID = "plex-account"
+        let item = MediaItem(
+            id: "arrietty",
+            title: "The Secret World of Arrietty",
+            kind: .movie,
+            overview: "A tiny family lives beneath the floorboards.",
+            productionYear: 2010,
+            officialRating: "G",
+            taglines: ["Discover a secret world."],
+            ratings: [
+                ExternalRating(source: .imdb, value: 7.6, scale: .outOfTen)
+            ],
+            sourceAccountID: accountID
+        )
+        let cached = CachedHeroRatingsProvider(
+            ratings: [
+                ExternalRating(source: .imdb, value: 7.6, scale: .outOfTen),
+                ExternalRating(source: .tmdb, value: 7.7, scale: .outOfTen),
+                ExternalRating(source: .anilist, value: 79, scale: .percent),
+            ]
+        )
+        let enrich = makeHeroMetadataEnricher(
+            accounts: [resolved(accountID, detail: item)],
+            identitySources: { _ in [] },
+            ratingsProvider: cached
+        )
+
+        let result = await enrich([item])
+
+        XCTAssertEqual(
+            Set<RatingSource>(result[0].ratings.map { $0.source }),
+            [.imdb, .tmdb, .anilist]
+        )
+        XCTAssertEqual(cached.fetchCount, 0)
+        XCTAssertEqual(cached.cacheReadCount, 1)
     }
 
     private func resolved(_ accountID: String, detail: MediaItem) -> ResolvedAccount {
@@ -145,6 +190,43 @@ final class HeroMetadataEnricherTests: XCTestCase {
             account: account,
             provider: HeroMetadataProvider(session: session, details: details)
         )
+    }
+}
+
+private final class CachedHeroRatingsProvider:
+    CachedExternalRatingsProviding,
+    @unchecked Sendable {
+    private let lock = NSLock()
+    private let stored: [ExternalRating]
+    private var _fetchCount = 0
+    private var _cacheReadCount = 0
+
+    init(ratings: [ExternalRating]) {
+        stored = ratings
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+
+    var fetchCount: Int {
+        withLock { _fetchCount }
+    }
+
+    var cacheReadCount: Int {
+        withLock { _cacheReadCount }
+    }
+
+    func ratings(for item: MediaItem) async -> [ExternalRating] {
+        withLock { _fetchCount += 1 }
+        return stored
+    }
+
+    func cachedRatings(for item: MediaItem) async -> [ExternalRating]? {
+        withLock { _cacheReadCount += 1 }
+        return stored
     }
 }
 

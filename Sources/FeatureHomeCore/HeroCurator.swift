@@ -20,6 +20,18 @@ public enum HeroArtworkValidator {
     public static let presence: HeroArtworkValidating = { !$0.isEmpty }
 }
 
+public struct HeroCurationResult: Sendable, Equatable {
+    public var items: [MediaItem]
+    public var featuredItems: [MediaItem]
+
+    public init(items: [MediaItem], featuredItems: [MediaItem]) {
+        self.items = items
+        self.featuredItems = featuredItems
+    }
+
+    public static let empty = HeroCurationResult(items: [], featuredItems: [])
+}
+
 /// Builds the ordered list of items the Home **hero** carousel rotates through,
 /// mixing the user's enabled sources (Featured/Seerr, Continue Watching, Random,
 /// Watchlist) per their per-profile ``HeroSettings``.
@@ -61,7 +73,36 @@ public struct HeroCurator: Sendable {
         artworkProvider: @escaping HeroArtworkProviding = HeroArtworkProvider.none,
         artworkValidator: @escaping HeroArtworkValidating = HeroArtworkValidator.presence
     ) async -> [MediaItem] {
-        guard settings.isActive else { return [] }
+        await curateResult(
+            settings: settings,
+            continueWatching: continueWatching,
+            watchlist: watchlist,
+            recentlyAdded: recentlyAdded,
+            randomLibraries: randomLibraries,
+            watchMutations: watchMutations,
+            featuredProvider: featuredProvider,
+            randomProvider: randomProvider,
+            artworkProvider: artworkProvider,
+            artworkValidator: artworkValidator
+        ).items
+    }
+
+    /// Full curation plus the validated Featured bucket that is safe to persist
+    /// across launches. Volatile library-backed sources—especially Continue
+    /// Watching—are deliberately excluded from that snapshot.
+    public func curateResult(
+        settings: HeroSettings,
+        continueWatching: [MediaItem],
+        watchlist: [MediaItem],
+        recentlyAdded: [MediaItem] = [],
+        randomLibraries: [HeroRandomLibrary] = [],
+        watchMutations: [MediaItemMutation] = [],
+        featuredProvider: FeaturedContentProviding = HeroFeaturedProvider.none,
+        randomProvider: RandomLibraryContentProviding = HeroRandomProvider.none,
+        artworkProvider: @escaping HeroArtworkProviding = HeroArtworkProvider.none,
+        artworkValidator: @escaping HeroArtworkValidating = HeroArtworkValidator.presence
+    ) async -> HeroCurationResult {
+        guard settings.isActive else { return .empty }
         let limit = settings.maxItems
 
         // Fetch the async sources up front (concurrently), guarded on being
@@ -98,12 +139,18 @@ public struct HeroCurator: Sendable {
             artworkProvider: artworkProvider,
             validate: artworkValidator
         )
-        return strategy.compose(eligible, limit: limit)
+        let featuredBuckets = zip(settings.sources, eligible).compactMap {
+            $0.0 == .featured ? $0.1 : nil
+        }
+        return HeroCurationResult(
+            items: strategy.compose(eligible, limit: limit),
+            featuredItems: strategy.compose(featuredBuckets, limit: limit)
+        )
     }
 
-    /// A **synchronous** seed built only from the already-loaded, non-async
-    /// sources (Continue Watching + Watchlist). Featured (Seerr) and Random are
-    /// treated as empty here because they require an `await` fetch.
+    /// A **synchronous** seed built from already-loaded Home rows plus an optional
+    /// persisted Featured bucket. Random remains empty because each appearance
+    /// deliberately requests a new server-shuffled selection.
     ///
     /// Home renders this instantly the moment its content is available so the
     /// hero appears in the *same frame* as the rest of the page (no pop-in), then
@@ -112,6 +159,7 @@ public struct HeroCurator: Sendable {
     /// seed already equals the final result, so nothing visibly changes.
     public func curateSync(
         settings: HeroSettings,
+        featured: [MediaItem] = [],
         continueWatching: [MediaItem],
         watchlist: [MediaItem],
         recentlyAdded: [MediaItem] = [],
@@ -120,7 +168,8 @@ public struct HeroCurator: Sendable {
         guard settings.isActive else { return [] }
         let perSource: [[MediaItem]] = settings.sources.map { source in
             switch source {
-            case .featured, .randomFromLibrary: return []
+            case .featured: return featured
+            case .randomFromLibrary: return []
             case .continueWatching: return continueWatching
             // Already aggregated for the Recently Added rail, so unlike Featured and
             // Random this source needs no fetch and can join the instant seed —
@@ -128,6 +177,7 @@ public struct HeroCurator: Sendable {
             case .recentlyAdded: return recentlyAdded
             case .watchlist: return watchlist
             }
+
         }.map {
             HeroWatchEligibility.filter(
                 $0,

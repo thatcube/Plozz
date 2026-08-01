@@ -48,8 +48,8 @@ struct HomeTab: View {
     let confirmAdminRequest: Bool
     let homeVisibility: HomeLibraryVisibilityModel
     let homeLayoutStore: HomeLayoutStoring
-    /// Per-profile store for the last successful Home content snapshot (instant
-    /// launch paint + silent refresh). Same lifecycle as `homeLayoutStore`.
+    /// Per-profile Home snapshot store (stable-row paint + fresh volatile rows).
+    /// Same lifecycle as `homeLayoutStore`.
     let homeContentStore: HomeContentStoring
     /// Per-profile hero carousel settings driving the Home featured section.
     let heroSettings: HeroSettingsModel
@@ -202,7 +202,8 @@ struct HomeTab: View {
                 ),
                 heroMetadataEnricher: makeHeroMetadataEnricher(
                     accounts: accounts,
-                    identitySources: identitySources
+                    identitySources: identitySources,
+                    ratingsProvider: ratingsProvider
                 ),
                 heroTrailerResolver: makeHeroTrailerResolver(),
                 homePerfOverlayEnabled: homePerfOverlayEnabled,

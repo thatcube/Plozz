@@ -100,6 +100,32 @@ public extension Dictionary where Key == String, Value == String {
         return nil
     }
 
+    /// Fills missing show-level namespaces from another item's series ids first,
+    /// then its ordinary ids. Used when an episode is replaced by a freshly fetched
+    /// provider record: the new episode carries episode-level TMDb/TVDB ids, while
+    /// schedule/scrobble lookups still need the parent show's ids.
+    mutating func mergeSeriesProviderIDs(from source: [String: String]) {
+        let mappings: [
+            (series: ProviderIDNamespace, base: ProviderIDNamespace)
+        ] = [
+            (.seriesImdb, .imdb),
+            (.seriesTmdb, .tmdb),
+            (.seriesTvdb, .tvdb),
+            (.seriesTvmaze, .tvmaze),
+            (.seriesAniList, .aniList),
+            (.seriesMal, .myAnimeList),
+            (.seriesAniDB, .aniDB),
+        ]
+        for mapping in mappings where providerID(mapping.series) == nil {
+            guard let value =
+                source.providerID(mapping.series)
+                    ?? source.providerID(mapping.base) else {
+                continue
+            }
+            self[mapping.series.canonicalKey] = value
+        }
+    }
+
     /// Canonicalized provider-id map keyed by lowercased alphanumeric tokens.
     /// Example: `["TMDb ID": "278"]` becomes `["tmdbid": "278"]`.
     var normalizedProviderIDs: [String: String] {

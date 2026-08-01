@@ -103,13 +103,15 @@ public struct ExternalTitleAvailability: Codable, Hashable, Sendable {
         calendar: Calendar = .current,
         locale: Locale = .current
     ) -> LocalizedStringResource? {
-        if let streaming = watchOffers.first(where: { $0.kind == .subscription }) {
-            return "Streaming on \(streaming.providerName)"
+        if let streaming = preferredOffer(for: [.subscription, .free, .ads]) {
+            let provider = Self.displayProviderName(streaming.providerName)
+            return "Streaming on \(provider)"
         }
-        if let transactional = watchOffers.first(where: {
-            $0.kind == .rent || $0.kind == .buy
-        }) {
-            return "Digital on \(transactional.providerName)"
+        if let transactional = preferredOffer(for: [.rent, .buy]) {
+            let provider = Self.displayProviderName(
+                transactional.providerName
+            )
+            return "Available digitally on \(provider)"
         }
 
         let startToday = calendar.startOfDay(for: now)
@@ -130,9 +132,9 @@ public struct ExternalTitleAvailability: Codable, Hashable, Sendable {
                 return "Premieres \(next.date, format: .dateTime.month(.abbreviated).day())"
             case .digital:
                 if hasReleasedTheatrically {
-                    return "In theaters · Digital \(next.date, format: .dateTime.month(.abbreviated).day())"
+                    return "In theaters · Available digitally \(next.date, format: .dateTime.month(.abbreviated).day())"
                 }
-                return "Digital \(next.date, format: .dateTime.month(.abbreviated).day())"
+                return "Available digitally \(next.date, format: .dateTime.month(.abbreviated).day())"
             case .television:
                 return "Premieres \(next.date, format: .dateTime.month(.abbreviated).day())"
             case .physical:
@@ -142,7 +144,7 @@ public struct ExternalTitleAvailability: Codable, Hashable, Sendable {
 
         let past = releaseEvents.sorted { $0.date > $1.date }
         if let digital = past.first(where: { $0.kind == .digital }) {
-            return "Digital \(digital.date, format: .dateTime.month(.abbreviated).day().year())"
+            return "Available digitally since \(digital.date, format: .dateTime.month(.abbreviated).day().year())"
         }
         if past.contains(where: {
             $0.kind == .theatrical
@@ -155,6 +157,46 @@ public struct ExternalTitleAvailability: Codable, Hashable, Sendable {
             return "Premiered \(television.date, format: .dateTime.month(.abbreviated).day().year())"
         }
         return nil
+    }
+
+    /// Prefer a service's direct offer over marketplace channel add-ons. TMDb/
+    /// JustWatch can return both `Max` and `HBO Max Amazon Channel`; API ordering
+    /// is not a UX priority and briefly made the hero advertise the reseller
+    /// instead of the service most viewers recognize.
+    ///
+    /// The full channel name is retained when it is the only offer — stripping
+    /// "Amazon Channel" there would falsely claim a direct Max subscription works.
+    private func preferredOffer(
+        for kinds: Set<TitleWatchOffer.Kind>
+    ) -> TitleWatchOffer? {
+        watchOffers
+            .enumerated()
+            .filter { kinds.contains($0.element.kind) }
+            .min { lhs, rhs in
+                let left = Self.isChannelAddOn(lhs.element.providerName)
+                let right = Self.isChannelAddOn(rhs.element.providerName)
+                if left != right { return !left }
+                return lhs.offset < rhs.offset
+            }?
+            .element
+    }
+
+    private static func isChannelAddOn(_ name: String) -> Bool {
+        let normalized = name.lowercased()
+        return normalized.contains("amazon channel")
+            || normalized.contains("apple tv channel")
+            || normalized.contains("roku premium channel")
+    }
+
+    /// TMDb/JustWatch still returns the 2023–2025 direct-service brand `Max` in
+    /// some regions. The consumer-facing service renamed back to HBO Max; only
+    /// normalize the exact direct-service token so reseller names keep their
+    /// meaningful qualifier.
+    private static func displayProviderName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare("Max") == .orderedSame
+            ? "HBO Max"
+            : name
     }
 
 }

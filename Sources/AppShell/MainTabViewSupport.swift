@@ -299,9 +299,30 @@ private func resolveHeroMetadata(
     return HeroMetadataEnrichment(root: hydratedTarget, playTarget: nil)
 }
 
+private func applyingCachedHeroRatings(
+    _ items: [MediaItem],
+    provider: any ExternalRatingsProviding
+) async -> [MediaItem] {
+    guard let cachedProvider =
+        provider as? any CachedExternalRatingsProviding else {
+        return items
+    }
+    var enriched = items
+    for index in enriched.indices {
+        guard let cached = await cachedProvider.cachedRatings(for: enriched[index]),
+              !cached.isEmpty else {
+            continue
+        }
+        enriched[index].ratings =
+            enriched[index].ratings.mergedWithAuthoritative(cached)
+    }
+    return enriched
+}
+
 func makeHeroMetadataEnricher(
     accounts: [ResolvedAccount],
-    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
+    ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider()
 ) -> @Sendable ([MediaItem]) async -> [MediaItem] {
     let providersByAccount = Dictionary(
         accounts.map { ($0.account.id, $0.provider) },
@@ -326,7 +347,12 @@ func makeHeroMetadataEnricher(
             return (index, target)
         })
         let candidates = targets.keys.sorted()
-        guard !candidates.isEmpty else { return items }
+        guard !candidates.isEmpty else {
+            return await applyingCachedHeroRatings(
+                items,
+                provider: ratingsProvider
+            )
+        }
 
         let concurrency = min(4, candidates.count)
         let details = await withTaskGroup(
@@ -379,6 +405,7 @@ func makeHeroMetadataEnricher(
 
         var enriched = items
         for (index, detail) in details {
+            let originalProviderIDs = enriched[index].providerIDs
             if var playTarget = detail.playTarget {
                 if playTarget.sourceAccountID == nil,
                    let sourceAccountID = detail.root.sourceAccountID {
@@ -388,6 +415,12 @@ func makeHeroMetadataEnricher(
             }
             let root = detail.root
             if enriched[index].kind == .episode {
+                enriched[index].providerIDs.mergeSeriesProviderIDs(
+                    from: originalProviderIDs
+                )
+                enriched[index].providerIDs.mergeSeriesProviderIDs(
+                    from: root.providerIDs
+                )
                 enriched[index].parentTitle = root.title
                 enriched[index].seriesID = root.id
                 enriched[index].officialRating = root.officialRating
@@ -429,7 +462,10 @@ func makeHeroMetadataEnricher(
                 enriched[index].studios = root.studios
             }
         }
-        return enriched
+        return await applyingCachedHeroRatings(
+            enriched,
+            provider: ratingsProvider
+        )
     }
 }
 
@@ -1090,4 +1126,3 @@ extension View {
 }
 
 #endif
-

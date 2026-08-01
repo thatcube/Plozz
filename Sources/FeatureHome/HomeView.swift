@@ -16,6 +16,12 @@ import MetadataKit
 public final class HomeHeroRuntimeState {
     var items: [MediaItem] = []
     var completedKey: HeroRecomputeKey?
+    /// Last launch's fully curated set. Hydrated once from the profile-scoped Home
+    /// cache so Featured/Random can paint before Seerr, artwork validation, and
+    /// metadata enrichment finish.
+    var cachedItems: [MediaItem] = []
+    var cachedKey: HomeHeroCacheKey?
+    var hasHydratedCache = false
     var externalRefreshRevision = 0
     /// Live, in-session watched/unwatched intents replayed onto the hero until the
     /// durable snapshot catches up. Kept bounded via ``registerWatchMutation(_:)``.
@@ -33,6 +39,9 @@ public final class HomeHeroRuntimeState {
     public func resetForSourceScopeChange() {
         items = []
         completedKey = nil
+        cachedItems = []
+        cachedKey = nil
+        hasHydratedCache = false
         externalRefreshRevision &+= 1
     }
 
@@ -233,6 +242,14 @@ public struct HomeView: View {
         self.onSelectItem = onSelectItem
         self.onPlayItem = onPlayItem
         self.onSelectLibrary = onSelectLibrary
+        if !heroRuntime.hasHydratedCache {
+            heroRuntime.hasHydratedCache = true
+            if let settings = heroSettings?.settings,
+               let cached = viewModel.cachedHeroItems(for: settings) {
+                heroRuntime.cachedKey = HomeHeroCacheKey(settings: settings)
+                heroRuntime.cachedItems = cached
+            }
+        }
     }
 
     public var body: some View {
@@ -256,6 +273,19 @@ public struct HomeView: View {
                 isLibraryVisible: { visibility.isVisible($0) },
                 isGlobalRowEnabled: { visibility.visibility.isGlobalRowEnabled($0) }
             )
+            let isAwaitingLiveContinueWatching = viewModel.isShowingCachedSnapshot
+            let heroContent = HomeHeroLaunchPolicy.content(
+                content,
+                awaitingLiveContinueWatching: isAwaitingLiveContinueWatching
+            )
+            let cachedContinueWatchingLayout = HomeRowLayout(
+                kind: .continueWatching,
+                count: content.continueWatching.isEmpty
+                    ? viewModel.skeletonLayout.first(where: {
+                        $0.kind == .continueWatching
+                    })?.count ?? 0
+                    : content.continueWatching.count
+            )
             // The descriptor the next launch's skeleton renders from: each row's
             // kind, order *and* how many cards it actually showed, so the skeleton
             // matches a full row and a sparse one alike.
@@ -266,10 +296,11 @@ public struct HomeView: View {
                 isVisible: { visibility.isVisible($0) }
             )
             let heroRecomputeKey = HeroRecomputeKey(
-                content: content,
+                content: heroContent,
                 settings: heroSettings?.settings,
                 randomLibraries: randomLibraries,
-                externalRefreshRevision: heroRuntime.externalRefreshRevision
+                externalRefreshRevision: heroRuntime.externalRefreshRevision,
+                awaitingLiveHome: viewModel.isShowingCachedSnapshot
             )
             // Seed the hero synchronously from the already-loaded sources
             // (Continue Watching + Watchlist) so it renders in the *same frame* as
@@ -280,9 +311,9 @@ public struct HomeView: View {
                 runtime: heroRuntime,
                 key: heroRecomputeKey,
                 settings: heroSettings?.settings,
-                continueWatching: content.continueWatching,
-                watchlist: content.watchlist,
-                recentlyAdded: content.latest,
+                continueWatching: heroContent.continueWatching,
+                watchlist: heroContent.watchlist,
+                recentlyAdded: heroContent.latest,
                 curator: heroCurator
             )
             let heroSlotState = HomeHeroSlotState.resolve(
@@ -394,10 +425,16 @@ public struct HomeView: View {
                                 .accessibilityLabel("Loading featured content")
                         }
                         LazyVStack(alignment: .leading, spacing: metrics.rowSpacing) {
+                            if isAwaitingLiveContinueWatching {
+                                HomeSkeletonRowView(row: cachedContinueWatchingLayout)
+                            }
                             if content.mergeLibraries {
                                 // Merged: the classic ordered rows (Continue Watching,
                                 // Watchlist, Recently Added, Libraries tiles).
-                                ForEach(rows) { row in
+                                ForEach(rows.filter {
+                                    !isAwaitingLiveContinueWatching
+                                        || $0.kind != .continueWatching
+                                }) { row in
                                     rowView(row)
                                 }
                             } else {
@@ -405,7 +442,11 @@ public struct HomeView: View {
                                 // opted-in rows, then the Libraries tiles (boxes) last as
                                 // the browse entry points — so per-library rows sit with
                                 // the global rows and the grid of tiles anchors the foot.
-                                ForEach(rows.filter { $0.kind != .libraries }) { row in
+                                ForEach(rows.filter {
+                                    $0.kind != .libraries
+                                        && (!isAwaitingLiveContinueWatching
+                                            || $0.kind != .continueWatching)
+                                }) { row in
                                     rowView(row)
                                 }
                                 ForEach(content.librarySections) { group in
@@ -480,7 +521,7 @@ public struct HomeView: View {
             // config changes. Off the main actor via the curator's async sources.
             .task(id: heroRecomputeKey) {
                 await recomputeHero(
-                    content: content,
+                    content: heroContent,
                     randomLibraries: randomLibraries,
                     key: heroRecomputeKey
                 )
@@ -612,6 +653,13 @@ public struct HomeView: View {
             heroRuntime.completedKey = key
             return
         }
+        if key.awaitingLiveHome, settings.sources != [.featured] {
+            // Any hero that includes a local source must be composed from the fresh
+            // multi-server Home aggregate. Keep the fixed skeleton until then; an
+            // intermediate Featured-only or stale-local carousel would reshuffle
+            // underneath the viewer when the remaining sources arrived.
+            return
+        }
 
         // External-refresh-only fast path. When the candidate structure is unchanged
         // and only watch history may have moved (a watch mutation / warmed identity
@@ -649,30 +697,66 @@ public struct HomeView: View {
         guard !Task.isCancelled else { return }
         heroRuntime.durableWatchMutations = durableWatchMutations
         heroRuntime.hasHydratedDurableMutations = true
-        let items = await HomePerfDiagnostics.measureCurate {
-            let curated = await heroCurator.curate(
+        let cachedFeatured =
+            heroRuntime.cachedKey == HomeHeroCacheKey(settings: settings)
+                ? heroRuntime.cachedItems
+                : []
+        let result = await HomePerfDiagnostics.measureCurate {
+            await heroCurator.curateResult(
                 settings: settings,
                 continueWatching: content.continueWatching,
                 watchlist: content.watchlist,
                 recentlyAdded: content.latest,
                 randomLibraries: randomLibraries,
                 watchMutations: durableWatchMutations + heroRuntime.watchMutations,
-                featuredProvider: heroFeaturedProvider,
+                featuredProvider: { limit in
+                    let fresh = await heroFeaturedProvider(limit)
+                    return fresh.isEmpty
+                        ? Array(cachedFeatured.prefix(limit))
+                        : fresh
+                },
                 randomProvider: heroRandomProvider,
                 artworkProvider: heroArtworkProvider,
                 artworkValidator: heroArtworkValidator
             )
-            return await heroMetadataEnricher(curated)
         }
+        let items = result.items
         guard !Task.isCancelled else {
             let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
             PlozzLog.boot("HomeHero.curate CANCEL ms=\(elapsedMS)")
             return
         }
-        heroRuntime.items = items
+        let cacheKey = HomeHeroCacheKey(settings: settings)
+        if items.isEmpty,
+           heroRuntime.cachedKey == cacheKey,
+           !heroRuntime.cachedItems.isEmpty {
+            // Featured/Random are network sources. A transient empty refresh must
+            // not tear down a good launch snapshot; retain it for this session and
+            // try again on the next cold launch.
+            heroRuntime.completedKey = key
+            let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
+            PlozzLog.boot("HomeHero.curate KEEP-CACHED ms=\(elapsedMS)")
+            return
+        }
+        // Mixed/local heroes stay on their fixed placeholder until presentation
+        // metadata—including shared cached ratings—is complete, then publish once.
+        // This prevents badges and labels changing underneath the viewer.
+        let enriched = await heroMetadataEnricher(items)
+        guard !Task.isCancelled else { return }
+        heroRuntime.items = enriched
+        heroRuntime.cachedItems = []
+        heroRuntime.cachedKey = nil
         heroRuntime.completedKey = key
+        let enrichedByID = Dictionary(
+            enriched.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let enrichedFeatured = result.featuredItems.map {
+            enrichedByID[$0.id] ?? $0
+        }
+        viewModel.cacheHeroItems(enrichedFeatured, for: settings)
         let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
-        PlozzLog.boot("HomeHero.curate DONE ms=\(elapsedMS) items=\(items.count)")
+        PlozzLog.boot("HomeHero.curate DONE ms=\(elapsedMS) items=\(enriched.count)")
     }
 
     /// Interval between in-place featured-status refreshes while Home is visible.
@@ -842,17 +926,20 @@ public struct HomeView: View {
 struct HeroRecomputeKey: Equatable {
     let continueWatching: [HeroCandidateSignature]
     let watchlist: [HeroCandidateSignature]
+    let recentlyAdded: [HeroCandidateSignature]
     let randomLibraries: [HeroRandomLibrary]
     let sources: [HeroSourceKind]
     let maxItems: Int
     let hideWatched: Bool
     let externalRefreshRevision: Int
+    let awaitingLiveHome: Bool
 
     init(
         content: HomeViewModel.Content,
         settings: HeroSettings?,
         randomLibraries: [HeroRandomLibrary],
-        externalRefreshRevision: Int = 0
+        externalRefreshRevision: Int = 0,
+        awaitingLiveHome: Bool = false
     ) {
         let activeSources = settings?.isActive == true ? settings?.sources ?? [] : []
         self.sources = activeSources
@@ -869,11 +956,19 @@ struct HeroRecomputeKey: Equatable {
                 HeroCandidateSignature($0, includeSourceIDs: includeSourceIDs)
             }
             : []
+        self.recentlyAdded = activeSources.contains(.recentlyAdded)
+            ? content.latest.map {
+                HeroCandidateSignature($0, includeSourceIDs: includeSourceIDs)
+            }
+            : []
         self.randomLibraries = activeSources.contains(.randomFromLibrary)
             ? randomLibraries
             : []
         self.externalRefreshRevision = settings?.requiresExternalWatchHistory == true
             ? externalRefreshRevision : 0
+        self.awaitingLiveHome = activeSources == [.featured]
+            ? false
+            : awaitingLiveHome
     }
 
     /// Whether the loaded candidate set is still structurally valid while only
@@ -881,10 +976,12 @@ struct HeroRecomputeKey: Equatable {
     func matchesIgnoringExternalRefresh(_ other: HeroRecomputeKey) -> Bool {
         continueWatching == other.continueWatching
             && watchlist == other.watchlist
+            && recentlyAdded == other.recentlyAdded
             && randomLibraries == other.randomLibraries
             && sources == other.sources
             && maxItems == other.maxItems
             && hideWatched == other.hideWatched
+            && awaitingLiveHome == other.awaitingLiveHome
     }
 }
 
@@ -951,11 +1048,10 @@ enum HomeHeroSlotState: Equatable {
 ///    by an in-flight external-history refresh — reconcile them against the live
 ///    watch overlays and show those. This keeps the async Featured/Random slides
 ///    and preserves focus while a just-watched title still drops out.
-/// 2. Otherwise seed synchronously from the already-loaded Continue Watching,
-///    Watchlist and Recently Added sources so the hero renders in the same frame
-///    as the rows — but
-///    hold that seed back until durable (offline) watch intents have hydrated when
-///    Hide Watched is on, so a seen title can't flash in before it's filtered.
+/// 2. Otherwise, only a Featured-only configuration may use its persisted seed.
+///    Every mixed/local configuration keeps the fixed hero placeholder until the
+///    complete fresh curation is ready, preventing stale cards or partial source
+///    sets from reshuffling underneath the viewer.
 enum HomeHeroDisplayResolver {
     @MainActor
     static func resolve(
@@ -979,18 +1075,29 @@ enum HomeHeroDisplayResolver {
             )
             if !reconciled.isEmpty { return reconciled }
         }
-        let durableReplayReady = settings?.hideWatched != true
-            || runtime.hasHydratedDurableMutations
-        guard durableReplayReady else { return [] }
-        return settings.map {
-            curator.curateSync(
-                settings: $0,
-                continueWatching: continueWatching,
-                watchlist: watchlist,
-                recentlyAdded: recentlyAdded,
-                watchMutations: watchMutations
-            )
-        } ?? []
+        guard let settings,
+              settings.sources == [.featured],
+              runtime.cachedKey == HomeHeroCacheKey(settings: settings),
+              !runtime.cachedItems.isEmpty else {
+            return []
+        }
+        return curator.reconcile(
+            runtime.cachedItems,
+            settings: settings,
+            watchMutations: watchMutations
+        )
+    }
+}
+
+enum HomeHeroLaunchPolicy {
+    static func content(
+        _ content: HomeViewModel.Content,
+        awaitingLiveContinueWatching: Bool
+    ) -> HomeViewModel.Content {
+        guard awaitingLiveContinueWatching else { return content }
+        var launch = content
+        launch.continueWatching = []
+        return launch
     }
 }
 

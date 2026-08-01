@@ -48,8 +48,11 @@ public enum HomePerfDiagnostics {
     /// the formatting cost is skipped entirely on shipped runs.
     public static func emitLine(_ line: @autoclosure () -> String) {
         guard isStdoutMirrorEnabled else { return }
+        // Force the lazy static origin to initialize before sampling `now`; doing
+        // this in the opposite order underflows the first relative timestamp.
+        let origin = start
         let now = DispatchTime.now().uptimeNanoseconds
-        let stamp = String(format: "t+%.0fms", Double(now &- start) / 1_000_000)
+        let stamp = String(format: "t+%.0fms", Double(now &- origin) / 1_000_000)
         let text = "PLZPERF \(stamp) \(line())"
         #if canImport(OSLog)
         logger.notice("\(text, privacy: .public)")

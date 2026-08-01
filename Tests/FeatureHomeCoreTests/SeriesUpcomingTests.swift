@@ -1,8 +1,10 @@
 import XCTest
 import CoreModels
+import MetadataKit
 @testable import FeatureHomeCore
 
 /// The rules that decide what an unaired episode looks like on the series page.
+@MainActor
 final class SeriesUpcomingTests: XCTestCase {
     private let calendar = Calendar(identifier: .gregorian)
     private let now = Date(timeIntervalSince1970: 1_900_000_000)
@@ -172,6 +174,41 @@ final class SeriesUpcomingTests: XCTestCase {
     }
 
     // MARK: Hero line
+
+    func testFreshCachedHeroSchedulePaintsImmediately() {
+        let record = SeriesScheduleRecord(
+            seriesKey: "show",
+            upcomingEpisode: upcoming(
+                season: 3,
+                episode: 5,
+                daysFromNow: 20
+            ),
+            cadence: AirCadence(weekdays: [6]),
+            refreshedAt: now,
+            refreshDueAt: now.addingTimeInterval(3_600)
+        )
+
+        XCTAssertEqual(
+            english(HeroScheduleLines.cachedLine(from: record, now: now)),
+            "New episodes on Friday"
+        )
+    }
+
+    func testExpiredCachedHeroScheduleWaitsForRefresh() {
+        let record = SeriesScheduleRecord(
+            seriesKey: "show",
+            upcomingEpisode: upcoming(
+                season: 3,
+                episode: 5,
+                daysFromNow: 20
+            ),
+            cadence: AirCadence(weekdays: [6]),
+            refreshedAt: now.addingTimeInterval(-7_200),
+            refreshDueAt: now.addingTimeInterval(-1)
+        )
+
+        XCTAssertNil(HeroScheduleLines.cachedLine(from: record, now: now))
+    }
 
     func testNamesTheDateForAnImminentEpisodeRatherThanTheCadence() {
         // "Fridays" is vaguer than "tomorrow" when it airs tomorrow.

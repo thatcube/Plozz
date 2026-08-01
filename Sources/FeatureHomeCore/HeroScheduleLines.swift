@@ -25,6 +25,10 @@ public final class HeroScheduleLines {
     /// carousel — the same three or four come round repeatedly — and without this
     /// each pass would re-request a schedule the resolver has already answered.
     private var fetched: Set<String> = []
+    /// Requests currently running. A fronted slide can disappear before its
+    /// provider chain finishes; cancellation must clear this set so the next visit
+    /// retries instead of treating an incomplete refresh as fetched forever.
+    private var fetching: Set<String> = []
 
     public init() {}
 
@@ -48,7 +52,8 @@ public final class HeroScheduleLines {
         for item in items where Self.carriesSchedule(item) {
             guard lines[item.id] == nil else { continue }
             let record = await SeriesScheduleResolver.shared.cachedRecord(for: MetadataQuery(item).seriesScoped)
-            apply(record, to: item)
+            guard let line = Self.cachedLine(from: record) else { continue }
+            lines[item.id] = line
         }
     }
 
@@ -84,11 +89,16 @@ public final class HeroScheduleLines {
             if line != nil || !Self.carriesSchedule(item) { return }
         }
         guard Self.carriesSchedule(item) else { return }
-        guard fetched.insert(fetchKey).inserted else { return }
+        guard !fetched.contains(fetchKey), fetching.insert(fetchKey).inserted else {
+            return
+        }
+        defer { fetching.remove(fetchKey) }
         let query = MetadataQuery(item).seriesScoped
         // The viewer is looking at this slide right now, so it goes ahead of the
         // passive backlog — the same tier a detail page uses.
         let record = await SeriesScheduleResolver.shared.refresh(query, tier: .foregroundFill)
+        guard !Task.isCancelled else { return }
+        fetched.insert(fetchKey)
         apply(record, to: item)
     }
 
@@ -101,6 +111,22 @@ public final class HeroScheduleLines {
         )
         guard lines[item.id] != line else { return }
         lines[item.id] = line
+    }
+
+    /// Fresh cache entries can paint immediately. Expired entries stay hidden
+    /// until ``refreshFronted(_:)`` confirms them, preventing an old cadence from
+    /// flashing for a moment and then disappearing when the refresh returns.
+    static func cachedLine(
+        from record: SeriesScheduleRecord?,
+        now: Date = Date()
+    ) -> LocalizedStringResource? {
+        guard let record, !record.isRefreshDue(now: now) else { return nil }
+        return SeriesUpcoming.heroLine(
+            nextEpisode: record.upcomingEpisode,
+            cadence: record.cadence,
+            schedule: record.upcomingEpisodes,
+            now: now
+        )
     }
 
     /// Whether an item can have an air schedule at all.

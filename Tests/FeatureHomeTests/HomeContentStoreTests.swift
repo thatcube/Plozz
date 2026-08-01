@@ -102,6 +102,99 @@ final class HomeContentStoreTests: XCTestCase {
         XCTAssertNil(store.load())
     }
 
+    func testCuratedHeroPersistsAcrossInstancesForMatchingSettings() {
+        let settings = HeroSettings(
+            isEnabled: true,
+            sources: [.featured],
+            maxItems: 8,
+            trailersEnabled: false,
+            hideWatched: true,
+            randomLibraryKeys: [],
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+        let key = HomeHeroCacheKey(settings: settings)
+        HomeContentStore(namespace: "hero", directory: tempDir)
+            .saveHero(makeItems(3), for: key)
+
+        let reopened = HomeContentStore(namespace: "hero", directory: tempDir)
+        XCTAssertEqual(reopened.loadHero(for: key)?.map(\.id), ["i0", "i1", "i2"])
+    }
+
+    func testCuratedHeroDoesNotCrossSettingsOrProfile() {
+        let featured = HeroSettings(
+            isEnabled: true,
+            sources: [.featured],
+            maxItems: 8,
+            trailersEnabled: false,
+            hideWatched: true,
+            randomLibraryKeys: [],
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+        var changed = featured
+        changed.sources = [.continueWatching]
+        let store = HomeContentStore(namespace: "hero-a", directory: tempDir)
+        store.saveHero(makeItems(2), for: HomeHeroCacheKey(settings: featured))
+
+        XCTAssertNil(store.loadHero(for: HomeHeroCacheKey(settings: changed)))
+        XCTAssertNil(
+            HomeContentStore(namespace: "hero-b", directory: tempDir)
+                .loadHero(for: HomeHeroCacheKey(settings: featured))
+        )
+    }
+
+    func testFeaturedCacheSurvivesAddingOtherHeroSources() {
+        let featuredOnly = HeroSettings(
+            isEnabled: true,
+            sources: [.featured],
+            maxItems: 8,
+            trailersEnabled: false,
+            hideWatched: true,
+            randomLibraryKeys: [],
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+        var mixed = featuredOnly
+        mixed.sources = [
+            .continueWatching,
+            .featured,
+            .recentlyAdded,
+            .randomFromLibrary,
+            .watchlist,
+        ]
+        mixed.randomLibraryKeys = ["server:movies"]
+        let store = HomeContentStore(namespace: "mixed-hero", directory: tempDir)
+        store.saveHero(makeItems(2), for: HomeHeroCacheKey(settings: featuredOnly))
+
+        XCTAssertEqual(
+            store.loadHero(for: HomeHeroCacheKey(settings: mixed))?.map(\.id),
+            ["i0", "i1"]
+        )
+    }
+
+    func testExpiredCuratedHeroIsDropped() {
+        let settings = HeroSettings(
+            isEnabled: true,
+            sources: [.featured],
+            maxItems: 8,
+            trailersEnabled: false,
+            hideWatched: false,
+            randomLibraryKeys: [],
+            autoAdvance: true,
+            autoAdvanceSeconds: 10
+        )
+        let normal = HomeContentStore(namespace: "expired-hero", directory: tempDir)
+        normal.saveHero(makeItems(1), for: HomeHeroCacheKey(settings: settings))
+
+        let expired = HomeContentStore(
+            namespace: "expired-hero",
+            directory: tempDir,
+            heroMaxAge: 0
+        )
+        XCTAssertNil(expired.loadHero(for: HomeHeroCacheKey(settings: settings)))
+    }
+
     func testSerializedSnapshotNeverContainsLocalArtworkPath() throws {
         let path = "Private Library/Movies/Film/poster.jpg"
         let accountID = "share-account"

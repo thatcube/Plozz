@@ -12,6 +12,12 @@ public protocol ExternalRatingsProviding: Sendable {
     func ratings(for item: MediaItem) async -> [ExternalRating]
 }
 
+/// Optional cache-only capability for latency-sensitive surfaces such as Home.
+/// A miss never starts provider work; callers keep backend-native ratings.
+public protocol CachedExternalRatingsProviding: ExternalRatingsProviding {
+    func cachedRatings(for item: MediaItem) async -> [ExternalRating]?
+}
+
 /// An `ExternalRatingsProviding` that always returns no ratings. Used when no
 /// enrichment source is configured (e.g. OMDb API key absent), so callers can
 /// always inject a non-optional provider.

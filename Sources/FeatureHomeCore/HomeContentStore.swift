@@ -2,16 +2,16 @@ import Foundation
 import CoreModels
 
 /// Persists a bounded snapshot of the last successful Home ``HomeViewModel/Content``
-/// **per profile**, so the next launch can paint the hero + Continue Watching (and
-/// the rest of Home) *instantly* from the last-known content and then silently
-/// refresh from the network — the same stale-while-revalidate pattern
+/// **per profile**, so the next launch can paint stable rows immediately while
+/// volatile Continue Watching remains a geometry-matched placeholder until the
+/// fresh multi-server aggregate arrives. Featured-only heroes have their own
+/// curated snapshot below; mixed/local heroes wait for complete fresh curation.
 /// `DetailSnapshotCache` uses for detail pages.
 ///
 /// Why this makes launch feel instant: image *bytes* already persist across
 /// launches (`ArtworkImageCache` + the on-disk `URLCache`), so once the metadata
-/// snapshot is cached too a relaunch repaints Home from disk with no network in
-/// the critical path. The live aggregate then swaps fresh content in place with no
-/// skeleton flash.
+/// snapshot is cached too a relaunch repaints stable Home content from disk with no
+/// network in the critical path. Volatile content publishes once when confirmed.
 ///
 /// Security: only already-displayed, non-secret metadata is stored — the same
 /// `MediaItem` / `AggregatedLibrary` values that `DetailSnapshotCache` and the
@@ -32,6 +32,41 @@ public protocol HomeContentStoring: Sendable {
     /// session (never on a scroll/animation hot path), so the atomic write is a
     /// negligible one-off cost and a subsequent `load()` reads it back reliably.
     func save(_ content: HomeViewModel.Content)
+    /// Last fully curated hero for the same profile and source configuration.
+    /// Kept separate from Home rows because Featured/Random are asynchronous
+    /// sources and are not part of ``HomeViewModel/Content``.
+    func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]?
+    func saveHero(_ items: [MediaItem], for key: HomeHeroCacheKey)
+}
+
+/// Settings that determine whether a cached Featured bucket is reusable.
+///
+/// Visual-only settings (trailer behavior, auto-advance timing) are excluded:
+/// changing them does not invalidate which titles can appear. Other source
+/// selections are excluded too because only Featured is persisted; adding
+/// Continue Watching must not invalidate the still-usable Featured seed.
+public struct HomeHeroCacheKey: Codable, Equatable, Sendable {
+    public var sources: [HeroSourceKind]
+    public var maxItems: Int
+    public var hideWatched: Bool
+
+    public init(settings: HeroSettings) {
+        let featured = settings.isActive && settings.isEnabled(.featured)
+        sources = featured ? [.featured] : []
+        maxItems = featured ? settings.maxItems : 0
+        hideWatched = featured ? settings.hideWatched : false
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sources, maxItems, hideWatched
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sources = try container.decode([HeroSourceKind].self, forKey: .sources)
+        maxItems = try container.decode(Int.self, forKey: .maxItems)
+        hideWatched = try container.decode(Bool.self, forKey: .hideWatched)
+    }
 }
 
 /// On-disk (`Caches`) store. Per-profile scoped via `SettingsKey.scoped` so each
@@ -41,13 +76,21 @@ public protocol HomeContentStoring: Sendable {
 /// decode miss falls back to the network) and their files are reclaimed.
 public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     private let fileURL: URL?
+    private let heroFileURL: URL?
     private let maxItemsPerRow: Int
     private let maxAge: TimeInterval
+    private let heroMaxAge: TimeInterval
 
     /// Wire format: the bounded content plus the time it was captured (for
     /// `maxAge`). Kept private so the on-disk shape can evolve behind the protocol.
     private struct Stored: Codable {
         var content: HomeViewModel.Content
+        var savedAt: Date
+    }
+
+    private struct StoredHero: Codable {
+        var key: HomeHeroCacheKey
+        var items: [MediaItem]
         var savedAt: Date
     }
 
@@ -75,17 +118,21 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
     private static let lock = NSLock()
     private static var didCleanup = false
     private static var memo: [String: HomeViewModel.Content?] = [:]
+    private static var heroMemo: [String: StoredHero?] = [:]
 
     public init(
         namespace: String? = nil,
         directory: URL? = HomeContentStore.defaultDirectory(),
         maxItemsPerRow: Int = 30,
-        maxAge: TimeInterval = 60 * 60 * 24 * 14
+        maxAge: TimeInterval = 60 * 60 * 24 * 14,
+        heroMaxAge: TimeInterval = 60 * 60 * 24
     ) {
         self.maxItemsPerRow = maxItemsPerRow
         self.maxAge = maxAge
+        self.heroMaxAge = heroMaxAge
         guard let directory else {
             self.fileURL = nil
+            self.heroFileURL = nil
             return
         }
         let dir = directory.appendingPathComponent(Self.schemaDirName, isDirectory: true)
@@ -101,6 +148,9 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "=", with: "")
         self.fileURL = dir.appendingPathComponent(safe).appendingPathExtension("json")
+        self.heroFileURL = dir
+            .appendingPathComponent(safe + "-hero")
+            .appendingPathExtension("json")
     }
 
     public func load() -> HomeViewModel.Content? {
@@ -154,6 +204,65 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         Self.lock.unlock()
     }
 
+    public func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]? {
+        guard let heroFileURL else { return nil }
+        let path = heroFileURL.path
+        Self.lock.lock()
+        let memoized = Self.heroMemo[path]
+        Self.lock.unlock()
+
+        let stored: StoredHero?
+        if let memoized {
+            stored = memoized
+        } else {
+            stored = readHero(at: heroFileURL)
+            Self.lock.lock()
+            Self.heroMemo.updateValue(stored, forKey: path)
+            Self.lock.unlock()
+        }
+        guard let stored else { return nil }
+        guard Date().timeIntervalSince(stored.savedAt) < heroMaxAge else {
+            try? FileManager.default.removeItem(at: heroFileURL)
+            Self.lock.lock()
+            Self.heroMemo.updateValue(nil, forKey: path)
+            Self.lock.unlock()
+            return nil
+        }
+        guard stored.key == key, !stored.items.isEmpty else { return nil }
+        return stored.items
+    }
+
+    public func saveHero(_ items: [MediaItem], for key: HomeHeroCacheKey) {
+        guard let heroFileURL, !items.isEmpty else { return }
+        let stored = StoredHero(
+            key: key,
+            items: Array(items.prefix(max(key.maxItems, 1))),
+            savedAt: Date()
+        )
+        guard let data = try? JSONEncoder().encode(stored) else { return }
+        try? FileManager.default.createDirectory(
+            at: heroFileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? data.write(to: heroFileURL, options: .atomic)
+        Self.lock.lock()
+        // Re-read after a save instead of optimistically memoizing what we tried to
+        // write. If the cache write failed, the old on-disk snapshot remains truth.
+        Self.heroMemo.removeValue(forKey: heroFileURL.path)
+        Self.lock.unlock()
+    }
+
+    private func readHero(at fileURL: URL) -> StoredHero? {
+        guard let data = try? Data(contentsOf: fileURL),
+              let stored = try? JSONDecoder().decode(StoredHero.self, from: data)
+        else { return nil }
+        guard Date().timeIntervalSince(stored.savedAt) < heroMaxAge else {
+            try? FileManager.default.removeItem(at: fileURL)
+            return nil
+        }
+        return stored
+    }
+
     /// Drops sibling schema dirs left by earlier versions so a bump reclaims their
     /// files instead of leaking them (mirrors `DetailSnapshotCache`). Runs at most
     /// once per process.
@@ -181,6 +290,7 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
 public final class InMemoryHomeContentStore: HomeContentStoring, @unchecked Sendable {
     private let lock = NSLock()
     private var content: HomeViewModel.Content?
+    private var hero: (key: HomeHeroCacheKey, items: [MediaItem])?
 
     public init(_ initial: HomeViewModel.Content? = nil) {
         self.content = initial
@@ -195,6 +305,17 @@ public final class InMemoryHomeContentStore: HomeContentStoring, @unchecked Send
         lock.lock(); defer { lock.unlock() }
         self.content = content
     }
+
+    public func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]? {
+        lock.lock(); defer { lock.unlock() }
+        guard hero?.key == key else { return nil }
+        return hero?.items
+    }
+
+    public func saveHero(_ items: [MediaItem], for key: HomeHeroCacheKey) {
+        lock.lock(); defer { lock.unlock() }
+        hero = items.isEmpty ? nil : (key, items)
+    }
 }
 
 /// No-op store: never reads or writes. The default for `HomeViewModel` so tests
@@ -203,4 +324,6 @@ public final class NoOpHomeContentStore: HomeContentStoring, @unchecked Sendable
     public init() {}
     public func load() -> HomeViewModel.Content? { nil }
     public func save(_ content: HomeViewModel.Content) {}
+    public func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]? { nil }
+    public func saveHero(_ items: [MediaItem], for key: HomeHeroCacheKey) {}
 }

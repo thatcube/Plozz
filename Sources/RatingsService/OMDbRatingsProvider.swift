@@ -109,7 +109,7 @@ public struct OMDbRatingsProvider: ExternalRatingsProviding {
 
 /// Decorates another provider with a TTL cache keyed by IMDb id (falling back
 /// to the item id), so repeat detail views don't re-hit the network.
-public struct CachingRatingsProvider: ExternalRatingsProviding {
+public struct CachingRatingsProvider: CachedExternalRatingsProviding {
     private let base: any ExternalRatingsProviding
     private let cache: RatingsCache
 
@@ -119,25 +119,42 @@ public struct CachingRatingsProvider: ExternalRatingsProviding {
     }
 
     public func ratings(for item: MediaItem) async -> [ExternalRating] {
-        let key = OMDbRatingsProvider.imdbID(from: item) ?? item.id
         let resolved: [ExternalRating]
-        if let cached = await cache.ratings(forKey: key) {
+        if let cached = await cachedRatings(for: item) {
             resolved = cached
         } else {
             let fetched = await base.ratings(for: item)
             // Only cache non-empty results so a transient failure isn't pinned.
             if !fetched.isEmpty {
-                await cache.store(fetched, forKey: key)
+                await cache.store(fetched, forKey: cacheKey(for: item))
             }
             resolved = fetched
         }
+        return Self.sanitized(resolved, for: item)
+    }
+
+    public func cachedRatings(for item: MediaItem) async -> [ExternalRating]? {
+        guard let cached = await cache.ratings(forKey: cacheKey(for: item)) else {
+            return nil
+        }
+        return Self.sanitized(cached, for: item)
+    }
+
+    private func cacheKey(for item: MediaItem) -> String {
+        OMDbRatingsProvider.imdbID(from: item) ?? item.id
+    }
+
+    private static func sanitized(
+        _ ratings: [ExternalRating],
+        for item: MediaItem
+    ) -> [ExternalRating] {
         // Self-heal: never surface an anime-only score (AniList) on a non-anime
         // item, even if a stale/poisoned cache entry — keyed only by IMDb id —
         // carries one from an earlier misclassification. AniList is keyless and
         // the cache persists for days, so a bad entry would otherwise stick.
-        guard resolved.contains(where: { $0.source.isAnimeOnly }),
+        guard ratings.contains(where: { $0.source.isAnimeOnly }),
               !AniListRatingsProvider.isAnime(item)
-        else { return resolved }
-        return resolved.filter { !$0.source.isAnimeOnly }
+        else { return ratings }
+        return ratings.filter { !$0.source.isAnimeOnly }
     }
 }

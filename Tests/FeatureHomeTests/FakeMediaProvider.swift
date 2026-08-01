@@ -69,6 +69,7 @@ final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting
     var pageHooks: [Int: @Sendable () async throws -> Void] = [:]
     var supplementalFactsByItem: [String: ProbedStreamFacts] = [:]
     var supplementalFactsGate: (@Sendable () async -> Void)?
+    var librariesGate: (@Sendable () async -> Void)?
     private var _supplementalProbeCount = 0
     var supplementalProbeCount: Int { withLock { _supplementalProbeCount } }
 
@@ -105,6 +106,7 @@ final class FakeMediaProvider: MediaProvider, InteractiveBrowseActivityReporting
 
     func libraries() async throws -> [MediaLibrary] {
         withLock { _librariesCallCount += 1 }
+        await librariesGate?()
         return []
     }
     /// How many times `libraries()` was called — lets a test prove whether the

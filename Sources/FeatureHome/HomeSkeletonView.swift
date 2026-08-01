@@ -31,25 +31,11 @@ struct HomeSkeletonView: View {
     var appearDelay: Duration = .milliseconds(150)
 
     @State private var visible = false
-    /// The rail's measured viewport width, used to render exactly enough
-    /// placeholder cards to fill the screen for the *current* density (see
-    /// `cardCount`). Measured via a background reader so it never perturbs layout.
-    @State private var availableWidth: CGFloat = 0
 
     @Environment(\.plozzMetrics) private var metrics
-    @Environment(\.themePalette) private var palette
-
-    /// tvOS full-screen width, used only as a first-frame fallback before the
-    /// real viewport width is measured — so the very first render still shows a
-    /// screen-filling row instead of a single card.
-    private static let fallbackWidth: CGFloat = 1920
 
     private var rows: [HomeRowLayout] {
         layout.isEmpty ? HomeRowKind.defaultSkeletonLayout : layout
-    }
-
-    private var measuredWidth: CGFloat {
-        availableWidth > 0 ? availableWidth : Self.fallbackWidth
     }
 
     var body: some View {
@@ -61,17 +47,6 @@ struct HomeSkeletonView: View {
             }
         }
         .allowsHitTesting(false)
-        .background {
-            // Measure the available width without affecting layout, so the number
-            // of skeleton cards tracks how many actually fit at the current density.
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear { availableWidth = proxy.size.width }
-                    .onChange(of: proxy.size.width) { _, newWidth in
-                        availableWidth = newWidth
-                    }
-            }
-        }
         .opacity(visible ? 1 : 0)
         .animation(.easeOut(duration: 0.2), value: visible)
         .task {
@@ -113,16 +88,29 @@ struct HomeSkeletonView: View {
     private var rowsStack: some View {
         VStack(alignment: .leading, spacing: metrics.rowSpacing) {
             ForEach(rows, id: \.kind) { row in
-                skeletonRow(row)
+                HomeSkeletonRowView(row: row)
             }
         }
     }
+}
 
-    @ViewBuilder
-    private func skeletonRow(_ row: HomeRowLayout) -> some View {
+/// One geometry-matched Home row placeholder. Shared by the full loading screen
+/// and the cached-launch path, where only volatile Continue Watching waits for
+/// live server data while the cached hero and stable rows are already visible.
+struct HomeSkeletonRowView: View {
+    let row: HomeRowLayout
+
+    @State private var availableWidth: CGFloat = 0
+    @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.themePalette) private var palette
+
+    private static let fallbackWidth: CGFloat = 1920
+    private var measuredWidth: CGFloat {
+        availableWidth > 0 ? availableWidth : Self.fallbackWidth
+    }
+
+    var body: some View {
         let kind = row.kind
-        // Mirrors MediaRowView's title + horizontal rail layout and paddings so
-        // the skeleton occupies the same vertical space as the real row.
         VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             // Reserve the *exact* height of MediaRowView's title — a hidden Text in
             // the real (density-scaled) header font — with the placeholder pill
@@ -162,6 +150,16 @@ struct HomeSkeletonView: View {
             }
             .scrollClipDisabled()
             .scrollDisabled(true)
+        }
+        .allowsHitTesting(false)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { availableWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, width in
+                        availableWidth = width
+                    }
+            }
         }
     }
 
@@ -220,8 +218,8 @@ struct HomeSkeletonView: View {
 /// get soft, shimmering placeholders, laid out at the same position as the real
 /// hero's content column (via the shared `HomeHeroLayout` insets). The big title /
 /// logo is intentionally omitted: on the rare first launch we can't know whether a
-/// title exists as a logo image or as text, and once Home has loaded once the real
-/// hero paints instantly from cache (see `HomeContentStore`) so this is never seen.
+/// title exists as a logo image or as text. Featured-only can bypass this from its
+/// curated cache; mixed/local heroes keep it until complete fresh curation.
 struct HomeHeroSkeletonView: View {
     @Environment(\.themePalette) private var palette
     /// Button pill footprint — mirrors `HomeHeroView.heroPill` (28pt label +

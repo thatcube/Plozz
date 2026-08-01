@@ -563,24 +563,11 @@ public struct HomeAggregator: Sendable {
         _ resolved: [String: [String: String]],
         onto items: [MediaItem]
     ) -> [MediaItem] {
-        let mappings: [(ProviderIDNamespace, String)] = [
-            (.imdb, "SeriesImdb"),
-            (.tmdb, "SeriesTmdb"),
-            (.tvdb, "SeriesTvdb"),
-            (.tvmaze, "SeriesTvmaze"),
-            (.aniList, "SeriesAniList"),
-            (.myAnimeList, "SeriesMal"),
-            (.aniDB, "SeriesAniDB")
-        ]
         return items.map { item in
             guard let seriesID = item.seriesID,
                   let sourceIDs = resolved[seriesID] else { return item }
             var copy = item
-            for (namespace, key) in mappings {
-                guard copy.providerIDs[key] == nil,
-                      let value = sourceIDs.providerID(namespace) else { continue }
-                copy.providerIDs[key] = value
-            }
+            copy.providerIDs.mergeSeriesProviderIDs(from: sourceIDs)
             return copy
         }
     }

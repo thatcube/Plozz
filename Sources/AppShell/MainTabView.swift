@@ -143,9 +143,9 @@ struct MainTabView: View {
     /// the loading skeleton so it matches the user's real Home before content
     /// arrives. Constructed with the active profile's namespace by `RootView`.
     let homeLayoutStore: HomeLayoutStoring
-    /// Per-profile store for the last successful Home content snapshot, so the hero
-    /// + Continue Watching (and the rest of Home) paint instantly on launch and
-    /// then silently refresh. Constructed with the active profile's namespace by
+    /// Per-profile store for the last successful Home content snapshot. Stable rows
+    /// paint immediately; volatile Continue Watching and mixed heroes wait for fresh
+    /// aggregation. Constructed with the active profile's namespace by
     /// `RootView` (same lifecycle as `homeLayoutStore`).
     let homeContentStore: HomeContentStoring
     private var ratingsProvider: any ExternalRatingsProviding { syncServices.ratingsProvider }

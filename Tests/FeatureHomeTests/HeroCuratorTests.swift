@@ -254,6 +254,32 @@ final class HeroCuratorTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["f1", "c1", "f2"])
     }
 
+    func testCurationResultPersistsOnlyValidatedFeaturedBucket() async {
+        let result = await HeroCurator().curateResult(
+            settings: settings(
+                sources: [
+                    .featured,
+                    .continueWatching,
+                    .recentlyAdded,
+                    .randomFromLibrary,
+                    .watchlist,
+                ]
+            ),
+            continueWatching: [item("cw")],
+            watchlist: [item("watchlist")],
+            recentlyAdded: [item("recent")],
+            randomLibraries: [],
+            featuredProvider: { _ in [self.item("featured")] },
+            randomProvider: { _, _ in [self.item("random")] }
+        )
+
+        XCTAssertEqual(
+            result.items.map(\.id),
+            ["featured", "cw", "recent", "random", "watchlist"]
+        )
+        XCTAssertEqual(result.featuredItems.map(\.id), ["featured"])
+    }
+
     func testRandomProviderReceivesResolvedLibrariesAndContributes() async {
         let curator = HeroCurator()
         let expectedLibraries = [
@@ -709,6 +735,68 @@ final class HeroRecomputeKeyTests: XCTestCase {
         XCTAssertNotEqual(original, refreshedRows)
     }
 
+    func testLiveHomeArrivalRestartsLocalHeroButNotFeaturedOnlyHero() {
+        let localWaiting = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.continueWatching]),
+            randomLibraries: [],
+            awaitingLiveHome: true
+        )
+        let localReady = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.continueWatching]),
+            randomLibraries: [],
+            awaitingLiveHome: false
+        )
+        let featuredWaiting = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.featured]),
+            randomLibraries: [],
+            awaitingLiveHome: true
+        )
+        let featuredReady = HeroRecomputeKey(
+            content: content(),
+            settings: settings(sources: [.featured]),
+            randomLibraries: [],
+            awaitingLiveHome: false
+        )
+
+        XCTAssertNotEqual(localWaiting, localReady)
+        XCTAssertEqual(featuredWaiting, featuredReady)
+    }
+
+    func testRecentlyAddedChangesRestartCurationOnlyWhenEnabled() {
+        let originalContent = HomeViewModel.Content(
+            latest: [MediaItem(id: "old", title: "Old", kind: .movie)]
+        )
+        let refreshedContent = HomeViewModel.Content(
+            latest: [MediaItem(id: "new", title: "New", kind: .movie)]
+        )
+        let enabledOriginal = HeroRecomputeKey(
+            content: originalContent,
+            settings: settings(sources: [.recentlyAdded]),
+            randomLibraries: []
+        )
+        let enabledFresh = HeroRecomputeKey(
+            content: refreshedContent,
+            settings: settings(sources: [.recentlyAdded]),
+            randomLibraries: []
+        )
+        let disabledOriginal = HeroRecomputeKey(
+            content: originalContent,
+            settings: settings(sources: [.featured]),
+            randomLibraries: []
+        )
+        let disabledFresh = HeroRecomputeKey(
+            content: refreshedContent,
+            settings: settings(sources: [.featured]),
+            randomLibraries: []
+        )
+
+        XCTAssertNotEqual(enabledOriginal, enabledFresh)
+        XCTAssertEqual(disabledOriginal, disabledFresh)
+    }
+
     func testWatchHistoryChangeRestartsEnabledSourceCuration() {
         let original = HeroRecomputeKey(
             content: content(hasBeenPlayed: false),
@@ -987,6 +1075,26 @@ final class HomeHeroDisplayResolverTests: XCTestCase {
         )
     }
 
+    private func allSourceOrders() -> [[HeroSourceKind]] {
+        var result: [[HeroSourceKind]] = []
+        func appendOrders(
+            prefix: [HeroSourceKind],
+            remaining: [HeroSourceKind]
+        ) {
+            if !prefix.isEmpty { result.append(prefix) }
+            for index in remaining.indices {
+                var nextRemaining = remaining
+                let next = nextRemaining.remove(at: index)
+                appendOrders(
+                    prefix: prefix + [next],
+                    remaining: nextRemaining
+                )
+            }
+        }
+        appendOrders(prefix: [], remaining: HeroSourceKind.allCases)
+        return result
+    }
+
     func testReconcilesRetainedItemsWhenKeyMatchesAndDropsNewlyWatched() {
         let settings = settings(hideWatched: true)
         let content = HomeViewModel.Content(continueWatching: [item("a"), item("b")])
@@ -1008,7 +1116,7 @@ final class HomeHeroDisplayResolverTests: XCTestCase {
         XCTAssertEqual(resolved.map(\.id), ["a"])
     }
 
-    func testFallsBackToSynchronousSeedWhenNoRetainedItems() {
+    func testWaitsForCompletedCurationInsteadOfShowingPartialLocalSeed() {
         let settings = settings(hideWatched: false)
         let content = HomeViewModel.Content(continueWatching: [item("seed")])
         let runtime = HomeHeroRuntimeState()
@@ -1022,7 +1130,201 @@ final class HomeHeroDisplayResolverTests: XCTestCase {
             curator: HeroCurator()
         )
 
-        XCTAssertEqual(resolved.map(\.id), ["seed"])
+        XCTAssertTrue(resolved.isEmpty)
+    }
+
+    func testUsesMatchingCachedCuratedHeroBeforeAsyncRecomputeCompletes() {
+        let settings = settings(sources: [.featured], hideWatched: false)
+        let content = HomeViewModel.Content()
+        let runtime = HomeHeroRuntimeState()
+        runtime.cachedKey = HomeHeroCacheKey(settings: settings)
+        runtime.cachedItems = [item("cached-featured")]
+
+        let resolved = HomeHeroDisplayResolver.resolve(
+            runtime: runtime,
+            key: key(settings, content: content),
+            settings: settings,
+            continueWatching: [],
+            watchlist: [],
+            curator: HeroCurator()
+        )
+
+        XCTAssertEqual(resolved.map(\.id), ["cached-featured"])
+    }
+
+    func testLaunchSourceMatrixNeverUsesCachedContinueWatching() {
+        let cachedFeatured = item("cached-featured")
+        let staleContinueWatching = item("stale-cw")
+        let cachedWatchlist = item("cached-watchlist")
+        let cachedRecent = item("cached-recent")
+        let cachedContent = HomeViewModel.Content(
+            continueWatching: [staleContinueWatching],
+            latest: [cachedRecent],
+            watchlist: [cachedWatchlist]
+        )
+        let launchContent = HomeHeroLaunchPolicy.content(
+            cachedContent,
+            awaitingLiveContinueWatching: true
+        )
+        XCTAssertTrue(launchContent.continueWatching.isEmpty)
+        XCTAssertEqual(launchContent.watchlist.map(\.id), ["cached-watchlist"])
+        XCTAssertEqual(launchContent.latest.map(\.id), ["cached-recent"])
+
+        let cases: [([HeroSourceKind], [String])] = [
+            ([.featured], ["cached-featured"]),
+            ([.continueWatching], []),
+            ([.featured, .continueWatching], []),
+            ([.continueWatching, .featured], []),
+            ([.featured, .watchlist], []),
+            ([.watchlist, .featured], []),
+            ([.featured, .recentlyAdded], []),
+            ([.randomFromLibrary], []),
+            (
+                [
+                    .featured,
+                    .continueWatching,
+                    .recentlyAdded,
+                    .randomFromLibrary,
+                    .watchlist,
+                ],
+                []
+            ),
+        ]
+
+        for (sources, expected) in cases {
+            let settings = settings(sources: sources, hideWatched: false)
+            let runtime = HomeHeroRuntimeState()
+            if sources.contains(.featured) {
+                runtime.cachedKey = HomeHeroCacheKey(settings: settings)
+                runtime.cachedItems = [cachedFeatured]
+            }
+            let resolved = HomeHeroDisplayResolver.resolve(
+                runtime: runtime,
+                key: key(settings, content: launchContent),
+                settings: settings,
+                continueWatching: launchContent.continueWatching,
+                watchlist: launchContent.watchlist,
+                recentlyAdded: launchContent.latest,
+                curator: HeroCurator()
+            )
+
+            XCTAssertEqual(resolved.map(\.id), expected, "sources: \(sources)")
+            XCTAssertFalse(
+                resolved.contains(where: { $0.id == "stale-cw" }),
+                "sources: \(sources)"
+            )
+        }
+    }
+
+    func testFreshContinueWatchingJoinsHeroAfterLiveAggregate() {
+        let settings = settings(
+            sources: [.featured, .continueWatching],
+            hideWatched: false
+        )
+        let liveContent = HomeViewModel.Content(
+            continueWatching: [item("fresh-cw")]
+        )
+        let runtime = HomeHeroRuntimeState()
+        runtime.items = [item("cached-featured"), item("fresh-cw")]
+        runtime.completedKey = key(settings, content: liveContent)
+
+        let resolved = HomeHeroDisplayResolver.resolve(
+            runtime: runtime,
+            key: key(settings, content: liveContent),
+            settings: settings,
+            continueWatching: liveContent.continueWatching,
+            watchlist: [],
+            curator: HeroCurator()
+        )
+
+        XCTAssertEqual(resolved.map(\.id), ["cached-featured", "fresh-cw"])
+    }
+
+    func testEveryOrderedSourceConfigurationUsesOnlyFreshContinueWatching() {
+        let cachedFeatured = item("featured")
+        let stale = HomeViewModel.Content(
+            continueWatching: [item("stale-cw")],
+            latest: [item("recent")],
+            watchlist: [item("watchlist")]
+        )
+        let launch = HomeHeroLaunchPolicy.content(
+            stale,
+            awaitingLiveContinueWatching: true
+        )
+        var live = launch
+        live.continueWatching = [item("fresh-cw")]
+
+        for sources in allSourceOrders() {
+            let settings = settings(sources: sources, hideWatched: false)
+            let runtime = HomeHeroRuntimeState()
+            if sources.contains(.featured) {
+                runtime.cachedKey = HomeHeroCacheKey(settings: settings)
+                runtime.cachedItems = [cachedFeatured]
+            }
+
+            let launchResolved = HomeHeroDisplayResolver.resolve(
+                runtime: runtime,
+                key: key(settings, content: launch),
+                settings: settings,
+                continueWatching: launch.continueWatching,
+                watchlist: launch.watchlist,
+                recentlyAdded: launch.latest,
+                curator: HeroCurator()
+            )
+            let expectedLaunch = sources == [.featured] ? ["featured"] : []
+            XCTAssertEqual(
+                launchResolved.map(\.id),
+                expectedLaunch,
+                "cached launch sources: \(sources)"
+            )
+            XCTAssertFalse(launchResolved.contains { $0.id == "stale-cw" })
+
+            let expectedLive = sources.compactMap { source -> String? in
+                switch source {
+                case .featured: return "featured"
+                case .continueWatching: return "fresh-cw"
+                case .recentlyAdded: return "recent"
+                case .randomFromLibrary: return "random"
+                case .watchlist: return "watchlist"
+                }
+            }
+            runtime.items = expectedLive.map { item($0) }
+            runtime.completedKey = key(settings, content: live)
+            let liveResolved = HomeHeroDisplayResolver.resolve(
+                runtime: runtime,
+                key: key(settings, content: live),
+                settings: settings,
+                continueWatching: live.continueWatching,
+                watchlist: live.watchlist,
+                recentlyAdded: live.latest,
+                curator: HeroCurator()
+            )
+            XCTAssertEqual(
+                liveResolved.map(\.id),
+                expectedLive,
+                "live sources: \(sources)"
+            )
+        }
+    }
+
+    func testIgnoresCachedCuratedHeroWhenSourceSettingsChanged() {
+        let cachedSettings = settings(sources: [.featured], hideWatched: false)
+        let currentSettings = settings(sources: [.continueWatching], hideWatched: false)
+        let content = HomeViewModel.Content(continueWatching: [item("live-seed")])
+        let runtime = HomeHeroRuntimeState()
+        runtime.cachedKey = HomeHeroCacheKey(settings: cachedSettings)
+        runtime.cachedItems = [item("stale-featured")]
+
+        let resolved = HomeHeroDisplayResolver.resolve(
+            runtime: runtime,
+            key: key(currentSettings, content: content),
+            settings: currentSettings,
+            continueWatching: content.continueWatching,
+            watchlist: [],
+            curator: HeroCurator()
+        )
+
+        XCTAssertTrue(resolved.isEmpty)
     }
 
     func testSuppressesSeedUntilDurableMutationsHydrateWhenHidingWatched() {

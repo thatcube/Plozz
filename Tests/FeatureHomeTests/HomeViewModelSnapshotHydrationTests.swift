@@ -103,6 +103,33 @@ final class HomeViewModelSnapshotHydrationTests: XCTestCase {
         )
     }
 
+    func testViewTaskCancellationKeepsCompletedModelOwnedRefresh() async {
+        let store = InMemoryHomeContentStore(snapshot(cwIDs: ["cachedA"]))
+        let provider = FakeMediaProvider(allItems: [])
+        provider.librariesGate = {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        let vm = makeViewModel(provider: provider, contentStore: store)
+
+        let first = Task { await vm.loadIfNeeded(for: .default) }
+        while provider.librariesCallCount == 0 {
+            await Task.yield()
+        }
+        first.cancel()
+        await first.value
+
+        XCTAssertFalse(
+            vm.isShowingCachedSnapshot,
+            "View-task cancellation must not discard a completed model-owned refresh"
+        )
+        await vm.loadIfNeeded(for: .default)
+        XCTAssertEqual(
+            provider.librariesCallCount,
+            1,
+            "Reappearance must not repeat the already-completed fan-out"
+        )
+    }
+
     func testSuccessfulLoadPersistsSnapshotForNextLaunch() async {
         let store = InMemoryHomeContentStore()
         let provider = FakeMediaProvider(allItems: [])

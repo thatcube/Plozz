@@ -89,10 +89,13 @@ public final class HomeViewModel {
 
     /// `true` while `state` holds a snapshot hydrated from `contentStore` on launch
     /// that has NOT yet been refreshed from the network this session. The first
-    /// appearance then refreshes **silently** (no `.loading`/skeleton) so the
-    /// instant cached hero + rows stay on screen until fresh content swaps in.
-    /// Cleared the moment that first refresh starts.
-    private var isShowingCachedSnapshot = false
+    /// appearance then refreshes **silently** (no full-screen skeleton). Stable
+    /// cached rows remain visible; Continue Watching uses a row placeholder until
+    /// fresh content publishes once.
+    public private(set) var isShowingCachedSnapshot = false
+    /// Prevents a restarted SwiftUI task from starting the launch refresh twice
+    /// while the cached rows remain visible.
+    @ObservationIgnored private var cachedSnapshotRefreshStarted = false
 
     /// The row structure to render as a skeleton while loading: the layout
     /// persisted from the previous successful load (row kinds, order **and** the
@@ -104,7 +107,7 @@ public final class HomeViewModel {
     private let aggregator: HomeAggregator
     private let layoutStore: HomeLayoutStoring
     /// Persists a bounded snapshot of the last successful `Content` so the next
-    /// launch can paint the hero + rows instantly from disk (artwork bytes already
+    /// launch can paint stable rows immediately from disk (artwork bytes already
     /// persist in `ArtworkImageCache`/`URLCache`) and then silently refresh. See
     /// `HomeContentStore`.
     private let contentStore: HomeContentStoring
@@ -204,10 +207,10 @@ public final class HomeViewModel {
         self.contentPublisher = contentPublisher
         let persisted = layoutStore.load()
         self.skeletonLayout = persisted.isEmpty ? HomeRowKind.defaultSkeletonLayout : persisted
-        // Hydrate the last-known Home from disk so the hero + Continue Watching (and
-        // the rest of the rows) paint INSTANTLY on launch — no skeleton, no network
-        // in the critical path. The first appearance then refreshes silently (see
-        // `loadIfNeeded`). Only a non-empty snapshot is used; anything else leaves
+        // Hydrate last-known stable rows from disk. Continue Watching is deliberately
+        // replaced by its row-sized placeholder until fresh multi-server data lands;
+        // mixed/local heroes likewise wait for complete curation. Only a non-empty
+        // snapshot is used; anything else leaves
         // `state == .idle` so a genuine first launch shows the normal loading state.
         if let cached = contentStore.load() {
             self.state = .loaded(cached)
@@ -247,12 +250,14 @@ public final class HomeViewModel {
     /// change: hiding/showing/disabling a library, or flipping the merge switch.
     public func loadIfNeeded(for visibility: HomeLibraryVisibility) async {
         // Showing a cached snapshot from launch: refresh SILENTLY so the instant
-        // hero + rows never flash to a skeleton — the cached content stays until
-        // the fresh aggregate swaps in. Clear the flag first so a re-entrant call
-        // (tvOS restarts this `.task` on reappearance) can't loop back here.
+        // hero + stable rows never flash to a full-screen skeleton. The volatile
+        // Continue Watching row renders a row-sized placeholder until this finishes,
+        // so old cards never swap underneath the viewer.
         if isShowingCachedSnapshot {
-            isShowingCachedSnapshot = false
+            guard !cachedSnapshotRefreshStarted else { return }
+            cachedSnapshotRefreshStarted = true
             await load(showLoadingState: false)
+            cachedSnapshotRefreshStarted = false
             return
         }
         switch state {
@@ -325,7 +330,12 @@ public final class HomeViewModel {
             }
             self.aggregationTask = aggregationTask
             let merged = await aggregationTask.value
-            guard !Task.isCancelled else { return }
+            // SwiftUI can cancel/restart the view-owned `.task` while this detached,
+            // model-owned aggregation is still valid. Publish its completed result
+            // unless the model explicitly cancelled the aggregation task itself;
+            // checking the caller here discarded an 8-second five-server result and
+            // forced a second full fan-out before Continue Watching appeared.
+            guard !aggregationTask.isCancelled else { return }
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
             let reconciledCW = Self.reconcileContinueWatching(merged.continueWatching, pending: pending, appliedRecency: appliedRecency)
@@ -344,7 +354,7 @@ public final class HomeViewModel {
             }
             self.unmergedTask = unmergedTask
             let unmerged = await unmergedTask.value
-            guard !Task.isCancelled else { return }
+            guard !unmergedTask.isCancelled else { return }
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
             let reconciledCW = Self.reconcileContinueWatching(unmerged.continueWatching, pending: pending, appliedRecency: appliedRecency)
@@ -371,8 +381,12 @@ public final class HomeViewModel {
         if content.isEmpty, !showLoadingState, case .loaded = state {
             PlozzLog.boot("HomeVM.load KEEP-CACHED silent-empty vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue))")
             lastLoadedVisibility = visibility
+            // The live sources were unavailable. Reveal the cached row rather than
+            // leaving a permanent loading placeholder with no refresh in flight.
+            isShowingCachedSnapshot = false
             return
         }
+        isShowingCachedSnapshot = false
         state = content.isEmpty ? .empty : .loaded(content)
         // Record what this content was aggregated for so a later reappearance with
         // an unchanged visibility snapshot is recognised as a no-op (see
@@ -497,6 +511,22 @@ public final class HomeViewModel {
             }
         }
         state = .loaded(content)
+        // Keep the next launch snapshot in lockstep with in-session watch actions.
+        // Without this, quitting after playback resurrects the pre-play Continue
+        // Watching order until the next live refresh completes.
+        contentStore.save(content)
+    }
+
+    public func cachedHeroItems(for settings: HeroSettings) -> [MediaItem]? {
+        guard settings.isActive, settings.sources == [.featured] else { return nil }
+        return contentStore.loadHero(for: HomeHeroCacheKey(settings: settings))
+    }
+
+    public func cacheHeroItems(_ items: [MediaItem], for settings: HeroSettings) {
+        guard settings.isActive, settings.isEnabled(.featured), !items.isEmpty else {
+            return
+        }
+        contentStore.saveHero(items, for: HomeHeroCacheKey(settings: settings))
     }
 
     /// In-flight guard so a burst of resume ticks for a not-yet-loaded title

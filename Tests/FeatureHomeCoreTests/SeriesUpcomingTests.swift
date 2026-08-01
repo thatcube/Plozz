@@ -230,7 +230,7 @@ final class SeriesUpcomingTests: XCTestCase {
         XCTAssertNil(SeriesUpcoming.heroLine(nextEpisode: nil, cadence: nil, now: now, calendar: calendar))
     }
 
-    func testExactTimestampIncludesDeviceLocalizedTime() {
+    func testHeroOmitsTimeEvenForExactTimestamp() {
         let episode = upcoming(
             season: 3,
             episode: 5,
@@ -244,9 +244,9 @@ final class SeriesUpcomingTests: XCTestCase {
             now: now,
             calendar: calendar
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             english(line)?.contains(" at ") == true,
-            "date-and-time providers should surface the release time"
+            "the hero stays glanceable; exact time belongs on the episode card"
         )
     }
 
@@ -263,6 +263,39 @@ final class SeriesUpcomingTests: XCTestCase {
             english(line)?.contains(" at ") == true,
             "TheTVDB airsTime has no timezone and cannot be localized safely"
         )
+    }
+
+    func testOnlyNearestUpcomingCardShowsExactTime() {
+        let schedule = [
+            upcoming(
+                season: 3,
+                episode: 5,
+                daysFromNow: 2,
+                precision: .dateAndTime
+            ),
+            upcoming(
+                season: 3,
+                episode: 6,
+                daysFromNow: 9,
+                precision: .dateAndTime
+            ),
+        ]
+        let items = SeriesUpcoming.placeholders(
+            for: 3,
+            seriesID: "s1",
+            seriesTitle: "Show",
+            ownedEpisodes: [owned(season: 3, episode: 4)],
+            schedule: schedule
+        )
+        XCTAssertEqual(items.map(\.showsScheduledReleaseTime), [true, false])
+        let firstCaption = items.first
+            .flatMap(\.upcomingReleaseText)
+            .map { String(localized: $0) }
+        let lastCaption = items.last
+            .flatMap(\.upcomingReleaseText)
+            .map { String(localized: $0) }
+        XCTAssertTrue(firstCaption?.contains(" at ") == true)
+        XCTAssertFalse(lastCaption?.contains(" at ") == true)
     }
 
     // MARK: Card caption

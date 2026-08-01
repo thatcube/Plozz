@@ -479,12 +479,29 @@ public extension MediaItem {
         ).day ?? 0
         switch days {
         case ..<0: return nil
-        case 0: return "Releases today"
-        case 1: return "Releases tomorrow"
+        case 0:
+            if scheduledAirDateHasTime, showsScheduledReleaseTime {
+                return "Releases today at \(date, format: .dateTime.hour().minute())"
+            }
+            return "Releases today"
+        case 1:
+            if scheduledAirDateHasTime, showsScheduledReleaseTime {
+                return "Releases tomorrow at \(date, format: .dateTime.hour().minute())"
+            }
+            return "Releases tomorrow"
         case 2...6:
+            if scheduledAirDateHasTime, showsScheduledReleaseTime {
+                return "Releases \(date, format: .dateTime.weekday(.wide)) at \(date, format: .dateTime.hour().minute())"
+            }
             return "Releases \(date, format: .dateTime.weekday(.wide))"
         default:
             let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: Date())
+            if scheduledAirDateHasTime, showsScheduledReleaseTime {
+                if sameYear {
+                    return "Releases \(date, format: .dateTime.month(.abbreviated).day().hour().minute())"
+                }
+                return "Releases \(date, format: .dateTime.month(.abbreviated).day().year().hour().minute())"
+            }
             if sameYear {
                 return "Releases \(date, format: .dateTime.month(.abbreviated).day())"
             }

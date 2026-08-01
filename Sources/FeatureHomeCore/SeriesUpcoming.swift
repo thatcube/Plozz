@@ -54,7 +54,8 @@ public enum SeriesUpcoming {
                 return ownedNumbers.contains(number) ? nil : (episode, number)
             }
             .sorted { $0.0.airDate < $1.0.airDate }
-            .map { pair in
+            .enumerated()
+            .map { index, pair in
                 let (episode, number) = pair
                 return MediaItem(
                     // Namespaced so it can never collide with a real server id, and
@@ -77,7 +78,12 @@ public enum SeriesUpcoming {
                     backdropURL: seriesArtwork?.backdropURL ?? seriesArtwork?.heroBackdropURL,
                     fallbackArtworkURL: seriesArtwork?.fallbackArtworkURL,
                     scheduledAirDate: episode.airDate,
-                    scheduledAirDateHasTime: episode.datePrecision == .dateAndTime
+                    scheduledAirDateHasTime: episode.datePrecision == .dateAndTime,
+                    // The nearest release benefits from a precise clock time;
+                    // repeating it on every later placeholder makes the rail
+                    // harder to scan.
+                    showsScheduledReleaseTime:
+                        index == 0 && episode.datePrecision == .dateAndTime
                 )
             }
     }
@@ -165,9 +171,6 @@ public enum SeriesUpcoming {
         // mid-season break or a finale, so on its own it isn't evidence the pattern
         // continues.
         if !isSeasonPremiere, isWeeklyRun(schedule, from: nextEpisode, calendar: calendar) {
-            if nextEpisode.datePrecision == .dateAndTime {
-                return "New episode every \(nextEpisode.airDate, format: .dateTime.weekday(.wide)) at \(nextEpisode.airDate, format: .dateTime.hour().minute())"
-            }
             return "New episode every \(nextEpisode.airDate, format: .dateTime.weekday(.wide))"
         }
 
@@ -193,31 +196,14 @@ public enum SeriesUpcoming {
         ).day ?? 0
         if isSeasonPremiere {
             switch days {
-            case 0:
-                if nextEpisode.datePrecision == .dateAndTime {
-                    return "New season today at \(nextEpisode.airDate, format: .dateTime.hour().minute())"
-                }
-                return "New season today"
-            case 1:
-                if nextEpisode.datePrecision == .dateAndTime {
-                    return "New season tomorrow at \(nextEpisode.airDate, format: .dateTime.hour().minute())"
-                }
-                return "New season tomorrow"
+            case 0: return "New season today"
+            case 1: return "New season tomorrow"
             case 2...6:
-                if nextEpisode.datePrecision == .dateAndTime {
-                    return "New season \(nextEpisode.airDate, format: .dateTime.weekday(.wide)) at \(nextEpisode.airDate, format: .dateTime.hour().minute())"
-                }
                 return "New season \(nextEpisode.airDate, format: .dateTime.weekday(.wide))"
             default:
                 let sameYear =
                     calendar.component(.year, from: nextEpisode.airDate)
                     == calendar.component(.year, from: now)
-                if nextEpisode.datePrecision == .dateAndTime {
-                    if sameYear {
-                        return "New season \(nextEpisode.airDate, format: .dateTime.month(.abbreviated).day().hour().minute())"
-                    }
-                    return "New season \(nextEpisode.airDate, format: .dateTime.month(.abbreviated).day().year().hour().minute())"
-                }
                 if sameYear {
                     return "New season \(nextEpisode.airDate, format: .dateTime.month(.abbreviated).day())"
                 }
@@ -225,31 +211,14 @@ public enum SeriesUpcoming {
             }
         } else {
             switch days {
-            case 0:
-                if nextEpisode.datePrecision == .dateAndTime {
-                    return "New episode today at \(nextEpisode.airDate, format: .dateTime.hour().minute())"
-                }
-                return "New episode today"
-            case 1:
-                if nextEpisode.datePrecision == .dateAndTime {
-                    return "New episode tomorrow at \(nextEpisode.airDate, format: .dateTime.hour().minute())"
-                }
-                return "New episode tomorrow"
+            case 0: return "New episode today"
+            case 1: return "New episode tomorrow"
             case 2...6:
-                if nextEpisode.datePrecision == .dateAndTime {
-                    return "New episode \(nextEpisode.airDate, format: .dateTime.weekday(.wide)) at \(nextEpisode.airDate, format: .dateTime.hour().minute())"
-                }
                 return "New episode \(nextEpisode.airDate, format: .dateTime.weekday(.wide))"
             default:
                 let sameYear =
                     calendar.component(.year, from: nextEpisode.airDate)
                     == calendar.component(.year, from: now)
-                if nextEpisode.datePrecision == .dateAndTime {
-                    if sameYear {
-                        return "New episode \(nextEpisode.airDate, format: .dateTime.month(.abbreviated).day().hour().minute())"
-                    }
-                    return "New episode \(nextEpisode.airDate, format: .dateTime.month(.abbreviated).day().year().hour().minute())"
-                }
                 if sameYear {
                     return "New episode \(nextEpisode.airDate, format: .dateTime.month(.abbreviated).day())"
                 }

@@ -117,27 +117,62 @@ public struct GlassPerformanceBudget: Equatable, Sendable {
     /// reports, because a transcoded stream is delivered as SDR while the file
     /// being read, decoded and tone-mapped is still Dolby Vision — and it is the
     /// work, not the delivered format, that costs.
+    /// Convenience for callers with provider metadata and nothing else.
     public static func contentIsDemanding(source: MediaSourceMetadata?) -> Bool {
         demand(for: source).isDemanding
     }
 
     /// Both facts from one classification, so nothing asks the same question of
     /// the same file twice and gets two answers.
+    ///
+    /// - Parameters:
+    ///   - source: provider metadata, which a Plex or Jellyfin server fills in
+    ///     and a network share leaves almost entirely empty.
+    ///   - resolvedRange: what the display was actually switched to, merging the
+    ///     provider's hint with the engine's own probe of the file.
+    ///   - probedWidth: coded width from that same probe.
+    ///
+    /// `resolvedRange` is the authority, and it has to be: a share has no
+    /// person, range or bitrate records at all, so reading provider metadata
+    /// alone meant a 4K Dolby Vision file on an NFS share was classified SDR and
+    /// kept its glass. Share libraries are a first-class case here, not a
+    /// fallback — they are the ones playing remuxed discs.
     public static func demand(
-        for source: MediaSourceMetadata?
+        for source: MediaSourceMetadata?,
+        resolvedRange: SourceDynamicRange? = nil,
+        probedWidth: Int? = nil
     ) -> (isDemanding: Bool, isHDR: Bool) {
-        guard let video = source?.video else { return (false, false) }
-        let hdr = PlaybackDiagnostics.classifyHDR(
-            videoRange: video.videoRange,
-            videoRangeType: video.videoRangeType,
-            colorTransfer: video.colorTransfer,
-            isDolbyVision: (video.dolbyVisionProfile ?? 0) > 0
-        )
+        let video = source?.video
+        let providerHDR = video.map {
+            PlaybackDiagnostics.classifyHDR(
+                videoRange: $0.videoRange,
+                videoRangeType: $0.videoRangeType,
+                colorTransfer: $0.colorTransfer,
+                isDolbyVision: ($0.dolbyVisionProfile ?? 0) > 0
+            )
+        }
+        // The probe wins where it has spoken: it read the file, while the
+        // provider's tokens are whatever a scanner recorded — and for a share
+        // there are none.
+        let hdr = resolvedRange.map(Self.hdrFormat(for:))
+            ?? providerHDR
+            ?? .unknown
+        let width = probedWidth ?? video?.width
         let demanding = contentIsDemanding(
             hdrFormat: hdr,
-            width: video.width,
-            bitrate: video.bitrate.map(Double.init)
+            width: width,
+            bitrate: video?.bitrate.map(Double.init)
         )
         return (demanding, hdr != .sdr && hdr != .unknown)
+    }
+
+    private static func hdrFormat(for range: SourceDynamicRange) -> PlaybackDiagnostics.HDRFormat {
+        switch range {
+        case .sdr: return .sdr
+        case .hlg: return .hlg
+        case .hdr10: return .hdr10
+        case .hdr10Plus: return .hdr10Plus
+        case .dolbyVision: return .dolbyVision
+        }
     }
 }

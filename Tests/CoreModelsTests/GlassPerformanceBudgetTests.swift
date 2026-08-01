@@ -89,6 +89,46 @@ final class GlassPerformanceBudgetTests: XCTestCase {
         XCTAssertTrue(GlassPerformanceBudget.contentIsDemanding(source: source))
     }
 
+    /// The case that shipped broken: a network share has no video metadata at
+    /// all, so the provider path classified a 4K Dolby Vision remux as SDR and
+    /// left the glass up. The engine's probe is the only evidence there is.
+    func testEngineProbeDrivesShareWithNoProviderMetadata() {
+        let result = GlassPerformanceBudget.demand(
+            for: nil,
+            resolvedRange: .dolbyVision,
+            probedWidth: 3840
+        )
+        XCTAssertTrue(result.isDemanding)
+        XCTAssertTrue(result.isHDR)
+    }
+
+    /// The probe read the file; the provider's tokens are whatever a scanner
+    /// once recorded. Where they disagree the probe wins.
+    func testEngineProbeOverridesProviderMetadata() {
+        var video = MediaSourceMetadata.VideoStream()
+        video.videoRange = "SDR"
+        video.width = 1920
+        var source = MediaSourceMetadata()
+        source.video = video
+        let result = GlassPerformanceBudget.demand(
+            for: source,
+            resolvedRange: .dolbyVision,
+            probedWidth: 3840
+        )
+        XCTAssertTrue(result.isDemanding)
+    }
+
+    /// A probe that resolved to SDR is a real answer, not a missing one.
+    func testProbedSDRKeepsGlass() {
+        let result = GlassPerformanceBudget.demand(
+            for: nil,
+            resolvedRange: .sdr,
+            probedWidth: 3840
+        )
+        XCTAssertFalse(result.isDemanding)
+        XCTAssertFalse(result.isHDR)
+    }
+
     func testOrdinarySourceKeepsGlass() {
         var video = MediaSourceMetadata.VideoStream()
         video.videoRange = "SDR"

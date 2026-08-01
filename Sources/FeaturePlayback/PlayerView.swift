@@ -142,6 +142,12 @@ public struct PlayerView: View {
         .onChange(of: viewModel.diagnosticsToken) { _, _ in
             updateGlassSuspension()
         }
+        // The engine's probe lands AFTER the request resolves, and for a share it
+        // carries the only evidence there is. Without this the suspension is
+        // decided from provider metadata that a share never fills in.
+        .onChange(of: viewModel.effectiveDynamicRange) { _, _ in
+            updateGlassSuspension()
+        }
         .onChange(of: viewModel.diagnosticsToken) { _, _ in
             // A request resolved (initial load, cross-engine swap, or transcode
             // retry) and the engine is committed — seed the overlay with the
@@ -368,7 +374,13 @@ public struct PlayerView: View {
     /// a transcode changes what is actually delivered, and the decision has to
     /// describe the stream being played.
     private func updateGlassSuspension() {
-        let demand = GlassPerformanceBudget.demand(for: viewModel.sourceMetadata)
+        let demand = GlassPerformanceBudget.demand(
+            for: viewModel.sourceMetadata,
+            // What the display was actually switched to, which for a share is
+            // the ONLY place this is known.
+            resolvedRange: viewModel.effectiveDynamicRange.bestAvailable,
+            probedWidth: viewModel.engineProbedFacts?.videoWidth
+        )
         guard demand.isDemanding != suspendedGlass else { return }
         if demand.isDemanding {
             glassPerformance?.beginDemandingPlayback(isHDR: demand.isHDR)

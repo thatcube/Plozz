@@ -175,6 +175,7 @@ struct PlayerControls: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.plozzHDRDisplayActive) private var hdrDisplayActive
+    @Environment(\.plozzReducePanelGlass) private var reducePanelGlass
 
     @State private var openPanel: Category?
     @State private var subtitleScreen: SubtitleScreen = .tracks
@@ -1298,7 +1299,23 @@ struct PlayerControls: View {
             // the ZStack and nudging every child, cluster included. That showed up as
             // the submenu drifting down and the Info card peeking in from the bottom.
             .padding(.bottom, styleEditing ? Self.horizontalMargin : menuBottomInset)
-            .transition(.scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .opacity))
+            // Scale WITHOUT a fade once the panel is frosted.
+            //
+            // A material rendered at partial opacity shows that much raw video
+            // through it, so fading one in walks it through every degree of
+            // translucency on the way to its real appearance — and the states it
+            // passes through look exactly like the Liquid Glass it replaced.
+            // That reads as the panel flashing glass and then thickening, which
+            // is precisely what it is.
+            //
+            // Glass had the same fade and looked fine, because glass is supposed
+            // to be see-through: a half-faded glass panel is just a fainter
+            // glass panel. Frost has an appearance it is either at or not.
+            .transition(
+                reducePanelGlass
+                    ? .scale(scale: 0.9, anchor: .bottomTrailing)
+                    : .scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .opacity)
+            )
         }
     }
 

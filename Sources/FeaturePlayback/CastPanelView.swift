@@ -282,8 +282,8 @@ struct CastPanelView: View {
             height: metrics.cardHeight
         )
         let radius = isExpanded
-            ? PlozzTheme.Metrics.playerPanelCornerRadius
-            : CastFaceCard.cornerRadius
+            ? metrics.panelCornerRadius
+            : metrics.panelCornerRadius
         return RoundedRectangle(cornerRadius: radius, style: .continuous)
             .frame(
                 width: isExpanded ? panelSize.width : collapsed.width,
@@ -444,7 +444,7 @@ struct CastPanelView: View {
                     // colour against arbitrary footage.
                     .buttonStyle(PlayerOverVideoCardStyle(
                         focused: focus == .castMember(index),
-                        cornerRadius: CastFaceCard.cornerRadius,
+                        cornerRadius: metrics.panelCornerRadius,
                         focusScale: CastFaceCard.focusScale,
                         // No depress. This card is what the detail pane grows
                         // out of, and a press that shifts it means the rectangle
@@ -526,10 +526,6 @@ private struct CastFaceCard: View {
     /// The full tvOS card lift. These are small cards in a row, where the gentle
     /// default barely registered.
     static let focusScale: CGFloat = 1.10
-    /// The panel's radius. These cards stand in the Info panel's place when the
-    /// tab switches, so their corners have to be its corners — anything else
-    /// makes the two tabs look like different surfaces.
-    static let cornerRadius: CGFloat = PlozzTheme.Metrics.playerPanelCornerRadius
 
     var body: some View {
         VStack(spacing: 12) {
@@ -562,7 +558,7 @@ private struct CastFaceCard: View {
             VStack(spacing: 3) {
                 MarqueeText(
                     text: person.name,
-                    font: .system(size: 21, weight: .semibold),
+                    font: metrics.castNameFont,
                     isFocused: focused,
                     restingAlignment: .center
                 )
@@ -570,7 +566,7 @@ private struct CastFaceCard: View {
                 if let role = person.role, !role.isEmpty {
                     MarqueeText(
                         text: role,
-                        font: .system(size: 18),
+                        font: metrics.castRoleFont,
                         isFocused: focused,
                         restingAlignment: .center
                     )
@@ -632,12 +628,12 @@ private struct CastListRow: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(person.name)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(metrics.castNameFont)
                     .foregroundStyle(.white)
                     .lineLimit(1)
                 if let role = person.role, !role.isEmpty {
                     Text(role)
-                        .font(.system(size: 13))
+                        .font(metrics.castRoleFont)
                         .foregroundStyle(.white.opacity(0.6))
                         .lineLimit(1)
                 }
@@ -741,10 +737,7 @@ private struct CastMemberDetail: View {
     /// and the chip is there precisely so a longer life story has somewhere to
     /// be read in full.
     private var biographyLineLimit: Int {
-        let budget = contentHeight
-            - 41   // name
-            - 12   // gap above the biography
-            - 58   // "See more" chip and its gap
+        let budget = contentHeight - metrics.detailChromeHeight
         return max(2, Int(budget / metrics.bodyLineHeight))
     }
 
@@ -805,12 +798,12 @@ private struct CastMemberDetail: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(verbatim: person.name)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(metrics.titleFont)
                         .foregroundStyle(.white)
                         .lineLimit(1)
                     if let role = person.role, !role.isEmpty {
                         Text(verbatim: role)
-                            .font(.system(size: 13))
+                            .font(metrics.castRoleFont)
                             .foregroundStyle(.white.opacity(0.6))
                             .lineLimit(1)
                     }

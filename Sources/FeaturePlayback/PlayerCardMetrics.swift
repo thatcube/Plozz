@@ -71,6 +71,17 @@ struct PlayerCardMetrics: Equatable {
     var badgeScale: CGFloat
     /// In the vertical layout, the height of one cast row.
     var castRowHeight: CGFloat
+    /// A cast face card's name, and the character beneath it.
+    var castNameFont: Font
+    var castRoleFont: Font
+    /// The Info card's action buttons — Restart, Previous, Next, Playback Info.
+    var actionFont: Font
+    var actionHPadding: CGFloat
+    var actionVPadding: CGFloat
+    /// Everything in a cast member's detail pane that is NOT the biography: the
+    /// name above it and the "See more" chip below. Subtracted from the stage to
+    /// work out how many lines of life story are left — see `biographyLineLimit`.
+    var detailChromeHeight: CGFloat
 
     /// The card's **exact** laid-out height, known up front rather than measured.
     ///
@@ -107,7 +118,13 @@ struct PlayerCardMetrics: Equatable {
         overviewLineLimit: 4,
         panelCornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius,
         badgeScale: 1,
-        castRowHeight: 0
+        castRowHeight: 0,
+        castNameFont: .system(size: 21, weight: .semibold),
+        castRoleFont: .system(size: 18),
+        actionFont: .subheadline.weight(.semibold),
+        actionHPadding: 22,
+        actionVPadding: 14,
+        detailChromeHeight: 111
     )
 
     /// A tablet at arm's length, with room for the full three-column card.
@@ -127,15 +144,52 @@ struct PlayerCardMetrics: Equatable {
         overviewLineLimit: 4,
         panelCornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius,
         badgeScale: 1,
-        castRowHeight: 0
+        castRowHeight: 0,
+        castNameFont: .system(size: 21, weight: .semibold),
+        castRoleFont: .system(size: 18),
+        actionFont: .subheadline.weight(.semibold),
+        actionHPadding: 22,
+        actionVPadding: 14,
+        detailChromeHeight: 111
     )
 
-    /// A phone, or an iPad window narrowed to about one.
+    /// A phone on its side: the same three-column band as iPad, drawn small.
+    ///
+    /// Landscape is landscape whatever the device — the video fills the width and
+    /// the space left is a short strip along the bottom, which is the shape the
+    /// horizontal card was designed for. What a phone lacks is not the proportion
+    /// but the size, so this scales the card rather than reorganising it.
+    static let compactHorizontal = PlayerCardMetrics(
+        layout: .horizontal,
+        contentHeight: 116,
+        contentPadding: 12,
+        showsThumbnail: true,
+        titleFont: .system(size: 17, weight: .semibold),
+        bodyFont: .system(size: 13),
+        bodyLineHeight: 17,
+        captionFont: .system(size: 11, weight: .medium),
+        castHeadshot: 56,
+        castHeadshotSideSpace: 14,
+        castVerticalInset: 8,
+        castIdentityWidth: 300,
+        overviewLineLimit: 3,
+        panelCornerRadius: 22,
+        badgeScale: 0.62,
+        castRowHeight: 0,
+        castNameFont: .system(size: 13, weight: .semibold),
+        castRoleFont: .system(size: 11),
+        actionFont: .system(size: 13, weight: .semibold),
+        actionHPadding: 12,
+        actionVPadding: 9,
+        detailChromeHeight: 62
+    )
+
+    /// A phone stood up, or a window narrowed to about one.
     ///
     /// `contentHeight` is a **ceiling** here rather than a fixed height: the card
     /// grows to its content and stops there, because a vertical card holds a list
-    /// whose length is not known up front. It is overwritten by `resolved` with a
-    /// share of the height actually available.
+    /// whose length is not known up front. `resolved` overwrites it with what the
+    /// screen can actually spare.
     static let compact = PlayerCardMetrics(
         layout: .vertical,
         contentHeight: 320,
@@ -154,7 +208,13 @@ struct PlayerCardMetrics: Equatable {
         // narrow reads as a lozenge.
         panelCornerRadius: 22,
         badgeScale: 0.62,
-        castRowHeight: 64
+        castRowHeight: 64,
+        castNameFont: .system(size: 15, weight: .semibold),
+        castRoleFont: .system(size: 13),
+        actionFont: .system(size: 13, weight: .semibold),
+        actionHPadding: 12,
+        actionVPadding: 9,
+        detailChromeHeight: 62
     )
 
     #if os(tvOS)
@@ -163,28 +223,33 @@ struct PlayerCardMetrics: Equatable {
     static let platformDefault = regular
     #endif
 
-    /// The widest the three-column card can be squeezed before it stops working.
+    /// The widest the full-size three-column card can be squeezed.
     ///
     /// Its parts do not compress: the thumbnail is a fixed 16:9 at the content
     /// height (370pt), the action column is three icon buttons (~190), the gaps
     /// between the columns are 60, and the text column needs ~280 before a
-    /// synopsis stops reading as prose. That is the sum, and below it the card
-    /// does not get tighter — it gets clipped, which is what a narrowed window
-    /// was showing.
+    /// synopsis stops reading as prose. Below this the card does not get tighter,
+    /// it gets clipped — but it can be *drawn smaller*, which is what
+    /// `compactHorizontal` is.
     static let thumbnailLayoutMinimumWidth: CGFloat = 900
 
-    /// The share of the screen a vertical card may take.
+    /// Everything stacked above the card: the title row, the scrub row, the tab
+    /// strip and the padding around them.
     ///
-    /// It is a share rather than a number because the two orientations it has to
-    /// serve are nothing alike: a portrait phone has ~800pt to spend and the
-    /// video occupies a strip across the middle, while the same phone in
-    /// landscape has ~390 and the video fills it. Bounded at both ends so the
-    /// card is never too short to hold a list, nor tall enough to swallow a
-    /// portrait screen.
-    private static let verticalHeightShare: CGFloat = 0.46
-    private static let verticalHeightRange: ClosedRange<CGFloat> = 190...460
+    /// Subtracted rather than taking a fraction of the screen, because it is a
+    /// fixed stack of controls — a share would hand a tall screen a card that
+    /// grew right through them.
+    private static let verticalChromeHeight: CGFloat = 260
+    private static let verticalHeightRange: ClosedRange<CGFloat> = 190...560
 
     /// Pick the metrics for the space the card has actually been given.
+    ///
+    /// Shape first, then size. Landscape gets the horizontal band whatever the
+    /// device — the video fills the width and leaves a strip along the bottom,
+    /// which is the shape that card was drawn for — and only then is it a
+    /// question of whether there is room to draw it full size. Portrait gets the
+    /// column. This is the split Apple's own player makes, and it is why a phone
+    /// on its side should look like an iPad rather than like a phone.
     static func resolved(forWidth width: CGFloat, height: CGFloat) -> PlayerCardMetrics {
         #if os(tvOS)
         return .tv
@@ -193,17 +258,28 @@ struct PlayerCardMetrics: Equatable {
         // Assume the roomy layout rather than the cramped one: a card that starts
         // full and stays full is the common case, and guessing compact would make
         // every iPad open with a visible re-layout.
-        guard width > 0 else { return .regular }
-        guard width < thumbnailLayoutMinimumWidth else { return .regular }
+        guard width > 0, height > 0 else { return .regular }
+
+        // Wide enough for the full card, in either orientation. An iPad in
+        // portrait is still an iPad.
+        if width >= thumbnailLayoutMinimumWidth { return .regular }
+
+        if width > height {
+            var metrics = compactHorizontal
+            // The card cannot be taller than the strip beneath the video, so the
+            // thumbnail — which is what sets the height — takes what is left of
+            // it. 116 suits a 390pt phone; a 500pt window can afford more.
+            let budget = height - verticalChromeHeight + 120
+            metrics.contentHeight = min(max(budget, 96), 176).rounded()
+            return metrics
+        }
 
         var metrics = compact
-        if height > 0 {
-            let budget = (height * verticalHeightShare).rounded()
-            metrics.contentHeight = min(
-                max(budget, verticalHeightRange.lowerBound),
-                verticalHeightRange.upperBound
-            ) - metrics.contentPadding * 2
-        }
+        let budget = height - verticalChromeHeight
+        metrics.contentHeight = min(
+            max(budget, verticalHeightRange.lowerBound),
+            verticalHeightRange.upperBound
+        ) - metrics.contentPadding * 2
         return metrics
         #endif
     }

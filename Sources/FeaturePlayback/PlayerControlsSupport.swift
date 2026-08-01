@@ -193,14 +193,18 @@ struct ScrubBar: View {
 struct InfoActionButtonStyle: ButtonStyle {
     let focused: Bool
     let prominent: Bool
+    /// Scaled with the card — a capsule sized for a three-metre viewing distance
+    /// is most of a phone's card height on its own.
+    var hPadding: CGFloat = 22
+    var vPadding: CGFloat = 14
 
     func makeBody(configuration: Configuration) -> some View {
         let fill: Color = focused ? .white : .white.opacity(prominent ? 0.24 : 0.12)
         let fg: Color = focused ? .black : .white
         return configuration.label
             .foregroundStyle(fg)
-            .padding(.horizontal, 22)
-            .padding(.vertical, 14)
+            .padding(.horizontal, hPadding)
+            .padding(.vertical, vPadding)
             .background(Capsule(style: .continuous).fill(fill))
             .clipShape(Capsule(style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.96 : 1)

@@ -100,21 +100,17 @@ struct InfoPanelView: View {
             // a long synopsis can simply be read — and the ellipsis that a fixed
             // line limit forces is the thing a viewer opening "Info" is least
             // likely to want.
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(model.infoCard.headline.isEmpty ? "Now Playing" : model.infoCard.headline)
-                        .font(metrics.titleFont)
-                        .foregroundStyle(.white)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if !model.infoCard.overview.isEmpty {
-                        Text(model.infoCard.overview)
-                            .font(metrics.bodyFont)
-                            .foregroundStyle(.white.opacity(0.82))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Scrolls ONLY when it has to.
+            //
+            // A ScrollView always accepts the full height it is offered, so
+            // wrapping the text unconditionally made every card as tall as its
+            // ceiling — a three-line synopsis with a well of empty glass beneath
+            // it. `ViewThatFits` takes the plain column when it fits, which sizes
+            // to its content and lets the card shrink around it, and falls back
+            // to the scrolling copy only for a synopsis long enough to need one.
+            ViewThatFits(in: .vertical) {
+                infoTextColumn
+                ScrollView(.vertical, showsIndicators: false) { infoTextColumn }
             }
 
             // Metadata gives up its badges rather than clipping them.
@@ -163,6 +159,23 @@ struct InfoPanelView: View {
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var infoTextColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(model.infoCard.headline.isEmpty ? "Now Playing" : model.infoCard.headline)
+                .font(metrics.titleFont)
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !model.infoCard.overview.isEmpty {
+                Text(model.infoCard.overview)
+                    .font(metrics.bodyFont)
+                    .foregroundStyle(.white.opacity(0.82))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -348,14 +361,19 @@ struct InfoPanelView: View {
                     Text(title).fixedSize().transition(.identity)
                 }
             }
-            .font(.subheadline.weight(.semibold))
+            .font(metrics.actionFont)
             .lineLimit(1)
             // Scope the animation to the label's layout: the capsule (sized to the
             // label in the style) follows this and grows smoothly, while the fill
             // and text colours — applied OUTSIDE this scope — change instantly.
             .animation(.easeOut(duration: 0.2), value: isFocused)
         }
-        .buttonStyle(InfoActionButtonStyle(focused: isFocused, prominent: prominent))
+        .buttonStyle(InfoActionButtonStyle(
+            focused: isFocused,
+            prominent: prominent,
+            hPadding: metrics.actionHPadding,
+            vPadding: metrics.actionVPadding
+        ))
         .focused($focus, equals: slot)
     }
 }

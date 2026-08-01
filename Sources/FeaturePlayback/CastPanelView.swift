@@ -1246,6 +1246,8 @@ private struct CastMemberDetail: View {
 /// Not focusable, by design. Nothing in this card may end the film.
 private struct CastCreditsRow: View {
     @Environment(\.playerCardMetrics) private var metrics
+    /// Whether an unowned credit here can be requested or is only flagged.
+    @Environment(\.plozzSeerConnected) private var seerConnected
     let items: [MediaItem]
     @FocusState.Binding var focus: PlayerControls.FocusSlot?
     /// Opens a title's own page, ending playback. `nil` leaves the posters inert.
@@ -1276,6 +1278,9 @@ private struct CastCreditsRow: View {
     /// padding, which is 24pt and swallows it whole.
     private var posterHeight: CGFloat { metrics.contentHeight }
     private var posterWidth: CGFloat { (posterHeight * 2 / 3).rounded() }
+    /// Card-edge inset for the not-in-library mark, proportional to the poster so
+    /// it isn't jammed into the corner of a card this small.
+    private var markInset: CGFloat { max(6, posterWidth * 0.035) }
     /// Modest on purpose: every percent of growth is height the poster gives up
     /// at rest to make room for it.
     private static let focusScale: CGFloat = 1.06
@@ -1423,9 +1428,30 @@ private struct CastCreditsRow: View {
                 // to every entry, owned or not; the detail page is what knows
                 // the difference, offering Play for a title in the library and a
                 // request for one that is not.
+                let libraryMark = MediaLibraryMark.mark(for: item, seerConnected: seerConnected)
                 Button { onOpenTitle?(item) } label: {
                     poster(for: item)
                         .frame(width: posterWidth, height: posterHeight)
+                        // Most of this row is external credits the viewer does
+                        // not own, and until now they rendered exactly like
+                        // owned titles — you selected one and got a page you
+                        // could not play anything from, with no warning. The
+                        // mark is that warning, and it needs the artwork
+                        // darkened behind it exactly as the caption does.
+                        .overlay(alignment: .top) {
+                            if libraryMark != nil {
+                                MediaArtworkChromeScrim(top: true, bottom: false)
+                            }
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            if let libraryMark {
+                                MediaLibraryMarkView(
+                                    mark: libraryMark,
+                                    size: MediaLibraryMarkView.size(forCardWidth: posterWidth)
+                                )
+                                .padding(markInset)
+                            }
+                        }
                         // Scrim and label as separate layers over the whole
                         // poster, not one box at its foot: a gradient sized to
                         // the text can only ever be as tall as the text, which
@@ -1447,6 +1473,11 @@ private struct CastCreditsRow: View {
                 ))
                 .focused($focus, equals: .castCredit(index))
                 .accessibilityLabel(Text(verbatim: item.title))
+                // The mark's own label is additional, not a replacement: the
+                // title still has to be the first thing announced.
+                .accessibilityValue(
+                    libraryMark.map { Text($0.accessibilityLabel) } ?? Text(verbatim: "")
+                )
         }
     }
 

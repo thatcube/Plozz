@@ -172,6 +172,9 @@ public struct PlozziOSRootView: View {
             \.plozzWatchStatusIndicator,
             appModel.settings.watchIndicator.indicator
         )
+        // See the note in RootView: drives whether an unowned title's corner mark
+        // reads as information or as an invitation to request it.
+        .environment(\.plozzSeerConnected, appModel.seerService.isConfigured)
         .environment(
             \.plozzReduceTransparency,
             appModel.settings.transparency.preference.reducesTransparency(

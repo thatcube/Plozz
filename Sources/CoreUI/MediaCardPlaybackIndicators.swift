@@ -26,6 +26,8 @@ public struct MediaCardPlaybackIndicators: View {
 
     @Environment(\.plozzMetrics) private var metrics
     @Environment(\.plozzWatchStatusIndicator) private var watchStatusIndicator
+    /// Whether an unowned title can be requested, or is merely flagged as absent.
+    @Environment(\.plozzSeerConnected) private var seerConnected
     @Environment(\.themePalette) private var palette
     /// Published by the hosting card so this chrome can settle back at rest and
     /// come to full strength on focus (tvOS only — see ``PlozzMediaChrome``).
@@ -63,8 +65,8 @@ public struct MediaCardPlaybackIndicators: View {
             // was hard to see at all. The shared scrim holds clear until ~62% and
             // then ramps, so the darkening is concentrated where the chrome is.
             .overlay {
-                if hasBottomChrome {
-                    MediaArtworkChromeScrim(top: false, bottom: true)
+                if hasTopChrome || hasBottomChrome {
+                    MediaArtworkChromeScrim(top: hasTopChrome, bottom: hasBottomChrome)
                 }
             }
             .overlay(alignment: .topTrailing) {
@@ -91,9 +93,25 @@ public struct MediaCardPlaybackIndicators: View {
         (progressBarEnabled && showsProgressBar) || downloadState != nil
     }
 
+    /// Only the library mark needs the TOP of the artwork darkened. The watched
+    /// badge and the unwatched flag are solid brand-blue shapes that carry their
+    /// own contrast; the library mark is a bare glyph and the scrim is the entire
+    /// reason it stays legible over pale artwork.
+    private var hasTopChrome: Bool {
+        libraryMark != nil
+    }
+
     @ViewBuilder
     private var statusIndicator: some View {
-        if PosterCardPresentation.showsWatchStatus(for: playback.kind) {
+        // A title that isn't in the library takes this slot INSTEAD of watch
+        // state, not alongside it. Watch state cannot apply to something you
+        // don't have — you have neither watched it nor left it unwatched — so
+        // the unwatched flag on an external credit was never information, and
+        // the two never compete for the corner.
+        if let libraryMark {
+            MediaLibraryMarkView(mark: libraryMark, size: libraryMarkSize)
+                .padding(badgeInset)
+        } else if PosterCardPresentation.showsWatchStatus(for: playback.kind) {
             switch watchStatusIndicator {
             case .watched:
                 watchedBadge
@@ -101,6 +119,22 @@ public struct MediaCardPlaybackIndicators: View {
                 unwatchedCorner
             }
         }
+    }
+
+    /// The not-in-library / requestable mark for this card, if it needs one.
+    /// Suppressed while the artwork is spoiler-hidden, for the same reason watch
+    /// state is: chrome on a masked poster gives away what the mask is hiding.
+    private var libraryMark: MediaLibraryMark? {
+        guard !hidesStatus else { return nil }
+        return playback.libraryMark(seerConnected: seerConnected)
+    }
+
+    /// Sized from the badge slot the card gave us rather than from a constant, so
+    /// the mark keeps its proportion on the 167pt in-player cast poster and the
+    /// 280pt person-page one alike. `watchedBadgeSize` is the check badge's
+    /// diameter on this card, which is already density-scaled.
+    private var libraryMarkSize: CGFloat {
+        metrics.watchedBadgeSize
     }
 
     @ViewBuilder
@@ -236,12 +270,26 @@ public struct MediaPlaybackIndicatorState: Equatable, Sendable {
     public let isPlayed: Bool
     public let playedPercentage: Double?
     public let resumePosition: Double?
+    /// Whether this title is a discovery entry the viewer doesn't own. Stored as
+    /// the resolved Bool rather than the `MediaAvailabilityStatus` it comes from,
+    /// keeping this struct's comparison surface to plain scalars — the whole
+    /// point of narrowing `MediaItem` here (see the note on the stored property
+    /// in `MediaCardPlaybackIndicators`).
+    public let isNotInLibrary: Bool
 
     public init(_ item: MediaItem) {
         kind = item.kind
         isPlayed = item.isPlayed
         playedPercentage = item.playedPercentage
         resumePosition = item.resumePosition
+        isNotInLibrary = item.isNotInLibraryDiscovery
+    }
+
+    /// The corner mark this card should wear, if any. Mirrors
+    /// ``MediaLibraryMark/mark(for:seerConnected:)`` without needing the full item.
+    func libraryMark(seerConnected: Bool) -> MediaLibraryMark? {
+        guard isNotInLibrary else { return nil }
+        return seerConnected ? .requestable : .notInLibrary
     }
 }
 

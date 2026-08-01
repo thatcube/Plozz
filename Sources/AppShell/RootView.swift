@@ -346,6 +346,11 @@ public struct RootView: View {
         )
         .environment(\.plozzCardStyle, appState.profileSettings.cardStyleModel.style)
         .environment(\.plozzWatchStatusIndicator, appState.profileSettings.watchStatusIndicatorModel.indicator)
+        // Read by the corner mark on a card whose title isn't in the library:
+        // connected turns "not yours" into "you can ask for this". Injected here
+        // rather than passed down because the mark is drawn beneath every row,
+        // grid and shelf in the app.
+        .environment(\.plozzSeerConnected, appState.seerService.isConfigured)
         .environment(\.plozzNavigationStyle, appState.profileSettings.navigationStyleModel.style)
         // Accessibility and user intent only. Performance does NOT enter here:
         // this reaches every glass surface in the app, including controls small

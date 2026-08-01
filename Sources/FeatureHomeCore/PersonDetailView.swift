@@ -40,6 +40,33 @@ public struct PersonDetailView: View {
     /// The page's own width, so the two measures below can answer to it.
     @State private var availableWidth: CGFloat = 0
 
+    /// The page's own edge inset.
+    ///
+    /// Zero on tvOS, where `screenPadding` is zero and every row carries its own
+    /// inset instead. Everywhere else that leaves the headshot, the headings and
+    /// the posters all running into the screen's edge, so the page supplies one.
+    private var pageInset: CGFloat {
+        #if os(tvOS)
+        return PlozzTheme.Metrics.screenPadding
+        #else
+        guard availableWidth > 0 else { return 20 }
+        return availableWidth < 500 ? 20 : 28
+        #endif
+    }
+
+    /// Whether the header has to stack rather than sit side by side.
+    ///
+    /// A headshot beside a name and a biography needs roughly 500pt before the
+    /// text column stops being a gutter: on a phone the name wrapped onto two
+    /// lines and the biography was reduced to three words and a "MORE".
+    private var stacksHeader: Bool {
+        #if os(tvOS)
+        return false
+        #else
+        return availableWidth > 0 && availableWidth < 500
+        #endif
+    }
+
     /// Across a room this is 220; on a phone that is most of the screen.
     ///
     /// A share of the width with a ceiling rather than a breakpoint: this page is
@@ -104,10 +131,40 @@ public struct PersonDetailView: View {
     /// viewer happened to arrive from — "Bilbo Baggins" is a fact about The
     /// Hobbit, and it reads as a subtitle on a page that then lists a dozen
     /// other roles.
+    @ViewBuilder
     private var header: some View {
+        if stacksHeader {
+            VStack(alignment: .leading, spacing: PlozzTheme.Spacing.medium) {
+                headshot
+                headerText
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, pageInset)
+        } else {
+            wideHeader
+        }
+    }
+
+    private var wideHeader: some View {
         HStack(alignment: .center, spacing: PlozzTheme.Spacing.large) {
             headshot
-            VStack(alignment: .leading, spacing: PlozzTheme.Spacing.small) {
+            headerText
+        }
+        // The pair sits centred, rather than pinned to the leading edge.
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, PlozzTheme.Metrics.screenPadding + pageInset)
+        // A full-width focus section, because the only focusable thing up here
+        // is the biography — and it sits to the RIGHT of the headshot. Without
+        // this, pressing Up from the left-most credit finds nothing above it
+        // (the headshot is not focusable) and the press dies. A section captures
+        // the movement across the whole width and redirects it inward, so Up
+        // reaches the biography from anywhere along the row. Same fix, and the
+        // same reason, as the player's bottom tab row.
+        .personFocusSection()
+    }
+
+    private var headerText: some View {
+        VStack(alignment: .leading, spacing: PlozzTheme.Spacing.small) {
                 Text(person.name)
                     .font(.system(size: metrics.sectionHeaderFontSize * 1.6, weight: .bold))
                 if let kind = person.kind, !kind.isEmpty, !person.isCast {
@@ -133,18 +190,6 @@ public struct PersonDetailView: View {
             // across a room it becomes hard to track from the end of one line to
             // the start of the next.
             .frame(maxWidth: biographyWidth, alignment: .leading)
-        }
-        // The pair sits centred, rather than pinned to the leading edge.
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-        // A full-width focus section, because the only focusable thing up here
-        // is the biography — and it sits to the RIGHT of the headshot. Without
-        // this, pressing Up from the left-most credit finds nothing above it
-        // (the headshot is not focusable) and the press dies. A section captures
-        // the movement across the whole width and redirects it inward, so Up
-        // reaches the biography from anywhere along the row. Same fix, and the
-        // same reason, as the player's bottom tab row.
-        .personFocusSection()
     }
 
     @ViewBuilder
@@ -306,7 +351,15 @@ public struct PersonDetailView: View {
     @ViewBuilder
     private func shelfBody(_ title: Text, items: [MediaItem]) -> some View {
         if !items.isEmpty {
-            MediaRowView(title: title, items: items, onSelect: onSelectItem)
+            MediaRowView(
+                title: title,
+                items: items,
+                // The content is inset, not the rail: a shelf that stops short of
+                // the edge reads as a boxed-in list, while one that bleeds says
+                // there is more to scroll to.
+                leadingInset: PlozzTheme.Metrics.screenPadding + pageInset,
+                onSelect: onSelectItem
+            )
                 // Each shelf is its own focus section, which MediaRowView
                 // deliberately does NOT do by default — ordinary rows stay
                 // unsectioned to preserve tvOS's column-aligned projection.

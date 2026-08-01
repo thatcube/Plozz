@@ -34,72 +34,10 @@ private struct PlozziOSItemNavigationModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .navigationDestination(item: $navigatedItem) { item in
-                // Resolve against the best server for this title, the same way a
-                // tapped card does, so a navigated push is not pinned to whichever
-                // server happened to back the row it came from.
-                let target = PlaybackSourceSelection.bestPlayItem(
-                    item,
-                    accounts: appModel.accountsProviders.resolvedActiveAccounts,
-                    identitySources: appModel.identityIndex.identitySourcesProvider
-                )
-                if let provider = appModel.provider(for: target) {
-                    PlozziOSItemDetailView(
-                        appModel: appModel,
-                        provider: provider,
-                        item: target,
-                        seerService: appModel.seerService,
-                        // An episode arriving through the menu is "Episode Info",
-                        // which wants the episode itself. "Go to Season" hands
-                        // over a season, so the two are distinguishable by kind.
-                        presentsEpisodeAsSubject: target.kind == .episode
-                    )
-                } else {
-                    ContentUnavailableView(
-                        "Server unavailable",
-                        systemImage: "exclamationmark.triangle",
-                        description: Text("This title's server is no longer connected.")
-                    )
-                }
+                PlozziOSItemPage(appModel: appModel, item: item)
             }
             .navigationDestination(item: $navigatedPerson) { route in
-                let person = route.person
-                let accounts = appModel.accountsProviders.resolvedActiveAccounts
-                PersonDetailView(
-                    person: person,
-                    viewModel: PersonDetailViewModel(
-                        person: person,
-                        // The person's OWN server, by its own person id.
-                        //
-                        // Load STOPS here without one — the view model returns
-                        // `.unavailable` before it ever fans out — so passing nil
-                        // and relying on the by-name rung, as this briefly did,
-                        // reported "nothing else in your library" for everybody.
-                        // The account travels with the route because a person id
-                        // means nothing to any other server.
-                        //
-                        // `resolveOptional`, never a fallback to the primary
-                        // account: that sent Jellyfin and share person ids to
-                        // Plex and got nothing back. No account means no credits,
-                        // not wrong credits.
-                        provider: route.sourceAccountID.flatMap { id in
-                            accounts.first(where: { $0.account.id == id })?.provider
-                        },
-                        // Every OTHER signed-in server, asked by name, since
-                        // person ids do not cross servers.
-                        otherProviders: accounts
-                            .filter { $0.account.id != route.sourceAccountID }
-                            .map(\.provider),
-                        // Keyless, so it works for every user out of the box, and
-                        // only reached when no server stored a biography.
-                        biographyProviders: [WikipediaPersonBiographyProvider()],
-                        // The same ladder the in-player Cast card uses — without
-                        // it this page can only answer with what the viewer
-                        // already owns, which is not what "known for" means.
-                        creditsProviders: PlayerCastCredits.providers,
-                        artworkResolver: PlayerCastCredits.artworkResolver
-                    ),
-                    onSelectItem: { navigatedItem = $0 }
-                )
+                PlozziOSPersonPage(appModel: appModel, route: route)
             }
             // Applied *after* the destinations so the environment encloses them
             // and pushed pages inherit the router. The other order leaves the
@@ -113,6 +51,100 @@ private struct PlozziOSItemNavigationModifier: ViewModifier {
             .mediaPersonSourceNavigator { person, accountID in
                 navigatedPerson = .init(person: person, sourceAccountID: accountID)
             }
+    }
+}
+
+/// A title's detail page, resolved to the best server that holds it.
+private struct PlozziOSItemPage: View {
+    let appModel: PlozziOSAppModel
+    let item: MediaItem
+
+    var body: some View {
+        // Resolve against the best server for this title, the same way a tapped
+        // card does, so a navigated push is not pinned to whichever server
+        // happened to back the row it came from.
+        let target = PlaybackSourceSelection.bestPlayItem(
+            item,
+            accounts: appModel.accountsProviders.resolvedActiveAccounts,
+            identitySources: appModel.identityIndex.identitySourcesProvider
+        )
+        if let provider = appModel.provider(for: target) {
+            PlozziOSItemDetailView(
+                appModel: appModel,
+                provider: provider,
+                item: target,
+                seerService: appModel.seerService,
+                // An episode arriving through the menu is "Episode Info", which
+                // wants the episode itself. "Go to Season" hands over a season,
+                // so the two are distinguishable by kind.
+                presentsEpisodeAsSubject: target.kind == .episode
+            )
+        } else {
+            ContentUnavailableView(
+                "Server unavailable",
+                systemImage: "exclamationmark.triangle",
+                description: Text("This title's server is no longer connected.")
+            )
+        }
+    }
+}
+
+/// A person's page, which owns the push to a title of its own.
+///
+/// The destination lives HERE rather than back at the stack root, and that is
+/// the whole reason a poster on this page does something when tapped. Both
+/// destinations were declared on the root's content, so a person page pushed
+/// from one of them could not drive the other: setting the item from inside the
+/// person destination asked the root to present a second page it was already
+/// presenting from, and nothing happened at all. A pushed page that pushes
+/// further has to carry its own destination.
+private struct PlozziOSPersonPage: View {
+    let appModel: PlozziOSAppModel
+    let route: PlozziOSPersonRoute
+    @State private var navigatedItem: MediaItem?
+
+    var body: some View {
+        let person = route.person
+        let accounts = appModel.accountsProviders.resolvedActiveAccounts
+        PersonDetailView(
+                person: person,
+                viewModel: PersonDetailViewModel(
+                    person: person,
+                    // The person's OWN server, by its own person id.
+                    //
+                    // Load STOPS here without one — the view model returns
+                    // `.unavailable` before it ever fans out — so passing nil
+                    // and relying on the by-name rung, as this briefly did,
+                    // reported "nothing else in your library" for everybody.
+                    // The account travels with the route because a person id
+                    // means nothing to any other server.
+                    //
+                    // `resolveOptional`, never a fallback to the primary
+                    // account: that sent Jellyfin and share person ids to
+                    // Plex and got nothing back. No account means no credits,
+                    // not wrong credits.
+                    provider: route.sourceAccountID.flatMap { id in
+                        accounts.first(where: { $0.account.id == id })?.provider
+                    },
+                    // Every OTHER signed-in server, asked by name, since
+                    // person ids do not cross servers.
+                    otherProviders: accounts
+                        .filter { $0.account.id != route.sourceAccountID }
+                        .map(\.provider),
+                    // Keyless, so it works for every user out of the box, and
+                    // only reached when no server stored a biography.
+                    biographyProviders: [WikipediaPersonBiographyProvider()],
+                    // The same ladder the in-player Cast card uses — without
+                    // it this page can only answer with what the viewer
+                    // already owns, which is not what "known for" means.
+                    creditsProviders: PlayerCastCredits.providers,
+                    artworkResolver: PlayerCastCredits.artworkResolver
+                ),
+            onSelectItem: { navigatedItem = $0 }
+        )
+        .navigationDestination(item: $navigatedItem) { item in
+            PlozziOSItemPage(appModel: appModel, item: item)
+        }
     }
 }
 

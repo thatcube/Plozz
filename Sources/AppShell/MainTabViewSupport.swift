@@ -836,35 +836,9 @@ private func makeCastDetailLoader(
             provider: ownProvider,
             otherProviders: otherProviders,
             biographyProviders: [WikipediaPersonBiographyProvider()],
-            // A ladder, because no single source answers for everyone and the
-            // row must not depend on one. Order is load-bearing rather than
-            // cosmetic: the merge inherits the ranking of whichever rung ranked
-            // a title first.
-            //
-            // TMDb leads where it is available. It is the only source measured
-            // that knows how prominent a person was in a title rather than only
-            // how famous the title is, and prominence is the entire question —
-            // it carries billing for roughly two thirds of credits against
-            // Wikidata's 8%, plus episode counts that identify a series regular.
-            //
-            // Wikidata follows, keyless and CC0, ranking award-cited work
-            // first. TVmaze last: it alone indexes episode-level guest parts,
-            // but its lists come back in no meaningful order, so leading with
-            // it would put a one-episode walk-on above Sherlock.
-            //
-            // The lower two are what answer for a viewer whose libraries are
-            // network shares, and for any build without a TMDb key.
-            creditsProviders: [
-                TMDbPersonCreditsProvider(access: MetadataProviderConfig.resolved().tmdb),
-                WikidataPersonCreditsProvider(),
-                TVmazePersonCreditsProvider(),
-            ],
-            // Artwork only. Deliberately not a ranking input: letting the source
-            // with the best artwork reach further down the row was tried and
-            // made the order measurably worse.
-            artworkResolver: TMDbPersonCreditArtworkResolver(
-                access: MetadataProviderConfig.resolved().tmdb
-            ),
+            // Shared with the person page — see `PlayerCastCredits`.
+            creditsProviders: PlayerCastCredits.providers,
+            artworkResolver: PlayerCastCredits.artworkResolver,
             // Strike what is playing. By id AND by normalized title, since a
             // second server holding the same film answers with its own id.
             //
@@ -1281,3 +1255,26 @@ final class PlayerCastDetailCache {
 }
 
 #endif
+
+/// The credit sources shared by the in-player Cast card and the person page.
+///
+/// One definition, because the two surfaces answer the same question and had
+/// already drifted: the player was given the full ladder while the person page
+/// was left with servers alone, so its "Known for" row could only ever show
+/// titles the viewer already owned — which is the one thing "known for" does not
+/// mean.
+enum PlayerCastCredits {
+    /// Order is load-bearing. The merge inherits the ranking of whichever rung
+    /// names a title first, so the fame-ranked source has to lead.
+    static var providers: [any PersonCreditsProviding] {
+        [
+            TMDbPersonCreditsProvider(access: MetadataProviderConfig.resolved().tmdb),
+            WikidataPersonCreditsProvider(),
+            TVmazePersonCreditsProvider(),
+        ]
+    }
+
+    static var artworkResolver: any PersonCreditArtworkResolving {
+        TMDbPersonCreditArtworkResolver(access: MetadataProviderConfig.resolved().tmdb)
+    }
+}

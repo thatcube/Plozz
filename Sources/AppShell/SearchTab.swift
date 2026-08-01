@@ -193,7 +193,22 @@ struct SearchTab: View {
                         // Only reached when no server stored a biography.
                         // Wikipedia needs no key or account, so this rung
                         // works for every user out of the box.
-                        biographyProviders: [WikipediaPersonBiographyProvider()]
+                        biographyProviders: [WikipediaPersonBiographyProvider()],
+                        // The same ladder the in-player Cast card uses, and
+                        // for the same reason: without it this page can only
+                        // answer with what the viewer already owns, which is
+                        // not what "known for" means.
+                        //
+                        // TMDb leads where a key is available — it alone
+                        // knows how prominent a person was in a title rather
+                        // than only how famous the title is. Wikidata and
+                        // TVmaze are keyless and carry the rest.
+                        creditsProviders: PlayerCastCredits.providers,
+                        // Artwork only, applied after ranking. Never a
+                        // ranking input: letting the source with the best
+                        // artwork reach further down the row was measured
+                        // making the order worse.
+                        artworkResolver: PlayerCastCredits.artworkResolver
                     ),
                     onSelectItem: { navigateToItem($0) }
                 )

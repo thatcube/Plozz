@@ -135,7 +135,7 @@ struct SearchTab: View {
                 // request-focused discovery detail page rather than a library
                 // fetch. Search's "Not in Your Library" section only ever surfaces
                 // such titles (owned ones are filtered out).
-                let isDiscovery = item.isNotInLibraryDiscovery
+                let isDiscovery = detailEnvironment.isDiscovery(item)
                 ItemDetailView(
                     viewModel: detailEnvironment.makeViewModel(for: item, libraryOrigin: nil),
                     spoilerSettings: spoilerSettings,

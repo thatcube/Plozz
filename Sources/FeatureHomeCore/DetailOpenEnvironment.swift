@@ -80,22 +80,15 @@ public struct DetailOpenEnvironment {
         isDiscovery: Bool,
         identitySources: (MediaItem) -> [MediaSourceRef]
     ) -> [MediaSourceRef] {
-        // The index is consulted for a discovery title TOO.
+        // Still gated on `isDiscovery`, deliberately: a page that really is
+        // showing a title nobody owns must not be handed library sources, or the
+        // request page would point at a copy that isn't there.
         //
-        // It used to be skipped (`isDiscovery ? []`), which quietly guaranteed
-        // that a title flagged "not in your library" could never be shown to be
-        // in it. That is how an owned show reached a dead page: opened from a
-        // person's credits as a discovery title, Seerr then answered
-        // `partiallyAvailable` (the viewer has some seasons), the CTA became
-        // `.play` — and the discovery layout suppresses Play by construction
-        // while the request pill hides itself for `.play`, so the page rendered
-        // no buttons at all. The index knew the title all along; nothing asked.
-        //
-        // Safe for a genuinely absent title: matching is by strong external id
-        // (TMDb/IMDb/TVDB), kind-scoped, with the same split-guard that governs
-        // playback targeting — so a title nobody owns simply resolves to nothing
-        // and `isDiscovery` stands.
-        let indexed = identitySources(item)
+        // The fix for owned titles being treated as discovery lives at the
+        // DECISION instead — see `isDiscovery(_:)`, which resolves the index
+        // before answering, so a title the viewer owns arrives here with
+        // `isDiscovery == false` and does get its sources.
+        let indexed = isDiscovery ? [] : identitySources(item)
         var seen = Set<String>()
         return (item.sources + indexed).filter { seen.insert($0.id).inserted }
     }
@@ -145,13 +138,25 @@ public struct DetailOpenEnvironment {
     ///
     /// - Parameter libraryOrigin: soft tie-break for otherwise-equivalent sources;
     ///   locality and managed-server priority remain authoritative.
+    /// Whether a title should get the request-focused discovery page rather than
+    /// the ordinary library one.
+    ///
+    /// "Flagged not in the library" and "actually absent" are different questions,
+    /// and only the second should strip a page of its library affordances. An
+    /// external credit carries `availability == .unknown` because the provider
+    /// that supplied it has no idea what the viewer owns — that is a statement
+    /// about the provider, not a finding about the library.
+    ///
+    /// Public because the view layer decides the same thing when it builds the
+    /// page, and the two answers MUST agree: a view told `isDiscoveryItem: true`
+    /// while its model loads a real library item renders the request layout over
+    /// library data.
+    public func isDiscovery(_ item: MediaItem) -> Bool {
+        item.isNotInLibraryDiscovery && identitySources(item).isEmpty
+    }
+
     public func makeViewModel(for item: MediaItem, libraryOrigin: String?) -> ItemDetailViewModel {
-        // "Flagged not in the library" and "actually absent" are different
-        // questions, and only the second one should strip the page of its
-        // library affordances. An external credit carries `availability
-        // == .unknown` because the provider that supplied it has no idea what
-        // the viewer owns — not as a finding about their library.
-        let isDiscovery = item.isNotInLibraryDiscovery && identitySources(item).isEmpty
+        let isDiscovery = isDiscovery(item)
         let selection = Self.initialSourceSelection(
             for: item,
             isDiscovery: isDiscovery,

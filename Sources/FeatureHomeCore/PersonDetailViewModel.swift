@@ -325,6 +325,39 @@ public final class PersonDetailViewModel {
             .replacingOccurrences(of: "Provider", with: "")
     }
 
+    /// Collapses duplicates within ONE server's answer.
+    ///
+    /// The cross-server merge deduped every server's list against the first
+    /// one's, but the first one's was taken raw — so a title a single server
+    /// returned twice was never checked against itself and reached the row as two
+    /// posters. Ryan Reynolds showed Deadpool and Deadpool 2 twice each for
+    /// exactly this reason: both copies carried an identical
+    /// `movie|deadpool 2|2018` key, so they had simply never been compared.
+    ///
+    /// A server legitimately returns the same work more than once — the same film
+    /// in two libraries, or as separate versions/editions — and for a credits row
+    /// those are one title.
+    ///
+    /// Keeps the first occurrence so the server's own ordering survives, but
+    /// takes a later copy's artwork if the winner had none: which duplicate came
+    /// first is arbitrary, and a poster is not.
+    static func collapsingDuplicates(_ items: [MediaItem]) -> [MediaItem] {
+        var result: [MediaItem] = []
+        var indexByKey: [String: Int] = [:]
+        for item in items {
+            let key = dedupeKey(item)
+            guard let existing = indexByKey[key] else {
+                indexByKey[key] = result.count
+                result.append(item)
+                continue
+            }
+            if result[existing].posterURL == nil, let poster = item.posterURL {
+                result[existing].posterURL = poster
+            }
+        }
+        return result
+    }
+
     /// Collapses the same title held on more than one server into one entry.
     ///
     /// Title+year rather than external ids: this is a display row, the two copies
@@ -382,7 +415,7 @@ public final class PersonDetailViewModel {
 
         biography = personRecord?.biography.flatMap { $0.isEmpty ? nil : $0 }
         if let items {
-            libraryCredits = items.filter(includeCredit)
+            libraryCredits = Self.collapsingDuplicates(items.filter(includeCredit))
             state = .loaded
         } else {
             state = .unavailable

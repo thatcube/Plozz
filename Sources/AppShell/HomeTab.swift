@@ -546,7 +546,7 @@ struct HomeTab: View {
         // titles (available/partiallyAvailable) are NOT discovery: they resolve to
         // a real library copy via the identity index, so they keep the normal
         // playable detail page.
-        let isDiscovery = item.isNotInLibraryDiscovery
+        let isDiscovery = detailEnvironment.isDiscovery(item)
         return ItemDetailView(
             viewModel: detailViewModels.value(forKey: "item:\(item.id)#\(libraryOrigin ?? "")") {
                 detailEnvironment.makeViewModel(for: item, libraryOrigin: libraryOrigin)

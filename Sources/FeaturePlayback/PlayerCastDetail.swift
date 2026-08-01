@@ -45,6 +45,16 @@ public struct PlayerCastDetail: Sendable, Equatable {
         self.isComplete = isComplete
     }
 
+    /// Whether every credit here carries artwork.
+    ///
+    /// Read by the caller's cache to decide whether an answer is worth replaying.
+    /// Artwork arrives from a network pass that can fail transiently, and a
+    /// failure that gets remembered is indistinguishable from a title that
+    /// genuinely has no poster — except that it never recovers.
+    public var artworkIsComplete: Bool {
+        credits.allSatisfy { !$0.artworkReferences(for: .poster).isEmpty }
+    }
+
     /// Nothing found. Distinct from "not asked yet", which is `nil` at the call
     /// site — the pane must not show an empty state while a request is in flight.
     public var isEmpty: Bool {

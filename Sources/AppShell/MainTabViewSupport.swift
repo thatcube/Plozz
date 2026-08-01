@@ -881,7 +881,15 @@ private func makeCastDetailLoader(
             limit: 24
         )
         return AsyncStream { continuation in
-            if let cached = cache.value(for: person.id) {
+            // Served only when it is COMPLETE — every credit carrying artwork.
+            //
+            // Artwork is resolved by a network pass that can fail transiently, and
+            // caching its result unconditionally made a single failure permanent:
+            // the artless answer was stored, every later open replayed it, and
+            // only relaunching the app cleared it. A cached miss is exactly the
+            // thing worth NOT remembering, so an incomplete entry falls through
+            // and asks again.
+            if let cached = cache.value(for: person.id), cached.artworkIsComplete {
                 PersonDiagnostics.emit("cast.cache-hit person=\(person.name)")
                 continuation.yield(cached)
                 continuation.finish()
@@ -897,6 +905,10 @@ private func makeCastDetailLoader(
                 // Only the finished answer is kept. Caching a partial one would
                 // pin whatever a slow rung had not yet returned, and a person
                 // whose row was still loading would be permanently short.
+                //
+                // Stored even when artwork is incomplete, so a second open still
+                // gets the row instantly — but `artworkIsComplete` means it is
+                // re-resolved rather than replayed.
                 cache.store(final, for: person.id)
                 continuation.yield(final)
                 continuation.finish()

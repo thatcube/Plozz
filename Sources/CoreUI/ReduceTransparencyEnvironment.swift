@@ -59,6 +59,32 @@ public extension EnvironmentValues {
 }
 
 public extension View {
+    /// The translucent surface used in place of Liquid Glass over demanding
+    /// video.
+    ///
+    /// A plain translucent colour, NOT a `Material`. Two reasons, and both were
+    /// learned the hard way here:
+    ///
+    /// A Material is a live backdrop blur, so on the frame it is inserted it has
+    /// no sample yet — it draws its own flat base colour and repaints once the
+    /// sample arrives. That is a panel that appears one colour and then becomes
+    /// another, on every open, and no amount of transition tuning hides it
+    /// because it is not the transition. Layering something opaque underneath
+    /// removes the pop only by removing the translucency as well.
+    ///
+    /// And in a path whose entire purpose is to stop paying for a per-frame
+    /// backdrop sample, a Material is still paying for one. A translucent fill
+    /// costs nothing, cannot pop, and is genuinely see-through — which is what
+    /// this is supposed to look like.
+    func plozzFrostedBackground<S: InsettableShape>(
+        _ shape: S,
+        raised: Bool = false
+    ) -> some View {
+        background {
+            shape.fill(raised ? PlozzFrostedSurface.raised : PlozzFrostedSurface.base)
+        }
+    }
+
     /// The shared hairline edge for a frosted surface, compensated for HDR.
     ///
     /// A modifier rather than six hand-written overlays, which is how the widths
@@ -101,55 +127,32 @@ private struct PlozzFrostedBorderModifier<S: InsettableShape>: ViewModifier {
 /// costs nothing and looks like a rectangle laid over the video.
 public enum PlozzFrostedSurface {
     /// For anything at rest: panels, cards, unfocused controls.
-    public static let base: Material = .thickMaterial
-    /// For a focused or selected control, which wants to sit a step brighter
-    /// than what surrounds it — the same relationship the glass version gets
-    /// from its white tint.
-    public static let raised: Material = .regularMaterial
+    ///
+    /// A dark GREY rather than black, and deliberately so. Pure black at any
+    /// opacity only ever subtracts light, so the panel reads as a hole punched
+    /// in the picture; lifting the fill off black gives it a surface of its own
+    /// that happens to be see-through, which is what glass looks like.
+    public static let base = Color(white: 0.10).opacity(0.85)
+    /// For a focused or selected control, which sits a step brighter than what
+    /// surrounds it — the same relationship glass gets from its white tint.
+    public static let raised = Color(white: 0.24).opacity(0.8)
 
-    /// A hairline light edge, so a frosted surface still has a boundary over
-    /// footage dark enough that the frost alone leaves none.
-    ///
-    /// ONE width and ONE colour for every frosted surface, and always drawn with
-    /// `strokeBorder` rather than `stroke`. Both halves of that matter: `stroke`
-    /// centres the line on the shape's path so half of it falls outside, which
-    /// makes a 1pt `stroke` and a 1pt `strokeBorder` visibly different weights —
-    /// that mismatch, plus a genuine 1pt-versus-2pt difference, is why the
-    /// buttons read as heavier than the panels they sat on.
-    ///
-    /// The value is the player panel's, which was already tuned against live
-    /// video, rather than the UIKit hero's 2pt: the hero's pills sit over a
-    /// still backdrop where a heavier edge reads as deliberate, and the same
-    /// weight around a small control over moving footage reads as an outline.
-    /// Nudged from 0.14 to 0.16 because frost is lighter than glass, so an edge
-    /// that registered against glass has less to work with here.
     public static let borderWidth: CGFloat = 1
 
     /// The edge, compensated for the display being in HDR mode.
     ///
-    /// tvOS switches the panel into HDR for Dolby Vision and HDR playback, and
-    /// the interface is composited into that signal — so SDR white is mapped to
-    /// a higher output level than the same value reaches in SDR mode. A hairline
-    /// tuned against a still, SDR backdrop therefore reads as a bright line over
-    /// a Dolby Vision film, which is exactly where this material is used.
-    ///
-    /// Compensated rather than split into two hand-tuned constants, so there is
-    /// still one edge in the app and one place to change it.
+    /// tvOS switches the panel into HDR for Dolby Vision, and the interface is
+    /// composited into that signal — so SDR white maps to a higher output level
+    /// than the same value reaches in SDR mode, and a hairline tuned against a
+    /// still backdrop reads as a bright line across someone's film.
     public static func borderColor(hdrDisplayActive: Bool) -> Color {
         Color.white.opacity(hdrDisplayActive ? 0.10 : 0.16)
     }
 
     /// For call sites with no way to know — previews and anything outside the
-    /// player. Assumes SDR, which is the safer error: too faint an edge is a
-    /// missing hairline, too bright is a line drawn across someone's film.
+    /// player. Assumes SDR, the safer error.
     public static let borderColor = Color.white.opacity(0.16)
 
-    /// The same edge used as a divider INSIDE a frosted surface.
-    ///
-    /// Shared with the border on purpose. A separator and a boundary are the
-    /// same idea at different orientations, and having them at different
-    /// weights is what made the menu dividers read as brighter than the panel
-    /// edge enclosing them.
     public static let dividerColor = borderColor
     public static func dividerColor(hdrDisplayActive: Bool) -> Color {
         borderColor(hdrDisplayActive: hdrDisplayActive)

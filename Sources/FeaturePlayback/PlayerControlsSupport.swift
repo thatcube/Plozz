@@ -117,8 +117,9 @@ struct ScrubBar: View {
     private func glassTrack(height: CGFloat) -> some View {
         if reducePanelGlass {
             Capsule()
-                .fill(PlozzFrostedSurface.base)
+                .fill(.clear)
                 .frame(height: height)
+                .plozzFrostedBackground(Capsule())
         } else if #available(iOS 26.0, tvOS 26.0, *) {
             Capsule()
                 .fill(.clear)
@@ -292,7 +293,8 @@ struct PlayerTabButtonStyle: ButtonStyle {
             // has a specular edge of its own that does this for free, and
             // without it these pills vanish against the letterboxing.
             shape
-                .fill(selected ? PlozzFrostedSurface.raised : PlozzFrostedSurface.base)
+                .fill(.clear)
+                .plozzFrostedBackground(shape, raised: selected)
                 .plozzFrostedBorder(shape)
         } else if !reduceTransparency, #available(iOS 26.0, tvOS 26.0, *) {
             // Selected keeps the glass and only tints it. Swapping in a flat
@@ -403,7 +405,7 @@ struct PanelGlassBackground: ViewModifier {
             // because this one sits over moving video: a thin frost lets enough
             // of a bright scene through to fight the text on top of it.
             content
-                .background(PlozzFrostedSurface.base, in: shape)
+                .plozzFrostedBackground(shape)
                 .plozzFrostedBorder(shape)
         } else if #available(iOS 26.0, tvOS 26.0, *) {
             content
@@ -531,15 +533,18 @@ struct PlayerFrostedButtonStyle: ButtonStyle {
         // Focus takes the same solid white the system glass style uses, so the
         // focused state is identical either way and only the resting one differs.
         let focusedFill = AnyShapeStyle(Color.white)
-        let restingFill = AnyShapeStyle(
-            prominent ? PlozzFrostedSurface.raised : PlozzFrostedSurface.base
-        )
         configuration.label
             .font(.body.weight(.semibold))
             .foregroundStyle(isFocused ? Color.black : Color.white)
             .padding(.horizontal, 24)
             .padding(.vertical, 14)
-            .background(shape.fill(isFocused ? focusedFill : restingFill))
+            .background {
+                if isFocused {
+                    shape.fill(focusedFill)
+                } else {
+                    Color.clear.plozzFrostedBackground(shape, raised: prominent)
+                }
+            }
             // Dropped when focused, where the white fill is its own boundary and
             // an edge on top of it reads as an outline rather than a shape.
             .plozzFrostedBorder(shape, visible: !isFocused)

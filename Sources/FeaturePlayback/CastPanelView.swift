@@ -1035,7 +1035,13 @@ private struct CastCreditsRow: View {
     /// at rest to make room for it.
     private static let focusScale: CGFloat = 1.06
     /// How wide the edges feather.
-    private static let fade: CGFloat = 46
+    ///
+    /// Wider than it was (46): the same curve compressed into a narrow band has
+    /// to change alpha faster per point, and a fast ramp is exactly what reads
+    /// as a hard edge rather than a fade. The row's content margins are keyed to
+    /// this, so the gradient still lies over empty space at rest and dims
+    /// nothing.
+    private static let fade: CGFloat = 64
     /// Concentric with the panel: the app's own rule is outer = inner + inset
     /// (see `playerPanelCornerRadius`, which is this plus `contentPadding`), so
     /// inverting it for content inset by exactly that padding gives curves that
@@ -1104,11 +1110,24 @@ private struct CastCreditsRow: View {
     /// the fade starts and finishes imperceptibly and only moves quickly through
     /// its middle, where nothing is looking.
     private static func edgeFade(reversed: Bool) -> some View {
-        let ramp: [Double] = [0, 0.04, 0.18, 0.5, 0.82, 0.96, 1]
-        let stops = ramp.enumerated().map { index, alpha in
-            Gradient.Stop(
-                color: .black.opacity(reversed ? 1 - alpha : alpha),
-                location: Double(index) / Double(ramp.count - 1)
+        // Sampled from smoothstep rather than written out by hand.
+        //
+        // The hand-picked seven-stop ramp was an approximation of this curve,
+        // and being an approximation it had small kinks in it — a gradient is
+        // read by the eye as a rate of change, so an uneven rate shows up as
+        // banding even when no individual step is large. Sampling the real
+        // function at enough points removes that, and the count is the cheap
+        // part: this is a static gradient, not something re-evaluated per frame.
+        let samples = 24
+        let stops = (0...samples).map { step -> Gradient.Stop in
+            let t = Double(step) / Double(samples)
+            // 3t² − 2t³: zero slope at both ends, so the fade begins and ends
+            // imperceptibly and only moves quickly through its middle, where
+            // nothing is looking.
+            let eased = t * t * (3 - 2 * t)
+            return Gradient.Stop(
+                color: .black.opacity(reversed ? 1 - eased : eased),
+                location: t
             )
         }
         return LinearGradient(stops: stops, startPoint: .leading, endPoint: .trailing)

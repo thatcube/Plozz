@@ -108,7 +108,7 @@ struct SkipSegmentButton: View {
 
         if reducePanelGlass {
             label
-                .background(Capsule(style: .continuous).fill(PlozzFrostedSurface.base))
+                .plozzFrostedBackground(Capsule(style: .continuous))
                 .plozzFrostedBorder(Capsule(style: .continuous))
         } else if #available(iOS 26.0, tvOS 26.0, *) {
             label.glassEffect(.regular, in: Capsule(style: .continuous))

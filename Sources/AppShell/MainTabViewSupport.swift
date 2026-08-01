@@ -859,6 +859,12 @@ private func makeCastDetailLoader(
                 WikidataPersonCreditsProvider(),
                 TVmazePersonCreditsProvider(),
             ],
+            // Artwork only. Deliberately not a ranking input: letting the source
+            // with the best artwork reach further down the row was tried and
+            // made the order measurably worse.
+            artworkResolver: TMDbPersonCreditArtworkResolver(
+                access: MetadataProviderConfig.resolved().tmdb
+            ),
             // Strike what is playing. By id AND by normalized title, since a
             // second server holding the same film answers with its own id.
             //

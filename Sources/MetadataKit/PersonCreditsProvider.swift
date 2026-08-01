@@ -457,6 +457,17 @@ public struct TMDbPersonCreditsProvider: PersonCreditsProviding {
         /// Excludes the long tail of one-line parts and unreleased projects that
         /// otherwise crowd out real work. A recurring television role is kept
         /// regardless of votes, because episode count is itself the evidence.
+        ///
+        /// 800 is high, and lowering it to 100 was tried and measurably worse:
+        /// five of ten people changed inside the top twelve, and the changes ran
+        /// the wrong way — Hailee Steinfeld lost Hawkeye to Romeo & Juliet, and
+        /// Clancy Brown lost Rick and Morty to The Mortuary Collection. Billing
+        /// is per-title, so a lead role in a film nobody rated outscores a
+        /// well-known supporting one the moment the floor lets it in.
+        ///
+        /// The tail this excludes has no artwork attached once another source
+        /// supplies it, which is a real cost — but the answer to that is to
+        /// backfill artwork, not to degrade the ranking to obtain it.
         var qualifies: Bool {
             displayTitle != nil && ((voteCount ?? 0) >= 800 || (episodeCount ?? 0) >= 10)
         }
@@ -486,3 +497,105 @@ public struct TMDbPersonCreditsProvider: PersonCreditsProviding {
 }
 
 #endif
+
+/// Finds artwork for a title that arrived without any.
+///
+/// Separate from `PersonCreditsProviding` on purpose. Which titles a person is
+/// known for and what those titles look like are different questions, and tying
+/// them together is what went wrong before: the rung with the best artwork had
+/// its ranking floor lowered to reach further down the row, and the ranking got
+/// measurably worse — a lead role in a film nobody rated outscored a well-known
+/// supporting one. Rank first, then decorate.
+public protocol PersonCreditArtworkResolving: Sendable {
+    /// `nil` when nothing is found, which must stay cheap: most of the row
+    /// already has artwork and only the tail asks.
+    func posterURL(title: String, year: Int?, isSeries: Bool) async -> URL?
+}
+
+/// TMDb's search endpoints, used only to put a face on a title another source
+/// named.
+///
+/// Its own credits rung deliberately ignores work below a vote floor, because
+/// letting it in wrecked the ranking. Those titles still reach the row from
+/// Wikidata and TVmaze, and TMDb almost always has a poster for them — so this
+/// asks the same service the question it is good at, without letting it move
+/// anything.
+public struct TMDbPersonCreditArtworkResolver: PersonCreditArtworkResolving {
+    private let access: TMDbAccess
+
+    public init(access: TMDbAccess) {
+        self.access = access
+    }
+
+    public func posterURL(title: String, year: Int?, isSeries: Bool) async -> URL? {
+        guard access.isEnabled else { return nil }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let base: String
+        switch access {
+        case .proxy(let url):
+            let text = url.absoluteString
+            base = text.hasSuffix("/") ? String(text.dropLast()) : text
+        case .directToken, .userToken, .disabled:
+            base = "https://api.themoviedb.org"
+        }
+        var headers: [String: String] = [:]
+        if case .directToken(let token) = access { headers["Authorization"] = "Bearer \(token)" }
+        if case .userToken(let token) = access { headers["Authorization"] = "Bearer \(token)" }
+
+        // With the year first, then without it.
+        //
+        // A year is a strong discriminator between remakes sharing a title, so
+        // it is worth trying — but the sources disagree about it often enough
+        // (a premiere against a wide release, a scanner's guess) that requiring
+        // one drops matches that are otherwise exact. Measured over 600 credits,
+        // the retry is what lifts coverage the last stretch.
+        for attemptYear in [year, nil] {
+            var components = URLComponents(
+                string: "\(base)/3/search/\(isSeries ? "tv" : "movie")"
+            )
+            var query = [URLQueryItem(name: "query", value: trimmed)]
+            if let attemptYear {
+                query.append(URLQueryItem(
+                    name: isSeries ? "first_air_date_year" : "year",
+                    value: String(attemptYear)
+                ))
+            }
+            components?.queryItems = query
+            guard let url = components?.url,
+                  let response = await MetadataHTTP.get(
+                      SearchResponse.self, url: url, headers: headers
+                  )
+            else { continue }
+            let matches = response.results ?? []
+            // An exact title match anywhere in the results beats a fuzzy one at
+            // the top: TMDb ranks by popularity, so searching a modest title can
+            // return a more famous near-miss first, and the wrong poster is
+            // worse than none.
+            let exact = matches.first {
+                $0.displayTitle?.caseInsensitiveCompare(trimmed) == .orderedSame
+            }
+            if let path = (exact ?? matches.first)?.posterPath {
+                return URL(string: "https://image.tmdb.org/t/p/w342\(path)")
+            }
+            // Nothing more to try when there was no year to drop.
+            if year == nil { break }
+        }
+        return nil
+    }
+
+    private struct SearchResponse: Decodable {
+        let results: [Match]?
+        struct Match: Decodable {
+            let title: String?
+            let name: String?
+            let posterPath: String?
+            enum CodingKeys: String, CodingKey {
+                case title, name
+                case posterPath = "poster_path"
+            }
+            var displayTitle: String? { title ?? name }
+        }
+    }
+}

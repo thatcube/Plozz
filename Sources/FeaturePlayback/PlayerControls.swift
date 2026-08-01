@@ -1299,23 +1299,7 @@ struct PlayerControls: View {
             // the ZStack and nudging every child, cluster included. That showed up as
             // the submenu drifting down and the Info card peeking in from the bottom.
             .padding(.bottom, styleEditing ? Self.horizontalMargin : menuBottomInset)
-            // Scale WITHOUT a fade once the panel is frosted.
-            //
-            // A material rendered at partial opacity shows that much raw video
-            // through it, so fading one in walks it through every degree of
-            // translucency on the way to its real appearance — and the states it
-            // passes through look exactly like the Liquid Glass it replaced.
-            // That reads as the panel flashing glass and then thickening, which
-            // is precisely what it is.
-            //
-            // Glass had the same fade and looked fine, because glass is supposed
-            // to be see-through: a half-faded glass panel is just a fainter
-            // glass panel. Frost has an appearance it is either at or not.
-            .transition(
-                reducePanelGlass
-                    ? .scale(scale: 0.9, anchor: .bottomTrailing)
-                    : .scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .opacity)
-            )
+            .transition(.scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .opacity))
         }
     }
 
@@ -1673,9 +1657,20 @@ struct PlayerControls: View {
         // `onPreferenceChange` — both of which sit OUTSIDE this nil scope.
         .animation(nil, value: subtitleScreen)
         .frame(width: panelWidth(for: category), alignment: .leading)
-        .colorScheme(.dark)
         .modifier(PanelGlassBackground())
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        // OUTSIDE the background, not inside it.
+        //
+        // `.colorScheme` sets the environment for the subtree it is attached to,
+        // and a `.background` added by a later modifier is not in that subtree —
+        // so with this above `PanelGlassBackground` the panel's CONTENT was dark
+        // while its material resolved against the ambient scheme. A `Material`
+        // is scheme-dependent and `.thickMaterial` in light mode is white, which
+        // is the white slab that appeared before the panel settled.
+        //
+        // It never showed while the panel was glass: `glassEffect` is not a
+        // Material and does not flip on colour scheme.
+        .colorScheme(.dark)
         // Drive the height change explicitly (see note above). The first
         // measurement for a given panel snaps in (no grow-from-zero / no
         // shrink-from-stale); later changes *within the same panel* (the

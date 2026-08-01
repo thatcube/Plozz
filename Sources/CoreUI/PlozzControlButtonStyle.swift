@@ -163,7 +163,8 @@ public struct PlozzSeasonTabStyle: ButtonStyle {
                 // itself; frost takes its brightness from behind, so over a dark
                 // scene it would otherwise have no boundary at all.
                 shape
-                    .fill(PlozzFrostedSurface.base)
+                    .fill(.clear)
+                    .plozzFrostedBackground(shape)
                     .plozzFrostedBorder(shape)
             } else if #available(iOS 26.0, tvOS 26.0, *) {
                 shape.fill(.clear).glassEffect(.regular, in: shape)

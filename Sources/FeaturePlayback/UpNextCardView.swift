@@ -356,11 +356,8 @@ struct PlayerOverVideoSurface: View {
             // of the frame, where frost alone leaves them without a boundary.
             // Dropped on focus, which already has a white ring of its own.
             shape
-                .fill(
-                    focused
-                        ? AnyShapeStyle(PlozzFrostedSurface.raised)
-                        : AnyShapeStyle(PlozzFrostedSurface.base)
-                )
+                .fill(.clear)
+                .plozzFrostedBackground(shape, raised: focused)
                 .plozzFrostedBorder(shape, visible: !focused)
         } else if #available(iOS 26.0, tvOS 26.0, *) {
             // Glass at rest as well as on focus — a card over live video is what

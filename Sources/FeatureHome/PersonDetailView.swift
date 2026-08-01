@@ -557,13 +557,23 @@ public struct PersonDetailView: View {
     /// Reading measure for the biography — roughly 90 characters at this size.
     private static let biographyWidth: CGFloat = 1000
 
+    /// Display name for each library id the viewer has, so owned credits can be
+    /// shelved under the libraries they actually came from.
+    ///
+    /// Keyed by the provider-local library id that `MediaItem.libraryID` carries.
+    /// Empty is a supported state — a viewer whose libraries have not been
+    /// discovered yet falls back to shelving by kind.
+    private let libraryNames: [String: String]
+
     public init(
         person: MediaPerson,
         viewModel: PersonDetailViewModel,
+        libraryNames: [String: String] = [:],
         onSelectItem: @escaping (MediaItem) -> Void
     ) {
         self.person = person
         _viewModel = State(initialValue: viewModel)
+        self.libraryNames = libraryNames
         self.onSelectItem = onSelectItem
     }
 
@@ -664,20 +674,27 @@ public struct PersonDetailView: View {
             // Rows are focusable, so this is the one state that needs no Back
             // button of its own.
             VStack(alignment: .leading, spacing: 0) {
-                creditRow("Movies", kinds: [.movie])
-                creditRow("TV Shows", kinds: [.series])
-                // Anything that is neither — the by-name queries ask only for
-                // movies and series, but a share catalog answers from its own
-                // records and can return loose video. Kept under the original
-                // heading rather than dropped, since these are still titles the
-                // viewer owns with this person.
-                creditRow(
+                // What they are known for, in the order the ranking produced.
+                //
+                // First and unsegmented, because splitting by kind is what
+                // destroys that ranking: the whole point is that Sherlock
+                // outranks a film, and a Movies shelf above a TV Shows shelf
+                // cannot say so. It also answers for a voice actor whose entire
+                // body of work is animation without the app having to decide
+                // what counts as anime.
+                shelf(
                     LocalizedStringResource(
-                        "Also in your library",
-                        comment: "Heading for a shelf of titles the viewer owns featuring this person, shown on a person's page beneath Movies and TV Shows. Catches anything that is neither."
+                        "Known for",
+                        comment: "Heading for a shelf of the titles a person is best known for, shown at the top of their page. Includes titles the viewer does not own."
                     ),
-                    kinds: nil
+                    items: viewModel.libraryCredits
                 )
+
+                // Then what the viewer actually owns, shelved by the library it
+                // came from.
+                ForEach(ownedShelves, id: \.key) { group in
+                    shelfBody(group.title.text, items: group.items)
+                }
             }
         case .loading:
             creditlessState { ProgressView().scaleEffect(1.5) }
@@ -705,10 +722,14 @@ public struct PersonDetailView: View {
     /// `kinds: nil` means "everything not claimed by a named row above", so no
     /// item can be silently dropped by adding a row.
     @ViewBuilder
-    private func creditRow(_ title: LocalizedStringResource, kinds: Set<MediaItemKind>?) -> some View {
-        let items = credits(matching: kinds)
+    private func shelf(_ title: LocalizedStringResource, items: [MediaItem]) -> some View {
+        shelfBody(Text(title), items: items)
+    }
+
+    @ViewBuilder
+    private func shelfBody(_ title: Text, items: [MediaItem]) -> some View {
         if !items.isEmpty {
-            MediaRowView(title: Text(title), items: items, onSelect: onSelectItem)
+            MediaRowView(title: title, items: items, onSelect: onSelectItem)
                 // Each shelf is its own focus section, which MediaRowView
                 // deliberately does NOT do by default — ordinary rows stay
                 // unsectioned to preserve tvOS's column-aligned projection.
@@ -726,17 +747,103 @@ public struct PersonDetailView: View {
         }
     }
 
-    /// Credits for one row. `nil` kinds means everything the named rows above
-    /// didn't claim.
-    private func credits(matching kinds: Set<MediaItemKind>?) -> [MediaItem] {
-        guard let kinds else {
-            return viewModel.libraryCredits.filter { !Self.namedRowKinds.contains($0.kind) }
+    /// The owned credits, grouped into the shelves shown beneath "Known for".
+    ///
+    /// Grouped by the LIBRARY each title came from rather than by its kind, so
+    /// the page mirrors how the viewer actually organises their media. Someone
+    /// who keeps a separate Anime library gets an Anime shelf without the app
+    /// classifying anything — which matters, because per-title anime detection
+    /// is a heuristic that gets Arcane, Castlevania and Blue Eye Samurai wrong
+    /// in one direction or the other. Someone with a Documentaries library gets
+    /// that shelf too, for free.
+    ///
+    /// Keyed on the library's NAME, not its id, so the same library on two
+    /// servers — a very common setup — collapses into one shelf instead of two
+    /// identically titled ones.
+    private var ownedShelves: [(key: String, title: ShelfTitle, items: [MediaItem])] {
+        let owned = viewModel.libraryCredits.filter { $0.availability != .unknown }
+        guard !owned.isEmpty else { return [] }
+
+        var groups: [String: [MediaItem]] = [:]
+        var titles: [String: ShelfTitle] = [:]
+        var order: [String] = []
+        for item in owned {
+            let title = item.libraryID.flatMap { libraryNames[$0] }
+                .map(ShelfTitle.library) ?? Self.fallbackTitle(item)
+            let key = title.key
+            if groups[key] == nil { order.append(key); titles[key] = title }
+            groups[key, default: []].append(item)
         }
-        return viewModel.libraryCredits.filter { kinds.contains($0.kind) }
+
+        var shelves = order.map {
+            (key: $0, title: titles[$0] ?? .other, items: groups[$0] ?? [])
+        }
+        // A page of one-title shelves is worse than a page of two useful ones.
+        // Past a handful of libraries the smallest are folded together rather
+        // than each taking a full row's height for a single poster.
+        if shelves.count > Self.maximumOwnedShelves {
+            let sorted = shelves.sorted { $0.items.count > $1.items.count }
+            let kept = Array(sorted.prefix(Self.maximumOwnedShelves - 1))
+            let rest = sorted.dropFirst(Self.maximumOwnedShelves - 1).flatMap(\.items)
+            shelves = kept
+            if !rest.isEmpty {
+                shelves.append((key: ShelfTitle.other.key, title: .other, items: rest))
+            }
+        }
+        return shelves
     }
 
-    /// Kinds that already have a row of their own.
-    private static let namedRowKinds: Set<MediaItemKind> = [.movie, .series]
+    /// A shelf heading, which is either the server's own library name or Plozz's
+    /// wording — and those are localized differently.
+    ///
+    /// A library's name is content: it is whatever the viewer called their
+    /// library and must render verbatim. Everything else here is app copy and
+    /// has to go through the catalog, which is exactly the distinction the
+    /// localization guard exists to enforce.
+    private enum ShelfTitle {
+        case library(String)
+        case movies
+        case series
+        case other
+
+        var key: String {
+            switch self {
+            case .library(let name): return "library:\(name)"
+            case .movies: return "kind:movies"
+            case .series: return "kind:series"
+            case .other: return "kind:other"
+            }
+        }
+
+        var text: Text {
+            switch self {
+            case .library(let name):
+                return Text(verbatim: name)
+            case .movies:
+                return Text("Movies")
+            case .series:
+                return Text("TV Shows")
+            case .other:
+                return Text(LocalizedStringResource(
+                    "person.shelf.inYourLibrary",
+                    defaultValue: "In your library",
+                    comment: "Heading for a shelf of titles the viewer owns featuring this person, used when the title's library is unknown or several small libraries are folded together."
+                ))
+            }
+        }
+    }
+
+    /// Used when a title carries no library — a share catalog answering from its
+    /// own records, or libraries that have not been discovered yet.
+    private static func fallbackTitle(_ item: MediaItem) -> ShelfTitle {
+        switch item.kind {
+        case .movie: return .movies
+        case .series, .episode: return .series
+        default: return .other
+        }
+    }
+
+    private static let maximumOwnedShelves = 4
 
     /// Any state with no credits row: the given content plus the focusable Back
     /// button that keeps Menu working.

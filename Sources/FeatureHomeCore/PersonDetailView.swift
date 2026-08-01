@@ -29,6 +29,9 @@ public struct PersonDetailView: View {
     private let onSelectItem: (MediaItem) -> Void
 
     @Environment(\.plozzMetrics) private var metrics
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
     @Environment(\.dismiss) private var dismiss
 
     /// Until credits arrive there is nothing focusable on this page, and on tvOS a
@@ -40,6 +43,43 @@ public struct PersonDetailView: View {
     /// The page's own width, so the two measures below can answer to it.
     @State private var availableWidth: CGFloat = 0
 
+    /// The page's type, which is the platform's rather than a tvOS scale shrunk
+    /// down.
+    ///
+    /// `sectionHeaderFontSize` is tuned for a screen read across a room and takes
+    /// no account of Dynamic Type. The semantic faces below are what every other
+    /// iOS surface in this app uses for the same jobs, and they scale with the
+    /// user's chosen text size for free.
+    private var nameFont: Font {
+        #if os(tvOS)
+        .system(size: metrics.sectionHeaderFontSize * 1.6, weight: .bold)
+        #else
+        .largeTitle.bold()
+        #endif
+    }
+
+    private var roleFont: Font {
+        #if os(tvOS)
+        .system(size: metrics.sectionHeaderFontSize * 0.8)
+        #else
+        .title3
+        #endif
+    }
+
+    private var bodyFont: Font {
+        #if os(tvOS)
+        .system(size: metrics.sectionHeaderFontSize * 0.72)
+        #else
+        .body
+        #endif
+    }
+
+    /// Where a rail's content starts. The skeleton uses this too — a placeholder
+    /// that does not line up with what replaces it makes the page jump.
+    private var railInset: CGFloat {
+        PlozzTheme.Metrics.screenPadding + pageInset
+    }
+
     /// The page's own edge inset.
     ///
     /// Zero on tvOS, where `screenPadding` is zero and every row carries its own
@@ -49,8 +89,11 @@ public struct PersonDetailView: View {
         #if os(tvOS)
         return PlozzTheme.Metrics.screenPadding
         #else
-        guard availableWidth > 0 else { return 20 }
-        return availableWidth < 500 ? 20 : 28
+        // The same 22/36 every other iOS page in this app insets by. Stepped on
+        // the size class rather than interpolated on width, deliberately: the
+        // point of this number is that a person page lines up with Home and with
+        // a title's detail page, and those step here.
+        return horizontalSizeClass == .compact ? 22 : 36
         #endif
     }
 
@@ -166,12 +209,12 @@ public struct PersonDetailView: View {
     private var headerText: some View {
         VStack(alignment: .leading, spacing: PlozzTheme.Spacing.small) {
                 Text(person.name)
-                    .font(.system(size: metrics.sectionHeaderFontSize * 1.6, weight: .bold))
+                    .font(nameFont)
                 if let kind = person.kind, !kind.isEmpty, !person.isCast {
                     // Crew keep their discipline (Director, Writer): unlike a
                     // character it describes the person, not one credit.
                     Text(kind)
-                        .font(.system(size: metrics.sectionHeaderFontSize * 0.8))
+                        .font(roleFont)
                         .plozzForeground(.secondary)
                 }
                 if let biography = viewModel.biography {
@@ -179,7 +222,7 @@ public struct PersonDetailView: View {
                         text: biography,
                         title: person.name,
                         lineLimit: 3,
-                        font: .system(size: metrics.sectionHeaderFontSize * 0.72)
+                        font: bodyFont
                     )
                     .plozzForeground(.secondary)
                     .padding(.top, PlozzTheme.Spacing.small)
@@ -277,7 +320,7 @@ public struct PersonDetailView: View {
                     "Nothing else in your library with \(person.name).",
                     comment: "Empty state on a person's page. The placeholder is a person's name. Means the viewer owns nothing else featuring them, not that a lookup failed."
                 )
-                    .font(.system(size: metrics.sectionHeaderFontSize))
+                    .font(bodyFont)
                     .multilineTextAlignment(.center)
                     .plozzForeground(.secondary)
             }
@@ -309,10 +352,23 @@ public struct PersonDetailView: View {
                     // A bar where the heading will be, rather than a guess at
                     // its wording: naming a shelf that may not arrive is worse
                     // than not naming it.
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(.white.opacity(0.10))
-                        .frame(width: 240, height: metrics.sectionHeaderFontSize)
-                        .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                    // Sized by the REAL heading rather than by a number that
+                    // happens to look similar: an invisible line of text in the
+                    // font the rail will use, with the bar drawn over it. A
+                    // hardcoded height was a tvOS font size, so on iOS the
+                    // placeholder stood taller than the heading that replaced it
+                    // and the whole page settled downward as the credits landed.
+                    Text(verbatim: " ")
+                        .font(PlozzRailTitle.font(
+                            sectionHeaderFontSize: metrics.sectionHeaderFontSize
+                        ))
+                        .hidden()
+                        .overlay(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(.white.opacity(0.10))
+                                .frame(width: 240)
+                        }
+                        .padding(.leading, railInset)
                     // The same nested horizontal viewport the real rows use. A
                     // plain HStack reports its full intrinsic width to the outer
                     // vertical ScrollView even when clipped, which widens the
@@ -325,8 +381,8 @@ public struct PersonDetailView: View {
                                     .frame(width: metrics.posterWidth)
                             }
                         }
-                        .padding(.leading, PlozzTheme.Metrics.screenPadding)
-                        .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                        .padding(.leading, railInset)
+                        .padding(.trailing, railInset)
                         .padding(.vertical, metrics.railShadowClearance)
                     }
                     .padding(.top, metrics.railTopClearanceOffset)
@@ -357,7 +413,7 @@ public struct PersonDetailView: View {
                 // The content is inset, not the rail: a shelf that stops short of
                 // the edge reads as a boxed-in list, while one that bleeds says
                 // there is more to scroll to.
-                leadingInset: PlozzTheme.Metrics.screenPadding + pageInset,
+                leadingInset: railInset,
                 onSelect: onSelectItem
             )
                 // Each shelf is its own focus section, which MediaRowView

@@ -4,6 +4,25 @@ import CoreModels
 
 /// A horizontally-scrolling, focusable row of media cards with a title.
 /// Reused by Home (Continue Watching, Latest) and detail (episodes, related).
+/// The one definition of a rail heading's type.
+///
+/// Shared so a skeleton standing in for a rail can reserve exactly the height the
+/// real heading will take. A placeholder that guesses is a placeholder that
+/// shifts the page when the content lands.
+public enum PlozzRailTitle {
+    /// The platform's own section header, not a tvOS size shrunk down.
+    /// `sectionHeaderFontSize` is tuned for a screen read across a room and takes
+    /// no account of Dynamic Type; `.title2` is what every other iOS surface in
+    /// this app titles a rail with, and it scales with the user's text size.
+    public static func font(sectionHeaderFontSize: CGFloat) -> Font {
+        #if os(tvOS)
+        return .system(size: sectionHeaderFontSize, weight: .bold)
+        #else
+        return .title2.bold()
+        #endif
+    }
+}
+
 public struct MediaRowView: View {
     public enum Presentation: Equatable, Sendable {
         case poster
@@ -307,7 +326,9 @@ public struct MediaRowView: View {
             VStack(alignment: .leading, spacing: layoutMetrics.sectionTitleSpacing) {
                 if let title {
                     title
-                        .font(.system(size: layoutMetrics.sectionHeaderFontSize, weight: .bold))
+                        .font(PlozzRailTitle.font(
+                            sectionHeaderFontSize: layoutMetrics.sectionHeaderFontSize
+                        ))
                         .padding(.leading, leadingInset)
                 }
 

@@ -24,6 +24,10 @@ struct PlozziOSPlayerControlsOverlay: View {
     @State private var isScrubbing = false
     @State private var scrubPreviewCoordinator: ScrubPreviewCoordinator?
     @State private var presentedSheet: PlozziOSPlayerSheet?
+    /// Whether the Info / Cast card is expanded. Owned here rather than inside
+    /// the strip because dismissing it is this view's job: the tap that closes
+    /// it lands on the video, above the card, which the strip does not cover.
+    @State private var isCardOpen = false
     @State private var autoHideTask: Task<Void, Never>?
     @StateObject private var pictureInPicture = PlozziOSPictureInPictureController()
 
@@ -32,7 +36,18 @@ struct PlozziOSPlayerControlsOverlay: View {
             Color.clear
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
-                .onTapGesture { toggleControls() }
+                .onTapGesture {
+                    // An open card is what a tap out here means to dismiss.
+                    // Hiding the whole transport instead would take the card
+                    // with it and leave nothing to tap back — and the gesture
+                    // reads as "put that away", not "hide everything".
+                    if isCardOpen {
+                        isCardOpen = false
+                        noteInteraction()
+                    } else {
+                        toggleControls()
+                    }
+                }
 
             if isPlayingElsewhere {
                 PlozziOSExternalPlaybackPlaceholder(
@@ -111,6 +126,7 @@ struct PlozziOSPlayerControlsOverlay: View {
                         presentedSheet = .sync
                         cancelAutoHide()
                     },
+                    isCardOpen: $isCardOpen,
                     onInteraction: noteInteraction
                 )
             }
@@ -502,10 +518,29 @@ private struct PlozziOSPlayerTransport: View {
     let onShowSpeed: () -> Void
     let onShowSubtitles: () -> Void
     let onShowSync: () -> Void
+    @Binding var isCardOpen: Bool
     let onInteraction: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
+            // The shared Info / Cast card, above the scrubber and growing
+            // upward — the same view tvOS uses, not a reimplementation of it.
+            PlayerTouchCardStrip(
+                model: viewModel.controls,
+                isCardOpen: $isCardOpen,
+                onRestart: { viewModel.requestSeek(to: 0) },
+                onNextEpisode: { viewModel.playNextEpisode() },
+                onPreviousEpisode: {
+                    if let previous = viewModel.previousEpisode {
+                        viewModel.playEpisode(previous)
+                    }
+                }
+            )
+            .padding(.horizontal, 24)
+            // Any touch in here is deliberate interaction, so the controls must
+            // not auto-hide out from under someone reading a synopsis.
+            .onTapGesture { onInteraction() }
+
             if isScrubbing, showsScrubPreview {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12)

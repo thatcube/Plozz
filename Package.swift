@@ -328,6 +328,10 @@ let package = Package(
             dependencies: [
                 "CoreModels",
                 "CoreNetworking",
+                // For `PersonDetailViewModel`, which lives here rather than in
+                // FeatureHome so BOTH shells can build it: FeatureHome carries
+                // unguarded tvOS-only API and is never compiled for iOS.
+                "CoreUI",
                 "MetadataKit",
                 "RatingsService",
                 "ProviderTrailers"

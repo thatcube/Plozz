@@ -129,13 +129,29 @@ let package = Package(
         //     breaking change across the 84 releases in this range; no public
         //     symbol was removed or renamed.
         //
-        // Pinned to the 6.0.2 RELEASE rather than upstream HEAD, which carries
-        // unreleased seek-lifecycle work. Same reasoning as the exact-SHA pin:
-        // the playback path takes documented, released changes only.
+        // Pinned to the 6.4.0 RELEASE rather than upstream HEAD. Same reasoning as
+        // the exact-SHA pin: the playback path takes documented, released changes
+        // only. The SHA is the COMMIT the 6.4.0 tag points at, not the annotated
+        // tag object's own id — a `revision:` pin wants the commit.
+        //
+        // Moved up from 6.0.2. Four minor releases, no breaking change and no
+        // symbol removed or renamed, and two of them answer shapes Plozz actually
+        // serves:
+        //   - 6.4.0 finite HEVC-in-MPEG-TS HLS VOD no longer reaches AVPlayer's
+        //     audio-only black native path (AVFoundation builds no video track for
+        //     HEVC in TS), plus a correct playhead for containers starting at a
+        //     non-zero PTS.
+        //   - 6.3.0 `ExternalSubtitleTrack.sourceStreamIndex`: registering one
+        //     track per embedded subtitle stream of the SAME MKV previously gave
+        //     several selectable tracks that all rendered the first stream's cues.
+        //   - 6.2.0 `presentationAxisMap`, source-PTS to item-time in both
+        //     directions, for compositing an overlay onto native playback.
+        //   - 6.1.0 `seekEvents`, which distinguishes a landing from a give-up
+        //     from a supersede — the falling edge of `isSeeking` cannot.
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked.
-        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "a216ca28e933526d98e95338be26cfc733587fec"),
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "b43f17df6eb8fe150f570f88386c52020384c7ed"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

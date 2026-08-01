@@ -1,8 +1,11 @@
-#if canImport(SwiftUI)
 import Foundation
-import CoreModels
 
 /// What the in-player Cast tab can say about one person beyond their face.
+///
+/// In CoreModels rather than beside the pane that shows it, because two features
+/// need it and features may not depend on one another: `FeaturePlayback` renders
+/// it, `FeatureHomeCore` builds it. A plain value with no UI in it belongs at the
+/// layer below both.
 ///
 /// Deliberately a plain value loaded by a closure the app supplies, rather than
 /// anything the player resolves itself. Person credits need signed-in accounts,
@@ -73,4 +76,3 @@ public struct PlayerCastDetail: Sendable, Equatable {
 /// does not, and it was holding the credits hostage.
 public typealias PlayerCastDetailLoading =
     @MainActor @Sendable (MediaPerson) -> AsyncStream<PlayerCastDetail>
-#endif

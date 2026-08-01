@@ -747,10 +747,15 @@ private struct CastMemberDetail: View {
     var contentHeight: CGFloat { metrics.contentHeight }
     /// Kept clear on the right for the Back button, which floats above the
     /// content rather than sitting in the row with it.
-    /// Sized to the button itself (a `.body` chevron in 16pt of horizontal
-    /// padding, ~61pt) plus a hair of clearance, so the row runs right up to it
-    /// instead of stopping well short.
-    private static let backButtonLane: CGFloat = 62
+    ///
+    /// Measured from the button rather than fixed at the 62 the tvOS chevron
+    /// happens to need: the same button is drawn smaller on a small card, and a
+    /// lane that does not shrink with it eats a poster's worth of a narrow card
+    /// — while one that does not GROW lets the chevron sit on top of the last
+    /// poster, which is what these were doing.
+    private var backButtonLane: CGFloat {
+        metrics.contentPadding * 2 + 40
+    }
 
     /// How many lines of biography fit, derived from the budget rather than
     /// guessed at.
@@ -834,7 +839,7 @@ private struct CastMemberDetail: View {
                 }
                 // Clear of the Back button, which is an overlay pinned to this
                 // corner rather than a member of the row.
-                Spacer(minLength: Self.backButtonLane)
+                Spacer(minLength: backButtonLane)
             }
 
             // No line limit: the column scrolls, so a long life story is read
@@ -919,7 +924,7 @@ private struct CastMemberDetail: View {
                 // With a poster rail beside it the rail reserved this lane; with
                 // no credits the column takes the whole stage and ran straight
                 // under the chevron.
-                .padding(.trailing, expectsCredits ? 0 : Self.backButtonLane)
+                .padding(.trailing, expectsCredits ? 0 : backButtonLane)
 
             if expectsCredits {
                 // The lane is CLAIMED for the whole load, not only once there
@@ -953,7 +958,7 @@ private struct CastMemberDetail: View {
                 .opacity(contentVisible ? 1 : 0)
                 // Stop short of the Back button. Without this the row ran under
                 // it and a poster scrolled beneath the chevron.
-                .padding(.trailing, Self.backButtonLane)
+                .padding(.trailing, backButtonLane)
             }
         }
         .frame(height: contentHeight, alignment: .topLeading)
@@ -1293,13 +1298,19 @@ private struct CastCreditsRow: View {
         // content's) can never report the focused poster's grown size.
         .frame(height: posterHeight)
         .contentMargins(.horizontal, Self.fade, for: .scrollContent)
-        // The scroll view's own clip is off, and the mask below does ALL the
-        // clipping instead — because the two axes want opposite things. A
-        // scrolled poster must never slide over the biography or the Back
-        // button, so the sides have to be clipped; but nothing sits above or
-        // below the row except the card's padding, so clipping there only ever
-        // shaves the focused poster.
+        // The scroll view's own clip is off on tvOS ONLY, where the mask below
+        // does all the clipping instead — because there the two axes want
+        // opposite things. A scrolled poster must never slide over the biography
+        // or the Back button, so the sides have to be clipped; but a FOCUSED
+        // poster grows past the row, and clipping vertically would shave it.
+        //
+        // Touch has no focus lift, so nothing ever needs to overflow and the
+        // ordinary clip is simply correct — leaving it off let posters draw
+        // outside the card entirely, under the Back button and past the rounded
+        // corner.
+        #if os(tvOS)
         .scrollClipDisabled()
+        #endif
         .frame(maxWidth: .infinity, alignment: .leading)
         .mask { fadeMask }
         .onPreferenceChange(CastCreditLabelHeightKey.self) { labelHeights = $0 }
@@ -1358,7 +1369,12 @@ private struct CastCreditsRow: View {
 
     /// How far a focused poster grows past the row, per edge.
     private var liftOverhang: CGFloat {
-        (posterHeight * (Self.focusScale - 1) / 2).rounded(.up) + 2
+        #if os(tvOS)
+        return (posterHeight * (Self.focusScale - 1) / 2).rounded(.up) + 2
+        #else
+        // No focus, no lift, nothing to make room for.
+        return 0
+        #endif
     }
 
 

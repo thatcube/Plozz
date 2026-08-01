@@ -31,6 +31,10 @@ struct PlozziOSPlayerView: View {
     @Environment(HeroTrailerController.self) private var trailerController
     @Environment(PlozziOSAppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
+    /// Installed by the enclosing navigation stack. Used by the Cast card's
+    /// credit posters, which leave the film for a title's own page — the same
+    /// contract they have on tvOS.
+    @Environment(\.mediaItemNavigator) private var navigateToItem
     @State private var viewModel: PlayerViewModel?
     @State private var playerIdentity = UUID()
     @State private var handoffTask: Task<Void, Never>?
@@ -215,6 +219,31 @@ struct PlozziOSPlayerView: View {
         viewModel.onSubtitleStyleChanged = { style in
             settings.subtitleStyle.style = style
         }
+        // The Cast card's detail page, on the same ladder the tvOS player and
+        // the full person page use — the loader is shared rather than restated,
+        // so the three cannot drift. Without it the card showed faces and
+        // nothing behind them: tapping one opened a pane with no biography and
+        // no known-for row, because the loader lived in the tvOS-only shell.
+        viewModel.controls.infoCard.castDetailLoader = makeCastDetailLoader(
+            for: item,
+            accounts: appModel.accountsProviders.resolvedActiveAccounts
+        )
+        // Leaving the film is a NAVIGATION concern, so it is wired by the view
+        // that presented the player rather than by the factory that builds one —
+        // the same split the tvOS shell makes.
+        //
+        // Dismiss first, then navigate: the player is a full-screen cover, and
+        // pushing behind it would land the viewer on a page they cannot see.
+        if let navigateToItem {
+            viewModel.controls.infoCard.openTitlePage = { title in
+                dismiss()
+                navigateToItem(title)
+            }
+        }
+        // `openPersonPage` is deliberately left unset: iOS has no person page to
+        // open. The Cast pane already hides its "See more" chip when there is
+        // nowhere for it to go, which is the correct degradation — a control that
+        // does nothing reads as broken.
         return viewModel
     }
 

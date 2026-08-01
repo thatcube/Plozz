@@ -625,16 +625,21 @@ private struct PlozziOSPlayerTransport: View {
             }
 
             HStack(alignment: .bottom, spacing: 16) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(viewModel.controls.title)
-                        .font(.title3.weight(.semibold))
-                        .lineLimit(1)
+                // Episode line ABOVE the title, matching `titleBlock` on tvOS:
+                // "S1, E2 · Episode Title" reads as a qualifier of the series
+                // name, so it belongs above the thing it qualifies. This had the
+                // two the other way round.
+                VStack(alignment: .leading, spacing: 1) {
                     if !viewModel.controls.subtitle.isEmpty {
                         Text(viewModel.controls.subtitle)
                             .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.white.opacity(0.85))
                             .lineLimit(1)
                     }
+                    Text(viewModel.controls.title)
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
 
                 Spacer(minLength: 12)

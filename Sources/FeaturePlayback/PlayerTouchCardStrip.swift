@@ -249,12 +249,16 @@ public struct PlayerTouchScrubBar: View {
             let fraction = duration > 0 ? min(max(currentSeconds / duration, 0), 1) : 0
             let knobX = width * fraction
             let barHeight = isTouching ? Self.touchedHeight : Self.restingHeight
-            let knobWidth: CGFloat = isTouching ? 8 : 4
+            // Thinner than tvOS's 4/8. A remote's knob is read across a room and
+            // has to survive that distance; a finger's is read at arm's length
+            // and sits directly under the thing pointing at it, so the same
+            // weight weighs more here.
+            let knobWidth: CGFloat = isTouching ? 6 : 3
             // FLUSH at rest, exactly as `ScrubBar` is: the knob is the bar's own
             // height until the bar is touched, so nothing protrudes above or
             // below the track. It was 24 against a 12pt bar, which is what made
             // the whole control read as oversized when nothing was happening.
-            let knobHeight: CGFloat = isTouching ? 40 : barHeight
+            let knobHeight: CGFloat = isTouching ? 32 : barHeight
 
             ZStack(alignment: .leading) {
                 PlayerScrubTrackSurface(height: barHeight)

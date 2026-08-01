@@ -229,43 +229,21 @@ struct InfoActionButtonStyle: ButtonStyle {
 /// underneath it. The semantic values these replace were `.headline` (45.35pt
 /// per line) and `.footnote` (34.61) — both a size larger than this card, at
 /// three metres, actually needs.
+/// The player card's type scale at its **regular** size.
+///
+/// Kept as a name rather than inlined because it is the scale the cards were
+/// designed at, and `PlayerCardMetrics` carries the compact variant beside it.
+/// Views should read the fonts from the metrics, not from here — this exists so
+/// the regular numbers have somewhere to live that is not a preset literal.
 enum PlayerCardText {
     /// Titles: the episode/film name, a person's name.
-    static let title: Font = PlayerCardSurface.isCompact
-        ? .system(size: 17, weight: .semibold)
-        : .system(size: 34, weight: .bold)
+    static let title: Font = PlayerCardMetrics.regular.titleFont
     /// Running prose: a synopsis, a biography.
-    static let body: Font = PlayerCardSurface.isCompact
-        ? .system(size: 13)
-        : .system(size: 25)
+    static let body: Font = PlayerCardMetrics.regular.bodyFont
     /// Its line height, for height budgeting.
-    static let bodyLineHeight: CGFloat = PlayerCardSurface.isCompact ? 17 : 30
+    static let bodyLineHeight: CGFloat = PlayerCardMetrics.regular.bodyLineHeight
     /// Supporting detail: the meta row, a character name.
-    static let caption: Font = PlayerCardSurface.isCompact
-        ? .system(size: 11, weight: .medium)
-        : .system(size: 22, weight: .medium)
-}
-
-/// Whether the player's cards are laid out for a phone.
-///
-/// **Idiom, not size class.** The two disagree in the case that matters: an iPad
-/// in Slide Over reports a compact width, and it would be wrong to strip the
-/// card down for that when the player is full-screen regardless. What actually
-/// changes here is the physical device, and that cannot change while the app
-/// runs — so this is a constant, not state, and the numbers that derive from it
-/// can stay `static`. That matters more than it sounds: `cardHeight`, the cast
-/// cards and the credit posters are all `static` and all derive from those
-/// numbers, so they scale for free rather than each needing to be threaded a
-/// size class.
-enum PlayerCardSurface {
-    #if os(tvOS)
-    static let isCompact = false
-    #else
-    // Read off the main-thread-bound `UIDevice` exactly once, at the first
-    // touch of any card metric — which happens during layout, on the main actor.
-    nonisolated(unsafe) static let isCompact: Bool =
-        UIDevice.current.userInterfaceIdiom == .phone
-    #endif
+    static let caption: Font = PlayerCardMetrics.regular.captionFont
 }
 
 struct PlayerTabButtonStyle: ButtonStyle {

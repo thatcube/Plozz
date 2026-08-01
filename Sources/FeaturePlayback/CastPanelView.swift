@@ -12,6 +12,7 @@ import CoreModels
 /// fixed stage that the reveal transform moves as a unit, so anything that
 /// changed its height would make the whole transport jump.
 struct CastPanelView: View {
+    @Environment(\.playerCardMetrics) private var metrics
     let model: PlayerControlsModel
     @FocusState.Binding var focus: PlayerControls.FocusSlot?
     /// The person shown in detail, or `nil` for the row. Owned by
@@ -182,7 +183,7 @@ struct CastPanelView: View {
                     .onChange(of: geometry.size) { _, size in panelSize = size }
             }
         }
-        .frame(height: InfoPanelView.cardHeight)
+        .frame(height: metrics.cardHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: closeRequest) { _, _ in
             guard detailPerson != nil else { return }
@@ -239,10 +240,10 @@ struct CastPanelView: View {
             // the viewer has just chosen.
             return openedCardFrame.map {
                 CGRect(
-                    x: $0.minX + CastFaceCard.headshotOrigin.x,
-                    y: $0.minY + CastFaceCard.headshotOrigin.y,
-                    width: CastFaceCard.headshot,
-                    height: CastFaceCard.headshot
+                    x: $0.minX + metrics.castHeadshotOrigin.x,
+                    y: $0.minY + metrics.castHeadshotOrigin.y,
+                    width: metrics.castHeadshot,
+                    height: metrics.castHeadshot
                 )
             }
         }
@@ -266,8 +267,8 @@ struct CastPanelView: View {
         // the reported focus scale is deliberately not applied.
         let collapsed = openedCardFrame ?? CGRect(
             x: 0, y: 0,
-            width: CastFaceCard.width,
-            height: InfoPanelView.cardHeight
+            width: metrics.castCardWidth,
+            height: metrics.cardHeight
         )
         let radius = isExpanded
             ? PlozzTheme.Metrics.playerPanelCornerRadius
@@ -431,7 +432,7 @@ struct CastPanelView: View {
             // edge is the panel's edge — flush with the Info tab above it. An
             // inset here made the row start indented from everything else in the
             // cluster.
-            .padding(.trailing, InfoPanelView.contentPadding)
+            .padding(.trailing, metrics.contentPadding)
             // No vertical inset: a cast card stands in the Info panel's place, so
             // it has to be the Info panel's height. The inset that used to be here
             // was reserving room for the focus lift, which `scrollClipDisabled`
@@ -460,41 +461,16 @@ struct CastPanelView: View {
 /// swaps with, gives focus something substantial to land on, and leaves the
 /// character name room to read from across a room.
 private struct CastFaceCard: View {
+    @Environment(\.playerCardMetrics) private var metrics
     let person: MediaPerson
     let focused: Bool
 
-    /// The headshot plus the space that has always sat either side of it, so
-    /// enlarging the face widens the CARD rather than crowding it. Previously
-    /// 190 and 128 were independent constants and the relationship between them
-    /// was accidental; this keeps it at the 31pt it happened to be.
-    static var width: CGFloat { headshot + headshotSideSpace * 2 }
-    /// Scaled with the card on iPad, where it is read at arm's length rather
-    /// than across a room, and again on a phone. Kept to multiples of 8 so the
-    /// row's rhythm survives.
-    #if os(tvOS)
-    static let headshot: CGFloat = 160
-    private static let headshotSideSpace: CGFloat = 31
-    private static let verticalInset: CGFloat = 18
-    #else
-    static let headshot: CGFloat = PlayerCardSurface.isCompact ? 72 : 128
-    private static let headshotSideSpace: CGFloat = PlayerCardSurface.isCompact ? 12 : 24
-    private static let verticalInset: CGFloat = PlayerCardSurface.isCompact ? 8 : 12
-    #endif
-    /// Where the circle sits inside the card, so the drill can start the
-    /// detail's headshot exactly on top of it.
-    static let headshotOrigin = CGPoint(x: headshotSideSpace, y: verticalInset)
     /// The labels' own inset, which is narrower — they may run closer to the
     /// card's edge than the circle does.
     private static let inset: CGFloat = 12
     /// The full tvOS card lift. These are small cards in a row, where the gentle
     /// default barely registered.
     static let focusScale: CGFloat = 1.10
-    /// How far the lift pushes each edge out, for anything that has to reason
-    /// about where a focused card actually is.
-    static let lift = CGSize(
-        width: width * (focusScale - 1) / 2,
-        height: InfoPanelView.cardHeight * (focusScale - 1) / 2
-    )
     /// The panel's radius. These cards stand in the Info panel's place when the
     /// tab switches, so their corners have to be its corners — anything else
     /// makes the two tabs look like different surfaces.
@@ -503,7 +479,7 @@ private struct CastFaceCard: View {
     var body: some View {
         VStack(spacing: 12) {
             avatar
-                .frame(width: Self.headshot, height: Self.headshot)
+                .frame(width: metrics.castHeadshot, height: metrics.castHeadshot)
                 .clipShape(Circle())
                 // The photo reports where it actually IS, rather than the drill
                 // reconstructing it from this card's internal constants.
@@ -551,9 +527,9 @@ private struct CastFaceCard: View {
             // the label enough that names started scrolling well short of the
             // edge, with dead card either side of them.
         }
-        .padding(.vertical, Self.verticalInset)
+        .padding(.vertical, metrics.castVerticalInset)
         .padding(.horizontal, Self.inset)
-        .frame(width: Self.width)
+        .frame(width: metrics.castCardWidth)
         .frame(maxHeight: .infinity)
         // Surface, lift and shadow all come from PlozzCardButtonStyle.
     }
@@ -588,6 +564,7 @@ private struct CastFaceCard: View {
 /// elsewhere would end the film, which is the one thing a glance mid-scene must
 /// never do.
 private struct CastMemberDetail: View {
+    @Environment(\.playerCardMetrics) private var metrics
     let person: MediaPerson
     let loader: PlayerCastDetailLoading?
     let onOpenPage: ((MediaPerson) -> Void)?
@@ -608,21 +585,19 @@ private struct CastMemberDetail: View {
     /// it gets the same room the posters opposite it get. Still a circle, and
     /// deliberately: it has to morph from the circle on the face card without a
     /// shape change halfway.
-    private static var headshot: CGFloat { contentHeight }
+    private var headshot: CGFloat { contentHeight }
     /// Wide enough for a name beside the headshot and a biography that reads as
     /// prose beneath it. The artwork pays for every point of this, but the row
     /// scrolls and a truncated sentence does not. A phone cannot spend 900 —
     /// that is wider than the screen — so it takes what a landscape iPhone has
     /// left once the headshot and the Back lane are paid for.
-    private static let identityWidth: CGFloat = PlayerCardSurface.isCompact ? 380 : 900
+    private var identityWidth: CGFloat { metrics.castIdentityWidth }
     /// The stage, less its inset. Everything in the pane is pinned to this: a
     /// column that exceeds it pushes the whole HStack past the frame that is
     /// meant to contain it, and the overflow is then split between the top and
     /// bottom — which is exactly what made the top inset look tighter than the
     /// bottom one.
-    static var contentHeight: CGFloat {
-        InfoPanelView.cardHeight - InfoPanelView.contentPadding * 2
-    }
+    var contentHeight: CGFloat { metrics.contentHeight }
     /// Kept clear on the right for the Back button, which floats above the
     /// content rather than sitting in the row with it.
     /// Sized to the button itself (a `.body` chevron in 16pt of horizontal
@@ -638,12 +613,12 @@ private struct CastMemberDetail: View {
     /// the name at the top and the chip at the bottom. Three is what is left,
     /// and the chip is there precisely so a longer life story has somewhere to
     /// be read in full.
-    private static var biographyLineLimit: Int {
+    private var biographyLineLimit: Int {
         let budget = contentHeight
             - 41   // name
             - 12   // gap above the biography
             - 58   // "See more" chip and its gap
-        return max(2, Int(budget / PlayerCardText.bodyLineHeight))
+        return max(2, Int(budget / metrics.bodyLineHeight))
     }
 
     /// `nil` while the request is in flight, which is NOT the same as an empty
@@ -670,12 +645,12 @@ private struct CastMemberDetail: View {
                 // Centred, not top-aligned. Beside a rail of full-height posters
                 // a short text block pinned to the top left an obvious well of
                 // empty card beneath it.
-                .frame(height: Self.contentHeight, alignment: .leading)
+                .frame(height: contentHeight, alignment: .leading)
                 // Full width when there is nothing to sit beside, so the
                 // biography can run properly instead of hugging one edge with
                 // half the pane left empty.
                 .frame(
-                    width: expectsCredits ? Self.identityWidth : nil,
+                    width: expectsCredits ? identityWidth : nil,
                     alignment: .leading
                 )
                 .frame(maxWidth: expectsCredits ? nil : .infinity, alignment: .leading)
@@ -720,10 +695,10 @@ private struct CastMemberDetail: View {
                 .padding(.trailing, Self.backButtonLane)
             }
         }
-        .frame(height: Self.contentHeight, alignment: .topLeading)
+        .frame(height: contentHeight, alignment: .topLeading)
         // Scoped to this subtree on purpose — see the loader below.
         .animation(.easeOut(duration: 0.25), value: detail)
-        .padding(InfoPanelView.contentPadding)
+        .padding(metrics.contentPadding)
         // An OVERLAY, not the last item in the row. In the flow its position
         // depended on how wide its neighbour was — so it started beside the
         // name and flew across the pane the instant the credits loaded. Pinned
@@ -740,7 +715,7 @@ private struct CastMemberDetail: View {
             .focusEffectDisabled()
             .focused($focus, equals: .castBack)
             .opacity(contentVisible ? 1 : 0)
-            .padding(InfoPanelView.contentPadding)
+            .padding(metrics.contentPadding)
         }
         // Pinned to the stage in BOTH axes. Height was left to the content, so
         // the pane opened at the height of a name and grew the moment the
@@ -753,7 +728,7 @@ private struct CastMemberDetail: View {
         // arrived the pane could ask for more and get it. This is the same
         // promise `InfoPanelView` makes about itself.
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .frame(height: InfoPanelView.cardHeight)
+        .frame(height: metrics.cardHeight)
         // Keyed on the person: switching between two faces without leaving the
         // detail has to re-ask, and re-asking must not show the previous
         // person's credits while it does.
@@ -833,7 +808,7 @@ private struct CastMemberDetail: View {
         // edge would strand it against the middle of a large circle.
         HStack(alignment: .center, spacing: 24) {
             avatar
-                .frame(width: Self.headshot, height: Self.headshot)
+                .frame(width: headshot, height: headshot)
                 .clipShape(Circle())
                 // Travels between the card's circle and its own.
                 //
@@ -861,7 +836,7 @@ private struct CastMemberDetail: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: person.name)
-                    .font(PlayerCardText.title)
+                    .font(metrics.titleFont)
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     // The name holds its size. It is the heading of this pane,
@@ -873,14 +848,14 @@ private struct CastMemberDetail: View {
                 // the viewer just read.
                 if let biography = detail?.biography, !biography.isEmpty {
                     Text(verbatim: biography)
-                        .font(PlayerCardText.body)
+                        .font(metrics.bodyFont)
                         .foregroundStyle(.white.opacity(0.82))
                         .lineSpacing(2)
                         // As many lines as the column has room for; with no rail
                         // beside it there is the whole pane to fill.
                         // What the column can actually HOLD, which is three
                         // lines either way — see `biographyLineLimit`.
-                        .lineLimit(Self.biographyLineLimit)
+                        .lineLimit(biographyLineLimit)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 12)
                 } else if detail?.isComplete == true, detail?.isEmpty == true {
@@ -895,7 +870,7 @@ private struct CastMemberDetail: View {
                         defaultValue: "No further details available.",
                         comment: "Shown in the in-player cast card when no source has a biography or other titles for this person."
                     ))
-                    .font(PlayerCardText.body)
+                    .font(metrics.bodyFont)
                     .foregroundStyle(.white.opacity(0.5))
                     .padding(.top, 12)
                 } else if let life = detail?.lifeSummary, !life.isEmpty {
@@ -905,7 +880,7 @@ private struct CastMemberDetail: View {
                     // no biography at all this is the one thing that places
                     // them, and Plex often has it when it has nothing else.
                     Text(verbatim: life)
-                        .font(PlayerCardText.body)
+                        .font(metrics.bodyFont)
                         .foregroundStyle(.white.opacity(0.72))
                         .lineLimit(2)
                         .padding(.top, 12)
@@ -936,7 +911,7 @@ private struct CastMemberDetail: View {
                             Image(systemName: "chevron.forward")
                                 .font(.system(size: 18, weight: .semibold))
                         }
-                        .font(PlayerCardText.caption)
+                        .font(metrics.captionFont)
                     }
                     .buttonStyle(PlozzPanelHeaderButtonStyle())
                     .focusEffectDisabled()
@@ -969,20 +944,20 @@ private struct CastMemberDetail: View {
 
     /// The headshot's own position within the pane, which its travel is
     /// measured from: the pane's inset on both axes.
-    private static var restingOrigin: CGPoint {
-        CGPoint(x: InfoPanelView.contentPadding, y: InfoPanelView.contentPadding)
+    private var restingOrigin: CGPoint {
+        CGPoint(x: metrics.contentPadding, y: metrics.contentPadding)
     }
 
     private var headshotScale: CGFloat {
         guard !isExpanded, let collapsedHeadshot else { return 1 }
-        return collapsedHeadshot.width / Self.headshot
+        return collapsedHeadshot.width / headshot
     }
 
     private var headshotOffset: CGSize {
         guard !isExpanded, let collapsedHeadshot else { return .zero }
         return CGSize(
-            width: collapsedHeadshot.minX - Self.restingOrigin.x,
-            height: collapsedHeadshot.minY - Self.restingOrigin.y
+            width: collapsedHeadshot.minX - restingOrigin.x,
+            height: collapsedHeadshot.minY - restingOrigin.y
         )
     }
 
@@ -1010,6 +985,7 @@ private struct CastMemberDetail: View {
 ///
 /// Not focusable, by design. Nothing in this card may end the film.
 private struct CastCreditsRow: View {
+    @Environment(\.playerCardMetrics) private var metrics
     let items: [MediaItem]
     @FocusState.Binding var focus: PlayerControls.FocusSlot?
     /// Opens a title's own page, ending playback. `nil` leaves the posters inert.
@@ -1038,13 +1014,8 @@ private struct CastCreditsRow: View {
     /// poster permanently to accommodate a state one of them is in briefly is a
     /// bad trade; the lift is allowed to overflow instead, into the card's own
     /// padding, which is 24pt and swallows it whole.
-    private static var height: CGFloat {
-        InfoPanelView.cardHeight - InfoPanelView.contentPadding * 2
-    }
-    private static var width: CGFloat { (height * 2 / 3).rounded() }
-
-    private var posterHeight: CGFloat { Self.height }
-    private var posterWidth: CGFloat { Self.width }
+    private var posterHeight: CGFloat { metrics.contentHeight }
+    private var posterWidth: CGFloat { (posterHeight * 2 / 3).rounded() }
     /// Modest on purpose: every percent of growth is height the poster gives up
     /// at rest to make room for it.
     private static let focusScale: CGFloat = 1.06
@@ -1060,8 +1031,8 @@ private struct CastCreditsRow: View {
     /// (see `playerPanelCornerRadius`, which is this plus `contentPadding`), so
     /// inverting it for content inset by exactly that padding gives curves that
     /// stay parallel to the panel's own.
-    private static var cornerRadius: CGFloat {
-        PlozzTheme.Metrics.playerPanelCornerRadius - InfoPanelView.contentPadding
+    private var cornerRadius: CGFloat {
+        PlozzTheme.Metrics.playerPanelCornerRadius - metrics.contentPadding
     }
 
     var body: some View {
@@ -1113,7 +1084,7 @@ private struct CastCreditsRow: View {
         // Overhang for the focus lift. A mask hides everything its own drawing
         // does not cover, so a mask the exact height of the row IS a vertical
         // clip — this is what was still shaving the focused poster.
-        .padding(.vertical, -Self.liftOverhang)
+        .padding(.vertical, -liftOverhang)
     }
 
     /// An EASED ramp, not a straight one.
@@ -1148,8 +1119,8 @@ private struct CastCreditsRow: View {
     }
 
     /// How far a focused poster grows past the row, per edge.
-    private static var liftOverhang: CGFloat {
-        (height * (focusScale - 1) / 2).rounded(.up) + 2
+    private var liftOverhang: CGFloat {
+        (posterHeight * (Self.focusScale - 1) / 2).rounded(.up) + 2
     }
 
 
@@ -1160,7 +1131,7 @@ private struct CastCreditsRow: View {
                 CastCreditPlaceholderTile(
                     width: posterWidth,
                     height: posterHeight,
-                    cornerRadius: Self.cornerRadius,
+                    cornerRadius: cornerRadius,
                     delay: Double(index) * 0.08
                 )
             }
@@ -1195,12 +1166,12 @@ private struct CastCreditsRow: View {
                             )
                         }
                         .overlay(alignment: .bottom) { titleLabel(item, shown: isFocused) }
-                        .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                         .animation(.easeOut(duration: 0.2), value: isFocused)
                 }
                 .buttonStyle(PlayerOverVideoCardStyle(
                     focused: isFocused,
-                    cornerRadius: Self.cornerRadius,
+                    cornerRadius: cornerRadius,
                     focusScale: Self.focusScale
                 ))
                 .focused($focus, equals: .castCredit(index))

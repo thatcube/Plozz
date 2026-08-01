@@ -39,6 +39,15 @@ public struct PlayerTouchCardStrip: View {
     @FocusState private var focus: PlayerControls.FocusSlot?
     @State private var castDetailPerson: MediaPerson?
     @State private var castCloseRequest = 0
+    /// The width the strip has actually been given, which decides the card's
+    /// layout. Measured rather than inferred from idiom or size class: an iPad
+    /// window can be dragged to any width, and the card has to answer for the
+    /// one it got.
+    @State private var availableWidth: CGFloat = 0
+
+    private var metrics: PlayerCardMetrics {
+        .resolved(forWidth: availableWidth)
+    }
 
     public init(
         model: PlayerControlsModel,
@@ -70,6 +79,16 @@ public struct PlayerTouchCardStrip: View {
         }
         .animation(.easeInOut(duration: 0.24), value: openPanel)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .environment(\.playerCardMetrics, metrics)
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { availableWidth = geometry.size.width }
+                    .onChange(of: geometry.size.width) { _, width in
+                        availableWidth = width
+                    }
+            }
+        }
         // Kept in step both ways: this view decides WHICH tab is open, the host
         // only ever needs to know THAT one is, and to be able to close it.
         .onChange(of: openPanel) { _, panel in
@@ -134,7 +153,7 @@ public struct PlayerTouchCardStrip: View {
                 )
             }
         }
-        .frame(height: InfoPanelView.cardHeight)
+        .frame(height: metrics.cardHeight)
         // Deliberately NOT clipped to the panel's rounded rectangle.
         //
         // Both panels already draw their own rounded glass, so a clip here buys

@@ -14,42 +14,19 @@ import CoreModels
 /// owns none of the panel morph/focus-restore choreography — that stays in
 /// `PlayerControls` — so this is a pure content extraction.
 struct InfoPanelView: View {
-    /// Fixed 16:9 thumbnail height; the card's height is derived from it.
+    /// The regular-size numbers, for the tvOS transport's parking offset.
     ///
-    /// Raised from 210 to give BOTH tabs of the card real room — the Cast tab
-    /// shares this stage, and at 210 its credit posters, biography and face
-    /// cards were all fighting for the same scarce lines. Everything that sizes
-    /// off `cardHeight` follows automatically.
-    /// Height of the card's thumbnail, and the peg everything else hangs off.
-    ///
-    /// Smaller on iPad, where the same card is read at arm's length rather than
-    /// across a room: 250 + 24 padding gives a 298pt card that is right at three
-    /// metres and overbearing on an 11-inch display. 208 + 16 lands the card at
-    /// exactly 240 — a fifth shorter, and every value here a multiple of 8, so
-    /// the rhythm survives the change.
-    #if os(tvOS)
-    static let thumbHeight: CGFloat = 250
-    /// Padding between the card's content and its glass edge.
-    static let contentPadding: CGFloat = 24
-    #else
-    /// On a phone the card carries no thumbnail at all (see `body`), so this is
-    /// the content's height rather than any picture's. 128 + 12 padding lands
-    /// the card at 152 — about a third of an iPhone's landscape height, which is
-    /// as much as a card describing the video can take before it buries it.
-    static let thumbHeight: CGFloat = PlayerCardSurface.isCompact ? 128 : 208
-    /// Padding between the card's content and its glass edge.
-    static let contentPadding: CGFloat = PlayerCardSurface.isCompact ? 12 : 16
-    #endif
+    /// `PlayerControls` needs a card height before the first frame — measuring
+    /// it instead meant the parked offset changed the moment the measurement
+    /// landed, which showed up as the transport jumping. tvOS has exactly one
+    /// size, so a static answer is a true one there; every other surface reads
+    /// `playerCardMetrics` from the environment, because a resizable window has
+    /// no single answer.
+    static var thumbHeight: CGFloat { PlayerCardMetrics.platformDefault.contentHeight }
+    static var contentPadding: CGFloat { PlayerCardMetrics.platformDefault.contentPadding }
+    static var cardHeight: CGFloat { PlayerCardMetrics.platformDefault.cardHeight }
 
-    /// The card's **exact** laid-out height, known up front rather than measured.
-    ///
-    /// Everything in the card is pinned to `thumbHeight` (the text column and the
-    /// action column both are), so this is deterministic. `PlayerControls` needs it
-    /// before the first frame to park the cluster with the card just off-screen —
-    /// measuring it instead meant the parked offset changed the moment the
-    /// measurement landed (and again whenever metadata arrived), which showed up as
-    /// the transport jumping.
-    static var cardHeight: CGFloat { thumbHeight + contentPadding * 2 }
+    @Environment(\.playerCardMetrics) private var metrics
 
     let model: PlayerControlsModel
     let actions: PlayerOptionsActions
@@ -85,19 +62,18 @@ struct InfoPanelView: View {
         // nested inside the card's glass radius (outer = inner + content padding),
         // so both corners share a centre.
         let thumbRadius = PlozzTheme.Metrics.mediumMediaCornerRadius
-        let contentPad = Self.contentPadding
-        let thumbHeight = Self.thumbHeight
+        let contentPad = metrics.contentPadding
 
         return Group {
-            if PlayerCardSurface.isCompact {
-                compactBody
+            if metrics.showsThumbnail {
+                regularBody(thumbRadius: thumbRadius, thumbHeight: metrics.contentHeight)
             } else {
-                regularBody(thumbRadius: thumbRadius, thumbHeight: thumbHeight)
+                compactBody
             }
         }
         .padding(contentPad)
         // Pin the height so `cardHeight` is a promise, not an estimate.
-        .frame(height: Self.cardHeight)
+        .frame(height: metrics.cardHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(PanelGlassBackground(cornerRadius: PlozzTheme.Metrics.playerPanelCornerRadius))
     }
@@ -114,26 +90,41 @@ struct InfoPanelView: View {
     private var compactBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(model.infoCard.headline.isEmpty ? "Now Playing" : model.infoCard.headline)
-                .font(PlayerCardText.title)
+                .font(metrics.titleFont)
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             if !model.infoCard.overview.isEmpty {
                 Text(model.infoCard.overview)
-                    .font(PlayerCardText.body)
+                    .font(metrics.bodyFont)
                     .foregroundStyle(.white.opacity(0.82))
-                    .lineLimit(3)
+                    .lineLimit(metrics.overviewLineLimit)
                     .truncationMode(.tail)
                     .layoutPriority(1)
             }
 
             Spacer(minLength: 0)
 
-            // One bottom line, because there is no room for two: Playback Info
-            // at the far left — kept apart from the three transport actions,
-            // being a diagnostics toggle rather than something you reach for
-            // while watching — then the metadata, then the actions at the right.
+            // Metadata gets its own line, and gives up its badges rather than
+            // clipping them.
+            //
+            // `ViewThatFits` because the badge row's width is content, not
+            // layout: four badges on a 4K Dolby Vision Atmos file are far wider
+            // than the one on a plain SDR episode, so no fixed breakpoint gets
+            // this right. It takes the full row when it fits and the meta line
+            // alone when it does not — which is the correct thing to drop, the
+            // badges being available on the item's detail page while the
+            // season/episode/runtime is the line that says WHERE you are.
+            ViewThatFits(in: .horizontal) {
+                metaRow(includingBadges: true)
+                metaRow(includingBadges: false)
+            }
+
+            // Playback Info at the far left, apart from the three transport
+            // actions: it is a diagnostics toggle rather than something reached
+            // for while watching, and grouping it with them would invite it to
+            // be pressed by mistake.
             HStack(spacing: 10) {
                 infoActionButton(
                     title: "Playback Info",
@@ -144,17 +135,7 @@ struct InfoPanelView: View {
                     model.diagnosticsEnabled.toggle()
                 }
 
-                if !infoMetaLine.isEmpty {
-                    Text(infoMetaLine)
-                        .font(PlayerCardText.caption)
-                        .foregroundStyle(.white.opacity(0.6))
-                        .lineLimit(1)
-                }
-                if !model.infoCard.badges.isEmpty {
-                    MediaBadgeRow(badges: model.infoCard.badges)
-                }
-
-                Spacer(minLength: 8)
+                Spacer(minLength: 12)
 
                 infoActionButton(title: "Restart", icon: "arrow.counterclockwise", prominent: false, slot: .infoRestart) {
                     actions.restart()
@@ -176,13 +157,29 @@ struct InfoPanelView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    @ViewBuilder
+    private func metaRow(includingBadges: Bool) -> some View {
+        HStack(spacing: 10) {
+            if !infoMetaLine.isEmpty {
+                Text(infoMetaLine)
+                    .font(metrics.captionFont)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+            }
+            if includingBadges, !model.infoCard.badges.isEmpty {
+                MediaBadgeRow(badges: model.infoCard.badges)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
     private func regularBody(thumbRadius: CGFloat, thumbHeight: CGFloat) -> some View {
         HStack(alignment: .top, spacing: 28) {
             infoThumbnail(cornerRadius: thumbRadius, height: thumbHeight)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.infoCard.headline.isEmpty ? "Now Playing" : model.infoCard.headline)
-                    .font(PlayerCardText.title)
+                    .font(metrics.titleFont)
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .truncationMode(.tail)
@@ -211,11 +208,11 @@ struct InfoPanelView: View {
                     // both of its lines whenever the synopsis is short enough to
                     // leave room, and truncating to one when it isn't.
                     Text(model.infoCard.overview)
-                        .font(PlayerCardText.body)
+                        .font(metrics.bodyFont)
                         .foregroundStyle(.white.opacity(0.82))
                         // Four lines now that the card is 40pt taller. Still a
                         // cap rather than a reservation — see the note above.
-                        .lineLimit(4)
+                        .lineLimit(metrics.overviewLineLimit)
                         .truncationMode(.tail)
                         .padding(.top, 1)
                         .layoutPriority(1)
@@ -234,7 +231,7 @@ struct InfoPanelView: View {
                 HStack(alignment: .center, spacing: 12) {
                     if !infoMetaLine.isEmpty {
                         Text(infoMetaLine)
-                            .font(PlayerCardText.caption)
+                            .font(metrics.captionFont)
                             .foregroundStyle(.white.opacity(0.6))
                             .lineLimit(1)
                     }

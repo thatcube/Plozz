@@ -718,7 +718,16 @@ public struct PersonDetailView: View {
                 }
             }
         case .loading, .loaded where !viewModel.creditsAreFinal:
-            creditlessState { ProgressView().scaleEffect(1.5) }
+            VStack(alignment: .leading, spacing: PlozzTheme.Spacing.large) {
+                creditShelfSkeleton
+                // Keeps a focus target on the page while every shelf is a
+                // placeholder. The skeleton itself is deliberately not
+                // focusable, so without this focus has nowhere to rest.
+                goBackButton
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            }
+            .defaultFocus($backFocused, true)
         case .loaded, .unavailable:
             // A source that couldn't answer and a person with genuinely nothing
             // else are indistinguishable here, and either way the honest thing to
@@ -743,6 +752,58 @@ public struct PersonDetailView: View {
     /// `kinds: nil` means "everything not claimed by a named row above", so no
     /// item can be silently dropped by adding a row.
     @ViewBuilder
+    /// Stand-in shelves while the credit order is being settled.
+    ///
+    /// The same shape the real shelves take, so filling them in shifts nothing —
+    /// a spinner sat in the middle of the page and then the whole thing jumped
+    /// as rows appeared around it. Two rows because that is the common outcome:
+    /// what they are known for, and what of it the viewer owns.
+    ///
+    /// Not focusable, so the engine can never anchor on a placeholder and strand
+    /// focus where a real card is about to be. Back stays reachable because the
+    /// header above it is focusable in its own right.
+    private var creditShelfSkeleton: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(0..<2, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
+                    // A bar where the heading will be, rather than a guess at
+                    // its wording: naming a shelf that may not arrive is worse
+                    // than not naming it.
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(.white.opacity(0.10))
+                        .frame(width: 240, height: metrics.sectionHeaderFontSize)
+                        .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                    // The same nested horizontal viewport the real rows use. A
+                    // plain HStack reports its full intrinsic width to the outer
+                    // vertical ScrollView even when clipped, which widens the
+                    // page and lets tvOS pan it sideways while the skeleton is
+                    // up — the exact problem documented on the Related row.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: metrics.cardSpacing) {
+                            ForEach(0..<Self.skeletonCardCount, id: \.self) { _ in
+                                SkeletonCardView(style: .poster)
+                                    .frame(width: metrics.posterWidth)
+                            }
+                        }
+                        .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                        .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                        .padding(.vertical, metrics.railShadowClearance)
+                    }
+                    .padding(.top, metrics.railTopClearanceOffset)
+                    .padding(.bottom, metrics.railBottomClearanceOffset)
+                    .scrollDisabled(true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    /// Enough to read as a row without measuring the viewport — clipped at the
+    /// trailing edge exactly as real cards are.
+    private static let skeletonCardCount = 8
+
     private func shelf(_ title: LocalizedStringResource, items: [MediaItem]) -> some View {
         shelfBody(Text(title), items: items)
     }
@@ -871,18 +932,28 @@ public struct PersonDetailView: View {
     private func creditlessState(@ViewBuilder _ content: () -> some View) -> some View {
         VStack(spacing: PlozzTheme.Spacing.large) {
             content()
-            Button {
-                dismiss()
-            } label: {
-                Label("Go Back", systemImage: "chevron.backward")
-                    .frame(minWidth: 260)
-            }
-            .buttonStyle(.borderedProminent)
-            .focused($backFocused)
+            goBackButton
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
         .defaultFocus($backFocused, true)
+    }
+
+    /// The page's own way out.
+    ///
+    /// Shared with the loading state rather than living only in `creditlessState`,
+    /// because a page whose only focusable content is a placeholder has nowhere
+    /// for focus to rest — and this button is what keeps Menu working while
+    /// there is nothing else to hold it.
+    private var goBackButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Label("Go Back", systemImage: "chevron.backward")
+                .frame(minWidth: 260)
+        }
+        .buttonStyle(.borderedProminent)
+        .focused($backFocused)
     }
 }
 private extension View {

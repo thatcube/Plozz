@@ -35,6 +35,8 @@ struct PlozziOSPlayerView: View {
     /// credit posters, which leave the film for a title's own page — the same
     /// contract they have on tvOS.
     @Environment(\.mediaItemNavigator) private var navigateToItem
+    /// Likewise for "See more" on a cast member, which opens their own page.
+    @Environment(\.mediaPersonNavigator) private var navigateToPerson
     @State private var viewModel: PlayerViewModel?
     @State private var playerIdentity = UUID()
     @State private var handoffTask: Task<Void, Never>?
@@ -240,10 +242,12 @@ struct PlozziOSPlayerView: View {
                 navigateToItem(title)
             }
         }
-        // `openPersonPage` is deliberately left unset: iOS has no person page to
-        // open. The Cast pane already hides its "See more" chip when there is
-        // nowhere for it to go, which is the correct degradation — a control that
-        // does nothing reads as broken.
+        if let navigateToPerson {
+            viewModel.controls.infoCard.openPersonPage = { person in
+                dismiss()
+                navigateToPerson(person)
+            }
+        }
         return viewModel
     }
 

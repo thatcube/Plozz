@@ -2,6 +2,8 @@
 import AppRuntime
 import CoreModels
 import CoreUI
+import FeatureHomeCore
+import MetadataKit
 import SwiftUI
 
 /// Programmatic navigation to an item's detail page.
@@ -18,6 +20,7 @@ import SwiftUI
 private struct PlozziOSItemNavigationModifier: ViewModifier {
     let appModel: PlozziOSAppModel
     @State private var navigatedItem: MediaItem?
+    @State private var navigatedPerson: MediaPerson?
 
     func body(content: Content) -> some View {
         content
@@ -49,11 +52,44 @@ private struct PlozziOSItemNavigationModifier: ViewModifier {
                     )
                 }
             }
-            // Applied *after* the destination so the environment encloses it and
-            // pushed pages inherit the router. The other order leaves the
+            .navigationDestination(item: $navigatedPerson) { person in
+                let accounts = appModel.accountsProviders.resolvedActiveAccounts
+                PersonDetailView(
+                    person: person,
+                    viewModel: PersonDetailViewModel(
+                        person: person,
+                        // NO id-scoped provider, deliberately.
+                        //
+                        // A person id is only meaningful to the server that
+                        // issued it, and `MediaPerson` does not carry which one
+                        // that was — tvOS supplies it separately, from the page
+                        // that loaded the title. This router is installed per
+                        // navigation stack and has no such context, so it asks
+                        // every server BY NAME instead, which is the same rung
+                        // the view model falls back to and cannot return another
+                        // server's person by mistake. It costs one request per
+                        // server; sending a Jellyfin id to Plex costs a wrong
+                        // answer, which is worse.
+                        provider: nil,
+                        otherProviders: accounts.map(\.provider),
+                        // Keyless, so it works for every user out of the box, and
+                        // only reached when no server stored a biography.
+                        biographyProviders: [WikipediaPersonBiographyProvider()],
+                        // The same ladder the in-player Cast card uses — without
+                        // it this page can only answer with what the viewer
+                        // already owns, which is not what "known for" means.
+                        creditsProviders: PlayerCastCredits.providers,
+                        artworkResolver: PlayerCastCredits.artworkResolver
+                    ),
+                    onSelectItem: { navigatedItem = $0 }
+                )
+            }
+            // Applied *after* the destinations so the environment encloses them
+            // and pushed pages inherit the router. The other order leaves the
             // destination outside the environment, so navigation actions are
             // dropped from every menu on a pushed page.
             .mediaItemNavigator { navigatedItem = $0 }
+            .mediaPersonNavigator { navigatedPerson = $0 }
     }
 }
 

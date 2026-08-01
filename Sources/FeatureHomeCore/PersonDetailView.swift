@@ -2,11 +2,17 @@
 import SwiftUI
 import CoreModels
 import CoreUI
-import FeatureHomeCore
 import MetadataKit
 
 
 /// A person's page: who they are, and what else the viewer owns with them.
+///
+/// In FeatureHomeCore rather than FeatureHome, alongside the view model it
+/// drives. The view was already written to build for iOS — its one piece of
+/// tvOS-only API is guarded at the foot of this file — but FeatureHome carries
+/// unguarded tvOS API elsewhere and so is never compiled for iOS, which stranded
+/// it. The in-player cast card needs somewhere to send "See more" on both
+/// platforms.
 ///
 /// The header is free — name, character and headshot all arrive with the item
 /// the person was listed on — so the page is never empty even when the source
@@ -31,9 +37,25 @@ public struct PersonDetailView: View {
     /// creditless state carries a focused Back button.
     @FocusState private var backFocused: Bool
 
-    private static let headshotDiameter: CGFloat = 220
-    /// Reading measure for the biography — roughly 90 characters at this size.
-    private static let biographyWidth: CGFloat = 1000
+    /// The page's own width, so the two measures below can answer to it.
+    @State private var availableWidth: CGFloat = 0
+
+    /// Across a room this is 220; on a phone that is most of the screen.
+    ///
+    /// A share of the width with a ceiling rather than a breakpoint: this page is
+    /// now shown on everything from a 320pt phone to a television, and a value
+    /// that is right at two sizes and wrong between them is not responsive.
+    private var headshotDiameter: CGFloat {
+        guard availableWidth > 0 else { return 220 }
+        return min(220, (availableWidth * 0.3).rounded())
+    }
+
+    /// Reading measure for the biography — roughly 90 characters at tvOS's size,
+    /// and never wider than the page, which 1000 is on every phone.
+    private var biographyWidth: CGFloat {
+        guard availableWidth > 0 else { return 1000 }
+        return min(1000, availableWidth)
+    }
 
     /// Display name for each library id the viewer has, so owned credits can be
     /// shelved under the libraries they actually came from.
@@ -62,6 +84,15 @@ public struct PersonDetailView: View {
                 credits
             }
             .padding(.top, PlozzTheme.Spacing.large)
+        }
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { availableWidth = geometry.size.width }
+                    .onChange(of: geometry.size.width) { _, width in
+                        availableWidth = width
+                    }
+            }
         }
         .task { await viewModel.load() }
     }
@@ -101,7 +132,7 @@ public struct PersonDetailView: View {
             // far past a comfortable reading measure at this size, and from
             // across a room it becomes hard to track from the end of one line to
             // the start of the next.
-            .frame(maxWidth: Self.biographyWidth, alignment: .leading)
+            .frame(maxWidth: biographyWidth, alignment: .leading)
         }
         // The pair sits centred, rather than pinned to the leading edge.
         .frame(maxWidth: .infinity)
@@ -125,7 +156,7 @@ public struct PersonDetailView: View {
                 headshotPlaceholder
             }
         }
-        .frame(width: Self.headshotDiameter, height: Self.headshotDiameter)
+        .frame(width: headshotDiameter, height: headshotDiameter)
         .clipShape(Circle())
     }
 
@@ -135,7 +166,7 @@ public struct PersonDetailView: View {
         ZStack {
             Circle().fill(Color.primary.opacity(0.12))
             Text(initials)
-                .font(.system(size: Self.headshotDiameter * 0.28, weight: .semibold))
+                .font(.system(size: headshotDiameter * 0.28, weight: .semibold))
                 .plozzForeground(.secondary)
         }
     }

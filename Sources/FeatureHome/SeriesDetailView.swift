@@ -243,6 +243,7 @@ struct SeriesDetailView: View {
     var body: some View {
         let _ = plozzTraceBodyChanges { Self._printChanges() }
         let _ = plozzPrintChanges { Self._printChanges() }
+        let _ = PlozzBodyRate.tick("SeriesDetail")
         scrollContent
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()

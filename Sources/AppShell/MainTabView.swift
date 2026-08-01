@@ -50,19 +50,10 @@ struct MainTabView: View {
     ///
     /// Both tabs observe the same value, so without this gate both would push
     /// the same page and the hidden one would keep it on its stack.
-    private func personRoute(for tab: MainTab) -> Binding<PersonRoute?> {
-        Binding(
-            get: { selectedTabRaw == tab.rawValue ? pendingPersonRoute : nil },
-            set: { pendingPersonRoute = $0 }
-        )
-    }
-
-    /// As `personRoute(for:)`, for a title opened from a person's credits.
-    private func titleRoute(for tab: MainTab) -> Binding<MediaItem?> {
-        Binding(
-            get: { selectedTabRaw == tab.rawValue ? pendingTitleRoute : nil },
-            set: { pendingTitleRoute = $0 }
-        )
+    /// Whether `tab` is the one on screen. A plain `Bool` rather than a
+    /// tab-gated `Binding`, and that difference is the point — see below.
+    private func isActiveTab(_ tab: MainTab) -> Bool {
+        selectedTabRaw == tab.rawValue
     }
 
     private enum MainTab: String {
@@ -383,7 +374,16 @@ struct MainTabView: View {
     /// inside the `TabView` expression, it is a large part of why this body sat
     /// on the Swift type-checker's budget.
     private var homeTabContent: some View {
-            HomeTab(
+            // TEMPORARY discriminator. HomeTab's body runs ~46/s during the hang
+            // while MainTabView's body does not run at all, which leaves two very
+            // different explanations: either this closure is being re-evaluated
+            // (so HomeTab's VALUE is rebuilt, and the cause is an observable read
+            // in MainTabView's scope), or HomeTab is invalidating itself from its
+            // own dependency. `_printChanges` cannot tell them apart here, because
+            // the `Binding(get:set:)` values below are non-comparable and get
+            // blamed either way. This tick answers it directly.
+            let _ = PlozzBodyRate.tick("homeTabContent")
+            return HomeTab(
                 accounts: accounts,
                 detailSnapshotCache: detailSnapshotCache,
                 authenticatedHTTPResolver: authenticatedHTTPResolver,
@@ -423,8 +423,9 @@ struct MainTabView: View {
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
                 playRequest: $playRequest,
                 resumePrompt: $resumePrompt,
-                pendingPersonRoute: personRoute(for: .home),
-                pendingTitleRoute: titleRoute(for: .home),
+                pendingPersonRoute: $pendingPersonRoute,
+                pendingTitleRoute: $pendingTitleRoute,
+                isActiveTab: isActiveTab(.home),
                 runtime: homeRuntime
             )
             .id(accountScopeKey)
@@ -458,8 +459,9 @@ struct MainTabView: View {
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 },
                 playRequest: $playRequest,
                 resumePrompt: $resumePrompt,
-                pendingPersonRoute: personRoute(for: .search),
-                pendingTitleRoute: titleRoute(for: .search)
+                pendingPersonRoute: $pendingPersonRoute,
+                pendingTitleRoute: $pendingTitleRoute,
+                isActiveTab: isActiveTab(.search)
             )
             .id(accountScopeKey)
     }
@@ -473,6 +475,7 @@ struct MainTabView: View {
         // re-run of this body hands HomeTab fresh ones every pass. Without this
         // probe the cycle is invisible at exactly the point it turns over.
         let _ = plozzPrintChanges { Self._printChanges() }
+        let _ = PlozzBodyRate.tick("MainTabView")
         return TabView(selection: selectedTab) {
             Tab("Home", systemImage: "house.fill", value: MainTab.home) {
             homeTabContent
@@ -515,7 +518,19 @@ struct MainTabView: View {
             // asked for, so restoring the live stream never costs the repro.
             PersonDiagnostics.armLatchIfTracing()
         }
-        .onChange(of: accountScopeKey) {
+        .onChange(of: accountScopeKey) { previous, current in
+            // TEMPORARY. `accountScopeKey` is the `.id()` of BOTH tab subtrees, so
+            // every change destroys and rebuilds the whole Home/Search tree —
+            // including any detail page pushed on top of it. That is the only
+            // thing on this path that explains `DetailStackDepth` cycling
+            // appeared/dismissed during a hang, and the suspicion is that the key
+            // is still settling while accounts load (opening a title before the
+            // load finishes is the reported trigger). Logged as a transition, so
+            // it costs nothing unless it actually moves.
+            PlozzLog.boot(
+                "ScopeKey CHANGED accounts=\(accounts.count) "
+                + "fromLen=\(previous.count) toLen=\(current.count) to=\(current.prefix(120))"
+            )
             homeHeroRuntime.resetForSourceScopeChange()
             onWarmIdentityIndex()
         }

@@ -1,4 +1,5 @@
 #if canImport(SwiftUI)
+import CoreNetworking
 import SwiftUI
 import CoreModels
 import CoreUI
@@ -178,6 +179,7 @@ public struct ItemDetailView: View {
 
     public var body: some View {
         let _ = plozzPrintChanges { Self._printChanges() }
+        let _ = PlozzBodyRate.tick("ItemDetail")
         ContentStateView(
             state: viewModel.state,
             onRetry: { Task { await viewModel.load() } }

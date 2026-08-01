@@ -101,6 +101,21 @@ struct HomeTab: View {
     /// A title raised by the in-player Cast card, pushed once the player has
     /// closed. Non-nil only while THIS tab is on screen — see the person route.
     @Binding var pendingTitleRoute: MediaItem?
+    /// Whether this tab is the one on screen.
+    ///
+    /// Replaces a tab-gated `Binding(get:set:)` that used to be synthesised per
+    /// evaluation. That binding was non-comparable — SwiftUI cannot prove two
+    /// closure-backed bindings equal — so it could never skip this view's body,
+    /// and a device capture showed exactly that: `_pendingPersonRoute,
+    /// _pendingTitleRoute changed` reported 1,399 times with no `@self`, i.e. the
+    /// view value was never rebuilt yet the body re-ran anyway, dragging Home and
+    /// any pushed detail page with it at display refresh rate.
+    ///
+    /// A `Bool` and a plain `@State` binding are both comparable, so an unchanged
+    /// pass is now genuinely skippable. The tab gate moves into the handlers,
+    /// which is where it was always doing its real work: only the visible tab may
+    /// consume a pending route, so the hidden one never pushes the same page.
+    let isActiveTab: Bool
 
     @State private var path = NavigationPath()
     /// Handles owned above the tab so tab re-hosting cannot destroy them.
@@ -136,6 +151,7 @@ struct HomeTab: View {
 
     var body: some View {
         let _ = plozzPrintChanges { Self._printChanges() }
+        let _ = PlozzBodyRate.tick("HomeTab")
         NavigationStack(path: $path) {
             HomeView(
                 viewModel: runtime.homeViewModel.value(forKey: runtime.scopeKey) {
@@ -263,7 +279,7 @@ struct HomeTab: View {
                 itemDetail(for: item, libraryOrigin: nil)
             }
             .onChange(of: pendingTitleRoute) { _, item in
-                guard let item else { return }
+                guard isActiveTab, let item else { return }
                 pendingTitleRoute = nil
                 path.append(item)
             }
@@ -272,7 +288,7 @@ struct HomeTab: View {
                 // has gone. Cleared immediately so the same person can be
                 // opened again later — and so the other tab, which watches the
                 // same value, never sees it.
-                guard let route else { return }
+                guard isActiveTab, let route else { return }
                 pendingPersonRoute = nil
                 path.append(route)
             }

@@ -236,7 +236,8 @@ public struct HomeView: View {
     }
 
     public var body: some View {
-        ContentStateView(
+        let _ = PlozzBodyRate.tick("HomeView")
+        return ContentStateView(
             state: viewModel.state,
             emptyMessage: "Your libraries are empty. Add media on your media server to see it here.",
             onRetry: { Task { await viewModel.load() } },

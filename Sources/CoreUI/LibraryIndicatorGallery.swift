@@ -142,14 +142,11 @@ struct IndicatorGlyphBadge: View {
 
     var body: some View {
         if IndicatorSymbolAvailability.exists(symbol) {
+            // No drop shadow. The scrim is what makes the mark legible, and a
+            // shadow on top of it is a second legibility device doing the same
+            // job — which is what makes chrome read as a sticker sitting on the
+            // artwork rather than part of the card.
             glyph
-                // Just enough to hold an edge where the scrim has already
-                // thinned out. The scrim does the real work.
-                .shadow(
-                    color: .black.opacity(style?.shadowOpacity ?? 0.5),
-                    radius: size * 0.14,
-                    y: size * 0.03
-                )
         } else {
             // A missing symbol renders as nothing, which would silently look like
             // "this candidate is invisible". Say so instead.
@@ -194,7 +191,6 @@ struct IndicatorMarkStyle {
     /// which is the see-through rendering.
     var disc: Color?
     var weight: Font.Weight = .semibold
-    var shadowOpacity: Double = 0.5
 }
 
 /// The two marks that were chosen off this screen, so the pair has one place it
@@ -493,7 +489,6 @@ struct IndicatorPosterTile: View {
                     .white.opacity(0.85),
                     style: StrokeStyle(lineWidth: 4 * scale, dash: [14 * scale, 10 * scale])
                 )
-                .shadow(color: .black.opacity(0.6), radius: 3)
         }
     }
 
@@ -665,6 +660,7 @@ public struct LibraryIndicatorGalleryView: View {
                 header
                 chosenPair
                 requestOpacityLadder
+                requestGreyMatrix
                 notInLibraryVariants
                 notInLibraryShapes
                 notInLibraryOnPosters
@@ -884,17 +880,91 @@ public struct LibraryIndicatorGalleryView: View {
         }
     }
 
+    // MARK: 0c — the full grey × opacity matrix
+
+    /// Ten greys, seven alphas. Coarse ladders can only show that a direction is
+    /// right; naming the exact pair needs the pair to be on screen.
+    ///
+    /// Light to dark down the rows. 0.75 is roughly what hierarchical composites
+    /// to over pale artwork and 0.50 over dark, so today's look lives in the
+    /// middle and everything below 0.50 is darker than the mark has ever been.
+    private static let matrixGreys: [Double] = [
+        0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50, 0.45, 0.40, 0.35
+    ]
+    /// 70% to fully opaque in 5s. Below 70 is the bleed-through that started all
+    /// this, so the range starts where it stops being a problem.
+    private static let matrixAlphas: [Double] = [0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.0]
+
+    /// Drawn at the PLAYER CAST size only — 167×250, where the mark is 25pt and
+    /// every one of these differences is hardest to see. A pair that works here
+    /// works on the person page; the reverse isn't true. Both artworks, because a
+    /// grey that settles nicely on a dark poster can glare on a pale one.
+    private var requestGreyMatrix: some View {
+        GallerySection(
+            marker: "0c",
+            title: "Every grey against every opacity",
+            subtitle: "10 greys down, 70→100% opacity across. Each cell is the in-player cast card at its real 167×250, so this is the hardest version of the test. Labelled grey/opacity — read one off and I'll set it."
+        ) {
+            VStack(alignment: .leading, spacing: 40) {
+                matrixBlock(for: .dark)
+                matrixBlock(for: .pale)
+            }
+        }
+    }
+
+    private func matrixBlock(for sample: IndicatorArtworkSample) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(verbatim: sample.id == "dark" ? "over dark artwork" : "over pale artwork")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.75))
+
+            // Lazy on purpose: 70 cells per artwork, each carrying a poster
+            // image, and a non-lazy stack would build all 140 up front.
+            LazyVGrid(
+                columns: Array(
+                    repeating: GridItem(
+                        .fixed(IndicatorCardSize.playerCast.width(metrics: metrics)),
+                        spacing: 14,
+                        alignment: .topLeading
+                    ),
+                    count: Self.matrixAlphas.count
+                ),
+                alignment: .leading,
+                spacing: 20
+            ) {
+                ForEach(Self.matrixGreys, id: \.self) { grey in
+                    ForEach(Self.matrixAlphas, id: \.self) { alpha in
+                        GalleryFocusTile {
+                            VStack(alignment: .leading, spacing: 6) {
+                                IndicatorPosterTile(
+                                    sample: sample,
+                                    glyph: ChosenIndicator.request,
+                                    size: .playerCast,
+                                    markStyle: IndicatorMarkStyle(
+                                        disc: Color(white: grey).opacity(alpha)
+                                    )
+                                )
+                                Text(verbatim: "\(Int(grey * 100)) / \(Int(alpha * 100))%")
+                                    .font(.system(size: 16, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.5))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: 0c — the same question for binoculars
 
     /// `binoculars.fill` has the opposite problem to the plus: its layers are
     /// *supposed* to differ in tone (the lenses reading darker than the body is
     /// the shape), so hierarchical is right and the only question is whether it
-    /// survives 25pt on the player card. These push weight and shadow rather than
-    /// colour, plus one darkened-lens variant for contrast.
+    /// survives 25pt on the player card — so these push weight, plus the same
+    /// named-grey opaque treatment the plus gets.
     private static let notInLibraryVariantList: [(label: String, note: String, style: IndicatorMarkStyle?)] = [
         ("plain hierarchical", "baseline — what's in Chosen now", nil),
         ("bolder", "heavier stroke; the shape has more to lose at 25pt than the plus does", IndicatorMarkStyle(weight: .bold)),
-        ("bolder + deeper shadow", "as above, drop shadow doubled", IndicatorMarkStyle(weight: .bold, shadowOpacity: 0.85)),
         ("grey 65% — opaque", "the same named-grey trick as the plus: hierarchical's tone, nothing showing through", IndicatorMarkStyle(disc: Color(white: 0.65))),
         ("grey 55% — opaque", "darker, so the lenses separate harder from the body", IndicatorMarkStyle(disc: Color(white: 0.55))),
         ("grey 45% — opaque", "darkest. Silhouette is unmistakable but the mark gets heavy", IndicatorMarkStyle(disc: Color(white: 0.45))),
@@ -903,7 +973,7 @@ public struct LibraryIndicatorGalleryView: View {
 
     private var notInLibraryVariants: some View {
         GallerySection(
-            marker: "0c",
+            marker: "0d",
             title: "Making the binoculars readable",
             subtitle: "Same exercise for the not-in-library mark, including the named-grey opaque versions. Hierarchical is already closer to right here — the lenses reading darker than the body IS the shape — but it has the same bleed-through, and the same 25pt test to pass."
         ) {

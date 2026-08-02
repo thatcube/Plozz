@@ -285,8 +285,30 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             let performUniversalWatchlist = self.performUniversalWatchlist
             let presentFeedback = self.presentUniversalWatchlistFeedback
             let beginFanOut = self.beginUniversalWatchlistFanOut
+            // Confirm FIRST, then do the work.
+            //
+            // The ledger write posts `.universalWatchlistDidChange` before it
+            // returns, and every surface holding a watchlist rebuilds off that. The
+            // toast used to be raised after all of it, so it was set and expired
+            // while the main thread was still busy and no frame was ever drawn with
+            // it on screen — a single press appeared to do nothing, and only a
+            // second press within the display window (which resets the timer) made
+            // one visible. Acknowledging the press before the storm is also simply
+            // what the viewer expects: the confirmation belongs to the tap.
+            let feedback = Self.universalWatchlistFeedback(adding: adding)
+            presentFeedback(feedback.icon, feedback.text)
             Task { @MainActor in
                 guard await performUniversalWatchlist(adding, item) else {
+                    // Take the acknowledgement back rather than leaving a
+                    // confirmation standing for something that did not happen.
+                    presentFeedback(
+                        "exclamationmark.triangle.fill",
+                        LocalizedStringResource(
+                            "watchlist.feedback.failed",
+                            defaultValue: "Couldn't update Watchlist",
+                            comment: "Transient message shown when saving a title to, or removing it from, the Watchlist did not succeed."
+                        )
+                    )
                     return
                 }
                 // The viewer just changed this; don't make the heart wait for a
@@ -294,8 +316,6 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
                 // which is the one case the O(1) revision cannot see.
                 self.membershipCache.removeAll(keepingCapacity: true)
                 self.membershipRevision = nil
-                let feedback = Self.universalWatchlistFeedback(adding: adding)
-                presentFeedback(feedback.icon, feedback.text)
                 beginFanOut(adding, item)
             }
             return

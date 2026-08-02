@@ -114,7 +114,9 @@ final class UniversalWatchlistActionTests: XCTestCase {
         )
 
         coordinator.perform(.addToWatchlist, on: item, context: .none)
-        await waitUntil { feedback.count == 1 }
+        // Feedback is raised before the write, so it is no longer the signal that
+        // the work finished — wait on the write itself.
+        await waitUntil { localCalls.count == 1 }
 
         XCTAssertEqual(localCalls.map(\.0), [true])
         XCTAssertEqual(localCalls.map(\.1), ["seer:20"])
@@ -122,7 +124,14 @@ final class UniversalWatchlistActionTests: XCTestCase {
         XCTAssertEqual(providerResolutions, 0)
     }
 
-    func testAddAndRemoveFeedbackFollowSuccessfulLocalPersistence() async {
+    /// Feedback is raised BEFORE the write, deliberately.
+    ///
+    /// The ledger write posts a change notification every watchlist surface
+    /// rebuilds from, and that work can hold the main thread long enough for a
+    /// 1.6s toast to be set and expire without a single frame being drawn with it
+    /// on screen — a press appeared to do nothing at all. The confirmation belongs
+    /// to the tap, not to the end of the fan-out.
+    func testFeedbackPrecedesPersistenceSoAPressIsAcknowledgedImmediately() async {
         var feedback: [String] = []
         var events: [String] = []
         let coordinator = MediaItemActionCoordinator(
@@ -146,9 +155,9 @@ final class UniversalWatchlistActionTests: XCTestCase {
         let item = MediaItem(id: "m", title: "Movie", kind: .movie)
 
         coordinator.perform(.addToWatchlist, on: item, context: .none)
-        await waitUntil { feedback.count == 1 }
+        await waitUntil { events.filter { $0 == "fanout" }.count == 1 }
         coordinator.perform(.removeFromWatchlist, on: item, context: .none)
-        await waitUntil { feedback.count == 2 }
+        await waitUntil { events.filter { $0 == "fanout" }.count == 2 }
 
         XCTAssertEqual(
             feedback,
@@ -157,13 +166,13 @@ final class UniversalWatchlistActionTests: XCTestCase {
         XCTAssertEqual(
             events,
             [
-                "persisted", "feedback", "fanout",
-                "persisted", "feedback", "fanout"
+                "feedback", "persisted", "fanout",
+                "feedback", "persisted", "fanout"
             ]
         )
     }
 
-    func testFeedbackWaitsForPersistenceAndFailureEmitsNothing() async {
+    func testPressIsAcknowledgedImmediatelyAndAFailureSaysSo() async {
         let gate = WatchlistPersistenceGate()
         var feedback: [String] = []
         let successful = MediaItemActionCoordinator(
@@ -180,9 +189,9 @@ final class UniversalWatchlistActionTests: XCTestCase {
         let item = MediaItem(id: "m", title: "Movie", kind: .movie)
         successful.perform(.addToWatchlist, on: item, context: .none)
         await gate.waitUntilStarted()
-        XCTAssertTrue(feedback.isEmpty)
+        // Acknowledged the moment it is pressed, without waiting on the write.
+        XCTAssertEqual(feedback, ["Added to Watchlist"])
         await gate.complete(success: true)
-        await waitUntil { feedback.count == 1 }
 
         var failureCalled = false
         let failed = MediaItemActionCoordinator(
@@ -200,8 +209,18 @@ final class UniversalWatchlistActionTests: XCTestCase {
             }
         )
         failed.perform(.removeFromWatchlist, on: item, context: .none)
-        await waitUntil { failureCalled }
-        XCTAssertEqual(feedback, ["Added to Watchlist"])
+        await waitUntil { feedback.count == 3 }
+        XCTAssertTrue(failureCalled)
+        // A failure now says so. Optimistic acknowledgement means silence would
+        // leave a confirmation standing for something that never happened.
+        XCTAssertEqual(
+            feedback,
+            [
+                "Added to Watchlist",
+                "Removed from Watchlist",
+                "Couldn't update Watchlist",
+            ]
+        )
     }
 
     func testOnlyMovieAndSeriesReceiveUniversalAction() {

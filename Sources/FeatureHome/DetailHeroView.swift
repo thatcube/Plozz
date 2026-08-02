@@ -846,6 +846,14 @@ struct DetailHeroView: View, Equatable {
                             .prefersDefaultFocus(!showsRequestPill, in: heroActionsScope)
                             .focused($heroActionRowFocus, equals: .trailer)
                         }
+                        // Watchlisting is the whole point of a title you do NOT
+                        // have: it is how you say "get this later". The row's own
+                        // visibility test above already counts this button, so the
+                        // intent was here — only the button was missing, and a
+                        // discovery page offered no way to save anything.
+                        if let heroWatchlistAction {
+                            watchlistButton(action: heroWatchlistAction)
+                        }
                     } else {
                     if let playTitle, let onPlay {
                         playButton(title: playTitle, action: onPlay)
@@ -862,9 +870,6 @@ struct DetailHeroView: View, Equatable {
                     }
                     if let heroWatchedAction {
                         watchedButton(action: heroWatchedAction)
-                    }
-                    if let heroWatchlistAction {
-                        watchlistButton(action: heroWatchlistAction)
                     }
                     // The breadcrumb above the title carries this on an episode
                     // page; the icon button is the fallback for any other hero

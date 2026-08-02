@@ -1264,8 +1264,12 @@ private struct PlozziOSDetailHeroForeground: View {
             // when they'd otherwise wrap — and the same page always lays out the
             // same way for a given width.
             ViewThatFits(in: .horizontal) {
+                // Widest first: everything inline with Trailer labelled, then the
+                // same row with Trailer reduced to its glyph, and only then start
+                // folding actions into "…".
+                actionRow(collapsing: 0, labelledTrailer: true)
                 ForEach(0...orderedInlineExtras.count, id: \.self) { collapseCount in
-                    actionRow(collapsing: collapseCount)
+                    actionRow(collapsing: collapseCount, labelledTrailer: false)
                 }
             }
             .controlSize(.large)
@@ -1321,11 +1325,13 @@ private struct PlozziOSDetailHeroForeground: View {
     private enum InlineExtra: Identifiable {
         case primary(ActionEntry)
         case download
+        case trailer
 
         var id: String {
             switch self {
             case .primary(let entry): return "media.\(entry.action.rawValue)"
             case .download: return "download"
+            case .trailer: return "trailer"
             }
         }
     }
@@ -1344,13 +1350,23 @@ private struct PlozziOSDetailHeroForeground: View {
         if downloadItem != nil {
             extras.append(.download)
         }
+        // Trailer folds LAST of all: on a title you don't have, it and Request are
+        // the only two things you can actually do, so it earns its place ahead of
+        // everything else here. It sheds its label first (see `actionRow`), which
+        // usually buys enough width that it never has to leave the row at all.
+        if trailerItem != nil, onPlayTrailer != nil {
+            extras.append(.trailer)
+        }
         return extras
     }
 
     /// One candidate row that keeps the highest-priority extras inline and folds
     /// the last `collapseCount` of them into the "…" menu. ViewThatFits chooses the
     /// widest candidate (fewest collapsed) that still fits the hero width.
-    private func actionRow(collapsing collapseCount: Int) -> some View {
+    private func actionRow(
+        collapsing collapseCount: Int,
+        labelledTrailer: Bool
+    ) -> some View {
         let extras = orderedInlineExtras
         let keep = max(0, extras.count - collapseCount)
         let inline = Array(extras.prefix(keep))
@@ -1359,9 +1375,8 @@ private struct PlozziOSDetailHeroForeground: View {
         return HStack(spacing: 12) {
             playActionButton
             heroRequestButton
-            trailerActionButton
             ForEach(inline) { extra in
-                inlineExtraButton(extra)
+                inlineExtraButton(extra, labelled: labelledTrailer)
             }
             if hasSourceVersionOptions || !menu.isEmpty {
                 sourceVersionMenuButton(actions: menu)
@@ -1378,12 +1393,17 @@ private struct PlozziOSDetailHeroForeground: View {
     }
 
     @ViewBuilder
-    private func inlineExtraButton(_ extra: InlineExtra) -> some View {
+    private func inlineExtraButton(
+        _ extra: InlineExtra,
+        labelled labelledTrailer: Bool
+    ) -> some View {
         switch extra {
         case .primary(let entry):
             primaryActionButton(entry)
         case .download:
             downloadActionButton
+        case .trailer:
+            trailerActionButton(labelled: labelledTrailer)
         }
     }
 
@@ -1398,15 +1418,24 @@ private struct PlozziOSDetailHeroForeground: View {
         }
     }
 
+    /// `labelled` false renders the glyph alone, which is about a third of the
+    /// width. Tried before any action is pushed into "…", because a recognisable
+    /// icon in the row beats a full word hidden in a menu.
     @ViewBuilder
-    private var trailerActionButton: some View {
+    private func trailerActionButton(labelled: Bool) -> some View {
         if let trailerItem, let onPlayTrailer {
             Button {
                 onPlayTrailer(trailerItem)
             } label: {
-                Label("Trailer", systemImage: "film.fill")
+                if labelled {
+                    Label("Trailer", systemImage: "film.fill")
+                } else {
+                    Label("Trailer", systemImage: "film.fill")
+                        .labelStyle(.iconOnly)
+                }
             }
             .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .secondary))
+            .accessibilityLabel("Trailer")
         }
     }
 
@@ -1505,12 +1534,24 @@ private struct PlozziOSDetailHeroForeground: View {
                 systemImage: downloadActionSymbol
             ))
         }
+        // So a collapsed Trailer is still reachable rather than simply gone.
+        if trailerItem != nil, onPlayTrailer != nil {
+            result.append(PlaybackSourceMenuAction(
+                id: "trailer",
+                title: "Trailer",
+                systemImage: "film.fill"
+            ))
+        }
         return result
     }
 
     private func performCompactPanelAction(_ id: String) {
         if id == "download" {
             Task { await performDownloadAction() }
+            return
+        }
+        if id == "trailer" {
+            if let trailerItem, let onPlayTrailer { onPlayTrailer(trailerItem) }
             return
         }
         guard id.hasPrefix("media."),

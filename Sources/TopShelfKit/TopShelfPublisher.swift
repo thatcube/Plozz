@@ -74,6 +74,15 @@ public enum TopShelfPublisher {
         result.reserveCapacity(media.count)
 
         for item in media {
+            // Composited artwork is cached by this id. A bare item id is unique only
+            // within one server (Plex ratingKeys are small per-server integers), so
+            // two accounts would otherwise overwrite each other's poster files and a
+            // card could show the wrong title's art with the wrong resume bar.
+            let artworkID = TopShelfSnapshot.Item(
+                id: item.id,
+                accountID: item.sourceAccountID,
+                title: item.title
+            ).shelfIdentifier
             let posterURL = Self.posterArtworkURL(for: item)
             let progress = compositeProgress ? item.playedPercentage : nil
             var imageURL: URL?
@@ -81,7 +90,7 @@ public enum TopShelfPublisher {
             if let poster = posterURL {
                 if let progress,
                    let composited = await TopShelfPosterComposer.compositedPosterURL(
-                       id: item.id, posterURL: poster, progress: progress
+                       id: artworkID, posterURL: poster, progress: progress
                    ) {
                     imageURL = composited
                 } else {
@@ -92,13 +101,14 @@ public enum TopShelfPublisher {
                 // placeholder (with the resume bar burned in when mid-playback)
                 // instead of leaving a blank card or a zoomed backdrop.
                 imageURL = TopShelfPosterComposer.placeholderPosterURL(
-                    id: item.id, title: item.title, progress: progress
+                    id: artworkID, title: item.title, progress: progress
                 )
             }
 
             result.append(
                 TopShelfSnapshot.Item(
                     id: item.id,
+                    accountID: item.sourceAccountID,
                     title: item.title,
                     subtitle: item.subtitle,
                     imageURL: imageURL,

@@ -32,8 +32,16 @@ public struct TopShelfSnapshot: Codable, Equatable, Sendable {
     }
 
     public struct Item: Codable, Equatable, Identifiable, Sendable {
-        /// Stable identifier — the Jellyfin item id, used for the play deep link.
+        /// The owning server's local id for the title.
+        ///
+        /// **Not unique on its own.** A Plex `ratingKey` is a small per-server
+        /// integer, so two accounts routinely hand back the same value for entirely
+        /// different titles — which is why ``shelfIdentifier`` scopes it by account
+        /// before tvOS or a deep link ever sees it.
         public var id: String
+        /// The account this copy came from. Optional so a snapshot written by an
+        /// older build still decodes; such an entry keeps today's unscoped behavior.
+        public var accountID: String?
         public var title: String  // l10n:content — server-supplied media title
         public var subtitle: String?  // l10n:content — server-supplied media subtitle (e.g. episode label)
         /// Poster artwork (2:3) for the shelf card. Usually a remote Jellyfin
@@ -46,14 +54,22 @@ public struct TopShelfSnapshot: Codable, Equatable, Sendable {
         /// so the extension doesn't read this — it renders the artwork as-is.
         public var playbackProgress: Double?
 
+        /// Collision-free identity for the shelf card and its deep link.
+        public var shelfIdentifier: String {
+            guard let accountID, !accountID.isEmpty else { return id }
+            return "\(accountID):\(id)"
+        }
+
         public init(
             id: String,
+            accountID: String? = nil,
             title: String,  // l10n:content — server-supplied media title
             subtitle: String? = nil,  // l10n:content — server-supplied media subtitle
             imageURL: URL? = nil,
             playbackProgress: Double? = nil
         ) {
             self.id = id
+            self.accountID = accountID
             self.title = title
             self.subtitle = subtitle
             self.imageURL = imageURL

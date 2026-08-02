@@ -158,7 +158,8 @@ public actor WatchStateReconciler {
             return false
         }
 
-        if let index = state.pending.firstIndex(where: { $0.coalesceKey == key }) {
+        if let index = state.pending.firstIndex(where: { $0.coalesceKey == key })
+            ?? Self.evidenceMatchIndex(for: mutation, in: state.pending) {
             let existing = state.pending[index]
             if mutation.capturedAt < existing.capturedAt {
                 // Older than what's already queued — stale relative to the queue.
@@ -172,6 +173,48 @@ public actor WatchStateReconciler {
         state.clock[key] = max(state.clock[key] ?? .distantPast, mutation.capturedAt)
         persist()
         return true
+    }
+
+    /// A queued mutation for the **same title** whose `coalesceKey` happens to differ.
+    ///
+    /// `WatchMutation.coalesceKey` is derived from `canonicalMediaID`, which picks the
+    /// first strong namespace present on *that* payload. Two servers holding one film
+    /// legitimately expose different id sets — server A `{imdb, tmdb}` keys on
+    /// `imdb:tt1`, server B `{tmdb}` on `tmdb:99` — so marking it watched from a page
+    /// backed by one server and then the other enqueues two rows for one title, and
+    /// they race each other on the wire.
+    ///
+    /// `canonicalMediaID` itself is deliberately **frozen**: it roots the persisted
+    /// stale-write clock and the Trakt/Simkl/AniList idempotency keys, so re-deriving
+    /// it would double-scrobble everything on upgrade and lose the high-water mark
+    /// that stops "Continue Watching reverted" data loss. Instead this widens matching
+    /// *additively*, using the identity evidence mutations already persist. It is an
+    /// O(n) scan of the pending queue, which holds only undrained writes.
+    static func evidenceMatchIndex(
+        for mutation: WatchMutation,
+        in pending: [WatchMutation]
+    ) -> Int? {
+        guard !mutation.identities.isEmpty else { return nil }
+        let incoming = Set(mutation.identities)
+        return pending.firstIndex { candidate in
+            guard candidate.kind == mutation.kind,
+                  candidate.seasonNumber == mutation.seasonNumber,
+                  candidate.episodeNumber == mutation.episodeNumber,
+                  !candidate.identities.isEmpty,
+                  !Set(candidate.identities).isDisjoint(with: incoming)
+            else { return false }
+            // Same split guard the merger and the identity index use: a shared id can
+            // be a mis-tag, and collapsing two different works into one write would
+            // mark the wrong title watched.
+            return !MediaItemIdentity.titlesPlausiblyContradict(
+                titleA: candidate.anchorTitle ?? "",
+                yearA: candidate.anchorYear,
+                kindA: candidate.kind ?? .unknown,
+                titleB: mutation.anchorTitle ?? "",
+                yearB: mutation.anchorYear,
+                kindB: mutation.kind ?? .unknown
+            )
+        }
     }
 
     /// Merges a newer mutation into an older queued one for the same title: the

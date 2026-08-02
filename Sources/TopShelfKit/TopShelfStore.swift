@@ -16,14 +16,53 @@ public enum TopShelf {
     /// Deep-link host used for "play this item" links.
     public static let itemHost = "item"
 
+    /// A title addressed by a deep link: the server's local id plus **which**
+    /// server it came from.
+    ///
+    /// The account matters. A bare item id is unique only within one server — Plex
+    /// ratingKeys are small per-server integers — so a link carrying only an id can
+    /// open the wrong title, or nothing at all, on a device signed in to more than
+    /// one server. The app is multi-account by design, so the account travels with
+    /// the link.
+    public struct ItemReference: Hashable, Sendable {
+        public let id: String
+        public let accountID: String?
+
+        public init(id: String, accountID: String? = nil) {
+            self.id = id
+            self.accountID = accountID
+        }
+    }
+
     /// Builds the deep link that launches Plozz straight into an item.
-    /// Example: `plozz://item/abc123`.
-    public static func itemDeepLink(id: String) -> URL {
+    /// Example: `plozz://item/abc123?account=jf-1`.
+    public static func itemDeepLink(id: String, accountID: String? = nil) -> URL {
         var components = URLComponents()
         components.scheme = deepLinkScheme
         components.host = itemHost
         components.path = "/" + id
+        if let accountID, !accountID.isEmpty {
+            components.queryItems = [URLQueryItem(name: accountQueryItem, value: accountID)]
+        }
         return components.url ?? URL(string: "\(deepLinkScheme)://\(itemHost)/\(id)")!
+    }
+
+    /// Query-item name carrying the owning account in an item deep link.
+    public static let accountQueryItem = "account"
+
+    /// Extracts the title a deep link addresses, or `nil` if the URL is not a
+    /// recognised item link. Links written by older builds carry no account and
+    /// decode with `accountID == nil`.
+    public static func itemReference(from url: URL) -> ItemReference? {
+        guard let id = itemID(from: url) else { return nil }
+        let accountID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first { $0.name == accountQueryItem }?
+            .value
+        return ItemReference(
+            id: id,
+            accountID: accountID.flatMap { $0.isEmpty ? nil : $0 }
+        )
     }
 
     /// Extracts the item id from a deep link, or `nil` if the URL is not a

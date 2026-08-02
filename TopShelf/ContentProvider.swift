@@ -33,7 +33,7 @@ final class ContentProvider: TVTopShelfContentProvider {
     }
 
     private static func makeItem(_ item: TopShelfSnapshot.Item) -> TVTopShelfSectionedItem {
-        let shelfItem = TVTopShelfSectionedItem(identifier: item.id)
+        let shelfItem = TVTopShelfSectionedItem(identifier: item.shelfIdentifier)
         shelfItem.title = item.title
         shelfItem.imageShape = .poster
         // No native `playbackProgress`: tvOS only draws that bar on `.hdtv`
@@ -46,7 +46,7 @@ final class ContentProvider: TVTopShelfContentProvider {
             shelfItem.setImageURL(imageURL, for: .screenScale2x)
         }
 
-        let deepLink = TopShelf.itemDeepLink(id: item.id)
+        let deepLink = TopShelf.itemDeepLink(id: item.id, accountID: item.accountID)
         let action = TVTopShelfAction(url: deepLink)
         shelfItem.displayAction = action
         shelfItem.playAction = action

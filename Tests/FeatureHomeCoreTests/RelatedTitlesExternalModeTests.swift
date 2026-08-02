@@ -4,6 +4,47 @@ import MetadataKit
 import XCTest
 @testable import FeatureHomeCore
 
+/// A provider returning many candidates, for bounding the publish path's work.
+private struct BulkRelatedProvider: RelatedTitlesProviding {
+    let id: MetadataSource = .tmdb
+    let isEnabled = true
+    let count: Int
+
+    func relatedTitles(
+        for query: MetadataQuery,
+        limit: Int
+    ) async -> [RelatedTitle] {
+        (0..<count).map { index in
+            RelatedTitle(
+                title: "Candidate \(index)",
+                year: 2000 + index,
+                kind: .movie,
+                providerIDs: ["Tmdb": "\(10_000 + index)"],
+                posterURL: nil,
+                source: .tmdb
+            )
+        }
+    }
+}
+
+/// Counts identity-index lookups so the publish path's work can be bounded.
+private final class LookupCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func mark() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+}
+
 private struct StubRelatedProvider: RelatedTitlesProviding {
     let id: MetadataSource = .tmdb
     let isEnabled = true
@@ -277,6 +318,61 @@ final class RelatedTitlesExternalModeTests: XCTestCase {
             providerIDs: ["Tmdb": "1"],
             availability: .unknown
         )
+    }
+
+    /// The ownership lookup now runs on the **publish** path, so it has to stay
+    /// bounded: once per published entry, never per card render, and never more than
+    /// the row can show. A row is at most a dozen posters; a hundred candidates must
+    /// not become a hundred component walks.
+    ///
+    /// This is a thermal guard, not a nicety — the app recently shipped a fix for a
+    /// severe overheating bug caused by exactly this shape of unbounded per-item work
+    /// inside a publication wave.
+    func testExternalModeOwnershipLookupIsBoundedByWhatTheRowCanShow() async {
+        let lookups = LookupCounter()
+        let loader = RelatedTitlesLoader(
+            resolver: RelatedTitlesResolver(providers: [BulkRelatedProvider(count: 100)]),
+            store: RelatedTitlesStore(directory: nil),
+            search: { _, _ in
+                XCTFail("the publish path must never touch a server")
+                return []
+            },
+            indexedLibrarySources: { _ in
+                lookups.mark()
+                return []
+            },
+            displayMode: .includeExternal
+        )
+
+        await loader.load(for: seed())
+
+        XCTAssertLessThanOrEqual(lookups.value, RelatedTitlesLoader.maximumEntries)
+        XCTAssertEqual(loader.entries.count, RelatedTitlesLoader.maximumEntries)
+    }
+
+    /// And re-entering the same page must not repeat the work: a second load for the
+    /// same seed is a no-op, so scrolling back and forth cannot re-run the lookups or
+    /// republish an unchanged row.
+    func testReenteringTheSamePageDoesNotRepeatOwnershipLookups() async {
+        let lookups = LookupCounter()
+        let loader = RelatedTitlesLoader(
+            resolver: RelatedTitlesResolver(providers: [BulkRelatedProvider(count: 12)]),
+            store: RelatedTitlesStore(directory: nil),
+            search: { _, _ in [] },
+            indexedLibrarySources: { _ in
+                lookups.mark()
+                return []
+            },
+            displayMode: .includeExternal
+        )
+
+        await loader.load(for: seed())
+        let afterFirst = lookups.value
+        let published = loader.entries
+        await loader.load(for: seed())
+
+        XCTAssertEqual(lookups.value, afterFirst, "second load must be a no-op")
+        XCTAssertEqual(loader.entries, published, "row must not be republished")
     }
 
     func testExternalModeCollapsesCrossProviderDuplicate() {

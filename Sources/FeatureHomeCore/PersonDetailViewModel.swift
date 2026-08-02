@@ -304,15 +304,11 @@ public final class PersonDetailViewModel {
     /// changes what the viewer can DO with a title, not what it is or how well
     /// known it is.
     private func reconciledWithLibrary(_ item: MediaItem) -> MediaItem {
-        guard item.isNotInLibraryDiscovery else { return item }
-        let owned = librarySources(item)
-        guard !owned.isEmpty else { return item }
-        var resolved = item
-        resolved.availability = nil
-        resolved.locallyValidatedPlayableSource = true
-        var seen = Set<String>()
-        resolved.sources = (item.sources + owned).filter { seen.insert($0.id).inserted }
-        return resolved
+        // One shared retarget, sharing the Related row's conservative guards: this
+        // used to accept a credit with no strong external id and did not scope the
+        // index's sources by kind, so a TMDb integer shared between a movie and a
+        // series could attach the wrong work's servers.
+        item.retargetedToOwnedLibraryCopy(indexedSources: librarySources) ?? item
     }
 
     private static func knownForKey(_ item: MediaItem) -> String {

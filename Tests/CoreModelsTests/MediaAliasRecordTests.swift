@@ -39,7 +39,13 @@ final class MediaAliasRecordTests: XCTestCase {
         let series = strong(.series, .tmdb, "123")
 
         XCTAssertNotEqual(movie, series)
-        XCTAssertNotEqual(movie.mediaIdentity, series.mediaIdentity)
+        // The ledger scopes by kind through the `kind` field, exactly as the identity
+        // index scopes its graph externally — one ruleset. There used to be a second,
+        // unused `mediaIdentity` accessor here that baked the kind INTO the source
+        // string (`"tmdb:movie"`), which would never have matched an index identity
+        // (`"tmdb"`); it was deleted rather than harmonised, since nothing consumed it.
+        XCTAssertEqual(movie.namespace, series.namespace)
+        XCTAssertEqual(movie.value, series.value)
     }
 
     func testUnsupportedKindsCannotCreateAliasEvidenceOrRecord() {

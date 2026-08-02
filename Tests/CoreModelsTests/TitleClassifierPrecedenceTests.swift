@@ -123,6 +123,38 @@ final class TitleClassifierPrecedenceTests: XCTestCase {
         XCTAssertTrue(before)
     }
 
+    // MARK: - One ruleset, two questions
+
+    /// The weak-evidence asymmetry, pinned on both sides so neither half is
+    /// "corrected" into the other. See ``MediaAliasWeakEvidence``'s doc for why.
+    func testWeakEvidenceRulesetIsConsistentlyConservative() {
+        // The ledger admits a series — but only with a year, which is what makes it
+        // safe. Without one it refuses, for movies and series alike.
+        XCTAssertNotNil(MediaAliasWeakEvidence(kind: .series, title: "Foundation", year: 2021))
+        XCTAssertNil(MediaAliasWeakEvidence(kind: .series, title: "Foundation", year: nil))
+        XCTAssertNil(MediaAliasWeakEvidence(kind: .movie, title: "Dune", year: nil))
+        // And never a kind that cannot own durable identity.
+        XCTAssertNil(MediaAliasWeakEvidence(kind: .episode, title: "Pilot", year: 2021))
+
+        // The merger stays movies-only: two series sharing a title and year must not
+        // be handed each other's servers, because being wrong there plays the wrong
+        // thing rather than merging two rows.
+        let seriesTitleIdentities = MediaItemIdentity.identities(
+            for: MediaItem(id: "s", title: "Foundation", kind: .series, productionYear: 2021)
+        )
+        XCTAssertFalse(seriesTitleIdentities.contains { identity in
+            if case .title = identity { return true }
+            return false
+        })
+        let movieTitleIdentities = MediaItemIdentity.identities(
+            for: MediaItem(id: "m", title: "Dune", kind: .movie, productionYear: 2021)
+        )
+        XCTAssertTrue(movieTitleIdentities.contains { identity in
+            if case .title = identity { return true }
+            return false
+        })
+    }
+
     /// The producer-side half of the badge decision: once a genuinely validated
     /// member folds in, the stale discovery availability is cleared, so no item ever
     /// reaches a card both validated and flagged — which is what stops the card and

@@ -918,7 +918,10 @@ private struct PlozziOSHomeHeroCarousel: View {
     /// loaded for this item.
     private func loadHeroSeasonAvailabilityIfNeeded() async {
         guard let item = currentItem,
-              item.isNotInLibraryDiscovery,
+              TitleClassifier.isDiscoveryRouting(
+                item,
+                identitySources: appModel.identityIndex.identitySourcesProvider(item)
+              ),
               item.kind == .series,
               appModel.seerService.isConfigured,
               heroSeasonAvailability[item.id] == nil else {
@@ -958,8 +961,14 @@ private struct PlozziOSHomeHeroCarousel: View {
     /// availability has loaded) so you choose which seasons to request. `nil` for
     /// in-library items and other kinds, so those keep the normal Play / More Info.
     private func heroRequest(for item: MediaItem) -> PlozziOSHeroRequest? {
+        // Asked through the one shared classifier rather than the availability flag
+        // alone: a hero the index can resolve to an owned copy must keep Play and
+        // never be handed a Request descriptor at all. The index lookup was already
+        // being made a few lines below for the CTA, so this costs nothing new — and
+        // it is a hero, one item, not a card wave.
+        let indexed = appModel.identityIndex.identitySourcesProvider(item)
         guard let onRequest,
-              item.isNotInLibraryDiscovery,
+              TitleClassifier.isDiscoveryRouting(item, identitySources: indexed),
               item.kind == .movie || item.kind == .series else {
             return nil
         }
@@ -970,10 +979,7 @@ private struct PlozziOSHomeHeroCarousel: View {
                 availability: availability,
                 downloadProgress: item.downloadProgress,
                 hasValidatedPlayableSource:
-                    item.hasPlayableLibraryTarget(
-                        additionalSources:
-                            appModel.identityIndex.identitySourcesProvider(item)
-                    ),
+                    item.hasPlayableLibraryTarget(additionalSources: indexed),
                 seerConnected: appModel.seerService.isConfigured
             ),
             isRequesting: isRequesting,

@@ -14,10 +14,6 @@ public struct MediaAliasStrongEvidence: Codable, Hashable, Sendable, Comparable 
         self.value = normalized
     }
 
-    public var mediaIdentity: MediaIdentity {
-        .external(source: "\(namespace.rawValue):\(kind.rawValue)", value: value)
-    }
-
     public static func < (lhs: Self, rhs: Self) -> Bool {
         if lhs.kind.rawValue != rhs.kind.rawValue {
             return lhs.kind.rawValue < rhs.kind.rawValue
@@ -29,6 +25,30 @@ public struct MediaAliasStrongEvidence: Codable, Hashable, Sendable, Comparable 
     }
 }
 
+/// Title/year evidence, used only when a title carries no strong external id.
+///
+/// ## Why this admits series when ``MediaItemIdentity``'s title fallback does not
+///
+/// The asymmetry is deliberate, and it is stated here once so it is not rediscovered
+/// as a bug. The two rules answer different questions with different costs of being
+/// wrong:
+///
+/// - ``MediaItemIdentity`` asks *"may I play this title from that server?"*. A false
+///   title match there unions two works' sources, and the viewer presses Play and
+///   gets the wrong film. Series titles carry far less signal than film titles
+///   (regional variants, reboots, season-as-title), so series are excluded outright.
+/// - This type asks *"is this the row the viewer already added?"*. A false match here
+///   merges two watchlist rows — visible, and undone by removing one. Refusing series
+///   is not the safe choice: weak evidence only ever exists for a title that had
+///   nothing stronger, so a series with no external ids would fail to find its own
+///   record after a relaunch and mint a **fresh** Plozz UUID every launch. That is
+///   unbounded durable growth in an iCloud-synced ledger, which is a release blocker
+///   and strictly worse than the merge it would avoid.
+///
+/// What makes admitting series safe here is the rule below: a year is **mandatory**
+/// (``MediaItemIdentity``'s fallback tolerates a missing year), and matching is
+/// kind-scoped. The remake/reboot collisions that make series titles untrustworthy —
+/// "One Piece" 1999 vs 2023, and the like — differ in year and so never meet.
 public struct MediaAliasWeakEvidence: Codable, Hashable, Sendable, Comparable {
     public let kind: MediaItemKind
     public let normalizedTitle: String

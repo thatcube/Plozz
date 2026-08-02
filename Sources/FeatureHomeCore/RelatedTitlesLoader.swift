@@ -143,28 +143,15 @@ public final class RelatedTitlesLoader {
         for related: RelatedTitle,
         capabilities: MediaCapabilities
     ) -> MediaItem? {
-        let hasStrongIdentity = MediaItemIdentity.strongExternalNamespaces.contains {
-            related.providerIDs.providerID($0.namespace) != nil
-        }
-        guard hasStrongIdentity else { return nil }
-
-        let externalItem = RelatedEntry(related: related, libraryItem: nil).item
-        let sources = indexedLibrarySources(externalItem).filter {
-            $0.kind == externalItem.kind
-        }
-        guard let selected = CrossSourceSelector.bestSelection(
-            from: sources,
-            capabilities: capabilities
-        ) else {
-            return nil
-        }
-
-        var libraryItem = externalItem.selectingSource(selected.source)
-        libraryItem.sources = sources
-        // `.unknown` describes the metadata provider's view, not the now-validated
-        // local copy. Clear it so shared card marks classify this as owned.
-        libraryItem.availability = nil
-        return libraryItem
+        // One shared retarget, used by a person's credits too — same strong-id
+        // requirement, same kind scoping, same "clear the provider's availability".
+        // Capabilities are passed because this row needs an id a server can load:
+        // the external item's own id is a provider id like `related:tmdb:tv:456`.
+        RelatedEntry(related: related, libraryItem: nil).item
+            .retargetedToOwnedLibraryCopy(
+                indexedSources: indexedLibrarySources,
+                capabilities: capabilities
+            )
     }
 
     /// Cross-provider Related results often describe the same work under disjoint

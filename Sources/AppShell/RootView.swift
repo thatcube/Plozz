@@ -49,7 +49,6 @@ public struct RootView: View {
     /// ``LazyViewState`` for the measurements that forced this.
     @State private var homeViewModelBox = LazyViewState<HomeViewModel>()
     @Environment(\.colorScheme) private var systemColorScheme
-    @Environment(\.scenePhase) private var scenePhase
     /// The reader's text size. Feeds `PlozzMetrics` so the shared type/geometry
     /// table rebuilds when it changes (see where the metrics are injected below).
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -468,18 +467,30 @@ public struct RootView: View {
         .onChange(of: appState.crashReportingModel.settings.isEnabled) { _, _ in
             reconcileCrashReporting()
         }
-        .task(id: scenePhase) {
-            appState.mediaShare.setBackgroundWorkAllowed(scenePhase == .active)
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                appState.drainWatchOutbox()
-                // Pull the latest synced config when the app comes to the foreground
-                // (tvOS push is best-effort), so profile/setting changes made
-                // elsewhere show up promptly instead of waiting for a manual sync.
-                appState.syncCloudOnForeground()
-            }
-        }
+        // Scene-phase side effects live in a zero-size child, NOT here.
+        //
+        // Reading `@Environment(\.scenePhase)` in this view made every phase
+        // change re-evaluate RootView — and RootView is the root, so that cascades
+        // through MainTabView, HomeTab and the whole ItemDetailView subtree.
+        // Measured on the Apple TV: 800ms-1s main-thread stalls, arriving well
+        // after whatever the viewer had actually done. The phase is only ever used
+        // to FIRE things, never to build anything, so nothing here needs to depend
+        // on it.
+        .background(
+            ScenePhaseEffects(
+                onBackgroundWorkAllowed: { allowed in
+                    appState.mediaShare.setBackgroundWorkAllowed(allowed)
+                },
+                onBecameActive: {
+                    appState.drainWatchOutbox()
+                    // Pull the latest synced config when the app comes to the
+                    // foreground (tvOS push is best-effort), so profile/setting
+                    // changes made elsewhere show up promptly instead of waiting
+                    // for a manual sync.
+                    appState.syncCloudOnForeground()
+                }
+            )
+        )
         .onOpenURL { appState.handle(url: $0) }
         // Window-level HDR/DV exit veil: a black layer above Home that the player
         // raises (via the injected `DisplayVeilModel`) just before it dismisses, so
@@ -1119,3 +1130,29 @@ private struct FailureView: View {
 }
 
 #endif
+
+/// Zero-size observer that turns scene-phase transitions into callbacks.
+///
+/// Exists so that reading `scenePhase` invalidates only this view instead of the
+/// one it hangs off. A `@State`-free `View` whose body is `Color.clear` costs
+/// nothing to rebuild, where re-evaluating the app's root costs the whole tree —
+/// including a detail page's full subtree, measured at 800ms-1s on the Apple TV.
+private struct ScenePhaseEffects: View {
+    let onBackgroundWorkAllowed: (Bool) -> Void
+    let onBecameActive: () -> Void
+
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+            .task(id: scenePhase) {
+                onBackgroundWorkAllowed(scenePhase == .active)
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active { onBecameActive() }
+            }
+    }
+}

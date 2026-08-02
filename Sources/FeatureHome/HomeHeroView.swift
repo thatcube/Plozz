@@ -397,11 +397,16 @@ struct HomeHeroView: View {
         }
     }
 
-    /// The item the hero's Watchlist button acts on. Whole titles
-    /// Watchlist actions apply only to whole movies and series. Episodes and
-    /// seasons are intentionally not promoted to their parent series.
+    /// The item the hero's Watchlist button acts on.
+    ///
+    /// Watchlisting applies to whole movies and series, and a hero very often
+    /// fronts an episode — Continue Watching almost always does. Leaving the
+    /// button pointed at the episode meant it simply disappeared there, so an
+    /// episode is promoted to its show.
     private func watchlistTarget(for item: MediaItem) -> MediaItem {
-        item
+        // An episode fronted in the hero (Continue Watching, most often) is
+        // watchlisted as its SHOW — see `MediaItem.watchlistSubject`.
+        item.watchlistSubject
     }
 
     private func isWatchlistedForHero(_ item: MediaItem) -> Bool {
@@ -1333,7 +1338,10 @@ struct HomeHeroView: View {
             case .play: return (item.resumeProgressFraction != nil ? "Resume" : "Play", { onPlay(item) })
             case .request: return ("Request", { performRequest(for: item) })
             case .downloadStatus: return (downloadStatusText(for: item), {})
-            case .moreInfo: return ("More Info", { onSelect(item) })
+            // Opens the SHOW, not the episode. "More info" about episode 4 of a
+            // series the viewer is midway through is the series — that is where
+            // the seasons, the cast and the rest of it live.
+            case .moreInfo: return ("More Info", { onSelect(item.watchlistSubject) })
             case .watchlist:
                 let fav = isWatchlistedForHero(item)
                 return (fav ? "Remove from Watchlist" : "Add to Watchlist", { performWatchlist(for: item) })
@@ -1695,7 +1703,8 @@ struct HomeHeroView: View {
             onPlay(item)
         case .request: performRequest(for: item)
         case .downloadStatus: break // informational status pill — no action
-        case .moreInfo: onSelect(item)
+        // Same destination as the SwiftUI pill path above: the show.
+        case .moreInfo: onSelect(item.watchlistSubject)
         case .watchlist: performWatchlist(for: item)
         case .next: advanceForward()
         }

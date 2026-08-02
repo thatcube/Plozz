@@ -384,9 +384,25 @@ struct DetailHeroView: View, Equatable {
 
     /// The watchlist toggle for `item`, if its resolving provider conforms to
     /// `WatchlistProviding` (offered only for whole titles — movies/series).
+    /// The watchlist toggle for the page's SUBJECT, not for whatever the hero
+    /// happens to be fronting.
+    ///
+    /// A series page rests its hero on the episode Play would run, and `item` is
+    /// that episode — but an episode is not watchlistable, so the button silently
+    /// disappeared the moment a show resolved its next episode. What the viewer
+    /// means by "watchlist this" on a show's page is the show. This mirrors the
+    /// watched toggle, which deliberately resolves against the play target for the
+    /// same reason in reverse: each button acts on the thing it is actually about.
     private var heroWatchlistAction: MediaItemAction? {
-        heroActions.first { $0 == .addToWatchlist || $0 == .removeFromWatchlist }
+        let subject = backdrop.watchlistSubject
+        let actions = subject.id == item.id
+            ? heroActions
+            : (actionHandler?.actions(for: subject, context: actionContext) ?? [])
+        return actions.first { $0 == .addToWatchlist || $0 == .removeFromWatchlist }
     }
+
+    /// The item a watchlist press acts on — the series on a series page.
+    private var watchlistActionItem: MediaItem { backdrop.watchlistSubject }
 
     /// The watched-state toggle, resolved against the play target so it can never
     /// mark a whole series watched while the Play button beside it starts one
@@ -555,9 +571,18 @@ struct DetailHeroView: View, Equatable {
             }
             return
         }
-        let subject = (action == .markWatched || action == .markUnwatched)
-            ? watchedActionItem
-            : item
+        // Each action acts on the thing it is about: watched-state on what Play
+        // would run, watchlist on the page's subject (a series, not the episode
+        // its hero is currently fronting), everything else on the hero item.
+        let subject: MediaItem
+        switch action {
+        case .markWatched, .markUnwatched:
+            subject = watchedActionItem
+        case .addToWatchlist, .removeFromWatchlist:
+            subject = watchlistActionItem
+        default:
+            subject = item
+        }
         actionHandler?.perform(action, on: subject, context: actionContext)
     }
 

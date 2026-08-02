@@ -210,6 +210,27 @@ extension MediaItem {
         }
     }
 
+    /// What "add to watchlist" means for this row.
+    ///
+    /// An episode is not watchlistable — you cannot save "episode 4" for later in
+    /// any sense a viewer means — so the subject of the gesture is the show it
+    /// belongs to. Without this the button simply vanished wherever a hero fronted
+    /// an episode, which is most of Continue Watching and every series page that
+    /// has resolved its next episode.
+    ///
+    /// Falls back to the item itself when the show cannot be identified, so the
+    /// button is never wired to something arbitrary.
+    public var watchlistSubject: MediaItem {
+        guard kind == .episode || kind == .season else { return self }
+        guard let seriesID else { return self }
+        return MediaItem(
+            id: seriesID,
+            title: parentTitle ?? title,
+            kind: .series,
+            sourceAccountID: sourceAccountID
+        )
+    }
+
     /// The destination for "Go to Season". Preferred: the full **series** detail
     /// page (rich hero, badges, season tabs, episode rail) with this episode's
     /// season pre-selected, carried in `seasonID`. Falls back to a bare season

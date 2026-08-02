@@ -251,20 +251,41 @@ public struct MediaAliasEvidence: Codable, Hashable, Sendable {
         self.locallyValidatedBindings = locallyValidatedBindings.intersection(hintKeys)
     }
 
+    /// Evidence for `item`, optionally widened by the **canonical evidence of its
+    /// cross-server component** so two copies of one title resolve to the same alias
+    /// even when their payloads expose different id sets.
     public init?(
         item: MediaItem,
+        canonicalEvidence: MediaIdentity? = nil,
         bindingHints: [MediaAliasProviderBindingHint] = [],
         locallyValidatedBindings: Set<MediaAliasProviderBindingKey> = []
     ) {
         guard item.kind == .movie || item.kind == .series else { return nil }
-        let strong = MediaItemIdentity.strongExternalNamespaces.compactMap {
-            entry -> MediaAliasStrongEvidence? in
-            guard let value = item.providerID(entry.namespace) else { return nil }
+        // `plexGuid` is included deliberately: a Plex Discover / Watchlist row carries
+        // *only* that id (the Discover fetch omits the external `Guid` array), so
+        // without it every such row produced no strong evidence at all and fell to
+        // weak title/year — the one case the ledger most needs to get right.
+        var namespaces = MediaItemIdentity.strongExternalNamespaces.map(\.namespace)
+        namespaces.append(.plexGuid)
+        var strong = namespaces.compactMap { namespace -> MediaAliasStrongEvidence? in
+            guard let value = item.providerID(namespace) else { return nil }
             return MediaAliasStrongEvidence(
                 kind: item.kind,
-                namespace: entry.namespace,
+                namespace: namespace,
                 value: value
             )
+        }
+        if case .external(let source, let value)? = canonicalEvidence {
+            let base = source.split(separator: ":", maxSplits: 1).first.map(String.init) ?? source
+            if let namespace = Self.strongNamespacesByToken[base],
+               let evidence = MediaAliasStrongEvidence(
+                   kind: item.kind,
+                   namespace: namespace,
+                   value: value
+               ),
+               !strong.contains(where: { $0.namespace == namespace }) {
+                strong.append(evidence)
+            }
         }
         self.init(
             kind: item.kind,
@@ -284,6 +305,15 @@ public struct MediaAliasEvidence: Codable, Hashable, Sendable {
             locallyValidatedBindings: locallyValidatedBindings
         )
     }
+
+    static let strongNamespacesByToken: [String: ProviderIDNamespace] = {
+        var result: [String: ProviderIDNamespace] = [:]
+        for entry in MediaItemIdentity.strongExternalNamespaces {
+            result[entry.canonical] = entry.namespace
+        }
+        result["plexguid"] = .plexGuid
+        return result
+    }()
 
     private static func canonicalHints(
         _ hints: [MediaAliasProviderBindingHint]

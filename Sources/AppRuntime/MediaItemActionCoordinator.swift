@@ -121,12 +121,10 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         // page surfaces a Request affordance instead). This deliberately excludes
         // *owned* featured titles (available/partiallyAvailable), which resolve to a
         // real library copy via the identity index and keep their working actions.
-        let identitySources = additionalSources(item)
-        let hasPlayableTarget = item.hasPlayableLibraryTarget(
-            additionalSources: identitySources
+        let isExternalDiscovery = TitleClassifier.isDiscoveryRouting(
+            item,
+            identitySources: additionalSources(item)
         )
-        let isExternalDiscovery = !hasPlayableTarget
-            || (item.isNotInLibraryDiscovery && identitySources.isEmpty)
         // An unaired episode exists on no server, so every action here — watch
         // state, watchlist, refresh, download — would silently fail.
         guard !item.isUpcomingUnaired else { return [] }

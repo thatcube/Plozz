@@ -11,6 +11,12 @@ public enum ProviderIDNamespace: String, Codable, Hashable, Sendable, CaseIterab
     case aniList
     case myAnimeList
     case aniDB
+    /// Plex's global metadata guid (`plex://movie/<id>`) — a strong, *server
+    /// independent* identity: identical across every server and account that matched
+    /// the title, and the key the account-level Plex Watchlist is addressed by. It is
+    /// the only strong id a Plex Discover / Watchlist row carries, since the Discover
+    /// fetch omits the external `Guid` array.
+    case plexGuid
 
     case seriesImdb
     case seriesTmdb
@@ -37,6 +43,7 @@ public enum ProviderIDNamespace: String, Codable, Hashable, Sendable, CaseIterab
         case .aniList: return "AniList"
         case .myAnimeList: return "Mal"
         case .aniDB: return "AniDB"
+        case .plexGuid: return "PlexGuid"
         case .seriesImdb: return "SeriesImdb"
         case .seriesTmdb: return "SeriesTmdb"
         case .seriesTvdb: return "SeriesTvdb"
@@ -66,6 +73,7 @@ public enum ProviderIDNamespace: String, Codable, Hashable, Sendable, CaseIterab
         case .aniList: return ["anilist", "anilistid"]
         case .myAnimeList: return ["myanimelist", "myanimelistid", "mal"]
         case .aniDB: return ["anidb", "anidbid"]
+        case .plexGuid: return ["plexguid"]
 
         case .seriesImdb: return ["seriesimdb"]
         case .seriesTmdb: return ["seriestmdb", "seriesthemoviedb"]

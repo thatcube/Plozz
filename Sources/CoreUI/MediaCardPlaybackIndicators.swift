@@ -282,8 +282,10 @@ public struct MediaPlaybackIndicatorState: Equatable, Sendable {
         isPlayed = item.isPlayed
         playedPercentage = item.playedPercentage
         resumePosition = item.resumePosition
-        isNotInLibrary = item.isNotInLibraryDiscovery
-            || !item.hasPlayableLibraryTarget()
+        // Same shared classifier the corner mark and the detail page use, so a card
+        // and its page can't disagree. Cards judge the item alone (no index work in
+        // a card path), which is exactly `identitySources: []`.
+        isNotInLibrary = TitleClassifier.isNotOwnedForBadge(item)
     }
 
     /// The corner mark this card should wear, if any. Mirrors

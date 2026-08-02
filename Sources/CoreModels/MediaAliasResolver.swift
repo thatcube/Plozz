@@ -1,4 +1,3 @@
-import CoreModels
 import Foundation
 
 public enum MediaAliasResolver {
@@ -41,7 +40,21 @@ public enum MediaAliasResolver {
         }
 
         guard let weak = evidence.weak else { return nil }
-        let weakCandidates = snapshot.aliases(for: weak)
+        // Weak (title+year) matching obeys exactly the same two rules as
+        // `MediaItemIdentity.identities(for:)`, so the ledger and the merger share one
+        // ruleset instead of drifting apart:
+        //
+        // 1. **A strong id suppresses the title key.** Falling back to title/year while
+        //    the incoming item carries a catalogue id would let an IMDb-only record and
+        //    a TMDb-only record merge purely because they share a name and year.
+        // 2. **Title matching is movies-only.** A series title is identical across a
+        //    whole show and unreliable across localizations; the merger never
+        //    title-matches series and neither may the ledger.
+        guard evidence.strong.isEmpty, evidence.kind == .movie else { return nil }
+        let weakCandidates = snapshot.aliases(for: weak).filter { candidate in
+            guard let record = snapshot.record(for: candidate) else { return false }
+            return record.strongEvidence.isEmpty
+        }
         guard !hasTransitiveSplitRisk(weakCandidates, snapshot: snapshot) else {
             return nil
         }

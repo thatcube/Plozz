@@ -165,16 +165,14 @@ public struct DetailOpenEnvironment {
         Self.isDiscovery(item, identitySources: identitySources)
     }
 
+    /// Delegates to the one shared classifier in `CoreModels` — the detail page, the
+    /// action coordinator, poster corner marks and both shells must give the same
+    /// answer or a card and the page it opens disagree about ownership.
     public static func isDiscovery(
         _ item: MediaItem,
         identitySources: (MediaItem) -> [MediaSourceRef]
     ) -> Bool {
-        let indexedSources = identitySources(item)
-        let hasPlayableTarget = item.hasPlayableLibraryTarget(
-            additionalSources: indexedSources
-        )
-        return !hasPlayableTarget
-            || (item.isNotInLibraryDiscovery && indexedSources.isEmpty)
+        TitleClassifier.isDiscoveryRouting(item, identitySources: identitySources(item))
     }
 
     public func makeViewModel(for item: MediaItem, libraryOrigin: String?) -> ItemDetailViewModel {

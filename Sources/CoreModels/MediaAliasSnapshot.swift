@@ -1,4 +1,3 @@
-import CoreModels
 import Foundation
 
 public struct MediaAliasSnapshot: Sendable, Equatable {

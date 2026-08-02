@@ -41,12 +41,27 @@ public enum MediaAliasDuplicateReconciler {
         return records
     }
 
+    /// Two records may be considered the same title when they share **strong**
+    /// evidence, or — under exactly the merger's rules — when they share weak
+    /// title/year evidence *and* neither carries any strong id, *and* they are movies.
+    ///
+    /// Without those two guards a shared title+year would merge an IMDb-only record
+    /// with an unrelated TMDb-only record (different namespaces never "conflict", so
+    /// `areCompatible` waves them through), and would title-match series, which the
+    /// merger deliberately never does because a series title is identical across a
+    /// whole show and unreliable across localizations.
     private static func sharesIdentityEvidence(
         _ lhs: MediaAliasRecord,
         _ rhs: MediaAliasRecord
     ) -> Bool {
-        !Set(lhs.strongEvidence).isDisjoint(with: rhs.strongEvidence)
-            || !Set(lhs.weakEvidence).isDisjoint(with: rhs.weakEvidence)
+        if !Set(lhs.strongEvidence).isDisjoint(with: rhs.strongEvidence) { return true }
+        guard lhs.strongEvidence.isEmpty,
+              rhs.strongEvidence.isEmpty,
+              lhs.kind == .movie,
+              rhs.kind == .movie else {
+            return false
+        }
+        return !Set(lhs.weakEvidence).isDisjoint(with: rhs.weakEvidence)
     }
 
     private static func areCompatible(

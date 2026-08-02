@@ -114,6 +114,10 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
     /// enriched identities for that exact physical item, so it still resolves its
     /// full cross-server set and merges with a twin that *does* carry an id.
     private let bySource: [String: [MediaIdentity]]
+    /// `source.id` → the **canonical evidence** of the refined component that source
+    /// belongs to. Computed once, authoritatively, in ``init(byIdentity:)`` — see
+    /// ``TitleComponentLabeller``.
+    private let canonicalEvidenceBySource: [String: MediaIdentity]
 
     public init(byIdentity: [MediaIdentity: [IndexedSource]]) {
         let sorted = byIdentity.mapValues { sources in
@@ -133,9 +137,14 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
         // cross-server selector tie-breaks on — is identical across rebuilds.
         // Without this the "best source" for a title could flip between launches
         // (the reported "it's almost random which server I end up on" symptom).
-        self.bySource = reverse.mapValues { identities in
+        let stableReverse = reverse.mapValues { identities in
             identities.sorted { Self.stableSortKey($0) < Self.stableSortKey($1) }
         }
+        self.bySource = stableReverse
+        self.canonicalEvidenceBySource = TitleComponentLabeller.label(
+            byIdentity: sorted,
+            bySource: stableReverse
+        )
     }
 
     /// A deterministic, launch-stable ordering key for a ``MediaIdentity`` (the enum
@@ -344,6 +353,61 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
             anchorTitle: normalized.isEmpty ? nil : normalized,
             anchorYear: item.productionYear
         )
+    }
+
+    /// The **canonical evidence** for `item` — the single identity that represents
+    /// this title's refined cross-server component, agreed on by every copy of it.
+    ///
+    /// Picking "the first identity an item happens to carry" is unstable across
+    /// servers: a Plex row exposing `imdb`+`tmdb` and a Jellyfin row exposing only
+    /// `tmdb` would choose *different* keys for one title. The label read here comes
+    /// from one authoritative component pass (``TitleComponentLabeller``) run when the
+    /// snapshot is built, so both rows agree — and, crucially, so the pass applies the
+    /// split guard **pairwise between component members** rather than relative to
+    /// whichever item happened to ask. An anchor-relative walk is not an equivalence
+    /// relation: for `Scream 6` / yearless `Scream` / `Scream 7` bridged by shared ids
+    /// it yields three different "components", and can still hand the two
+    /// contradicting films the same minimum.
+    ///
+    /// Returns `nil` when the item matches no indexed source (a pure discovery title),
+    /// or when it matches **two** different refined components — an ambiguity that must
+    /// never be resolved by bridging them.
+    public func canonicalEvidence(for item: MediaItem) -> MediaIdentity? {
+        var identities = MediaItemIdentity.identities(for: item)
+        if let accountID = item.sourceAccountID,
+           let recovered = bySource["\(accountID):\(item.id)"] {
+            identities.append(contentsOf: recovered)
+        }
+        // Same rule #1 re-application as `sources(for:)`: a recovered strong external
+        // id suppresses the weak title fallback so it can never bridge two works.
+        if identities.contains(where: { if case .external = $0 { return true } else { return false } }) {
+            identities.removeAll { if case .title = $0 { return true } else { return false } }
+        }
+        guard !identities.isEmpty else { return nil }
+        let normalized = MediaItemIdentity.normalizedTitle(item.title)
+        var labels: Set<MediaIdentity> = []
+        var visited = Set<MediaIdentity>()
+        for identity in identities where visited.insert(identity).inserted {
+            guard let sources = byIdentity[identity] else { continue }
+            for source in sources where source.kind == item.kind {
+                // A source that positively contradicts the asking item is a different
+                // work riding a bad shared id — its label must not be adopted.
+                if MediaItemIdentity.titlesPlausiblyContradict(
+                    titleA: normalized,
+                    yearA: item.productionYear,
+                    kindA: item.kind,
+                    titleB: source.normalizedTitle ?? "",
+                    yearB: source.year,
+                    kindB: source.kind
+                ) {
+                    continue
+                }
+                if let label = canonicalEvidenceBySource[source.id] {
+                    labels.insert(label)
+                }
+            }
+        }
+        return labels.count == 1 ? labels.first : nil
     }
 
     /// Membership ``MediaSourceRef``s for `item` — the picker / merge-enrichment view.

@@ -129,14 +129,24 @@ let package = Package(
         //     breaking change across the 84 releases in this range; no public
         //     symbol was removed or renamed.
         //
-        // Pinned to the 6.4.0 RELEASE rather than upstream HEAD. Same reasoning as
+        // Pinned to the 6.5.0 RELEASE rather than upstream HEAD. Same reasoning as
         // the exact-SHA pin: the playback path takes documented, released changes
-        // only. The SHA is the COMMIT the 6.4.0 tag points at, not the annotated
-        // tag object's own id — a `revision:` pin wants the commit.
+        // only. The SHA is the COMMIT the tag points at. Unlike the 6.4.0 tag,
+        // which was annotated (so its own object id differed from the commit it
+        // wrapped), 6.5.0 is a lightweight tag that points straight at the commit,
+        // so the ref and the pinned SHA are the same object — a `revision:` pin
+        // wants the commit either way.
         //
-        // Moved up from 6.0.2. Four minor releases, no breaking change and no
-        // symbol removed or renamed, and two of them answer shapes Plozz actually
-        // serves:
+        // Moved up from 6.0.2. Five minor releases, no breaking change and no
+        // symbol removed or renamed, and several of them answer shapes Plozz
+        // actually serves:
+        //   - 6.5.0 every engine error type now conforms to `LocalizedError`, so a
+        //     terminal `PlayerState.error` and every caught engine error render the
+        //     description the engine already computes (e.g. the HTTP status behind
+        //     an HLS ingest failure, or a `DemuxerError`'s AVERROR string) instead
+        //     of Foundation's generic "operation couldn't be completed" bridge.
+        //     Purely additive public API; the one behaviour change is that error
+        //     TEXT differs, which Plozz never string-matches.
         //   - 6.4.0 finite HEVC-in-MPEG-TS HLS VOD no longer reaches AVPlayer's
         //     audio-only black native path (AVFoundation builds no video track for
         //     HEVC in TS), plus a correct playhead for containers starting at a
@@ -151,7 +161,7 @@ let package = Package(
         //
         // SMB enters AetherEngine only through Plozz's protocol-neutral custom-source
         // bridge; the engine's legacy SMB URL product is not linked.
-        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "b43f17df6eb8fe150f570f88386c52020384c7ed"),
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "327c2da65c8070ebd7f2dcccffb972ddc173f5b0"),
         // NOTE: FFmpegBuild (FFmpeg n8.1.x decode-only) and LibDovi (Dolby Vision
         // RPU parser) are pulled in TRANSITIVELY by AetherEngine — its own manifest
         // declares and consumes them. Plozz used to declare them directly only for

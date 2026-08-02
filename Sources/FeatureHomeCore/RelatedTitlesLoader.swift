@@ -63,6 +63,9 @@ public final class RelatedTitlesLoader {
     private let resolver: RelatedTitlesResolver
     private let store: RelatedTitlesStore
     private let search: @Sendable (String, Int) async -> [MediaItem]
+    // Read-only by design: the future unified Plozz identity layer can back this
+    // seam with its durable UUID, but merely browsing Related must never allocate
+    // or persist identity records.
     private let indexedLibrarySources: @Sendable (MediaItem) -> [MediaSourceRef]
     private let now: @Sendable () -> Date
     private let displayMode: DisplayMode

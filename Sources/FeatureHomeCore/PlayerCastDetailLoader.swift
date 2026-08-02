@@ -153,13 +153,8 @@ private func foldDuplicateCredits(_ items: [MediaItem]) -> [MediaItem] {
     // folds the same film catalogued under two different titles, which no title
     // compare can see. Within each group keep whichever copy can actually show a
     // poster; a row of grey title tiles is the one outcome worse than a duplicate.
-    let collapsed: [MediaItem] = TitleDedupe.groups(items) { item in
+    let collapsed: [MediaItem] = TitleDedupe.collapsed(items) { item in
         "\(titleKey(item))|\(item.productionYear.map(String.init) ?? "")"
-    }.compactMap { group in
-        guard let first = group.first else { return nil }
-        return group.lazy
-            .map { items[$0] }
-            .first { !$0.artworkReferences(for: .poster).isEmpty } ?? items[first]
     }
 
     let titlesWithAYear = Set(

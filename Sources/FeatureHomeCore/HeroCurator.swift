@@ -239,7 +239,7 @@ public struct HeroCurator: Sendable {
         return groups.map { group in
             var merged = MediaItemMerger.mergeGroup(group.items)
             for donor in group.items {
-                merged.fillMissingHeroPresentation(from: donor)
+                merged.fillingMissingPresentation(from: donor)
             }
             return merged
         }
@@ -272,37 +272,6 @@ public struct HeroCurator: Sendable {
     }
 }
 
-private extension MediaItem {
-    mutating func fillMissingHeroPresentation(from donor: MediaItem) {
-        if originalTitle?.isEmpty != false { originalTitle = donor.originalTitle }
-        if overview?.isEmpty != false { overview = donor.overview }
-        if productionYear == nil { productionYear = donor.productionYear }
-        if officialRating?.isEmpty != false {
-            officialRating = donor.officialRating
-        }
-        if genres.isEmpty { genres = donor.genres }
-        if people.isEmpty { people = donor.people }
-        if studios.isEmpty { studios = donor.studios }
-        if tags.isEmpty { tags = donor.tags }
-        if taglines.isEmpty { taglines = donor.taglines }
-        if runtime == nil { runtime = donor.runtime }
-        if posterURL == nil { posterURL = donor.posterURL }
-        if seriesPosterURL == nil { seriesPosterURL = donor.seriesPosterURL }
-        if backdropURL == nil { backdropURL = donor.backdropURL }
-        if heroBackdropURL == nil { heroBackdropURL = donor.heroBackdropURL }
-        if fallbackArtworkURL == nil {
-            fallbackArtworkURL = donor.fallbackArtworkURL
-        }
-        if logoURL == nil { logoURL = donor.logoURL }
-        ratings = ratings.mergedWithAuthoritative(donor.ratings)
-        if artworkSelections.isEmpty {
-            artworkSelections = donor.artworkSelections
-        }
-        if availability == nil { availability = donor.availability }
-        if downloadProgress == nil { downloadProgress = donor.downloadProgress }
-        if mediaInfo == nil { mediaInfo = donor.mediaInfo }
-    }
-}
 
 /// Keeps poster-only or artwork-free items out of the full-bleed hero. Parent
 /// backdrops remain eligible so episodes can use their series artwork.

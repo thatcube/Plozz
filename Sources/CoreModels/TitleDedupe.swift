@@ -35,6 +35,18 @@ public protocol TitleDedupeSubject {
     /// Fallback when a row carries no identity at all, so it can never be folded
     /// into an unrelated one.
     var dedupeFallbackID: String { get }
+
+    /// Fold a group describing ONE title into the single row that represents it.
+    ///
+    /// A protocol requirement rather than something each caller does for itself,
+    /// because "keep the first and drop the rest" is the wrong default and was
+    /// wrong in practice: a person's credits kept an entry from a source that
+    /// attaches no catalogue ids and discarded the duplicate that had one, leaving
+    /// a show the viewer owns on four servers unable to match its own library and
+    /// wearing a request mark. Identity and order belong to the first member;
+    /// EVIDENCE belongs to the whole group. Conforming types decide how to fold,
+    /// but they cannot decline to.
+    static func collapsingDedupeGroup(_ group: [Self]) -> Self
     /// Every strong identity this row carries, kind-scoped. Declared here rather
     /// than only in the extension below so a conformer's own version is the one
     /// generic code calls — an extension-only member dispatches statically, which
@@ -68,6 +80,20 @@ extension MediaItem: TitleDedupeSubject {
     /// title identity — two rows for one film that carry no catalogue id at all are
     /// still the same film. `RelatedTitle` has no equivalent and takes the default.
     public var dedupeStrongKeys: Set<String> { MediaItemIdentity.overlapKeys(for: self) }
+
+    /// The app's canonical fold. `MediaItemMerger` already unions provider ids,
+    /// sources and every server across a group; deferring to it means a display row
+    /// and a Home row agree about what one title is.
+    public static func collapsingDedupeGroup(_ group: [MediaItem]) -> MediaItem {
+        var merged = MediaItemMerger.mergeGroup(group)
+        // The merger settles identity; this settles presentation. Without it the
+        // survivor keeps its own gaps — a credit with no poster stays a grey tile
+        // beside a duplicate that had one.
+        for donor in group {
+            merged.fillingMissingPresentation(from: donor)
+        }
+        return merged
+    }
 }
 
 /// The named weak policies. Dedup asks the same question everywhere — "are these two
@@ -220,11 +246,36 @@ public enum TitleDedupe {
     }
 
     /// First-wins dedup under a named policy.
+    ///
+    /// Prefer ``collapsed(_:policy:)`` — this returns a lone survivor and so
+    /// discards whatever its duplicates knew.
     public static func deduplicated<S: TitleDedupeSubject>(
         _ items: [S],
         policy: TitleDedupePolicy
     ) -> [S] {
         deduplicated(items) { policy.weakKey($0) }
+    }
+
+    /// THE dedup entry point: one row per title, each folded from its whole group.
+    ///
+    /// Groups stay in first-appearance order, so a row never reshuffles.
+    public static func collapsed<S: TitleDedupeSubject>(
+        _ items: [S],
+        policy: TitleDedupePolicy
+    ) -> [S] {
+        collapsed(items) { policy.weakKey($0) }
+    }
+
+    /// As above, with a caller-supplied weak policy.
+    public static func collapsed<S: TitleDedupeSubject>(
+        _ items: [S],
+        weakKey: (S) -> String? = { _ in nil }
+    ) -> [S] {
+        groups(items, weakKey: weakKey).compactMap { group in
+            let members = group.map { items[$0] }
+            guard !members.isEmpty else { return nil }
+            return S.collapsingDedupeGroup(members)
+        }
     }
 
     private static func contradicts<S: TitleDedupeSubject>(_ lhs: S, _ rhs: S) -> Bool {

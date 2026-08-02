@@ -168,46 +168,11 @@ public final class RelatedTitlesLoader {
     static func collapsingExternalDuplicates(
         _ titles: [RelatedTitle]
     ) -> [RelatedTitle] {
-        TitleDedupe.groups(titles, policy: .titleAndYear).map { group in
-            mergeExternalGroup(group.map { titles[$0] })
-        }
+        TitleDedupe.collapsed(titles, policy: .titleAndYear)
     }
 
 
-    private static func mergeExternalGroup(
-        _ titles: [RelatedTitle]
-    ) -> RelatedTitle {
-        let first = titles[0]
-        var providerIDs = first.providerIDs
-        for title in titles.dropFirst() {
-            for (key, value) in title.providerIDs where providerIDs[key] == nil {
-                providerIDs[key] = value
-            }
-        }
-        let relation = titles.map(\.relation).min {
-            relationRank($0) < relationRank($1)
-        } ?? first.relation
-        return RelatedTitle(
-            title: first.title,
-            year: first.year ?? titles.lazy.compactMap(\.year).first,
-            kind: first.kind,
-            relation: relation,
-            providerIDs: providerIDs,
-            posterURL: first.posterURL
-                ?? titles.lazy.compactMap(\.posterURL).first,
-            source: first.source
-        )
-    }
 
-    private static func relationRank(
-        _ relation: RelatedTitle.Relation
-    ) -> Int {
-        switch relation {
-        case .continuation: return 0
-        case .sideStory: return 1
-        case .recommendation: return 2
-        }
-    }
 
     private func resolvedTitles(for query: MetadataQuery, key: String) async -> [RelatedTitle] {
         if let cached = await store.record(for: key), !cached.isRefreshDue(now: now()) {

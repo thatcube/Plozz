@@ -327,25 +327,7 @@ public final class PersonDetailViewModel {
     /// server answered first is arbitrary, and a card with no date or no artwork
     /// is not.
     static func collapsingAcrossServers(_ items: [MediaItem]) -> [MediaItem] {
-        TitleDedupe.groups(items, policy: .titleIgnoringYear).compactMap { group in
-            guard let first = group.first else { return nil }
-            var winner = items[first]
-            if winner.productionYear == nil {
-                winner.productionYear = group.lazy
-                    .compactMap { items[$0].productionYear }.first
-            }
-            if winner.posterURL == nil {
-                winner.posterURL = group.lazy
-                    .compactMap { items[$0].posterURL }.first
-            }
-            for index in group.dropFirst() {
-                for (namespace, value) in items[index].providerIDs
-                where winner.providerIDs[namespace] == nil {
-                    winner.providerIDs[namespace] = value
-                }
-            }
-            return winner
-        }
+        TitleDedupe.collapsed(items, policy: .titleIgnoringYear)
     }
 
     private static func knownForKey(_ item: MediaItem) -> String {
@@ -381,17 +363,7 @@ public final class PersonDetailViewModel {
         // policy. Adding the strong half fixes the case a pure title compare could
         // never see: the same film catalogued under two localized titles, which both
         // servers agree is `imdb:tt…`.
-        var result: [MediaItem] = []
-        for group in TitleDedupe.groups(items, weakKey: dedupeKey) {
-            guard let first = group.first else { continue }
-            var winner = items[first]
-            if winner.posterURL == nil,
-               let poster = group.lazy.compactMap({ items[$0].posterURL }).first {
-                winner.posterURL = poster
-            }
-            result.append(winner)
-        }
-        return result
+        TitleDedupe.collapsed(items, weakKey: dedupeKey)
     }
 
     /// This row's **weak** policy — the strong-identity half lives in the shared

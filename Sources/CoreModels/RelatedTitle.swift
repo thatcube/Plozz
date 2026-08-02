@@ -75,4 +75,44 @@ extension RelatedTitle: TitleDedupeSubject {
     public var dedupeYear: Int? { year }
     public var dedupeProviderIDs: [String: String] { providerIDs }
     public var dedupeFallbackID: String { id }
+
+    /// Cross-provider results describe one work under disjoint id sets, so the fold
+    /// keeps the union — that union is what later lets the row recognise a copy the
+    /// viewer owns. The first member keeps title, kind and position; a year or
+    /// poster it lacks comes from whichever sibling has one.
+    public static func collapsingDedupeGroup(_ group: [RelatedTitle]) -> RelatedTitle {
+        let first = group[0]
+        var providerIDs = first.providerIDs
+        for title in group.dropFirst() {
+            for (key, value) in title.providerIDs where providerIDs[key] == nil {
+                providerIDs[key] = value
+            }
+        }
+        // The strongest claim in the group: a continuation outranks a side story,
+        // which outranks a recommendation. Being described as "related" by one
+        // source and "the sequel" by another means it is the sequel.
+        let relation = group.map(\.relation).min {
+            $0.relatedStrengthRank < $1.relatedStrengthRank
+        } ?? first.relation
+        return RelatedTitle(
+            title: first.title,
+            year: first.year ?? group.lazy.compactMap(\.year).first,
+            kind: first.kind,
+            relation: relation,
+            providerIDs: providerIDs,
+            posterURL: first.posterURL ?? group.lazy.compactMap(\.posterURL).first,
+            source: first.source
+        )
+    }
+}
+
+public extension RelatedTitle.Relation {
+    /// Lower is a stronger statement about how two titles relate.
+    var relatedStrengthRank: Int {
+        switch self {
+        case .continuation: return 0
+        case .sideStory: return 1
+        case .recommendation: return 2
+        }
+    }
 }

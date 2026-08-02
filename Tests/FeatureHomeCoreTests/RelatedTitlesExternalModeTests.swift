@@ -146,6 +146,13 @@ final class RelatedTitlesExternalModeTests: XCTestCase {
         XCTAssertTrue(
             loader.entries.first?.item.ownershipPresentation().canPlay == true
         )
+        // Pinned through the ONE shared classifier as well as the item's own
+        // fields: `TitleClassifier` is what both shells' cards and detail routing
+        // consume, so asserting it here is what guarantees neither tvOS nor
+        // iOS/iPadOS can put a request mark on this card.
+        guard let item = loader.entries.first?.item else { return XCTFail("no entry") }
+        XCTAssertFalse(TitleClassifier.isNotOwnedForBadge(item))
+        XCTAssertFalse(TitleClassifier.isDiscoveryRouting(item, identitySources: []))
     }
 
     func testExternalModeClassifiesOwnedMovieByStrongID() async {
@@ -225,6 +232,11 @@ final class RelatedTitlesExternalModeTests: XCTestCase {
 
         XCTAssertFalse(loader.entries.first?.isInLibrary == true)
         XCTAssertEqual(loader.entries.first?.item.kind, .series)
+        // The converse, through the same classifier: a title the index cannot
+        // vouch for must still read as unowned, so fixing the owned case can never
+        // start claiming ownership of everything on the row.
+        guard let item = loader.entries.first?.item else { return XCTFail("no entry") }
+        XCTAssertTrue(TitleClassifier.isNotOwnedForBadge(item))
     }
 
     func testSharedShellDisplayModeProducesIdenticalOwnershipClassification() async {

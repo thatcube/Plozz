@@ -439,6 +439,18 @@ public enum MediaItemMerger {
         primary.locallyValidatedPlayableSource =
             orderedMembers.contains(where: \.locallyValidatedPlayableSource)
             || !indexSources.isEmpty
+        // A discovery availability describes the provider that supplied the row; once
+        // a genuinely validated member has folded in, it is stale and describes a
+        // *request*, not library membership. Clearing it here is what lets the card
+        // badge stay fail-closed (it keeps the availability clause that routing drops)
+        // without the card and the page it opens disagreeing.
+        //
+        // Real local proof only — deliberately not `!indexSources.isEmpty`, so the
+        // badge remains index-free and cannot flicker as the index warms.
+        if primary.isNotInLibraryDiscovery,
+           orderedMembers.contains(where: \.locallyValidatedPlayableSource) {
+            primary.availability = nil
+        }
 
         return primary
     }

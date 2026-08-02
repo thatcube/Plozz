@@ -43,8 +43,10 @@ extension MediaItem {
     /// a container resolves to many files rather than one. Both must open their
     /// detail page instead of being handed to the player.
     var isPlayableNow: Bool {
-        guard !isNotInLibraryDiscovery,
-              hasPlayableLibraryTarget(),
+        // The same index-free answer the card's own corner mark uses, so a press can
+        // never contradict what the poster is showing. Was a fifth hand-rolled copy of
+        // this classification.
+        guard !TitleClassifier.isNotOwnedForBadge(self),
               !isUpcomingUnaired else { return false }
         switch kind {
         case .movie, .episode, .video, .series: return true

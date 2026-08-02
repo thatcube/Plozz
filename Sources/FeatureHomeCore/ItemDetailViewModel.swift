@@ -776,12 +776,11 @@ public final class ItemDetailViewModel {
         guard !Task.isCancelled, let seed = state.value?.item else { return }
 
         let generation = sourceGeneration
-        async let metadata = externalMetadataResolver(
+        let resolved = await externalMetadataResolver(
             seed,
             availabilityRegionCode
         )
-        async let ratings = ratingsProvider.ratings(for: seed)
-        let (resolved, externalRatings) = await (metadata, ratings)
+        let enrichedSeed = Self.applying(resolved.enrichment, to: seed)
         guard !Task.isCancelled,
               sourceGeneration == generation,
               case var .loaded(detail) = state,
@@ -791,10 +790,6 @@ public final class ItemDetailViewModel {
             resolved.enrichment,
             to: detail.item
         )
-        if !externalRatings.isEmpty {
-            detail.item.ratings =
-                detail.item.ratings.mergedWithAuthoritative(externalRatings)
-        }
         detail.externalAvailability =
             resolved.availability.isEmpty ? nil : resolved.availability
         detail.childrenLoaded = true
@@ -806,10 +801,22 @@ public final class ItemDetailViewModel {
             loadUpcomingSchedule(for: enriched)
         }
         loadRelatedTitles(for: enriched)
-        await loadDiscoveryTrailer(
+        async let ratings = ratingsProvider.ratings(for: enrichedSeed)
+        async let trailer: Void = loadDiscoveryTrailer(
             for: enriched,
             sourceGeneration: generation
         )
+        let externalRatings = await ratings
+        if !externalRatings.isEmpty,
+           !Task.isCancelled,
+           sourceGeneration == generation,
+           case var .loaded(latest) = state,
+           latest.item.id == enriched.id {
+            latest.item.ratings =
+                latest.item.ratings.mergedWithAuthoritative(externalRatings)
+            state = .loaded(latest)
+        }
+        await trailer
     }
 
     private static func applying(

@@ -53,6 +53,56 @@ final class MetadataKitTests: XCTestCase {
         XCTAssertNil(ContentClassifier.originalAudioLanguage(for: item(kind: .episode)))
     }
 
+    func testSeriesScopedLanguageMemoKeyIsSharedAcrossEpisodes() {
+        let first = item(
+            kind: .episode,
+            season: 1,
+            episode: 1,
+            providerIDs: ["Tmdb": "episode-1", "SeriesTmdb": "show-42"]
+        )
+        let second = item(
+            kind: .episode,
+            season: 1,
+            episode: 2,
+            providerIDs: ["Tmdb": "episode-2", "SeriesTmdb": "show-42"]
+        )
+
+        XCTAssertEqual(
+            MetadataQuery(first).seriesScoped.cacheKey(for: .poster),
+            MetadataQuery(second).seriesScoped.cacheKey(for: .poster)
+        )
+    }
+
+    func testSeriesScopedLanguageLookupDropsChildIDsWithoutSeriesIDs() {
+        let first = MediaItem(
+            id: "episode-1",
+            title: "Pilot",
+            kind: .episode,
+            parentTitle: "Futurama",
+            seasonNumber: 1,
+            episodeNumber: 1,
+            seriesID: "show-futurama",
+            providerIDs: ["Tmdb": "episode-tmdb-1"]
+        )
+        let second = MediaItem(
+            id: "episode-2",
+            title: "The Series Has Landed",
+            kind: .episode,
+            parentTitle: "Futurama",
+            seasonNumber: 1,
+            episodeNumber: 2,
+            seriesID: "show-futurama",
+            providerIDs: ["Tmdb": "episode-tmdb-2"]
+        )
+        let query = MetadataQuery(first).seriesScoped
+
+        XCTAssertNil(query.providerIDs.providerID(.tmdb))
+        XCTAssertEqual(
+            ArtworkRouter.originalLanguageCacheKey(for: first),
+            ArtworkRouter.originalLanguageCacheKey(for: second)
+        )
+    }
+
     func testContentTypeMapsToSubtitleCategory() {
         XCTAssertEqual(ContentType.anime.subtitleCategory, .anime)
         XCTAssertEqual(ContentType.movie.subtitleCategory, .movie)

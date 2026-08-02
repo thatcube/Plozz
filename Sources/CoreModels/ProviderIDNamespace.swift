@@ -126,6 +126,14 @@ public extension Dictionary where Key == String, Value == String {
         }
     }
 
+    /// Removes every spelling/alias of `namespace`.
+    mutating func removeProviderID(_ namespace: ProviderIDNamespace) {
+        let aliases = Set(namespace.aliases.map(normalizeProviderIDKey))
+        self = filter {
+            !aliases.contains(normalizeProviderIDKey($0.key))
+        }
+    }
+
     /// Canonicalized provider-id map keyed by lowercased alphanumeric tokens.
     /// Example: `["TMDb ID": "278"]` becomes `["tmdbid": "278"]`.
     var normalizedProviderIDs: [String: String] {

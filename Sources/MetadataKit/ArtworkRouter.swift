@@ -61,8 +61,8 @@ public actor ArtworkRouter {
         if let classified = ContentClassifier.originalAudioLanguage(for: item) {
             return classified
         }
-        let query = MetadataQuery(item)
-        let key = "original-language|\(query.cacheKey(for: .poster))"
+        let query = MetadataQuery(item).seriesScoped
+        let key = Self.originalLanguageCacheKey(for: item, query: query)
         if let cached = originalLanguages[key] { return cached }
         if missingOriginalLanguages.contains(key) { return nil }
         guard let language = await tmdb.originalLanguage(for: query) else {
@@ -71,6 +71,25 @@ public actor ArtworkRouter {
         }
         originalLanguages[key] = language
         return language
+    }
+
+    static func originalLanguageCacheKey(
+        for item: MediaItem,
+        query: MetadataQuery? = nil
+    ) -> String {
+        let query = query ?? MetadataQuery(item).seriesScoped
+        if item.kind == .episode || item.kind == .season {
+            let namespaces: [ProviderIDNamespace] = [
+                .seriesTmdb, .seriesTvdb, .seriesImdb, .seriesTvmaze,
+                .seriesAniList, .seriesMal, .seriesAniDB,
+            ]
+            for namespace in namespaces {
+                if let value = item.providerID(namespace) {
+                    return "original-language|\(namespace.canonicalKey.lowercased()):\(value)"
+                }
+            }
+        }
+        return "original-language|\(query.cacheKey(for: .poster))"
     }
 
     // MARK: - Video artwork

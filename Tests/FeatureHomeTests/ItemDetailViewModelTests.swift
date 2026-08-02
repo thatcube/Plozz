@@ -1,6 +1,7 @@
 import XCTest
 import CoreModels
 import MetadataKit
+import RatingsService
 @testable import FeatureHome
 
 @MainActor
@@ -85,6 +86,87 @@ final class ItemDetailViewModelTests: XCTestCase {
             [release]
         )
         XCTAssertEqual(vm.state.value?.childrenLoaded, true)
+    }
+
+    func testDiscoveryRatingsReceiveIDsFromMetadataEnrichment() async {
+        let seed = MediaItem(
+            id: "seer:movie:42",
+            title: "External Movie",
+            kind: .movie,
+            providerIDs: ["Tmdb": "42"],
+            availability: .unknown
+        )
+        let ratings = CapturingDiscoveryRatingsProvider()
+        let vm = ItemDetailViewModel(
+            provider: FakeMediaProvider(allItems: []),
+            itemID: seed.id,
+            initialItem: seed,
+            isDiscoveryItem: true,
+            externalMetadataResolver: { _, region in
+                ExternalTitleMetadata(
+                    enrichment: MetadataEnrichment(
+                        externalIDs: [
+                            "Imdb": SourcedValue(
+                                value: "tt1234567",
+                                source: .tmdb
+                            )
+                        ]
+                    ),
+                    availability: ExternalTitleAvailability(regionCode: region)
+                )
+            },
+            ratingsProvider: ratings,
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(ratings.seenItem?.providerID(.imdb), "tt1234567")
+        XCTAssertEqual(vm.state.value?.item.ratings.map(\.source), [.imdb])
+    }
+
+    func testDiscoveryMetadataPaintsBeforeRatingsFinish() async {
+        let seed = MediaItem(
+            id: "seer:movie:42",
+            title: "External Movie",
+            kind: .movie,
+            availability: .unknown
+        )
+        let gate = AsyncGate()
+        let ratings = CapturingDiscoveryRatingsProvider(gate: gate)
+        let vm = ItemDetailViewModel(
+            provider: FakeMediaProvider(allItems: []),
+            itemID: seed.id,
+            initialItem: seed,
+            isDiscoveryItem: true,
+            externalMetadataResolver: { _, region in
+                ExternalTitleMetadata(
+                    enrichment: MetadataEnrichment(
+                        overview: SourcedValue(
+                            value: "Paint this first.",
+                            source: .tmdb
+                        )
+                    ),
+                    availability: ExternalTitleAvailability(regionCode: region)
+                )
+            },
+            ratingsProvider: ratings,
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        let load = Task { await vm.load() }
+        while ratings.seenItem == nil { await Task.yield() }
+
+        XCTAssertEqual(vm.state.value?.item.overview, "Paint this first.")
+        XCTAssertTrue(vm.state.value?.item.ratings.isEmpty == true)
+
+        gate.open()
+        await load.value
+        XCTAssertEqual(vm.state.value?.item.ratings.map(\.source), [.imdb])
     }
 
     func testLateDiscoveryStatusRefreshPreservesRichMetadata() async {
@@ -1936,6 +2018,36 @@ final class ItemDetailViewModelTests: XCTestCase {
         if case .failed = vm.state {
             XCTFail("Seeded hero must not be replaced by a full-screen error")
         }
+    }
+}
+
+private final class CapturingDiscoveryRatingsProvider:
+    ExternalRatingsProviding,
+    @unchecked Sendable {
+    private let lock = NSLock()
+    private var _seenItem: MediaItem?
+    private let gate: AsyncGate?
+
+    init(gate: AsyncGate? = nil) {
+        self.gate = gate
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+
+    var seenItem: MediaItem? {
+        withLock { _seenItem }
+    }
+
+    func ratings(for item: MediaItem) async -> [ExternalRating] {
+        withLock { _seenItem = item }
+        await gate?.wait()
+        return [
+            ExternalRating(source: .imdb, value: 7.5, scale: .outOfTen)
+        ]
     }
 }
 

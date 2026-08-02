@@ -119,14 +119,15 @@ public struct CachingRatingsProvider: CachedExternalRatingsProviding {
     }
 
     public func ratings(for item: MediaItem) async -> [ExternalRating] {
+        let key = directCacheKey(for: item)
         let resolved: [ExternalRating]
-        if let cached = await cachedRatings(for: item) {
+        if let cached = await cache.ratings(forKey: key) {
             resolved = cached
         } else {
             let fetched = await base.ratings(for: item)
             // Only cache non-empty results so a transient failure isn't pinned.
             if !fetched.isEmpty {
-                await cache.store(fetched, forKey: cacheKey(for: item))
+                await cache.store(fetched, forKey: key)
             }
             resolved = fetched
         }
@@ -134,20 +135,25 @@ public struct CachingRatingsProvider: CachedExternalRatingsProviding {
     }
 
     public func cachedRatings(for item: MediaItem) async -> [ExternalRating]? {
-        guard let cached = await cache.ratings(forKey: cacheKey(for: item)) else {
+        if let seriesKey = seriesFallbackCacheKey(for: item),
+           let series = await cache.ratings(forKey: seriesKey) {
+            return Self.sanitized(series, for: item)
+        }
+        guard let direct = await cache.ratings(
+            forKey: directCacheKey(for: item)
+        ) else {
             return nil
         }
-        return Self.sanitized(cached, for: item)
+        return Self.sanitized(direct, for: item)
     }
 
-    private func cacheKey(for item: MediaItem) -> String {
-        if item.kind == .episode || item.kind == .season {
-            return item.providerID(.seriesImdb)
-                ?? item.seriesID
-                ?? OMDbRatingsProvider.imdbID(from: item)
-                ?? item.id
-        }
+    private func directCacheKey(for item: MediaItem) -> String {
         return OMDbRatingsProvider.imdbID(from: item) ?? item.id
+    }
+
+    private func seriesFallbackCacheKey(for item: MediaItem) -> String? {
+        guard item.kind == .episode || item.kind == .season else { return nil }
+        return item.providerID(.seriesImdb)
     }
 
     private static func sanitized(

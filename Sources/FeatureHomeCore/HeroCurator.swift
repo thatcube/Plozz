@@ -216,14 +216,25 @@ public struct HeroCurator: Sendable {
         var groups: [(tokens: Set<String>, items: [MediaItem])] = []
         for item in items {
             let tokens = HeroDedupe.tokens(for: item)
-            if let index = groups.firstIndex(where: {
-                !tokens.isDisjoint(with: $0.tokens)
-            }) {
-                groups[index].tokens.formUnion(tokens)
-                groups[index].items.append(item)
-            } else {
-                groups.append((tokens, [item]))
+            let matches = groups.indices.filter {
+                !tokens.isDisjoint(with: groups[$0].tokens)
             }
+            guard let destination = matches.first else {
+                groups.append((tokens, [item]))
+                continue
+            }
+
+            var mergedTokens = tokens
+            var mergedItems: [MediaItem] = []
+            for index in matches {
+                mergedTokens.formUnion(groups[index].tokens)
+                mergedItems.append(contentsOf: groups[index].items)
+            }
+            mergedItems.append(item)
+            for index in matches.dropFirst().reversed() {
+                groups.remove(at: index)
+            }
+            groups[destination] = (mergedTokens, mergedItems)
         }
         return groups.map { group in
             var merged = MediaItemMerger.mergeGroup(group.items)

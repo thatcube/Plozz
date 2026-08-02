@@ -790,7 +790,8 @@ let package = Package(
                 "FeatureHome",
                 "FeatureHomeCore",
                 "HeroUI",
-                "CoreModels"
+                "CoreModels",
+                "RatingsService"
             ]
         ),
         .testTarget(

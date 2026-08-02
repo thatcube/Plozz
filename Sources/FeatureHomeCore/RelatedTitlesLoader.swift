@@ -112,14 +112,139 @@ public final class RelatedTitlesLoader {
             // time. Searching every candidate against every server here is pure
             // speculative cost (up to 24 titles × all accounts) and delays a row
             // that already has everything it needs to render.
-            var seen = Set<String>()
-            entries = titles
-                .filter { seen.insert($0.id).inserted }
+            entries = Self.collapsingExternalDuplicates(titles)
                 .prefix(Self.maximumEntries)
                 .map { RelatedEntry(related: $0, libraryItem: nil) }
             return
         }
         await matchToLibrary(titles, seedKey: key)
+    }
+
+    /// Cross-provider Related results often describe the same work under disjoint
+    /// ids (AniList vs TMDb). Collapse connected strong-id groups and use an exact
+    /// normalized title/year/kind token only to bridge those namespaces.
+    static func collapsingExternalDuplicates(
+        _ titles: [RelatedTitle]
+    ) -> [RelatedTitle] {
+        var groups: [(tokens: Set<String>, titles: [RelatedTitle])] = []
+        for title in titles {
+            let tokens = externalIdentityTokens(for: title)
+            var mergedTokens = tokens
+            var mergedTitles = [title]
+            var matches: [Int] = []
+            while true {
+                let compatible = groups.indices.filter { index in
+                    !matches.contains(index)
+                        && !mergedTokens.isDisjoint(with: groups[index].tokens)
+                        && groups[index].titles.allSatisfy {
+                            canMerge($0, with: mergedTitles)
+                        }
+                }
+                guard !compatible.isEmpty else { break }
+                let strong = Set(mergedTokens.filter { $0.hasPrefix("ext:") })
+                let next = compatible.first {
+                    !strong.isDisjoint(
+                        with: Set(
+                            groups[$0].tokens.filter { $0.hasPrefix("ext:") }
+                        )
+                    )
+                } ?? compatible[0]
+                matches.append(next)
+                mergedTokens.formUnion(groups[next].tokens)
+                mergedTitles.append(contentsOf: groups[next].titles)
+            }
+            let orderedMatches = matches.sorted()
+            guard let destination = orderedMatches.first else {
+                groups.append((tokens, [title]))
+                continue
+            }
+            // Keep provider order stable: existing groups lead, the newly-arrived
+            // bridge follows.
+            let existingTitles = orderedMatches.flatMap { groups[$0].titles }
+            mergedTitles = existingTitles + [title]
+            for index in orderedMatches.dropFirst().reversed() {
+                groups.remove(at: index)
+            }
+            groups[destination] = (mergedTokens, mergedTitles)
+        }
+        return groups.map { mergeExternalGroup($0.titles) }
+    }
+
+    private static func canMerge(
+        _ candidate: RelatedTitle,
+        with existing: [RelatedTitle]
+    ) -> Bool {
+        for other in existing {
+            for entry in MediaItemIdentity.strongExternalNamespaces {
+                guard let left = candidate.providerIDs.providerID(entry.namespace),
+                      let right = other.providerIDs.providerID(entry.namespace)
+                else {
+                    continue
+                }
+                if left.caseInsensitiveCompare(right) != .orderedSame {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private static func externalIdentityTokens(
+        for title: RelatedTitle
+    ) -> Set<String> {
+        var tokens = Set<String>()
+        for entry in MediaItemIdentity.strongExternalNamespaces {
+            if let value = title.providerIDs.providerID(entry.namespace) {
+                tokens.insert(
+                    "ext:\(title.kind.rawValue):\(entry.canonical):\(value.lowercased())"
+                )
+            }
+        }
+        if let year = title.year {
+            let normalized = MediaItemIdentity.normalizedTitle(title.title)
+            if !normalized.isEmpty {
+                tokens.insert(
+                    "title:\(title.kind.rawValue):\(normalized):\(year)"
+                )
+            }
+        }
+        if tokens.isEmpty { tokens.insert("id:\(title.id)") }
+        return tokens
+    }
+
+    private static func mergeExternalGroup(
+        _ titles: [RelatedTitle]
+    ) -> RelatedTitle {
+        let first = titles[0]
+        var providerIDs = first.providerIDs
+        for title in titles.dropFirst() {
+            for (key, value) in title.providerIDs where providerIDs[key] == nil {
+                providerIDs[key] = value
+            }
+        }
+        let relation = titles.map(\.relation).min {
+            relationRank($0) < relationRank($1)
+        } ?? first.relation
+        return RelatedTitle(
+            title: first.title,
+            year: first.year ?? titles.lazy.compactMap(\.year).first,
+            kind: first.kind,
+            relation: relation,
+            providerIDs: providerIDs,
+            posterURL: first.posterURL
+                ?? titles.lazy.compactMap(\.posterURL).first,
+            source: first.source
+        )
+    }
+
+    private static func relationRank(
+        _ relation: RelatedTitle.Relation
+    ) -> Int {
+        switch relation {
+        case .continuation: return 0
+        case .sideStory: return 1
+        case .recommendation: return 2
+        }
     }
 
     private func resolvedTitles(for query: MetadataQuery, key: String) async -> [RelatedTitle] {

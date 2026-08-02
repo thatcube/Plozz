@@ -103,6 +103,9 @@ public struct MetadataQuery: Sendable, Hashable {
     public var seriesScoped: Self {
         guard kind == .season || kind == .episode else { return self }
         var ids = providerIDs
+        for (_, base) in Self.seriesIDPromotions {
+            ids.removeProviderID(base)
+        }
         for (series, base) in Self.seriesIDPromotions {
             if let value = ids.providerID(series) { ids[base.canonicalKey] = value }
         }

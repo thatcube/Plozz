@@ -900,9 +900,12 @@ public final class PlayerViewModel {
                 sourceProvider: provider.kind,
                 sourceFileName: localURL.lastPathComponent
             )
-            let originalLanguage = await resolvedOriginalAudioLanguage(
-                for: offlineItem
-            )
+            // The entire point of this path is zero-network local playback. Anime
+            // has a trustworthy local answer; other content defers to remembered,
+            // explicit, device, or embedded/default track policy rather than waiting
+            // for TMDb while offline.
+            let originalLanguage =
+                ContentClassifier.originalAudioLanguage(for: offlineItem)
             request.preferredAudioLanguages =
                 preferredAudioLanguages(
                     for: offlineItem,

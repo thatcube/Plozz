@@ -132,6 +132,37 @@ final class HeroCuratorTests: XCTestCase {
         XCTAssertEqual(result[0].ratings.map(\.source), [.tmdb])
     }
 
+    func testFinalDedupeMergesIdentityBridgeTransitively() {
+        let tmdbOnly = MediaItem(
+            id: "tmdb-copy",
+            title: "Bridge",
+            kind: .series,
+            providerIDs: ["Tmdb": "42"]
+        )
+        let imdbOnly = MediaItem(
+            id: "imdb-copy",
+            title: "Bridge",
+            kind: .series,
+            providerIDs: ["Imdb": "tt42"]
+        )
+        let bridge = MediaItem(
+            id: "hydrated-copy",
+            title: "Bridge",
+            kind: .series,
+            providerIDs: ["Tmdb": "42", "Imdb": "tt42"]
+        )
+
+        let result = HeroCurator().deduplicating([
+            tmdbOnly,
+            imdbOnly,
+            bridge,
+        ])
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].providerID(.tmdb), "42")
+        XCTAssertEqual(result[0].providerID(.imdb), "tt42")
+    }
+
     func testRawIDsAreScopedByAccountDuringDeduplication() async {
         let result = await HeroCurator().curate(
             settings: settings(sources: [.continueWatching, .watchlist]),

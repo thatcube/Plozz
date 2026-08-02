@@ -186,7 +186,11 @@ final class RatingsCacheTests: XCTestCase {
         let seriesRatings = [
             ExternalRating(source: .tmdb, value: 7.198, scale: .outOfTen)
         ]
+        let episodeRatings = [
+            ExternalRating(source: .imdb, value: 6.4, scale: .outOfTen)
+        ]
         await cache.store(seriesRatings, forKey: "tt5645432")
+        await cache.store(episodeRatings, forKey: "tt-episode")
         let base = CountingProvider(result: [])
         let provider = CachingRatingsProvider(base: base, cache: cache)
         let episode = MediaItem(
@@ -204,6 +208,38 @@ final class RatingsCacheTests: XCTestCase {
 
         XCTAssertEqual(ratings, seriesRatings)
         XCTAssertEqual(base.callCount, 0)
+    }
+
+    func testEpisodeFetchCannotOverwriteSeriesCache() async {
+        let cache = RatingsCache(ttl: 1000)
+        let seriesRatings = [
+            ExternalRating(source: .tmdb, value: 8.9, scale: .outOfTen)
+        ]
+        let episodeRatings = [
+            ExternalRating(source: .imdb, value: 7.1, scale: .outOfTen)
+        ]
+        await cache.store(seriesRatings, forKey: "tt0903747")
+        let base = CountingProvider(result: episodeRatings)
+        let provider = CachingRatingsProvider(base: base, cache: cache)
+        let episode = MediaItem(
+            id: "episode-1",
+            title: "Pilot",
+            kind: .episode,
+            seriesID: "breaking-bad",
+            providerIDs: [
+                "Imdb": "tt0959621",
+                "SeriesImdb": "tt0903747",
+            ]
+        )
+
+        let fetchedEpisode = await provider.ratings(for: episode)
+        let cachedSeries = await cache.ratings(forKey: "tt0903747")
+        let cachedEpisode = await cache.ratings(forKey: "tt0959621")
+
+        XCTAssertEqual(fetchedEpisode, episodeRatings)
+        XCTAssertEqual(cachedSeries, seriesRatings)
+        XCTAssertEqual(cachedEpisode, episodeRatings)
+        XCTAssertEqual(base.callCount, 1)
     }
 
     func testAniListSkipsEpisodesAndSeasons() {

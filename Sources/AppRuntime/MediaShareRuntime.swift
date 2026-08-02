@@ -90,6 +90,10 @@ public protocol MediaShareRuntime: Sendable {
     /// shares (tests, previews) need not implement it.
     func pollForChanges() async
 
+    /// Allows foreground-only scan/enrichment work to run. Passing false
+    /// checkpoints active work and preserves its durable queue for the next resume.
+    func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) async
+
     /// Retires the transport sessions bound to one account's credential
     /// revision (used on credential rotation and account removal).
     func retire(accountID: String, credentialRevision: CredentialRevision) async
@@ -132,6 +136,7 @@ public extension MediaShareRuntime {
 
     /// Default: nothing to poll.
     func pollForChanges() async {}
+    func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) async {}
 }
 
 /// The single production `MediaShareRuntime`. Construct it only through
@@ -304,6 +309,10 @@ public final class DefaultMediaShareRuntime: MediaShareRuntime {
 
     public func pollForChanges() async {
         await coordinator.pollForChanges()
+    }
+
+    public func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) async {
+        await coordinator.setBackgroundWorkAllowed(allowed, revision: revision)
     }
 
     public func retire(accountID: String, credentialRevision: CredentialRevision) async {

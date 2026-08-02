@@ -651,3 +651,22 @@ work, and 14.7% watchlist/alias work. There were no hangs over 250 ms.
 one observable progress publication, require no publication after finish, require
 one enrichment lifecycle across pause/resume, and require a 1,000-alias evidence
 wave to persist once while an identical repeat persists zero times.
+
+**Follow-up device evidence.** A 60-second trace of the corrected build recorded
+9.3 CPU-seconds total versus 27 CPU-seconds in the original 30-second trace. The
+first ten seconds contained bounded scan/catalog completion; after that, idle
+bins held near 0.1 CPU-seconds per five seconds (about 2% of one core), with
+nominal thermal state and no UI hangs. A separate 180-second fresh-launch trace
+showed one bounded scan burst, then returned to 1.6-3.7% of one core with nominal
+thermals. Its three 254-299 ms microhang intervals aligned with attach/scene
+transitions rather than steady foreground UI.
+
+That longer trace exposed one remaining lifecycle gap: share catalog work kept
+running after the app resigned active. Both shells now send revisioned scene
+state into the shared runtime. Inactive apps cancel and checkpoint scans, pause
+the durable metadata scheduler without polling, and retain explicit forced-rescan
+intent. Returning active resumes the latest phase only; stale out-of-order scene
+deliveries cannot leave work paused or restart it off-screen. Tests require no
+scan restart while inactive, forced closure of cancellation-insensitive active
+and draining scan transports, cancellation of a running metadata slice, durable
+resume, force preservation, and latest-revision wins.

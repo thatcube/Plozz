@@ -113,6 +113,7 @@ final class ShareCatalogRuntime {
     }
 
     var hasActiveScanTasks: Bool { !scanTasks.isEmpty }
+    var hasDrainingScanTasks: Bool { !drainingScanTasks.isEmpty }
 
     /// Remove one finished active scan task and discard any reason stamped for it in
     /// the `recordScanOutcome`→`clearScanTask` window (the task is gone, so no future

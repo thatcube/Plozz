@@ -468,6 +468,9 @@ public struct RootView: View {
         .onChange(of: appState.crashReportingModel.settings.isEnabled) { _, _ in
             reconcileCrashReporting()
         }
+        .task(id: scenePhase) {
+            appState.mediaShare.setBackgroundWorkAllowed(scenePhase == .active)
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 appState.drainWatchOutbox()

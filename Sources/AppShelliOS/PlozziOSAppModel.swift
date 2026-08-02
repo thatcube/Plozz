@@ -268,6 +268,7 @@ final class PlozziOSAppModel {
     let crashReportingController: CrashReportingController
     let requiresLaunchProfileSelection: Bool
     private(set) var settings: PlozziOSSettingsModel
+    private var backgroundWorkRevision: UInt64 = 0
     private(set) var seriesTrackStore: SeriesTrackPreferenceStore
     private(set) var versionPreferences: VersionPreferenceStore
     private(set) var downloads: PlozziOSDownloadsModel
@@ -762,6 +763,14 @@ final class PlozziOSAppModel {
 
     func rescanShare(accountID: String) {
         mediaShareRescanService.rescan(accountID: accountID)
+    }
+
+    func setBackgroundWorkAllowed(_ allowed: Bool) {
+        backgroundWorkRevision &+= 1
+        let revision = backgroundWorkRevision
+        Task { [mediaShareRuntime] in
+            await mediaShareRuntime.setBackgroundWorkAllowed(allowed, revision: revision)
+        }
     }
 
     /// Media-share account ids signed in on this device. Scopes the Settings

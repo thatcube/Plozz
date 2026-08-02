@@ -306,6 +306,83 @@ final class ShareMetadataWorkSchedulerTests: XCTestCase {
         XCTAssertTrue(cancelled)
     }
 
+    func testBackgroundSuspensionStopsRunningWorkUntilForegroundResume() async {
+        let recorder = Recorder()
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false, configuration: .init(
+            maxItemsPerSlice: 1,
+            maxSliceDuration: .seconds(1),
+            delayBetweenSlices: .milliseconds(1),
+            interactiveIdleDelay: .milliseconds(1),
+            blockedPollDelay: .milliseconds(1)
+        ))
+        await scheduler.register(
+            accountKey: "a",
+            mayRun: { true },
+            runSlice: { _ in
+                let call = await recorder.nextSlice("a")
+                await recorder.begin("slice-\(call)")
+                if call == 1 {
+                    do {
+                        try await Task.sleep(for: .seconds(5))
+                    } catch {
+                        await recorder.noteCancelled()
+                    }
+                }
+                await recorder.end()
+                return .init(attempted: 1, hasMore: call == 1)
+            },
+            runItem: { _ in }
+        )
+
+        await scheduler.enqueueBacklog(accountKey: "a")
+        let started = await waitUntil { await recorder.active == 1 }
+        XCTAssertTrue(started)
+
+        await scheduler.setBackgroundWorkAllowed(false)
+        let stopped = await waitUntil {
+            let cancelled = await recorder.cancelled
+            let active = await recorder.active
+            return cancelled == 1 && active == 0
+        }
+        XCTAssertTrue(stopped)
+        try? await Task.sleep(for: .milliseconds(50))
+        let whileInactive = await recorder.events
+        let inactiveSnapshot = await scheduler.snapshot()
+        XCTAssertEqual(whileInactive, ["slice-1"])
+        XCTAssertEqual(inactiveSnapshot.queuedBacklogs, 1)
+        XCTAssertNil(inactiveSnapshot.runningAccountKey)
+
+        await scheduler.setBackgroundWorkAllowed(true)
+        let resumed = await waitUntil { await recorder.sliceCalls["a"] == 2 }
+        XCTAssertTrue(resumed)
+        await scheduler.remove(accountKey: "a")
+        let finalEvents = await recorder.events
+        XCTAssertEqual(finalEvents, ["slice-1", "slice-2"])
+    }
+
+    func testStaleBackgroundRevisionCannotOverrideNewerForegroundState() async {
+        let recorder = Recorder()
+        let scheduler = ShareMetadataWorkScheduler(adaptiveBudget: false)
+        await scheduler.register(
+            accountKey: "a",
+            mayRun: { true },
+            runSlice: { _ in
+                await recorder.begin("slice")
+                await recorder.end()
+                return .init(attempted: 1, hasMore: false)
+            },
+            runItem: { _ in }
+        )
+
+        await scheduler.setBackgroundWorkAllowed(true, revision: 2)
+        await scheduler.setBackgroundWorkAllowed(false, revision: 1)
+        await scheduler.enqueueBacklog(accountKey: "a")
+
+        let ran = await waitUntil { await recorder.events == ["slice"] }
+        XCTAssertTrue(ran)
+        await scheduler.remove(accountKey: "a")
+    }
+
     func testInterruptInvalidatesAdmissionAlreadyInFlight() async {
         let recorder = Recorder()
         let gate = AdmissionGate()

@@ -137,6 +137,8 @@ actor ShareMetadataWorkScheduler {
     private var consecutivePreferredBacklogAdmissions = 0
     private var worker: Task<Void, Never>?
     private var running: Running?
+    private var backgroundWorkAllowed = true
+    private var backgroundWorkRevision: UInt64 = 0
 
     /// - Parameter adaptiveBudget: when true (production) the slice size is
     ///   derived from the device and corrected by observed cost. Tests inject a
@@ -264,6 +266,36 @@ actor ShareMetadataWorkScheduler {
         }
     }
 
+    /// Stops all passive and opened-item metadata work while the app is not active.
+    /// Durable queue entries remain in place and resume from the same position.
+    func setBackgroundWorkAllowed(_ allowed: Bool) async {
+        await setBackgroundWorkAllowed(allowed, revision: backgroundWorkRevision &+ 1)
+    }
+
+    func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) async {
+        guard revision > backgroundWorkRevision else { return }
+        backgroundWorkRevision = revision
+        guard backgroundWorkAllowed != allowed else { return }
+        backgroundWorkAllowed = allowed
+        if allowed {
+            ensureWorker()
+            return
+        }
+
+        for accountKey in jobs.keys {
+            admissionGenerations[accountKey, default: 0] &+= 1
+        }
+        let runningTask = running?.task
+        runningTask?.cancel()
+        worker?.cancel()
+        for job in Array(jobs.values) {
+            await job.pausePass()
+        }
+        if let runningTask {
+            _ = await runningTask.value
+        }
+    }
+
     func resume(accountKey: String) {
         guard let count = suspensionCounts[accountKey] else { return }
         if count <= 1 {
@@ -294,7 +326,7 @@ actor ShareMetadataWorkScheduler {
             await job.finishPass()
         }
         if let runningTask {
-            await runningTask.value
+            _ = await runningTask.value
         }
     }
 
@@ -307,7 +339,7 @@ actor ShareMetadataWorkScheduler {
     }
 
     private func ensureWorker() {
-        guard worker == nil, hasQueuedWork else { return }
+        guard backgroundWorkAllowed, worker == nil, hasQueuedWork else { return }
         worker = Task(priority: .utility) { [weak self] in
             await self?.runLoop()
         }
@@ -319,7 +351,7 @@ actor ShareMetadataWorkScheduler {
             ensureWorker()
         }
 
-        while !Task.isCancelled, hasQueuedWork {
+        while !Task.isCancelled, backgroundWorkAllowed, hasQueuedWork {
             guard let (queued, job) = await dequeueRunnableWork() else {
                 await sleep(configuration.blockedPollDelay)
                 continue
@@ -424,6 +456,7 @@ actor ShareMetadataWorkScheduler {
     /// starve runnable work from other accounts. Urgent opened-item work is globally
     /// first; backlog order comes from the pure fairness policy.
     private func dequeueRunnableWork() async -> (QueuedWork, Job)? {
+        guard backgroundWorkAllowed else { return nil }
         let now = clock.now
         let backlogByKey = Dictionary(
             backlogQueue.map { ($0.work.accountKey, $0) },
@@ -458,6 +491,7 @@ actor ShareMetadataWorkScheduler {
             }
             let admissionGeneration = admissionGenerations[work.accountKey, default: 0]
             if await job.mayRun(),
+               backgroundWorkAllowed,
                jobs[work.accountKey] != nil,
                admissionGenerations[work.accountKey, default: 0] == admissionGeneration,
                registrationGenerations[work.accountKey, default: 0] == queued.registrationGeneration,

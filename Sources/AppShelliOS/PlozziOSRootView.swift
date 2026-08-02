@@ -100,6 +100,9 @@ public struct PlozziOSRootView: View {
             )
             .preferredColorScheme(resolvedPalette.isLight ? .light : .dark)
         }
+        .task(id: scenePhase) {
+            appModel.setBackgroundWorkAllowed(scenePhase == .active)
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active { appModel.syncCloudOnForeground() }
         }

@@ -40,16 +40,19 @@ final class ShareScanLifecycleTests: XCTestCase {
         private var startedCount = 0
         private var rootListCountValue = 0
         private var shutdownCountValue = 0
-        let blocksRoot: Bool
+        private var blocksRootFlag: Bool
+        private let ignoresTaskCancellation: Bool
         let tree: [String: [String]]
         let failingDirs: Set<String>
 
         init(
             blocksRoot: Bool,
+            ignoresTaskCancellation: Bool = false,
             tree: [String: [String]] = [:],
             failingDirs: Set<String> = []
         ) {
-            self.blocksRoot = blocksRoot
+            self.blocksRootFlag = blocksRoot
+            self.ignoresTaskCancellation = ignoresTaskCancellation
             self.tree = tree
             self.failingDirs = failingDirs
         }
@@ -73,6 +76,13 @@ final class ShareScanLifecycleTests: XCTestCase {
             }
         }
 
+        func setBlocksRoot(_ blocksRoot: Bool) {
+            lock.withLock {
+                blocksRootFlag = blocksRoot
+                openedFlag = false
+            }
+        }
+
         func children(of relativePath: String) -> [String] {
             tree[relativePath] ?? []
         }
@@ -90,9 +100,13 @@ final class ShareScanLifecycleTests: XCTestCase {
 
         /// Blocks the root listing until force-close (open) or task cancellation.
         func blockRoot() async {
-            guard blocksRoot else { return }
-            while !isOpened && !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 2_000_000)
+            guard lock.withLock({ blocksRootFlag }) else { return }
+            while !isOpened && (ignoresTaskCancellation || !Task.isCancelled) {
+                if ignoresTaskCancellation {
+                    await Task.yield()
+                } else {
+                    try? await Task.sleep(nanoseconds: 2_000_000)
+                }
             }
         }
     }
@@ -249,7 +263,10 @@ final class ShareScanLifecycleTests: XCTestCase {
         let accountID = "cancel-\(UUID().uuidString)"
         let revision = CredentialRevision()
         let diagnostics = ScanDiagnosticsSpy()
-        let controller = LifecycleListController(blocksRoot: true)
+        let controller = LifecycleListController(
+            blocksRoot: true,
+            ignoresTaskCancellation: true
+        )
         let coordinator = makeCoordinator(diagnostics: diagnostics)
         let factory = makeSessionFactory(
             accountID: accountID, revision: revision, controller: controller
@@ -284,6 +301,175 @@ final class ShareScanLifecycleTests: XCTestCase {
         let rescanned = await poll { controller.rootLists >= 2 }
         XCTAssertTrue(rescanned, "the next access after a cancelled scan must rescan")
 
+        await coordinator.invalidate(accountKey: accountID)
+    }
+
+    func testInactiveApplicationCheckpointsScanAndResumesInForeground() async throws {
+        let accountID = "inactive-\(UUID().uuidString)"
+        let revision = CredentialRevision()
+        let diagnostics = ScanDiagnosticsSpy()
+        let controller = LifecycleListController(
+            blocksRoot: true,
+            ignoresTaskCancellation: true
+        )
+        let coordinator = makeCoordinator(diagnostics: diagnostics)
+        let factory = makeSessionFactory(
+            accountID: accountID, revision: revision, controller: controller
+        )
+
+        _ = await coordinator.store(
+            accountKey: accountID, displayName: "NAS",
+            credentialRevision: revision, sessionFactory: factory
+        )
+        await controller.waitUntilListing()
+
+        await coordinator.setBackgroundWorkAllowed(false)
+        let stopped = await poll {
+            diagnostics.records.contains { $0.owner == .applicationInactive }
+        }
+        XCTAssertTrue(stopped, "resigning active must stop and attribute the foreground-only scan")
+        let completion = await coordinator.backgroundScanCompletedAt(accountID)
+        XCTAssertNil(
+            completion,
+            "an interrupted pass must not suppress its foreground resume"
+        )
+        let rootListsWhileInactive = controller.rootLists
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(
+            controller.rootLists,
+            rootListsWhileInactive,
+            "no scan may restart while the application remains inactive"
+        )
+
+        await coordinator.setBackgroundWorkAllowed(true)
+        let resumed = await poll { controller.rootLists > rootListsWhileInactive }
+        XCTAssertTrue(
+            resumed,
+            "returning active must resume the interrupted durable scan"
+        )
+
+        await coordinator.invalidate(accountKey: accountID)
+    }
+
+    func testStaleInactiveDeliveryCannotOverrideNewerActiveRevision() async throws {
+        let accountID = "phase-revision-\(UUID().uuidString)"
+        let revision = CredentialRevision()
+        let diagnostics = ScanDiagnosticsSpy()
+        let controller = LifecycleListController(blocksRoot: false)
+        let coordinator = makeCoordinator(diagnostics: diagnostics)
+        let factory = makeSessionFactory(
+            accountID: accountID, revision: revision, controller: controller
+        )
+
+        await coordinator.setBackgroundWorkAllowed(true, revision: 2)
+        await coordinator.setBackgroundWorkAllowed(false, revision: 1)
+        _ = await coordinator.store(
+            accountKey: accountID, displayName: "NAS",
+            credentialRevision: revision, sessionFactory: factory
+        )
+
+        let scanned = await poll { controller.rootLists == 1 }
+        XCTAssertTrue(scanned, "a stale inactive delivery must not pause the newer active phase")
+        await coordinator.invalidate(accountKey: accountID)
+    }
+
+    func testForcedRescanQueuedWhileInactiveBypassesForegroundCoalescing() async throws {
+        let accountID = "inactive-force-\(UUID().uuidString)"
+        let revision = CredentialRevision()
+        let diagnostics = ScanDiagnosticsSpy()
+        let controller = LifecycleListController(blocksRoot: false)
+        let coordinator = makeCoordinator(diagnostics: diagnostics)
+        let factory = makeSessionFactory(
+            accountID: accountID, revision: revision, controller: controller
+        )
+
+        _ = await coordinator.store(
+            accountKey: accountID, displayName: "NAS",
+            credentialRevision: revision, sessionFactory: factory
+        )
+        let initialScan = await poll { controller.rootLists == 1 }
+        let initialCompletion = await poll {
+            await coordinator.backgroundScanCompletedAt(accountID) != nil
+        }
+        XCTAssertTrue(initialScan)
+        XCTAssertTrue(initialCompletion)
+
+        await coordinator.setBackgroundWorkAllowed(false)
+        await coordinator.rescan(accountKey: accountID)
+        await coordinator.setBackgroundWorkAllowed(true)
+
+        let rescanned = await poll { controller.rootLists == 2 }
+        XCTAssertTrue(
+            rescanned,
+            "an explicit rescan must retain its force semantics across inactivity"
+        )
+        await coordinator.invalidate(accountKey: accountID)
+    }
+
+    func testActiveForcedRescanInterruptedByInactivityResumesAsForced() async throws {
+        let accountID = "interrupted-force-\(UUID().uuidString)"
+        let revision = CredentialRevision()
+        let diagnostics = ScanDiagnosticsSpy()
+        let controller = LifecycleListController(blocksRoot: false)
+        let coordinator = makeCoordinator(diagnostics: diagnostics)
+        let factory = makeSessionFactory(
+            accountID: accountID, revision: revision, controller: controller
+        )
+
+        _ = await coordinator.store(
+            accountKey: accountID, displayName: "NAS",
+            credentialRevision: revision, sessionFactory: factory
+        )
+        let initialCompletion = await poll {
+            await coordinator.backgroundScanCompletedAt(accountID) != nil
+        }
+        XCTAssertTrue(initialCompletion)
+
+        controller.setBlocksRoot(true)
+        await coordinator.rescan(accountKey: accountID)
+        let forcedScanStarted = await poll { controller.rootLists == 2 }
+        XCTAssertTrue(forcedScanStarted)
+        await coordinator.setBackgroundWorkAllowed(false)
+        await coordinator.setBackgroundWorkAllowed(true)
+
+        let resumedForcedScan = await poll { controller.rootLists == 3 }
+        XCTAssertTrue(
+            resumedForcedScan,
+            "an interrupted explicit rescan must still bypass the recent-completion throttle"
+        )
+        await coordinator.invalidate(accountKey: accountID)
+    }
+
+    func testInactiveTransitionClosesCancellationInsensitiveDrainingRescan() async throws {
+        let accountID = "inactive-draining-\(UUID().uuidString)"
+        let revision = CredentialRevision()
+        let diagnostics = ScanDiagnosticsSpy()
+        let controller = LifecycleListController(
+            blocksRoot: true,
+            ignoresTaskCancellation: true
+        )
+        let coordinator = makeCoordinator(diagnostics: diagnostics)
+        let factory = makeSessionFactory(
+            accountID: accountID, revision: revision, controller: controller
+        )
+
+        _ = await coordinator.store(
+            accountKey: accountID, displayName: "NAS",
+            credentialRevision: revision, sessionFactory: factory
+        )
+        await controller.waitUntilListing()
+
+        let rescan = Task { await coordinator.rescan(accountKey: accountID) }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await coordinator.setBackgroundWorkAllowed(false)
+
+        let listerClosed = await poll { controller.shutdownCount > 0 }
+        XCTAssertTrue(
+            listerClosed,
+            "resigning active must close cancellation-insensitive draining scan transports"
+        )
+        await rescan.value
+        await coordinator.setBackgroundWorkAllowed(true)
         await coordinator.invalidate(accountKey: accountID)
     }
 

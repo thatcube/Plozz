@@ -60,6 +60,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     /// Secret-safe sink for scans that end without a completion stamp. Injected so
     /// tests can assert the exact owner/generation of each non-completing scan.
     private let diagnostics: ShareScanDiagnostics
+    private var backgroundWorkAllowed = true
+    private var backgroundWorkRevision: UInt64 = 0
+    private var scansPendingForeground: [String: Bool] = [:]
+    private var scanForcesByTaskID: [UUID: Bool] = [:]
 
     public init(
         arbiterFactory: @escaping ArbiterFactory = { MediaIOArbiter(accountID: $0) }
@@ -141,6 +145,76 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         preferredAccountRevision = revision
         await metadataScheduler.setPreferredAccountKeys(accountKeys)
         await artworkCacheLifecycle.setPreferredAccountKeys(accountKeys, revision: revision)
+    }
+
+    /// Media-share scans are intentionally foreground-only. Resigning active
+    /// checkpoints any running walk and pauses durable enrichment; returning active
+    /// resumes only work that was interrupted or requested while inactive.
+    public func setBackgroundWorkAllowed(_ allowed: Bool) async {
+        await setBackgroundWorkAllowed(allowed, revision: backgroundWorkRevision &+ 1)
+    }
+
+    /// Revisioned composition-root entry point. Scene changes cross an unstructured
+    /// task boundary, so an older delivery must never overwrite the latest phase.
+    public func setBackgroundWorkAllowed(_ allowed: Bool, revision: UInt64) async {
+        guard revision > backgroundWorkRevision else { return }
+        backgroundWorkRevision = revision
+        guard backgroundWorkAllowed != allowed else { return }
+        backgroundWorkAllowed = allowed
+
+        if allowed {
+            await metadataScheduler.setBackgroundWorkAllowed(true, revision: revision)
+            await resumePendingForegroundScans()
+            return
+        }
+
+        var tasks: [Task<Void, Never>] = []
+        var scanners: [ShareScanner] = []
+        for (accountKey, runtime) in runtimes
+        where runtime.hasActiveScanTasks || runtime.hasDrainingScanTasks {
+            let force = runtime.scanTasks.keys.contains {
+                scanForcesByTaskID[$0] == true
+            }
+            if runtime.hasActiveScanTasks {
+                markScanPendingForeground(accountKey, force: force)
+            }
+            let taskEntries = runtime.scanTasks.merging(
+                runtime.drainingScanTasks,
+                uniquingKeysWith: { current, _ in current }
+            )
+            runtime.stampCancellationReasons(
+                taskIDs: taskEntries.keys,
+                owner: .applicationInactive
+            )
+            let accountTasks = Array(taskEntries.values)
+            accountTasks.forEach { $0.cancel() }
+            tasks.append(contentsOf: accountTasks)
+            if let scanner = runtime.scanner {
+                scanners.append(scanner)
+            }
+        }
+
+        async let metadataPause: Void = metadataScheduler.setBackgroundWorkAllowed(
+            false,
+            revision: revision
+        )
+        await withTaskGroup(of: Void.self) { group in
+            for scanner in scanners {
+                group.addTask {
+                    // Closing the transport listers releases directory reads that
+                    // ignore task cancellation. The scan generation stays valid so
+                    // the cancelled walk can still persist its resume frontier.
+                    await scanner.forceCloseActiveListers()
+                }
+            }
+        }
+        await metadataPause
+        for task in tasks {
+            await task.value
+        }
+        if backgroundWorkAllowed {
+            await resumePendingForegroundScans()
+        }
     }
 
     /// Removes one display-rejected local artwork fingerprint from future catalog
@@ -354,6 +428,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     }
 
     public func rescan(accountKey: String) async {
+        guard backgroundWorkAllowed else {
+            markScanPendingForeground(accountKey, force: true)
+            return
+        }
         while let invalidationTask = runtimes[accountKey]?.invalidationTask {
             await invalidationTask.value
         }
@@ -577,6 +655,10 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
     /// no-op scan+enrich on every access. `ShareScanner.scanIfStale` still
     /// governs whether the actual walk runs when a spawn IS allowed.
     private func ensureScanning(_ accountKey: String) async {
+        guard backgroundWorkAllowed else {
+            markScanPendingForeground(accountKey, force: false)
+            return
+        }
         guard let runtime = runtimes[accountKey],
               !runtime.hasActiveScanTasks,
               !runtime.restarting,
@@ -591,13 +673,35 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
         await startScan(accountKey: accountKey, runtime: runtime, scanner: scanner, force: false)
     }
 
+    private func resumePendingForegroundScans() async {
+        guard backgroundWorkAllowed else { return }
+        for (accountKey, force) in Array(scansPendingForeground) {
+            guard let runtime = runtimes[accountKey], !runtime.hasActiveScanTasks else {
+                continue
+            }
+            scansPendingForeground[accountKey] = nil
+            if force {
+                await rescan(accountKey: accountKey)
+            } else {
+                await ensureScanning(accountKey)
+            }
+        }
+    }
+
+    private func markScanPendingForeground(_ accountKey: String, force: Bool) {
+        scansPendingForeground[accountKey] = force || scansPendingForeground[accountKey] == true
+    }
+
     private func startScan(
         accountKey: String,
         runtime: ShareCatalogRuntime,
         scanner: ShareScanner,
         force: Bool
     ) async {
-        guard runtime.enricher != nil else { return }
+        guard backgroundWorkAllowed, runtime.enricher != nil else {
+            markScanPendingForeground(accountKey, force: force)
+            return
+        }
         let store = runtime.store
         // Capture the scanner/credential generation this walk is bound to, so
         // completion is only stamped if the SAME generation is still current when the
@@ -614,6 +718,12 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             return
         }
         await metadataScheduler.resume(accountKey: accountKey)
+        guard backgroundWorkAllowed else {
+            markScanPendingForeground(accountKey, force: force)
+            resource.markDrained()
+            await scannerLease.finishAndWait()
+            return
+        }
         let taskID = UUID()
         let startGate = ShareScanStartGate()
         let task = Task(priority: .utility) { [weak self] in
@@ -665,11 +775,13 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             await self?.clearScanTask(accountKey, taskID: taskID)
         }
         resource.attach(task)
+        scanForcesByTaskID[taskID] = force
         runtime.addScanTask(taskID, task)
         await startGate.open()
     }
 
     private func clearScanTask(_ accountKey: String, taskID: UUID) {
+        scanForcesByTaskID[taskID] = nil
         // The runtime discards the task entry AND any reason stamped for it in the
         // window between `recordScanOutcome` consuming its first reason and this
         // removal. taskIDs are unique UUIDs, so this never changes attribution of any
@@ -835,6 +947,7 @@ public actor ShareCatalogCoordinator: ShareCatalogCoordinating {
             if runtimes[accountKey] === runtime {
                 runtimes[accountKey] = nil
             }
+            scansPendingForeground[accountKey] = nil
             return
         }
         // Credential rotation preserves the runtime; just clear the invalidation

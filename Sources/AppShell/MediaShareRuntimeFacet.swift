@@ -61,6 +61,8 @@ public final class MediaShareRuntimeFacet {
     /// order propagation can't overwrite a newer active set on the runtime.
     @ObservationIgnored
     private var sharePriorityRevision: UInt64 = 0
+    @ObservationIgnored
+    private var backgroundWorkRevision: UInt64 = 0
 
     /// The network-file resolver used for direct-file share playback. Forwards to
     /// the runtime so there is a single owner of the resolver instance.
@@ -132,6 +134,13 @@ public final class MediaShareRuntimeFacet {
     public func pollSharesForChanges() {
         let runtime = runtime
         Task { await runtime.pollForChanges() }
+    }
+
+    public func setBackgroundWorkAllowed(_ allowed: Bool) {
+        backgroundWorkRevision &+= 1
+        let revision = backgroundWorkRevision
+        let runtime = runtime
+        Task { await runtime.setBackgroundWorkAllowed(allowed, revision: revision) }
     }
 
     public func rescanShare(accountID: String) {

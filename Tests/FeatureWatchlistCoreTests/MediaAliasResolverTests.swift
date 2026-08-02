@@ -235,6 +235,98 @@ final class MediaAliasResolverTests: XCTestCase {
         XCTAssertNotEqual(first, second)
     }
 
+    /// A Plex Discover / Watchlist row carries **only** a `PlexGuid`: that fetch omits
+    /// the external `Guid` array that a library item would carry, so the row has no
+    /// IMDb/TMDb/TVDb id at all. Before `plexGuid` counted as strong alias evidence
+    /// such a row produced *none*, fell through to weak title/year, and so could never
+    /// find the durable record its own library copy had already created — the ledger's
+    /// single most important match. This is independent of the Related row's ownership
+    /// classification; it is about durable identity, and both fixes are required.
+    func testPlexDiscoverRowWithOnlyAPlexGuidResolvesToItsLibraryCopysAlias() {
+        let guid = "plex://movie/5d7768265af944001f1f6977"
+        let libraryCopy = MediaItem(
+            id: "rating-key-88",
+            title: "Black Sails",
+            kind: .movie,
+            productionYear: 2014,
+            providerIDs: ["PlexGuid": guid, "Imdb": "tt2375692"],
+            locallyValidatedPlayableSource: true,
+            sourceAccountID: "account"
+        )
+        // The Discover row: same title, no external ids beyond the guid.
+        let discoverRow = MediaItem(
+            id: "discover-abc",
+            title: "Black Sails",
+            kind: .movie,
+            productionYear: 2014,
+            providerIDs: ["PlexGuid": guid],
+            sourceAccountID: "account"
+        )
+
+        let libraryEvidence = MediaAliasEvidence(item: libraryCopy)!
+        let discoverEvidence = MediaAliasEvidence(item: discoverRow)!
+
+        // The gap itself: the Discover row must carry strong evidence, not weak-only.
+        XCTAssertTrue(
+            discoverEvidence.strong.contains { $0.namespace == .plexGuid && $0.value == guid },
+            "A Discover row's PlexGuid must count as strong alias evidence"
+        )
+
+        let alias = id("00000000-0000-0000-0000-0000000000AA")
+        let snapshot = MediaAliasSnapshot(records: [
+            record(id: alias, kind: .movie, strong: libraryEvidence.strong)
+        ])
+
+        XCTAssertEqual(
+            MediaAliasResolver.lookup(evidence: discoverEvidence, in: snapshot),
+            alias,
+            "The Discover row must resolve to the durable record its library copy made"
+        )
+
+        // …and it must do so on the guid alone, without leaning on title/year. A second
+        // ledger holding *only* the guid still matches; a fresh UUID here would mean a
+        // new record on every launch, which is the unbounded growth we treat as a
+        // release blocker.
+        let guidOnly = MediaAliasSnapshot(records: [
+            record(
+                id: alias,
+                kind: .movie,
+                strong: [strong(.movie, .plexGuid, guid)]
+            )
+        ])
+        XCTAssertEqual(
+            MediaAliasResolver.lookup(evidence: discoverEvidence, in: guidOnly),
+            alias
+        )
+    }
+
+    /// The guid stays kind-scoped like every other strong namespace: Plex mints
+    /// distinct guids per kind, but the ledger must not rely on that to stay correct.
+    func testPlexGuidEvidenceIsKindScoped() {
+        let guid = "plex://show/abc"
+        let movie = id("00000000-0000-0000-0000-0000000000B1")
+        let series = id("00000000-0000-0000-0000-0000000000B2")
+        let snapshot = MediaAliasSnapshot(records: [
+            record(id: movie, kind: .movie, strong: [strong(.movie, .plexGuid, guid)]),
+            record(id: series, kind: .series, strong: [strong(.series, .plexGuid, guid)]),
+        ])
+
+        XCTAssertEqual(
+            MediaAliasResolver.lookup(
+                evidence: evidence(.series, strong: [strong(.series, .plexGuid, guid)]),
+                in: snapshot
+            ),
+            series
+        )
+        XCTAssertEqual(
+            MediaAliasResolver.lookup(
+                evidence: evidence(.movie, strong: [strong(.movie, .plexGuid, guid)]),
+                in: snapshot
+            ),
+            movie
+        )
+    }
+
     private func id(_ value: String) -> MediaAliasID {
         MediaAliasID(UUID(uuidString: value)!)
     }

@@ -388,6 +388,9 @@ struct HomeTab: View {
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
                     onNavigate: { navigate($0, asOwnSubject: $0.kind == .episode) },
+                    onSelectPerson: { person, accountID in
+                        path.append(PersonRoute(person: person, sourceAccountID: accountID))
+                    },
                     stackDepth: detailStackDepth,
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     preservesHeroTrailerOnDisappear: true,
@@ -430,6 +433,9 @@ struct HomeTab: View {
                     onPlay: { requestPlay($0) },
                     onSelectChild: { navigate($0, libraryOrigin: route.originAccountID) },
                     onNavigate: { navigate($0, asOwnSubject: $0.kind == .episode) },
+                    onSelectPerson: { person, accountID in
+                        path.append(PersonRoute(person: person, sourceAccountID: accountID))
+                    },
                     stackDepth: detailStackDepth,
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     preservesHeroTrailerOnDisappear: true,

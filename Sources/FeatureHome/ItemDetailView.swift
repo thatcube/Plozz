@@ -362,9 +362,20 @@ public struct ItemDetailView: View {
         // Bound from the loaded detail, which is the only thing that knows which
         // server answered for this title — and therefore whose person ids the
         // cast list holds.
-        .mediaPersonNavigator { person in
-            onSelectPerson?(person, viewModel.state.value?.item.sourceAccountID)
-        }
+        // Installed ONLY when this page was actually given somewhere to push a
+        // person. Installing unconditionally overrode any ancestor-provided
+        // navigator with a closure that called a nil handler — so a construction
+        // site that forgot `onSelectPerson` produced a cast row that focused and
+        // pressed normally and silently did nothing, with no ancestor able to
+        // rescue it. Four of this page's six construction sites had done exactly
+        // that.
+        .mediaPersonNavigator(
+            onSelectPerson.map { handler in
+                { person in
+                    handler(person, viewModel.state.value?.item.sourceAccountID)
+                }
+            }
+        )
     }
 
     private var heroTrailerTaskID: String {

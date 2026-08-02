@@ -408,13 +408,17 @@ public final class WatchlistModel {
     public func presentationSnapshot(
         profileID: String,
         aliasSnapshot: MediaAliasSnapshot,
-        currentItemsByAliasID: [MediaAliasID: MediaItem]
+        currentItemsByAliasID: [MediaAliasID: MediaItem],
+        indexedSources: ((MediaItem) -> [MediaSourceRef])? = nil,
+        capabilities: MediaCapabilities? = nil
     ) throws -> [WatchlistPresentationEntry] {
         try ensureHydrated(profileID)
         return WatchlistPresentationResolver.resolve(
             snapshot: snapshotsByProfile[profileID] ?? .empty,
             aliasSnapshot: aliasSnapshot,
-            currentItemsByAliasID: currentItemsByAliasID
+            currentItemsByAliasID: currentItemsByAliasID,
+            indexedSources: indexedSources,
+            capabilities: capabilities
         )
     }
 

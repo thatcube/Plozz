@@ -1178,6 +1178,21 @@ private struct HomeShareScanRefreshObserver: View {
     /// A change is waiting for a quiet moment to be shown.
     @State private var hasPendingChange = false
 
+    /// Whether a change time has been seen at all yet.
+    ///
+    /// The first non-nil observation is the shares telling us what is already on
+    /// disk, not news — and Home's own load is fetching exactly that, right now.
+    /// Treating it as a change made every cold launch run the whole 5-account
+    /// fan-out a second time (measured at 11s of duplicated network and CPU).
+    @State private var hasChangeBaseline = false
+
+    /// Whether the app has actually been backgrounded.
+    ///
+    /// `scenePhase` reaches `.active` during launch too, so refreshing on every
+    /// arrival at `.active` reloaded Home moments after it had loaded. Only a
+    /// genuine return from background is the "expected reshuffle" moment.
+    @State private var hasBeenBackgrounded = false
+
     /// Show a pending change once nothing is in the way. Called both when a change
     /// arrives and on every poll tick, so a viewer who is mid-browse when new
     /// content lands still sees it as soon as they stop.
@@ -1215,6 +1230,11 @@ private struct HomeShareScanRefreshObserver: View {
             .frame(width: 0, height: 0)
             .onChange(of: latestChangeAt) { oldValue, newValue in
                 guard newValue != nil, newValue != oldValue else { return }
+                guard hasChangeBaseline else {
+                    // First sighting: this is the state Home is loading anyway.
+                    hasChangeBaseline = true
+                    return
+                }
                 // Latched, not dropped. A change arriving while the viewer is
                 // busy must not be discarded: `latestChangeAt` won't move again
                 // until the *next* real change, and unchanged scans never move
@@ -1225,8 +1245,15 @@ private struct HomeShareScanRefreshObserver: View {
             .onChange(of: scenePhase) { _, phase in
                 // Returning from background is the one moment a visible reshuffle
                 // is expected rather than jarring, and the most likely time for
-                // something to have arrived.
-                if phase == .active { onRefresh() }
+                // something to have arrived. Launch also passes through `.active`,
+                // and refreshing there just re-runs the load that is already in
+                // flight.
+                if phase == .background || phase == .inactive {
+                    hasBeenBackgrounded = true
+                } else if phase == .active, hasBeenBackgrounded {
+                    hasBeenBackgrounded = false
+                    onRefresh()
+                }
             }
             .task(id: hasShares) {
                 guard hasShares else { return }

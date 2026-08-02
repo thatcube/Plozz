@@ -14,10 +14,24 @@ public struct WatchlistPresentationEntry: Identifiable, Sendable, Equatable {
 public enum WatchlistPresentationResolver {
     /// Replaces offline presentation values with current items without changing
     /// alias identity or stable watchlist order.
+    /// - Parameters:
+    ///   - indexedSources: the identity index, used only for entries with no live
+    ///     candidate. The candidates a caller can offer are whatever other Home rows
+    ///     happen to hold — Continue Watching, Recently Added, a provider's own
+    ///     watchlist. A film sitting in the library that the viewer watchlisted in
+    ///     Plozz appears in none of those, so it fell through to the offline
+    ///     presentation below and rendered as "not in your library" despite being
+    ///     right there. The index knows the whole library, so it can answer.
+    ///
+    ///     This is a publish path, not a card path: it runs once per watchlist
+    ///     rebuild, over entries with no candidate only. A card body must never call
+    ///     it (`tools/arch-guard.py` enforces that).
     public static func resolve(
         snapshot: WatchlistSnapshot,
         aliasSnapshot: MediaAliasSnapshot,
-        currentItemsByAliasID: [MediaAliasID: MediaItem]
+        currentItemsByAliasID: [MediaAliasID: MediaItem],
+        indexedSources: ((MediaItem) -> [MediaSourceRef])? = nil,
+        capabilities: MediaCapabilities? = nil
     ) -> [WatchlistPresentationEntry] {
         snapshot.orderedEntries.compactMap { intent in
             let aliasID = snapshot.resolvedAliasID(for: intent.aliasID)
@@ -26,22 +40,41 @@ public enum WatchlistPresentationResolver {
                 item.watchlistAliasID = aliasID
                 return WatchlistPresentationEntry(aliasID: aliasID, item: item)
             }
-            let presentation = aliasSnapshot.record(for: aliasID)?.presentation
-                ?? intent.presentation
+            let record = aliasSnapshot.record(for: aliasID)
+            let presentation = record?.presentation ?? intent.presentation
             guard let presentation else { return nil }
-            return WatchlistPresentationEntry(
-                aliasID: aliasID,
-                item: MediaItem(
-                    id: aliasID.description,
-                    title: presentation.title,
-                    kind: intent.kind,
-                    watchlistAliasID: aliasID,
-                    productionYear: presentation.year,
-                    posterURL: presentation.artworkURL.flatMap(URL.init(string:)),
-                    backdropURL: presentation.backdropURL.flatMap(URL.init(string:)),
-                    locallyValidatedPlayableSource: false
-                )
+            // Carry the record's own external ids onto the placeholder. Without them
+            // nothing downstream can recognise the title — not the index, not a
+            // detail page — so it could only ever stay a dead card.
+            var providerIDs: [String: String] = [:]
+            for evidence in record?.strongEvidence ?? [] where evidence.kind == intent.kind {
+                providerIDs[evidence.namespace.canonicalKey] = evidence.value
+            }
+            let placeholder = MediaItem(
+                id: aliasID.description,
+                title: presentation.title,
+                kind: intent.kind,
+                watchlistAliasID: aliasID,
+                productionYear: presentation.year,
+                posterURL: presentation.artworkURL.flatMap(URL.init(string:)),
+                backdropURL: presentation.backdropURL.flatMap(URL.init(string:)),
+                providerIDs: providerIDs,
+                // Honest until proven otherwise: no live copy has been offered for
+                // this entry. `retargetedToOwnedLibraryCopy` requires this marker,
+                // and it is also what makes the badge correct if the search below
+                // finds nothing.
+                availability: .unknown,
+                locallyValidatedPlayableSource: false
             )
+            let resolved = indexedSources.flatMap {
+                placeholder.retargetedToOwnedLibraryCopy(
+                    indexedSources: $0,
+                    capabilities: capabilities
+                )
+            }
+            var item = resolved ?? placeholder
+            item.watchlistAliasID = aliasID
+            return WatchlistPresentationEntry(aliasID: aliasID, item: item)
         }
     }
 

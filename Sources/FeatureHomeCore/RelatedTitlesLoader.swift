@@ -155,96 +155,24 @@ public final class RelatedTitlesLoader {
     }
 
     /// Cross-provider Related results often describe the same work under disjoint
-    /// ids (AniList vs TMDb). Collapse connected strong-id groups and use an exact
-    /// normalized title/year/kind token only to bridge those namespaces.
+    /// ids (AniList vs TMDb).
+    ///
+    /// Uses the shared ``TitleDedupe`` — the same engine, split guard and kind
+    /// scoping as person credits, the cast strip and the cross-server credit merge.
+    /// This row previously carried its own union-find with its own token format and
+    /// its own conflict rule, which is why fixes to one never reached the other.
+    ///
+    /// The policy is the only thing that differs, and it is `.titleAndYear`
+    /// deliberately: tapping a Related card starts something, so a false merge here
+    /// sends the viewer to the wrong work rather than costing a poster.
     static func collapsingExternalDuplicates(
         _ titles: [RelatedTitle]
     ) -> [RelatedTitle] {
-        var groups: [(tokens: Set<String>, titles: [RelatedTitle])] = []
-        for title in titles {
-            let tokens = externalIdentityTokens(for: title)
-            var mergedTokens = tokens
-            var mergedTitles = [title]
-            var matches: [Int] = []
-            while true {
-                let compatible = groups.indices.filter { index in
-                    !matches.contains(index)
-                        && !mergedTokens.isDisjoint(with: groups[index].tokens)
-                        && groups[index].titles.allSatisfy {
-                            canMerge($0, with: mergedTitles)
-                        }
-                }
-                guard !compatible.isEmpty else { break }
-                let strong = Set(mergedTokens.filter { $0.hasPrefix("ext:") })
-                let next = compatible.first {
-                    !strong.isDisjoint(
-                        with: Set(
-                            groups[$0].tokens.filter { $0.hasPrefix("ext:") }
-                        )
-                    )
-                } ?? compatible[0]
-                matches.append(next)
-                mergedTokens.formUnion(groups[next].tokens)
-                mergedTitles.append(contentsOf: groups[next].titles)
-            }
-            let orderedMatches = matches.sorted()
-            guard let destination = orderedMatches.first else {
-                groups.append((tokens, [title]))
-                continue
-            }
-            // Keep provider order stable: existing groups lead, the newly-arrived
-            // bridge follows.
-            let existingTitles = orderedMatches.flatMap { groups[$0].titles }
-            mergedTitles = existingTitles + [title]
-            for index in orderedMatches.dropFirst().reversed() {
-                groups.remove(at: index)
-            }
-            groups[destination] = (mergedTokens, mergedTitles)
+        TitleDedupe.groups(titles, policy: .titleAndYear).map { group in
+            mergeExternalGroup(group.map { titles[$0] })
         }
-        return groups.map { mergeExternalGroup($0.titles) }
     }
 
-    private static func canMerge(
-        _ candidate: RelatedTitle,
-        with existing: [RelatedTitle]
-    ) -> Bool {
-        for other in existing {
-            for entry in MediaItemIdentity.strongExternalNamespaces {
-                guard let left = candidate.providerIDs.providerID(entry.namespace),
-                      let right = other.providerIDs.providerID(entry.namespace)
-                else {
-                    continue
-                }
-                if left.caseInsensitiveCompare(right) != .orderedSame {
-                    return false
-                }
-            }
-        }
-        return true
-    }
-
-    private static func externalIdentityTokens(
-        for title: RelatedTitle
-    ) -> Set<String> {
-        var tokens = Set<String>()
-        for entry in MediaItemIdentity.strongExternalNamespaces {
-            if let value = title.providerIDs.providerID(entry.namespace) {
-                tokens.insert(
-                    "ext:\(title.kind.rawValue):\(entry.canonical):\(value.lowercased())"
-                )
-            }
-        }
-        if let year = title.year {
-            let normalized = MediaItemIdentity.normalizedTitle(title.title)
-            if !normalized.isEmpty {
-                tokens.insert(
-                    "title:\(title.kind.rawValue):\(normalized):\(year)"
-                )
-            }
-        }
-        if tokens.isEmpty { tokens.insert("id:\(title.id)") }
-        return tokens
-    }
 
     private static func mergeExternalGroup(
         _ titles: [RelatedTitle]

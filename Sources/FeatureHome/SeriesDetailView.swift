@@ -102,6 +102,8 @@ struct SeriesDetailView: View {
     /// the pop completes, and tvOS then parks focus on the hero — restoring it
     /// and hiding the cast — before the rail takes focus back.
     @State private var isReclaimingFocus = false
+    /// Fallback that ends the reclaim window when the rail cannot.
+    @State private var reclaimTimeout: Task<Void, Never>?
     /// Suppresses the duplicate Play/row focus callback emitted when focus first
     /// returns from the browser to the real hero controls.
     @State private var suppressesDuplicateHeroFocus = false
@@ -353,6 +355,24 @@ struct SeriesDetailView: View {
                 // remembers correctly.
                 guard !covered else { return }
                 isReclaimingFocus = true
+                // Self-clearing. The rail's `onRefocusComplete` is the normal way
+                // out, but it only arrives if there is a rail with something to
+                // refocus — a show whose episodes haven't loaded, or that was left
+                // resting on the hero, never sends it. The latch then stayed true
+                // for the life of the page, and because it also gates
+                // `.disabled()` on the cast and Related rows, every tile in them
+                // stayed visible, focusable and completely inert: pressing a cast
+                // member did nothing at all, forever.
+                reclaimTimeout?.cancel()
+                reclaimTimeout = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(900))
+                    guard !Task.isCancelled else { return }
+                    isReclaimingFocus = false
+                }
+            }
+            .onDisappear {
+                reclaimTimeout?.cancel()
+                reclaimTimeout = nil
             }
 
 
@@ -526,7 +546,16 @@ struct SeriesDetailView: View {
                         leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
                         seriesRecedeModel: recedeModel,
                         revealsSeriesCastWithoutBrowser: revealsCastWithoutBrowser,
-                        suppressesFocus: ignoresSystemFocusMoves,
+                        // Only a genuinely COVERED page is inert. This used to be
+                        // `ignoresSystemFocusMoves`, which also carries the
+                        // transient reclaim latch — and that latch drives
+                        // `.disabled()` on these rows, so any moment it was true
+                        // the cast and Related tiles were visible and focusable
+                        // but swallowed every press. The latch's real job is to
+                        // tell the page's focus HANDLERS that a move came from
+                        // tvOS rather than the viewer, which is unrelated to
+                        // whether the viewer may tap a face.
+                        suppressesFocus: hasChildOnTop,
                         onCastFocusEntered: {
                             seasonBarEngaged = false
                             // Cast/Related sit BELOW the browser, so the page
@@ -1061,6 +1090,8 @@ struct SeriesDetailView: View {
             isCovered: hasChildOnTop,
             precedingContainerIDs: precedingSeasonIDs,
             onRefocusComplete: {
+                reclaimTimeout?.cancel()
+                reclaimTimeout = nil
                 isReclaimingFocus = false
             },
             onFocusEntered: {

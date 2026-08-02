@@ -260,6 +260,9 @@ struct SearchTab: View {
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
                     onNavigate: { navigateToItem($0) },
+                    onSelectPerson: { person, accountID in
+                        path.append(PersonRoute(person: person, sourceAccountID: accountID))
+                    },
                     stackDepth: detailStackDepth,
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     initialEpisode: route.episode,
@@ -298,6 +301,9 @@ struct SearchTab: View {
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) },
                     onNavigate: { navigateToItem($0) },
+                    onSelectPerson: { person, accountID in
+                        path.append(PersonRoute(person: person, sourceAccountID: accountID))
+                    },
                     stackDepth: detailStackDepth,
                     heroTrailerResolver: makeHeroTrailerResolver(),
                     initialSeasonID: route.season.id,

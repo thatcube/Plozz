@@ -143,7 +143,12 @@ public extension UniversalWatchlistHost {
         return (try? universalWatchlist.presentationSnapshot(
             profileID: profiles.activeProfileID,
             aliasSnapshot: aliasSnapshot,
-            currentItemsByAliasID: current
+            currentItemsByAliasID: current,
+            // Lets an entry with no live candidate still find its owned copy — a
+            // library film watchlisted in Plozz appears in no other Home row, so
+            // without this it renders as "not in your library" while sitting in it.
+            indexedSources: identityIndex.identitySourcesProvider,
+            capabilities: .detected()
         ).map(\.item)) ?? []
     }
 

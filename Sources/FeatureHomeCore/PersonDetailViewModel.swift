@@ -311,6 +311,35 @@ public final class PersonDetailViewModel {
         item.retargetedToOwnedLibraryCopy(indexedSources: librarySources) ?? item
     }
 
+    /// Collapses one work held on several servers into a single credit.
+    ///
+    /// Keyed on kind+title, deliberately without the year: the year is the field
+    /// the servers disagree on, so including it defeats the very merge this is
+    /// for. Within a person's credits a genuine collision between two same-named
+    /// works of the same kind is rare, and the cost is one row entry rather than
+    /// something unplayable — the survivor is still a real library item, and the
+    /// detail page's cross-server picker still finds every copy.
+    ///
+    /// First wins, so the home server's copy stays the one the row routes to, but
+    /// it inherits a year or a poster from a later copy when it lacks one: which
+    /// server answered first is arbitrary, and a card with no date or no artwork
+    /// is not.
+    static func collapsingAcrossServers(_ items: [MediaItem]) -> [MediaItem] {
+        TitleDedupe.groups(items, policy: .titleIgnoringYear).compactMap { group in
+            guard let first = group.first else { return nil }
+            var winner = items[first]
+            if winner.productionYear == nil {
+                winner.productionYear = group.lazy
+                    .compactMap { items[$0].productionYear }.first
+            }
+            if winner.posterURL == nil {
+                winner.posterURL = group.lazy
+                    .compactMap { items[$0].posterURL }.first
+            }
+            return winner
+        }
+    }
+
     private static func knownForKey(_ item: MediaItem) -> String {
         "\(item.kind.rawValue)|\(MediaItemIdentity.normalizedTitle(item.title))"
     }
@@ -490,7 +519,18 @@ public final class PersonDetailViewModel {
         // below is applied after the merge and independently of it.
         if !creditsProviders.isEmpty, !Task.isCancelled {
             let stage = Date()
-            var merged = libraryCredits
+            // The SAME title-only collapse the external rungs get below, applied
+            // to the servers' own answers first.
+            //
+            // The cross-server merge keys on title+year, and servers disagree
+            // about a show's year constantly: one dates a series by its premiere,
+            // another by whatever the scanner found, a third has no year at all.
+            // Billy West's row showed Futurama three times for exactly this
+            // reason — 1999, no year, and 1990 — one card per server, all of them
+            // the same show. Everything the comment below argues about outside
+            // sources applies at least as strongly here, because these are copies
+            // of one work rather than different opinions about it.
+            var merged = Self.collapsingAcrossServers(libraryCredits)
             // Keyed on title alone, NOT title+year like the cross-server merge.
             //
             // An outside source dates a series by its premiere while a library

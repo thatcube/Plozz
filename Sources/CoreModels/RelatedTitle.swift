@@ -68,3 +68,11 @@ public struct RelatedTitle: Codable, Sendable, Equatable, Identifiable, Hashable
         relation == .continuation || relation == .sideStory
     }
 }
+
+extension RelatedTitle: TitleDedupeSubject {
+    public var dedupeKind: MediaItemKind { kind }
+    public var dedupeTitle: String { title }
+    public var dedupeYear: Int? { year }
+    public var dedupeProviderIDs: [String: String] { providerIDs }
+    public var dedupeFallbackID: String { id }
+}

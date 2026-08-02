@@ -20,14 +20,94 @@ import Foundation
 ///   year-less copy into a titled one than show the same film four times.
 ///
 /// Passing `weakKey: { _ in nil }` gives strong-identity-only dedup.
+/// Anything that describes a title well enough to be deduped.
+///
+/// Exists so the engine below is the *only* implementation. `RelatedTitle` and
+/// `MediaItem` are different types, and that alone — not any difference of policy —
+/// is why the Related row grew a second union-find with its own token scheme and its
+/// own split guard. Two implementations of one rule means two places to fix every
+/// bug, and in practice only one of them ever got fixed.
+public protocol TitleDedupeSubject {
+    var dedupeKind: MediaItemKind { get }
+    var dedupeTitle: String { get }
+    var dedupeYear: Int? { get }
+    var dedupeProviderIDs: [String: String] { get }
+    /// Fallback when a row carries no identity at all, so it can never be folded
+    /// into an unrelated one.
+    var dedupeFallbackID: String { get }
+    /// Every strong identity this row carries, kind-scoped. Declared here rather
+    /// than only in the extension below so a conformer's own version is the one
+    /// generic code calls — an extension-only member dispatches statically, which
+    /// silently ignored `MediaItem`'s richer key set.
+    var dedupeStrongKeys: Set<String> { get }
+}
+
+public extension TitleDedupeSubject {
+    /// Every strong external identity this row carries, kind-scoped.
+    ///
+    /// Kind scoping is load-bearing: TMDb and TVDb reuse one integer id space across
+    /// movies and series, so an unscoped compare folds a film into an unrelated show.
+    var dedupeStrongKeys: Set<String> {
+        var keys = Set<String>()
+        for entry in MediaItemIdentity.strongExternalNamespaces {
+            if let value = dedupeProviderIDs.providerID(entry.namespace) {
+                keys.insert("\(dedupeKind.rawValue)|\(entry.canonical):\(value.lowercased())")
+            }
+        }
+        return keys
+    }
+}
+
+extension MediaItem: TitleDedupeSubject {
+    public var dedupeKind: MediaItemKind { kind }
+    public var dedupeTitle: String { title }
+    public var dedupeYear: Int? { productionYear }
+    public var dedupeProviderIDs: [String: String] { providerIDs }
+    public var dedupeFallbackID: String { "\(sourceAccountID ?? "-"):\(id)" }
+    /// The app-wide identity set, which for a movie with a year also includes its
+    /// title identity — two rows for one film that carry no catalogue id at all are
+    /// still the same film. `RelatedTitle` has no equivalent and takes the default.
+    public var dedupeStrongKeys: Set<String> { MediaItemIdentity.overlapKeys(for: self) }
+}
+
+/// The named weak policies. Dedup asks the same question everywhere — "are these two
+/// rows the same title" — but what it costs to be WRONG differs by surface, and that
+/// is the only thing that legitimately varies.
+public enum TitleDedupePolicy {
+    /// Strong shared identity only. For surfaces where a false merge changes what
+    /// PLAYS, so a title guess is never worth it.
+    case strongOnly
+    /// Strong identity, or an exact title+year match. Refuses to merge two rows that
+    /// both lack a year, because collapsing them could remove a title the viewer owns.
+    case titleAndYear
+    /// Strong identity, or the same title regardless of year. For rows showing one
+    /// work held in several places, where the year is exactly what the sources
+    /// disagree about.
+    case titleIgnoringYear
+
+    func weakKey<S: TitleDedupeSubject>(_ subject: S) -> String? {
+        let title = MediaItemIdentity.normalizedTitle(subject.dedupeTitle)
+        guard !title.isEmpty else { return nil }
+        switch self {
+        case .strongOnly:
+            return nil
+        case .titleAndYear:
+            guard let year = subject.dedupeYear else { return nil }
+            return "\(subject.dedupeKind.rawValue)|\(title)|\(year)"
+        case .titleIgnoringYear:
+            return "\(subject.dedupeKind.rawValue)|\(title)"
+        }
+    }
+}
+
 public enum TitleDedupe {
     /// Groups indices of `items` that refer to the same title.
     ///
     /// Groups appear in first-appearance order and each group's members are in input
     /// order, so a surface that keeps the first member never reshuffles its row.
-    public static func groups(
-        _ items: [MediaItem],
-        weakKey: (MediaItem) -> String? = { _ in nil }
+    public static func groups<S: TitleDedupeSubject>(
+        _ items: [S],
+        weakKey: (S) -> String? = { _ in nil }
     ) -> [[Int]] {
         guard items.count > 1 else { return items.isEmpty ? [] : [[0]] }
 
@@ -51,11 +131,18 @@ public enum TitleDedupe {
             if a < b { parent[b] = a } else { parent[a] = b }
         }
 
+        // Precomputed so refinement can ask about strong affinity cheaply.
+        let strongKeysByIndex: [Set<String>] = items.map { item in
+            let keys = item.dedupeStrongKeys
+            // No identity at all: anchor on the row itself so an empty key set can
+            // never fold two unrelated rows together.
+            return keys.isEmpty ? ["self|\(item.dedupeFallbackID)"] : keys
+        }
         var anchorByStrongKey: [String: Int] = [:]
         var anchorByWeakKey: [String: Int] = [:]
         for index in items.indices {
             let item = items[index]
-            for key in MediaItemIdentity.overlapKeys(for: item) {
+            for key in strongKeysByIndex[index] {
                 if let anchor = anchorByStrongKey[key] {
                     union(anchor, index)
                 } else {
@@ -79,6 +166,15 @@ public enum TitleDedupe {
         // third row whose metadata straddles both. Same greedy refinement the merger
         // and `TitleComponentLabeller` use, so all three agree on what "different
         // work" means.
+        //
+        // Placement prefers a subgroup this row shares a catalogue id with, and only
+        // falls back to "doesn't contradict anyone here" when it shares none. Without
+        // that preference a row could be pulled away from its own strong-id partner
+        // by a group it merely fails to contradict: given "Frozen" 2010 as
+        // {tmdb:111}, {tmdb:222, imdb:tt222} and {imdb:tt222}, the third belongs with
+        // the second by shared IMDb id, but it shares no namespace with the first and
+        // so cannot contradict it — and landed there, asserting tmdb:111 and
+        // imdb:tt222 are one film.
         var refined: [[Int]] = []
         for root in membersByRoot.keys.sorted() {
             let members = membersByRoot[root] ?? []
@@ -88,9 +184,15 @@ public enum TitleDedupe {
             }
             var subgroups: [[Int]] = []
             for index in members {
-                if let slot = subgroups.firstIndex(where: { group in
-                    !group.contains { contradicts(items[$0], items[index]) }
-                }) {
+                let compatible = subgroups.indices.filter { slot in
+                    !subgroups[slot].contains { contradicts(items[$0], items[index]) }
+                }
+                let byStrongIdentity = compatible.first { slot in
+                    subgroups[slot].contains {
+                        !strongKeysByIndex[$0].isDisjoint(with: strongKeysByIndex[index])
+                    }
+                }
+                if let slot = byStrongIdentity ?? compatible.first {
                     subgroups[slot].append(index)
                 } else {
                     subgroups.append([index])
@@ -102,21 +204,49 @@ public enum TitleDedupe {
     }
 
     /// Convenience: first-wins dedup preserving input order.
-    public static func deduplicated(
-        _ items: [MediaItem],
-        weakKey: (MediaItem) -> String? = { _ in nil }
-    ) -> [MediaItem] {
+    public static func deduplicated<S: TitleDedupeSubject>(
+        _ items: [S],
+        weakKey: (S) -> String? = { _ in nil }
+    ) -> [S] {
         groups(items, weakKey: weakKey).compactMap { $0.first.map { items[$0] } }
     }
 
-    private static func contradicts(_ lhs: MediaItem, _ rhs: MediaItem) -> Bool {
-        MediaItemIdentity.titlesPlausiblyContradict(
-            titleA: MediaItemIdentity.normalizedTitle(lhs.title),
-            yearA: lhs.productionYear,
-            kindA: lhs.kind,
-            titleB: MediaItemIdentity.normalizedTitle(rhs.title),
-            yearB: rhs.productionYear,
-            kindB: rhs.kind
+    /// Group under a named policy — the form every surface should use.
+    public static func groups<S: TitleDedupeSubject>(
+        _ items: [S],
+        policy: TitleDedupePolicy
+    ) -> [[Int]] {
+        groups(items) { policy.weakKey($0) }
+    }
+
+    /// First-wins dedup under a named policy.
+    public static func deduplicated<S: TitleDedupeSubject>(
+        _ items: [S],
+        policy: TitleDedupePolicy
+    ) -> [S] {
+        deduplicated(items) { policy.weakKey($0) }
+    }
+
+    private static func contradicts<S: TitleDedupeSubject>(_ lhs: S, _ rhs: S) -> Bool {
+        // Same namespace, different value ⇒ different works. Two rows both claiming
+        // a TMDb id that disagree are two films, however identical their title and
+        // year — "Frozen" 2010 is a real pair. This came from the Related row's own
+        // implementation, which had it while credits and the cast strip did not; it
+        // is the same rule the alias resolver applies, and folding it in here is why
+        // one engine is worth having.
+        for entry in MediaItemIdentity.strongExternalNamespaces {
+            guard let left = lhs.dedupeProviderIDs.providerID(entry.namespace),
+                  let right = rhs.dedupeProviderIDs.providerID(entry.namespace)
+            else { continue }
+            if left.caseInsensitiveCompare(right) != .orderedSame { return true }
+        }
+        return MediaItemIdentity.titlesPlausiblyContradict(
+            titleA: MediaItemIdentity.normalizedTitle(lhs.dedupeTitle),
+            yearA: lhs.dedupeYear,
+            kindA: lhs.dedupeKind,
+            titleB: MediaItemIdentity.normalizedTitle(rhs.dedupeTitle),
+            yearB: rhs.dedupeYear,
+            kindB: rhs.dedupeKind
         )
     }
 }

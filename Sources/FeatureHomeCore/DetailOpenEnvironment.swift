@@ -95,6 +95,14 @@ public struct DetailOpenEnvironment {
         return (item.sources + indexed).filter { seen.insert($0.id).inserted }
     }
 
+    /// The Related-row policy shared by both platform shells. Discovery details keep
+    /// navigable external results; owned details retain the library-only row.
+    public static func relatedTitlesDisplayMode(
+        isDiscoveryItem: Bool
+    ) -> RelatedTitlesLoader.DisplayMode {
+        isDiscoveryItem ? .includeExternal : .libraryOnly
+    }
+
     public func initialSources(for item: MediaItem, isDiscovery: Bool) -> [MediaSourceRef] {
         Self.initialSources(
             for: item,
@@ -196,7 +204,7 @@ public struct DetailOpenEnvironment {
             alternateProviderResolver: resolveOptionalProvider,
             crossServerSourceResolver: isDiscovery ? nil : crossServerSourceResolver,
             relatedTitlesLoader: makeRelatedTitlesLoader?(
-                isDiscovery ? .includeExternal : .libraryOnly
+                Self.relatedTitlesDisplayMode(isDiscoveryItem: isDiscovery)
             ),
             snapshotCache: snapshotCache
         )

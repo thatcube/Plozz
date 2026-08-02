@@ -63,6 +63,7 @@ public final class RelatedTitlesLoader {
     private let resolver: RelatedTitlesResolver
     private let store: RelatedTitlesStore
     private let search: @Sendable (String, Int) async -> [MediaItem]
+    private let indexedLibrarySources: @Sendable (MediaItem) -> [MediaSourceRef]
     private let now: @Sendable () -> Date
     private let displayMode: DisplayMode
     private var loadedSeedKey: String?
@@ -71,12 +72,14 @@ public final class RelatedTitlesLoader {
         resolver: RelatedTitlesResolver,
         store: RelatedTitlesStore = .shared,
         search: @escaping @Sendable (String, Int) async -> [MediaItem],
+        indexedLibrarySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
         displayMode: DisplayMode = .libraryOnly,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.resolver = resolver
         self.store = store
         self.search = search
+        self.indexedLibrarySources = indexedLibrarySources
         self.displayMode = displayMode
         self.now = now
     }
@@ -108,17 +111,57 @@ public final class RelatedTitlesLoader {
         guard !titles.isEmpty else { return }
         guard loadedSeedKey == key else { return }  // page changed while resolving
         if displayMode == .includeExternal {
-            // External detail pages can navigate these provider items directly;
-            // the destination's identity index resolves an owned copy at select
-            // time. Searching every candidate against every server here is pure
-            // speculative cost (up to 24 titles × all accounts) and delays a row
-            // that already has everything it needs to render.
+            // Resolve against the eager identity index before publishing. Destination
+            // routing used to do this only after selection, so an owned title wore an
+            // external/requestable mark until it was tapped. The synchronous index
+            // lookup keeps this path network-free while making card state and routing
+            // agree.
+            let capabilities = MediaCapabilities.detected()
             entries = Self.collapsingExternalDuplicates(titles)
                 .prefix(Self.maximumEntries)
-                .map { RelatedEntry(related: $0, libraryItem: nil) }
+                .map {
+                    RelatedEntry(
+                        related: $0,
+                        libraryItem: indexedLibraryItem(
+                            for: $0,
+                            capabilities: capabilities
+                        )
+                    )
+                }
             return
         }
         await matchToLibrary(titles, seedKey: key)
+    }
+
+    /// Builds a validated library item from the shared identity index. Related
+    /// providers must contribute a strong id: title/year fallback is intentionally
+    /// rejected because a wrong ownership match can route playback to another work.
+    private func indexedLibraryItem(
+        for related: RelatedTitle,
+        capabilities: MediaCapabilities
+    ) -> MediaItem? {
+        let hasStrongIdentity = MediaItemIdentity.strongExternalNamespaces.contains {
+            related.providerIDs.providerID($0.namespace) != nil
+        }
+        guard hasStrongIdentity else { return nil }
+
+        let externalItem = RelatedEntry(related: related, libraryItem: nil).item
+        let sources = indexedLibrarySources(externalItem).filter {
+            $0.kind == externalItem.kind
+        }
+        guard let selected = CrossSourceSelector.bestSelection(
+            from: sources,
+            capabilities: capabilities
+        ) else {
+            return nil
+        }
+
+        var libraryItem = externalItem.selectingSource(selected.source)
+        libraryItem.sources = sources
+        // `.unknown` describes the metadata provider's view, not the now-validated
+        // local copy. Clear it so shared card marks classify this as owned.
+        libraryItem.availability = nil
+        return libraryItem
     }
 
     /// Cross-provider Related results often describe the same work under disjoint

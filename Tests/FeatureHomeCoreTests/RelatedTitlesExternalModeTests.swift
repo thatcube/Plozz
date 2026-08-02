@@ -4,24 +4,16 @@ import MetadataKit
 import XCTest
 @testable import FeatureHomeCore
 
-private struct OneRelatedProvider: RelatedTitlesProviding {
+private struct StubRelatedProvider: RelatedTitlesProviding {
     let id: MetadataSource = .tmdb
     let isEnabled = true
+    let title: RelatedTitle
 
     func relatedTitles(
         for query: MetadataQuery,
         limit: Int
     ) async -> [RelatedTitle] {
-        [
-            RelatedTitle(
-                title: "Related Movie",
-                year: 2026,
-                kind: .movie,
-                providerIDs: ["Tmdb": "99"],
-                posterURL: URL(string: "https://image.test/99.jpg"),
-                source: .tmdb
-            )
-        ]
+        [title]
     }
 }
 
@@ -44,18 +36,67 @@ private final class SearchCallFlag: @unchecked Sendable {
 
 @MainActor
 final class RelatedTitlesExternalModeTests: XCTestCase {
-    func testExternalModePublishesWithoutSearchingEveryLibrary() async {
-        let search = SearchCallFlag()
-        let loader = RelatedTitlesLoader(
+    private func related(
+        title: String = "Related Movie",
+        year: Int? = 2026,
+        kind: MediaItemKind = .movie,
+        ids: [String: String] = ["Tmdb": "99"]
+    ) -> RelatedTitle {
+        RelatedTitle(
+            title: title,
+            year: year,
+            kind: kind,
+            providerIDs: ids,
+            posterURL: URL(string: "https://image.test/99.jpg"),
+            source: .tmdb
+        )
+    }
+
+    private func indexedSources(
+        for items: [MediaItem]
+    ) -> @Sendable (MediaItem) -> [MediaSourceRef] {
+        var byIdentity: [MediaIdentity: [IndexedSource]] = [:]
+        for item in items {
+            let source = IndexedSource(
+                accountID: item.sourceAccountID ?? "library-account",
+                itemID: item.id,
+                providerKind: .jellyfin,
+                kind: item.kind,
+                normalizedTitle: MediaItemIdentity.normalizedTitle(item.title),
+                year: item.productionYear
+            )
+            for identity in MediaItemIdentity.identities(for: item) {
+                byIdentity[identity, default: []].append(source)
+            }
+        }
+        let snapshot = IdentityIndexSnapshot(byIdentity: byIdentity)
+        return { snapshot.sourceRefs(for: $0) }
+    }
+
+    private func makeLoader(
+        related: RelatedTitle,
+        indexedLibrarySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
+        search: SearchCallFlag = SearchCallFlag()
+    ) -> RelatedTitlesLoader {
+        RelatedTitlesLoader(
             resolver: RelatedTitlesResolver(
-                providers: [OneRelatedProvider()]
+                providers: [StubRelatedProvider(title: related)]
             ),
             store: RelatedTitlesStore(directory: nil),
             search: { _, _ in
                 search.mark()
                 return []
             },
+            indexedLibrarySources: indexedLibrarySources,
             displayMode: .includeExternal
+        )
+    }
+
+    func testExternalModePublishesWithoutSearchingEveryLibrary() async {
+        let search = SearchCallFlag()
+        let loader = makeLoader(
+            related: related(),
+            search: search
         )
         let seed = MediaItem(
             id: "seer:movie:1",
@@ -70,6 +111,160 @@ final class RelatedTitlesExternalModeTests: XCTestCase {
         XCTAssertFalse(search.value)
         XCTAssertEqual(loader.entries.map(\.item.title), ["Related Movie"])
         XCTAssertEqual(loader.entries.first?.item.availability, .unknown)
+    }
+
+    func testExternalModeClassifiesOwnedSeriesByStrongID() async {
+        let related = related(
+            title: "Black Sails",
+            year: 2014,
+            kind: .series,
+            ids: ["Tmdb": "47665"]
+        )
+        let owned = MediaItem(
+            id: "jf-series",
+            title: "Black Sails",
+            kind: .series,
+            productionYear: 2014,
+            providerIDs: ["Tmdb": "47665"],
+            sourceAccountID: "jellyfin-account"
+        )
+        let search = SearchCallFlag()
+        let loader = makeLoader(
+            related: related,
+            indexedLibrarySources: indexedSources(for: [owned]),
+            search: search
+        )
+
+        await loader.load(for: seed())
+
+        XCTAssertFalse(search.value)
+        XCTAssertTrue(loader.entries.first?.isInLibrary == true)
+        XCTAssertEqual(loader.entries.first?.item.id, "jf-series")
+        XCTAssertEqual(loader.entries.first?.item.sourceAccountID, "jellyfin-account")
+        XCTAssertTrue(loader.entries.first?.item.locallyValidatedPlayableSource == true)
+        XCTAssertNil(loader.entries.first?.item.availability)
+        XCTAssertTrue(
+            loader.entries.first?.item.ownershipPresentation().canPlay == true
+        )
+    }
+
+    func testExternalModeClassifiesOwnedMovieByStrongID() async {
+        let owned = MediaItem(
+            id: "plex-movie",
+            title: "Related Movie",
+            kind: .movie,
+            productionYear: 2026,
+            providerIDs: ["Tmdb": "99"],
+            sourceAccountID: "plex-account"
+        )
+        let loader = makeLoader(
+            related: related(),
+            indexedLibrarySources: indexedSources(for: [owned])
+        )
+
+        await loader.load(for: seed())
+
+        XCTAssertTrue(loader.entries.first?.isInLibrary == true)
+        XCTAssertEqual(loader.entries.first?.item.id, "plex-movie")
+    }
+
+    func testExternalModeKeepsGenuinelyUnownedTitleExternal() async {
+        let loader = makeLoader(related: related())
+
+        await loader.load(for: seed())
+
+        XCTAssertFalse(loader.entries.first?.isInLibrary == true)
+        XCTAssertEqual(loader.entries.first?.item.id, "related:\(related().id)")
+        XCTAssertFalse(loader.entries.first?.item.locallyValidatedPlayableSource == true)
+    }
+
+    func testExternalModeRejectsTitleOnlyNearMatch() async {
+        let titleOnly = related(
+            title: "Related Movie!",
+            kind: .movie,
+            ids: [:]
+        )
+        let owned = MediaItem(
+            id: "same-title",
+            title: "Related Movie",
+            kind: .movie,
+            productionYear: 2026,
+            sourceAccountID: "library-account"
+        )
+        let loader = makeLoader(
+            related: titleOnly,
+            indexedLibrarySources: indexedSources(for: [owned])
+        )
+
+        await loader.load(for: seed())
+
+        XCTAssertFalse(loader.entries.first?.isInLibrary == true)
+    }
+
+    func testExternalModeScopesSharedTMDbIDByKind() async {
+        let series = related(
+            title: "Unrelated Series",
+            year: 2026,
+            kind: .series,
+            ids: ["Tmdb": "99"]
+        )
+        let movie = MediaItem(
+            id: "movie-99",
+            title: "Related Movie",
+            kind: .movie,
+            productionYear: 2026,
+            providerIDs: ["Tmdb": "99"],
+            sourceAccountID: "library-account"
+        )
+        let loader = makeLoader(
+            related: series,
+            indexedLibrarySources: indexedSources(for: [movie])
+        )
+
+        await loader.load(for: seed())
+
+        XCTAssertFalse(loader.entries.first?.isInLibrary == true)
+        XCTAssertEqual(loader.entries.first?.item.kind, .series)
+    }
+
+    func testSharedShellDisplayModeProducesIdenticalOwnershipClassification() async {
+        let owned = MediaItem(
+            id: "shared-owned",
+            title: "Related Movie",
+            kind: .movie,
+            productionYear: 2026,
+            providerIDs: ["Tmdb": "99"],
+            sourceAccountID: "library-account"
+        )
+        let sources = indexedSources(for: [owned])
+        let tvLoader = makeLoader(
+            related: related(),
+            indexedLibrarySources: sources
+        )
+        let iOSLoader = makeLoader(
+            related: related(),
+            indexedLibrarySources: sources
+        )
+
+        XCTAssertEqual(
+            DetailOpenEnvironment.relatedTitlesDisplayMode(isDiscoveryItem: true),
+            .includeExternal
+        )
+        await tvLoader.load(for: seed())
+        await iOSLoader.load(for: seed())
+
+        XCTAssertEqual(tvLoader.entries, iOSLoader.entries)
+        XCTAssertTrue(tvLoader.entries.first?.isInLibrary == true)
+    }
+
+    private func seed() -> MediaItem {
+        MediaItem(
+            id: "seer:movie:1",
+            title: "Seed",
+            kind: .movie,
+            providerIDs: ["Tmdb": "1"],
+            availability: .unknown
+        )
     }
 
     func testExternalModeCollapsesCrossProviderDuplicate() {

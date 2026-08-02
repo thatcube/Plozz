@@ -250,7 +250,10 @@ struct SearchTab: View {
                         // cross-server "…" picker a directly-opened series does.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
-            relatedTitlesLoader: makeRelatedTitlesLoader(in: accounts),
+                        relatedTitlesLoader: makeRelatedTitlesLoader(
+                            in: accounts,
+                            identitySources: identitySources
+                        ),
                         snapshotCache: detailSnapshotCache
                     ),
                     spoilerSettings: spoilerSettings,
@@ -285,7 +288,10 @@ struct SearchTab: View {
                         // cross-server "…" picker a directly-opened series does.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
                         crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
-            relatedTitlesLoader: makeRelatedTitlesLoader(in: accounts),
+                        relatedTitlesLoader: makeRelatedTitlesLoader(
+                            in: accounts,
+                            identitySources: identitySources
+                        ),
                         snapshotCache: detailSnapshotCache
                     ),
                     spoilerSettings: spoilerSettings,
@@ -343,6 +349,7 @@ struct SearchTab: View {
             makeRelatedTitlesLoader: {
                 makeRelatedTitlesLoader(
                     in: accounts,
+                    identitySources: identitySources,
                     displayMode: $0
                 )
             },

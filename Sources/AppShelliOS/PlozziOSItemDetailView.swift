@@ -255,9 +255,10 @@ private struct PlozziOSCanonicalItemDetailView: View {
                         RelatedTitlesLoader(
                             resolver: .production(traktClientID: TraktConfig.resolved().clientID),
                             search: search,
-                            displayMode: isDiscoveryItem
-                                ? .includeExternal
-                                : .libraryOnly
+                            indexedLibrarySources: identitySources,
+                            displayMode: DetailOpenEnvironment.relatedTitlesDisplayMode(
+                                isDiscoveryItem: isDiscoveryItem
+                            )
                         )
                     }
             )

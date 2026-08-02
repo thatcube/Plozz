@@ -51,6 +51,7 @@ let package = Package(
         .library(name: "FeatureSearch", targets: ["FeatureSearch"]),
         .library(name: "FeatureSettings", targets: ["FeatureSettings"]),
         .library(name: "FeatureProfiles", targets: ["FeatureProfiles"]),
+        .library(name: "FeatureWatchlistCore", targets: ["FeatureWatchlistCore"]),
         .library(name: "FeatureSyncSetup", targets: ["FeatureSyncSetup"]),
         .library(name: "FeatureSyncCloud", targets: ["FeatureSyncCloud"]),
         .library(name: "FeatureMusic", targets: ["FeatureMusic"]),
@@ -374,6 +375,10 @@ let package = Package(
             name: "FeatureProfiles",
             dependencies: ["CoreModels", "CoreUI"]
         ),
+        .target(
+            name: "FeatureWatchlistCore",
+            dependencies: ["CoreModels"]
+        ),
 
         // MARK: Sync & Setup (cross-device onboarding — feature-flagged, v1)
         //
@@ -669,6 +674,7 @@ let package = Package(
                 "FeatureSearch",
                 "FeatureSettings",
                 "FeatureProfiles",
+                "FeatureWatchlistCore",
                 "FeatureMusic",
                 "FeatureSyncSetup",
                 "FeatureSyncCloud",
@@ -694,6 +700,7 @@ let package = Package(
                 "FeatureProfiles",
                 "FeatureSearchCore",
                 "FeatureSettings",
+                "FeatureWatchlistCore",
                 "MetadataKit",
                 "MediaDownloads",
                 "MediaTransportCore",
@@ -719,6 +726,10 @@ let package = Package(
         .testTarget(
             name: "CoreModelsTests",
             dependencies: ["CoreModels", "CoreUI"]
+        ),
+        .testTarget(
+            name: "FeatureWatchlistCoreTests",
+            dependencies: ["FeatureWatchlistCore", "CoreModels"]
         ),
         .testTarget(
             name: "FeatureSyncSetupTests",

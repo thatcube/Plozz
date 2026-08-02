@@ -5,6 +5,7 @@ import CoreModels
 import CoreNetworking
 import FeatureSyncSetup
 import FeatureSyncCloud
+import FeatureWatchlistCore
 import UIKit
 
 // MARK: - PlozziOSAppModel + CloudKit config auto-sync
@@ -17,20 +18,46 @@ extension PlozziOSAppModel {
 
     private static let cloudContainerIdentifier = "iCloud.com.thatcube.Plozz"
 
+    static var isRunningUnitTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    static func writableStateDirectory() -> URL? {
+        try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+    }
+
+    static func mediaAliasStorageDirectory() -> URL? {
+        writableStateDirectory()?
+            .appendingPathComponent("PlozzMediaState", isDirectory: true)
+            .appendingPathComponent("AliasLedger", isDirectory: true)
+    }
+
     static func makeCloudSync(for model: PlozziOSAppModel) -> CloudConfigSyncService? {
-        guard let baseDir = try? FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true)
-            ?? FileManager.default.url(
-                for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        else { return nil }
-        let stateURL = baseDir
-            .appendingPathComponent("PlozzSync", isDirectory: true)
-            .appendingPathComponent("cloud-config-v3.json")
+        guard let baseDir = writableStateDirectory() else { return nil }
+        let syncDir = baseDir.appendingPathComponent("PlozzSync", isDirectory: true)
+        let configStateURL = syncDir.appendingPathComponent("cloud-config-v3.json")
+        let mediaStateURL = syncDir.appendingPathComponent("cloud-media-state-v1.json")
+
+        let mediaChannel = CloudConfigSyncService.ChannelConfiguration(
+            schema: .mediaStateV1,
+            stateFileURL: mediaStateURL,
+            captureRecords: { [weak model] fallback in
+                guard let model else { return fallback }
+                return await model.captureMediaStateSyncRecords(fallback: fallback)
+            },
+            applyRecords: { [weak model] changes in
+                await model?.applyMediaStateSyncRecords(changes)
+            }
+        )
 
         return CloudConfigSyncService(.init(
             containerIdentifier: cloudContainerIdentifier,
-            stateFileURL: stateURL,
+            stateFileURL: configStateURL,
             isEnabled: { SyncSetupFeatureFlag().isEnabled },
             captureRecords: { [weak model] fallback in
                 guard let model else { return [:] }
@@ -43,13 +70,16 @@ extension PlozziOSAppModel {
                 await model?.clearRemoteDerivedSyncState()
             },
             status: model.cloudSyncStatus
-        ))
+        ), channels: [mediaChannel])
     }
 
     /// Force an immediate two-way sync (manual "Sync Now").
     func syncCloudNow() {
-        guard let cloudSync else { return }
-        Task { await cloudSync.syncNow() }
+        let config = cloudSync
+        guard let config else { return }
+        Task {
+            await config.syncNow()
+        }
     }
 
     // MARK: Publish side (V3 flat record capture)
@@ -199,6 +229,10 @@ extension PlozziOSAppModel {
         }
 
         if !profileUpserts.isEmpty || !profileDeletes.isEmpty {
+            for profileID in profileDeletes
+            where profileID != ProfileStore.defaultProfileID {
+                removeMediaAliases(forProfileID: profileID)
+            }
             profiles.applySyncedProfileDTOs(profileUpserts, deletions: profileDeletes)
         }
         for w in settingWrites {
@@ -369,8 +403,12 @@ extension PlozziOSAppModel {
     // MARK: Lifecycle + change observation
 
     func startCloudSyncIfEnabled() {
-        guard SyncSetupFeatureFlag().isEnabled, let cloudSync else { return }
-        Task { await cloudSync.activate() }
+        guard SyncSetupFeatureFlag().isEnabled else { return }
+        let config = cloudSync
+        guard let config else { return }
+        Task {
+            await config.activate()
+        }
         armCloudConfigObservation()
         heartbeatHouseholdPresence()          // register this device in the household
         publishPortableCredentials()          // share this device's logins via iCloud Keychain
@@ -392,12 +430,16 @@ extension PlozziOSAppModel {
     }
 
     func scheduleCloudPublish() {
-        guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
+        guard SyncSetupFeatureFlag().isEnabled,
+              cloudSync != nil else {
+            return
+        }
+        let config = cloudSync
         cloudPublishTask?.cancel()
         cloudPublishTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             guard !Task.isCancelled else { return }
-            await cloudSync.publishLocalChanges()
+            await config?.publishLocalChanges()
             // A local sign-in/out changed the account set → refresh the credentials
             // shared via iCloud Keychain so the user's other devices track it.
             await MainActor.run { self?.publishPortableCredentials() }
@@ -408,9 +450,12 @@ extension PlozziOSAppModel {
     /// disabling stops publishing but never deletes the shared cloud config.
     func setSyncSetupEnabled(_ on: Bool) {
         syncSetup.setEnabled(on)
-        guard let cloudSync else { return }
+        let config = cloudSync
+        guard let config else { return }
         if on {
-            Task { await cloudSync.activate() }
+            Task {
+                await config.activate()
+            }
             armCloudConfigObservation()
             scheduleCloudPublish()
             heartbeatHouseholdPresence()
@@ -418,13 +463,17 @@ extension PlozziOSAppModel {
             autoConnectFromSyncedCredentials()
         } else {
             HouseholdDevicesStore().remove(deviceID: deviceID)
+            Task { await config.deactivate() }
         }
     }
 
     /// Lightweight foreground pull (iOS). Same effect as tapping Sync Now's fetch.
     func syncCloudOnForeground() {
-        guard let cloudSync, SyncSetupFeatureFlag().isEnabled else { return }
-        Task { await cloudSync.fetchNow() }
+        guard SyncSetupFeatureFlag().isEnabled else { return }
+        let config = cloudSync
+        Task {
+            await config?.fetchNow()
+        }
         heartbeatHouseholdPresence()
         checkForSyncSetupOffer()
         publishPortableCredentials()
@@ -482,15 +531,123 @@ extension PlozziOSAppModel {
     /// Reset a corrupted/divergent sync: wipe the iCloud zone and re-seed from this
     /// device. Local config is untouched.
     func resetCloudSync() {
-        guard let cloudSync else { return }
-        Task { await cloudSync.resetAndReseed() }
+        let config = cloudSync
+        Task {
+            await config?.resetAndReseed()
+        }
     }
 
     /// Repair a device stuck not-receiving (stale change token): re-download the
     /// whole zone fresh. Non-destructive to the shared cloud data.
     func redownloadCloudSync() {
-        guard let cloudSync else { return }
-        Task { await cloudSync.redownloadFromCloud() }
+        let config = cloudSync
+        Task {
+            await config?.redownloadFromCloud()
+        }
+    }
+
+    func prepareMediaAliasLedger() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.mediaAliasLedger.loadProfiles(
+                    self.profiles.profiles.map(\.id)
+                )
+                try await self.mediaAliasLedger.activate(
+                    profileID: self.profiles.activeProfileID
+                )
+            } catch {
+                PlozzLog.sync.error(
+                    "Media aliases: local ledger preparation failed: \(error.localizedDescription)"
+                )
+            }
+            self.armMediaAliasObservation()
+        }
+    }
+
+    func armMediaAliasObservation() {
+        withObservationTracking {
+            _ = profiles.profiles
+            _ = profiles.activeProfileID
+            _ = mediaAliasLedger.snapshotsByProfile
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                do {
+                    try await self.mediaAliasLedger.loadProfiles(
+                        self.profiles.profiles.map(\.id)
+                    )
+                    try await self.mediaAliasLedger.activate(
+                        profileID: self.profiles.activeProfileID
+                    )
+                } catch {
+                    PlozzLog.sync.error(
+                        "Media aliases: profile activation failed: \(error.localizedDescription)"
+                    )
+                }
+                self.scheduleCloudPublish()
+                self.armMediaAliasObservation()
+            }
+        }
+    }
+
+    func removeMediaAliases(forProfileID profileID: String) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.mediaAliasLedger.removeProfile(profileID)
+                await self.cloudSync?.publishLocalChanges()
+            } catch {
+                PlozzLog.sync.error(
+                    "Media aliases: profile removal failed: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    func captureMediaStateSyncRecords(
+        fallback: [SyncRecordID: Data]
+    ) async -> [SyncRecordID: Data] {
+        do {
+            return try await mediaAliasLedger.captureAllAliasSyncRecords(
+                profileIDs: profiles.profiles.map(\.id),
+                fallback: fallback
+            )
+        } catch {
+            PlozzLog.sync.error(
+                "Media aliases: capture failed; preserving sync baseline: \(error.localizedDescription)"
+            )
+            return fallback
+        }
+    }
+
+    func applyMediaStateSyncRecords(_ changes: SyncLocalChanges) async {
+        var parsed: [MediaAliasRemoteChange] = []
+        var invalidNameCount = 0
+        for (recordName, value) in changes {
+            guard let key = MediaStateRecordKey.parse(recordName) else {
+                invalidNameCount += 1
+                continue
+            }
+            parsed.append(MediaAliasRemoteChange(key: key, value: value))
+        }
+        if invalidNameCount > 0 {
+            PlozzLog.sync.error(
+                "Media aliases: rejected \(invalidNameCount) invalid record name(s)"
+            )
+        }
+        do {
+            let report = try await mediaAliasLedger.applyRemoteChanges(parsed)
+            if !report.rejectedRecordNames.isEmpty {
+                PlozzLog.sync.error(
+                    "Media aliases: rejected \(report.rejectedRecordNames.count) malformed record(s)"
+                )
+            }
+        } catch {
+            PlozzLog.sync.error(
+                "Media aliases: remote apply failed: \(error.localizedDescription)"
+            )
+        }
     }
 
     /// DEBUG: nuke the ENTIRE household from iCloud so you can test a true cold start
@@ -506,9 +663,18 @@ extension PlozziOSAppModel {
     ///   4. turns iCloud Sync OFF here so this device stays out of the household until
     ///      you re-enable it — leaving iCloud genuinely empty for the next publisher.
     func eraseEverythingFromICloudForDebugging() {
-        let cloud = cloudSync
+        let config = cloudSync
         Task { @MainActor in
-            await cloud?.deleteAllServerData()   // step 1 (flushes deletes to peers)
+            await config?.deleteAllServerData()
+            for profileID in profiles.profiles.map(\.id) {
+                do {
+                    try await mediaAliasLedger.removeProfile(profileID)
+                } catch {
+                    PlozzLog.sync.error(
+                        "Media aliases: debug reset failed for one profile: \(error.localizedDescription)"
+                    )
+                }
+            }
             removeAllPortableCredentials()        // step 2
             resetToFirstRunForDebugging()         // step 3
             setSyncSetupEnabled(false)            // step 4

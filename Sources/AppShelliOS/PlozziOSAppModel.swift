@@ -11,6 +11,7 @@ import FeatureProfiles
 import FeatureSettings
 import FeatureSyncSetup
 import FeatureSyncCloud
+import FeatureWatchlistCore
 import Foundation
 import MALService
 import MediaDownloads
@@ -58,12 +59,17 @@ final class PlozziOSAppModel {
 
     let accountsProviders: AccountsProvidersModel
     let profiles: ProfilesModel
+    /// Generic durable title identity for Plozz-owned profile state.
+    let mediaAliasLedger: MediaAliasLedgerModel
     /// Cross-device Sync & Setup (feature-flagged; OFF by default).
     let syncSetup: SyncSetupService
 
     /// CloudKit "Stage 1" auto-sync of the NON-SECRET household config across this
-    /// Apple ID's devices. Lazily built so its config<->apply closures can capture
-    /// `self`. Gated on `SyncSetupFeatureFlag`; a no-op until enabled. See
+    /// Apple ID's devices, multiplexed with the durable media identity/state channel
+    /// onto the SAME `CKSyncEngine` (Apple permits exactly one active engine per
+    /// private database — see `CloudConfigSyncService`'s multiplexing doc comment).
+    /// Lazily built so its config<->apply closures can capture `self`. Gated on
+    /// `SyncSetupFeatureFlag`; a no-op until enabled. See
     /// `PlozziOSAppModel+CloudSync`.
     @ObservationIgnored
     private(set) lazy var cloudSync: CloudConfigSyncService? = Self.makeCloudSync(for: self)
@@ -416,6 +422,13 @@ final class PlozziOSAppModel {
         )
         self.shareScanStatus = shareScanStatus
         self.durableLocalStateStore = durableLocalStateStore
+        let aliasStorageDirectory = Self.isRunningUnitTests
+            ? nil
+            : Self.mediaAliasStorageDirectory()
+        self.mediaAliasLedger = MediaAliasLedgerModel(
+            durableStore: aliasStorageDirectory == nil ? nil : durableLocalStateStore,
+            storageDirectory: aliasStorageDirectory
+        )
         self.seerService = seerService
         self.traktService = traktService
         self.simklService = simklService
@@ -589,6 +602,7 @@ final class PlozziOSAppModel {
 
         // Bring up CloudKit config auto-sync (no-op unless the Sync & Setup flag is
         // on) and start observing local config changes to publish them.
+        prepareMediaAliasLedger()
         startCloudSyncIfEnabled()
     }
 
@@ -1104,6 +1118,7 @@ final class PlozziOSAppModel {
 
     func removeProfile(_ id: String) {
         let previousActiveProfileID = profiles.activeProfileID
+        removeMediaAliases(forProfileID: id)
         profiles.remove(id)
         watchReconcilers[id] = nil
         if profiles.activeProfileID != previousActiveProfileID {

@@ -67,6 +67,38 @@ final class ProfileFlowModelTests: XCTestCase {
         XCTAssertFalse(model.isProfileSelectionCancelable)
     }
 
+    func testProfileRemovalInvokesDurableAliasCleanup() {
+        let store = AccountStore(secureStore: InMemorySecureStore())
+        let profiles = ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
+        let removed = profiles.add(name: "Removed", avatarSymbol: "person", colorIndex: 1)
+        let hub = AccountsProvidersModel(
+            accountStore: store,
+            registry: ProviderRegistry(),
+            profilesModel: profiles
+        )
+        let plex = PlexHomeUsersModel(
+            accountsProviders: hub,
+            profilesModel: profiles,
+            switchProfile: { _ in }
+        )
+        var removedAliasProfileID: String?
+        let model = ProfileFlowModel(
+            profilesModel: profiles,
+            accountsProviders: hub,
+            plexHomeUsers: plex,
+            profileSettings: ProfileSettingsModel(namespace: profiles.activeNamespace),
+            audioController: AudioPlaybackController(),
+            updateTrackersForActiveProfile: {},
+            discardWatchReconciler: { _ in },
+            removeMediaAliases: { removedAliasProfileID = $0 }
+        )
+
+        model.removeProfile(id: removed.id)
+
+        XCTAssertEqual(removedAliasProfileID, removed.id)
+        XCTAssertFalse(profiles.profiles.contains { $0.id == removed.id })
+    }
+
     func testPrepareLaunchPickerShownWhenAskOnStartupWithMultipleProfiles() {
         let (model, profiles) = makeModel()
         _ = profiles.add(name: "Second", avatarSymbol: "person", colorIndex: 1)

@@ -10,6 +10,7 @@ import FeatureMusic
 import FeatureProfiles
 import FeatureSyncSetup
 import FeatureSyncCloud
+import FeatureWatchlistCore
 import MediaTransportCore
 import MediaDownloads
 import MediaTransportFTP
@@ -92,6 +93,8 @@ public final class AppState {
     /// The household's profiles + active selection. Owned at the app level and
     /// layered on top of the multi-account core.
     public let profilesModel: ProfilesModel
+    /// Generic durable title identity for Plozz-owned profile state.
+    public let mediaAliasLedger: MediaAliasLedgerModel
 
     /// The app-scoped audio playback engine. Created **once** and shared across
     /// profile switches so there's only ever a single `AVQueuePlayer` — otherwise
@@ -501,9 +504,12 @@ public final class AppState {
 
     /// CloudKit "Stage 1" auto-sync of the NON-SECRET household config (server
     /// descriptors, profiles, per-profile settings + membership) across one Apple
-    /// ID's devices. Lazily built so its config<->apply closures can capture `self`.
-    /// Gated at runtime on `SyncSetupFeatureFlag`; a no-op until enabled. `nil` only
-    /// if no writable state location can be resolved. See `AppState+CloudSync`.
+    /// ID's devices, multiplexed with the durable media identity/state channel onto
+    /// the SAME `CKSyncEngine` (Apple permits exactly one active engine per private
+    /// database — see `CloudConfigSyncService`'s multiplexing doc comment). Lazily
+    /// built so its config<->apply closures can capture `self`. Gated at runtime on
+    /// `SyncSetupFeatureFlag`; a no-op until enabled. `nil` only if no writable
+    /// state location can be resolved. See `AppState+CloudSync`.
     @ObservationIgnored
     public private(set) lazy var cloudSync: CloudConfigSyncService? = Self.makeCloudSync(for: self)
 
@@ -678,7 +684,8 @@ public final class AppState {
         profileSettings: profileSettings,
         audioController: audioController,
         updateTrackersForActiveProfile: { [weak self] in self?.updateTraktForActiveProfile() },
-        discardWatchReconciler: { [weak self] id in self?.watchReconcilers[id] = nil }
+        discardWatchReconciler: { [weak self] id in self?.watchReconcilers[id] = nil },
+        removeMediaAliases: { [weak self] id in self?.removeMediaAliases(forProfileID: id) }
     )
     public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
 
@@ -742,6 +749,13 @@ public final class AppState {
             resolvedDurableLocalStateStore = nil
         }
         self.durableLocalStateStore = resolvedDurableLocalStateStore
+        let aliasStorageDirectory = Self.isRunningUnitTests
+            ? nil
+            : Self.mediaAliasStorageDirectory()
+        self.mediaAliasLedger = MediaAliasLedgerModel(
+            durableStore: aliasStorageDirectory == nil ? nil : resolvedDurableLocalStateStore,
+            storageDirectory: aliasStorageDirectory
+        )
         let resolvedRuntime: any MediaShareRuntime = mediaShareRuntime
             ?? AppShellMediaShareRuntimeFactory.make(accountStore: resolvedAccountStore)
         let defaultAuthenticatedHTTPResolver: ManagedAuthenticatedHTTPResolver?
@@ -1152,6 +1166,7 @@ public final class AppState {
 
         // Bring up CloudKit config auto-sync (no-op unless the Sync & Setup flag is
         // on) and start observing local config changes to publish them.
+        prepareMediaAliasLedger()
         startCloudSyncIfEnabled()
     }
 

@@ -3,7 +3,7 @@ import Foundation
 /// Canonical external-id namespaces used across metadata/artwork/rating
 /// enrichment. Each namespace resolves through a set of provider-specific key
 /// aliases (`Imdb`, `IMDb`, `myanimelist`, …) found in `MediaItem.providerIDs`.
-public enum ProviderIDNamespace: Sendable {
+public enum ProviderIDNamespace: String, Codable, Hashable, Sendable, CaseIterable {
     case imdb
     case tmdb
     case tvdb

@@ -15,6 +15,7 @@ public enum DurableLocalStateCollection: String, Codable, CaseIterable, Sendable
     case credentialMutationIndex
     case localMediaDownloads
     case localMediaWatch
+    case mediaAliasLedger
     case migrationMarker
     case sourceIdentity
     case sourceReclaim
@@ -58,6 +59,7 @@ public enum DurableLocalStateError: Error, Equatable, Sendable {
     case malformedPayload
     case payloadTooLarge
     case schemaMismatch
+    case storageUnavailable
     case unsupportedVersion
     case writeConflict
 }

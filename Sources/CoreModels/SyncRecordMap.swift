@@ -83,6 +83,242 @@ public struct SyncRecordKey: Hashable, Sendable {
     }
 }
 
+/// Record key for durable Plozz-owned media state. It deliberately lives outside
+/// ``SyncRecordKind`` so adding aliases does not alter the V3 config-sync schema.
+public struct MediaStateRecordKey: Hashable, Sendable {
+    public let profileID: String
+    public let aliasID: MediaAliasID
+
+    public init(profileID: String, aliasID: MediaAliasID) {
+        self.profileID = profileID
+        self.aliasID = aliasID
+    }
+
+    public var recordName: String {
+        "alias:\(profileID):\(aliasID)"
+    }
+
+    public static func parse(_ recordName: String) -> Self? {
+        let prefix = "alias:"
+        guard recordName.hasPrefix(prefix) else { return nil }
+        let remainder = recordName.dropFirst(prefix.count)
+        guard let separator = remainder.lastIndex(of: ":") else { return nil }
+        let profileID = String(remainder[..<separator])
+        let rawAliasID = String(remainder[remainder.index(after: separator)...])
+        guard !profileID.isEmpty,
+              let aliasID = MediaAliasID(uuidString: rawAliasID) else {
+            return nil
+        }
+        return Self(profileID: profileID, aliasID: aliasID)
+    }
+}
+
+/// Non-secret, portable projection of a media alias. Receiver-local binding
+/// validation is excluded; a peer's binding hint remains lookup-inert until this
+/// device independently corroborates it.
+public struct MediaAliasSyncDTO: Codable, Hashable, Sendable {
+    public var id: MediaAliasID
+    public var kind: MediaItemKind
+    public var createdAt: Date
+    public var updatedAt: Date
+    public var strongEvidence: [MediaAliasStrongEvidence]
+    public var weakEvidence: [MediaAliasWeakEvidence]
+    public var presentation: MediaAliasPresentation?
+    public var bindingHints: [MediaAliasProviderBindingHint]
+    public var redirectTarget: MediaAliasID?
+    public var conflicts: [MediaAliasConflict]
+
+    public init(record: MediaAliasRecord) {
+        let record = record.canonicalized()
+        id = record.id
+        kind = record.kind
+        createdAt = record.createdAt
+        updatedAt = record.updatedAt
+        strongEvidence = record.strongEvidence
+        weakEvidence = record.weakEvidence
+        presentation = record.presentation.map {
+            MediaAliasPresentation(title: $0.title, year: $0.year)
+        }
+        bindingHints = record.bindingHints.compactMap { $0.syncProjection() }
+        redirectTarget = record.redirectTarget
+        conflicts = record.conflicts
+    }
+
+    public func applying(to existing: MediaAliasRecord?) -> MediaAliasRecord? {
+        guard existing == nil || existing?.kind == kind else { return nil }
+
+        let combinedStrong = (existing?.strongEvidence ?? []) + strongEvidence
+        let strongByNamespace = Dictionary(grouping: combinedStrong, by: \.namespace)
+        var mergedStrong: [MediaAliasStrongEvidence] = []
+        var mergedConflicts = Set(existing?.conflicts ?? [])
+        mergedConflicts.formUnion(conflicts)
+        let conflictDate = max(existing?.updatedAt ?? updatedAt, updatedAt)
+        for namespace in strongByNamespace.keys.sorted(by: {
+            $0.rawValue < $1.rawValue
+        }) {
+            let values = Array(Set(
+                strongByNamespace[namespace, default: []].map(\.value)
+            )).sorted()
+            guard let accepted = values.first,
+                  let evidence = MediaAliasStrongEvidence(
+                    kind: kind,
+                    namespace: namespace,
+                    value: accepted
+                  ) else {
+                continue
+            }
+            mergedStrong.append(evidence)
+            for rejected in values.dropFirst() {
+                mergedConflicts.insert(MediaAliasConflict(
+                    kind: .strongEvidence,
+                    namespace: namespace,
+                    existingValue: accepted,
+                    rejectedValue: rejected,
+                    recordedAt: conflictDate
+                ))
+            }
+        }
+
+        var hintsByBinding = Dictionary(
+            uniqueKeysWithValues: (existing?.bindingHints ?? []).map {
+                ($0.binding, $0)
+            }
+        )
+        for hint in bindingHints {
+            if let current = hintsByBinding[hint.binding] {
+                hintsByBinding[hint.binding] = min(current, hint)
+            } else {
+                hintsByBinding[hint.binding] = hint
+            }
+        }
+        let mergedHints = hintsByBinding.values.sorted()
+        let mergedBindings = Set(mergedHints.map(\.binding))
+        let localValidation = existing?.locallyValidatedBindings
+            .intersection(mergedBindings) ?? []
+
+        var appliedPresentation = presentation.map {
+            MediaAliasPresentation(title: $0.title, year: $0.year)
+        }
+        if let local = existing?.presentation {
+            let localUpdatedAt = existing?.updatedAt ?? .distantPast
+            if appliedPresentation == nil
+                || localUpdatedAt > updatedAt
+                || (localUpdatedAt == updatedAt
+                    && Self.presentationPrecedes(local, appliedPresentation!)) {
+                appliedPresentation = local
+            } else {
+                appliedPresentation?.artworkURL = local.artworkURL
+                appliedPresentation?.backdropURL = local.backdropURL
+            }
+        }
+        return MediaAliasRecord(
+            id: id,
+            kind: kind,
+            createdAt: min(existing?.createdAt ?? createdAt, createdAt),
+            updatedAt: max(existing?.updatedAt ?? updatedAt, updatedAt),
+            strongEvidence: mergedStrong,
+            weakEvidence: Array(Set(
+                (existing?.weakEvidence ?? []) + weakEvidence
+            )).sorted(),
+            presentation: appliedPresentation,
+            bindingHints: mergedHints,
+            locallyValidatedBindings: localValidation,
+            redirectTarget: redirectTarget,
+            conflicts: Array(mergedConflicts).sorted()
+        )
+    }
+
+    private static func presentationPrecedes(
+        _ lhs: MediaAliasPresentation,
+        _ rhs: MediaAliasPresentation
+    ) -> Bool {
+        if lhs.title != rhs.title {
+            return lhs.title < rhs.title
+        }
+        return (lhs.year ?? Int.min) <= (rhs.year ?? Int.min)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, createdAt, updatedAt, strongEvidence, weakEvidence
+        case presentation, bindingHints, redirectTarget, conflicts
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(MediaAliasID.self, forKey: .id)
+        let kind = try container.decode(MediaItemKind.self, forKey: .kind)
+        let createdAt = try container.decode(Date.self, forKey: .createdAt)
+        let updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        let strong = try container.decodeIfPresent(
+            [MediaAliasStrongEvidence].self,
+            forKey: .strongEvidence
+        ) ?? []
+        let weak = try container.decodeIfPresent(
+            [MediaAliasWeakEvidence].self,
+            forKey: .weakEvidence
+        ) ?? []
+        let presentation = try container.decodeIfPresent(
+            MediaAliasPresentation.self,
+            forKey: .presentation
+        )
+        let hints = try container.decodeIfPresent(
+            [MediaAliasProviderBindingHint].self,
+            forKey: .bindingHints
+        ) ?? []
+        let redirect = try container.decodeIfPresent(
+            MediaAliasID.self,
+            forKey: .redirectTarget
+        )
+        let conflicts = try container.decodeIfPresent(
+            [MediaAliasConflict].self,
+            forKey: .conflicts
+        ) ?? []
+        guard let record = MediaAliasRecord(
+            id: id,
+            kind: kind,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            strongEvidence: strong,
+            weakEvidence: weak,
+            presentation: presentation,
+            bindingHints: hints,
+            redirectTarget: redirect,
+            conflicts: conflicts
+        ) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: container,
+                debugDescription: "Invalid media alias sync record."
+            )
+        }
+        self.init(record: record)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        guard let record = applying(to: nil) else {
+            throw EncodingError.invalidValue(
+                self,
+                EncodingError.Context(
+                    codingPath: encoder.codingPath,
+                    debugDescription: "Invalid media alias sync record."
+                )
+            )
+        }
+        let value = MediaAliasSyncDTO(record: record)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(value.id, forKey: .id)
+        try container.encode(value.kind, forKey: .kind)
+        try container.encode(value.createdAt, forKey: .createdAt)
+        try container.encode(value.updatedAt, forKey: .updatedAt)
+        try container.encode(value.strongEvidence, forKey: .strongEvidence)
+        try container.encode(value.weakEvidence, forKey: .weakEvidence)
+        try container.encodeIfPresent(value.presentation, forKey: .presentation)
+        try container.encode(value.bindingHints, forKey: .bindingHints)
+        try container.encodeIfPresent(value.redirectTarget, forKey: .redirectTarget)
+        try container.encode(value.conflicts, forKey: .conflicts)
+    }
+}
+
 // MARK: - Capture fallback (out-of-order / deletion disambiguation)
 
 /// Shared, pure helper for the app-layer `captureSyncRecords`. After the app builds

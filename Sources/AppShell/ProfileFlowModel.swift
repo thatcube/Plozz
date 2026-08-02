@@ -49,6 +49,8 @@ public final class ProfileFlowModel {
     /// Drops a removed profile's retained watch reconciler. Injected because the
     /// watch-outbox domain still lives on `AppState`.
     @ObservationIgnored private let discardWatchReconciler: @MainActor (String) -> Void
+    /// Removes all durable media aliases owned by a deleted profile.
+    @ObservationIgnored private let removeMediaAliases: @MainActor (String) -> Void
 
     public init(
         profilesModel: ProfilesModel,
@@ -57,7 +59,8 @@ public final class ProfileFlowModel {
         profileSettings: ProfileSettingsModel,
         audioController: AudioPlaybackController,
         updateTrackersForActiveProfile: @escaping @MainActor () -> Void,
-        discardWatchReconciler: @escaping @MainActor (String) -> Void
+        discardWatchReconciler: @escaping @MainActor (String) -> Void,
+        removeMediaAliases: @escaping @MainActor (String) -> Void = { _ in }
     ) {
         self.profilesModel = profilesModel
         self.accountsProviders = accountsProviders
@@ -66,6 +69,7 @@ public final class ProfileFlowModel {
         self.audioController = audioController
         self.updateTrackersForActiveProfile = updateTrackersForActiveProfile
         self.discardWatchReconciler = discardWatchReconciler
+        self.removeMediaAliases = removeMediaAliases
     }
 
     // MARK: Launch picker lifecycle (driven by AppState bootstrap / onboarding)
@@ -218,6 +222,7 @@ public final class ProfileFlowModel {
     public func removeProfile(id: String) {
         let wasActive = id == profilesModel.activeProfileID
         discardWatchReconciler(id)
+        removeMediaAliases(id)
         profilesModel.remove(id)
         if wasActive {
             rebuildSettingsModels()

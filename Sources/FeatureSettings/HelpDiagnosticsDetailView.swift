@@ -53,9 +53,6 @@ struct HelpDiagnosticsDetailView: View {
                 sendDiagnosticsPanel
                 crashReportingPanel
                 diagnosticsPanel
-                #if DEBUG
-                indicatorGalleryPanel
-                #endif
                 recentActivityPanel
             }
             .frame(maxWidth: 1200, alignment: .leading)
@@ -164,33 +161,6 @@ struct HelpDiagnosticsDetailView: View {
                 .toggleStyle(SettingsSwitchToggleStyle())
         }
     }
-
-    #if DEBUG
-    // MARK: - Design preview (Debug builds only)
-
-    /// Temporary entry point for the poster-indicator comparison screen. Plozz now
-    /// shows titles the viewer doesn't own (external cast credits) with no signal
-    /// that they're unowned; this renders every candidate mark at production size
-    /// so one can be picked by looking at the TV. Compiled out of Release, and
-    /// deleted once the choice is made.
-    private var indicatorGalleryPanel: some View {
-        SettingsPanel {
-            NavigationLink(value: SettingsRoute.indicatorGallery) {
-                SettingsRowLabel(icon: "square.grid.2x2", title: Text(verbatim: "Library & Request Icons")) {
-                    Text(verbatim: "Debug-only design preview of candidate poster marks")
-                        .font(.subheadline)
-                        .settingsRowSecondary()
-                        .lineLimit(1)
-                } trailing: {
-                    Image(systemName: "chevron.forward")
-                        .font(.caption.weight(.semibold))
-                        .settingsRowSecondary()
-                }
-            }
-            .buttonStyle(SettingsFocusButtonStyle())
-        }
-    }
-    #endif
 
     // MARK: - Recent activity (read-only, redacted) — opens its own page
     private var recentActivityPanel: some View {

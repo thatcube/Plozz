@@ -72,18 +72,39 @@ public extension UniversalWatchlistHost {
         }
     }
 
+    /// The universal identity resolver over this device's live evidence and the
+    /// profile's durable Plozz ledger.
+    ///
+    /// Built on demand rather than published: it is a value over two snapshots the
+    /// shells already observe, and publishing a third observable derived from both
+    /// would add an observation edge — and a republication wave — for nothing. Take
+    /// one per prepared-state pass and reuse it; never call this from a SwiftUI
+    /// `body` or `init`.
+    var titleIdentityResolver: TitleIdentityResolver {
+        let index = identityIndex.identitySnapshot
+        let aliases = mediaAliasLedger.activeSnapshot
+        var hasher = Hasher()
+        hasher.combine(index.crossServerIdentityCount)
+        hasher.combine(index.identityCount)
+        hasher.combine(aliases.recordsByID.count)
+        hasher.combine(aliases.activeRecordCount)
+        return TitleIdentityResolver(
+            index: index,
+            aliases: aliases,
+            revision: UInt64(bitPattern: Int64(hasher.finalize()))
+        )
+    }
+
     func universalWatchlistMembership(_ item: MediaItem) -> Bool {
         guard runtimeFeatureFlags.isEnabled(.universalWatchlist) else {
             return false
         }
-        if let aliasID = item.watchlistAliasID {
-            return universalWatchlist.activeSnapshot.contains(aliasID: aliasID)
-        }
-        guard let evidence = universalWatchlistLookupEvidence(for: item),
-              let aliasID = MediaAliasResolver.lookup(
-                evidence: evidence,
-                in: mediaAliasLedger.activeSnapshot
-              ) else { return false }
+        // One identity path. Resolving through `TitleIdentityResolver` rather than
+        // the item's own evidence means a Plex Discover row (which carries only a
+        // PlexGuid) and a Jellyfin row (which carries IMDb) both reach the same Plozz
+        // UUID when the index knows they are one title — so the heart on a card and
+        // the heart on the page it opens can no longer disagree.
+        guard let aliasID = titleIdentityResolver.aliasID(for: item) else { return false }
         return universalWatchlist.activeSnapshot.contains(aliasID: aliasID)
     }
 
@@ -552,26 +573,6 @@ public extension UniversalWatchlistHost {
         )
     }
 
-    func universalWatchlistLookupEvidence(
-        for item: MediaItem
-    ) -> MediaAliasEvidence? {
-        let bindings = item.sources.compactMap {
-            ref -> MediaAliasProviderBindingKey? in
-            guard ref.providerKind?.usesMediaBrowserAPI == true else { return nil }
-            return MediaAliasProviderBindingKey(
-                providerKind: ref.providerKind!,
-                accountDescriptorID: ref.accountID,
-                providerItemID: ref.itemID
-            )
-        }
-        return MediaAliasEvidence(
-            item: item,
-            bindingHints: bindings.map {
-                MediaAliasProviderBindingHint(binding: $0)
-            },
-            locallyValidatedBindings: Set(bindings)
-        )
-    }
 
     func universalMutationTarget(
         aliasID: MediaAliasID,

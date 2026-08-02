@@ -379,10 +379,22 @@ public final class RelatedTitlesLoader {
                         guard displayMode == .includeExternal || item != nil else {
                             return nil
                         }
-                        let identity = item?.id ?? related.id
-                        guard seenItemIDs.insert(identity).inserted else {
-                            return nil
+                        // Dedupe on identity, not on the server's row id. Two
+                        // candidates ("Blade Runner" and "Blade Runner: The Final
+                        // Cut", or the same film returned by two providers) can match
+                        // to different rows that are the same title, and listing it
+                        // twice in a twelve-slot row is a visible bug. Falls back to
+                        // the row id when nothing was matched, which is the old
+                        // behaviour for unmatched external candidates.
+                        let keys: Set<String>
+                        if let item {
+                            let overlap = MediaItemIdentity.overlapKeys(for: item)
+                            keys = overlap.isEmpty ? [item.id] : overlap
+                        } else {
+                            keys = [related.id]
                         }
+                        guard seenItemIDs.isDisjoint(with: keys) else { return nil }
+                        seenItemIDs.formUnion(keys)
                         return RelatedEntry(
                             related: related,
                             libraryItem: item

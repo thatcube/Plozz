@@ -48,6 +48,10 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
     /// people would otherwise decode 30–50 full-size (multi-MB) profile images —
     /// hundreds of MB — for tiny circles. Capped small keeps a full cast cheap.
     case personHeadshot
+    /// Streaming-service marks in the detail page's "where to watch" rows. The
+    /// source serves these at 92px wide already, so the cap only guards against a
+    /// provider that sends something larger; a dozen of them must stay negligible.
+    case serviceLogo
 
     /// Longest-edge cap (in pixels) applied when decoding, or `nil` to decode at the
     /// source's native size. The cap never *upscales*: a source smaller than the cap
@@ -56,6 +60,7 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
         switch self {
         case .original: return nil
         case .musicThumbnail: return 256
+        case .serviceLogo: return 192
         case .personHeadshot: return 400
         case .posterCard: return 960
         case .landscapeCard: return 1_200

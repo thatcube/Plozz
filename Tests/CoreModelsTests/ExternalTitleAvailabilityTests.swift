@@ -9,13 +9,21 @@ final class ExternalTitleAvailabilityTests: XCTestCase {
         return calendar
     }
 
-    func testStreamingOfferWinsOverHistoricalReleaseDate() {
+    /// The hero line is about WHEN a title can be obtained, not where it streams.
+    ///
+    /// Plozz's audience runs its own server; being told a 2018 show is on Philo is
+    /// not what they came to find out, and it crowded out the facts that do change
+    /// what they do. The services are still shown, with their marks, under
+    /// "Release & Availability".
+    func testStreamingOffersAreNotHeroNews() {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
         let availability = ExternalTitleAvailability(
             regionCode: "US",
             releaseEvents: [
                 TitleReleaseEvent(
-                    kind: .theatrical,
-                    date: now.addingTimeInterval(-86_400),
+                    kind: .digital,
+                    date: now.addingTimeInterval(-86_400 * 900),
                     regionCode: "US"
                 )
             ],
@@ -25,69 +33,49 @@ final class ExternalTitleAvailabilityTests: XCTestCase {
                     providerName: "Max",
                     kind: .subscription,
                     regionCode: "US"
-                )
-            ]
-        )
-
-        XCTAssertTrue(
-            english(availability.primaryLine(
-                now: now,
-                calendar: calendar,
-                locale: Locale(identifier: "en_US")
-            ))?.hasPrefix("Streaming on HBO Max") == true
-        )
-    }
-
-    func testDirectStreamingServiceBeatsMarketplaceChannel() {
-        let availability = ExternalTitleAvailability(
-            regionCode: "US",
-            watchOffers: [
-                TitleWatchOffer(
-                    providerID: 1,
-                    providerName: "HBO Max Amazon Channel",
-                    kind: .subscription,
-                    regionCode: "US"
                 ),
                 TitleWatchOffer(
                     providerID: 2,
-                    providerName: "Max",
-                    kind: .subscription,
+                    providerName: "Apple TV",
+                    kind: .buy,
                     regionCode: "US"
                 ),
             ]
         )
 
-        XCTAssertEqual(
-            english(availability.primaryLine(
-                now: now,
-                calendar: calendar,
-                locale: Locale(identifier: "en_US")
-            )),
-            "Streaming on HBO Max"
-        )
+        XCTAssertNil(availability.primaryLine(
+            now: now,
+            calendar: calendar,
+            locale: Locale(identifier: "en_US")
+        ))
     }
 
-    func testChannelNameRemainsWhenItIsTheOnlyOffer() {
-        let availability = ExternalTitleAvailability(
-            regionCode: "US",
-            watchOffers: [
-                TitleWatchOffer(
-                    providerID: 1,
-                    providerName: "HBO Max Amazon Channel",
-                    kind: .subscription,
-                    regionCode: "US"
-                )
-            ]
-        )
-
+    /// One service sold through several storefronts is one service. This is what
+    /// keeps the row below from being four Starz tiles and no room for the rest.
+    func testStorefrontVariantsCollapseToOneService() {
+        for name in [
+            "Starz Apple TV Channel",
+            "Starz Amazon Channel",
+            "Starz Roku Premium Channel",
+            "Starz",
+        ] {
+            XCTAssertEqual(
+                ExternalTitleAvailability.collapsedServiceName(name),
+                "Starz",
+                "\(name) should collapse to Starz"
+            )
+        }
+        // An ad-supported TIER of a subscription is the same service too.
         XCTAssertEqual(
-            english(availability.primaryLine(
-                now: now,
-                calendar: calendar,
-                locale: Locale(identifier: "en_US")
-            )),
-            "Streaming on HBO Max Amazon Channel"
+            ExternalTitleAvailability.collapsedServiceName("Amazon Prime Video with Ads"),
+            "Amazon Prime Video"
         )
+        // But a service whose own name merely ends in "Channel" is not a variant.
+        XCTAssertEqual(
+            ExternalTitleAvailability.collapsedServiceName("The Roku Channel"),
+            "The Roku Channel"
+        )
+        XCTAssertEqual(ExternalTitleAvailability.collapsedServiceName("Max"), "HBO Max")
     }
 
     func testFutureDigitalDateIsNotCalledStreaming() {
@@ -111,27 +99,29 @@ final class ExternalTitleAvailabilityTests: XCTestCase {
         XCTAssertFalse(line?.localizedCaseInsensitiveContains("streaming") == true)
     }
 
-    func testRentBuyOfferUsesDigitalVocabularyAndProviderName() {
+    /// Nor does a rental. That a decade-old film can be bought on Apple TV is not
+    /// a reason to occupy the one line the hero has.
+    func testRentBuyOffersAreNotHeroNews() {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
         let availability = ExternalTitleAvailability(
             regionCode: "US",
+            releaseEvents: [],
             watchOffers: [
                 TitleWatchOffer(
                     providerID: 2,
                     providerName: "Apple TV",
-                    kind: .rent,
+                    kind: .buy,
                     regionCode: "US"
                 )
             ]
         )
 
-        XCTAssertEqual(
-            english(availability.primaryLine(
-                now: now,
-                calendar: calendar,
-                locale: Locale(identifier: "en_US")
-            )),
-            "Available digitally on Apple TV"
-        )
+        XCTAssertNil(availability.primaryLine(
+            now: now,
+            calendar: calendar,
+            locale: Locale(identifier: "en_US")
+        ))
     }
 
     func testPastTheatricalReleaseWithoutDigitalEvidenceSaysOnlyInTheaters() {
@@ -207,4 +197,34 @@ final class ExternalTitleAvailabilityTests: XCTestCase {
     private func english(_ resource: LocalizedStringResource?) -> String? {
         resource.map { String(localized: $0) }
     }
+
+    /// An older film with no digital release event recorded is not still in
+    /// cinemas — the event is simply missing. Anywhere to watch it is proof.
+    func testTheatricalClaimYieldsToEvidenceOfDigitalAvailability() {
+        let availability = ExternalTitleAvailability(
+            regionCode: "US",
+            releaseEvents: [
+                TitleReleaseEvent(
+                    kind: .theatrical,
+                    date: now.addingTimeInterval(-14 * 365 * 86_400),
+                    regionCode: "US"
+                )
+            ],
+            watchOffers: [
+                TitleWatchOffer(
+                    providerID: 2,
+                    providerName: "Apple TV",
+                    kind: .buy,
+                    regionCode: "US"
+                )
+            ]
+        )
+
+        XCTAssertNil(availability.primaryLine(
+            now: now,
+            calendar: calendar,
+            locale: Locale(identifier: "en_US")
+        ))
+    }
+
 }

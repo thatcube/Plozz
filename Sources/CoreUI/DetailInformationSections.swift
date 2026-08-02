@@ -736,9 +736,16 @@ public struct DetailInformationSections: View {
                         Text(fact.label)
                             .font(factLabelFont)
                             .plozzForeground(.secondary)
-                        Text(fact.value)
-                            .font(factValueFont)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if fact.logos.isEmpty {
+                            Text(fact.value)
+                                .font(factValueFont)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            WatchProviderLogoRow(
+                                logos: fact.logos,
+                                names: fact.value
+                            )
+                        }
                     }
                 }
             }
@@ -839,37 +846,31 @@ public struct DetailInformationSections: View {
                 value: "\(event.date.formatted(.dateTime.month(.abbreviated).day().year())) · \(region)"
             ))
         }
-        let streaming = providerNames(
-            availability.watchOffers.filter {
-                $0.kind == .subscription || $0.kind == .free || $0.kind == .ads
-            }
-        )
-        if !streaming.isEmpty {
-            facts.append(InformationFact(
-                id: "streaming",
-                label: "Streaming",
-                value: streaming
-            ))
+        func offerFact(
+            id: String,
+            label: LocalizedStringKey,
+            _ matching: (TitleWatchOffer) -> Bool
+        ) -> InformationFact? {
+            let offers = availability.watchOffers.filter(matching)
+            let names = providerNames(offers)
+            guard !names.isEmpty else { return nil }
+            return InformationFact(
+                id: id,
+                label: label,
+                value: names,
+                logos: providerLogos(offers)
+            )
         }
-        let rent = providerNames(
-            availability.watchOffers.filter { $0.kind == .rent }
-        )
-        if !rent.isEmpty {
-            facts.append(InformationFact(
-                id: "rent",
-                label: "Rent",
-                value: rent
-            ))
+        if let fact = offerFact(id: "streaming", label: "Streaming", {
+            $0.kind == .subscription || $0.kind == .free || $0.kind == .ads
+        }) {
+            facts.append(fact)
         }
-        let buy = providerNames(
-            availability.watchOffers.filter { $0.kind == .buy }
-        )
-        if !buy.isEmpty {
-            facts.append(InformationFact(
-                id: "buy",
-                label: "Buy",
-                value: buy
-            ))
+        if let fact = offerFact(id: "rent", label: "Rent", { $0.kind == .rent }) {
+            facts.append(fact)
+        }
+        if let fact = offerFact(id: "buy", label: "Buy", { $0.kind == .buy }) {
+            facts.append(fact)
         }
         if !availability.watchOffers.isEmpty {
             facts.append(InformationFact(
@@ -881,11 +882,27 @@ public struct DetailInformationSections: View {
         return facts
     }
 
+    /// Collapsed by SERVICE, not by the source's provider id.
+    ///
+    /// Starz sells through its own app and as an add-on channel on Apple TV, Roku
+    /// and Amazon; each carries a different id, so an id-keyed dedupe listed it four
+    /// times and pushed the genuinely different services off the end of the line.
+    /// One mark per SERVICE, in the source's order, collapsed the same way the
+    /// names are so the logo row and the text fallback can never disagree.
+    private func providerLogos(_ offers: [TitleWatchOffer]) -> [WatchProviderLogo] {
+        var seen = Set<String>()
+        return offers.compactMap { offer in
+            let name = ExternalTitleAvailability.collapsedServiceName(offer.providerName)
+            guard seen.insert(name).inserted, let url = offer.logoURL else { return nil }
+            return WatchProviderLogo(id: name, name: name, url: url)
+        }
+    }
+
     private func providerNames(_ offers: [TitleWatchOffer]) -> String {
-        var seen = Set<Int>()
+        var seen = Set<String>()
         return offers
-            .filter { seen.insert($0.providerID).inserted }
-            .map(\.providerName)
+            .map { ExternalTitleAvailability.collapsedServiceName($0.providerName) }
+            .filter { seen.insert($0).inserted }
             .joined(separator: " · ")
     }
 
@@ -1235,6 +1252,51 @@ private struct BodyLineHeightKey: PreferenceKey {
     }
 }
 
+/// A wrapping row of service marks.
+///
+/// Wrapping rather than scrolling: this sits inside a static information column
+/// that nothing focuses through, so a horizontal scroller would hide services with
+/// no affordance to reveal them.
+private struct WatchProviderLogoRow: View {
+    let logos: [WatchProviderLogo]
+    /// The same services as text, used as the single accessibility label — a
+    /// screen reader should hear "Starz, Philo, YouTube TV", not twelve images.
+    let names: String
+
+    #if os(tvOS)
+    private static let side: CGFloat = 64
+    #else
+    private static let side: CGFloat = 46
+    #endif
+
+    var body: some View {
+        WrappingHStackLayout(spacing: 10, lineSpacing: 10) {
+            ForEach(logos) { logo in
+                FallbackAsyncImage(
+                    urls: [logo.url],
+                    variant: .serviceLogo
+                ) {
+                    // Never a blank tile: an unreachable logo falls back to the
+                    // service's own name rather than a grey square.
+                    Text(logo.name)
+                        .font(.system(size: 15, weight: .medium))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .padding(4)
+                }
+                .frame(width: Self.side, height: Self.side)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                )
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(names))
+    }
+}
+
 private struct InformationGroup: Identifiable {
     let id: String
     let title: LocalizedStringKey
@@ -1245,6 +1307,19 @@ private struct InformationFact: Identifiable {
     let id: String
     let label: LocalizedStringKey
     let value: String
+    /// Service artwork for a "where to watch" row. A logo is read at a glance from
+    /// across a room where a list of names has to be parsed, so where these exist
+    /// they replace the text — `value` stays as the accessibility description and
+    /// as the fallback when a logo is missing.
+    var logos: [WatchProviderLogo] = []
+}
+
+/// One service's mark. Identified by the collapsed service NAME rather than the
+/// source's provider id, so Starz billed through four storefronts shows one logo.
+struct WatchProviderLogo: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let url: URL
 }
 
 #endif

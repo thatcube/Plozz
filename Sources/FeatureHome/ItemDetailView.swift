@@ -550,13 +550,20 @@ public struct ItemDetailView: View {
         )
         let discoveryStatusLine: LocalizedStringResource? = {
             guard usesExternalDetail else { return nil }
+            // A schedule that has nothing to SAY must not silence the streaming
+            // line. Having fetched a schedule is not the same as having an
+            // upcoming episode: for a series that has ended, `heroLine` returns
+            // nil, and returning that directly meant the hero went from
+            // "Streaming on Starz" to blank the moment the schedule landed —
+            // which reads as the page losing information a second after opening.
             if detail.item.kind == .series,
-               let schedule = detail.upcomingSchedule {
-                return SeriesUpcoming.heroLine(
-                    nextEpisode: schedule.upcomingEpisode,
-                    cadence: schedule.cadence,
-                    schedule: schedule.upcomingEpisodes
-                )
+               let schedule = detail.upcomingSchedule,
+               let line = SeriesUpcoming.heroLine(
+                   nextEpisode: schedule.upcomingEpisode,
+                   cadence: schedule.cadence,
+                   schedule: schedule.upcomingEpisodes
+               ) {
+                return line
             }
             return detail.externalAvailability?.primaryLine()
         }()

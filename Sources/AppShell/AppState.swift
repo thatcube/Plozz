@@ -101,17 +101,17 @@ public final class AppState {
     public let universalWatchlist: WatchlistModel
     public let runtimeFeatureFlags: RuntimeFeatureFlags
     @ObservationIgnored
-    var universalWatchlistReconciler: WatchlistReconciler?
+    public var universalWatchlistReconciler: WatchlistReconciler?
     @ObservationIgnored
-    var universalWatchlistMutationStore: DurableWatchlistMutationStore?
+    public var universalWatchlistMutationStore: DurableWatchlistMutationStore?
     @ObservationIgnored
-    var universalWatchlistProfileID: String?
+    public var universalWatchlistProfileID: String?
     @ObservationIgnored
-    var universalWatchlistRetryScheduler: WatchlistRetryScheduler?
+    public var universalWatchlistRetryScheduler: WatchlistRetryScheduler?
     @ObservationIgnored
-    var universalWatchlistShouldResumeAuthentication = false
+    public var universalWatchlistShouldResumeAuthentication = false
     @ObservationIgnored
-    var universalWatchlistIdentityUpdateTask: Task<Void, Never>?
+    public var universalWatchlistIdentityUpdateTask: Task<Void, Never>?
 
     /// The app-scoped audio playback engine. Created **once** and shared across
     /// profile switches so there's only ever a single `AVQueuePlayer` — otherwise

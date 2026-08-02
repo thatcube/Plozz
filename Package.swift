@@ -605,6 +605,10 @@ let package = Package(
                 "CoreNetworking",
                 "CoreUI",
                 "FeatureAuthCore",
+                // The universal watchlist runtime lives here so tvOS and iOS share
+                // one implementation instead of two 560-line copies.
+                "FeatureHomeCore",
+                "FeatureWatchlistCore",
                 "MediaTransportCore",
                 "MediaTransportFTP",
                 "MediaTransportHTTP",

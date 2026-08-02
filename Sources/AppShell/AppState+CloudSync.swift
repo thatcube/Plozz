@@ -625,7 +625,7 @@ extension AppState {
     }
 
     /// Coalesce a burst of edits into one publish shortly after they settle.
-    func scheduleCloudPublish() {
+    public func scheduleCloudPublish() {
         guard SyncSetupFeatureFlag().isEnabled,
               cloudSync != nil else {
             return

@@ -171,6 +171,46 @@ final class TitleIdentityTests: XCTestCase {
         XCTAssertEqual(resolver.deduplicated([a, b]).count, 1)
     }
 
+    /// The bug the resolver-backed watchlist membership fixes.
+    ///
+    /// A Plex Discover row carries only a PlexGuid — the Discover fetch omits the
+    /// `Guid` array — so its own evidence never matches a ledger record minted from
+    /// a Jellyfin row's IMDb id. Asking the item alone therefore said "not on your
+    /// watchlist" on the card and "on your watchlist" on the page it opened. The
+    /// resolver folds the index's canonical evidence in, so both reach the alias.
+    func testResolverBridgesToADurableAliasThroughIndexedEvidence() {
+        let imdb = MediaIdentity.external(source: "imdb", value: "tt1160419")
+        let plexGuid = MediaIdentity.external(source: "plexguid", value: "plex://movie/abc")
+        let discover = indexed("plex", "discover-1", title: "Dune", year: 2021)
+        let library = indexed("jf", "9", title: "Dune", year: 2021)
+
+        let record = MediaAliasRecord(
+            kind: .movie,
+            strongEvidence: [
+                MediaAliasStrongEvidence(kind: .movie, namespace: .imdb, value: "tt1160419")!
+            ]
+        )!
+        let resolver = TitleIdentityResolver(
+            index: snapshot([(imdb, [discover, library]), (plexGuid, [discover, library])]),
+            aliases: MediaAliasSnapshot(records: [record])
+        )
+
+        // The item itself knows only its PlexGuid.
+        let discoverItem = item(
+            "discover-1",
+            title: "Dune",
+            year: 2021,
+            providerIDs: ["PlexGuid": "plex://movie/abc"],
+            account: "plex"
+        )
+        XCTAssertEqual(resolver.aliasID(for: discoverItem), record.id)
+
+        // And an item that resolves to no durable record must NOT mint one — a
+        // resolver lookup is a read, never a write.
+        let stranger = item("x", title: "Unrelated", year: 1999, account: "plex")
+        XCTAssertNil(resolver.aliasID(for: stranger))
+    }
+
     /// An item the index has never seen still resolves — to its own strongest
     /// identity — so discovery rows group with each other without touching the
     /// durable ledger.

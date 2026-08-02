@@ -149,29 +149,25 @@ private func foldDuplicateCredits(_ items: [MediaItem]) -> [MediaItem] {
         "\(item.kind.rawValue)|\(MediaItemIdentity.normalizedTitle(item.title))"
     }
 
-    var byExactKey: [String: MediaItem] = [:]
-    var order: [String] = []
-    for item in items {
-        let key = "\(titleKey(item))|\(item.productionYear.map(String.init) ?? "")"
-        if let existing = byExactKey[key] {
-            // Keep whichever copy can actually show a poster; a row of grey
-            // title tiles is the one outcome worse than a duplicate.
-            let hasArt = !item.artworkReferences(for: .poster).isEmpty
-            let existingHasArt = !existing.artworkReferences(for: .poster).isEmpty
-            if hasArt, !existingHasArt { byExactKey[key] = item }
-        } else {
-            byExactKey[key] = item
-            order.append(key)
-        }
+    // Strong external identity first, through the shared `TitleDedupe` — that is what
+    // folds the same film catalogued under two different titles, which no title
+    // compare can see. Within each group keep whichever copy can actually show a
+    // poster; a row of grey title tiles is the one outcome worse than a duplicate.
+    let collapsed: [MediaItem] = TitleDedupe.groups(items) { item in
+        "\(titleKey(item))|\(item.productionYear.map(String.init) ?? "")"
+    }.compactMap { group in
+        guard let first = group.first else { return nil }
+        return group.lazy
+            .map { items[$0] }
+            .first { !$0.artworkReferences(for: .poster).isEmpty } ?? items[first]
     }
 
     let titlesWithAYear = Set(
-        order.compactMap { byExactKey[$0] }
-            .filter { $0.productionYear != nil }
-            .map(titleKey)
+        collapsed.filter { $0.productionYear != nil }.map(titleKey)
     )
-    return order.compactMap { byExactKey[$0] }
-        .filter { $0.productionYear != nil || !titlesWithAYear.contains(titleKey($0)) }
+    return collapsed.filter {
+        $0.productionYear != nil || !titlesWithAYear.contains(titleKey($0))
+    }
 }
 
 /// Finished cast answers for the title currently playing.

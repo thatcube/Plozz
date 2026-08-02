@@ -175,7 +175,7 @@ final class SearchSectionTests: XCTestCase {
         let merged = SearchSection.mergingDiscoveryAvailability(
             into: [library],
             discoveryResults: [discoveryResult],
-            requestableSeriesTmdbIDs: ["136315"]
+            requestableSeriesKeys: MediaItemIdentity.overlapKeys(for: discoveryResult)
         )
 
         XCTAssertEqual(merged.first?.id, "plex:1")

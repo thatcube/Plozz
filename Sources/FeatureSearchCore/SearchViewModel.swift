@@ -170,13 +170,13 @@ public final class SearchViewModel {
         guard let seerRequestAvailability else { return }
         let accounts = accounts
         availabilityCueEnrichmentTask = Task { [weak self] in
-            let requestableSeriesTmdbIDs = await Self.requestablePartialSeriesTmdbIDs(
+            let requestableSeriesKeys = await Self.requestablePartialSeriesKeys(
                 discoveryResults: discoveryResults,
                 libraryResults: libraryResults,
                 accounts: accounts,
                 availabilityResolver: seerRequestAvailability
             )
-            guard !Task.isCancelled, !requestableSeriesTmdbIDs.isEmpty, let self else { return }
+            guard !Task.isCancelled, !requestableSeriesKeys.isEmpty, let self else { return }
             guard SearchPolicy.isCurrent(requestedQuery: requestedQuery, liveQuery: self.query),
                   case let .loaded(currentSections) = self.state
             else { return }
@@ -186,42 +186,43 @@ public final class SearchViewModel {
                     items: SearchSection.mergingDiscoveryAvailability(
                         into: section.items,
                         discoveryResults: discoveryResults,
-                        requestableSeriesTmdbIDs: requestableSeriesTmdbIDs
+                        requestableSeriesKeys: requestableSeriesKeys
                     )
                 )
             })
         }
     }
 
-    private nonisolated static func requestablePartialSeriesTmdbIDs(
+    /// Kind-scoped identity keys of the partially-available shows Seerr can still
+    /// take a request for. Pairs library rows to discovery rows through the shared
+    /// identity overlap rather than a TMDb id, so a show the library only exposes
+    /// under IMDb/TVDB is no longer silently skipped.
+    private nonisolated static func requestablePartialSeriesKeys(
         discoveryResults: [MediaItem],
         libraryResults: [MediaItem],
         accounts: [ResolvedAccount],
         availabilityResolver: @escaping @Sendable (MediaItem) async -> MediaRequestAvailability?
     ) async -> Set<String> {
-        let libraryTmdbIDs = Set(libraryResults.compactMap { item in
-            item.kind == .series ? item.providerIDs["Tmdb"] : nil
-        })
-        let partialDiscoveryByTmdbID = Dictionary(
-            discoveryResults.compactMap { item -> (String, MediaItem)? in
-                guard item.kind == .series,
-                      item.availability == .partiallyAvailable,
-                      let tmdbID = item.providerIDs["Tmdb"],
-                      libraryTmdbIDs.contains(tmdbID)
-                else { return nil }
-                return (tmdbID, item)
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let candidates = libraryResults.compactMap { libraryItem -> (String, MediaItem, MediaItem)? in
-            guard libraryItem.kind == .series,
-                  let tmdbID = libraryItem.providerIDs["Tmdb"],
-                  let discoveryItem = partialDiscoveryByTmdbID[tmdbID]
-            else { return nil }
-            return (tmdbID, libraryItem, discoveryItem)
+        let libraryKeys = libraryResults.reduce(into: Set<String>()) { keys, item in
+            guard item.kind == .series else { return }
+            keys.formUnion(MediaItemIdentity.overlapKeys(for: item))
         }
-        return await withTaskGroup(of: String?.self) { group in
-            for (tmdbID, libraryItem, discoveryItem) in candidates {
+        let partialDiscovery = discoveryResults.filter { item in
+            item.kind == .series
+                && item.availability == .partiallyAvailable
+                && !MediaItemIdentity.overlapKeys(for: item).isDisjoint(with: libraryKeys)
+        }
+        let candidates = libraryResults.compactMap {
+            libraryItem -> (Set<String>, MediaItem, MediaItem)? in
+            guard libraryItem.kind == .series else { return nil }
+            let keys = MediaItemIdentity.overlapKeys(for: libraryItem)
+            guard let discoveryItem = partialDiscovery.first(where: {
+                !MediaItemIdentity.overlapKeys(for: $0).isDisjoint(with: keys)
+            }) else { return nil }
+            return (keys, libraryItem, discoveryItem)
+        }
+        return await withTaskGroup(of: Set<String>?.self) { group in
+            for (keys, libraryItem, discoveryItem) in candidates {
                 group.addTask {
                     guard let availability = await availabilityResolver(discoveryItem),
                           let ownedSeasonNumbers = await ownedSeasonNumbers(
@@ -230,12 +231,12 @@ public final class SearchViewModel {
                           )
                     else { return nil }
                     let reconciled = availability.markingAvailable(Array(ownedSeasonNumbers))
-                    return reconciled.requestableSeasonNumbers.isEmpty ? nil : tmdbID
+                    return reconciled.requestableSeasonNumbers.isEmpty ? nil : keys
                 }
             }
             var result: Set<String> = []
-            for await tmdbID in group {
-                if let tmdbID { result.insert(tmdbID) }
+            for await keys in group {
+                if let keys { result.formUnion(keys) }
             }
             return result
         }

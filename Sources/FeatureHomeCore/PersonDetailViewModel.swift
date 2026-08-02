@@ -343,37 +343,40 @@ public final class PersonDetailViewModel {
     /// takes a later copy's artwork if the winner had none: which duplicate came
     /// first is arbitrary, and a poster is not.
     static func collapsingDuplicates(_ items: [MediaItem]) -> [MediaItem] {
+        // Strong external identity is handled by the shared `TitleDedupe`, which also
+        // applies the merge split guard; `dedupeKey` supplies only this row's weak
+        // policy. Adding the strong half fixes the case a pure title compare could
+        // never see: the same film catalogued under two localized titles, which both
+        // servers agree is `imdb:tt…`.
         var result: [MediaItem] = []
-        var indexByKey: [String: Int] = [:]
-        for item in items {
-            let key = dedupeKey(item)
-            guard let existing = indexByKey[key] else {
-                indexByKey[key] = result.count
-                result.append(item)
-                continue
+        for group in TitleDedupe.groups(items, weakKey: dedupeKey) {
+            guard let first = group.first else { continue }
+            var winner = items[first]
+            if winner.posterURL == nil,
+               let poster = group.lazy.compactMap({ items[$0].posterURL }).first {
+                winner.posterURL = poster
             }
-            if result[existing].posterURL == nil, let poster = item.posterURL {
-                result[existing].posterURL = poster
-            }
+            result.append(winner)
         }
         return result
     }
 
-    /// Collapses the same title held on more than one server into one entry.
+    /// This row's **weak** policy — the strong-identity half lives in the shared
+    /// ``TitleDedupe``.
     ///
     /// Title+year rather than external ids: this is a display row, the two copies
     /// are interchangeable for the viewer, and being wrong costs a duplicate
     /// poster rather than the wrong thing playing — which is why this can be
     /// looser than `RelatedTitleMatcher`, where a false match means the wrong
     /// show starts.
-    private static func dedupeKey(_ item: MediaItem) -> String {
+    private static func dedupeKey(_ item: MediaItem) -> String? {
         let title = MediaItemIdentity.normalizedTitle(item.title)
         guard let year = item.productionYear else {
             // No year is not evidence of sameness. Two different films can share a
             // normalized title, and collapsing them would silently remove one the
             // viewer owns — a worse outcome than the duplicate poster this exists
-            // to prevent. Fall back to the id, which never merges anything.
-            return "id|\(item.id)"
+            // to prevent. No weak key at all, so only a shared strong id merges it.
+            return nil
         }
         return "\(item.kind.rawValue)|\(title)|\(year)"
     }

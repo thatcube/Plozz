@@ -71,7 +71,31 @@ public extension MediaIdentity {
 }
 
 
-// MARK: - TitleIdentity
+// MARK: - Cross-list overlap
+
+public extension MediaItemIdentity {
+    /// Kind-scoped identity tokens for asking "do these two *lists* contain the same
+    /// title?" — the question search asks when it decides whether a Seerr result is
+    /// already in the viewer's library.
+    ///
+    /// Deliberately a **set of all** identities rather than one canonical key. The two
+    /// lists come from different providers and rarely carry the same id: a Jellyfin
+    /// row may expose IMDb + TVDB while the Seerr row exposes only TMDb, so any
+    /// "pick one key and compare" scheme misses. Overlap is non-empty intersection.
+    ///
+    /// The kind prefix matters: a movie and a series routinely share a TMDb integer,
+    /// and an unscoped compare silently hides a requestable show because an unrelated
+    /// film happened to own the same number.
+    static func overlapKeys(for item: MediaItem) -> Set<String> {
+        Set(identities(for: item).map { "\(item.kind.rawValue)|\($0.canonicalToken)" })
+    }
+
+    /// Whether `lhs` and `rhs` are the same title by any shared strong identity.
+    static func overlaps(_ lhs: MediaItem, _ rhs: MediaItem) -> Bool {
+        !overlapKeys(for: lhs).isDisjoint(with: overlapKeys(for: rhs))
+    }
+}
+
 
 /// **The** grouping key for a title across the whole app.
 ///

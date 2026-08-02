@@ -40,21 +40,21 @@ public enum MediaAliasResolver {
         }
 
         guard let weak = evidence.weak else { return nil }
-        // Weak (title+year) matching obeys exactly the same two rules as
-        // `MediaItemIdentity.identities(for:)`, so the ledger and the merger share one
-        // ruleset instead of drifting apart:
+        // Rule 1 of `MediaItemIdentity`: **a strong id suppresses the title key.**
+        // Falling back to title/year while the incoming item carries a catalogue id
+        // would let an IMDb-only record and an unrelated TMDb-only record resolve to
+        // one alias purely because they share a name and year.
         //
-        // 1. **A strong id suppresses the title key.** Falling back to title/year while
-        //    the incoming item carries a catalogue id would let an IMDb-only record and
-        //    a TMDb-only record merge purely because they share a name and year.
-        // 2. **Title matching is movies-only.** A series title is identical across a
-        //    whole show and unreliable across localizations; the merger never
-        //    title-matches series and neither may the ledger.
-        guard evidence.strong.isEmpty, evidence.kind == .movie else { return nil }
-        let weakCandidates = snapshot.aliases(for: weak).filter { candidate in
-            guard let record = snapshot.record(for: candidate) else { return false }
-            return record.strongEvidence.isEmpty
-        }
+        // Rule 2 (title matching is movies-only) deliberately does **not** apply here,
+        // and that is not an oversight. The merger asks "may I play this title from
+        // that server", where a false match plays the wrong thing. The ledger asks "is
+        // this the row the viewer already added", and weak evidence exists in it only
+        // for titles that had nothing stronger to record. Refusing to match a series
+        // by title would not make the ledger safer — it would make a series with no
+        // external ids unfindable after a reload and mint a fresh duplicate UUID on
+        // every launch, which is the unbounded-growth failure this ledger must not have.
+        guard evidence.strong.isEmpty else { return nil }
+        let weakCandidates = snapshot.aliases(for: weak)
         guard !hasTransitiveSplitRisk(weakCandidates, snapshot: snapshot) else {
             return nil
         }

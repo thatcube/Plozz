@@ -41,24 +41,24 @@ public enum MediaAliasDuplicateReconciler {
         return records
     }
 
-    /// Two records may be considered the same title when they share **strong**
-    /// evidence, or — under exactly the merger's rules — when they share weak
-    /// title/year evidence *and* neither carries any strong id, *and* they are movies.
+    /// Two records are the same title when they share **strong** evidence, or when
+    /// they share weak title/year evidence and at most one of them carries strong ids.
     ///
-    /// Without those two guards a shared title+year would merge an IMDb-only record
-    /// with an unrelated TMDb-only record (different namespaces never "conflict", so
-    /// `areCompatible` waves them through), and would title-match series, which the
-    /// merger deliberately never does because a series title is identical across a
-    /// whole show and unreliable across localizations.
+    /// The last clause is the guard. Two records that *both* carry strong ids in
+    /// different namespaces — one IMDb-only, one TMDb-only — never "conflict" as far
+    /// as `areCompatible` can tell, because a conflict needs the same namespace with
+    /// different values. Sharing a title and year was therefore enough to merge two
+    /// records that each had a perfectly good, and different, catalogue identity.
+    ///
+    /// A weak-only record bridging into one that has strong ids is still allowed and
+    /// is the common case: the ledger writes weak evidence for titles that had nothing
+    /// stronger at the time, and enrichment later gives one copy real ids.
     private static func sharesIdentityEvidence(
         _ lhs: MediaAliasRecord,
         _ rhs: MediaAliasRecord
     ) -> Bool {
         if !Set(lhs.strongEvidence).isDisjoint(with: rhs.strongEvidence) { return true }
-        guard lhs.strongEvidence.isEmpty,
-              rhs.strongEvidence.isEmpty,
-              lhs.kind == .movie,
-              rhs.kind == .movie else {
+        guard lhs.strongEvidence.isEmpty || rhs.strongEvidence.isEmpty else {
             return false
         }
         return !Set(lhs.weakEvidence).isDisjoint(with: rhs.weakEvidence)

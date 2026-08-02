@@ -107,22 +107,28 @@ public struct SearchSection: Identifiable, Equatable, Sendable {
     /// Transfers Seerr's partial-series state onto the matching playable library
     /// item without changing its provider id, sources, ordering, or navigation.
     /// The discovery duplicate is still filtered from "Not in Your Library".
+    ///
+    /// Pairing uses the shared kind-scoped identity overlap rather than a bare TMDb
+    /// compare, so a show the library exposes as IMDb/TVDB-only still picks up its
+    /// "More Seasons" cue, and a film sharing a TMDb integer with an unrelated show
+    /// never does.
     public static func mergingDiscoveryAvailability(
         into libraryResults: [MediaItem],
         discoveryResults: [MediaItem],
-        requestableSeriesTmdbIDs: Set<String>
+        requestableSeriesKeys: Set<String>
     ) -> [MediaItem] {
-        let partialSeriesTmdbIDs = Set(discoveryResults.compactMap { item -> String? in
-            guard item.kind == .series, item.availability == .partiallyAvailable else { return nil }
-            guard let tmdbID = item.providerIDs["Tmdb"],
-                  requestableSeriesTmdbIDs.contains(tmdbID) else { return nil }
-            return tmdbID
-        })
-        guard !partialSeriesTmdbIDs.isEmpty else { return libraryResults }
+        guard !requestableSeriesKeys.isEmpty else { return libraryResults }
+        let partialSeriesKeys = discoveryResults.reduce(into: Set<String>()) { keys, item in
+            guard item.kind == .series, item.availability == .partiallyAvailable else { return }
+            let itemKeys = MediaItemIdentity.overlapKeys(for: item)
+            guard !itemKeys.isDisjoint(with: requestableSeriesKeys) else { return }
+            keys.formUnion(itemKeys)
+        }
+        guard !partialSeriesKeys.isEmpty else { return libraryResults }
         return libraryResults.map { item in
             guard item.kind == .series,
-                  let tmdbID = item.providerIDs["Tmdb"],
-                  partialSeriesTmdbIDs.contains(tmdbID)
+                  !MediaItemIdentity.overlapKeys(for: item)
+                      .isDisjoint(with: partialSeriesKeys)
             else { return item }
             var updated = item
             updated.availability = .partiallyAvailable
@@ -134,9 +140,13 @@ public struct SearchSection: Identifiable, Equatable, Sendable {
     /// filtering out anything that is really in the user's library:
     ///
     /// - titles Seerr reports as already `available`/`partiallyAvailable`, and
-    /// - titles whose TMDB id matches one already returned by the library search
-    ///   (so a movie found on Jellyfin/Plex is never also listed as "not in your
-    ///   library" just because Seerr surfaced it too).
+    /// - titles sharing any strong identity with one the library search returned.
+    ///
+    /// The overlap test used to compare TMDb ids only, which double-listed every
+    /// title the library exposes under IMDb, TVDB or AniList but not TMDb — the user
+    /// saw the same film in their results *and* under "Not in Your Library", with a
+    /// Request button for something they already owned. It was also kind-blind, so a
+    /// requestable show could vanish because an unrelated movie shared its number.
     ///
     /// Preserves Seerr's relevance order and caps to `limit` (0 = uncapped).
     /// Returns `nil` when nothing requestable remains, so the caller simply omits
@@ -146,7 +156,9 @@ public struct SearchSection: Identifiable, Equatable, Sendable {
         libraryResults: [MediaItem],
         limit: Int = 0
     ) -> SearchSection? {
-        let libraryTmdbIDs = Set(libraryResults.compactMap { $0.providerIDs["Tmdb"] })
+        let libraryKeys = libraryResults.reduce(into: Set<String>()) {
+            $0.formUnion(MediaItemIdentity.overlapKeys(for: $1))
+        }
         let filtered = discoveryResults.filter { item in
             switch item.availability {
             case .available, .partiallyAvailable:
@@ -154,10 +166,8 @@ public struct SearchSection: Identifiable, Equatable, Sendable {
             default:
                 break
             }
-            if let tmdb = item.providerIDs["Tmdb"], libraryTmdbIDs.contains(tmdb) {
-                return false // the library search already surfaced this title
-            }
-            return true
+            // the library search already surfaced this title
+            return MediaItemIdentity.overlapKeys(for: item).isDisjoint(with: libraryKeys)
         }
         let capped = limit > 0 ? Array(filtered.prefix(limit)) : filtered
         return capped.isEmpty ? nil : SearchSection(kind: .notInLibrary, items: capped)

@@ -138,7 +138,7 @@ public struct TransientStatusView: View {
                     Image(systemName: message.icon)
                     Text(message.text)
                 }
-                .font(.system(size: 22, weight: .semibold))
+                .font(messageFont)
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 22)
                 .padding(.vertical, 13)
@@ -159,6 +159,16 @@ public struct TransientStatusView: View {
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    private var messageFont: Font {
+        #if os(iOS)
+        placement == .root
+            ? .headline.weight(.semibold)
+            : .system(size: 22, weight: .semibold)
+        #else
+        .system(size: 22, weight: .semibold)
+        #endif
     }
 }
 

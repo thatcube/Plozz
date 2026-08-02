@@ -48,7 +48,16 @@ public struct RootView: View {
     /// tab tree so a `TabView` re-host cannot discard it mid-load; see
     /// ``LazyViewState`` for the measurements that forced this.
     @State private var homeViewModelBox = LazyViewState<HomeViewModel>()
-    @Environment(\.colorScheme) private var systemColorScheme
+    /// The device appearance, mirrored into state by `ColorSchemeMirror` rather
+    /// than read from the environment here.
+    ///
+    /// Reading `@Environment(\.colorScheme)` in this view meant every appearance
+    /// change re-evaluated RootView — and RootView is the root, so that cascaded
+    /// through MainTabView, HomeTab and a detail page's whole subtree. Measured on
+    /// the Apple TV at 861ms of blocked main thread, arriving with no relation to
+    /// anything the viewer had done. Mirrored into `@State` and written only when
+    /// the value genuinely differs, so a re-reported appearance costs nothing.
+    @State private var systemColorScheme: ColorScheme = .dark
     /// The reader's text size. Feeds `PlozzMetrics` so the shared type/geometry
     /// table rebuilds when it changes (see where the metrics are injected below).
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -476,6 +485,13 @@ public struct RootView: View {
         // after whatever the viewer had actually done. The phase is only ever used
         // to FIRE things, never to build anything, so nothing here needs to depend
         // on it.
+        .background(
+            ColorSchemeMirror { scheme in
+                // Guarded: an unconditional assignment would reinstate the very
+                // invalidation this exists to remove.
+                if systemColorScheme != scheme { systemColorScheme = scheme }
+            }
+        )
         .background(
             ScenePhaseEffects(
                 onBackgroundWorkAllowed: { allowed in
@@ -1154,5 +1170,23 @@ private struct ScenePhaseEffects: View {
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active { onBecameActive() }
             }
+    }
+}
+
+/// Zero-size mirror of the device's colour scheme.
+///
+/// Same shape as `ScenePhaseEffects`: the environment read lives in a view whose
+/// rebuild is free, instead of in the root, whose rebuild is the whole app.
+private struct ColorSchemeMirror: View {
+    let onChange: (ColorScheme) -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+            .task(id: colorScheme) { onChange(colorScheme) }
     }
 }

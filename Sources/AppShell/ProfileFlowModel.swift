@@ -51,6 +51,8 @@ public final class ProfileFlowModel {
     @ObservationIgnored private let discardWatchReconciler: @MainActor (String) -> Void
     /// Removes all durable media aliases owned by a deleted profile.
     @ObservationIgnored private let removeMediaAliases: @MainActor (String) -> Void
+    @ObservationIgnored private let activateUniversalWatchlist:
+        @MainActor () -> Void
 
     public init(
         profilesModel: ProfilesModel,
@@ -60,7 +62,8 @@ public final class ProfileFlowModel {
         audioController: AudioPlaybackController,
         updateTrackersForActiveProfile: @escaping @MainActor () -> Void,
         discardWatchReconciler: @escaping @MainActor (String) -> Void,
-        removeMediaAliases: @escaping @MainActor (String) -> Void = { _ in }
+        removeMediaAliases: @escaping @MainActor (String) -> Void = { _ in },
+        activateUniversalWatchlist: @escaping @MainActor () -> Void = {}
     ) {
         self.profilesModel = profilesModel
         self.accountsProviders = accountsProviders
@@ -70,6 +73,7 @@ public final class ProfileFlowModel {
         self.updateTrackersForActiveProfile = updateTrackersForActiveProfile
         self.discardWatchReconciler = discardWatchReconciler
         self.removeMediaAliases = removeMediaAliases
+        self.activateUniversalWatchlist = activateUniversalWatchlist
     }
 
     // MARK: Launch picker lifecycle (driven by AppState bootstrap / onboarding)
@@ -120,6 +124,7 @@ public final class ProfileFlowModel {
         rebuildSettingsModels()
         updateTrackersForActiveProfile()
         accountsProviders.reloadAccounts()
+        activateUniversalWatchlist()
         isChoosingProfile = false
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
     }
@@ -156,6 +161,7 @@ public final class ProfileFlowModel {
                 rebuildSettingsModels()
                 updateTrackersForActiveProfile()
                 accountsProviders.reloadAccounts()
+                activateUniversalWatchlist()
                 plexHomeUsers.ensurePlexIdentityForActiveProfile()
             }
         } else {
@@ -186,6 +192,7 @@ public final class ProfileFlowModel {
             rebuildSettingsModels()
             updateTrackersForActiveProfile()
             accountsProviders.reloadAccounts()
+            activateUniversalWatchlist()
             isChoosingProfile = false
             isPickingThemeForNewProfile = true
         }
@@ -228,6 +235,7 @@ public final class ProfileFlowModel {
             rebuildSettingsModels()
             updateTrackersForActiveProfile()
             accountsProviders.reloadAccounts()
+            activateUniversalWatchlist()
             // `profilesModel.remove(id)` above already selected the fallback profile
             // as active, so re-apply ITS Plex identity — re-installing the fallback's
             // Home-user binding or dropping the removed profile's stale token override.

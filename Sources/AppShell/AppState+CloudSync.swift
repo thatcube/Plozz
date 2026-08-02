@@ -254,6 +254,7 @@ extension AppState {
             for profileID in profilesModel.profiles.map(\.id) {
                 do {
                     try await mediaAliasLedger.removeProfile(profileID)
+                    try universalWatchlist.removeProfile(profileID)
                 } catch {
                     PlozzLog.sync.error(
                         "Media aliases: debug reset failed for one profile: \(error.localizedDescription)"
@@ -674,6 +675,7 @@ extension AppState {
                 try await self.mediaAliasLedger.activate(
                     profileID: self.profilesModel.activeProfileID
                 )
+                await self.prepareUniversalWatchlist()
             } catch {
                 PlozzLog.sync.error(
                     "Media aliases: local ledger preparation failed: \(error.localizedDescription)"
@@ -688,6 +690,7 @@ extension AppState {
             _ = profilesModel.profiles
             _ = profilesModel.activeProfileID
             _ = mediaAliasLedger.snapshotsByProfile
+            _ = universalWatchlist.snapshotsByProfile
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -698,6 +701,7 @@ extension AppState {
                     try await self.mediaAliasLedger.activate(
                         profileID: self.profilesModel.activeProfileID
                     )
+                    await self.prepareUniversalWatchlist()
                 } catch {
                     PlozzLog.sync.error(
                         "Media aliases: profile activation failed: \(error.localizedDescription)"
@@ -710,6 +714,7 @@ extension AppState {
     }
 
     func removeMediaAliases(forProfileID profileID: String) {
+        removeUniversalWatchlist(forProfileID: profileID)
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -727,10 +732,21 @@ extension AppState {
         fallback: [SyncRecordID: Data]
     ) async -> [SyncRecordID: Data] {
         do {
-            return try await mediaAliasLedger.captureAllAliasSyncRecords(
+            var captured = try await mediaAliasLedger.captureAllAliasSyncRecords(
                 profileIDs: profilesModel.profiles.map(\.id),
                 fallback: fallback
             )
+            for profile in profilesModel.profiles {
+                try universalWatchlist.hydrate(profileID: profile.id)
+                captured.merge(
+                    try universalWatchlist.captureSyncRecords(
+                        profileID: profile.id,
+                        fallback: fallback
+                    ),
+                    uniquingKeysWith: { _, watchlist in watchlist }
+                )
+            }
+            return captured
         } catch {
             PlozzLog.sync.error(
                 "Media aliases: capture failed; preserving sync baseline: \(error.localizedDescription)"
@@ -741,13 +757,19 @@ extension AppState {
 
     func applyMediaStateSyncRecords(_ changes: SyncLocalChanges) async {
         var parsed: [MediaAliasRemoteChange] = []
+        var watchlistChanges:
+            [String: [WatchlistMediaStateRecordKey: Data]] = [:]
         var invalidNameCount = 0
         for (recordName, value) in changes {
-            guard let key = MediaStateRecordKey.parse(recordName) else {
+            if let key = MediaStateRecordKey.parse(recordName) {
+                parsed.append(MediaAliasRemoteChange(key: key, value: value))
+            } else if let key = WatchlistMediaStateRecordKey.parse(recordName) {
+                if let value {
+                    watchlistChanges[key.profileID, default: [:]][key] = value
+                }
+            } else {
                 invalidNameCount += 1
-                continue
             }
-            parsed.append(MediaAliasRemoteChange(key: key, value: value))
         }
         if invalidNameCount > 0 {
             PlozzLog.sync.error(
@@ -762,8 +784,44 @@ extension AppState {
                 )
             }
         } catch {
+            PlozzLog.sync.error("Media aliases: remote apply failed")
+        }
+
+        var appliedWatchlistCount = 0
+        var rejectedWatchlistCount = 0
+        var ignoredDeletedProfileCount = 0
+        for profileID in watchlistChanges.keys.sorted() {
+            guard let records = watchlistChanges[profileID] else { continue }
+            do {
+                let report = try universalWatchlist.applyRemoteSyncRecords(
+                    profileID: profileID,
+                    changes: records
+                )
+                appliedWatchlistCount += report.appliedCount
+                rejectedWatchlistCount += report.rejectedCount
+                ignoredDeletedProfileCount +=
+                    report.ignoredDeletedProfileRecordNames.count
+                if report.appliedCount > 0 {
+                    try universalWatchlist.reconcileAliases(
+                        profileID: profileID,
+                        aliasSnapshot:
+                            mediaAliasLedger.snapshotsByProfile[profileID]
+                                ?? .empty
+                    )
+                }
+            } catch {
+                rejectedWatchlistCount += records.count
+            }
+        }
+        if rejectedWatchlistCount > 0 || ignoredDeletedProfileCount > 0 {
             PlozzLog.sync.error(
-                "Media aliases: remote apply failed: \(error.localizedDescription)"
+                "Watchlist sync rejected=\(rejectedWatchlistCount) ignoredDeletedProfile=\(ignoredDeletedProfileCount)"
+            )
+        }
+        if appliedWatchlistCount > 0 {
+            NotificationCenter.default.post(
+                name: .universalWatchlistDidChange,
+                object: nil
             )
         }
     }

@@ -1017,6 +1017,7 @@ struct PlozziOSHomeHeroForeground: View {
         heroRequestButton
 
         if let watchlistAction {
+            let isWatchlisted = watchlistAction == .removeFromWatchlist
             Button {
                 actionHandler?.perform(
                     watchlistAction,
@@ -1025,7 +1026,7 @@ struct PlozziOSHomeHeroForeground: View {
                 )
             } label: {
                 Image(
-                    systemName: watchlistItem.isFavorite
+                    systemName: isWatchlisted
                         ? "bookmark.fill"
                         : "bookmark"
                 )
@@ -1038,6 +1039,9 @@ struct PlozziOSHomeHeroForeground: View {
                 )
             )
             .accessibilityLabel(watchlistAction.title)
+            .accessibilityValue(
+                isWatchlisted ? "In Watchlist" : "Not in Watchlist"
+            )
         }
 
         if let provider {
@@ -1544,6 +1548,10 @@ private struct PlozziOSDetailHeroForeground: View {
             ) {
                 perform(entry)
             }
+            .accessibilityLabel(entry.action.title)
+            .accessibilityValue(
+                entry.action.accessibilityState.map(Text.init) ?? Text("")
+            )
         }
         sourceVersionMenuActions
     }

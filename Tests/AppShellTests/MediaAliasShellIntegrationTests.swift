@@ -69,6 +69,113 @@ final class MediaAliasShellIntegrationTests: XCTestCase {
         XCTAssertEqual(Set(stateFileURLs).count, stateFileURLs.count, "channel state files must be disjoint")
     }
 
+    func testMediaStateChannelCapturesAndAppliesWatchlistIntentExactly() async throws {
+        let state = makeState()
+        let profileID = state.profilesModel.activeProfileID
+        try state.universalWatchlist.activate(profileID: profileID)
+        let aliasID = MediaAliasID()
+        try state.universalWatchlist.add(
+            profileID: profileID,
+            aliasID: aliasID,
+            kind: .movie
+        )
+        let key = WatchlistMediaStateRecordKey(
+            profileID: profileID,
+            aliasID: aliasID
+        )
+        let captured = await state.captureMediaStateSyncRecords(fallback: [:])
+        let addBytes = try XCTUnwrap(captured[key.recordName])
+
+        let tombstone = WatchlistIntent(
+            aliasID: aliasID,
+            kind: .movie,
+            desiredState: .absent,
+            rank: 0,
+            origin: .cloud,
+            changedAt: Date(timeIntervalSince1970: 10)
+        )!
+        let removeBytes = try XCTUnwrap(
+            CanonicalJSON.encode(WatchlistIntentSyncDTO(intent: tombstone))
+        )
+        await state.applyMediaStateSyncRecords([
+            key.recordName: removeBytes
+        ])
+
+        XCTAssertFalse(
+            state.universalWatchlist.activeSnapshot.contains(aliasID: aliasID)
+        )
+        let recaptured = await state.captureMediaStateSyncRecords(
+            fallback: [key.recordName: removeBytes]
+        )
+        XCTAssertEqual(recaptured[key.recordName], removeBytes)
+        XCTAssertNotEqual(addBytes, removeBytes)
+    }
+
+    func testPoisonAndDeletedProfileRecordsDoNotBlockValidMediaState() async throws {
+        let state = makeState()
+        let profileID = state.profilesModel.activeProfileID
+        try state.universalWatchlist.activate(profileID: profileID)
+        let validAlias = MediaAliasID()
+        let poisonAlias = MediaAliasID()
+        let validKey = WatchlistMediaStateRecordKey(
+            profileID: profileID,
+            aliasID: validAlias
+        )
+        let poisonKey = WatchlistMediaStateRecordKey(
+            profileID: profileID,
+            aliasID: poisonAlias
+        )
+        let validIntent = WatchlistIntent(
+            aliasID: validAlias,
+            kind: .series,
+            desiredState: .present,
+            rank: 1,
+            origin: .cloud
+        )!
+        try state.universalWatchlist.activate(profileID: "deleted")
+        try state.universalWatchlist.removeProfile("deleted")
+        try state.universalWatchlist.activate(profileID: profileID)
+        let deletedAlias = MediaAliasID()
+        let deletedKey = WatchlistMediaStateRecordKey(
+            profileID: "deleted",
+            aliasID: deletedAlias
+        )
+        let deletedIntent = WatchlistIntent(
+            aliasID: deletedAlias,
+            kind: .movie,
+            desiredState: .present,
+            rank: 0,
+            origin: .cloud
+        )!
+        let malformedAliasKey = "alias:\(profileID):not-a-uuid"
+        let malformedWatchlistKey = "watchlist:\(profileID):not-a-uuid"
+        let poisonMediaAlias = MediaStateRecordKey(
+            profileID: profileID,
+            aliasID: MediaAliasID()
+        )
+
+        await state.applyMediaStateSyncRecords([
+            validKey.recordName: CanonicalJSON.encode(
+                WatchlistIntentSyncDTO(intent: validIntent)
+            )!,
+            poisonKey.recordName: Data("poison".utf8),
+            deletedKey.recordName: CanonicalJSON.encode(
+                WatchlistIntentSyncDTO(intent: deletedIntent)
+            )!,
+            malformedAliasKey: Data("bad-key".utf8),
+            malformedWatchlistKey: Data("bad-key".utf8),
+            poisonMediaAlias.recordName: Data("poison-alias".utf8)
+        ])
+
+        XCTAssertTrue(
+            state.universalWatchlist.activeSnapshot.contains(aliasID: validAlias)
+        )
+        XCTAssertFalse(
+            state.universalWatchlist.snapshotsByProfile["deleted"]?
+                .contains(aliasID: deletedAlias) ?? false
+        )
+    }
+
     private func makeState() -> AppState {
         let suite = "MediaAliasShellIntegrationTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

@@ -19,7 +19,11 @@ final class RecordingHTTPClient: HTTPClient, @unchecked Sendable {
         }
     }
 
-    struct Stub { var status: Int; var body: Data }
+    struct Stub {
+        var status: Int
+        var body: Data
+        var headers: [String: String]
+    }
 
     /// Per-suffix queues of responses. Each call pops the next response, falling
     /// back to the last one once the queue is drained — handy for "fail N times
@@ -29,9 +33,16 @@ final class RecordingHTTPClient: HTTPClient, @unchecked Sendable {
     private(set) var sent: [Sent] = []
     private let lock = NSLock()
 
-    func stub(pathSuffix: String, json: String, status: Int = 200) {
+    func stub(
+        pathSuffix: String,
+        json: String,
+        status: Int = 200,
+        headers: [String: String] = [:]
+    ) {
         lock.lock(); defer { lock.unlock() }
-        responses[pathSuffix, default: []].append(Stub(status: status, body: Data(json.utf8)))
+        responses[pathSuffix, default: []].append(
+            Stub(status: status, body: Data(json.utf8), headers: headers)
+        )
     }
 
     /// Convenience for an empty 200 (scrobble / revoke responses we ignore).
@@ -42,29 +53,46 @@ final class RecordingHTTPClient: HTTPClient, @unchecked Sendable {
     var sentPaths: [String] { lock.lock(); defer { lock.unlock() }; return sent.map(\.path) }
 
     func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await sendRaw(endpoint, baseURL: baseURL)
+        switch response.statusCode {
+        case 200...299:
+            return (data, response)
+        case 401, 403: throw AppError.unauthorized
+        case 404: throw AppError.notFound
+        case 409: throw AppError.conflict
+        default: throw AppError.invalidResponse
+        }
+    }
+
+    func sendRaw(
+        _ endpoint: Endpoint,
+        baseURL: URL
+    ) async throws -> (Data, HTTPURLResponse) {
         lock.lock()
         sent.append(Sent(path: endpoint.path, headers: endpoint.headers, body: endpoint.body))
         if let error { lock.unlock(); throw error }
-        let match = responses.first { endpoint.path.hasSuffix($0.key) }?.value
+        let matchKey = responses.keys
+            .filter { endpoint.path.hasSuffix($0) }
+            .max { $0.count < $1.count }
+        let match = matchKey.flatMap { responses[$0] }
         let stub: Stub
         if var queue = match, !queue.isEmpty {
             stub = queue.count > 1 ? queue.removeFirst() : queue[0]
-            if let key = responses.first(where: { endpoint.path.hasSuffix($0.key) })?.key {
-                responses[key] = queue
-            }
+            if let matchKey { responses[matchKey] = queue }
         } else {
             lock.unlock()
             throw AppError.notFound
         }
         lock.unlock()
 
-        switch stub.status {
-        case 200...299:
-            return (stub.body, HTTPURLResponse(url: baseURL, statusCode: stub.status, httpVersion: nil, headerFields: nil)!)
-        case 401, 403: throw AppError.unauthorized
-        case 404: throw AppError.notFound
-        case 409: throw AppError.conflict
-        default: throw AppError.invalidResponse
-        }
+        return (
+            stub.body,
+            HTTPURLResponse(
+                url: baseURL,
+                statusCode: stub.status,
+                httpVersion: nil,
+                headerFields: stub.headers
+            )!
+        )
     }
 }

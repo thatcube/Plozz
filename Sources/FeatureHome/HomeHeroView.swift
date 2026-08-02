@@ -397,36 +397,18 @@ struct HomeHeroView: View {
     }
 
     /// The item the hero's Watchlist button acts on. Whole titles
-    /// (movie / series / video) act on themselves; an **episode or season** acts
-    /// on its parent **series** so a mid-show Continue Watching slide still offers
-    /// a consistent "watchlist the show" button — episodes and seasons aren't
-    /// watchlist-eligible themselves, and Plex's account watchlist only accepts
-    /// whole shows anyway. Falls back to the item itself when no series id is
-    /// known (an extremely rare episode with no reported series).
-    ///
-    /// The returned target's `isFavorite` is the authoritative watchlist state:
-    /// a just-toggled optimistic override wins, else membership in the loaded
-    /// Watchlist row (``watchlistedKeys``) or the item's own flag. This makes the
-    /// button's fill, add/remove direction and label all reflect the real show
-    /// state — an episode's own favourite flag never leaks in.
+    /// Watchlist actions apply only to whole movies and series. Episodes and
+    /// seasons are intentionally not promoted to their parent series.
     private func watchlistTarget(for item: MediaItem) -> MediaItem {
-        var target: MediaItem
-        switch item.kind {
-        case .episode, .season:
-            guard let seriesID = item.seriesID else { return item }
-            target = MediaItem(
-                id: seriesID,
-                title: item.parentTitle ?? item.title,
-                kind: .series,
-                sourceAccountID: item.sourceAccountID
-            )
-        default:
-            target = item
-        }
+        item
+    }
+
+    private func isWatchlistedForHero(_ item: MediaItem) -> Bool {
+        let target = watchlistTarget(for: item)
         let key = Self.watchlistKey(accountID: target.sourceAccountID, itemID: target.id)
-        let base = watchlistedKeys.contains(key) || target.isFavorite
-        target.isFavorite = watchlistOverrides[key] ?? base
-        return target
+        return watchlistOverrides[key]
+            ?? actionHandler?.isWatchlisted(target)
+            ?? false
     }
 
     /// Stable, account-scoped key for a title's watchlist membership. Account
@@ -1206,7 +1188,10 @@ struct HomeHeroView: View {
                     prominent: isProminentPrimary(.moreInfo, for: item)
                 )
             case .watchlist:
-                return .init(kind: .watchlist, isFavorite: watchlistTarget(for: item).isFavorite)
+                return .init(
+                    kind: .watchlist,
+                    isFavorite: isWatchlistedForHero(item)
+                )
             case .next:
                 return .init(kind: .next)
             }
@@ -1349,7 +1334,7 @@ struct HomeHeroView: View {
             case .downloadStatus: return (downloadStatusText(for: item), {})
             case .moreInfo: return ("More Info", { onSelect(item) })
             case .watchlist:
-                let fav = watchlistTarget(for: item).isFavorite
+                let fav = isWatchlistedForHero(item)
                 return (fav ? "Remove from Watchlist" : "Add to Watchlist", { performWatchlist(for: item) })
             case .next: return ("Next", { advanceForward() })
             }
@@ -1842,7 +1827,10 @@ struct HomeHeroView: View {
         case .request: name = "Request"
         case .downloadStatus: name = downloadStatusText(for: item)
         case .moreInfo: name = "More Info"
-        case .watchlist: name = watchlistTarget(for: item).isFavorite ? "Remove from Watchlist" : "Add to Watchlist"
+        case .watchlist:
+            name = isWatchlistedForHero(item)
+                ? "Remove from Watchlist"
+                : "Add to Watchlist"
         case .next: name = "Next"
         }
         return Text(verbatim: "\(item.title), ") + Text(name)
@@ -1902,13 +1890,19 @@ struct HomeHeroView: View {
                 }
             }
         case .watchlist:
-            let target = watchlistTarget(for: item)
+            let isWatchlisted = isWatchlistedForHero(item)
             heroPill(selected: selected) {
-                Image(systemName: target.isFavorite ? "bookmark.fill" : "bookmark")
+                Image(systemName: isWatchlisted ? "bookmark.fill" : "bookmark")
                     .font(.system(size: 28, weight: .semibold))
-                    .symbolEffect(.bounce, value: target.isFavorite)
+                    .symbolEffect(.bounce, value: isWatchlisted)
                     .frame(width: 34, height: 34)
             }
+            .accessibilityLabel(
+                isWatchlisted ? "Remove from Watchlist" : "Add to Watchlist"
+            )
+            .accessibilityValue(
+                isWatchlisted ? "In Watchlist" : "Not in Watchlist"
+            )
         case .next:
             heroPill(selected: selected) {
                 Image(systemName: "chevron.forward")

@@ -709,6 +709,7 @@ let package = Package(
                 "MediaTransportNFS",
                 "MediaTransportSFTP",
                 "MediaTransportWebDAV",
+                "ProviderJellyfin",
                 "ProviderPlex",
                 "ProviderShare",
                 "RatingsService",

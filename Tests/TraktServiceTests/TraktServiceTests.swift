@@ -243,6 +243,164 @@ final class TraktScrobble409SuccessTests: XCTestCase {
     }
 }
 
+// MARK: - Watchlist
+
+final class TraktWatchlistDestinationTests: XCTestCase {
+    private func makeDestination(
+        http: RecordingHTTPClient,
+        tokens: TraktTokens = TraktTokens(
+            accessToken: "acc",
+            refreshToken: "ref",
+            expiresAt: .distantFuture
+        )
+    ) -> TraktWatchlistDestination {
+        TraktWatchlistDestination(
+            config: configured(),
+            http: http,
+            tokenStore: InMemoryTraktTokenStore(tokens: tokens)
+        )
+    }
+
+    func testListDecodesMoviesAndShowsWithTypedIDs() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/sync/watchlist/movies", json: """
+        [{"movie":{"title":"Dune","year":2021,"ids":{"trakt":1,"imdb":"tt1160419","tmdb":438631}}}]
+        """)
+        http.stub(pathSuffix: "/sync/watchlist/shows", json: """
+        [{"show":{"title":"Severance","year":2022,"ids":{"trakt":2,"tvdb":371980}}}]
+        """)
+
+        let entries = try await makeDestination(http: http).fetchEntries()
+
+        XCTAssertEqual(entries.map(\.kind), [.movie, .series])
+        XCTAssertTrue(entries[0].externalIDs.contains {
+            $0.namespace == .imdb && $0.value == "tt1160419"
+        })
+        XCTAssertEqual(
+            http.sentPaths,
+            ["/sync/watchlist/movies", "/sync/watchlist/shows"]
+        )
+    }
+
+    func testAddAndRemoveUseTypedMovieAndShowPayloads() async throws {
+        let http = RecordingHTTPClient()
+        http.stubEmpty(pathSuffix: "/sync/watchlist")
+        http.stubEmpty(pathSuffix: "/sync/watchlist/remove")
+        let destination = makeDestination(http: http)
+        let movie = WatchlistMutationTarget(
+            aliasID: MediaAliasID(),
+            kind: .movie,
+            externalIDs: [
+                WatchlistExternalID(namespace: .imdb, value: "tt1")!
+            ]
+        )!
+        let show = WatchlistMutationTarget(
+            aliasID: MediaAliasID(),
+            kind: .series,
+            externalIDs: [
+                WatchlistExternalID(namespace: .tvdb, value: "42")!
+            ]
+        )!
+
+        let movieResolution = try await destination.resolve(movie)
+        let showResolution = try await destination.resolve(show)
+        try await destination.apply(
+            .present,
+            to: try XCTUnwrap(movieResolution)
+        )
+        try await destination.apply(
+            .absent,
+            to: try XCTUnwrap(showResolution)
+        )
+
+        let add = try XCTUnwrap(http.sent.first?.json)
+        let addMovie = try XCTUnwrap((add["movies"] as? [[String: Any]])?.first)
+        XCTAssertEqual(
+            (addMovie["ids"] as? [String: Any])?["imdb"] as? String,
+            "tt1"
+        )
+        let remove = try XCTUnwrap(http.sent.last?.json)
+        let removeShow = try XCTUnwrap(
+            (remove["shows"] as? [[String: Any]])?.first
+        )
+        XCTAssertEqual(
+            (removeShow["ids"] as? [String: Any])?["tvdb"] as? Int,
+            42
+        )
+        XCTAssertEqual(
+            http.sentPaths,
+            ["/sync/watchlist", "/sync/watchlist/remove"]
+        )
+    }
+
+    func testRateLimitCarriesRetryAfterAndConflictIsIdempotentSuccess() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(
+            pathSuffix: "/sync/watchlist",
+            json: "{}",
+            status: 429,
+            headers: ["Retry-After": "17"]
+        )
+        let destination = makeDestination(http: http)
+        let target = WatchlistMutationTarget(
+            aliasID: MediaAliasID(),
+            kind: .movie,
+            externalIDs: [
+                WatchlistExternalID(namespace: .tmdb, value: "10")!
+            ]
+        )!
+        let resolution = try await destination.resolve(target)
+        let binding = try XCTUnwrap(resolution)
+        do {
+            try await destination.apply(.present, to: binding)
+            XCTFail("Expected rate limit")
+        } catch let error as WatchlistDestinationError {
+            XCTAssertEqual(error, .rateLimited(retryAfter: 17))
+        }
+
+        let idempotentHTTP = RecordingHTTPClient()
+        idempotentHTTP.stub(
+            pathSuffix: "/sync/watchlist",
+            json: "{}",
+            status: 409
+        )
+        let idempotent = makeDestination(http: idempotentHTTP)
+        let idempotentResolution = try await idempotent.resolve(target)
+        let idempotentBinding = try XCTUnwrap(idempotentResolution)
+        try await idempotent.apply(.present, to: idempotentBinding)
+        XCTAssertEqual(idempotentHTTP.sentPaths.count, 1)
+    }
+
+    func testExpiredTokenRefreshesBeforeList() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(
+            pathSuffix: "/oauth/token",
+            json: tokenJSON(access: "new", refresh: "new-ref")
+        )
+        http.stub(pathSuffix: "/sync/watchlist/movies", json: "[]")
+        http.stub(pathSuffix: "/sync/watchlist/shows", json: "[]")
+        let destination = makeDestination(
+            http: http,
+            tokens: TraktTokens(
+                accessToken: "old",
+                refreshToken: "ref",
+                expiresAt: .distantPast
+            )
+        )
+
+        _ = try await destination.fetchEntries()
+
+        XCTAssertEqual(
+            http.sentPaths,
+            [
+                "/oauth/token",
+                "/sync/watchlist/movies",
+                "/sync/watchlist/shows"
+            ]
+        )
+    }
+}
+
 // MARK: - Auth (device code poll)
 
 final class TraktAuthServiceTests: XCTestCase {

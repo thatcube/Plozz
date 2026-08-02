@@ -43,6 +43,10 @@ public struct MediaItemEllipsisMenu: View {
                     } label: {
                         Label(action.title, systemImage: action.systemImage)
                     }
+                    .accessibilityLabel(Text(action.title))
+                    .accessibilityValue(
+                        action.accessibilityState.map(Text.init) ?? Text("")
+                    )
                 }
             } label: {
                 Image(systemName: "ellipsis")

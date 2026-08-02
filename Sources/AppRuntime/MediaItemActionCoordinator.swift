@@ -15,10 +15,22 @@ import CoreNetworking
 @MainActor
 public final class MediaItemActionCoordinator: MediaItemActionHandling {
     private let providerResolver: (String?) -> (any MediaProvider)?
+    private let providerCapabilityResolver:
+        (String?) -> (
+            supportsWatchState: Bool,
+            supportsWatchlist: Bool,
+            supportsMetadataRefresh: Bool
+        )?
     private let additionalSources: (MediaItem) -> [MediaSourceRef]
     private let primaryAccountID: () -> String?
     private let crossServerWatchSyncEnabled: () -> Bool
     private let enqueueWatchMutation: (WatchMutation) -> Void
+    private let universalWatchlistEnabled: () -> Bool
+    private let watchlistMembership: (MediaItem) -> Bool
+    private let performUniversalWatchlist: (Bool, MediaItem) -> Void
+    private let resolveDurableWatchlist: ([MediaItem]) -> [MediaItem]
+    private let seedLegacyUniversalWatchlist: ([MediaItem]) async -> Void
+    private let importNativeUniversalWatchlist: ([MediaItem]) async -> Void
     /// Current offline state for an item, or `nil` on a surface without download
     /// capability. Injected as a closure so AppRuntime needn't depend on
     /// MediaDownloads — and so tvOS, which has no downloads, simply omits it.
@@ -48,18 +60,38 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
 
     public init(
         providerResolver: @escaping (String?) -> (any MediaProvider)?,
+        providerCapabilityResolver: @escaping (String?) -> (
+            supportsWatchState: Bool,
+            supportsWatchlist: Bool,
+            supportsMetadataRefresh: Bool
+        )? = { _ in nil },
         additionalSources: @escaping (MediaItem) -> [MediaSourceRef] = { _ in [] },
         primaryAccountID: @escaping () -> String?,
         crossServerWatchSyncEnabled: @escaping () -> Bool,
         enqueueWatchMutation: @escaping (WatchMutation) -> Void,
+        universalWatchlistEnabled: @escaping () -> Bool = { false },
+        watchlistMembership: @escaping (MediaItem) -> Bool = { _ in false },
+        performUniversalWatchlist: @escaping (Bool, MediaItem) -> Void = { _, _ in },
+        resolveDurableWatchlist: @escaping ([MediaItem]) -> [MediaItem] = {
+            $0.filter(\.isFavorite)
+        },
+        seedLegacyUniversalWatchlist: @escaping ([MediaItem]) async -> Void = { _ in },
+        importNativeUniversalWatchlist: @escaping ([MediaItem]) async -> Void = { _ in },
         downloadState: @escaping (MediaItem) -> MediaItemDownloadState?? = { _ in nil },
         performDownloadAction: @escaping (MediaItemAction, MediaItem) -> Void = { _, _ in }
     ) {
         self.providerResolver = providerResolver
+        self.providerCapabilityResolver = providerCapabilityResolver
         self.additionalSources = additionalSources
         self.primaryAccountID = primaryAccountID
         self.crossServerWatchSyncEnabled = crossServerWatchSyncEnabled
         self.enqueueWatchMutation = enqueueWatchMutation
+        self.universalWatchlistEnabled = universalWatchlistEnabled
+        self.watchlistMembership = watchlistMembership
+        self.performUniversalWatchlist = performUniversalWatchlist
+        self.resolveDurableWatchlist = resolveDurableWatchlist
+        self.seedLegacyUniversalWatchlist = seedLegacyUniversalWatchlist
+        self.importNativeUniversalWatchlist = importNativeUniversalWatchlist
         self.downloadState = downloadState
         self.performDownloadAction = performDownloadAction
     }
@@ -71,17 +103,29 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         // page surfaces a Request affordance instead). This deliberately excludes
         // *owned* featured titles (available/partiallyAvailable), which resolve to a
         // real library copy via the identity index and keep their working actions.
-        guard !item.isNotInLibraryDiscovery else { return [] }
+        let isExternalDiscovery = item.isNotInLibraryDiscovery
         // An unaired episode exists on no server, so every action here — watch
         // state, watchlist, refresh, download — would silently fail.
         guard !item.isUpcomingUnaired else { return [] }
-        let capabilities = capabilities(for: item)
+        let capabilities = isExternalDiscovery
+            ? ProviderCapabilities(
+                supportsWatchState: false,
+                supportsWatchlist: false,
+                supportsMetadataRefresh: false
+            )
+            : capabilities(for: item)
+        let universalEnabled = universalWatchlistEnabled()
         return MediaItemActionCatalog.actions(
             for: item,
             supportsWatchState: capabilities.supportsWatchState,
-            supportsWatchlist: capabilities.supportsWatchlist,
+            supportsWatchlist: universalEnabled
+                ? false
+                : capabilities.supportsWatchlist,
+            isWatchlisted: universalEnabled
+                ? watchlistMembership(item)
+                : nil,
             supportsMetadataRefresh: capabilities.supportsMetadataRefresh,
-            downloadState: downloadState(item),
+            downloadState: isExternalDiscovery ? nil : downloadState(item),
             context: context
         )
     }
@@ -196,6 +240,10 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// with the live identity index — the same source of truth the mark-watched
     /// fan-out uses — so a title only one server surfaced still saves everywhere.
     private func performWatchlist(adding: Bool, on item: MediaItem) {
+        if universalWatchlistEnabled() {
+            performUniversalWatchlist(adding, item)
+            return
+        }
         let targets = watchlistTargets(for: item)
         guard !targets.isEmpty else { return }
 
@@ -298,16 +346,19 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         // they don't collide with a real account id.
         let key = item.sourceAccountID ?? "\u{0}primary"
         if let cached = capabilityCache[key] { return cached }
-        let provider = provider(for: item)
+        guard let value = providerCapabilityResolver(item.sourceAccountID) else {
+            return ProviderCapabilities(
+                supportsWatchState: false,
+                supportsWatchlist: false,
+                supportsMetadataRefresh: false
+            )
+        }
         let resolved = ProviderCapabilities(
-            supportsWatchState: provider is WatchStateProviding,
-            supportsWatchlist: provider is WatchlistProviding,
-            supportsMetadataRefresh: provider is MetadataRefreshing
+            supportsWatchState: value.supportsWatchState,
+            supportsWatchlist: value.supportsWatchlist,
+            supportsMetadataRefresh: value.supportsMetadataRefresh
         )
-        // Don't cache a miss: a provider that isn't resolvable yet (still signing
-        // in, token not loaded) would otherwise be pinned as "no capabilities" for
-        // the process lifetime.
-        if provider != nil { capabilityCache[key] = resolved }
+        capabilityCache[key] = resolved
         return resolved
     }
 
@@ -315,5 +366,29 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// profile switch) so a new or removed account is re-evaluated.
     public func invalidateAccountCaches() {
         capabilityCache.removeAll()
+    }
+
+    public func isWatchlisted(_ item: MediaItem) -> Bool {
+        universalWatchlistEnabled()
+            ? watchlistMembership(item)
+            : item.isFavorite
+    }
+
+    public func durableWatchlistItems(
+        from candidates: [MediaItem]
+    ) -> [MediaItem] {
+        universalWatchlistEnabled()
+            ? resolveDurableWatchlist(candidates)
+            : candidates.filter(\.isFavorite)
+    }
+
+    public func seedLegacyWatchlist(_ items: [MediaItem]) async {
+        guard universalWatchlistEnabled() else { return }
+        await seedLegacyUniversalWatchlist(items)
+    }
+
+    public func importNativeWatchlist(_ items: [MediaItem]) async {
+        guard universalWatchlistEnabled() else { return }
+        await importNativeUniversalWatchlist(items)
     }
 }

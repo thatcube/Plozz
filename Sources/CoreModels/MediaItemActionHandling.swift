@@ -25,10 +25,28 @@ public protocol MediaItemActionHandling: AnyObject {
     /// Defaulted so implementations that cache nothing — tests, previews — need
     /// not care.
     func invalidateAccountCaches()
+
+    /// Current Plozz-owned membership. Must be an immutable in-memory lookup.
+    func isWatchlisted(_ item: MediaItem) -> Bool
+
+    /// Resolves the durable ordered row against current presentation candidates.
+    func durableWatchlistItems(from candidates: [MediaItem]) -> [MediaItem]
+
+    /// One-time bounded Home-cache migration before native imports.
+    func seedLegacyWatchlist(_ items: [MediaItem]) async
+
+    /// Additive provider read import. Native absence never deletes Plozz intent.
+    func importNativeWatchlist(_ items: [MediaItem]) async
 }
 
 public extension MediaItemActionHandling {
     func invalidateAccountCaches() {}
+    func isWatchlisted(_ item: MediaItem) -> Bool { false }
+    func durableWatchlistItems(from candidates: [MediaItem]) -> [MediaItem] {
+        candidates.filter(\.isFavorite)
+    }
+    func seedLegacyWatchlist(_ items: [MediaItem]) async {}
+    func importNativeWatchlist(_ items: [MediaItem]) async {}
 }
 
 public extension Notification.Name {
@@ -45,6 +63,9 @@ public extension Notification.Name {
     /// before its local twin was known picks that twin up and can route playback to
     /// it. Carries no payload; observers read the live snapshot on receipt.
     static let identityIndexDidUpdate = Notification.Name("PlozzIdentityIndexDidUpdate")
+    /// Posted after durable Plozz watchlist membership changes locally.
+    static let universalWatchlistDidChange =
+        Notification.Name("PlozzUniversalWatchlistDidChange")
 }
 
 /// The payload of a `.mediaItemDidMutate` notification: which items changed and

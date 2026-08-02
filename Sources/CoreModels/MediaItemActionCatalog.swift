@@ -50,6 +50,7 @@ public enum MediaItemActionCatalog {
         for item: MediaItem,
         supportsWatchState: Bool,
         supportsWatchlist: Bool = false,
+        isWatchlisted: Bool? = nil,
         supportsMetadataRefresh: Bool = false,
         downloadState: MediaItemDownloadState?? = nil,
         context: MediaItemActionContext = .none
@@ -72,8 +73,19 @@ public enum MediaItemActionCatalog {
         // Watchlist action: a single toggle whose direction follows the item's
         // current favourite/watchlist state. Offered for the same content kinds
         // that carry a watched state (movies, episodes, series, …) — not folders.
-        if supportsWatchlist, isWatchlistEligible(item) {
-            actions.append(item.isFavorite ? .removeFromWatchlist : .addToWatchlist)
+        if isWatchlistEligible(item) {
+            if let isWatchlisted {
+                actions.append(
+                    isWatchlisted ? .removeFromWatchlist : .addToWatchlist
+                )
+            } else if supportsWatchlist {
+                // Legacy provider-derived behavior while the universal feature
+                // flag is disabled. Provider `isFavorite` remains independent
+                // once an explicit Plozz membership value is supplied above.
+                actions.append(
+                    item.isFavorite ? .removeFromWatchlist : .addToWatchlist
+                )
+            }
         }
 
         // Navigation actions: independent of watched-state capability.
@@ -169,8 +181,9 @@ public enum MediaItemActionCatalog {
     /// "save for later" mental model work.
     private static func isWatchlistEligible(_ item: MediaItem) -> Bool {
         switch item.kind {
-        case .movie, .series, .video: return true
-        case .episode, .season, .folder, .collection, .unknown: return false
+        case .movie, .series: return true
+        case .video, .episode, .season, .folder, .collection, .unknown:
+            return false
         }
     }
 

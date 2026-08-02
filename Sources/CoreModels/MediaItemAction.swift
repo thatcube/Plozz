@@ -181,6 +181,26 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         }
     }
 
+    /// Explicit selected-state value for assistive technologies.
+    public var accessibilityState: LocalizedStringResource? {
+        switch self {
+        case .addToWatchlist:
+            return LocalizedStringResource(
+                "mediaAction.watchlist.notSelected",
+                defaultValue: "Not in Watchlist",
+                comment: "Accessibility value for a title not saved to Watchlist."
+            )
+        case .removeFromWatchlist:
+            return LocalizedStringResource(
+                "mediaAction.watchlist.selected",
+                defaultValue: "In Watchlist",
+                comment: "Accessibility value for a title saved to Watchlist."
+            )
+        default:
+            return nil
+        }
+    }
+
     /// Whether this action navigates (handled by the view layer's router) rather
     /// than mutating state through the provider. Navigation actions are performed
     /// locally by the context menu, not the app-level action handler.

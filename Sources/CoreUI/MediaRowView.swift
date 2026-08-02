@@ -335,7 +335,7 @@ public struct MediaRowView: View {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: layoutMetrics.cardSpacing) {
-                            ForEach(items) { item in
+                            ForEach(items, id: \.stablePresentationID) { item in
                                 tappableCard(for: item)
                             }
                         }

@@ -102,6 +102,76 @@ final class JellyfinVersionsWatchlistRefreshTests: XCTestCase {
         )
     }
 
+    func testUniversalDestinationRequiresValidatedLocalCopyForJellyfinAndEmby() async throws {
+        for kind in [ProviderKind.jellyfin, .emby] {
+            let stub = StubHTTPClient()
+            stub.stub(pathSuffix: "/Users/u1/FavoriteItems/i1", json: "{}")
+            stub.stub(pathSuffix: "/Users/u1/FavoriteItems/i2", json: "{}")
+            let session = UserSession(
+                server: MediaServer(
+                    id: "s",
+                    name: "Home",
+                    baseURL: URL(string: "http://host:8096")!,
+                    provider: kind
+                ),
+                userID: "u1",
+                userName: "Alice",
+                deviceID: "d1",
+                accessToken: "TOKEN"
+            )
+            let provider = JellyfinProvider(
+                session: session,
+                accountID: "\(kind.rawValue)-account",
+                http: stub
+            )
+            let destination = try XCTUnwrap(
+                MediaBrowserWatchlistDestination(provider: provider)
+            )
+            let alias = MediaAliasID()
+            let externalOnly = WatchlistMutationTarget(
+                aliasID: alias,
+                kind: .movie,
+                externalIDs: [
+                    WatchlistExternalID(namespace: .tmdb, value: "11")!
+                ]
+            )!
+            let unvalidatedResolution = try await destination.resolve(externalOnly)
+            XCTAssertNil(unvalidatedResolution)
+
+            let bindingKey = try XCTUnwrap(
+                MediaAliasProviderBindingKey(
+                    providerKind: kind,
+                    accountDescriptorID: provider.accountID,
+                    providerItemID: "i1"
+                )
+            )
+            let validated = WatchlistMutationTarget(
+                aliasID: alias,
+                kind: .movie,
+                validatedBindings: [
+                    bindingKey,
+                    try XCTUnwrap(MediaAliasProviderBindingKey(
+                        providerKind: kind,
+                        accountDescriptorID: provider.accountID,
+                        providerItemID: "i2"
+                    ))
+                ]
+            )!
+            let resolution = try await destination.resolve(validated)
+            let binding = try XCTUnwrap(resolution)
+            XCTAssertEqual(binding.opaqueValues, ["i1", "i2"])
+            try await destination.apply(.present, to: binding)
+            XCTAssertEqual(
+                stub.method(forPathSuffix: "/Users/u1/FavoriteItems/i1"),
+                .post
+            )
+            XCTAssertEqual(
+                stub.method(forPathSuffix: "/Users/u1/FavoriteItems/i2"),
+                .post
+            )
+        }
+    }
+
     // MARK: - Feature C: metadata refresh
 
     func testRefreshMetadataPostsFullRefresh() async throws {

@@ -113,6 +113,36 @@ public struct MediaStateRecordKey: Hashable, Sendable {
     }
 }
 
+/// Disjoint media-state record key for the Plozz watchlist. Keeping this parser
+/// separate from ``MediaStateRecordKey`` preserves alias and config-V3 semantics.
+public struct WatchlistMediaStateRecordKey: Hashable, Sendable {
+    public let profileID: String
+    public let aliasID: MediaAliasID
+
+    public init(profileID: String, aliasID: MediaAliasID) {
+        self.profileID = profileID
+        self.aliasID = aliasID
+    }
+
+    public var recordName: String {
+        "watchlist:\(profileID):\(aliasID)"
+    }
+
+    public static func parse(_ recordName: String) -> Self? {
+        let prefix = "watchlist:"
+        guard recordName.hasPrefix(prefix) else { return nil }
+        let remainder = recordName.dropFirst(prefix.count)
+        guard let separator = remainder.lastIndex(of: ":") else { return nil }
+        let profileID = String(remainder[..<separator])
+        let rawAliasID = String(remainder[remainder.index(after: separator)...])
+        guard !profileID.isEmpty,
+              let aliasID = MediaAliasID(uuidString: rawAliasID) else {
+            return nil
+        }
+        return Self(profileID: profileID, aliasID: aliasID)
+    }
+}
+
 /// Non-secret, portable projection of a media alias. Receiver-local binding
 /// validation is excluded; a peer's binding hint remains lookup-inert until this
 /// device independently corroborates it.

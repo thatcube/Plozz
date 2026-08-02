@@ -69,7 +69,8 @@ struct PlozziOSHomeView: View {
                 },
                 recentlyAppliedRecency: { [weak appModel] in
                     await appModel?.appliedWatchRecency() ?? [:]
-                }
+                },
+                mediaItemActionHandler: appModel.mediaItemActionHandler
             )
         )
     }
@@ -152,7 +153,13 @@ struct PlozziOSHomeView: View {
                 viewModel.applyWatchedState(mutation)
             }
         }
-
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .universalWatchlistDidChange
+            )
+        ) { _ in
+            viewModel.refreshDurableWatchlist()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
             viewModel.scheduleReenrich()
         }
@@ -778,7 +785,7 @@ private struct PlozziOSHomeHeroCarousel: View {
                     PlozziOSHomeHeroForeground(
                         item: playItem,
                         detailItem: currentItem,
-                        watchlistItem: rootItem,
+                        watchlistItem: currentItem,
                         presentation: HeroPresentation(
                             item: rootItem,
                             artworkStyle: style,
@@ -1305,7 +1312,7 @@ private struct PlozziOSFeaturedRow: View {
 
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(items) { item in
+                    ForEach(items, id: \.stablePresentationID) { item in
                         PlozziOSHomeMediaCard(
                             item: item,
                             isLandscape: false,
@@ -1440,7 +1447,7 @@ private struct PlozziOSHomeMediaRail: View {
 
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(items) { item in
+                    ForEach(items, id: \.stablePresentationID) { item in
                         PlozziOSHomeMediaCard(
                             item: item,
                             isLandscape: style == .landscape,

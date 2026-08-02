@@ -61,6 +61,8 @@ final class PlozziOSAppModel {
     let profiles: ProfilesModel
     /// Generic durable title identity for Plozz-owned profile state.
     let mediaAliasLedger: MediaAliasLedgerModel
+    let universalWatchlist: WatchlistModel
+    let runtimeFeatureFlags: RuntimeFeatureFlags
     /// Cross-device Sync & Setup (feature-flagged; OFF by default).
     let syncSetup: SyncSetupService
 
@@ -284,6 +286,19 @@ final class PlozziOSAppModel {
                     self.accountsProviders.provider(forAccountID: $0)
                 } ?? self.accountsProviders.primaryProvider
             },
+            providerCapabilityResolver: { [unowned self] accountID in
+                let provider = accountID.flatMap { id in
+                    self.accountsProviders.homeAccounts.first {
+                        $0.account.id == id
+                    }?.provider
+                } ?? self.accountsProviders.homeAccounts.first?.provider
+                guard let provider else { return nil }
+                return (
+                    provider is WatchStateProviding,
+                    provider is WatchlistProviding,
+                    provider is MetadataRefreshing
+                )
+            },
             additionalSources: { [weak self] item in
                 self?.identityIndex.identitySnapshot.sourceRefs(for: item) ?? []
             },
@@ -295,6 +310,24 @@ final class PlozziOSAppModel {
             },
             enqueueWatchMutation: { [unowned self] mutation in
                 self.applyWatchMutation(mutation)
+            },
+            universalWatchlistEnabled: { [unowned self] in
+                self.runtimeFeatureFlags.isEnabled(.universalWatchlist)
+            },
+            watchlistMembership: { [unowned self] item in
+                self.universalWatchlistMembership(item)
+            },
+            performUniversalWatchlist: { [unowned self] adding, item in
+                self.performUniversalWatchlist(adding: adding, item: item)
+            },
+            resolveDurableWatchlist: { [unowned self] items in
+                self.resolvedUniversalWatchlistItems(candidates: items)
+            },
+            seedLegacyUniversalWatchlist: { [weak self] _ in
+                try? await self?.seedLegacyUniversalWatchlist()
+            },
+            importNativeUniversalWatchlist: { [weak self] _ in
+                await self?.importUniversalNativeWatchlists()
             },
             // Downloads are an iOS/iPadOS capability, so only this shell supplies
             // them; tvOS omits both closures and the catalog offers no download
@@ -326,6 +359,12 @@ final class PlozziOSAppModel {
     @ObservationIgnored private var queuedLibrarySelectionBeginsFirstRun = false
     @ObservationIgnored private var postAddPresentationGeneration: UInt64 = 0
     @ObservationIgnored private var watchReconcilers: [String: WatchStateReconciler] = [:]
+    @ObservationIgnored var universalWatchlistReconciler: WatchlistReconciler?
+    @ObservationIgnored var universalWatchlistMutationStore: DurableWatchlistMutationStore?
+    @ObservationIgnored var universalWatchlistProfileID: String?
+    @ObservationIgnored var universalWatchlistRetryScheduler:
+        WatchlistRetryScheduler?
+    @ObservationIgnored var universalWatchlistShouldResumeAuthentication = false
     @ObservationIgnored private var heroTrailerCache: [String: HeroTrailerCacheEntry] = [:]
     @ObservationIgnored
     private(set) lazy var identityIndex = IdentityIndexModel(
@@ -337,6 +376,7 @@ final class PlozziOSAppModel {
         },
         onPublish: { [weak self] in
             self?.drainWatchOutbox()
+            self?.universalWatchlistIdentityDidUpdate()
         }
     )
 
@@ -428,6 +468,12 @@ final class PlozziOSAppModel {
         self.mediaAliasLedger = MediaAliasLedgerModel(
             durableStore: aliasStorageDirectory == nil ? nil : durableLocalStateStore,
             storageDirectory: aliasStorageDirectory
+        )
+        self.runtimeFeatureFlags = .productionDefault
+        self.universalWatchlist = WatchlistModel(
+            storageDirectory: Self.isRunningUnitTests
+                ? nil
+                : Self.universalWatchlistStorageDirectory()
         )
         self.seerService = seerService
         self.traktService = traktService
@@ -524,6 +570,10 @@ final class PlozziOSAppModel {
         }
         accountsProviders.onAccountsInvalidated = { [weak self] in
             self?.mediaItemActionHandler.invalidateAccountCaches()
+            self?.universalWatchlistProfileID = nil
+            self?.universalWatchlistRetryScheduler = nil
+            self?.universalWatchlistShouldResumeAuthentication = true
+            Task { await self?.prepareUniversalWatchlist() }
         }
         accountsProviders.credentialRevision = { [weak self] account in
             self?.plexHomeUsers.effectiveCredentialRevision(for: account)
@@ -593,6 +643,7 @@ final class PlozziOSAppModel {
         }
         updateTrackersForActiveProfile()
         drainWatchOutbox()
+        Task { await prepareUniversalWatchlist() }
         applyCrashReportingPreference()
         Task {
             let namespaces = [nil] + profiles.profiles.map { Optional($0.id) }
@@ -602,6 +653,9 @@ final class PlozziOSAppModel {
 
         // Bring up CloudKit config auto-sync (no-op unless the Sync & Setup flag is
         // on) and start observing local config changes to publish them.
+        self.traktService.onConnectionAvailable = { [weak self] in
+            Task { await self?.resumeUniversalWatchlistAuthentication() }
+        }
         prepareMediaAliasLedger()
         startCloudSyncIfEnabled()
     }
@@ -743,6 +797,7 @@ final class PlozziOSAppModel {
     }
 
     func selectProfile(_ id: String) {
+        universalWatchlistRetryScheduler = nil
         profiles.select(id)
         settings = PlozziOSSettingsModel(namespace: profiles.activeNamespace)
         seriesTrackStore = SeriesTrackPreferenceStore(
@@ -764,6 +819,7 @@ final class PlozziOSAppModel {
         identityIndex.warmIdentityIndex()
         updateTrackersForActiveProfile()
         drainWatchOutbox()
+        Task { await prepareUniversalWatchlist() }
         Task { await seerService.setActiveProfile(namespace: profiles.activeNamespace) }
     }
 
@@ -1117,6 +1173,7 @@ final class PlozziOSAppModel {
     }
 
     func removeProfile(_ id: String) {
+        universalWatchlistRetryScheduler = nil
         let previousActiveProfileID = profiles.activeProfileID
         removeMediaAliases(forProfileID: id)
         profiles.remove(id)
@@ -1143,6 +1200,7 @@ final class PlozziOSAppModel {
         identityIndex.warmIdentityIndex()
         updateTrackersForActiveProfile()
         drainWatchOutbox()
+        Task { await prepareUniversalWatchlist() }
         Task { await seerService.setActiveProfile(namespace: profiles.activeNamespace) }
     }
 

@@ -146,6 +146,10 @@ public struct MediaItemContextMenu: ViewModifier {
                     } label: {
                         Label(action.title, systemImage: action.systemImage)
                     }
+                    .accessibilityLabel(Text(action.title))
+                    .accessibilityValue(
+                        action.accessibilityState.map(Text.init) ?? Text("")
+                    )
                 }
             }
             .task(id: pendingNavigationTarget) {

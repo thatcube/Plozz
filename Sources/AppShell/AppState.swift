@@ -95,6 +95,19 @@ public final class AppState {
     public let profilesModel: ProfilesModel
     /// Generic durable title identity for Plozz-owned profile state.
     public let mediaAliasLedger: MediaAliasLedgerModel
+    /// Profile-scoped, local-first universal Watchlist source of truth.
+    public let universalWatchlist: WatchlistModel
+    public let runtimeFeatureFlags: RuntimeFeatureFlags
+    @ObservationIgnored
+    var universalWatchlistReconciler: WatchlistReconciler?
+    @ObservationIgnored
+    var universalWatchlistMutationStore: DurableWatchlistMutationStore?
+    @ObservationIgnored
+    var universalWatchlistProfileID: String?
+    @ObservationIgnored
+    var universalWatchlistRetryScheduler: WatchlistRetryScheduler?
+    @ObservationIgnored
+    var universalWatchlistShouldResumeAuthentication = false
 
     /// The app-scoped audio playback engine. Created **once** and shared across
     /// profile switches so there's only ever a single `AVQueuePlayer` — otherwise
@@ -161,6 +174,19 @@ public final class AppState {
                 accountID.flatMap { self.accountsProviders.provider(forAccountID: $0) }
                     ?? self.accountsProviders.primaryProvider
             },
+            providerCapabilityResolver: { [unowned self] accountID in
+                let provider = accountID.flatMap { id in
+                    self.accountsProviders.homeAccounts.first {
+                        $0.account.id == id
+                    }?.provider
+                } ?? self.accountsProviders.homeAccounts.first?.provider
+                guard let provider else { return nil }
+                return (
+                    provider is WatchStateProviding,
+                    provider is WatchlistProviding,
+                    provider is MetadataRefreshing
+                )
+            },
             additionalSources: { [unowned self] item in
                 self.identityIndex.identitySnapshot.sourceRefs(for: item)
             },
@@ -172,6 +198,24 @@ public final class AppState {
             },
             enqueueWatchMutation: { [unowned self] mutation in
                 self.enqueueWatchMutation(mutation)
+            },
+            universalWatchlistEnabled: { [unowned self] in
+                self.runtimeFeatureFlags.isEnabled(.universalWatchlist)
+            },
+            watchlistMembership: { [unowned self] item in
+                self.universalWatchlistMembership(item)
+            },
+            performUniversalWatchlist: { [unowned self] adding, item in
+                self.performUniversalWatchlist(adding: adding, item: item)
+            },
+            resolveDurableWatchlist: { [unowned self] items in
+                self.resolvedUniversalWatchlistItems(candidates: items)
+            },
+            seedLegacyUniversalWatchlist: { [weak self] _ in
+                try? await self?.seedLegacyUniversalWatchlist()
+            },
+            importNativeUniversalWatchlist: { [weak self] _ in
+                await self?.importUniversalNativeWatchlists()
             }
         )
 
@@ -480,7 +524,10 @@ public final class AppState {
     public private(set) lazy var identityIndex: IdentityIndexModel = IdentityIndexModel(
         activeAccounts: { [weak self] in self?.accountsProviders.homeAccounts ?? [] },
         namespace: { [weak self] in self?.profilesModel.activeNamespace },
-        onPublish: { [weak self] in self?.drainWatchOutbox() }
+        onPublish: { [weak self] in
+            self?.drainWatchOutbox()
+            self?.universalWatchlistIdentityDidUpdate()
+        }
     )
 
     /// App-lifetime main-thread responsiveness probe (dev-only; nil unless
@@ -685,7 +732,11 @@ public final class AppState {
         audioController: audioController,
         updateTrackersForActiveProfile: { [weak self] in self?.updateTraktForActiveProfile() },
         discardWatchReconciler: { [weak self] id in self?.watchReconcilers[id] = nil },
-        removeMediaAliases: { [weak self] id in self?.removeMediaAliases(forProfileID: id) }
+        removeMediaAliases: { [weak self] id in self?.removeMediaAliases(forProfileID: id) },
+        activateUniversalWatchlist: { [weak self] in
+            self?.universalWatchlistRetryScheduler = nil
+            Task { await self?.prepareUniversalWatchlist() }
+        }
     )
     public let authenticatedHTTPResolver: any AuthenticatedHTTPResourceResolving
 
@@ -729,7 +780,8 @@ public final class AppState {
         seerService: SeerService? = nil,
         anilistService: AniListService? = nil,
         malService: MALService? = nil,
-        lastfmService: LastFmService? = nil
+        lastfmService: LastFmService? = nil,
+        runtimeFeatureFlags: RuntimeFeatureFlags = .productionDefault
     ) {
         let resolvedAccountStore = accountStore ?? Self.makeDefaultAccountStore()
         let resolvedDurableLocalStateStore: DurableLocalStateStore?
@@ -755,6 +807,12 @@ public final class AppState {
         self.mediaAliasLedger = MediaAliasLedgerModel(
             durableStore: aliasStorageDirectory == nil ? nil : resolvedDurableLocalStateStore,
             storageDirectory: aliasStorageDirectory
+        )
+        self.runtimeFeatureFlags = runtimeFeatureFlags
+        self.universalWatchlist = WatchlistModel(
+            storageDirectory: Self.isRunningUnitTests
+                ? nil
+                : Self.universalWatchlistStorageDirectory()
         )
         let resolvedRuntime: any MediaShareRuntime = mediaShareRuntime
             ?? AppShellMediaShareRuntimeFactory.make(accountStore: resolvedAccountStore)
@@ -978,6 +1036,10 @@ public final class AppState {
         }
         accountsProviders.onAccountsInvalidated = { [weak self] in
             self?.mediaItemActionHandler.invalidateAccountCaches()
+            self?.universalWatchlistProfileID = nil
+            self?.universalWatchlistRetryScheduler = nil
+            self?.universalWatchlistShouldResumeAuthentication = true
+            Task { await self?.prepareUniversalWatchlist() }
         }
         accountsProviders.onActiveAccountsChanged = { [weak self] resolved, accounts in
             self?.mediaShare.setActiveShareAccounts(resolved, accounts: accounts)
@@ -1166,6 +1228,9 @@ public final class AppState {
 
         // Bring up CloudKit config auto-sync (no-op unless the Sync & Setup flag is
         // on) and start observing local config changes to publish them.
+        self.traktService.onConnectionAvailable = { [weak self] in
+            Task { await self?.resumeUniversalWatchlistAuthentication() }
+        }
         prepareMediaAliasLedger()
         startCloudSyncIfEnabled()
     }

@@ -126,3 +126,57 @@ struct TraktScrobbleBody: Encodable, Equatable {
     /// Watched percentage, 0...100.
     var progress: Double
 }
+
+// MARK: - Watchlist DTOs
+
+public struct TraktWatchlistIDs: Codable, Hashable, Sendable {
+    public var trakt: Int?
+    public var imdb: String?
+    public var tmdb: Int?
+    public var tvdb: Int?
+
+    public init(
+        trakt: Int? = nil,
+        imdb: String? = nil,
+        tmdb: Int? = nil,
+        tvdb: Int? = nil
+    ) {
+        self.trakt = trakt
+        self.imdb = imdb
+        self.tmdb = tmdb
+        self.tvdb = tvdb
+    }
+
+    public var isEmpty: Bool {
+        trakt == nil && imdb == nil && tmdb == nil && tvdb == nil
+    }
+}
+
+public struct TraktWatchlistTitle: Codable, Hashable, Sendable {
+    public var title: String?
+    public var year: Int?
+    public var ids: TraktWatchlistIDs
+
+    public init(
+        title: String? = nil,
+        year: Int? = nil,
+        ids: TraktWatchlistIDs
+    ) {
+        self.title = title
+        self.year = year
+        self.ids = ids
+    }
+}
+
+struct TraktWatchlistMovieEntry: Decodable, Sendable {
+    let movie: TraktWatchlistTitle
+}
+
+struct TraktWatchlistShowEntry: Decodable, Sendable {
+    let show: TraktWatchlistTitle
+}
+
+struct TraktWatchlistMutationBody: Encodable, Sendable {
+    var movies: [TraktWatchlistTitle]?
+    var shows: [TraktWatchlistTitle]?
+}

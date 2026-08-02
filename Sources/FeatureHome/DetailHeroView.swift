@@ -1403,19 +1403,22 @@ struct DetailHeroView: View, Equatable {
     /// fan-out), so the icon flips the instant the mutation broadcasts back.
     @ViewBuilder
     private func watchlistButton(action: MediaItemAction) -> some View {
+        let isWatchlisted = action == .removeFromWatchlist
         Button { performHeroAction(action) } label: {
-            Image(systemName: item.isFavorite ? "bookmark.fill" : "bookmark")
+            Image(systemName: isWatchlisted ? "bookmark.fill" : "bookmark")
                 .font(.system(size: heroGlyphSize))
-                .foregroundStyle(item.isFavorite ? Color.accentColor : Color.primary)
+                .foregroundStyle(isWatchlisted ? Color.accentColor : Color.primary)
                 .contentTransition(.opacity)
-                .symbolEffect(.bounce, value: item.isFavorite)
+                .symbolEffect(.bounce, value: isWatchlisted)
                 .frame(width: heroIconSize, height: heroIconSize)
         }
         .modifier(HeroActionButtonStyle(prominent: false, circular: true))
-        .animation(.easeInOut(duration: 0.2), value: item.isFavorite)
+        .animation(.easeInOut(duration: 0.2), value: isWatchlisted)
         .focused($heroActionRowFocus, equals: .watchlist)
         .accessibilityLabel(action.title)
-        .accessibilityValue(item.isFavorite ? "On your watchlist" : "Not on your watchlist")
+        .accessibilityValue(
+            isWatchlisted ? "In Watchlist" : "Not in Watchlist"
+        )
     }
 
     /// Visible watched-state toggle, shown when the provider can mutate it.

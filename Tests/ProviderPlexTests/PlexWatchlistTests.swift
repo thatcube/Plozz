@@ -140,4 +140,70 @@ final class PlexWatchlistTests: XCTestCase {
         XCTAssertEqual(items.map(\.title), ["Dune", "Severance"])
         XCTAssertTrue(items.allSatisfy(\.isFavorite))
     }
+
+    func testUniversalDestinationResolvesPlexGuidButNeverTitleOrExternalSearch() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/actions/addToWatchlist", json: "{}")
+        let provider = PlexProvider(session: makeSession(), http: stub)
+        let destination = try XCTUnwrap(
+            PlexWatchlistDestination(provider: provider)
+        )
+        var item = MediaItem(id: "local", title: "Dune", kind: .movie)
+        item.providerIDs["PlexGuid"] = "plex://movie/abc123"
+        let alias = MediaAliasID()
+        let resolved = try await destination.resolve(
+            WatchlistMutationTarget(aliasID: alias, item: item)!
+        )
+        let binding = try XCTUnwrap(resolved)
+        try await destination.apply(.present, to: binding)
+        XCTAssertEqual(
+            stub.method(forPathSuffix: "/actions/addToWatchlist"),
+            .put
+        )
+
+        let unresolved = WatchlistMutationTarget(
+            aliasID: MediaAliasID(),
+            kind: .movie,
+            externalIDs: [
+                WatchlistExternalID(namespace: .imdb, value: "tt1160419")!
+            ]
+        )!
+        let unresolvedBinding = try await destination.resolve(unresolved)
+        XCTAssertNil(unresolvedBinding)
+    }
+
+    func testUniversalDestinationImportProducesCorroboratedAliasEvidence() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/sections/watchlist/all", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"abc123","type":"movie","title":"Dune","year":2021,
+           "guid":"plex://movie/abc123","Guid":[{"id":"imdb://tt1160419"}]}
+        ]}}
+        """)
+        let provider = PlexProvider(
+            session: makeSession(),
+            accountID: "plex-account",
+            http: stub
+        )
+        let destination = try XCTUnwrap(
+            PlexWatchlistDestination(provider: provider)
+        )
+
+        let imported = try await destination.fetchEntries()
+        let entry = try XCTUnwrap(imported.first)
+        let evidence = try XCTUnwrap(entry.mediaAliasEvidence)
+
+        XCTAssertEqual(evidence.strong.first?.value, "tt1160419")
+        XCTAssertEqual(
+            evidence.locallyValidatedBindings.first?.providerItemID,
+            "abc123"
+        )
+        let rebound = WatchlistMutationTarget(
+            aliasID: MediaAliasID(),
+            kind: .movie,
+            validatedBindings: Array(evidence.locallyValidatedBindings)
+        )!
+        let reboundResolution = try await destination.resolve(rebound)
+        XCTAssertNotNil(reboundResolution)
+    }
 }

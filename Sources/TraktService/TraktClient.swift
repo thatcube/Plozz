@@ -109,4 +109,90 @@ struct TraktClient: Sendable {
             // 409 = already scrobbled = success.
         }
     }
+
+    // MARK: - Watchlist
+
+    func watchlist(
+        accessToken: String
+    ) async throws -> (
+        movies: [TraktWatchlistTitle],
+        shows: [TraktWatchlistTitle]
+    ) {
+        let movies: [TraktWatchlistMovieEntry] = try await watchlistGET(
+            path: "/sync/watchlist/movies",
+            accessToken: accessToken
+        )
+        let shows: [TraktWatchlistShowEntry] = try await watchlistGET(
+            path: "/sync/watchlist/shows",
+            accessToken: accessToken
+        )
+        return (movies.map(\.movie), shows.map(\.show))
+    }
+
+    func setWatchlisted(
+        _ present: Bool,
+        kind: MediaItemKind,
+        ids: TraktWatchlistIDs,
+        accessToken: String
+    ) async throws {
+        guard !ids.isEmpty, kind == .movie || kind == .series else {
+            throw WatchlistDestinationError.unsupportedIdentity
+        }
+        let title = TraktWatchlistTitle(ids: ids)
+        let body = TraktWatchlistMutationBody(
+            movies: kind == .movie ? [title] : nil,
+            shows: kind == .series ? [title] : nil
+        )
+        let endpoint = try Endpoint(
+            method: .post,
+            path: present ? "/sync/watchlist" : "/sync/watchlist/remove",
+            headers: headers(accessToken: accessToken)
+        ).jsonBody(body)
+        let (_, response) = try await http.sendRaw(endpoint, baseURL: baseURL)
+        try validateWatchlistStatus(response, idempotentMutation: true)
+    }
+
+    private func watchlistGET<T: Decodable>(
+        path: String,
+        accessToken: String
+    ) async throws -> T {
+        let endpoint = Endpoint(
+            method: .get,
+            path: path,
+            headers: headers(accessToken: accessToken)
+        )
+        let (data, response) = try await http.sendRaw(endpoint, baseURL: baseURL)
+        try validateWatchlistStatus(response, idempotentMutation: false)
+        do {
+            return try JSONDecoder.plozz.decode(T.self, from: data)
+        } catch {
+            throw AppError.decoding
+        }
+    }
+
+    private func validateWatchlistStatus(
+        _ response: HTTPURLResponse,
+        idempotentMutation: Bool
+    ) throws {
+        switch response.statusCode {
+        case 200...299:
+            return
+        case 401, 403:
+            throw WatchlistDestinationError.authenticationRequired
+        case 404:
+            throw WatchlistDestinationError.unsupportedIdentity
+        case 409 where idempotentMutation:
+            return
+        case 429:
+            throw WatchlistDestinationError.rateLimited(
+                retryAfter: response.value(
+                    forHTTPHeaderField: "Retry-After"
+                ).flatMap(TimeInterval.init)
+            )
+        case 500...599:
+            throw WatchlistDestinationError.transient
+        default:
+            throw WatchlistDestinationError.permanent
+        }
+    }
 }

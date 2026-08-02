@@ -36,6 +36,10 @@ public final class TraktService {
 
     /// The scrobbler injected into playback. A no-op when Trakt is unconfigured.
     @ObservationIgnored public let scrobbler: any TraktScrobbling
+    @ObservationIgnored public let watchlistDestination:
+        TraktWatchlistDestination?
+    @ObservationIgnored public var onConnectionAvailable:
+        (@MainActor @Sendable () -> Void)?
 
     @ObservationIgnored private let config: TraktConfig
     @ObservationIgnored private let auth: TraktAuthService
@@ -57,9 +61,16 @@ public final class TraktService {
                 tokenStore: tokenStore,
                 profileGeneration: profileGeneration
             )
+            self.watchlistDestination = TraktWatchlistDestination(
+                config: config,
+                http: http,
+                tokenStore: tokenStore,
+                profileGeneration: profileGeneration
+            )
             self.phase = .unknown
         } else {
             self.scrobbler = DisabledTraktScrobbler()
+            self.watchlistDestination = nil
             self.phase = .unavailable
         }
     }
@@ -99,6 +110,7 @@ public final class TraktService {
             let settings = try await auth.userSettings(accessToken: access)
             guard generation == profileGeneration.current else { return }
             phase = .connected(username: settings.displayName)
+            onConnectionAvailable?()
         } catch {
             guard generation == profileGeneration.current else { return }
             // Token rejected/unusable — surface as disconnected so the user can
@@ -146,6 +158,7 @@ public final class TraktService {
                             return
                         }
                         self.phase = .connected(username: settings?.displayName ?? "Trakt")
+                        self.onConnectionAvailable?()
                         return
                     } catch let error as AppError where error == .quickConnectExpired {
                         continue // Code lapsed unapproved — issue a fresh one.

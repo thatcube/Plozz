@@ -30,6 +30,7 @@ struct HomeTab: View {
     /// only to hand to the Top Shelf publisher: that snapshot crosses into
     /// another process, so its titles have to be resolved on this side.
     @Environment(\.locale) private var locale
+    @Environment(\.mediaItemActionHandler) private var mediaItemActionHandler
     let accounts: [ResolvedAccount]
     /// Detail-snapshot cache scoped to the active content identity, threaded from
     /// `MainTabView` so revisit paints never cross a profile/account/credential.
@@ -163,6 +164,7 @@ struct HomeTab: View {
                         currentVisibility: { homeVisibility.visibility },
                         pendingWatchMutations: pendingWatchMutations,
                         recentlyAppliedRecency: appliedWatchRecency,
+                        mediaItemActionHandler: mediaItemActionHandler,
                         contentPublisher: { continueWatching, latest in
                             await TopShelfPublisher.publish(
                                 continueWatching: continueWatching,

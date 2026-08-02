@@ -115,6 +115,12 @@ public struct MediaPerson: Codable, Hashable, Identifiable, Sendable {
 /// `Metadata`) onto this type so feature code never imports a provider module.
 public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public var id: String
+    /// Stable Plozz identity used only for durable Watchlist presentation/focus.
+    /// Provider addressing continues to use `id` and `sources`.
+    public var watchlistAliasID: MediaAliasID?
+    public var stablePresentationID: String {
+        watchlistAliasID.map { "watchlist:\($0)" } ?? id
+    }
     public var title: String  // l10n:content — media title (server/provider content)
     /// The title in the work's original/production language, when the server
     /// records one distinct from the (often localised) display `title`. Foreign
@@ -355,6 +361,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         title: String,  // l10n:content — media title (server/provider content)
         originalTitle: String? = nil,
         kind: MediaItemKind,
+        watchlistAliasID: MediaAliasID? = nil,
         overview: String? = nil,
         parentTitle: String? = nil,
         seasonNumber: Int? = nil,
@@ -404,6 +411,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.scheduledAirDateHasTime = scheduledAirDateHasTime
         self.showsScheduledReleaseTime = showsScheduledReleaseTime
         self.id = id
+        self.watchlistAliasID = watchlistAliasID
         self.title = title
         self.originalTitle = originalTitle
         self.kind = kind
@@ -455,7 +463,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// about the title. Listing the keys explicitly keeps `Encodable` synthesis
     /// in sync with the custom `init(from:)` below.
     private enum CodingKeys: String, CodingKey {
-        case id, title, kind, overview, parentTitle, seasonNumber, episodeNumber
+        case id, watchlistAliasID, title, kind, overview, parentTitle, seasonNumber, episodeNumber
         case originalTitle
         case productionYear, officialRating, genres, people, studios, tags, taglines
         case seriesID, seasonID, runtime, resumePosition, playedPercentage, isPlayed, hasBeenPlayed
@@ -475,6 +483,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
+        watchlistAliasID = try container.decodeIfPresent(
+            MediaAliasID.self,
+            forKey: .watchlistAliasID
+        )
         title = try container.decode(String.self, forKey: .title)
         originalTitle = try container.decodeIfPresent(String.self, forKey: .originalTitle)
         kind = try container.decode(MediaItemKind.self, forKey: .kind)

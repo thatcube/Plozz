@@ -563,6 +563,13 @@ public struct HomeView: View {
                 Task { await viewModel.load() }
             }
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .universalWatchlistDidChange
+            )
+        ) { _ in
+            viewModel.refreshDurableWatchlist()
+        }
         // New content that lands while the viewer sits on Home appears without a
         // navigation round trip. Zero-size and render-isolated — see the type.
         .onMoveCommand { _ in lastInteractionAt = .now }

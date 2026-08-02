@@ -141,6 +141,7 @@ public final class HomeViewModel {
     /// client). Defaults to none so existing callers/tests are unaffected. (h2-cw-clamp)
     private let recentlyAppliedRecency: @Sendable () async -> [String: AppliedResumeRecord]
     private let contentPublisher: HomeContentPublishing
+    private let mediaItemActionHandler: (any MediaItemActionHandling)?
 
     /// In-flight content aggregation (run off the main actor) and the fire-and-
     /// forget Top Shelf publish. Tracked so ``deinit`` can cancel them — otherwise
@@ -194,6 +195,7 @@ public final class HomeViewModel {
         currentVisibility: @escaping () -> HomeLibraryVisibility = { .default },
         pendingWatchMutations: @escaping @Sendable () async -> [WatchMutation] = { [] },
         recentlyAppliedRecency: @escaping @Sendable () async -> [String: AppliedResumeRecord] = { [:] },
+        mediaItemActionHandler: (any MediaItemActionHandling)? = nil,
         contentPublisher: @escaping HomeContentPublishing = { _, _ in }
     ) {
         self.accounts = accounts
@@ -205,6 +207,7 @@ public final class HomeViewModel {
         self.pendingWatchMutations = pendingWatchMutations
         self.recentlyAppliedRecency = recentlyAppliedRecency
         self.contentPublisher = contentPublisher
+        self.mediaItemActionHandler = mediaItemActionHandler
         let persisted = layoutStore.load()
         self.skeletonLayout = persisted.isEmpty ? HomeRowKind.defaultSkeletonLayout : persisted
         // Hydrate last-known stable rows from disk. Continue Watching is deliberately
@@ -212,7 +215,15 @@ public final class HomeViewModel {
         // mixed/local heroes likewise wait for complete curation. Only a non-empty
         // snapshot is used; anything else leaves
         // `state == .idle` so a genuine first launch shows the normal loading state.
-        if let cached = contentStore.load() {
+        if var cached = contentStore.load() {
+            if let mediaItemActionHandler {
+                let resolved = mediaItemActionHandler.durableWatchlistItems(
+                    from: cached.watchlist + cached.latest
+                )
+                if !resolved.isEmpty || cached.watchlist.isEmpty {
+                    cached.watchlist = resolved
+                }
+            }
             self.state = .loaded(cached)
             self.isShowingCachedSnapshot = true
         }
@@ -339,10 +350,14 @@ public final class HomeViewModel {
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
             let reconciledCW = Self.reconcileContinueWatching(merged.continueWatching, pending: pending, appliedRecency: appliedRecency)
+            let durableWatchlist = mediaItemActionHandler?
+                .durableWatchlistItems(
+                    from: reconciledCW + merged.latest + merged.watchlist
+                ) ?? merged.watchlist
             content = Content(
                 continueWatching: reconciledCW,
                 latest: merged.latest,
-                watchlist: merged.watchlist.filter(keepWatchlisted),
+                watchlist: durableWatchlist.filter(keepWatchlisted),
                 libraries: merged.libraries
             )
         } else {
@@ -358,10 +373,14 @@ public final class HomeViewModel {
             let pending = await pendingWatchMutations()
             let appliedRecency = await recentlyAppliedRecency()
             let reconciledCW = Self.reconcileContinueWatching(unmerged.continueWatching, pending: pending, appliedRecency: appliedRecency)
+            let durableWatchlist = mediaItemActionHandler?
+                .durableWatchlistItems(
+                    from: reconciledCW + unmerged.latest + unmerged.watchlist
+                ) ?? unmerged.watchlist
             content = Content(
                 continueWatching: reconciledCW,
                 latest: unmerged.latest,
-                watchlist: unmerged.watchlist.filter(keepWatchlisted),
+                watchlist: durableWatchlist.filter(keepWatchlisted),
                 libraries: unmerged.libraries,
                 mergeLibraries: false,
                 librarySections: unmerged.librarySections
@@ -455,6 +474,7 @@ public final class HomeViewModel {
         if isInProgressResume && !alreadyOnHome {
             scheduleNewResumeReload()
         }
+
         if mutation.played == true {
             content.continueWatching.removeAll { mutation.targets($0) }
         } else if reflectsPlayback {
@@ -515,6 +535,24 @@ public final class HomeViewModel {
         // Without this, quitting after playback resurrects the pre-play Continue
         // Watching order until the next live refresh completes.
         contentStore.save(content)
+    }
+
+    /// Re-resolves the durable alias-ordered Watchlist against already-loaded
+    /// presentation candidates. No provider creation, disk read, or network work.
+    public func refreshDurableWatchlist() {
+        guard case var .loaded(content) = state,
+              let mediaItemActionHandler else { return }
+        var candidates = content.watchlist
+            + content.continueWatching
+            + content.latest
+        candidates += content.librarySections.flatMap {
+            $0.sections.flatMap(\.items)
+        }
+        content.watchlist = mediaItemActionHandler.durableWatchlistItems(
+            from: candidates
+        )
+        state = content.isEmpty ? .empty : .loaded(content)
+        if !content.isEmpty { contentStore.save(content) }
     }
 
     public func cachedHeroItems(for settings: HeroSettings) -> [MediaItem]? {

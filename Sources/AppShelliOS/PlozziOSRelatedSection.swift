@@ -26,7 +26,7 @@ struct PlozziOSRelatedSection: View {
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 12) {
-                        ForEach(items) { item in
+                        ForEach(items, id: \.stablePresentationID) { item in
                             Button {
                                 onSelect(item)
                             } label: {

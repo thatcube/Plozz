@@ -180,6 +180,59 @@ final class ShareScanStatusModelTests: XCTestCase {
         XCTAssertFalse(model.isAnyBusy, "enrich finish applied — indicator cleared")
     }
 
+    func testReporterCoalescesProgressBurstAndStopsAfterFinish() async {
+        let sleeper = ManualProgressSleeper()
+        let model = ShareScanStatusModel(
+            progressPublicationInterval: .milliseconds(250),
+            progressSleep: { _ in try await sleeper.sleep() }
+        )
+        let reporter = model.reporter()
+        reporter.scanStarted("s1", "NAS")
+        for _ in 0..<200 where !model.isAnyBusy {
+            await Task.yield()
+        }
+        let afterStart = model.statePublicationCount
+
+        for value in 1...10_000 {
+            reporter.scanFrontierProgress("s1", value, 10_001 - value, value)
+        }
+        for _ in 0..<20 {
+            await Task.yield()
+        }
+        XCTAssertEqual(
+            model.statePublicationCount,
+            afterStart,
+            "producer bursts stay off the observable main-actor state until the coalesced flush"
+        )
+
+        await sleeper.advance()
+        for _ in 0..<500
+        where model.state(forShareID: "s1")?.itemsFound != 10_000 {
+            await Task.yield()
+        }
+        XCTAssertEqual(model.state(forShareID: "s1")?.itemsFound, 10_000)
+        XCTAssertEqual(
+            model.statePublicationCount,
+            afterStart + 1,
+            "ten thousand inputs publish only their latest value"
+        )
+
+        reporter.scanFinished("s1")
+        for _ in 0..<200 where model.isAnyBusy {
+            await Task.yield()
+        }
+        let afterFinish = model.statePublicationCount
+        await sleeper.advance()
+        for _ in 0..<20 {
+            await Task.yield()
+        }
+        XCTAssertEqual(
+            model.statePublicationCount,
+            afterFinish,
+            "completion cancels the pending flush and no work publishes afterward"
+        )
+    }
+
     func testReporterRemovesDeletedShareAfterQueuedProgress() async {
         let model = ShareScanStatusModel()
         let reporter = model.reporter()
@@ -371,5 +424,39 @@ final class ShareScanStatusModelTests: XCTestCase {
         }
         wait(for: [expectation], timeout: 2)
         XCTAssertEqual(model.state(forShareID: "s1")?.fraction, 0.3)
+    }
+}
+
+private actor ManualProgressSleeper {
+    private var permits = 0
+    private var waiters: [UUID: CheckedContinuation<Void, Error>] = [:]
+
+    func sleep() async throws {
+        try Task.checkCancellation()
+        if permits > 0 {
+            permits -= 1
+            return
+        }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                waiters[id] = continuation
+            }
+        } onCancel: {
+            Task { await self.cancel(id: id) }
+        }
+    }
+
+    func advance() {
+        guard let id = waiters.keys.first,
+              let continuation = waiters.removeValue(forKey: id) else {
+            permits += 1
+            return
+        }
+        continuation.resume()
+    }
+
+    private func cancel(id: UUID) {
+        waiters.removeValue(forKey: id)?.resume(throwing: CancellationError())
     }
 }

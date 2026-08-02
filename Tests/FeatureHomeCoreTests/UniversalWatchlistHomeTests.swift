@@ -43,11 +43,47 @@ final class UniversalWatchlistHomeTests: XCTestCase {
             [first.stablePresentationID, second.stablePresentationID]
         )
     }
+
+    func testDurableFrontInsertionRefreshesHomeRowImmediately() {
+        let older = MediaItem(
+            id: "older",
+            title: "Older",
+            kind: .movie,
+            watchlistAliasID: MediaAliasID()
+        )
+        let newlyAdded = MediaItem(
+            id: "new",
+            title: "New",
+            kind: .series,
+            watchlistAliasID: MediaAliasID()
+        )
+        let store = UniversalWatchlistHomeStore(
+            content: .init(watchlist: [older])
+        )
+        let handler = UniversalWatchlistHomeHandler(items: [older])
+        let model = HomeViewModel(
+            accounts: [],
+            contentStore: store,
+            mediaItemActionHandler: handler
+        )
+
+        handler.items = [newlyAdded, older]
+        model.refreshDurableWatchlist()
+
+        guard case .loaded(let content) = model.state else {
+            return XCTFail("Expected loaded content")
+        }
+        XCTAssertEqual(content.watchlist.map(\.title), ["New", "Older"])
+        XCTAssertEqual(
+            content.watchlist.map(\.stablePresentationID),
+            [newlyAdded.stablePresentationID, older.stablePresentationID]
+        )
+    }
 }
 
 @MainActor
 private final class UniversalWatchlistHomeHandler: MediaItemActionHandling {
-    let items: [MediaItem]
+    var items: [MediaItem]
     init(items: [MediaItem]) { self.items = items }
     func actions(
         for item: MediaItem,

@@ -68,61 +68,77 @@ extension AppState {
     func performUniversalWatchlist(
         adding: Bool,
         item: MediaItem
-    ) {
+    ) async -> Bool {
         guard runtimeFeatureFlags.isEnabled(.universalWatchlist),
-              item.kind == .movie || item.kind == .series else { return }
+              item.kind == .movie || item.kind == .series else { return false }
         let profileID = profilesModel.activeProfileID
-        Task { @MainActor [weak self] in
-            guard let self,
-                  profileID == self.profilesModel.activeProfileID,
-                  let evidence = self.universalWatchlistEvidence(for: item)
-            else { return }
-            do {
-                let aliasID = try await self.mediaAliasLedger.resolveOrCreate(
+        guard profileID == profilesModel.activeProfileID,
+              let evidence = universalWatchlistEvidence(for: item)
+        else { return false }
+        do {
+            let aliasID = try await mediaAliasLedger.resolveOrCreate(
+                profileID: profileID,
+                evidence: evidence,
+                preferredAliasID: item.watchlistAliasID
+            )
+            if adding {
+                try universalWatchlist.add(
                     profileID: profileID,
-                    evidence: evidence,
-                    preferredAliasID: item.watchlistAliasID
-                )
-                if adding {
-                    try self.universalWatchlist.add(
-                        profileID: profileID,
-                        aliasID: aliasID,
-                        kind: item.kind,
-                        presentation: evidence.presentation
-                    )
-                } else {
-                    try self.universalWatchlist.remove(
-                        profileID: profileID,
-                        aliasID: aliasID,
-                        kind: item.kind,
-                        presentation: evidence.presentation
-                    )
-                }
-                NotificationCenter.default.post(
-                    name: .universalWatchlistDidChange,
-                    object: nil
-                )
-                self.scheduleCloudPublish()
-                guard let target = self.universalMutationTarget(
                     aliasID: aliasID,
-                    item: item
-                ), let reconciler = self.universalWatchlistReconciler else {
-                    return
-                }
-                try await reconciler.enqueueFanOut(
+                    kind: item.kind,
+                    presentation: evidence.presentation
+                )
+            } else {
+                try universalWatchlist.remove(
                     profileID: profileID,
-                    desiredState: adding ? .present : .absent,
-                    target: target
+                    aliasID: aliasID,
+                    kind: item.kind,
+                    presentation: evidence.presentation
                 )
-                let processed = await reconciler.drain(profileID: profileID)
-                await self.universalWatchlistRetryScheduler?.reschedule()
-                let status = await reconciler.diagnostics(profileID: profileID)
-                PlozzLog.app.info(
-                    "Watchlist queue depth=\(status.queueDepth) processed=\(processed) retry=\(status.transientFailureCount) auth=\(status.authenticationFailureCount) identity=\(status.unsupportedIdentityCount) permanent=\(status.permanentFailureCount)"
-                )
-            } catch {
-                PlozzLog.app.error("Watchlist local mutation failed")
             }
+            NotificationCenter.default.post(
+                name: .universalWatchlistDidChange,
+                object: nil
+            )
+            scheduleCloudPublish()
+            return true
+        } catch {
+            PlozzLog.app.error("Watchlist local mutation failed")
+            return false
+        }
+    }
+
+    func beginUniversalWatchlistFanOut(
+        adding: Bool,
+        item: MediaItem
+    ) {
+        let profileID = profilesModel.activeProfileID
+        guard let evidence = universalWatchlistEvidence(for: item),
+              let aliasID = MediaAliasResolver.lookup(
+                evidence: evidence,
+                preferredAliasID: item.watchlistAliasID,
+                in: mediaAliasLedger.activeSnapshot
+              ),
+              let target = universalMutationTarget(
+                aliasID: aliasID,
+                item: item
+              ),
+              let reconciler = universalWatchlistReconciler else {
+            return
+        }
+        let retryScheduler = universalWatchlistRetryScheduler
+        Task {
+            try? await reconciler.enqueueFanOut(
+                profileID: profileID,
+                desiredState: adding ? .present : .absent,
+                target: target
+            )
+            let processed = await reconciler.drain(profileID: profileID)
+            await retryScheduler?.reschedule()
+            let status = await reconciler.diagnostics(profileID: profileID)
+            PlozzLog.app.info(
+                "Watchlist queue depth=\(status.queueDepth) processed=\(processed) retry=\(status.transientFailureCount) auth=\(status.authenticationFailureCount) identity=\(status.unsupportedIdentityCount) permanent=\(status.permanentFailureCount)"
+            )
         }
     }
 
@@ -260,47 +276,63 @@ extension AppState {
     }
 
     func universalWatchlistIdentityDidUpdate() {
-        guard runtimeFeatureFlags.isEnabled(.universalWatchlist),
-              let reconciler = universalWatchlistReconciler else { return }
+        guard runtimeFeatureFlags.isEnabled(.universalWatchlist) else { return }
         let profileID = profilesModel.activeProfileID
-        let intents = universalWatchlist.activeSnapshot.intentsByAliasID.values
-        Task { [weak self] in
-            guard let self else { return }
-            var woken = 0
-            var changes: [WatchlistIdentityEvidenceChange] = []
-            for intent in intents {
-                guard var record = self.mediaAliasLedger.activeSnapshot.record(
-                    for: intent.aliasID
-                ) else { continue }
-                let identities = record.strongEvidence.compactMap { evidence in
-                    MediaItemIdentity.strongExternalNamespaces.first {
-                        $0.namespace == evidence.namespace
-                    }.map {
-                        MediaIdentity.external(
-                            source: $0.canonical,
-                            value: evidence.value
-                        )
-                    }
-                }
-                let sources = self.identityIndex.identitySnapshot.sources(
-                    forIdentities: identities,
-                    kind: record.kind,
-                    anchorTitle: record.presentation?.title,
-                    anchorYear: record.presentation?.year
-                )
-                let bindings = sources.compactMap {
-                    source -> MediaAliasProviderBindingKey? in
-                    guard source.providerKind?.usesMediaBrowserAPI == true else {
-                        return nil
-                    }
-                    return MediaAliasProviderBindingKey(
-                        providerKind: source.providerKind!,
-                        accountDescriptorID: source.accountID,
-                        providerItemID: source.itemID
+        universalWatchlistIdentityUpdateTask?.cancel()
+        universalWatchlistIdentityUpdateTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled,
+                  let self,
+                  self.profilesModel.activeProfileID == profileID else { return }
+            await self.reconcileUniversalWatchlistIdentity(profileID: profileID)
+        }
+    }
+
+    private func reconcileUniversalWatchlistIdentity(profileID: String) async {
+        guard let reconciler = universalWatchlistReconciler,
+              profilesModel.activeProfileID == profileID else { return }
+        let intents = Array(
+            universalWatchlist.activeSnapshot.intentsByAliasID.values
+        )
+        let observedAt = Date()
+        var enrichments: [MediaAliasEnrichment] = []
+        for intent in intents {
+            guard let record = mediaAliasLedger.activeSnapshot.record(
+                for: intent.aliasID
+            ) else { continue }
+            let identities = record.strongEvidence.compactMap { evidence in
+                MediaItemIdentity.strongExternalNamespaces.first {
+                    $0.namespace == evidence.namespace
+                }.map {
+                    MediaIdentity.external(
+                        source: $0.canonical,
+                        value: evidence.value
                     )
                 }
-                if !bindings.isEmpty,
-                   let evidence = MediaAliasEvidence(
+            }
+            let sources = identityIndex.identitySnapshot.sources(
+                forIdentities: identities,
+                kind: record.kind,
+                anchorTitle: record.presentation?.title,
+                anchorYear: record.presentation?.year
+            )
+            let bindings = Set(sources.compactMap {
+                source -> MediaAliasProviderBindingKey? in
+                guard source.providerKind?.usesMediaBrowserAPI == true else {
+                    return nil
+                }
+                return MediaAliasProviderBindingKey(
+                    providerKind: source.providerKind!,
+                    accountDescriptorID: source.accountID,
+                    providerItemID: source.itemID
+                )
+            }).subtracting(record.locallyValidatedBindings)
+            guard !bindings.isEmpty,
+                  let evidence = MediaAliasEvidence(
                     kind: record.kind,
                     strong: record.strongEvidence,
                     weak: record.weakEvidence.first,
@@ -309,39 +341,44 @@ extension AppState {
                         MediaAliasProviderBindingHint(
                             binding: $0,
                             sourceValidation: .observedBySource,
-                            observedAt: Date()
+                            observedAt: observedAt
                         )
                     },
-                    locallyValidatedBindings: Set(bindings)
-                   ) {
-                    try? await self.mediaAliasLedger.enrich(
-                        profileID: profileID,
-                        aliasID: intent.aliasID,
-                        evidence: evidence
-                    )
-                    record = self.mediaAliasLedger.activeSnapshot.record(
-                        for: intent.aliasID
-                    ) ?? record
-                }
-                guard let target = WatchlistMutationTarget(
-                    aliasID: intent.aliasID,
-                    aliasRecord: record
-                ) else { continue }
-                changes.append(.init(
-                    desiredState: intent.desiredState,
-                    target: target
-                ))
-                woken += 1
-            }
-            try? await reconciler.identityEvidenceChanged(
-                profileID: profileID,
-                changes: changes
+                    locallyValidatedBindings: bindings
+                  ) else { continue }
+            enrichments.append(MediaAliasEnrichment(
+                aliasID: intent.aliasID,
+                evidence: evidence
+            ))
+        }
+        _ = try? await mediaAliasLedger.enrichBatch(
+            profileID: profileID,
+            enrichments: enrichments
+        )
+
+        var changes: [WatchlistIdentityEvidenceChange] = []
+        for intent in intents {
+            guard let record = mediaAliasLedger.activeSnapshot.record(
+                for: intent.aliasID
+            ), let target = WatchlistMutationTarget(
+                aliasID: intent.aliasID,
+                aliasRecord: record
+            ) else { continue }
+            changes.append(.init(
+                desiredState: intent.desiredState,
+                target: target
+            ))
+        }
+        try? await reconciler.identityEvidenceChanged(
+            profileID: profileID,
+            changes: changes
+        )
+        _ = await reconciler.drain(profileID: profileID)
+        await universalWatchlistRetryScheduler?.reschedule()
+        if !changes.isEmpty {
+            PlozzLog.app.info(
+                "Watchlist late fan-out count=\(changes.count) aliases=\(enrichments.count)"
             )
-            _ = await reconciler.drain(profileID: profileID)
-            await self.universalWatchlistRetryScheduler?.reschedule()
-            if woken > 0 {
-                PlozzLog.app.info("Watchlist late fan-out count=\(woken)")
-            }
         }
     }
 
@@ -362,6 +399,8 @@ extension AppState {
                 )
             }
             if self.universalWatchlistProfileID == profileID {
+                self.universalWatchlistIdentityUpdateTask?.cancel()
+                self.universalWatchlistIdentityUpdateTask = nil
                 await self.universalWatchlistRetryScheduler?.cancel()
                 self.universalWatchlistRetryScheduler = nil
                 self.universalWatchlistProfileID = nil
@@ -375,6 +414,8 @@ extension AppState {
         profileID: String
     ) async throws {
         guard universalWatchlistProfileID != profileID else { return }
+        universalWatchlistIdentityUpdateTask?.cancel()
+        universalWatchlistIdentityUpdateTask = nil
         await universalWatchlistRetryScheduler?.cancel()
         universalWatchlistRetryScheduler = nil
         var destinations: [any WatchlistDestination] = []

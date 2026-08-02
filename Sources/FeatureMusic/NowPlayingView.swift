@@ -12,6 +12,7 @@ import UIKit
 /// below. Single centered column — no Up Next list. Observes the shared
 /// `AudioPlaybackController`.
 public struct NowPlayingView: View {
+    @Environment(\.transientStatusPresenter) private var statusPresenter
     @Bindable var controller: AudioPlaybackController
     /// The app's currently selected theme, passed in from the host so the
     /// player's "Match Theme" appearance can distinguish Pure Black from plain Dark
@@ -83,16 +84,6 @@ public struct NowPlayingView: View {
     /// on the intended control, turning the hand-off into a neutral relocation
     /// (identical to a swipe's) that honours `defaultFocus`/`resetFocus`.
     @State private var revealCatcherMounted = false
-
-    /// A brief, non-interactive confirmation shown when a *toggle* transport
-    /// control (shuffle / repeat) changes, so the user sees exactly what their
-    /// press did. The glass buttons convey active state only by tint, and the
-    /// tvOS focus highlight washes that tint out while the button is focused —
-    /// making, e.g., repeat-off and repeat-all look identical. This pill states
-    /// the new mode in words, which reads regardless of focus styling.
-    @State private var transportStatus: TransportStatus?
-    /// Auto-dismiss for `transportStatus`; re-armed on every change.
-    @State private var statusTask: Task<Void, Never>?
 
     /// True while the control bar is mid slide-in/out. During the slide the
     /// scrub bar suppresses its progress spring so the fill + knob ride the slide
@@ -305,12 +296,14 @@ public struct NowPlayingView: View {
             // Transient toggle confirmation ("Repeat All", "Shuffle On", …),
             // floating just above the control bar. Non-interactive and
             // non-focusable so it never disturbs the transport focus flow.
-            if let status = transportStatus {
-                transportStatusPill(status)
+            if let statusPresenter {
+                TransientStatusView(
+                    presenter: statusPresenter,
+                    placement: .musicTransport,
+                    isLightSurface: isLightPlayer
+                )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .padding(.bottom, bottomBarHeight + 20)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
             }
         }
         // mainContent's bottom-padding re-center still rides one shared spring;
@@ -341,7 +334,6 @@ public struct NowPlayingView: View {
             setIdleTimerDisabled(false)
             hideTask?.cancel()
             focusTask?.cancel()
-            statusTask?.cancel()
         }
         .onChange(of: scrubModel.isScrubbing) { _, _ in scheduleHide() }
         // Any focus movement among the controls (or onto the scrub bar, which
@@ -822,7 +814,10 @@ public struct NowPlayingView: View {
                     active: controller.isShuffled
                 ) {
                     controller.toggleShuffle()
-                    flashStatus(icon: "shuffle", text: controller.isShuffled ? "Shuffle On" : "Shuffle Off")
+                    flashStatus(
+                        icon: "shuffle",
+                        text: shuffleStatusLabel(controller.isShuffled)
+                    )
                 }
                     .focused($focus, equals: .shuffle)
             }
@@ -945,41 +940,58 @@ public struct NowPlayingView: View {
     /// tint), so the words are what actually tell the two apart.
     private func repeatStatusLabel(_ mode: AudioPlaybackController.RepeatMode) -> (icon: String, text: LocalizedStringResource) {
         switch mode {
-        case .off: return ("repeat", "Repeat Off")
-        case .all: return ("repeat", "Repeat All")
-        case .one: return ("repeat.1", "Repeat One")
+        case .off:
+            return (
+                "repeat",
+                LocalizedStringResource(
+                    "music.transport.repeatOff",
+                    defaultValue: "Repeat Off",
+                    comment: "Transient confirmation after turning music repeat off."
+                )
+            )
+        case .all:
+            return (
+                "repeat",
+                LocalizedStringResource(
+                    "music.transport.repeatAll",
+                    defaultValue: "Repeat All",
+                    comment: "Transient confirmation after setting music to repeat the full queue."
+                )
+            )
+        case .one:
+            return (
+                "repeat.1",
+                LocalizedStringResource(
+                    "music.transport.repeatOne",
+                    defaultValue: "Repeat One",
+                    comment: "Transient confirmation after setting music to repeat the current track."
+                )
+            )
         }
     }
 
-    /// Shows `text` (with `icon`) in the transient status pill and re-arms its
-    /// auto-dismiss. Called from the toggle transport actions.
+    private func shuffleStatusLabel(_ enabled: Bool) -> LocalizedStringResource {
+        enabled
+            ? LocalizedStringResource(
+                "music.transport.shuffleOn",
+                defaultValue: "Shuffle On",
+                comment: "Transient confirmation after turning music shuffle on."
+            )
+            : LocalizedStringResource(
+                "music.transport.shuffleOff",
+                defaultValue: "Shuffle Off",
+                comment: "Transient confirmation after turning music shuffle off."
+            )
+    }
+
+    /// Uses the shell-owned presenter; replacement and dismissal timing stay
+    /// shared with every other transient confirmation.
     private func flashStatus(icon: String, text: LocalizedStringResource) {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            transportStatus = TransportStatus(icon: icon, text: text)
-        }
-        statusTask?.cancel()
-        statusTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_600_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.3)) {
-                transportStatus = nil
-            }
-        }
-    }
-
-    /// The floating confirmation pill for a toggle change.
-    private func transportStatusPill(_ status: TransportStatus) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: status.icon)
-            Text(status.text)
-        }
-        .font(.system(size: 22, weight: .semibold))
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 22)
-        .padding(.vertical, 13)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(isLightPlayer ? 0.15 : 0.12), lineWidth: 1))
-        .shadow(color: .black.opacity(isLightPlayer ? 0.12 : 0.4), radius: 12, y: 4)
+        statusPresenter?.present(
+            icon: icon,
+            text: text,
+            placement: .musicTransport
+        )
     }
 
     /// Best-effort album-cover fallback for `track`, used only when the server
@@ -1309,14 +1321,6 @@ private extension View {
             }
         }
     }
-}
-
-/// A transient confirmation for a toggle transport control (shuffle / repeat),
-/// shown in a floating pill so the user sees what their press did even when the
-/// button's active tint is washed out by the tvOS focus highlight.
-private struct TransportStatus: Equatable {
-    let icon: String
-    let text: LocalizedStringResource
 }
 
 /// Reports the natural height of the bottom control bar so the player can slide

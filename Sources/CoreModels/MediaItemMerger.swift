@@ -391,11 +391,21 @@ public enum MediaItemMerger {
             // before folding them in: a member rehydrated from a stale on-disk cache
             // can carry a cross-kind twin (the episode↔movie bug), and its own
             // untyped peers can't be trusted. A member's self-ref is always kept.
-            let contributed: [MediaSourceRef] = duplicate.sources.isEmpty
-                ? [selfSource(for: duplicate, serverInfo: serverInfo)].compactMap { $0 }
-                : MediaSourceRef.retainingKindCompatible(
-                    duplicate.sources, itemKind: primary.kind, selfIDs: memberSelfIDs
-                  )
+            let contributed: [MediaSourceRef]
+            if !duplicate.locallyValidatedPlayableSource {
+                contributed = []
+            } else {
+                contributed = duplicate.sources.isEmpty
+                    ? [selfSource(
+                        for: duplicate,
+                        serverInfo: serverInfo
+                      )].compactMap { $0 }
+                    : MediaSourceRef.retainingKindCompatible(
+                        duplicate.sources,
+                        itemKind: primary.kind,
+                        selfIDs: memberSelfIDs
+                      )
+            }
             contributed.forEach(appendSource)
         }
         // Append index-only servers LAST so the loaded rows' live watch-state
@@ -426,6 +436,9 @@ public enum MediaItemMerger {
             || duplicates.contains(where: \.hasBeenPlayed)
         primary.lastPlayedAt = unified.lastPlayedAt
         primary.isFavorite = sources.contains { $0.isFavorite } || primary.isFavorite
+        primary.locallyValidatedPlayableSource =
+            orderedMembers.contains(where: \.locallyValidatedPlayableSource)
+            || !indexSources.isEmpty
 
         return primary
     }
@@ -444,6 +457,7 @@ public enum MediaItemMerger {
         serverInfo: (String) -> SourceServerInfo?
     ) -> MediaSourceRef? {
         guard let accountID = item.sourceAccountID else { return nil }
+        guard item.locallyValidatedPlayableSource else { return nil }
         // A Plex **Discover / watchlist stub** addresses the title only by its
         // GLOBAL catalog guid — its own `id` equals the `PlexGuid` tail
         // (`plex://show/<id>` → `<id>`). No Plex Media Server can play that global

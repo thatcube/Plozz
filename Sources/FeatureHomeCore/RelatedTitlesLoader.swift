@@ -32,7 +32,8 @@ public struct RelatedEntry: Sendable, Equatable, Identifiable {
             productionYear: related.year,
             posterURL: related.posterURL,
             providerIDs: related.providerIDs,
-            availability: .unknown
+            availability: .unknown,
+            locallyValidatedPlayableSource: false
         )
     }
 }

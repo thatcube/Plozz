@@ -27,7 +27,12 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     private let enqueueWatchMutation: (WatchMutation) -> Void
     private let universalWatchlistEnabled: () -> Bool
     private let watchlistMembership: (MediaItem) -> Bool
-    private let performUniversalWatchlist: (Bool, MediaItem) -> Void
+    private let performUniversalWatchlist:
+        @MainActor (Bool, MediaItem) async -> Bool
+    private let presentUniversalWatchlistFeedback:
+        @MainActor (String, LocalizedStringResource) -> Void
+    private let beginUniversalWatchlistFanOut:
+        @MainActor (Bool, MediaItem) -> Void
     private let resolveDurableWatchlist: ([MediaItem]) -> [MediaItem]
     private let seedLegacyUniversalWatchlist: ([MediaItem]) async -> Void
     private let importNativeUniversalWatchlist: ([MediaItem]) async -> Void
@@ -71,7 +76,17 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         enqueueWatchMutation: @escaping (WatchMutation) -> Void,
         universalWatchlistEnabled: @escaping () -> Bool = { false },
         watchlistMembership: @escaping (MediaItem) -> Bool = { _ in false },
-        performUniversalWatchlist: @escaping (Bool, MediaItem) -> Void = { _, _ in },
+        performUniversalWatchlist:
+            @escaping @MainActor (Bool, MediaItem) async -> Bool = { _, _ in
+                false
+            },
+        presentUniversalWatchlistFeedback:
+            @escaping @MainActor (
+                String,
+                LocalizedStringResource
+            ) -> Void = { _, _ in },
+        beginUniversalWatchlistFanOut:
+            @escaping @MainActor (Bool, MediaItem) -> Void = { _, _ in },
         resolveDurableWatchlist: @escaping ([MediaItem]) -> [MediaItem] = {
             $0.filter(\.isFavorite)
         },
@@ -89,6 +104,9 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         self.universalWatchlistEnabled = universalWatchlistEnabled
         self.watchlistMembership = watchlistMembership
         self.performUniversalWatchlist = performUniversalWatchlist
+        self.presentUniversalWatchlistFeedback =
+            presentUniversalWatchlistFeedback
+        self.beginUniversalWatchlistFanOut = beginUniversalWatchlistFanOut
         self.resolveDurableWatchlist = resolveDurableWatchlist
         self.seedLegacyUniversalWatchlist = seedLegacyUniversalWatchlist
         self.importNativeUniversalWatchlist = importNativeUniversalWatchlist
@@ -103,7 +121,12 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         // page surfaces a Request affordance instead). This deliberately excludes
         // *owned* featured titles (available/partiallyAvailable), which resolve to a
         // real library copy via the identity index and keep their working actions.
-        let isExternalDiscovery = item.isNotInLibraryDiscovery
+        let identitySources = additionalSources(item)
+        let hasPlayableTarget = item.hasPlayableLibraryTarget(
+            additionalSources: identitySources
+        )
+        let isExternalDiscovery = !hasPlayableTarget
+            || (item.isNotInLibraryDiscovery && identitySources.isEmpty)
         // An unaired episode exists on no server, so every action here — watch
         // state, watchlist, refresh, download — would silently fail.
         guard !item.isUpcomingUnaired else { return [] }
@@ -241,7 +264,17 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// fan-out uses — so a title only one server surfaced still saves everywhere.
     private func performWatchlist(adding: Bool, on item: MediaItem) {
         if universalWatchlistEnabled() {
-            performUniversalWatchlist(adding, item)
+            let performUniversalWatchlist = self.performUniversalWatchlist
+            let presentFeedback = self.presentUniversalWatchlistFeedback
+            let beginFanOut = self.beginUniversalWatchlistFanOut
+            Task { @MainActor in
+                guard await performUniversalWatchlist(adding, item) else {
+                    return
+                }
+                let feedback = Self.universalWatchlistFeedback(adding: adding)
+                presentFeedback(feedback.icon, feedback.text)
+                beginFanOut(adding, item)
+            }
             return
         }
         let targets = watchlistTargets(for: item)
@@ -265,12 +298,36 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
                 } catch {
                     PlozzLog.app.error("Watchlist \(adding ? "add" : "remove") failed on a provider")
                 }
+
             }
             // If every provider failed, revert the optimistic change.
             if !anySucceeded {
                 MediaItemMutation(itemIDs: [item.id], scopedItemIDs: scoped, favorite: !adding).post()
             }
         }
+    }
+
+    private static func universalWatchlistFeedback(
+        adding: Bool
+    ) -> (icon: String, text: LocalizedStringResource) {
+        if adding {
+            return (
+                "bookmark.fill",
+                LocalizedStringResource(
+                    "watchlist.feedback.added",
+                    defaultValue: "Added to Watchlist",
+                    comment: "Transient confirmation after a title is saved locally to the user's Watchlist."
+                )
+            )
+        }
+        return (
+            "bookmark.slash",
+            LocalizedStringResource(
+                "watchlist.feedback.removed",
+                defaultValue: "Removed from Watchlist",
+                comment: "Transient confirmation after a title is removed locally from the user's Watchlist."
+            )
+        )
     }
 
     /// Every distinct copy of this title paired with the item retargeted to that

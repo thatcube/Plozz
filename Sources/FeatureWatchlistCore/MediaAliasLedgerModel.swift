@@ -91,8 +91,10 @@ public final class MediaAliasLedgerModel {
     public func activate(profileID: String) async throws {
         try reviveProfiles([profileID])
         let ledger = try await ledger(for: profileID)
-        snapshotsByProfile[profileID] = await ledger.snapshot()
-        activeProfileID = profileID
+        publish(await ledger.snapshot(), profileID: profileID)
+        if activeProfileID != profileID {
+            activeProfileID = profileID
+        }
     }
 
     public func loadProfiles(_ profileIDs: [String]) async throws {
@@ -100,7 +102,7 @@ public final class MediaAliasLedgerModel {
         try reviveProfiles(profileIDs)
         for profileID in profileIDs.sorted() {
             let ledger = try await ledger(for: profileID)
-            snapshotsByProfile[profileID] = await ledger.snapshot()
+            publish(await ledger.snapshot(), profileID: profileID)
         }
     }
 
@@ -130,7 +132,7 @@ public final class MediaAliasLedgerModel {
             evidence: evidence,
             preferredAliasID: preferredAliasID
         )
-        snapshotsByProfile[profileID] = await ledger.snapshot()
+        publish(await ledger.snapshot(), profileID: profileID)
         return id
     }
 
@@ -145,7 +147,24 @@ public final class MediaAliasLedgerModel {
         }
         let ledger = try await ledger(for: profileID)
         try await ledger.enrich(aliasID: aliasID, with: evidence)
-        snapshotsByProfile[profileID] = await ledger.snapshot()
+        publish(await ledger.snapshot(), profileID: profileID)
+    }
+
+    /// Applies one identity-index publication with one durable write and one
+    /// observable snapshot publication, regardless of intent count.
+    @discardableResult
+    public func enrichBatch(
+        profileID: String,
+        enrichments: [MediaAliasEnrichment]
+    ) async throws -> Int {
+        try ensureDeletionStateAvailable()
+        guard !removedProfileIDs.contains(profileID) else {
+            throw MediaAliasLedgerError.profileDeleted(profileID)
+        }
+        let ledger = try await ledger(for: profileID)
+        let changedCount = try await ledger.enrich(enrichments)
+        publish(await ledger.snapshot(), profileID: profileID)
+        return changedCount
     }
 
     public func captureAllAliasSyncRecords(
@@ -157,6 +176,7 @@ public final class MediaAliasLedgerModel {
             try await purgeProfileStorage(profileID)
             pendingPurgeProfileIDs.remove(profileID)
         }
+
         try await loadProfiles(profileIDs)
         var captured: [SyncRecordID: Data] = [:]
         for profileID in ledgersByProfile.keys.sorted()
@@ -186,6 +206,14 @@ public final class MediaAliasLedgerModel {
             captured[recordName] = bytes
         }
         return captured
+    }
+
+    private func publish(
+        _ snapshot: MediaAliasSnapshot,
+        profileID: String
+    ) {
+        guard snapshotsByProfile[profileID] != snapshot else { return }
+        snapshotsByProfile[profileID] = snapshot
     }
 
     @discardableResult
@@ -239,7 +267,7 @@ public final class MediaAliasLedgerModel {
                 records: incoming,
                 deletedAliasIDs: deleted
             )
-            snapshotsByProfile[profileID] = await ledger.snapshot()
+            publish(await ledger.snapshot(), profileID: profileID)
         }
         return MediaAliasRemoteApplyReport(
             rejectedRecordNames: rejectedRecordNames,

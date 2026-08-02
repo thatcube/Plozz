@@ -223,6 +223,11 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// that never came from discovery. Lets the hero pick Request vs. Pending vs.
     /// Available for a **featured** item without importing the Seerr module.
     public var availability: MediaAvailabilityStatus?
+    /// Explicit local ownership/playback proof. A provider library fetch or a
+    /// locally validated identity-index source sets this true. Global discovery
+    /// records and synced/unvalidated binding hints set it false; account metadata
+    /// alone never upgrades it.
+    public var locallyValidatedPlayableSource: Bool
 
     /// When this episode is expected to air, for an episode that has **not aired
     /// yet** and therefore exists nowhere in the user's library.
@@ -391,6 +396,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         metadataProvenance: MetadataProvenance = MetadataProvenance(),
         artworkSelections: [ArtworkSelection] = [],
         availability: MediaAvailabilityStatus? = nil,
+        locallyValidatedPlayableSource: Bool = true,
         downloadProgress: Double? = nil,
         mediaInfo: MediaSourceMetadata? = nil,
         sourceAccountID: String? = nil,
@@ -444,6 +450,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.metadataProvenance = metadataProvenance
         self.artworkSelections = artworkSelections
         self.availability = availability
+        self.locallyValidatedPlayableSource = locallyValidatedPlayableSource
         self.downloadProgress = downloadProgress
         self.mediaInfo = mediaInfo
         self.sourceAccountID = sourceAccountID
@@ -470,7 +477,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
         case fallbackArtworkURL, logoURL, ratings, providerIDs, metadataProvenance
         case artworkSelections, mediaInfo
-        case availability
+        case availability, locallyValidatedPlayableSource
         case downloadProgress
         case sourceAccountID, additionalSourceAccountIDs, versions, isFavorite
         case sources, lastPlayedAt, libraryID
@@ -525,6 +532,22 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
             forKey: .artworkSelections
         )) ?? []
         availability = try container.decodeIfPresent(MediaAvailabilityStatus.self, forKey: .availability)
+        if let persistedValidation = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .locallyValidatedPlayableSource
+        ) {
+            locallyValidatedPlayableSource = persistedValidation
+        } else {
+            // Backward-compatible cache migration. PMS ratingKeys are numeric;
+            // global Discover ids are the PlexGuid tail or a letter-bearing hex
+            // token. Never infer ownership from the account tag itself.
+            let guidTail = providerIDs["PlexGuid"]?
+                .split(separator: "/").last.map(String.init)
+            let isBareDiscoverID = id.allSatisfy(\.isHexDigit)
+                && id.contains(where: \.isLetter)
+            locallyValidatedPlayableSource =
+                !(guidTail == id || (guidTail != nil && isBareDiscoverID))
+        }
         downloadProgress = try container.decodeIfPresent(Double.self, forKey: .downloadProgress)
         mediaInfo = try container.decodeIfPresent(MediaSourceMetadata.self, forKey: .mediaInfo)
         sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
@@ -720,6 +743,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         copy.id = source.itemID
         copy.sourceAccountID = source.accountID
         copy.selectedSourceAccountID = source.accountID
+        copy.locallyValidatedPlayableSource = true
         copy.explicitSourceSelection = explicit
         // Keep the current versions when the target source ref carries none:
         // Home / Search source refs are membership-only (versions are populated

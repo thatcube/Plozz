@@ -382,6 +382,10 @@ public struct RootView: View {
         // device scheme and `.system` can follow it (and switching away from a
         // forced scheme never gets stuck).
         .environment(\.colorScheme, resolvedPalette.isLight ? .light : .dark)
+        .transientStatusOverlay(
+            presenter: appState.transientStatusPresenter,
+            isLightSurface: resolvedPalette.isLight
+        )
         .fullScreenCover(item: Binding(
             get: { pinRequest },
             set: { newValue in if newValue == nil { appState.plexHomeUsers.dismissPlexPINIfPresented() } }

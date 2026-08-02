@@ -16,10 +16,11 @@ public struct WatchlistIntentStoreState: Codable, Hashable, Sendable {
         migration: WatchlistMigrationMetadata = .init()
     ) {
         self.version = version
-        self.nextRank = max(
-            nextRank,
-            intents.map(\.rank).max().map { $0 &+ 1 } ?? 0
-        )
+        let maximumRank = intents.map(\.rank).max()
+        let requiredNextRank = maximumRank.map {
+            $0 == UInt64.max ? UInt64.max : $0 + 1
+        } ?? 0
+        self.nextRank = max(nextRank, requiredNextRank)
         self.intents = intents.map { $0.canonicalized() }.sorted {
             $0.aliasID < $1.aliasID
         }
@@ -195,9 +196,13 @@ public final class AtomicWatchlistIntentStore: WatchlistIntentStoring, @unchecke
     }
 
     private static func validate(_ state: WatchlistIntentStoreState) throws {
+        let maximumRank = state.intents.map(\.rank).max()
+        let requiredNextRank = maximumRank.map {
+            $0 == UInt64.max ? UInt64.max : $0 + 1
+        } ?? 0
         guard state.version == WatchlistIntentStoreState.currentVersion,
               Set(state.intents.map(\.aliasID)).count == state.intents.count,
-              state.nextRank >= (state.intents.map(\.rank).max().map { $0 &+ 1 } ?? 0)
+              state.nextRank >= requiredNextRank
         else { throw DurableLocalStateError.malformedPayload }
     }
 }

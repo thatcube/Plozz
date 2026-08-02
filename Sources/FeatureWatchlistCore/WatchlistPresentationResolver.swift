@@ -38,7 +38,8 @@ public enum WatchlistPresentationResolver {
                     watchlistAliasID: aliasID,
                     productionYear: presentation.year,
                     posterURL: presentation.artworkURL.flatMap(URL.init(string:)),
-                    backdropURL: presentation.backdropURL.flatMap(URL.init(string:))
+                    backdropURL: presentation.backdropURL.flatMap(URL.init(string:)),
+                    locallyValidatedPlayableSource: false
                 )
             )
         }
@@ -58,6 +59,10 @@ public enum WatchlistPresentationResolver {
                 ? evidence.weak.map { aliasSnapshot.aliases(for: $0) } ?? []
                 : aliases
             guard candidates.count == 1, let aliasID = candidates.first else { continue }
+            if result[aliasID]?.locallyValidatedPlayableSource == true,
+               !item.locallyValidatedPlayableSource {
+                continue
+            }
             result[aliasID] = item
         }
         return result

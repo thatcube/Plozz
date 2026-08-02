@@ -89,6 +89,9 @@ final class PlexWatchlistTests: XCTestCase {
         let items = try await provider.watchlist()
         XCTAssertEqual(items.map(\.title), ["Dune"])
         XCTAssertTrue(items.first?.isFavorite ?? false)
+        XCTAssertFalse(
+            items.first?.locallyValidatedPlayableSource ?? true
+        )
     }
 
     /// Regression: the watchlist READ must hit `discover.provider.plex.tv`, not
@@ -205,5 +208,22 @@ final class PlexWatchlistTests: XCTestCase {
         )!
         let reboundResolution = try await destination.resolve(rebound)
         XCTAssertNotNil(reboundResolution)
+    }
+
+    func testDiscoverDetailRemainsUnownedDespiteAccountOrigin() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/abc123", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"abc123","type":"movie","title":"The Legend of Hei",
+           "guid":"plex://movie/abc123"}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        var item = try await provider.item(id: "abc123")
+        item.sourceAccountID = "plex-account"
+
+        XCTAssertFalse(item.locallyValidatedPlayableSource)
+        XCTAssertFalse(item.hasPlayableLibraryTarget())
     }
 }

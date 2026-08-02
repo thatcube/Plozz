@@ -29,12 +29,25 @@ public enum HeroCTA: Equatable, Sendable {
     case unavailable
 }
 
+public struct MediaOwnershipPresentation: Equatable, Sendable {
+    public let canPlay: Bool
+    public let showsProviderManagement: Bool
+    public let showsPlaybackDetails: Bool
+
+    public init(hasValidatedPlayableSource: Bool) {
+        canPlay = hasValidatedPlayableSource
+        showsProviderManagement = hasValidatedPlayableSource
+        showsPlaybackDetails = hasValidatedPlayableSource
+    }
+}
+
 public extension MediaItem {
     /// The hero primary CTA for this item given the current Seerr connection.
     func heroCTA(seerConnected: Bool) -> HeroCTA {
         Self.heroCTA(
             availability: availability,
             downloadProgress: downloadProgress,
+            hasValidatedPlayableSource: hasPlayableLibraryTarget(),
             seerConnected: seerConnected
         )
     }
@@ -67,17 +80,24 @@ public extension MediaItem {
     /// there is nothing to act on yet.
     var isUpcomingUnaired: Bool { scheduledAirDate != nil }
 
-    /// Whether this item resolves to a real playable library record. Plex Watchlist
-    /// can contain global Discover titles the user has never owned; those records use
-    /// the tail of their `plex://` GUID as `id`, which no Plex Media Server can play.
-    /// A matching library copy restores playability as soon as identity resolution
-    /// contributes a source whose local item id differs from that global GUID tail.
+    /// Whether this item resolves to a real playable library record. Only explicit
+    /// local validation or a source supplied by the active identity index counts.
+    /// `sourceAccountID`, global provider ids, and synced binding hints do not.
     func hasPlayableLibraryTarget(additionalSources: [MediaSourceRef] = []) -> Bool {
-        guard let guidTail = providerIDs["PlexGuid"]?
-            .split(separator: "/").last.map(String.init)
-        else { return true }
-        if id != guidTail { return true }
-        return (sources + additionalSources).contains { $0.itemID != guidTail }
+        if locallyValidatedPlayableSource { return true }
+        return additionalSources.contains {
+            $0.kind == nil || $0.kind == kind
+        }
+    }
+
+    func ownershipPresentation(
+        additionalSources: [MediaSourceRef] = []
+    ) -> MediaOwnershipPresentation {
+        MediaOwnershipPresentation(
+            hasValidatedPlayableSource: hasPlayableLibraryTarget(
+                additionalSources: additionalSources
+            )
+        )
     }
 
     /// Pure decision used by ``heroCTA(seerConnected:)`` and directly by the hero
@@ -90,25 +110,21 @@ public extension MediaItem {
     static func heroCTA(
         availability: MediaAvailabilityStatus?,
         downloadProgress: Double?,
+        hasValidatedPlayableSource: Bool,
         seerConnected: Bool
     ) -> HeroCTA {
-        guard let availability else { return .play }
+        if hasValidatedPlayableSource { return .play }
+        guard seerConnected else { return .unavailable }
         switch availability {
-        case .available, .partiallyAvailable:
-            return .play
-        case .pending, .processing, .unknown, .deleted:
-            guard seerConnected else { return .unavailable }
-            switch availability {
-            case .pending:
-                return .requested
-            case .processing:
-                // Approved: only "Downloading" when a real queue item reports
-                // progress; otherwise it's still just requested (searching).
-                if let downloadProgress { return .downloading(progress: downloadProgress) }
-                return .requested
-            default:
-                return .request // .unknown / .deleted are requestable
+        case .pending:
+            return .requested
+        case .processing:
+            if let downloadProgress {
+                return .downloading(progress: downloadProgress)
             }
+            return .requested
+        case .none, .unknown, .deleted, .available, .partiallyAvailable:
+            return .request
         }
     }
 }

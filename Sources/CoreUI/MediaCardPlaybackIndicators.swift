@@ -283,6 +283,7 @@ public struct MediaPlaybackIndicatorState: Equatable, Sendable {
         playedPercentage = item.playedPercentage
         resumePosition = item.resumePosition
         isNotInLibrary = item.isNotInLibraryDiscovery
+            || !item.hasPlayableLibraryTarget()
     }
 
     /// The corner mark this card should wear, if any. Mirrors

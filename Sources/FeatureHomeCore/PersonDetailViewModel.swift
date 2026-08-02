@@ -309,6 +309,7 @@ public final class PersonDetailViewModel {
         guard !owned.isEmpty else { return item }
         var resolved = item
         resolved.availability = nil
+        resolved.locallyValidatedPlayableSource = true
         var seen = Set<String>()
         resolved.sources = (item.sources + owned).filter { seen.insert($0.id).inserted }
         return resolved

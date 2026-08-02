@@ -286,6 +286,73 @@ final class ShareEnricherTests: XCTestCase {
         XCTAssertEqual(attempts, 12)
     }
 
+    func testPauseResumeKeepsOneLogicalProgressLifecycle() async {
+        final class Lifecycle: @unchecked Sendable {
+            private let lock = NSLock()
+            private var starts = 0
+            private var finishes = 0
+
+            func started() {
+                lock.lock()
+                starts += 1
+                lock.unlock()
+            }
+
+            func finished() {
+                lock.lock()
+                finishes += 1
+                lock.unlock()
+            }
+
+            var counts: (starts: Int, finishes: Int) {
+                lock.lock()
+                defer { lock.unlock() }
+                return (starts, finishes)
+            }
+        }
+
+        let lifecycle = Lifecycle()
+        let reporter = ShareScanReporter(
+            scanStarted: { _, _ in },
+            scanProgress: { _, _ in },
+            scanFinished: { _ in },
+            enrichStarted: { _, _ in lifecycle.started() },
+            enrichProgress: { _, _ in },
+            enrichFinished: { _ in lifecycle.finished() }
+        )
+        let store = ShareCatalogStore(
+            accountKey: "pause-lifecycle",
+            directory: tempDir()
+        )
+        await store.upsert((0..<2).map {
+            movie("Movies/L\($0) (2000).mkv", "L\($0)", 2000)
+        }, scanID: 1)
+        let enricher = ShareEnricher(
+            store: store,
+            resolver: FakeResolver(byTitle: [:]),
+            reporter: reporter
+        )
+
+        _ = await enricher.enrichPendingSlice(
+            maxItems: 1,
+            maxDuration: .seconds(10)
+        )
+        await enricher.pauseScheduledPass()
+        XCTAssertEqual(lifecycle.counts.starts, 1)
+        XCTAssertEqual(lifecycle.counts.finishes, 0)
+
+        _ = await enricher.enrichPendingSlice(
+            maxItems: 1,
+            maxDuration: .seconds(10)
+        )
+        _ = await enricher.enrichPendingSlice(
+            maxItems: 1,
+            maxDuration: .seconds(10)
+        )
+        XCTAssertEqual(lifecycle.counts.starts, 1)
+        XCTAssertEqual(lifecycle.counts.finishes, 1)
+    }
+
     func testFastTrackedItemAdvancesActivePassProgress() async {
         final class Captured: @unchecked Sendable {
             private let lock = NSLock()

@@ -969,6 +969,11 @@ private struct PlozziOSHomeHeroCarousel: View {
             cta: MediaItem.heroCTA(
                 availability: availability,
                 downloadProgress: item.downloadProgress,
+                hasValidatedPlayableSource:
+                    item.hasPlayableLibraryTarget(
+                        additionalSources:
+                            appModel.identityIndex.identitySourcesProvider(item)
+                    ),
                 seerConnected: appModel.seerService.isConfigured
             ),
             isRequesting: isRequesting,

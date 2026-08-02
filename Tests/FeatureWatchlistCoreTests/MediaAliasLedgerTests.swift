@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import Observation
 import XCTest
 @testable import FeatureWatchlistCore
 
@@ -571,6 +572,70 @@ final class MediaAliasLedgerTests: XCTestCase {
         ) { _ in }
     }
 
+    func testIdentityEnrichmentWavePersistsOnceAndNoOpWaveDoesNotPersist() async throws {
+        let records = (0..<1_000).map { index in
+            record(
+                id: id(index + 1),
+                createdAt: TimeInterval(index),
+                strong: [strong(.movie, .tmdb, String(index))]
+            )
+        }
+
+        @MainActor
+        func testRepeatedActivationDoesNotRepublishUnchangedSnapshot() async throws {
+            let model = MediaAliasLedgerModel()
+            try await model.activate(profileID: "p")
+            let changed = ObservationFlag()
+            withObservationTracking {
+                _ = model.snapshotsByProfile
+                _ = model.activeProfileID
+            } onChange: {
+                changed.mark()
+            }
+
+            try await model.activate(profileID: "p")
+
+            XCTAssertFalse(
+                changed.value,
+                "idempotent activation cannot re-arm the shell observation loop"
+            )
+        }
+        let store = ControllableAliasStore(
+            initialState: MediaAliasLedgerState(records: records)
+        )
+        let ledger = try MediaAliasLedger(profileID: "p", store: store)
+        let enrichments = records.enumerated().map { index, record in
+            MediaAliasEnrichment(
+                aliasID: record.id,
+                evidence: MediaAliasEvidence(
+                    kind: .movie,
+                    strong: [strong(.movie, .tmdb, String(index))],
+                    weak: MediaAliasWeakEvidence(
+                        kind: .movie,
+                        title: "Title \(index)",
+                        year: 2000
+                    ),
+                    presentation: MediaAliasPresentation(
+                        title: "Title \(index)",
+                        year: 2000
+                    )
+                )!
+            )
+        }
+
+        let changed = try await ledger.enrich(enrichments)
+        XCTAssertEqual(changed, 1_000)
+        XCTAssertEqual(store.saveCount, 1)
+
+        let unchanged = try await ledger.enrich(enrichments)
+        XCTAssertEqual(unchanged, 0)
+        XCTAssertEqual(
+            store.saveCount,
+            1,
+            "an identical identity publication performs no durable write"
+        )
+    }
+
     private func makeRecords(count: Int) -> [MediaAliasRecord] {
         (0..<count).map { index in
             let binding = MediaAliasProviderBindingKey(
@@ -654,11 +719,39 @@ private enum AliasStoreFailure: Error, Equatable {
     case write
 }
 
+private final class ObservationFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var changed = false
+
+    var value: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return changed
+    }
+
+    func mark() {
+        lock.lock()
+        changed = true
+        lock.unlock()
+    }
+}
+
 private final class ControllableAliasStore: MediaAliasStoring, @unchecked Sendable {
     private let lock = NSLock()
-    private var state = MediaAliasLedgerState.empty
+    private var state: MediaAliasLedgerState
+    private var saves = 0
     var failLoads = false
     var failWrites = false
+
+    init(initialState: MediaAliasLedgerState = .empty) {
+        state = initialState
+    }
+
+    var saveCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return saves
+    }
 
     func load() throws -> MediaAliasLedgerState {
         lock.lock()
@@ -672,6 +765,7 @@ private final class ControllableAliasStore: MediaAliasStoring, @unchecked Sendab
         defer { lock.unlock() }
         if failWrites { throw AliasStoreFailure.write }
         self.state = state
+        saves += 1
     }
 
     func remove() throws {

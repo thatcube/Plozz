@@ -194,9 +194,9 @@ struct DetailHeroView: View, Equatable {
     /// than an edge a fast key-press can outrun.
     var onHeroActionBlurred: (() -> Void)? = nil
     /// Marks this hero as presenting a **discovery** (Seerr) title that isn't in
-    /// the library. When `true` the library-only action buttons (Play, Trailer,
-    /// watchlist/watched/refresh, server/version "…" menu) are suppressed and the
-    /// row shows a single request/status pill driven by ``requestCTA`` instead.
+    /// the library. When `true` library-only actions (Play, watched, refresh,
+    /// server/version controls) are suppressed. The Plozz Watchlist toggle remains
+    /// independent and may appear beside the request/status pill.
     var isDiscoveryItem: Bool = false
     /// The request/download CTA for a discovery title, derived from its Seerr
     /// availability via ``MediaItem/heroCTA(availability:downloadProgress:seerConnected:)``
@@ -829,7 +829,9 @@ struct DetailHeroView: View, Equatable {
                 }
             }
             if isDiscoveryItem
-                ? (showsRequestPill || onPlayTrailer != nil)
+                ? (showsRequestPill
+                    || onPlayTrailer != nil
+                    || heroWatchlistAction != nil)
                 : ((playTitle != nil && onPlay != nil) || onPlayTrailer != nil || hasHeroActionButtons) {
                 HStack(spacing: 24) {
                     if isDiscoveryItem {
@@ -854,6 +856,9 @@ struct DetailHeroView: View, Equatable {
                         }
                         .modifier(HeroActionButtonStyle(prominent: false))
                         .focused($heroActionRowFocus, equals: .trailer)
+                    }
+                    if let heroWatchlistAction {
+                        watchlistButton(action: heroWatchlistAction)
                     }
                     if let heroWatchedAction {
                         watchedButton(action: heroWatchedAction)

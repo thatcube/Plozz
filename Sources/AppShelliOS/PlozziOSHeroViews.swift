@@ -1090,7 +1090,11 @@ struct PlozziOSHomeHeroForeground: View {
     }
 
     private var hasPlayAction: Bool {
-        !item.isNotInLibraryDiscovery
+        !DetailOpenEnvironment.isDiscovery(
+            item,
+            identitySources:
+                appModel.identityIndex.identitySourcesProvider
+        )
             && (item.kind == .movie
                 || item.kind == .episode
                 || item.kind == .video)

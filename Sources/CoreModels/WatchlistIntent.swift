@@ -40,6 +40,10 @@ public struct WatchlistIntent: Codable, Hashable, Identifiable, Sendable {
     public let kind: MediaItemKind
     public var desiredState: WatchlistDesiredState
     public var rank: UInt64
+    /// Signed presentation order. Older records omit this and retain their
+    /// original ascending `rank`; explicit user adds allocate below the current
+    /// minimum while native imports allocate above the maximum.
+    public var orderingRank: Int64?
     public var origin: WatchlistIntentOrigin
     public var changedAt: Date
     public var presentation: MediaAliasPresentation?
@@ -50,6 +54,7 @@ public struct WatchlistIntent: Codable, Hashable, Identifiable, Sendable {
         kind: MediaItemKind,
         desiredState: WatchlistDesiredState,
         rank: UInt64,
+        orderingRank: Int64? = nil,
         origin: WatchlistIntentOrigin,
         changedAt: Date = Date(),
         presentation: MediaAliasPresentation? = nil,
@@ -60,10 +65,17 @@ public struct WatchlistIntent: Codable, Hashable, Identifiable, Sendable {
         self.kind = kind
         self.desiredState = desiredState
         self.rank = rank
+        self.orderingRank = orderingRank
         self.origin = origin
         self.changedAt = changedAt
         self.presentation = presentation?.sanitizedForSync()
         self.metadata = metadata
+    }
+
+    public var effectiveOrderingRank: Int64 {
+        orderingRank ?? (
+            rank > UInt64(Int64.max) ? Int64.max : Int64(rank)
+        )
     }
 
     public func canonicalized() -> Self {
@@ -78,7 +90,7 @@ public struct WatchlistIntent: Codable, Hashable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case aliasID, kind, desiredState, rank, origin, changedAt, presentation
+        case aliasID, kind, desiredState, rank, orderingRank, origin, changedAt, presentation
         case metadata
     }
 
@@ -92,6 +104,10 @@ public struct WatchlistIntent: Codable, Hashable, Identifiable, Sendable {
                 forKey: .desiredState
             ),
             rank: try container.decode(UInt64.self, forKey: .rank),
+            orderingRank: try container.decodeIfPresent(
+                Int64.self,
+                forKey: .orderingRank
+            ),
             origin: try container.decode(WatchlistIntentOrigin.self, forKey: .origin),
             changedAt: try container.decode(Date.self, forKey: .changedAt),
             presentation: try container.decodeIfPresent(
@@ -119,6 +135,7 @@ public struct WatchlistIntent: Codable, Hashable, Identifiable, Sendable {
         try container.encode(value.kind, forKey: .kind)
         try container.encode(value.desiredState, forKey: .desiredState)
         try container.encode(value.rank, forKey: .rank)
+        try container.encodeIfPresent(value.orderingRank, forKey: .orderingRank)
         try container.encode(value.origin, forKey: .origin)
         try container.encode(value.changedAt, forKey: .changedAt)
         try container.encodeIfPresent(value.presentation, forKey: .presentation)
@@ -152,6 +169,7 @@ public struct WatchlistIntentSyncDTO: Codable, Hashable, Sendable {
     public let kind: MediaItemKind
     public let desiredState: WatchlistDesiredState
     public let rank: UInt64
+    public let orderingRank: Int64?
     public let origin: WatchlistIntentOrigin
     public let changedAt: Date
     public let presentation: MediaAliasPresentation?
@@ -163,6 +181,7 @@ public struct WatchlistIntentSyncDTO: Codable, Hashable, Sendable {
         kind = value.kind
         desiredState = value.desiredState
         rank = value.rank
+        orderingRank = value.orderingRank
         origin = value.origin
         changedAt = value.changedAt
         presentation = value.presentation
@@ -175,6 +194,7 @@ public struct WatchlistIntentSyncDTO: Codable, Hashable, Sendable {
             kind: kind,
             desiredState: desiredState,
             rank: rank,
+            orderingRank: orderingRank,
             origin: origin,
             changedAt: changedAt,
             presentation: presentation,

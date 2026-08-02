@@ -24,6 +24,7 @@ public struct WatchlistSnapshot: Sendable, Equatable {
                 kind: intent.kind,
                 desiredState: intent.desiredState,
                 rank: intent.rank,
+                orderingRank: intent.orderingRank,
                 origin: intent.origin,
                 changedAt: intent.changedAt,
                 presentation: intent.presentation,
@@ -45,7 +46,12 @@ public struct WatchlistSnapshot: Sendable, Equatable {
         orderedEntries = merged.values.filter {
             $0.desiredState == .present
         }.sorted {
-            if $0.rank != $1.rank { return $0.rank < $1.rank }
+            if $0.effectiveOrderingRank != $1.effectiveOrderingRank {
+                return $0.effectiveOrderingRank < $1.effectiveOrderingRank
+            }
+            if $0.changedAt != $1.changedAt {
+                return $0.changedAt > $1.changedAt
+            }
             return $0.aliasID < $1.aliasID
         }
         tombstoneCount = merged.values.lazy.filter {
@@ -79,11 +85,24 @@ public struct WatchlistSnapshot: Sendable, Equatable {
             let right = CanonicalJSON.encode(WatchlistIntentSyncDTO(intent: rhs)) ?? Data()
             newest = left.lexicographicallyPrecedes(right) ? rhs : lhs
         }
+        let orderingRank: Int64
+        if newest.desiredState == .present {
+            orderingRank = [lhs, rhs].filter {
+                $0.desiredState == .present
+            }.map(\.effectiveOrderingRank).min()
+                ?? newest.effectiveOrderingRank
+        } else {
+            orderingRank = min(
+                lhs.effectiveOrderingRank,
+                rhs.effectiveOrderingRank
+            )
+        }
         return WatchlistIntent(
             aliasID: lhs.aliasID,
             kind: lhs.kind,
             desiredState: newest.desiredState,
             rank: min(lhs.rank, rhs.rank),
+            orderingRank: orderingRank,
             origin: newest.origin,
             changedAt: newest.changedAt,
             presentation: newest.presentation ?? lhs.presentation ?? rhs.presentation,

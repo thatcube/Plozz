@@ -112,6 +112,7 @@ public struct TVmazePersonCreditsProvider: PersonCreditsProviding {
         item.productionYear = year.flatMap { Int($0.prefix(4)) }
         item.posterURL = image.flatMap(URL.init(string:))
         item.availability = .unknown
+        item.locallyValidatedPlayableSource = false
         return item
     }
 
@@ -248,6 +249,7 @@ public struct WikidataPersonCreditsProvider: PersonCreditsProviding {
             // each, and the title tile the row already falls back to is a better
             // trade than a burst of image lookups during playback.
             item.availability = .unknown
+            item.locallyValidatedPlayableSource = false
             return item
         }
     }
@@ -406,6 +408,7 @@ public struct TMDbPersonCreditsProvider: PersonCreditsProviding {
                     URL(string: "https://image.tmdb.org/t/p/w342\($0)")
                 }
                 item.availability = .unknown
+                item.locallyValidatedPlayableSource = false
                 return item
             }
     }

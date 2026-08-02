@@ -198,12 +198,25 @@ public enum ScanProgressDetail: Equatable, Sendable {
 @MainActor
 @Observable
 public final class ShareScanStatusModel {
+    public typealias ProgressSleep = @Sendable (Duration) async throws -> Void
+
     /// Keyed by the media-share account id used by the catalog coordinator.
     public private(set) var byShare: [String: ShareScanState] = [:]
+    /// Test/diagnostic counter for actual observable state publications.
+    @ObservationIgnored public private(set) var statePublicationCount = 0
 
-    public init() {
+    public init(
+        progressPublicationInterval: Duration = .milliseconds(250),
+        progressSleep: @escaping ProgressSleep = { duration in
+            try await Task.sleep(for: duration)
+        }
+    ) {
         let (stream, continuation) = AsyncStream.makeStream(of: Event.self)
-        self.continuation = continuation
+        inbox = EventInbox(
+            continuation: continuation,
+            interval: progressPublicationInterval,
+            sleep: progressSleep
+        )
         // A single main-actor pump applies events in stream order, so a late
         // `scanProgress` can never re-open a finished scan and no event is lost to
         // a scheduling reorder between the scanner's independent report tasks.
@@ -212,12 +225,11 @@ public final class ShareScanStatusModel {
         }
     }
 
-    deinit { continuation.finish() }
+    deinit { inbox.finish() }
 
-    /// Ordered delivery channel. The scanner/enricher run off-main and report from
-    /// independent tasks; funnelling every event through one continuation → one
-    /// pump makes application order deterministic and drop-free.
-    @ObservationIgnored private nonisolated let continuation: AsyncStream<Event>.Continuation
+    /// Progress is latest-value coalesced before it reaches the ordered lifecycle
+    /// stream. This bounds producer bursts without ever dropping start/finish events.
+    @ObservationIgnored private nonisolated let inbox: EventInbox
     @ObservationIgnored private var pump: Task<Void, Never>?
     /// Removed account ids are fenced so scanner events already queued during
     /// cancellation cannot recreate a stale Home banner.
@@ -234,6 +246,113 @@ public final class ShareScanStatusModel {
         case enrichProgress(id: String, done: Int)
         case enrichFinished(id: String)
         case shareRemoved(id: String)
+    }
+
+    private final class EventInbox: @unchecked Sendable {
+        private enum ProgressKey: Hashable {
+            case scan(String)
+            case enrich(String)
+        }
+
+        private let lock = NSLock()
+        private let continuation: AsyncStream<Event>.Continuation
+        private let interval: Duration
+        private let sleep: ProgressSleep
+        private var pendingProgress: [ProgressKey: Event] = [:]
+        private var flushTask: Task<Void, Never>?
+        private var isFinished = false
+
+        init(
+            continuation: AsyncStream<Event>.Continuation,
+            interval: Duration,
+            sleep: @escaping ProgressSleep
+        ) {
+            self.continuation = continuation
+            self.interval = interval
+            self.sleep = sleep
+        }
+
+        func submitLifecycle(_ event: Event) {
+            let pending = takePendingProgress(cancelScheduledFlush: true)
+            for event in pending {
+                continuation.yield(event)
+            }
+            continuation.yield(event)
+        }
+
+        func submitProgress(_ event: Event) {
+            let key: ProgressKey
+            switch event {
+            case let .scanProgress(id, _, _, _):
+                key = .scan(id)
+            case let .enrichProgress(id, _):
+                key = .enrich(id)
+            default:
+                submitLifecycle(event)
+                return
+            }
+
+            lock.lock()
+            guard !isFinished else {
+                lock.unlock()
+                return
+            }
+            pendingProgress[key] = event
+            guard flushTask == nil else {
+                lock.unlock()
+                return
+            }
+            let interval = interval
+            let sleep = sleep
+            flushTask = Task { [weak self] in
+                do {
+                    try await sleep(interval)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                self?.flushProgress()
+            }
+            lock.unlock()
+        }
+
+        func finish() {
+            let pending = takePendingProgress(
+                cancelScheduledFlush: true,
+                markFinished: true
+            )
+            for event in pending {
+                continuation.yield(event)
+            }
+            continuation.finish()
+        }
+
+        private func flushProgress() {
+            let pending = takePendingProgress(cancelScheduledFlush: false)
+            for event in pending {
+                continuation.yield(event)
+            }
+        }
+
+        private func takePendingProgress(
+            cancelScheduledFlush: Bool,
+            markFinished: Bool = false
+        ) -> [Event] {
+            lock.lock()
+            if markFinished {
+                isFinished = true
+            }
+            if cancelScheduledFlush {
+                flushTask?.cancel()
+            }
+            flushTask = nil
+            let events = pendingProgress
+                .sorted { String(describing: $0.key) < String(describing: $1.key) }
+                .map(\.value)
+            pendingProgress.removeAll(keepingCapacity: true)
+            lock.unlock()
+            return events
+        }
     }
 
     /// Apply one event, in stream order, on the main actor.
@@ -308,7 +427,7 @@ public final class ShareScanStatusModel {
         state.directoriesScanned = 0
         state.directoriesPending = 0
         state.scanFractionCeiling = 0
-        byShare[shareID] = state
+        publish(state, for: shareID)
     }
 
     public func scanProgress(
@@ -317,7 +436,7 @@ public final class ShareScanStatusModel {
         directoriesPending: Int,
         itemsFound: Int
     ) {
-        guard var state = byShare[shareID] else { return }
+        guard var state = byShare[shareID], state.isScanning else { return }
         state.directoriesScanned = directoriesScanned
         state.directoriesPending = directoriesPending
         state.itemsFound = itemsFound
@@ -326,7 +445,7 @@ public final class ShareScanStatusModel {
         if let fraction = state.scanFraction {
             state.scanFractionCeiling = fraction
         }
-        byShare[shareID] = state
+        publish(state, for: shareID)
     }
 
     /// Source compatibility for callers that have no frontier count.
@@ -358,7 +477,7 @@ public final class ShareScanStatusModel {
     public func catalogChanged(shareID: String) {
         guard var state = byShare[shareID] else { return }
         state.lastChangeAt = Date()
-        byShare[shareID] = state
+        publish(state, for: shareID)
     }
 
     public func scanFinished(shareID: String) {
@@ -367,7 +486,7 @@ public final class ShareScanStatusModel {
         state.directoriesPending = 0
         state.scanFractionCeiling = 0
         state.lastScanAt = Date()
-        byShare[shareID] = state
+        publish(state, for: shareID)
     }
 
     public func enrichStarted(shareID: String, total: Int) {
@@ -379,13 +498,13 @@ public final class ShareScanStatusModel {
         state.isEnriching = true
         state.enrichTotal = total
         state.enrichDone = 0
-        byShare[shareID] = state
+        publish(state, for: shareID)
     }
 
     public func enrichProgress(shareID: String, done: Int) {
-        guard var state = byShare[shareID] else { return }
+        guard var state = byShare[shareID], state.isEnriching else { return }
         state.enrichDone = done
-        byShare[shareID] = state
+        publish(state, for: shareID)
     }
 
     public func enrichFinished(shareID: String) {
@@ -393,39 +512,82 @@ public final class ShareScanStatusModel {
         state.isEnriching = false
         state.enrichDone = 0
         state.enrichTotal = 0
-        byShare[shareID] = state
+        publish(state, for: shareID)
     }
 
     /// Immediately removes a deleted share from every status surface and fences
     /// progress already queued by its cancelling scanner.
     public func removeShare(shareID: String) {
         removedShareIDs.insert(shareID)
-        byShare[shareID] = nil
+        publish(nil, for: shareID)
+    }
+
+    private func publish(_ state: ShareScanState?, for shareID: String) {
+        guard byShare[shareID] != state else { return }
+        byShare[shareID] = state
+        statePublicationCount += 1
     }
 
     /// A reporter that forwards scanner events onto this model **in order** via the
     /// serialized event stream (see `apply`). Held by the scanner/enricher (which
     /// run off-main), so passing it across the actor boundary is safe.
     public nonisolated func reporter() -> ShareScanReporter {
-        let c = continuation
+        let inbox = inbox
         return ShareScanReporter(
-            shareRegistered: { id in c.yield(.shareRegistered(id: id)) },
-            scanStarted: { id, name in c.yield(.scanStarted(id: id, name: name)) },
+            shareRegistered: { id in
+                inbox.submitLifecycle(.shareRegistered(id: id))
+            },
+            scanStarted: { id, name in
+                inbox.submitLifecycle(.scanStarted(id: id, name: name))
+            },
             scanProgress: { id, items in
-                c.yield(.scanProgress(id: id, directories: 0, pending: 0, items: items))
+                inbox.submitProgress(
+                    .scanProgress(
+                        id: id,
+                        directories: 0,
+                        pending: 0,
+                        items: items
+                    )
+                )
             },
             scanDetailedProgress: { id, directories, items in
-                c.yield(.scanProgress(id: id, directories: directories, pending: 0, items: items))
+                inbox.submitProgress(
+                    .scanProgress(
+                        id: id,
+                        directories: directories,
+                        pending: 0,
+                        items: items
+                    )
+                )
             },
             scanFrontierProgress: { id, directories, pending, items in
-                c.yield(.scanProgress(id: id, directories: directories, pending: pending, items: items))
+                inbox.submitProgress(
+                    .scanProgress(
+                        id: id,
+                        directories: directories,
+                        pending: pending,
+                        items: items
+                    )
+                )
             },
-            scanFinished: { id in c.yield(.scanFinished(id: id)) },
-            scanChangedCatalog: { id in c.yield(.scanChangedCatalog(id: id)) },
-            enrichStarted: { id, total in c.yield(.enrichStarted(id: id, total: total)) },
-            enrichProgress: { id, done in c.yield(.enrichProgress(id: id, done: done)) },
-            enrichFinished: { id in c.yield(.enrichFinished(id: id)) },
-            shareRemoved: { id in c.yield(.shareRemoved(id: id)) }
+            scanFinished: { id in
+                inbox.submitLifecycle(.scanFinished(id: id))
+            },
+            scanChangedCatalog: { id in
+                inbox.submitLifecycle(.scanChangedCatalog(id: id))
+            },
+            enrichStarted: { id, total in
+                inbox.submitLifecycle(.enrichStarted(id: id, total: total))
+            },
+            enrichProgress: { id, done in
+                inbox.submitProgress(.enrichProgress(id: id, done: done))
+            },
+            enrichFinished: { id in
+                inbox.submitLifecycle(.enrichFinished(id: id))
+            },
+            shareRemoved: { id in
+                inbox.submitLifecycle(.shareRemoved(id: id))
+            },
         )
     }
 }

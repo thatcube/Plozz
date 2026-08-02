@@ -73,7 +73,10 @@ public enum MediaLibraryMark: Equatable, Sendable {
     /// actionable one — a title you don't own is still worth flagging when Seerr
     /// is absent, which is the majority case and the reason this exists.
     public static func mark(for item: MediaItem, seerConnected: Bool) -> MediaLibraryMark? {
-        guard item.isNotInLibraryDiscovery else { return nil }
+        guard item.isNotInLibraryDiscovery
+                || !item.hasPlayableLibraryTarget() else {
+            return nil
+        }
         return seerConnected ? .requestable : .notInLibrary
     }
 }

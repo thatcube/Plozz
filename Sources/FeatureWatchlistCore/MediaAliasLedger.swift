@@ -6,6 +6,16 @@ public enum MediaAliasLedgerError: Error, Equatable, Sendable {
     case profileDeleted(String)
 }
 
+public struct MediaAliasEnrichment: Sendable {
+    public let aliasID: MediaAliasID
+    public let evidence: MediaAliasEvidence
+
+    public init(aliasID: MediaAliasID, evidence: MediaAliasEvidence) {
+        self.aliasID = aliasID
+        self.evidence = evidence
+    }
+}
+
 public actor MediaAliasLedger: MediaAliasResolving {
     public typealias Snapshot = MediaAliasSnapshot
 
@@ -104,15 +114,35 @@ public actor MediaAliasLedger: MediaAliasResolving {
         aliasID: MediaAliasID,
         with evidence: MediaAliasEvidence
     ) throws {
-        guard let resolved = currentSnapshot.resolvedAliasID(for: aliasID),
-              let record = records[resolved] else {
-            throw MediaAliasLedgerError.aliasNotFound(aliasID)
-        }
-        let enriched = MediaAliasResolver.enriched(record, with: evidence, at: Date())
-        guard enriched != record else { return }
+        _ = try enrich([
+            MediaAliasEnrichment(aliasID: aliasID, evidence: evidence)
+        ])
+    }
+
+    /// Applies an identity-evidence wave in memory and persists/publishes once.
+    @discardableResult
+    public func enrich(_ enrichments: [MediaAliasEnrichment]) throws -> Int {
         var candidate = records
-        candidate[resolved] = enriched
+        var changedCount = 0
+        let now = Date()
+        for enrichment in enrichments {
+            guard let resolved = currentSnapshot.resolvedAliasID(
+                for: enrichment.aliasID
+            ), let record = candidate[resolved] else {
+                throw MediaAliasLedgerError.aliasNotFound(enrichment.aliasID)
+            }
+            let enriched = MediaAliasResolver.enriched(
+                record,
+                with: enrichment.evidence,
+                at: now
+            )
+            guard enriched != record else { continue }
+            candidate[resolved] = enriched
+            changedCount += 1
+        }
+        guard changedCount > 0 else { return 0 }
         try persistAndPublish(candidate)
+        return changedCount
     }
 
     public func mergeRemote(

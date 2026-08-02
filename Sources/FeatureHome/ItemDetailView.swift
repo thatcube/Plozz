@@ -524,16 +524,21 @@ public struct ItemDetailView: View {
         // play — so it must NOT offer a dead Play button. The body (overview/cast/
         // ratings) still renders; the Watchlist toggle keeps the row focusable.
         // Cross-server discovery restores Play the instant it folds in a real copy.
+        let hasValidatedPlayableSource =
+            detail.item.hasPlayableLibraryTarget(additionalSources: sources)
+        let usesExternalDetail = isDiscoveryItem
+            || !hasValidatedPlayableSource
         let canPlay = isPlayable(detail.item)
-            && detail.item.hasPlayableLibraryTarget(additionalSources: sources)
+            && hasValidatedPlayableSource
         let effectiveAvailability = requestOverride ?? detail.item.availability
         let requestCTA = MediaItem.heroCTA(
             availability: effectiveAvailability,
             downloadProgress: detail.item.downloadProgress,
+            hasValidatedPlayableSource: hasValidatedPlayableSource,
             seerConnected: seerConnected
         )
         let discoveryStatusLine: LocalizedStringResource? = {
-            guard isDiscoveryItem else { return nil }
+            guard usesExternalDetail else { return nil }
             if detail.item.kind == .series,
                let schedule = detail.upcomingSchedule {
                 return SeriesUpcoming.heroLine(
@@ -581,10 +586,10 @@ public struct ItemDetailView: View {
                         playRemainingText: canPlay ? detail.item.resumeRemainingText : nil,
                         playSeasonEpisodeText: canPlay ? HeroForegroundModelBuilder.seasonEpisodeButtonText(for: detail.item) : nil,
                         onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
-                        versions: isDiscoveryItem ? [] : effectiveVersions,
+                        versions: usesExternalDetail ? [] : effectiveVersions,
                         selectedVersionID: effectiveVersionID,
                         onSelectVersion: { id in selectVersion(id, for: detail.item) },
-                        sources: isDiscoveryItem ? [] : serverChoices,
+                        sources: usesExternalDetail ? [] : serverChoices,
                         offlineSourceAccountIDs: viewModel.unreachableSourceAccountIDs,
                         selectedSourceAccountID: effectiveSource?.accountID,
                         onSelectSource: serverChoices.count > 1 ? { id in selectSource(id) } : nil,
@@ -597,17 +602,17 @@ public struct ItemDetailView: View {
                                 proxy.scrollTo(Self.topAnchorID, anchor: .top)
                             }
                         },
-                        isDiscoveryItem: isDiscoveryItem,
+                        isDiscoveryItem: usesExternalDetail,
                         requestCTA: requestCTA,
                         requestActingName: requestActingName,
                         onRequest: (
-                            isDiscoveryItem
+                            usesExternalDetail
                                 && detail.item.kind == .movie
                                 && onRequest != nil
                                 && requestCTA == .request
                         ) ? { requestTapped(detail.item) } : nil,
                         seasonRequestAvailability:
-                            isDiscoveryItem && detail.item.kind == .series
+                            usesExternalDetail && detail.item.kind == .series
                                 ? seasonRequestAvailability
                                 : nil,
                         seasonRequestAvailabilityResolved:
@@ -616,7 +621,7 @@ public struct ItemDetailView: View {
                             seasonRequestAvailabilityFailed,
                         isRequestingSeasons: isSeasonRequestInFlight,
                         onRequestSeasons:
-                            isDiscoveryItem && onRequestSeasons != nil
+                            usesExternalDetail && onRequestSeasons != nil
                                 ? { seasons in
                                     requestTapped(
                                         detail.item,
@@ -624,7 +629,7 @@ public struct ItemDetailView: View {
                                     )
                                 }
                                 : nil,
-                        onRetrySeasonRequestAvailability: isDiscoveryItem
+                        onRetrySeasonRequestAvailability: usesExternalDetail
                             ? { seasonRequestRetryToken &+= 1 }
                             : nil
                     )
@@ -642,8 +647,8 @@ public struct ItemDetailView: View {
                     DetailExtrasView(
                         item: detail.item,
                         selectedSource: effectiveSource
-                            ?? (isDiscoveryItem ? nil : viewModel.currentSourceForDisplay),
-                        selectedVersion: isDiscoveryItem
+                            ?? (usesExternalDetail ? nil : viewModel.currentSourceForDisplay),
+                        selectedVersion: usesExternalDetail
                             ? nil
                             : effectiveVersions.first { $0.id == effectiveVersionID }
                                 ?? MediaVersion.synthesized(from: detail.item),

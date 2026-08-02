@@ -950,33 +950,51 @@ private struct PlozziOSShareScanSection: View {
 
     var body: some View {
         SettingsSectionGroup("Library") {
-            if let state, state.isBusy {
-                LabeledContent {
-                    if let detail = state.progressDetail {
-                        scanProgressDetailText(detail)
-                            .monospacedDigit()
-                    } else {
-                        ProgressView()
-                    }
-                } label: {
-                    if let phase = state.phase {
-                        Text(phase)
-                    }
+            LabeledContent {
+                ZStack(alignment: .trailing) {
+                    idleValue
+                        .opacity(isBusy ? 0 : 1)
+                    busyValue
+                        .monospacedDigit()
+                        .opacity(isBusy ? 1 : 0)
                 }
-                ShareScanProgressBar(fraction: state.fraction)
-            } else {
-                LabeledContent("Last scanned") {
-                    if let date = state?.lastScanAt {
-                        Text(date, format: .relative(presentation: .named))
-                    } else {
-                        Text("Never")
-                    }
+            } label: {
+                ZStack(alignment: .leading) {
+                    Text("Last scanned")
+                        .opacity(isBusy ? 0 : 1)
+                    Text(state?.phase ?? LocalizedStringResource("Updating library"))
+                        .opacity(isBusy ? 1 : 0)
                 }
             }
+            ShareScanProgressBar(fraction: state?.fraction)
+                .frame(height: isBusy ? 6 : 0)
+                .opacity(isBusy ? 1 : 0)
+                .clipped()
 
             Button("Scan Now", systemImage: "arrow.clockwise", action: onScan)
-                .disabled(state?.isBusy == true)
+                .disabled(isBusy)
         }
+        .transaction { transaction in
+            transaction.animation = nil
+        }
+    }
+
+    private var isBusy: Bool {
+        state?.isBusy == true
+    }
+
+    private var busyValue: Text {
+        guard let detail = state?.progressDetail else {
+            return Text(verbatim: "")
+        }
+        return scanProgressDetailText(detail)
+    }
+
+    private var idleValue: Text {
+        if let date = state?.lastScanAt {
+            return Text(date, format: .relative(presentation: .named))
+        }
+        return Text("Never")
     }
 }
 

@@ -311,14 +311,17 @@ actor ShareEnricher {
     }
 
     func pauseScheduledPass() {
-        guard isAdvertisingEnrich else { return }
-        isAdvertisingEnrich = false
-        reporter.enrichFinished(shareID)
+        // A scheduler pause interrupts execution, not the logical enrichment pass.
+        // Keeping the lifecycle open prevents pause/resume from repeatedly removing
+        // and reinserting the same progress UI while durable backlog remains.
     }
 
     func finishLogicalPass() {
-        pauseScheduledPass()
         guard isPassActive else { return }
+        if isAdvertisingEnrich {
+            reporter.enrichFinished(shareID)
+        }
+        isAdvertisingEnrich = false
         isPassActive = false
         enrichTotal = 0
         enrichDone = 0

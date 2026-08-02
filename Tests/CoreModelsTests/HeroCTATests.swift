@@ -6,7 +6,17 @@ import CoreModels
 /// items. Kept exhaustive so the UI's button choice can never drift.
 final class HeroCTATests: XCTestCase {
     private func item(_ availability: MediaAvailabilityStatus?, download: Double? = nil) -> MediaItem {
-        MediaItem(id: "x", title: "T", kind: .movie, availability: availability, downloadProgress: download)
+        let isOwned = availability == nil
+            || availability == .available
+            || availability == .partiallyAvailable
+        return MediaItem(
+            id: "x",
+            title: "T",
+            kind: .movie,
+            availability: availability,
+            locallyValidatedPlayableSource: isOwned,
+            downloadProgress: download
+        )
     }
 
     func testOrdinaryLibraryItemIsAlwaysPlay() {
@@ -65,7 +75,8 @@ final class HeroCTATests: XCTestCase {
             id: "5d7768342ec6b5001f6bbacd",
             title: "13 Going on 30",
             kind: .movie,
-            providerIDs: ["PlexGuid": "plex://movie/5d7768342ec6b5001f6bbacd"]
+            providerIDs: ["PlexGuid": "plex://movie/5d7768342ec6b5001f6bbacd"],
+            locallyValidatedPlayableSource: false
         )
 
         XCTAssertFalse(discover.hasPlayableLibraryTarget())
@@ -76,7 +87,8 @@ final class HeroCTATests: XCTestCase {
             id: "5d7768342ec6b5001f6bbacd",
             title: "13 Going on 30",
             kind: .movie,
-            providerIDs: ["PlexGuid": "plex://movie/5d7768342ec6b5001f6bbacd"]
+            providerIDs: ["PlexGuid": "plex://movie/5d7768342ec6b5001f6bbacd"],
+            locallyValidatedPlayableSource: false
         )
         let librarySource = MediaSourceRef(
             accountID: "plex-account",
@@ -97,6 +109,45 @@ final class HeroCTATests: XCTestCase {
             providerIDs: ["PlexGuid": "plex://movie/5d7768342ec6b5001f6bbacd"]
         )
         XCTAssertTrue(owned.hasPlayableLibraryTarget())
+    }
+
+    func testAccountMetadataAndGlobalGuidDoNotProveOwnership() {
+        let external = MediaItem(
+            id: "global",
+            title: "The Legend of Hei",
+            kind: .movie,
+            providerIDs: ["PlexGuid": "plex://movie/global"],
+            locallyValidatedPlayableSource: false,
+            sourceAccountID: "plex-account"
+        )
+
+        XCTAssertFalse(external.hasPlayableLibraryTarget())
+        XCTAssertEqual(
+            external.ownershipPresentation(),
+            MediaOwnershipPresentation(hasValidatedPlayableSource: false)
+        )
+        XCTAssertEqual(external.heroCTA(seerConnected: true), .request)
+        XCTAssertEqual(external.heroCTA(seerConnected: false), .unavailable)
+    }
+
+    func testLegacyCachedDiscoverRecordMigratesToUnowned() throws {
+        let legacyJSON = """
+        {
+          "id":"abc123",
+          "title":"The Legend of Hei",
+          "kind":"movie",
+          "providerIDs":{"PlexGuid":"plex://movie/abc123"},
+          "sourceAccountID":"plex-account"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(
+            MediaItem.self,
+            from: Data(legacyJSON.utf8)
+        )
+
+        XCTAssertFalse(decoded.locallyValidatedPlayableSource)
+        XCTAssertFalse(decoded.hasPlayableLibraryTarget())
     }
 
     func testSeasonRequestAvailabilityKeepsOnlyMissingAndInFlightSeasons() {

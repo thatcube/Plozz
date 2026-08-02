@@ -608,3 +608,46 @@ grep "vm LIFECYCLE" /tmp/trace.log     # healthy: every init has a deinit, ends 
 
 `CFGetRetainCount(self)` at teardown tells you HOW MANY owners remain (one
 stubborn owner vs a race) but never WHO. Only the memory graph answers who.
+
+---
+
+## 11. Case study: share-scan progress + media-state feedback loop (August 2026, iOS)
+
+**Symptom.** During a media-share update, the Settings progress bar and counts
+repeatedly faded/flashed. After the directory walk appeared finished, an iPhone
+16 Pro Max remained warm and the whole app felt expensive.
+
+**Measurement.** A 30-second attached Debug Time Profiler trace recorded about
+27 CPU-seconds (roughly 90% of one core), including 5.9 seconds on Main Thread.
+Inclusive stack buckets were 27.7% SwiftUI graph work, 27.6% share scan/catalog
+work, and 14.7% watchlist/alias work. There were no hangs over 250 ms.
+
+**Two independent causes were active.**
+
+1. `ShareScanStatusModel` accepted every per-item enrichment update through an
+   unbounded stream and replaced its observable state dictionary for every event.
+   Scheduler pauses also emitted a false enrichment finish; resume emitted another
+   start, repeatedly removing and reinserting the progress presentation.
+2. The shell observed alias/watchlist snapshots and responded to every mutation by
+   preparing the watchlist again. Preparation fetched native provider watchlists,
+   enriched aliases, and republished the observed snapshot, forming a feedback
+   cycle. Idempotent alias activation also assigned an unchanged snapshot.
+
+**Fix pattern.**
+
+- Coalesce high-frequency progress before it reaches `@Observable` state. Keep only
+  the latest scan and enrichment value per share, publish at most every 250 ms,
+  flush before lifecycle completion, and fence late progress.
+- A scheduler pause is not logical completion. Keep one start/finish pair for the
+  whole durable backlog.
+- Keep progress view identity stable; update width/opacity rather than conditionally
+  replacing determinate/indeterminate bars and percentage nodes.
+- Separate profile-selection observation (which may hydrate/import) from snapshot
+  observation (which may only schedule debounced cloud capture).
+- Deduplicate unchanged snapshots and batch an identity-index evidence wave into
+  one durable write/publication.
+
+**Regression proof.** The focused tests drive 10,000 progress events and require
+one observable progress publication, require no publication after finish, require
+one enrichment lifecycle across pause/resume, and require a 1,000-alias evidence
+wave to persist once while an identical repeat persists zero times.

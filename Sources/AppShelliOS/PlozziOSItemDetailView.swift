@@ -199,8 +199,10 @@ private struct PlozziOSCanonicalItemDetailView: View {
         self.presentsEpisodeAsSubject = presentsEpisodeAsSubject
         _seriesPlayTarget = State(initialValue: initialEpisode)
         let identitySources = appModel.identityIndex.identitySourcesProvider
-        let isDiscoveryItem =
-            item.isNotInLibraryDiscovery && identitySources(item).isEmpty
+        let isDiscoveryItem = DetailOpenEnvironment.isDiscovery(
+            item,
+            identitySources: identitySources
+        )
         self.isDiscoveryItem = isDiscoveryItem
         let discoveryStatusRefresh:
             (@Sendable (MediaItem) async -> (MediaAvailabilityStatus, Double?)?)?
@@ -364,7 +366,14 @@ private struct PlozziOSCanonicalItemDetailView: View {
             : (seriesPlayTarget ?? detail.item)
         let playableHeroTarget = seriesPlayTarget.map(playbackItem(for:))
             ?? detailPlayableItem(for: detail.item)
-        let options = detailPlaybackOptions(for: heroTarget)
+        let options = isDiscoveryItem
+            ? DetailPlaybackOptions(
+                sources: [],
+                selectedSourceAccountID: nil,
+                versions: [],
+                selectedVersionID: nil
+            )
+            : detailPlaybackOptions(for: heroTarget)
         let heroStyle: HeroArtworkStyle = horizontalSizeClass == .compact
             ? .compactPortrait
             : .landscape
@@ -573,6 +582,10 @@ private struct PlozziOSCanonicalItemDetailView: View {
             cta: MediaItem.heroCTA(
                 availability: availability,
                 downloadProgress: item.downloadProgress,
+                hasValidatedPlayableSource:
+                    item.hasPlayableLibraryTarget(
+                        additionalSources: availableSources
+                    ),
                 seerConnected: appModel.seerService.isConfigured
             ),
             isRequesting: isRequesting,

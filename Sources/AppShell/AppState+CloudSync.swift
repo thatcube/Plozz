@@ -682,15 +682,17 @@ extension AppState {
                 )
             }
             self.armMediaAliasObservation()
+            self.armMediaStateSnapshotObservation()
         }
     }
 
+    /// Profile roster/selection changes require activation and one native import.
+    /// Ordinary alias/watchlist snapshot mutations are observed separately below;
+    /// they must never re-enter preparation or fetch provider watchlists.
     func armMediaAliasObservation() {
         withObservationTracking {
             _ = profilesModel.profiles
             _ = profilesModel.activeProfileID
-            _ = mediaAliasLedger.snapshotsByProfile
-            _ = universalWatchlist.snapshotsByProfile
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -709,6 +711,19 @@ extension AppState {
                 }
                 self.scheduleCloudPublish()
                 self.armMediaAliasObservation()
+            }
+        }
+    }
+
+    func armMediaStateSnapshotObservation() {
+        withObservationTracking {
+            _ = mediaAliasLedger.snapshotsByProfile
+            _ = universalWatchlist.snapshotsByProfile
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.scheduleCloudPublish()
+                self.armMediaStateSnapshotObservation()
             }
         }
     }

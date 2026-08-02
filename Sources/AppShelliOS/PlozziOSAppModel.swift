@@ -61,6 +61,7 @@ final class PlozziOSAppModel {
     let profiles: ProfilesModel
     /// Generic durable title identity for Plozz-owned profile state.
     let mediaAliasLedger: MediaAliasLedgerModel
+    let transientStatusPresenter = TransientStatusPresenter()
     let universalWatchlist: WatchlistModel
     let runtimeFeatureFlags: RuntimeFeatureFlags
     /// Cross-device Sync & Setup (feature-flagged; OFF by default).
@@ -318,7 +319,24 @@ final class PlozziOSAppModel {
                 self.universalWatchlistMembership(item)
             },
             performUniversalWatchlist: { [unowned self] adding, item in
-                self.performUniversalWatchlist(adding: adding, item: item)
+                await self.performUniversalWatchlist(
+                    adding: adding,
+                    item: item
+                )
+            },
+            presentUniversalWatchlistFeedback: {
+                [unowned self] icon, text in
+                self.transientStatusPresenter.present(
+                    icon: icon,
+                    text: text
+                )
+            },
+            beginUniversalWatchlistFanOut: {
+                [unowned self] adding, item in
+                self.beginUniversalWatchlistFanOut(
+                    adding: adding,
+                    item: item
+                )
             },
             resolveDurableWatchlist: { [unowned self] items in
                 self.resolvedUniversalWatchlistItems(candidates: items)
@@ -365,6 +383,8 @@ final class PlozziOSAppModel {
     @ObservationIgnored var universalWatchlistRetryScheduler:
         WatchlistRetryScheduler?
     @ObservationIgnored var universalWatchlistShouldResumeAuthentication = false
+    @ObservationIgnored var universalWatchlistIdentityUpdateTask:
+        Task<Void, Never>?
     @ObservationIgnored private var heroTrailerCache: [String: HeroTrailerCacheEntry] = [:]
     @ObservationIgnored
     private(set) lazy var identityIndex = IdentityIndexModel(

@@ -144,9 +144,10 @@ public final class WatchlistModel {
     ) throws -> WatchlistIntent {
         try ensureHydrated(profileID)
         var state = statesByProfile[profileID]!
+        prepareOrderingSpace(in: &state)
         let existing = state.intents.first { $0.aliasID == aliasID }
-        let rank = existing?.rank ?? state.nextRank
-        if existing == nil { state.nextRank &+= 1 }
+        let rank = existing?.rank ?? allocateLegacyRank(in: &state)
+        let orderingRank = nextFrontOrderingRank(in: state)
         var sources = existing?.metadata.sourceDestinationIDs ?? []
         if let sourceDestinationID {
             sources.append(sourceDestinationID.rawValue)
@@ -156,6 +157,7 @@ public final class WatchlistModel {
             kind: kind,
             desiredState: .present,
             rank: rank,
+            orderingRank: orderingRank,
             origin: origin,
             changedAt: changedAt,
             presentation: presentation ?? existing?.presentation,
@@ -180,14 +182,15 @@ public final class WatchlistModel {
     ) throws -> WatchlistIntent {
         try ensureHydrated(profileID)
         var state = statesByProfile[profileID]!
+        prepareOrderingSpace(in: &state)
         let existing = state.intents.first { $0.aliasID == aliasID }
-        let rank = existing?.rank ?? state.nextRank
-        if existing == nil { state.nextRank &+= 1 }
+        let rank = existing?.rank ?? allocateLegacyRank(in: &state)
         let intent = WatchlistIntent(
             aliasID: aliasID,
             kind: kind,
             desiredState: .absent,
             rank: rank,
+            orderingRank: existing?.orderingRank,
             origin: .local,
             changedAt: changedAt,
             presentation: presentation ?? existing?.presentation,
@@ -214,26 +217,21 @@ public final class WatchlistModel {
         observedAfterConfirmedAbsence: Bool = false,
         at changedAt: Date = Date()
     ) throws -> Bool {
-        try ensureHydrated(profileID)
-        let existing = statesByProfile[profileID]!.intents.first {
-            $0.aliasID == aliasID
-        }
-
-        if existing?.desiredState == .absent,
-           existing?.metadata.lastExplicitRemovalAt != nil,
-           !observedAfterConfirmedAbsence {
-            return false
-        }
-        _ = try add(
+        try importNativeBatch(
             profileID: profileID,
-            aliasID: aliasID,
-            kind: kind,
-            presentation: presentation,
-            origin: .nativeImport,
-            sourceDestinationID: destinationID,
+            destinationID: destinationID,
+            candidates: [
+                WatchlistNativeImportCandidate(
+                    aliasID: aliasID,
+                    kind: kind,
+                    presentation: presentation,
+                    observedAfterConfirmedAbsence:
+                        observedAfterConfirmedAbsence
+                )
+            ],
+            markImportComplete: false,
             at: changedAt
-        )
-        return true
+        ) > 0
     }
 
     /// Applies one destination's additive import in memory and persists once.
@@ -247,11 +245,16 @@ public final class WatchlistModel {
     ) throws -> Int {
         try ensureHydrated(profileID)
         var state = statesByProfile[profileID]!
+        prepareOrderingSpace(
+            in: &state,
+            additionalSlots: candidates.count
+        )
         var byAlias = Dictionary(
             uniqueKeysWithValues: state.intents.map { ($0.aliasID, $0) }
         )
         var importedCount = 0
         var changed = false
+        var nextBackRank = nextBackOrderingRank(in: state)
 
         for candidate in candidates {
             guard candidate.kind == .movie || candidate.kind == .series else {
@@ -266,11 +269,15 @@ public final class WatchlistModel {
             var sources = existing?.metadata.sourceDestinationIDs ?? []
             sources.append(destinationID.rawValue)
             let isReactivation = existing?.desiredState == .absent
+            let isNew = existing == nil
             let intent = WatchlistIntent(
                 aliasID: candidate.aliasID,
                 kind: candidate.kind,
                 desiredState: .present,
-                rank: existing?.rank ?? state.nextRank,
+                rank: existing?.rank ?? allocateLegacyRank(in: &state),
+                orderingRank: isNew || isReactivation
+                    ? nextBackRank
+                    : existing?.orderingRank,
                 origin: isReactivation || existing == nil
                     ? .nativeImport
                     : existing!.origin,
@@ -287,7 +294,7 @@ public final class WatchlistModel {
                         : existing?.metadata.lastReconciledAt
                 )
             )!
-            if existing == nil { state.nextRank &+= 1 }
+            if isNew || isReactivation { nextBackRank += 1 }
             if intent != existing {
                 byAlias[candidate.aliasID] = intent
                 changed = true
@@ -320,18 +327,24 @@ public final class WatchlistModel {
     ) throws {
         try ensureHydrated(profileID)
         var state = statesByProfile[profileID]!
+        prepareOrderingSpace(
+            in: &state,
+            additionalSlots: entries.count
+        )
         guard state.migration.legacyHomeSeedCompletedAt == nil else { return }
+        var nextBackRank = nextBackOrderingRank(in: state)
         for (aliasID, kind, presentation) in entries
         where state.intents.contains(where: { $0.aliasID == aliasID }) == false {
             guard let intent = WatchlistIntent(
                 aliasID: aliasID,
                 kind: kind,
                 desiredState: .present,
-                rank: state.nextRank,
+                rank: allocateLegacyRank(in: &state),
+                orderingRank: nextBackRank,
                 origin: .legacyHomeSeed,
                 presentation: presentation
             ) else { continue }
-            state.nextRank &+= 1
+            nextBackRank += 1
             state.intents.append(intent)
         }
         state.migration.legacyHomeSeedCompletedAt = Date()
@@ -463,7 +476,12 @@ public final class WatchlistModel {
             // SyncLedger already resolved the logical-clock conflict. Apply its
             // winning canonical value exactly so capture(apply(bytes)) == bytes.
             replace(incoming, in: &state)
-            state.nextRank = max(state.nextRank, incoming.rank &+ 1)
+            state.nextRank = max(
+                state.nextRank,
+                incoming.rank == UInt64.max
+                    ? UInt64.max
+                    : incoming.rank + 1
+            )
             applied.append(key.recordName)
         }
         if !applied.isEmpty {
@@ -540,6 +558,68 @@ public final class WatchlistModel {
     ) {
         state.intents.removeAll { $0.aliasID == intent.aliasID }
         state.intents.append(intent)
+    }
+
+    /// Rebalances only at numeric exhaustion. Existing persisted ranks otherwise
+    /// remain untouched, so migration/relaunch cannot reshuffle the row.
+    private func prepareOrderingSpace(
+        in state: inout WatchlistIntentStoreState,
+        additionalSlots: Int = 1
+    ) {
+        let count = state.intents.count
+        guard count > 0 else {
+            if state.nextRank == UInt64.max { state.nextRank = 0 }
+            return
+        }
+        let minimum = state.intents.map(\.effectiveOrderingRank).min()!
+        let maximum = state.intents.map(\.effectiveOrderingRank).max()!
+        let margin = Int64(min(
+            count + max(1, additionalSlots) + 2,
+            Int(Int64.max)
+        ))
+        let needsRebalance = state.nextRank == UInt64.max
+            || minimum <= Int64.min + margin
+            || maximum >= Int64.max - margin
+        guard needsRebalance else { return }
+
+        let ordered = state.intents.indices.sorted {
+            let lhs = state.intents[$0]
+            let rhs = state.intents[$1]
+            if lhs.effectiveOrderingRank != rhs.effectiveOrderingRank {
+                return lhs.effectiveOrderingRank < rhs.effectiveOrderingRank
+            }
+            return lhs.aliasID < rhs.aliasID
+        }
+        for (position, index) in ordered.enumerated() {
+            state.intents[index].rank = UInt64(position)
+            state.intents[index].orderingRank = Int64(position)
+        }
+        state.nextRank = UInt64(count)
+    }
+
+    private func allocateLegacyRank(
+        in state: inout WatchlistIntentStoreState
+    ) -> UInt64 {
+        prepareOrderingSpace(in: &state)
+        let rank = state.nextRank
+        state.nextRank += 1
+        return rank
+    }
+
+    private func nextFrontOrderingRank(
+        in state: WatchlistIntentStoreState
+    ) -> Int64 {
+        guard let minimum = state.intents.map(\.effectiveOrderingRank).min()
+        else { return 0 }
+        return minimum - 1
+    }
+
+    private func nextBackOrderingRank(
+        in state: WatchlistIntentStoreState
+    ) -> Int64 {
+        guard let maximum = state.intents.map(\.effectiveOrderingRank).max()
+        else { return 0 }
+        return maximum + 1
     }
 
     private func persist(

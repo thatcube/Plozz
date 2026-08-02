@@ -185,6 +185,10 @@ public struct PlozziOSRootView: View {
             \.colorScheme,
             resolvedPalette.isLight ? .light : .dark
         )
+        .transientStatusOverlay(
+            presenter: appModel.transientStatusPresenter,
+            isLightSurface: resolvedPalette.isLight
+        )
         .environment(appModel)
         .environment(heroTrailerController)
         .environment(sidebarGeometry)

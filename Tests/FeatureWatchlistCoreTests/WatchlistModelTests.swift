@@ -4,6 +4,63 @@ import XCTest
 
 @MainActor
 final class WatchlistModelTests: XCTestCase {
+    func testExplicitAddsInsertAtFrontWithoutReorderingExistingEntries() throws {
+        let model = WatchlistModel()
+        let first = MediaAliasID()
+        let second = MediaAliasID()
+        let third = MediaAliasID()
+        try model.activate(profileID: "p")
+
+        try model.add(profileID: "p", aliasID: first, kind: .movie)
+        try model.add(profileID: "p", aliasID: second, kind: .series)
+        try model.add(profileID: "p", aliasID: third, kind: .movie)
+
+        XCTAssertEqual(
+            model.activeSnapshot.orderedEntries.map(\.aliasID),
+            [third, second, first]
+        )
+    }
+
+    func testExplicitRemoveThenReaddMovesTitleToFront() throws {
+        let model = WatchlistModel()
+        let first = MediaAliasID()
+        let second = MediaAliasID()
+        try model.activate(profileID: "p")
+        try model.add(profileID: "p", aliasID: first, kind: .movie)
+        try model.add(profileID: "p", aliasID: second, kind: .movie)
+
+        try model.remove(profileID: "p", aliasID: first, kind: .movie)
+        try model.add(profileID: "p", aliasID: first, kind: .movie)
+
+        XCTAssertEqual(
+            model.activeSnapshot.orderedEntries.map(\.aliasID),
+            [first, second]
+        )
+    }
+
+    func testNativeImportAppendsDeterministically() throws {
+        let model = WatchlistModel()
+        let explicit = MediaAliasID()
+        let nativeFirst = MediaAliasID()
+        let nativeSecond = MediaAliasID()
+        try model.activate(profileID: "p")
+        try model.add(profileID: "p", aliasID: explicit, kind: .movie)
+
+        _ = try model.importNativeBatch(
+            profileID: "p",
+            destinationID: WatchlistDestinationID(rawValue: "native")!,
+            candidates: [
+                .init(aliasID: nativeFirst, kind: .movie),
+                .init(aliasID: nativeSecond, kind: .series)
+            ]
+        )
+
+        XCTAssertEqual(
+            model.activeSnapshot.orderedEntries.map(\.aliasID),
+            [explicit, nativeFirst, nativeSecond]
+        )
+    }
+
     func testTombstonePersistsAndReaddKeepsStableRank() throws {
         let model = WatchlistModel()
         let alias = MediaAliasID()
@@ -285,6 +342,211 @@ final class WatchlistModelTests: XCTestCase {
         XCTAssertThrowsError(try relaunched.hydrate(profileID: "removed"))
         try relaunched.activate(profileID: "removed")
         XCTAssertTrue(relaunched.activeSnapshot.orderedEntries.isEmpty)
+    }
+
+    func testOrderingPersistsAcrossRelaunch() throws {
+        let root = FileManager.default.urls(
+            for: .cachesDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent(
+            "PlozzWatchlistOrderingTests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = MediaAliasID()
+        let second = MediaAliasID()
+        let native = MediaAliasID()
+        let original = WatchlistModel(storageDirectory: root)
+        try original.activate(profileID: "p")
+        try original.add(profileID: "p", aliasID: first, kind: .movie)
+        try original.add(profileID: "p", aliasID: second, kind: .series)
+        _ = try original.importNativeBatch(
+            profileID: "p",
+            destinationID: WatchlistDestinationID(rawValue: "native")!,
+            candidates: [.init(aliasID: native, kind: .movie)]
+        )
+
+        let relaunched = WatchlistModel(storageDirectory: root)
+        try relaunched.activate(profileID: "p")
+
+        XCTAssertEqual(
+            relaunched.activeSnapshot.orderedEntries.map(\.aliasID),
+            [second, first, native]
+        )
+    }
+
+    func testPresentationEnrichmentDoesNotReorderEntries() throws {
+        let model = WatchlistModel()
+        let first = MediaAliasID()
+        let second = MediaAliasID()
+        try model.activate(profileID: "p")
+        try model.add(profileID: "p", aliasID: first, kind: .movie)
+        try model.add(profileID: "p", aliasID: second, kind: .series)
+        let before = model.activeSnapshot.orderedEntries.map(\.aliasID)
+        let aliasSnapshot = MediaAliasSnapshot(records: [
+            MediaAliasRecord(
+                id: first,
+                kind: .movie,
+                presentation: MediaAliasPresentation(
+                    title: "Enriched Movie",
+                    year: 2020
+                )
+            )!,
+            MediaAliasRecord(
+                id: second,
+                kind: .series,
+                presentation: MediaAliasPresentation(
+                    title: "Enriched Series",
+                    year: 2021
+                )
+            )!
+        ])
+
+        try model.reconcileAliases(
+            profileID: "p",
+            aliasSnapshot: aliasSnapshot
+        )
+        _ = try model.presentationSnapshot(
+            profileID: "p",
+            aliasSnapshot: aliasSnapshot,
+            currentItemsByAliasID: [:]
+        )
+
+        XCTAssertEqual(
+            model.snapshotsByProfile["p"]?.orderedEntries.map(\.aliasID),
+            before
+        )
+    }
+
+    func testRedirectedTombstoneDoesNotMoveActiveWinner() {
+        let neighbor = MediaAliasID()
+        let winner = MediaAliasID()
+        let tombstone = MediaAliasID()
+        let now = Date()
+        let intents = [
+            WatchlistIntent(
+                aliasID: neighbor,
+                kind: .movie,
+                desiredState: .present,
+                rank: 0,
+                orderingRank: 0,
+                origin: .local,
+                changedAt: now
+            )!,
+            WatchlistIntent(
+                aliasID: winner,
+                kind: .movie,
+                desiredState: .present,
+                rank: 1,
+                orderingRank: 5,
+                origin: .local,
+                changedAt: now
+            )!,
+            WatchlistIntent(
+                aliasID: tombstone,
+                kind: .movie,
+                desiredState: .absent,
+                rank: 2,
+                orderingRank: -100,
+                origin: .local,
+                changedAt: now.addingTimeInterval(-1)
+            )!
+        ]
+        let aliasSnapshot = MediaAliasSnapshot(records: [
+            MediaAliasRecord(id: neighbor, kind: .movie)!,
+            MediaAliasRecord(id: winner, kind: .movie)!,
+            MediaAliasRecord(
+                id: tombstone,
+                kind: .movie,
+                redirectTarget: winner
+            )!
+        ])
+
+        let snapshot = WatchlistSnapshot(
+            intents: intents,
+            aliasSnapshot: aliasSnapshot
+        )
+
+        XCTAssertEqual(
+            snapshot.orderedEntries.map(\.aliasID),
+            [neighbor, winner]
+        )
+    }
+
+    func testUnvalidatedSyncedHintStaysUnownedUntilLocalCopyReplacesInPlace() throws {
+        let model = WatchlistModel()
+        let older = MediaAliasID()
+        let newer = MediaAliasID()
+        try model.activate(profileID: "p")
+        try model.add(
+            profileID: "p",
+            aliasID: older,
+            kind: .movie,
+            presentation: MediaAliasPresentation(title: "Older", year: 2020)
+        )
+        try model.add(
+            profileID: "p",
+            aliasID: newer,
+            kind: .movie,
+            presentation: MediaAliasPresentation(title: "Newer", year: 2021)
+        )
+        let binding = MediaAliasProviderBindingKey(
+            providerKind: .plex,
+            accountDescriptorID: "account",
+            providerItemID: "global"
+        )!
+        let aliasSnapshot = MediaAliasSnapshot(records: [
+            MediaAliasRecord(
+                id: older,
+                kind: .movie,
+                presentation: MediaAliasPresentation(
+                    title: "Older",
+                    year: 2020
+                )
+            )!,
+            MediaAliasRecord(
+                id: newer,
+                kind: .movie,
+                presentation: MediaAliasPresentation(
+                    title: "Newer",
+                    year: 2021
+                ),
+                bindingHints: [
+                    MediaAliasProviderBindingHint(binding: binding)
+                ],
+                locallyValidatedBindings: []
+            )!
+        ])
+
+        let fallback = try model.presentationSnapshot(
+            profileID: "p",
+            aliasSnapshot: aliasSnapshot,
+            currentItemsByAliasID: [:]
+        )
+        XCTAssertEqual(fallback.map(\.id), [newer, older])
+        XCTAssertTrue(
+            fallback.allSatisfy {
+                !$0.item.locallyValidatedPlayableSource
+            }
+        )
+
+        let localCopy = MediaItem(
+            id: "local-rating-key",
+            title: "Newer",
+            kind: .movie,
+            locallyValidatedPlayableSource: true,
+            sourceAccountID: "account"
+        )
+        let enriched = try model.presentationSnapshot(
+            profileID: "p",
+            aliasSnapshot: aliasSnapshot,
+            currentItemsByAliasID: [newer: localCopy]
+        )
+        XCTAssertEqual(enriched.map(\.id), [newer, older])
+        XCTAssertEqual(enriched.first?.item.id, "local-rating-key")
+        XCTAssertTrue(
+            enriched.first?.item.locallyValidatedPlayableSource == true
+        )
     }
 
     func testNativeImportBatchPersistsOnceAtOneAndTenThousand() throws {

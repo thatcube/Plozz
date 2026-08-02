@@ -365,6 +365,7 @@ struct HomeHeroView: View {
         MediaItem.heroCTA(
             availability: requestOverrides[item.id] ?? item.availability,
             downloadProgress: item.downloadProgress,
+            hasValidatedPlayableSource: item.hasPlayableLibraryTarget(),
             seerConnected: seerConnected
         )
     }
@@ -373,7 +374,7 @@ struct HomeHeroView: View {
     /// primary action (a not-owned featured title with Seerr disconnected).
     private func primaryButton(for item: MediaItem) -> HeroButton? {
         switch heroCTA(for: item) {
-        case .play: return item.hasPlayableLibraryTarget() ? .play : nil
+        case .play: return .play
         case .request: return .request
         case .downloading, .requested: return .downloadStatus
         case .unavailable: return nil

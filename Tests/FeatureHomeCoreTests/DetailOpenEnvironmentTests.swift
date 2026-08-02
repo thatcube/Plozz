@@ -53,4 +53,64 @@ final class DetailOpenEnvironmentTests: XCTestCase {
         XCTAssertTrue(selection.sources.isEmpty)
         XCTAssertNil(selection.selected)
     }
+
+    func testAccountTaggedGlobalItemWithoutLocalProofUsesExternalDetail() {
+        let item = MediaItem(
+            id: "global-discover-id",
+            title: "The Legend of Hei",
+            kind: .movie,
+            providerIDs: ["PlexGuid": "plex://movie/global-discover-id"],
+            locallyValidatedPlayableSource: false,
+            sourceAccountID: "plex-account"
+        )
+
+        XCTAssertTrue(DetailOpenEnvironment.isDiscovery(
+            item,
+            identitySources: { _ in [] }
+        ))
+        let selection = DetailOpenEnvironment.initialSourceSelection(
+            for: item,
+            isDiscovery: true,
+            libraryOrigin: nil,
+            identitySources: { _ in [] },
+            sourceLocality: { _ in .local }
+        )
+        XCTAssertTrue(selection.sources.isEmpty)
+        XCTAssertNil(selection.selected)
+        XCTAssertEqual(
+            item.ownershipPresentation().showsPlaybackDetails,
+            false
+        )
+        XCTAssertEqual(
+            item.ownershipPresentation().showsProviderManagement,
+            false
+        )
+    }
+
+    func testValidatedIdentityIndexCopyRestoresLibraryDetail() {
+        let item = MediaItem(
+            id: "global-discover-id",
+            title: "The Legend of Hei",
+            kind: .movie,
+            locallyValidatedPlayableSource: false,
+            sourceAccountID: "plex-account"
+        )
+        let local = MediaSourceRef(
+            accountID: "plex-account",
+            itemID: "local-rating-key",
+            kind: .movie,
+            providerKind: .plex
+        )
+
+        XCTAssertFalse(DetailOpenEnvironment.isDiscovery(
+            item,
+            identitySources: { _ in [local] }
+        ))
+        let presentation = item.ownershipPresentation(
+            additionalSources: [local]
+        )
+        XCTAssertTrue(presentation.canPlay)
+        XCTAssertTrue(presentation.showsPlaybackDetails)
+        XCTAssertTrue(presentation.showsProviderManagement)
+    }
 }

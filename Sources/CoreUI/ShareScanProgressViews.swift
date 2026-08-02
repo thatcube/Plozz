@@ -38,33 +38,31 @@ public struct ShareScanProgressBar: View {
                 Capsule(style: .continuous)
                     .fill(palette.fill)
 
-                if let fraction {
-                    Capsule(style: .continuous)
-                        .fill(fillGradient)
-                        .frame(width: max(height, width * CGFloat(min(max(fraction, 0), 1))))
-                        // Animate the WIDTH only, so a climbing counter glides
-                        // instead of stepping — and nothing else in the row moves.
-                        .animation(.easeOut(duration: 0.35), value: fraction)
-                } else if reduceMotion {
-                    // No motion: a static, half-length band still reads as
-                    // "working, length unknown" without anything sliding.
-                    Capsule(style: .continuous)
-                        .fill(fillGradient)
-                        .frame(width: width * 0.45)
-                        .opacity(0.65)
-                } else {
-                    Capsule(style: .continuous)
-                        .fill(sweepGradient)
-                        .frame(width: width * 0.45)
-                        .offset(x: sweep ? width * 0.55 : -width * 0.45)
-                        .onAppear {
-                            withAnimation(
-                                .easeInOut(duration: 1.5).repeatForever(autoreverses: true)
-                            ) {
-                                sweep = true
-                            }
+                Capsule(style: .continuous)
+                    .fill(fillGradient)
+                    .frame(width: determinateWidth(in: width))
+                    .opacity(fraction == nil ? 0 : 1)
+                    // Keep every mode mounted. Progress changes animate only the
+                    // fill width instead of replacing the whole bar subtree.
+                    .animation(.easeOut(duration: 0.35), value: fraction)
+
+                Capsule(style: .continuous)
+                    .fill(fillGradient)
+                    .frame(width: width * 0.45)
+                    .opacity(fraction == nil && reduceMotion ? 0.65 : 0)
+
+                Capsule(style: .continuous)
+                    .fill(sweepGradient)
+                    .frame(width: width * 0.45)
+                    .offset(x: sweep ? width * 0.55 : -width * 0.45)
+                    .opacity(fraction == nil && !reduceMotion ? 1 : 0)
+                    .onAppear {
+                        withAnimation(
+                            .easeInOut(duration: 1.5).repeatForever(autoreverses: true)
+                        ) {
+                            sweep = true
                         }
-                }
+                    }
             }
             .clipShape(Capsule(style: .continuous))
         }
@@ -79,6 +77,11 @@ public struct ShareScanProgressBar: View {
     /// white on tvOS, system blue on iOS/iPadOS — so the same bar rendered a
     /// different colour on each device.
     private var tint: Color { ThemePalette.brandBlue }
+
+    private func determinateWidth(in width: CGFloat) -> CGFloat {
+        guard let fraction else { return height }
+        return max(height, width * CGFloat(min(max(fraction, 0), 1)))
+    }
 
     private var fillGradient: LinearGradient {
         LinearGradient(
@@ -131,15 +134,15 @@ public struct ShareScanStatusRow: View {
 
                 Spacer(minLength: 8)
 
-                if let fraction = state.fraction {
-                    Text(
-                        fraction,
-                        format: .percent.precision(.fractionLength(0))
-                    )
-                        .font(valueFont)
-                        .monospacedDigit()
-                        .plozzForeground(.secondary)
-                }
+                Text(
+                    state.fraction ?? 0,
+                    format: .percent.precision(.fractionLength(0))
+                )
+                    .font(valueFont)
+                    .monospacedDigit()
+                    .plozzForeground(.secondary)
+                    .opacity(state.fraction == nil ? 0 : 1)
+                    .accessibilityHidden(state.fraction == nil)
             }
 
             ShareScanProgressBar(fraction: state.fraction, height: barHeight)
@@ -327,10 +330,11 @@ public struct ShareScanProgressBanner: View {
                     .plozzFocusableCard(
                         cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius
                     )
-                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: state?.isBusy)
+        .transaction { transaction in
+            transaction.animation = nil
+        }
     }
 
     private var state: ShareScanState? {

@@ -73,6 +73,7 @@ enum SeerMapper {
             heroBackdropURL: imageURL(path: result.backdropPath, size: heroBackdropSize),
             providerIDs: ["Tmdb": String(result.id)],
             availability: status,
+            locallyValidatedPlayableSource: false,
             downloadProgress: downloadProgress(from: result.mediaInfo?.downloadStatus)
         )
     }

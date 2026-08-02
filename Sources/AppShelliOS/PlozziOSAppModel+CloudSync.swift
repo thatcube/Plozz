@@ -563,15 +563,17 @@ extension PlozziOSAppModel {
                 )
             }
             self.armMediaAliasObservation()
+            self.armMediaStateSnapshotObservation()
         }
     }
 
+    /// Profile roster/selection changes require activation and one native import.
+    /// Snapshot mutations only schedule cloud capture; they must not recursively
+    /// prepare the model or fetch provider watchlists.
     func armMediaAliasObservation() {
         withObservationTracking {
             _ = profiles.profiles
             _ = profiles.activeProfileID
-            _ = mediaAliasLedger.snapshotsByProfile
-            _ = universalWatchlist.snapshotsByProfile
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -590,6 +592,19 @@ extension PlozziOSAppModel {
                 }
                 self.scheduleCloudPublish()
                 self.armMediaAliasObservation()
+            }
+        }
+    }
+
+    func armMediaStateSnapshotObservation() {
+        withObservationTracking {
+            _ = mediaAliasLedger.snapshotsByProfile
+            _ = universalWatchlist.snapshotsByProfile
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.scheduleCloudPublish()
+                self.armMediaStateSnapshotObservation()
             }
         }
     }

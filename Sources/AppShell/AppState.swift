@@ -3,6 +3,7 @@ import Observation
 import AppRuntime
 import CoreModels
 import CoreNetworking
+import CoreUI
 import FeatureAuth
 import FeatureDiscovery
 import FeatureDiscoveryCore
@@ -95,6 +96,7 @@ public final class AppState {
     public let profilesModel: ProfilesModel
     /// Generic durable title identity for Plozz-owned profile state.
     public let mediaAliasLedger: MediaAliasLedgerModel
+    public let transientStatusPresenter = TransientStatusPresenter()
     /// Profile-scoped, local-first universal Watchlist source of truth.
     public let universalWatchlist: WatchlistModel
     public let runtimeFeatureFlags: RuntimeFeatureFlags
@@ -108,6 +110,8 @@ public final class AppState {
     var universalWatchlistRetryScheduler: WatchlistRetryScheduler?
     @ObservationIgnored
     var universalWatchlistShouldResumeAuthentication = false
+    @ObservationIgnored
+    var universalWatchlistIdentityUpdateTask: Task<Void, Never>?
 
     /// The app-scoped audio playback engine. Created **once** and shared across
     /// profile switches so there's only ever a single `AVQueuePlayer` — otherwise
@@ -206,7 +210,24 @@ public final class AppState {
                 self.universalWatchlistMembership(item)
             },
             performUniversalWatchlist: { [unowned self] adding, item in
-                self.performUniversalWatchlist(adding: adding, item: item)
+                await self.performUniversalWatchlist(
+                    adding: adding,
+                    item: item
+                )
+            },
+            presentUniversalWatchlistFeedback: {
+                [unowned self] icon, text in
+                self.transientStatusPresenter.present(
+                    icon: icon,
+                    text: text
+                )
+            },
+            beginUniversalWatchlistFanOut: {
+                [unowned self] adding, item in
+                self.beginUniversalWatchlistFanOut(
+                    adding: adding,
+                    item: item
+                )
             },
             resolveDurableWatchlist: { [unowned self] items in
                 self.resolvedUniversalWatchlistItems(candidates: items)

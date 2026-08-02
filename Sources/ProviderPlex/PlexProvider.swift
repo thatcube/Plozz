@@ -343,7 +343,13 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
         // watchlist toggle + cross-server discovery (which can still surface an
         // owned copy on another server) keep working.
         if let discoverID = PlexClient.discoverMetadataID(from: id) {
-            return map(metadata: try await client.discoverMetadata(metadataID: discoverID))
+            var item = map(
+                metadata: try await client.discoverMetadata(
+                    metadataID: discoverID
+                )
+            )
+            item.locallyValidatedPlayableSource = false
+            return item
         }
         do {
             return map(metadata: try await client.metadata(ratingKey: id))
@@ -352,7 +358,13 @@ public struct PlexProvider: MediaProvider, AuthenticatedHTTPOriginProviding {
             // global Discover id (defensive) — retry against Discover if derivable,
             // otherwise surface the original notFound.
             guard let discoverID = PlexClient.discoverMetadataID(from: id) else { throw error }
-            return map(metadata: try await client.discoverMetadata(metadataID: discoverID))
+            var item = map(
+                metadata: try await client.discoverMetadata(
+                    metadataID: discoverID
+                )
+            )
+            item.locallyValidatedPlayableSource = false
+            return item
         }
     }
 
@@ -1780,7 +1792,12 @@ extension PlexProvider: WatchlistProviding {
     public func watchlist() async throws -> [MediaItem] {
         try await client.watchlist()
             .map(map(metadata:))
-            .map { var copy = $0; copy.isFavorite = true; return copy }
+            .map {
+                var copy = $0
+                copy.isFavorite = true
+                copy.locallyValidatedPlayableSource = false
+                return copy
+            }
     }
 }
 

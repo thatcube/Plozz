@@ -154,7 +154,19 @@ public struct DetailOpenEnvironment {
     /// while its model loads a real library item renders the request layout over
     /// library data.
     public func isDiscovery(_ item: MediaItem) -> Bool {
-        item.isNotInLibraryDiscovery && identitySources(item).isEmpty
+        Self.isDiscovery(item, identitySources: identitySources)
+    }
+
+    public static func isDiscovery(
+        _ item: MediaItem,
+        identitySources: (MediaItem) -> [MediaSourceRef]
+    ) -> Bool {
+        let indexedSources = identitySources(item)
+        let hasPlayableTarget = item.hasPlayableLibraryTarget(
+            additionalSources: indexedSources
+        )
+        return !hasPlayableTarget
+            || (item.isNotInLibraryDiscovery && indexedSources.isEmpty)
     }
 
     public func makeViewModel(for item: MediaItem, libraryOrigin: String?) -> ItemDetailViewModel {

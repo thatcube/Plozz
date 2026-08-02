@@ -109,6 +109,9 @@ public struct TVmazePersonCreditsProvider: PersonCreditsProviding {
 
     private func item(id: Int, title: String, year: String?, image: String?) -> MediaItem {
         var item = MediaItem(id: "tvmaze:\(id)", title: title, kind: .series)
+        // Its own catalogue id, which it plainly knows and was discarding. Without
+        // one of these a credit cannot be matched against the viewer's library.
+        item.providerIDs[ProviderIDNamespace.tvmaze.canonicalKey] = String(id)
         item.productionYear = year.flatMap { Int($0.prefix(4)) }
         item.posterURL = image.flatMap(URL.init(string:))
         item.availability = .unknown

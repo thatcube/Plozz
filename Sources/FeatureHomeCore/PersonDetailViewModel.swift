@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreNetworking
 import CoreUI
 import MetadataKit
 
@@ -308,7 +309,8 @@ public final class PersonDetailViewModel {
         // used to accept a credit with no strong external id and did not scope the
         // index's sources by kind, so a TMDb integer shared between a movie and a
         // series could attach the wrong work's servers.
-        item.retargetedToOwnedLibraryCopy(indexedSources: librarySources) ?? item
+        let retargeted = item.retargetedToOwnedLibraryCopy(indexedSources: librarySources)
+        return retargeted ?? item
     }
 
     /// Collapses one work held on several servers into a single credit.
@@ -335,6 +337,12 @@ public final class PersonDetailViewModel {
             if winner.posterURL == nil {
                 winner.posterURL = group.lazy
                     .compactMap { items[$0].posterURL }.first
+            }
+            for index in group.dropFirst() {
+                for (namespace, value) in items[index].providerIDs
+                where winner.providerIDs[namespace] == nil {
+                    winner.providerIDs[namespace] = value
+                }
             }
             return winner
         }
@@ -421,39 +429,52 @@ public final class PersonDetailViewModel {
         // In flight while the servers are asked, and cancelled with this task if
         // the viewer moves on; see the method.
         async let externalBiography = fetchExternalBiography()
-        guard let provider else {
-            state = .unavailable
-            _ = await externalBiography
+        // No OWNING server is not the end of the lookup.
+        //
+        // A person reached from a discovery title — a cast face on a show nobody
+        // has — has no owning account, so `provider` is nil. This used to return
+        // immediately, which skipped both the viewer's OTHER servers and the
+        // external credit rungs, and the page then said "nothing else in your
+        // library with <name>" about an actor whose work the viewer owns plenty
+        // of. It had simply never asked. The remaining stages key off the
+        // person's NAME, not a server-specific id, so they work perfectly well
+        // without one.
+        var items: [MediaItem]?
+        if let provider {
+            // The person's own server, asked by its own exact id. Independent and
+            // separately fallible from the biography: a source can list credits and
+            // keep no person record, or the reverse, and neither absence should
+            // suppress the other.
+            async let credits = try? provider.items(withPerson: person.id, limit: limit)
+            async let record = try? provider.person(id: person.id)
+
+            // `try?` over an already-Optional return nests the optionals, so flatten
+            // both once: "the call failed" and "the source had nothing" mean the same
+            // thing to this page.
+            items = await credits
+            let personRecord: MediaPerson? = await record ?? nil
+
+            biography = personRecord?.biography.flatMap { $0.isEmpty ? nil : $0 }
+            if let items {
+                libraryCredits = Self.collapsingDuplicates(items.filter(includeCredit))
+                state = .loaded
+            } else {
+                state = .unavailable
+            }
             PersonDiagnostics.emit(
-                "person.load name=\(person.name) result=no-provider ms=\(elapsed(started))"
+                "person.own name=\(person.name) provider=\(Self.kind(of: provider)) "
+                + "credits=\(items?.count ?? -1) record=\(personRecord == nil ? "nil" : "yes") "
+                + "bio=\(biography == nil ? "no" : "yes") ms=\(elapsed(started))"
             )
-            return
-        }
-        // The person's own server, asked by its own exact id. Independent and
-        // separately fallible from the biography: a source can list credits and
-        // keep no person record, or the reverse, and neither absence should
-        // suppress the other.
-        async let credits = try? provider.items(withPerson: person.id, limit: limit)
-        async let record = try? provider.person(id: person.id)
-
-        // `try?` over an already-Optional return nests the optionals, so flatten
-        // both once: "the call failed" and "the source had nothing" mean the same
-        // thing to this page.
-        let items: [MediaItem]? = await credits
-        let personRecord: MediaPerson? = await record ?? nil
-
-        biography = personRecord?.biography.flatMap { $0.isEmpty ? nil : $0 }
-        if let items {
-            libraryCredits = Self.collapsingDuplicates(items.filter(includeCredit))
-            state = .loaded
         } else {
+            // Nothing owned yet, but nothing failed either — the later stages
+            // decide what this page can show.
             state = .unavailable
+            PersonDiagnostics.emit(
+                "person.own name=\(person.name) provider=none "
+                + "result=no-owning-server ms=\(elapsed(started))"
+            )
         }
-        PersonDiagnostics.emit(
-            "person.own name=\(person.name) provider=\(Self.kind(of: provider)) "
-            + "credits=\(items?.count ?? -1) record=\(personRecord == nil ? "nil" : "yes") "
-            + "bio=\(biography == nil ? "no" : "yes") ms=\(elapsed(started))"
-        )
         onProgress?()
 
         if Task.isCancelled { return }
@@ -462,7 +483,8 @@ public final class PersonDetailViewModel {
         // provider that does, and for a Plex-sourced person this is the sole
         // route to a biography — the server itself has no person records at
         // all, only actor tags on titles.
-        if biography == nil, let externalID = person.externalID, !externalID.isEmpty {
+        if biography == nil, let provider,
+           let externalID = person.externalID, !externalID.isEmpty {
             let stage = Date()
             let record = await provider.person(externalID: externalID, name: person.name)
             if let text = record?.biography, !text.isEmpty { biography = text }
@@ -604,10 +626,25 @@ public final class PersonDetailViewModel {
                         // provider has a poster for a title already held without
                         // one, take it: the winning entry keeps its identity and
                         // its rank, and only gains an image it was missing.
-                        if let index = indexByKey[key],
-                           merged[index].posterURL == nil,
-                           let poster = item.posterURL {
-                            merged[index].posterURL = poster
+                        if let index = indexByKey[key] {
+                            if merged[index].posterURL == nil,
+                               let poster = item.posterURL {
+                                merged[index].posterURL = poster
+                            }
+                            // And its EXTERNAL IDS, which matter more than the
+                            // poster. Wikidata and TVmaze credits carry no
+                            // catalogue ids at all, and Wikidata is ranked first
+                            // because it knows what a person is famous for — so an
+                            // id-less entry won every group and the TMDb duplicate
+                            // that did carry an id was thrown away. The survivor
+                            // then had nothing to match the identity index with,
+                            // and a show the viewer owns on four servers still wore
+                            // a request mark. A duplicate is another description of
+                            // the same work: fold in what it knows.
+                            for (namespace, value) in item.providerIDs
+                            where merged[index].providerIDs[namespace] == nil {
+                                merged[index].providerIDs[namespace] = value
+                            }
                         }
                         continue
                     }

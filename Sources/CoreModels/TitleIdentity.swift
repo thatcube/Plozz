@@ -219,6 +219,14 @@ public struct TitleIdentityResolver: Sendable, Equatable {
     /// take an `.alias` root and an `.evidence` root respectively and fail to group,
     /// in exactly the surfaces this type exists to fix.
     public func identity(for item: MediaItem) -> TitleIdentity {
+        // A resolvable durable hint is the answer on its own — it is what the index
+        // walk would have led to anyway. Checked FIRST because `canonicalEvidence`
+        // walks a transitive component graph, and paying for that only to discard it
+        // is pure waste on a path that callers reach per item.
+        if let preferred = item.watchlistAliasID,
+           let resolved = aliases.resolvedAliasID(for: preferred) {
+            return TitleIdentity(kind: item.kind, root: .alias(resolved))
+        }
         let canonical = index.canonicalEvidence(for: item)
         if let aliasID = durableAliasID(for: item, canonical: canonical) {
             return TitleIdentity(kind: item.kind, root: .alias(aliasID))
@@ -269,10 +277,7 @@ public struct TitleIdentityResolver: Sendable, Equatable {
         for item: MediaItem,
         canonical: MediaIdentity?
     ) -> MediaAliasID? {
-        if let preferred = item.watchlistAliasID,
-           let resolved = aliases.resolvedAliasID(for: preferred) {
-            return resolved
-        }
+        // `identity(for:)` has already tried `item.watchlistAliasID`.
         guard !aliases.recordsByID.isEmpty,
               let evidence = MediaAliasEvidence(item: item, canonicalEvidence: canonical) else {
             return nil

@@ -209,6 +209,9 @@ public final class AppState {
             watchlistMembership: { [unowned self] item in
                 self.universalWatchlistMembership(item)
             },
+            watchlistMembershipRevision: { [unowned self] in
+                self.universalWatchlistMembershipRevision
+            },
             performUniversalWatchlist: { [unowned self] adding, item in
                 await self.performUniversalWatchlist(
                     adding: adding,

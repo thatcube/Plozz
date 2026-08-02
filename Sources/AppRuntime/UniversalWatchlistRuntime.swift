@@ -84,7 +84,10 @@ public extension UniversalWatchlistHost {
         let index = identityIndex.identitySnapshot
         let aliases = mediaAliasLedger.activeSnapshot
         var hasher = Hasher()
-        hasher.combine(index.crossServerIdentityCount)
+        // Counts only, and only O(1) ones. `crossServerIdentityCount` looks like a
+        // peer of `identityCount` but is documented diagnostics: it scans every
+        // indexed identity and builds a Set per entry. It has no place on a path
+        // callers reach per item.
         hasher.combine(index.identityCount)
         hasher.combine(aliases.recordsByID.count)
         hasher.combine(aliases.activeRecordCount)
@@ -93,6 +96,27 @@ public extension UniversalWatchlistHost {
             aliases: aliases,
             revision: UInt64(bitPattern: Int64(hasher.finalize()))
         )
+    }
+
+    /// A cheap value that changes whenever anything `universalWatchlistMembership`
+    /// depends on changes: the identity index, the durable alias ledger, or the
+    /// watchlist itself. Consumers cache membership against it rather than resolving
+    /// an identity per card body — see `MediaItemActionCoordinator.membershipCache`.
+    ///
+    /// Every input is O(1), because this is read once per item: hashing the whole
+    /// active id set would be O(watchlist) per card, trading one hot cost for
+    /// another. A local toggle additionally clears the cache outright, so the only
+    /// gap is a REMOTE sync that adds and removes the same number of titles between
+    /// two reads — which self-heals on the next change of any input.
+    var universalWatchlistMembershipRevision: UInt64 {
+        let index = identityIndex.identitySnapshot
+        let aliases = mediaAliasLedger.activeSnapshot
+        var hasher = Hasher()
+        hasher.combine(index.identityCount)
+        hasher.combine(aliases.recordsByID.count)
+        hasher.combine(aliases.activeRecordCount)
+        hasher.combine(universalWatchlist.activeSnapshot.activeAliasIDs.count)
+        return UInt64(bitPattern: Int64(hasher.finalize()))
     }
 
     func universalWatchlistMembership(_ item: MediaItem) -> Bool {

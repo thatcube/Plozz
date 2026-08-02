@@ -314,4 +314,70 @@ final class UniversalWatchlistActionTests: XCTestCase {
             continuation = nil
         }
     }
+
+    /// Resolving membership walks the identity index's component graph and builds
+    /// alias evidence. `actions(for:)` runs from every card's `body`, so doing that
+    /// per call cost sustained 200-500 ms main-thread stalls on an idle Apple TV
+    /// Home. It must be resolved once per world, not once per body.
+    func testMembershipIsResolvedOncePerWorldNotPerCardBody() {
+        var resolutions = 0
+        var revision: UInt64 = 1
+        let coordinator = MediaItemActionCoordinator(
+            providerResolver: { _ in nil },
+            primaryAccountID: { nil },
+            crossServerWatchSyncEnabled: { false },
+            enqueueWatchMutation: { _ in },
+            universalWatchlistEnabled: { true },
+            watchlistMembership: { _ in
+                resolutions += 1
+                return true
+            },
+            watchlistMembershipRevision: { revision }
+        )
+        let a = MediaItem(id: "1", title: "A", kind: .movie, sourceAccountID: "acct")
+        let b = MediaItem(id: "2", title: "B", kind: .movie, sourceAccountID: "acct")
+
+        // A row of cards re-evaluating many times over an unchanged world.
+        for _ in 0..<50 {
+            _ = coordinator.isWatchlisted(a)
+            _ = coordinator.isWatchlisted(b)
+        }
+        XCTAssertEqual(resolutions, 2, "one resolution per distinct item, not per call")
+
+        // A changed world must be seen — a stale heart is the bug this replaced.
+        revision = 2
+        XCTAssertTrue(coordinator.isWatchlisted(a))
+        XCTAssertEqual(resolutions, 3)
+
+        // Two cards showing the same copy share one answer.
+        let aAgain = MediaItem(id: "1", title: "A", kind: .movie, sourceAccountID: "acct")
+        _ = coordinator.isWatchlisted(aAgain)
+        XCTAssertEqual(resolutions, 3)
+    }
+
+    /// The same title on two different servers is two copies and must be asked
+    /// about separately — the cache key must not collapse them.
+    func testMembershipCacheIsScopedByAccount() {
+        var asked: [String] = []
+        let coordinator = MediaItemActionCoordinator(
+            providerResolver: { _ in nil },
+            primaryAccountID: { nil },
+            crossServerWatchSyncEnabled: { false },
+            enqueueWatchMutation: { _ in },
+            universalWatchlistEnabled: { true },
+            watchlistMembership: { item in
+                asked.append(item.sourceAccountID ?? "-")
+                return false
+            },
+            watchlistMembershipRevision: { 7 }
+        )
+        _ = coordinator.isWatchlisted(
+            MediaItem(id: "9", title: "T", kind: .movie, sourceAccountID: "plex")
+        )
+        _ = coordinator.isWatchlisted(
+            MediaItem(id: "9", title: "T", kind: .movie, sourceAccountID: "jellyfin")
+        )
+        XCTAssertEqual(asked, ["plex", "jellyfin"])
+    }
+
 }

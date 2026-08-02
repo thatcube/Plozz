@@ -27,6 +27,8 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     private let enqueueWatchMutation: (WatchMutation) -> Void
     private let universalWatchlistEnabled: () -> Bool
     private let watchlistMembership: (MediaItem) -> Bool
+    /// A cheap value that changes whenever anything membership depends on changes.
+    private let watchlistMembershipRevision: () -> UInt64
     private let performUniversalWatchlist:
         @MainActor (Bool, MediaItem) async -> Bool
     private let presentUniversalWatchlistFeedback:
@@ -54,6 +56,22 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// covers that.
     private var capabilityCache: [String: ProviderCapabilities] = [:]
 
+    /// Cached watchlist MEMBERSHIP per item, for the same reason as the capability
+    /// cache above and on exactly the same hot path.
+    ///
+    /// Answering "is this watchlisted" resolves the item's universal identity, which
+    /// walks the identity index's transitive component graph and builds alias
+    /// evidence. That is fine once per item; it is not fine per card per frame, which
+    /// is what `actions(for:)` runs at. Measured on the Apple TV before this cache:
+    /// sustained 200–500 ms main-thread stalls on an idle Home with the view body
+    /// re-evaluating 1–6 times a second.
+    ///
+    /// Keyed by the item's own coordinates — cheap and stable — and thrown away
+    /// wholesale whenever the identity index, the alias ledger or the watchlist
+    /// changes, so a heart can never be answered from a stale world.
+    private var membershipCache: [String: Bool] = [:]
+    private var membershipRevision: UInt64?
+
     private struct ProviderCapabilities {
         let supportsWatchState: Bool
         let supportsWatchlist: Bool
@@ -76,6 +94,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         enqueueWatchMutation: @escaping (WatchMutation) -> Void,
         universalWatchlistEnabled: @escaping () -> Bool = { false },
         watchlistMembership: @escaping (MediaItem) -> Bool = { _ in false },
+        watchlistMembershipRevision: @escaping () -> UInt64 = { 0 },
         performUniversalWatchlist:
             @escaping @MainActor (Bool, MediaItem) async -> Bool = { _, _ in
                 false
@@ -103,6 +122,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         self.enqueueWatchMutation = enqueueWatchMutation
         self.universalWatchlistEnabled = universalWatchlistEnabled
         self.watchlistMembership = watchlistMembership
+        self.watchlistMembershipRevision = watchlistMembershipRevision
         self.performUniversalWatchlist = performUniversalWatchlist
         self.presentUniversalWatchlistFeedback =
             presentUniversalWatchlistFeedback
@@ -143,7 +163,7 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
                 ? false
                 : capabilities.supportsWatchlist,
             isWatchlisted: universalEnabled
-                ? watchlistMembership(item)
+                ? cachedWatchlistMembership(item)
                 : nil,
             supportsMetadataRefresh: capabilities.supportsMetadataRefresh,
             downloadState: isExternalDiscovery ? nil : downloadState(item),
@@ -269,6 +289,11 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
                 guard await performUniversalWatchlist(adding, item) else {
                     return
                 }
+                // The viewer just changed this; don't make the heart wait for a
+                // count to move. Clearing outright also covers a same-count swap,
+                // which is the one case the O(1) revision cannot see.
+                self.membershipCache.removeAll(keepingCapacity: true)
+                self.membershipRevision = nil
                 let feedback = Self.universalWatchlistFeedback(adding: adding)
                 presentFeedback(feedback.icon, feedback.text)
                 beginFanOut(adding, item)
@@ -421,11 +446,31 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// profile switch) so a new or removed account is re-evaluated.
     public func invalidateAccountCaches() {
         capabilityCache.removeAll()
+        membershipCache.removeAll()
+        membershipRevision = nil
+    }
+
+    /// Watchlist membership for `item`, resolved once per world rather than once per
+    /// card body. See `membershipCache`.
+    private func cachedWatchlistMembership(_ item: MediaItem) -> Bool {
+        let revision = watchlistMembershipRevision()
+        if membershipRevision != revision {
+            membershipRevision = revision
+            membershipCache.removeAll(keepingCapacity: true)
+        }
+        // The item's own coordinates, not its identity: deriving the identity is the
+        // expensive thing being avoided. Two rows showing the same title on the same
+        // server share a key and an answer, which is correct — they are one copy.
+        let key = "\(item.sourceAccountID ?? "-"):\(item.id)"
+        if let cached = membershipCache[key] { return cached }
+        let resolved = watchlistMembership(item)
+        membershipCache[key] = resolved
+        return resolved
     }
 
     public func isWatchlisted(_ item: MediaItem) -> Bool {
         universalWatchlistEnabled()
-            ? watchlistMembership(item)
+            ? cachedWatchlistMembership(item)
             : item.isFavorite
     }
 

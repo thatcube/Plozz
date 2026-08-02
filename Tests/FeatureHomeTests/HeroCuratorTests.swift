@@ -100,6 +100,38 @@ final class HeroCuratorTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["dup", "c2", "w2"])
     }
 
+    func testFinalDedupeCollapsesIdentityRevealedByHydration() {
+        let sparseFeatured = MediaItem(
+            id: "seer:series:277439",
+            title: "Cape Fear",
+            kind: .series,
+            overview: "A storm is coming.",
+            productionYear: 2026,
+            genres: ["Drama"],
+            backdropURL: URL(string: "https://example.com/featured.jpg"),
+            ratings: [
+                ExternalRating(source: .tmdb, value: 7.5, scale: .outOfTen)
+            ]
+        )
+        let local = MediaItem(
+            id: "series:cape-fear",
+            title: "Cape Fear",
+            kind: .series,
+            backdropURL: URL(string: "https://example.com/local.jpg"),
+            providerIDs: ["Tmdb": "277439"]
+        )
+        var hydratedFeatured = sparseFeatured
+        hydratedFeatured.providerIDs["Tmdb"] = "277439"
+
+        let result = HeroCurator().deduplicating([hydratedFeatured, local])
+
+        XCTAssertEqual(result.map(\.id), ["seer:series:277439"])
+        XCTAssertEqual(result[0].overview, "A storm is coming.")
+        XCTAssertEqual(result[0].productionYear, 2026)
+        XCTAssertEqual(result[0].genres, ["Drama"])
+        XCTAssertEqual(result[0].ratings.map(\.source), [.tmdb])
+    }
+
     func testRawIDsAreScopedByAccountDuringDeduplication() async {
         let result = await HeroCurator().curate(
             settings: settings(sources: [.continueWatching, .watchlist]),

@@ -141,7 +141,13 @@ public struct CachingRatingsProvider: CachedExternalRatingsProviding {
     }
 
     private func cacheKey(for item: MediaItem) -> String {
-        OMDbRatingsProvider.imdbID(from: item) ?? item.id
+        if item.kind == .episode || item.kind == .season {
+            return item.providerID(.seriesImdb)
+                ?? item.seriesID
+                ?? OMDbRatingsProvider.imdbID(from: item)
+                ?? item.id
+        }
+        return OMDbRatingsProvider.imdbID(from: item) ?? item.id
     }
 
     private static func sanitized(

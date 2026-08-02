@@ -208,6 +208,32 @@ public struct HeroCurator: Sendable {
         )
     }
 
+    /// Final identity pass after provider detail hydration. Sparse list records can
+    /// lack the external id that their full records later reveal; two candidates
+    /// that were distinct during initial curation may therefore become the same
+    /// title after enrichment.
+    public func deduplicating(_ items: [MediaItem]) -> [MediaItem] {
+        var groups: [(tokens: Set<String>, items: [MediaItem])] = []
+        for item in items {
+            let tokens = HeroDedupe.tokens(for: item)
+            if let index = groups.firstIndex(where: {
+                !tokens.isDisjoint(with: $0.tokens)
+            }) {
+                groups[index].tokens.formUnion(tokens)
+                groups[index].items.append(item)
+            } else {
+                groups.append((tokens, [item]))
+            }
+        }
+        return groups.map { group in
+            var merged = MediaItemMerger.mergeGroup(group.items)
+            for donor in group.items {
+                merged.fillMissingHeroPresentation(from: donor)
+            }
+            return merged
+        }
+    }
+
     private enum HeroWatchEligibility {
         static func filter(
             _ items: [MediaItem],
@@ -221,6 +247,7 @@ public struct HeroCurator: Sendable {
             let reconciled = mutations.isEmpty ? items : items.map { item in
                 mutations.reduce(item) { current, mutation in mutation.applied(to: current) }
             }
+
             guard settings.hideWatched else { return reconciled }
             return reconciled.filter { item in
                 switch item.kind {
@@ -231,6 +258,38 @@ public struct HeroCurator: Sendable {
                 }
             }
         }
+    }
+}
+
+private extension MediaItem {
+    mutating func fillMissingHeroPresentation(from donor: MediaItem) {
+        if originalTitle?.isEmpty != false { originalTitle = donor.originalTitle }
+        if overview?.isEmpty != false { overview = donor.overview }
+        if productionYear == nil { productionYear = donor.productionYear }
+        if officialRating?.isEmpty != false {
+            officialRating = donor.officialRating
+        }
+        if genres.isEmpty { genres = donor.genres }
+        if people.isEmpty { people = donor.people }
+        if studios.isEmpty { studios = donor.studios }
+        if tags.isEmpty { tags = donor.tags }
+        if taglines.isEmpty { taglines = donor.taglines }
+        if runtime == nil { runtime = donor.runtime }
+        if posterURL == nil { posterURL = donor.posterURL }
+        if seriesPosterURL == nil { seriesPosterURL = donor.seriesPosterURL }
+        if backdropURL == nil { backdropURL = donor.backdropURL }
+        if heroBackdropURL == nil { heroBackdropURL = donor.heroBackdropURL }
+        if fallbackArtworkURL == nil {
+            fallbackArtworkURL = donor.fallbackArtworkURL
+        }
+        if logoURL == nil { logoURL = donor.logoURL }
+        ratings = ratings.mergedWithAuthoritative(donor.ratings)
+        if artworkSelections.isEmpty {
+            artworkSelections = donor.artworkSelections
+        }
+        if availability == nil { availability = donor.availability }
+        if downloadProgress == nil { downloadProgress = donor.downloadProgress }
+        if mediaInfo == nil { mediaInfo = donor.mediaInfo }
     }
 }
 

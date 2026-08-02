@@ -743,12 +743,13 @@ public struct HomeView: View {
         // This prevents badges and labels changing underneath the viewer.
         let enriched = await heroMetadataEnricher(items)
         guard !Task.isCancelled else { return }
-        heroRuntime.items = enriched
+        let stableItems = heroCurator.deduplicating(enriched)
+        heroRuntime.items = stableItems
         heroRuntime.cachedItems = []
         heroRuntime.cachedKey = nil
         heroRuntime.completedKey = key
         let enrichedByID = Dictionary(
-            enriched.map { ($0.id, $0) },
+            stableItems.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
         let enrichedFeatured = result.featuredItems.map {
@@ -756,7 +757,7 @@ public struct HomeView: View {
         }
         viewModel.cacheHeroItems(enrichedFeatured, for: settings)
         let elapsedMS = Int(Date().timeIntervalSince(started) * 1_000)
-        PlozzLog.boot("HomeHero.curate DONE ms=\(elapsedMS) items=\(enriched.count)")
+        PlozzLog.boot("HomeHero.curate DONE ms=\(elapsedMS) items=\(stableItems.count)")
     }
 
     /// Interval between in-place featured-status refreshes while Home is visible.

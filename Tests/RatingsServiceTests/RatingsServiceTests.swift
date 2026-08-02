@@ -181,6 +181,31 @@ final class RatingsCacheTests: XCTestCase {
         XCTAssertEqual(ratings.map(\.source), [.anilist])
     }
 
+    func testEpisodeReadsSeriesScopedCachedRatingsWithoutFetching() async {
+        let cache = RatingsCache(ttl: 1000)
+        let seriesRatings = [
+            ExternalRating(source: .tmdb, value: 7.198, scale: .outOfTen)
+        ]
+        await cache.store(seriesRatings, forKey: "tt5645432")
+        let base = CountingProvider(result: [])
+        let provider = CachingRatingsProvider(base: base, cache: cache)
+        let episode = MediaItem(
+            id: "episode-1",
+            title: "Episode 1",
+            kind: .episode,
+            seriesID: "series-provider-id",
+            providerIDs: [
+                "Imdb": "tt-episode",
+                "SeriesImdb": "tt5645432",
+            ]
+        )
+
+        let ratings = await provider.cachedRatings(for: episode)
+
+        XCTAssertEqual(ratings, seriesRatings)
+        XCTAssertEqual(base.callCount, 0)
+    }
+
     func testAniListSkipsEpisodesAndSeasons() {
         // AniList scores a *show*, so answering for an episode means lending it
         // the series' number — which would sit beside a server's genuinely

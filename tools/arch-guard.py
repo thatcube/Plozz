@@ -65,6 +65,38 @@ import re
 import subprocess
 import sys
 
+# --- Identity-index render-path policy ---------------------------------------
+# `IdentityIndexSnapshot.sources(for:)` and friends walk a TRANSITIVE component
+# graph: bounded, but not free. That cost is fine once per row load or once per
+# page open. It is NOT fine per card, because a card body re-evaluates on every
+# scroll tick and every observation wave — and a graph walk on that path is
+# exactly the shape of the unbounded-work bug that made the device overheat.
+#
+# A comment saying "never call this from a card" is not enforceable, so this is a
+# module boundary instead: CoreUI is the presentation layer where cards, rows and
+# posters live, and it renders a classification that was RESOLVED FOR IT upstream
+# (a `Bool`, a mark, a descriptor). It must never reach for the index itself.
+# Same rule for the shells' card-shaped views, which are CoreUI cards in all but
+# module. Both are already clean; this keeps them that way loudly.
+INDEX_WALK_SYMBOLS = (
+    "sources(for:",
+    "sources(for ",
+    "sourceRefs(for",
+    "sourcesProvider",
+    "identitySourcesProvider",
+)
+
+# Modules that render but never resolve. CoreUI has no dependency on the index by
+# design; adding one is a layering decision, not an implementation detail.
+INDEX_WALK_FORBIDDEN_MODULES = {"CoreUI"}
+
+# Card-shaped views living inside a shell module (which legitimately uses the
+# index elsewhere, e.g. to open a detail page). Matched on file basename.
+INDEX_WALK_FORBIDDEN_FILES = {
+    "PlozziOSPosterCard.swift",
+    "PlozziOSHomeSkeletonRail.swift",
+}
+
 # --- Declarative policy (the intent lives here) ------------------------------
 # Editing anything below is a conscious, reviewed relaxation of the layering.
 
@@ -725,6 +757,60 @@ def check_tracked_mutable_fanout(sources_root: str) -> list[str]:
     return v
 
 
+def check_index_walk_off_render_path(sources_root: str) -> list[str]:
+    """Keep the identity index's transitive graph walk out of card render paths.
+
+    See INDEX_WALK_SYMBOLS. A card body re-runs on every scroll tick and every
+    observation wave; a graph walk there is the shape of the unbounded-work bug
+    that overheated the device. Rather than trusting a comment, the render layer
+    simply may not name the API — resolve upstream and pass the answer down.
+    """
+    v: list[str] = []
+    if not os.path.isdir(sources_root):
+        return v
+
+    for target in sorted(os.listdir(sources_root)):
+        tdir = os.path.join(sources_root, target)
+        if not os.path.isdir(tdir):
+            continue
+        module_forbidden = target in INDEX_WALK_FORBIDDEN_MODULES
+
+        for dirpath, _dirs, files in os.walk(tdir):
+            for fn in sorted(files):
+                if not fn.endswith(".swift"):
+                    continue
+                if not (module_forbidden or fn in INDEX_WALK_FORBIDDEN_FILES):
+                    continue
+                path = os.path.join(dirpath, fn)
+                rel = os.path.relpath(path, os.path.dirname(sources_root))
+                try:
+                    with open(path, encoding="utf-8") as fh:
+                        lines = fh.readlines()
+                except (OSError, UnicodeDecodeError):
+                    continue
+                # Comments/strings are neutralised so the prose explaining the
+                # rule can name the very API the rule forbids.
+                scan = _strip_comments_and_strings(lines)
+                for lineno, line in enumerate(scan, 1):
+                    for symbol in INDEX_WALK_SYMBOLS:
+                        if symbol not in line:
+                            continue
+                        why = (
+                            f"module '{target}' renders a resolved classification"
+                            if module_forbidden
+                            else "this is a card-shaped view"
+                        )
+                        v.append(
+                            f"[render-path] {rel}:{lineno}: names the identity-index "
+                            f"walk '{symbol.rstrip('( ')}', but {why}. That walk is "
+                            f"transitive and a card body re-evaluates on every scroll "
+                            f"tick — resolve it once upstream (loader/page open) and "
+                            f"pass the answer in."
+                        )
+                        break
+    return v
+
+
 def observable_fanout_report(sources_root: str) -> list[str]:
     """Non-failing informational lines: tracked-mutable ratchet-tighten hints, plus
     stable-let-ref and init-arity smells surfaced for future work."""
@@ -772,6 +858,7 @@ def run_checks(manifest: dict, sources_root: str) -> list[str]:
     violations += check_acyclic(pkg)
     violations += check_imports(pkg, sources_root)
     violations += check_tracked_mutable_fanout(sources_root)
+    violations += check_index_walk_off_render_path(sources_root)
     return violations
 
 
@@ -872,8 +959,68 @@ def _self_test() -> int:
 
     if not _self_test_fanout():
         ok = False
+    if not _self_test_render_path():
+        ok = False
     print("arch-guard --self-test: " + ("OK" if ok else "FAILED"))
     return 0 if ok else 1
+
+
+def _self_test_render_path() -> bool:
+    """A guard that cannot fail is decoration. This builds a throwaway Sources tree
+    and proves the render-path rule fires where it should and stays quiet where it
+    shouldn't — including that a mention in a COMMENT is not a violation, since the
+    real CoreUI files explain the rule by naming the API it forbids."""
+    import shutil
+    import tempfile
+
+    ok = True
+
+    def check(label, cond):
+        nonlocal ok
+        status = "PASS" if cond else "FAIL"
+        if not cond:
+            ok = False
+        print(f"  {status}  render-path: {label}")
+
+    root = tempfile.mkdtemp(prefix="arch-guard-render-")
+    try:
+        src = os.path.join(root, "Sources")
+        for module in ("CoreUI", "AppShelliOS", "FeatureHomeCore"):
+            os.makedirs(os.path.join(src, module))
+
+        def write(module, name, body):
+            with open(os.path.join(src, module, name), "w", encoding="utf-8") as fh:
+                fh.write(body)
+
+        # A card in the render layer reaching for the index: must fail.
+        write("CoreUI", "PosterCardView.swift",
+              "struct PosterCardView: View {\n"
+              "    var body: some View { Text(index.sourceRefs(for: item).description) }\n}\n")
+        # A card-shaped view inside a shell module: must fail.
+        write("AppShelliOS", "PlozziOSPosterCard.swift",
+              "struct PlozziOSPosterCard: View {\n"
+              "    var mark: Bool { model.identitySourcesProvider(item).isEmpty }\n}\n")
+        # The same call from a loader: must be allowed.
+        write("FeatureHomeCore", "RelatedTitlesLoader.swift",
+              "func load() { let s = snapshot.sourceRefs(for: item) }\n")
+        # Prose in the render layer naming the forbidden API: must be allowed.
+        write("CoreUI", "MediaLibraryMark.swift",
+              "// Never call sourceRefs(for:) here — the classification arrives resolved.\n"
+              "struct MediaLibraryMark: View { var body: some View { EmptyView() } }\n")
+
+        violations = check_index_walk_off_render_path(src)
+        blob = "\n".join(violations)
+        check("card in CoreUI is rejected", "PosterCardView.swift" in blob)
+        check("card-shaped shell view is rejected", "PlozziOSPosterCard.swift" in blob)
+        check("loader outside the render layer is allowed",
+              "RelatedTitlesLoader.swift" not in blob)
+        check("a comment naming the API is not a violation",
+              "MediaLibraryMark.swift" not in blob)
+        check("exactly the two real violations", len(violations) == 2)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+    return ok
 
 
 def _self_test_fanout() -> bool:

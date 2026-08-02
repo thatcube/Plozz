@@ -772,14 +772,26 @@ public final class ItemDetailViewModel {
     /// Loads a synthetic external title without ever pretending its id belongs to
     /// a media server.
     private func loadDiscoveryDetail() async {
-        await refreshDiscoveryStatus()
-        guard !Task.isCancelled, let seed = state.value?.item else { return }
+        guard let seed = state.value?.item else {
+            if state.value == nil { state = .empty }
+            return
+        }
 
         let generation = sourceGeneration
-        let resolved = await externalMetadataResolver(
-            seed,
-            availabilityRegionCode
-        )
+        // Concurrently, and published ONCE.
+        //
+        // These used to run in series with a state publication between them, so a
+        // discovery page painted the seed, then swapped in the request status, then
+        // swapped again as the metadata landed — the viewer saw the availability
+        // badge and the backdrop visibly change about a second after arriving.
+        // Neither answer is more correct than the other and neither depends on the
+        // other, so there is nothing to be gained by showing the first one alone;
+        // running them together also makes the page settle in the time of the
+        // slower request rather than the sum of both.
+        async let statusTask = discoveryStatus(for: seed)
+        async let metadataTask = externalMetadataResolver(seed, availabilityRegionCode)
+        let status = await statusTask
+        let resolved = await metadataTask
         let enrichedSeed = Self.applying(resolved.enrichment, to: seed)
         guard !Task.isCancelled,
               sourceGeneration == generation,
@@ -790,6 +802,10 @@ public final class ItemDetailViewModel {
             resolved.enrichment,
             to: detail.item
         )
+        if let status {
+            detail.item.availability = status.availability
+            detail.item.downloadProgress = status.downloadProgress
+        }
         detail.externalAvailability =
             resolved.availability.isEmpty ? nil : resolved.availability
         detail.childrenLoaded = true
@@ -844,7 +860,15 @@ public final class ItemDetailViewModel {
             copy.logoURL = logo.value
             copy.metadataProvenance.set(logo, for: .logoURL)
         }
+        // Only when the page has NO backdrop at all.
+        //
+        // The hero draws `heroBackdropURL ?? backdropURL`, so filling the hero slot
+        // on an item that already had a plain backdrop replaced an image the viewer
+        // was already looking at — the background visibly swapping a second after
+        // the page opened. Filling an empty slot is enrichment; outranking what is
+        // on screen is a contradiction, and this layer only does the former.
         if copy.heroBackdropURL == nil,
+           copy.backdropURL == nil,
            let backdrop = enrichment.detailBackdrop {
             copy.heroBackdropURL = backdrop.value
             copy.metadataProvenance.set(backdrop, for: .detailBackdrop)
@@ -906,6 +930,20 @@ public final class ItemDetailViewModel {
     /// the search result. The seeded item is kept untouched on any failure, and the
     /// state is only republished when something actually changed (no needless
     /// re-render / focus churn).
+    /// The live request/download status, FETCHED WITHOUT PUBLISHING.
+    ///
+    /// Separated so the first paint can combine it with the metadata resolve into a
+    /// single state change; the polling entry point below still publishes, because
+    /// by then the page is settled and a change really is news.
+    private func discoveryStatus(
+        for item: MediaItem
+    ) async -> (availability: MediaAvailabilityStatus, downloadProgress: Double?)? {
+        guard let discoveryStatusRefresh,
+              let (availability, downloadProgress) = await discoveryStatusRefresh(item)
+        else { return nil }
+        return (availability, downloadProgress)
+    }
+
     private func refreshDiscoveryStatus() async {
         guard let requestedItem = state.value?.item else {
             if state.value == nil { state = .empty }

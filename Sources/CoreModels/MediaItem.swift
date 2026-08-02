@@ -586,8 +586,23 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
 
     private func legacyArtworkURLs(for placement: ArtworkPlacement) -> [URL] {
         switch placement {
-        case .homeHero, .detailBackdrop:
+        case .homeHero:
             return [heroBackdropURL, backdropURL, fallbackArtworkURL].compactMap { $0 }
+        case .detailBackdrop:
+            // No poster last resort here.
+            //
+            // A discovery title opened from a cast or Related card arrives with a
+            // poster and nothing else, so this ladder painted the poster full-bleed
+            // and then swapped it for the real backdrop the moment enrichment
+            // landed — the background visibly changing a second after arriving, on
+            // every such page. A portrait poster stretched behind a landscape hero
+            // was never the image we wanted anyway; it was a placeholder that
+            // outstayed its welcome by being indistinguishable from the real thing.
+            //
+            // The layer's async fallback still resolves a genuine backdrop, so the
+            // page goes from its scrim straight to the right image — one appearance
+            // instead of a replacement.
+            return [heroBackdropURL, backdropURL].compactMap { $0 }
         case .poster:
             return [posterURL, fallbackArtworkURL].compactMap { $0 }
         case .seriesPoster:

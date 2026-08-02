@@ -1658,6 +1658,20 @@ struct DetailHeroView: View, Equatable {
         default:
             break
         }
+        // A discovery page waits for its own enrichment instead of racing it.
+        //
+        // This fallback and the metadata pipeline are two different choosers of a
+        // backdrop, and they do not agree: the router picks one TMDb image, the
+        // pipeline's `detailBackdrop` picks another. On a discovery title — which
+        // arrives carrying only a poster — the router won the first paint and the
+        // pipeline replaced it a second later, which is the background visibly
+        // changing after arrival. Enrichment is the authoritative answer and is
+        // already in flight when this page opens, so the honest thing is to show
+        // the scrim until it lands rather than an image chosen only because it was
+        // quicker. A bare second beats a swap.
+        if isDiscoveryItem, source.heroBackdropURL == nil, source.backdropURL == nil {
+            return nil
+        }
         // art → TMDb hero → the item's own poster. Some titles (e.g. a Plex movie
         // with a poster but no fanart/`art`) carry no landscape backdrop anywhere,
         // so fall back to the poster rather than leaving the hero blank — matching

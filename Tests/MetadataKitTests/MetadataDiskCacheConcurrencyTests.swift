@@ -121,7 +121,7 @@ final class MetadataDiskCacheConcurrencyTests: XCTestCase {
         let directory = tempDir()
         defer { try? FileManager.default.removeItem(at: directory) }
         try? Data("legacy".utf8).write(to: directory.appendingPathComponent("plozz-metadata-cache-v1.json"))
-        try? Data("{}".utf8).write(to: directory.appendingPathComponent("plozz-metadata-cache-v3.json"))
+        try? Data("{}".utf8).write(to: directory.appendingPathComponent(MetadataDiskCache.cacheFileName))
         let fileIO = InstrumentedFileIO()
         let cache = MetadataDiskCache(directory: directory, maxBytes: 100_000, fileIO: fileIO, coding: CountingCoding())
 
@@ -156,7 +156,7 @@ final class MetadataDiskCacheConcurrencyTests: XCTestCase {
     func testBlockedLoadIsSharedAndDoesNotStallUnrelatedActor() async {
         let directory = tempDir()
         defer { try? FileManager.default.removeItem(at: directory) }
-        try? Data("{}".utf8).write(to: directory.appendingPathComponent("plozz-metadata-cache-v3.json"))
+        try? Data("{}".utf8).write(to: directory.appendingPathComponent(MetadataDiskCache.cacheFileName))
         let gate = DispatchSemaphore(value: 0)
         let fileIO = InstrumentedFileIO(blockReadUntilSignaled: gate)
         let cache = MetadataDiskCache(directory: directory, maxBytes: 100_000, fileIO: fileIO, coding: CountingCoding())
@@ -207,7 +207,7 @@ final class MetadataDiskCacheConcurrencyTests: XCTestCase {
 
         // Every mutation must survive on disk: a stale (lower-revision) completion
         // must never clobber newer state.
-        let url = directory.appendingPathComponent("plozz-metadata-cache-v3.json")
+        let url = directory.appendingPathComponent(MetadataDiskCache.cacheFileName)
         let data = try? Data(contentsOf: url)
         XCTAssertNotNil(data)
         let decoded = (try? JSONDecoder().decode([String: MetadataDiskCache.Entry].self, from: data!)) ?? [:]
@@ -245,7 +245,7 @@ final class MetadataDiskCacheConcurrencyTests: XCTestCase {
         let past = Date().addingTimeInterval(-10)
         let expiredEntry = ["stale": MetadataDiskCache.Entry(url: "https://example.com/x.jpg", expires: past)]
         let expiredData = try! JSONEncoder().encode(expiredEntry)
-        try! expiredData.write(to: expiredDir.appendingPathComponent("plozz-metadata-cache-v3.json"))
+        try! expiredData.write(to: expiredDir.appendingPathComponent(MetadataDiskCache.cacheFileName))
         let expiredCache = MetadataDiskCache(directory: expiredDir, maxBytes: 1_000_000)
         let staleHit = await expiredCache.cached("stale")
         XCTAssertNil(staleHit, "an expired entry must be a miss")
@@ -281,7 +281,7 @@ final class MetadataDiskCacheConcurrencyTests: XCTestCase {
                 seed["key-\(index)"] = MetadataDiskCache.Entry(url: "https://example.com/\(index).jpg", expires: future)
             }
             let seedData = try JSONEncoder().encode(seed)
-            try seedData.write(to: directory.appendingPathComponent("plozz-metadata-cache-v3.json"))
+            try seedData.write(to: directory.appendingPathComponent(MetadataDiskCache.cacheFileName))
 
             // Reader with a tiny budget: loading an oversized file triggers exactly
             // one prune, whose whole-map encodes must stay bounded (<= 3).

@@ -150,8 +150,32 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     }
 
     private func posterPath(for query: MetadataQuery) async -> String? {
-        // The search result already carries a poster, so this is a single call.
-        await search(query)?.poster_path
+        // Prefer an id the item already carries, exactly as backdrop and logo do.
+        //
+        // This used to go straight to a title search, which threw away a known
+        // TMDb id and asked TMDb to re-find the title from its name and year.
+        // Those are the two things least likely to match: a library's name can
+        // carry a season suffix ("… Season 2") and its year can be the season's,
+        // not the show's, so a title TMDb knows perfectly well returned nothing
+        // and the card stayed blank. The search is still the fallback for items
+        // with no id at all.
+        if let id = await resolveID(for: query) {
+            if let poster = await images(forID: id, isTV: query.isTV)?.posters,
+               let path = Self.bestImagePath(poster, preferNeutral: false) {
+                return path
+            }
+            if let detail = await details(forID: id, isTV: query.isTV)?.poster_path {
+                return detail
+            }
+        }
+        return await search(query)?.poster_path
+    }
+
+    /// The primary record for a title, used for the poster TMDb itself considers
+    /// canonical when the images endpoint has nothing usable.
+    private func details(forID id: String, isTV: Bool) async -> SearchResult? {
+        guard let url = url("/3/\(isTV ? "tv" : "movie")/\(id)") else { return nil }
+        return await MetadataHTTP.get(SearchResult.self, url: url, headers: authHeaders)
     }
 
     private func stillPath(seriesID: String, season: Int, episode: Int) async -> String? {
@@ -552,6 +576,7 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     struct ImagesResponse: Decodable {
         let backdrops: [Image]?
         let logos: [Image]?
+        let posters: [Image]?
     }
     struct StillsResponse: Decodable {
         let stills: [Image]?

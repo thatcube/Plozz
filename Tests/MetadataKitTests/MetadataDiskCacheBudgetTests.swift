@@ -64,7 +64,7 @@ final class MetadataDiskCacheBudgetTests: XCTestCase {
             to: directory.appendingPathComponent("plozz-metadata-cache-v1.json")
         )
         try? Data("{}".utf8).write(
-            to: directory.appendingPathComponent("plozz-metadata-cache-v3.json")
+            to: directory.appendingPathComponent(MetadataDiskCache.cacheFileName)
         )
         let fileIO = RecordingMetadataCacheFileIO()
         let coding = RecordingMetadataCacheCoding()

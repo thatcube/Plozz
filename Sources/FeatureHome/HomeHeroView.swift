@@ -515,6 +515,11 @@ struct HomeHeroView: View {
             guard !heroVisible else { return }
             withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
         }
+        .onDisappear {
+            // Leaving Home means nobody can see this trailer, so it should stop
+            // streaming and decoding rather than play on behind another screen.
+            resetTrailer(stopPlayer: true)
+        }
         // Re-seat the fronted slide when the curated *set* changes under us — not
         // just when it shrinks. `HomeView` seeds the hero synchronously (Continue
         // Watching + Watchlist) and then swaps in the async curated set (which

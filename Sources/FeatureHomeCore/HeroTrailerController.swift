@@ -60,6 +60,9 @@ public final class HeroTrailerController {
     public private(set) var isPlaying = false
     public private(set) var isReady = false
     public private(set) var isPaused = false
+    #if canImport(UIKit)
+    private var backgroundObserver: (any NSObjectProtocol)?
+    #endif
     /// The live (session) mute state of the trailer. Initialized from the active
     /// surface's mute *default* when a trailer starts, but the in-hero mute button
     /// flips THIS (a transient session override) — it never rewrites the saved
@@ -107,8 +110,38 @@ public final class HeroTrailerController {
         #if canImport(UIKit)
         homeSurfaceView.playerLayer.player = player
         detailSurfaceView.playerLayer.player = player
+        observeAppLifecycle()
         #endif
     }
+
+    #if canImport(UIKit)
+    /// Stop an ambient trailer once the app is no longer on screen.
+    ///
+    /// Nothing did this: leaving the app left the hero's trailer streaming and
+    /// decoding, which measured as the single largest remaining draw — the app's
+    /// steady CPU swung between roughly 1% and 18% purely on whether a trailer
+    /// was running. It is decoration for a screen nobody is looking at, so it
+    /// should not survive leaving that screen.
+    ///
+    /// Deliberately `didEnterBackground` rather than `willResignActive`: the
+    /// latter also fires for a pulled-down notification shade or the app
+    /// switcher, where the hero is still on screen and stopping would read as a
+    /// glitch.
+    private func observeAppLifecycle() {
+        backgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isPlaying || self.currentItemID != nil else {
+                    return
+                }
+                self.stop()
+            }
+        }
+    }
+    #endif
 
     /// Reads the source's actual AVFoundation duration before the hero timeline
     /// starts. Using the real stream duration keeps the wall-clock gauge and

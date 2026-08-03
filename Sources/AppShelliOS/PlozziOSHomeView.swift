@@ -927,6 +927,13 @@ private struct PlozziOSHomeHeroCarousel: View {
         .onAppear(perform: installTrailerEndHandler)
         .onDisappear {
             trailerController.clearEndHandler(ownerID: endHandlerOwnerID)
+            // Leaving Home — another tab, or a pushed page — means nobody can
+            // see this trailer, so it should not keep streaming and decoding.
+            // Scoped to the item this hero was showing so a stale disappear
+            // can't stop a trailer the detail page has taken over.
+            if let currentItem {
+                trailerController.stop(ifShowing: currentItem.id)
+            }
         }
         .task(id: currentItem?.id) {
             await loadHeroSeasonAvailabilityIfNeeded()

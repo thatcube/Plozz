@@ -1,4 +1,5 @@
 import Foundation
+import CoreModels
 #if canImport(Security)
 import Security
 #endif
@@ -59,8 +60,16 @@ public final class SyncedTokenBox<Token: Codable & Sendable>: @unchecked Sendabl
         let account = currentAccount()
         if let raw = synced.string(for: account),
            let token = decode(raw) {
+            FanoutDiagnostics.emit(
+                "keychain.read account=\(account) source=synced "
+                + "attrSynchronizable=\(Self.storedSynchronizable(service: service, account: account))"
+            )
             return token
         }
+        FanoutDiagnostics.emit(
+            "keychain.read account=\(account) source=none "
+            + "attrSynchronizable=\(Self.storedSynchronizable(service: service, account: account))"
+        )
         // Nothing synced yet. A device that signed in before this existed still
         // holds a device-local item; adopt it so switching storage doesn't read
         // as being signed out, and so it reaches this account's other devices.
@@ -77,7 +86,42 @@ public final class SyncedTokenBox<Token: Codable & Sendable>: @unchecked Sendabl
         guard let raw = String(data: data, encoding: .utf8) else {
             throw SyncedTokenBoxError.encoding
         }
-        try synced.setString(raw, for: currentAccount())
+        let account = currentAccount()
+        do {
+            try synced.setString(raw, for: account)
+            // Never the token itself — only whether the synced write landed and
+            // whether the item reads back as synchronizable.
+            FanoutDiagnostics.emit(
+                "keychain.sync account=\(account) write=ok "
+                + "readback=\(synced.string(for: account) == nil ? "miss" : "hit") "
+                + "attrSynchronizable=\(Self.storedSynchronizable(service: service, account: account))"
+            )
+        } catch {
+            FanoutDiagnostics.emit(
+                "keychain.sync account=\(account) write=FAILED error=\(error)"
+            )
+            throw error
+        }
+    }
+
+    /// What the Keychain actually recorded for the item, which is the only way to
+    /// tell a platform that accepted `kSecAttrSynchronizable` from one that
+    /// quietly stored a local item instead.
+    static func storedSynchronizable(service: String, account: String) -> String {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        query[kSecAttrSynchronizable as String] = kSecAttrSynchronizableAny
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let attrs = result as? [String: Any] else { return "status:\(status)" }
+        let flag = attrs[kSecAttrSynchronizable as String] as? Bool
+        return flag.map(String.init) ?? "absent"
     }
 
     public func clear() throws {

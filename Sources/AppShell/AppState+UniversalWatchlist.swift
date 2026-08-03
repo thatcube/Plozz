@@ -27,6 +27,8 @@ extension AppState: UniversalWatchlistHost {
         let candidates: [(any WatchlistDestination)?] = [
             traktService.watchlistDestination,
             simklService.watchlistDestination,
+            anilistService.watchlistDestination,
+            malService.watchlistDestination,
         ]
         return candidates.compactMap { $0 }
     }

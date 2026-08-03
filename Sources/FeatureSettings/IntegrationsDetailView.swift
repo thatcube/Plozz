@@ -91,7 +91,7 @@ struct IntegrationsDetailView: View {
             SettingsSplitRow(
                 id: "anilist",
                 verbatimTitle: "AniList",
-                description: "Track anime and manga progress on your AniList profile.",
+                description: "Scrobble and sync your anime progress and watchlist with AniList.",
             ) {
                 if case .awaitingToken = anilist.phase {
                     AniListTokenEntryView(anilist: anilist)
@@ -107,7 +107,7 @@ struct IntegrationsDetailView: View {
             SettingsSplitRow(
                 id: "mal",
                 verbatimTitle: "MyAnimeList",
-                description: "Track anime and manga progress on your MyAnimeList profile.",
+                description: "Scrobble and sync your anime progress and watchlist with MyAnimeList.",
             ) {
                 if case .awaitingAuthorizationCode = mal.phase {
                     MALAuthorizationCodeEntryView(mal: mal)

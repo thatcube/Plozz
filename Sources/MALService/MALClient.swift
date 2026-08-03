@@ -131,6 +131,38 @@ struct MALClient: Sendable {
     }
 
     /// `PATCH /v2/anime/{anime_id}/my_list_status` — updates the user's list entry.
+    /// `GET /v2/users/@me/animelist?status=plan_to_watch` — the plan-to-watch list.
+    func planToWatch(accessToken: String) async throws -> MALAnimeListResponse {
+        let endpoint = Endpoint(
+            method: .get,
+            path: "/users/@me/animelist",
+            queryItems: [
+                URLQueryItem(name: "status", value: "plan_to_watch"),
+                URLQueryItem(name: "limit", value: "1000"),
+                URLQueryItem(name: "fields", value: "id,title,start_season"),
+            ],
+            headers: ["Authorization": "Bearer \(accessToken)"]
+        )
+        return try await http.decode(
+            MALAnimeListResponse.self,
+            from: endpoint,
+            baseURL: apiBaseURL
+        )
+    }
+
+    /// `DELETE /v2/anime/{anime_id}/my_list_status` — removes the list entry.
+    ///
+    /// MAL answers 404 when the entry was not there, which for a removal means
+    /// the desired state already holds; the caller treats that as success.
+    func deleteAnimeListStatus(animeID: Int, accessToken: String) async throws {
+        let endpoint = Endpoint(
+            method: .delete,
+            path: "/anime/\(animeID)/my_list_status",
+            headers: ["Authorization": "Bearer \(accessToken)"]
+        )
+        _ = try await http.send(endpoint, baseURL: apiBaseURL)
+    }
+
     func updateAnimeListStatus(
         animeID: Int,
         status: MALAnimeStatus?,
@@ -141,7 +173,14 @@ struct MALClient: Sendable {
         if let status { parameters["status"] = status.rawValue }
         if let numWatchedEpisodes { parameters["num_watched_episodes"] = String(numWatchedEpisodes) }
 
-        let endpoint = Endpoint(
+        // Through the injected client, like every other call here.
+        //
+        // This used to build its own `URLRequest` against `URLSession.shared`,
+        // which meant it bypassed the app's networking stack entirely — no shared
+        // configuration, and untestable, since a test double could never observe
+        // it. The form encoding is the only thing that differs from a JSON call,
+        // and that belongs in the body rather than in a second transport.
+        var endpoint = Endpoint(
             method: .patch,
             path: "/anime/\(animeID)/my_list_status",
             headers: [
@@ -149,11 +188,8 @@ struct MALClient: Sendable {
                 "Content-Type": "application/x-www-form-urlencoded"
             ]
         )
-        _ = try await sendForm(
-            endpoint: endpoint,
-            parameters: parameters,
-            baseURL: apiBaseURL
-        )
+        endpoint.body = formBody(parameters)
+        _ = try await http.send(endpoint, baseURL: apiBaseURL)
     }
 
     // MARK: - Helpers

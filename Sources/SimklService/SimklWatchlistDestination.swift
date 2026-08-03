@@ -22,14 +22,17 @@ import Foundation
 ///   a different list, would silently keep something they took away.
 public actor SimklWatchlistDestination: WatchlistDestination {
     public nonisolated let id: WatchlistDestinationID
-    /// `trakt` is absent on purpose: Simkl accepts an IMDb/TMDb/TVDb id, and a
-    /// Trakt id would only ever be noise to it.
+    /// `trakt` and `plex` are absent on purpose: they identify a title only
+    /// within those services. The anime catalogues ARE included — Simkl indexes
+    /// AniList/MAL/AniDB ids as well as the film-and-TV ones, which is what makes
+    /// it the one destination able to place an anime series by any identity the
+    /// viewer's library happens to carry.
     public nonisolated let capabilities = WatchlistDestinationCapabilities(
         readable: true,
         writable: true,
         removable: true,
         bindingRequirement: .globalExternalIdentity,
-        globalIdentityNamespaces: [.imdb, .tmdb, .tvdb]
+        globalIdentityNamespaces: [.imdb, .tmdb, .tvdb, .aniList, .myAnimeList, .aniDB]
     )
 
     private let client: SimklClient
@@ -155,6 +158,12 @@ public actor SimklWatchlistDestination: WatchlistDestination {
             return SimklIDs(tmdb: Int(externalID.value))
         case .tvdb:
             return SimklIDs(tvdb: Int(externalID.value))
+        case .aniList:
+            return SimklIDs(anilist: Int(externalID.value))
+        case .myAnimeList:
+            return SimklIDs(mal: Int(externalID.value))
+        case .aniDB:
+            return SimklIDs(anidb: Int(externalID.value))
         case .trakt, .plex:
             // Not identifiers Simkl knows about.
             return SimklIDs()

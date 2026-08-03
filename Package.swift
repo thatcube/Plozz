@@ -797,6 +797,14 @@ let package = Package(
             dependencies: ["SimklService", "CoreModels", "CoreNetworking"]
         ),
         .testTarget(
+            name: "AniListServiceTests",
+            dependencies: ["AniListService", "CoreModels", "CoreNetworking"]
+        ),
+        .testTarget(
+            name: "MALServiceTests",
+            dependencies: ["MALService", "CoreModels", "CoreNetworking"]
+        ),
+        .testTarget(
             name: "SeerServiceTests",
             dependencies: ["SeerService", "CoreModels", "CoreNetworking"]
         ),

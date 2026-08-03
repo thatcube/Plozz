@@ -83,3 +83,38 @@ public enum MALAnimeStatus: String, Sendable {
     case dropped
     case planToWatch = "plan_to_watch"
 }
+
+// MARK: - Plan-to-watch list DTOs
+
+struct MALAnimeListSeason: Decodable, Equatable {
+    var year: Int?
+}
+
+struct MALAnimeListNode: Decodable, Equatable {
+    var id: Int?
+    var title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title
+        case startSeason = "start_season"
+    }
+
+    var startSeason: MALAnimeListSeason?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(Int.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        startSeason = try c.decodeIfPresent(
+            MALAnimeListSeason.self, forKey: .startSeason
+        )
+    }
+}
+
+struct MALAnimeListEntry: Decodable, Equatable {
+    var node: MALAnimeListNode?
+}
+
+struct MALAnimeListResponse: Decodable, Equatable {
+    var data: [MALAnimeListEntry]?
+}

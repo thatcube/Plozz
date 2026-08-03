@@ -28,15 +28,26 @@ public final class MALService {
     @ObservationIgnored private var pendingSession: String?
     @ObservationIgnored private var profileGeneration: UInt64 = 0
 
+    /// The universal watchlist's MyAnimeList destination — anime series only,
+    /// and `nil` when MAL is not configured in this build.
+    @ObservationIgnored public let watchlistDestination:
+        MALWatchlistDestination?
+
     public init(config: MALConfig, http: HTTPClient = URLSessionHTTPClient(), tokenStore: MALTokenStoring) {
         self.config = config
         self.auth = MALAuthService(config: config, http: http)
         self.tokenStore = tokenStore
         if config.isConfigured {
             self.scrobbler = MALScrobbler(config: config, http: http, tokenStore: tokenStore)
+            self.watchlistDestination = MALWatchlistDestination(
+                config: config,
+                http: http,
+                tokenStore: tokenStore
+            )
             self.phase = .unknown
         } else {
             self.scrobbler = DisabledMALScrobbler()
+            self.watchlistDestination = nil
             self.phase = .unavailable
         }
     }

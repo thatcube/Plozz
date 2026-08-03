@@ -127,6 +127,14 @@ public struct WatchlistExternalID: Codable, Hashable, Sendable, Comparable {
         case tvdb
         case trakt
         case plex
+        // The anime catalogues. A universal identity that stops at the five
+        // namespaces the film/TV trackers happen to use is not universal — the
+        // rest of the app has carried AniList, MyAnimeList and AniDB ids all
+        // along, and this layer was quietly dropping them, which is precisely
+        // what made an AniList or MAL destination impossible to write.
+        case aniList
+        case myAnimeList
+        case aniDB
 
         public static func < (lhs: Self, rhs: Self) -> Bool {
             lhs.rawValue < rhs.rawValue
@@ -190,6 +198,19 @@ public struct WatchlistMutationTarget: Codable, Hashable, Sendable {
            let id = WatchlistExternalID(namespace: .plex, value: value) {
             ids.append(id)
         }
+        // Anime catalogues. Series-scoped spellings are accepted as a fallback
+        // because a show's own id is often only recorded on the series row.
+        for (namespace, seriesNamespace, target) in [
+            (ProviderIDNamespace.aniList, ProviderIDNamespace.seriesAniList, WatchlistExternalID.Namespace.aniList),
+            (ProviderIDNamespace.myAnimeList, ProviderIDNamespace.seriesMal, WatchlistExternalID.Namespace.myAnimeList),
+            (ProviderIDNamespace.aniDB, ProviderIDNamespace.seriesAniDB, WatchlistExternalID.Namespace.aniDB),
+        ] {
+            guard let value = item.providerID(namespace)
+                    ?? item.providerID(seriesNamespace),
+                  let id = WatchlistExternalID(namespace: target, value: value)
+            else { continue }
+            ids.append(id)
+        }
         self.init(
             aliasID: aliasID,
             kind: item.kind,
@@ -205,6 +226,9 @@ public struct WatchlistMutationTarget: Codable, Hashable, Sendable {
             case .imdb: namespace = .imdb
             case .tmdb: namespace = .tmdb
             case .tvdb: namespace = .tvdb
+            case .aniList, .seriesAniList: namespace = .aniList
+            case .myAnimeList, .seriesMal: namespace = .myAnimeList
+            case .aniDB, .seriesAniDB: namespace = .aniDB
             default: return nil
             }
             return WatchlistExternalID(namespace: namespace, value: evidence.value)
@@ -341,6 +365,11 @@ public struct WatchlistDestinationEntry: Codable, Hashable, Sendable {
             case .imdb: namespace = .imdb
             case .tmdb: namespace = .tmdb
             case .tvdb: namespace = .tvdb
+            case .aniList: namespace = .aniList
+            case .myAnimeList: namespace = .myAnimeList
+            case .aniDB: namespace = .aniDB
+            // Trakt and Plex ids identify a title only WITHIN those services, so
+            // they are not evidence of what the title is.
             case .trakt, .plex: return nil
             }
             return MediaAliasStrongEvidence(

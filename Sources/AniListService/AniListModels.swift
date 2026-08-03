@@ -82,3 +82,41 @@ public enum AniListMediaListStatus: String, Sendable {
     case planning = "PLANNING"
     case repeating = "REPEATING"
 }
+
+// MARK: - Planning list (watchlist) DTOs
+
+struct AniListPlanningTitle: Decodable, Equatable {
+    var romaji: String?
+    var english: String?
+}
+
+struct AniListPlanningMedia: Decodable, Equatable {
+    var id: Int?
+    var title: AniListPlanningTitle?
+    var seasonYear: Int?
+    var idMal: Int?
+}
+
+struct AniListPlanningEntry: Decodable, Equatable {
+    var media: AniListPlanningMedia?
+}
+
+struct AniListPlanningList: Decodable, Equatable {
+    var entries: [AniListPlanningEntry]?
+}
+
+struct AniListPlanningCollection: Decodable, Equatable {
+    var lists: [AniListPlanningList]?
+}
+
+struct AniListPlanningData: Decodable, Equatable {
+    var MediaListCollection: AniListPlanningCollection?
+}
+
+struct AniListMediaListLookup: Decodable, Equatable {
+    var id: Int?
+}
+
+struct AniListMediaListLookupData: Decodable, Equatable {
+    var MediaList: AniListMediaListLookup?
+}

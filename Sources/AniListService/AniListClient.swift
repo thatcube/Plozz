@@ -102,6 +102,95 @@ struct AniListClient: Sendable {
         return nil
     }
 
+    // MARK: - Planning list
+
+    /// The viewer's PLANNING entries, which is what a watchlist means here.
+    ///
+    /// One page of a reasonable size rather than full pagination: this feeds a
+    /// reconcile pass that only needs to know what is already there, and a list
+    /// long enough to overflow it is long enough that the tail is not what the
+    /// viewer just added.
+    func planningEntries(
+        userID: Int,
+        accessToken: String
+    ) async throws -> [AniListPlanningEntry] {
+        let query = """
+        query ($userId: Int) {
+          MediaListCollection (userId: $userId, type: ANIME, status: PLANNING) {
+            lists { entries { media { id title { romaji english } seasonYear
+              idMal } } }
+          }
+        }
+        """
+        let body = AniListGraphQLBodyWithVars(
+            query: query,
+            variables: ["userId": .int(userID)]
+        )
+        let endpoint = try Endpoint(
+            method: .post,
+            path: "",
+            headers: headers(accessToken: accessToken)
+        ).jsonBody(body)
+        let response: AniListGraphQLResponse<AniListPlanningData> =
+            try await http.decode(
+                AniListGraphQLResponse<AniListPlanningData>.self,
+                from: endpoint,
+                baseURL: baseURL
+            )
+        if let errors = response.errors, !errors.isEmpty {
+            throw AppError.unknown("AniList: \(errors.first?.message ?? "unknown error")")
+        }
+        return (response.data?.MediaListCollection?.lists ?? [])
+            .flatMap { $0.entries ?? [] }
+    }
+
+    /// Removes the viewer's list entry for `mediaId`.
+    ///
+    /// AniList deletes by LIST ENTRY id rather than media id, so the entry has to
+    /// be found first. A media the viewer never listed has no entry, which is not
+    /// a failure — the desired state is already true.
+    func deleteMediaListEntry(
+        mediaId: Int,
+        userID: Int,
+        accessToken: String
+    ) async throws {
+        let lookup = """
+        query ($userId: Int, $mediaId: Int) {
+          MediaList (userId: $userId, mediaId: $mediaId) { id }
+        }
+        """
+        let lookupBody = AniListGraphQLBodyWithVars(
+            query: lookup,
+            variables: ["userId": .int(userID), "mediaId": .int(mediaId)]
+        )
+        let lookupEndpoint = try Endpoint(
+            method: .post,
+            path: "",
+            headers: headers(accessToken: accessToken)
+        ).jsonBody(lookupBody)
+        let found: AniListGraphQLResponse<AniListMediaListLookupData>? =
+            try? await http.decode(
+                AniListGraphQLResponse<AniListMediaListLookupData>.self,
+                from: lookupEndpoint,
+                baseURL: baseURL
+            )
+        guard let entryID = found?.data?.MediaList?.id else { return }
+
+        let mutation = """
+        mutation ($id: Int) { DeleteMediaListEntry (id: $id) { deleted } }
+        """
+        let body = AniListGraphQLBodyWithVars(
+            query: mutation,
+            variables: ["id": .int(entryID)]
+        )
+        let endpoint = try Endpoint(
+            method: .post,
+            path: "",
+            headers: headers(accessToken: accessToken)
+        ).jsonBody(body)
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
     // MARK: - Update list
 
     /// Updates or creates a media list entry (marks progress / status).

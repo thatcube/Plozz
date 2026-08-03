@@ -1267,10 +1267,29 @@ private struct PlozziOSDetailHeroForeground: View {
                 // Widest first: everything inline with Trailer labelled, then the
                 // same row with Trailer reduced to its glyph, and only then start
                 // folding actions into "…".
-                actionRow(collapsing: 0, labelledTrailer: true)
+                actionRow(collapsing: 0, labelledTrailer: true, resume: .full)
                 ForEach(0...orderedInlineExtras.count, id: \.self) { collapseCount in
-                    actionRow(collapsing: collapseCount, labelledTrailer: false)
+                    actionRow(
+                        collapsing: collapseCount,
+                        labelledTrailer: false,
+                        resume: .full
+                    )
                 }
+                // Every action is already in "…" by here, so the only thing left
+                // to give is the Play button's resume detail. Without these the
+                // narrowest candidate could still be wider than the hero — a
+                // long "Resume S12, E7 • 43m" overflowed the text column and
+                // dragged the whole hero off to one side.
+                actionRow(
+                    collapsing: orderedInlineExtras.count,
+                    labelledTrailer: false,
+                    resume: .seasonEpisodeOnly
+                )
+                actionRow(
+                    collapsing: orderedInlineExtras.count,
+                    labelledTrailer: false,
+                    resume: .hidden
+                )
             }
             .controlSize(.large)
         }
@@ -1365,7 +1384,8 @@ private struct PlozziOSDetailHeroForeground: View {
     /// widest candidate (fewest collapsed) that still fits the hero width.
     private func actionRow(
         collapsing collapseCount: Int,
-        labelledTrailer: Bool
+        labelledTrailer: Bool,
+        resume: PlayResumeButtonLabel.ResumeTrailingStyle
     ) -> some View {
         let extras = orderedInlineExtras
         let keep = max(0, extras.count - collapseCount)
@@ -1373,7 +1393,7 @@ private struct PlozziOSDetailHeroForeground: View {
         let collapsed = Array(extras.suffix(collapseCount))
         let menu = menuActions(collapsing: collapsed)
         return HStack(spacing: 12) {
-            playActionButton
+            playActionButton(resume: resume)
             heroRequestButton
             ForEach(inline) { extra in
                 inlineExtraButton(extra, labelled: labelledTrailer)
@@ -1441,7 +1461,9 @@ private struct PlozziOSDetailHeroForeground: View {
 
 
     @ViewBuilder
-    private var playActionButton: some View {
+    private func playActionButton(
+        resume: PlayResumeButtonLabel.ResumeTrailingStyle = .full
+    ) -> some View {
         if let playableItem {
             Button {
                 onPlay(playableItem, false)
@@ -1453,7 +1475,8 @@ private struct PlozziOSDetailHeroForeground: View {
                     seasonEpisodeText: seasonEpisodeText(for: playableItem),
                     onLight: colorScheme == .dark,
                     spacing: 10,
-                    capsuleWidth: 60
+                    capsuleWidth: 60,
+                    resumeTrailingStyle: resume
                 )
             }
             .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .primary))

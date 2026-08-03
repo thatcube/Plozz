@@ -133,7 +133,25 @@ public final class TraktService {
             do {
                 while true {
                     try Task.checkCancellation()
-                    let code = try await self.auth.beginDeviceCode()
+                    let code: TraktDeviceCode
+                    do {
+                        code = try await self.auth.beginDeviceCode()
+                    } catch let error as AppError where error == .unauthorized {
+                        // A 401 HERE cannot be about the viewer: no account is
+                        // involved until a code has been issued and approved. It
+                        // means Trakt rejected this build's client credentials —
+                        // the application was removed, or API access for it has
+                        // lapsed. Retrying cannot change that, and saying "your
+                        // session has expired" sends someone to re-authenticate an
+                        // account that was never the problem.
+                        guard generation == self.profileGeneration.current else { return }
+                        self.phase = .error(LocalizedStringResource(
+                            "trakt.error.clientRejected",
+                            defaultValue: "Trakt rejected this app's API credentials. The application may have been removed, or its API access may no longer be active.",
+                            comment: "Shown when Trakt refuses the app's own client credentials, so no sign-in can succeed until they are replaced."
+                        ))
+                        return
+                    }
                     try Task.checkCancellation()
                     guard generation == self.profileGeneration.current else {
                         return

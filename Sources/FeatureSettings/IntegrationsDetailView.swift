@@ -38,7 +38,14 @@ struct IntegrationsDetailView: View {
             SettingsSplitRow(
                 id: "trakt",
                 verbatimTitle: "Trakt",
-                description: "Scrobble and sync your Jellyfin watch history to Trakt.",
+                // Deliberately says nothing about WHERE the media came from.
+                // Naming Jellyfin was wrong twice over: scrobbling works from any
+                // provider — Plex, Emby and network shares included — and this
+                // integration also syncs the watchlist, which the old wording
+                // never mentioned. Describing what the connection does, rather
+                // than enumerating what it currently covers, is also what keeps
+                // this true the next time something is added to it.
+                description: "Scrobble and sync your watch history and watchlist with Trakt.",
             ) {
                 if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
                     DeviceCodeConnectingView(
@@ -192,11 +199,22 @@ struct IntegrationsDetailView: View {
                     Label("Disconnect", systemImage: "xmark.circle")
                 }
             }
-        case .error:
+        case .error(let message):
             VStack(alignment: .leading, spacing: 18) {
                 Label("Couldn't connect", systemImage: "exclamationmark.triangle.fill")
                     .font(.headline)
                     .foregroundStyle(.orange)
+                // The reason, which the phase has been carrying all along and this
+                // view was discarding. "Couldn't connect" alone sends someone to
+                // check their Wi-Fi when the service has actually rejected the
+                // app's credentials — a wrong diagnosis is worse than a vague one,
+                // because Retry cannot fix it and nothing says so.
+                if let message {
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Button(action: onConnect) {
                     Label("Retry", systemImage: "arrow.clockwise")
                 }
@@ -215,7 +233,7 @@ struct IntegrationsDetailView: View {
         case .disconnected: .disconnected
         case .connecting: .connecting
         case let .connected(name): .connected(name)
-        case .error: .error
+        case .error(let message): .error(message)
         }
     }
 
@@ -226,7 +244,7 @@ struct IntegrationsDetailView: View {
         case .disconnected: .disconnected
         case .connecting: .connecting
         case let .connected(name): .connected(name)
-        case .error: .error
+        case .error(let message): .error(message)
         }
     }
 
@@ -237,7 +255,7 @@ struct IntegrationsDetailView: View {
         case .disconnected: .disconnected
         case .awaitingToken: .connecting
         case let .connected(name): .connected(name)
-        case .error: .error
+        case .error(let message): .error(message)
         }
     }
 
@@ -248,7 +266,7 @@ struct IntegrationsDetailView: View {
         case .disconnected: .disconnected
         case .awaitingAuthorizationCode: .connecting
         case let .connected(name): .connected(name)
-        case .error: .error
+        case .error(let message): .error(message)
         }
     }
 
@@ -259,7 +277,7 @@ struct IntegrationsDetailView: View {
         case .disconnected: .disconnected
         case .connecting: .connecting
         case let .connected(name): .connected(name)
-        case .error: .error
+        case .error(let message): .error(message)
         }
     }
 }
@@ -273,7 +291,12 @@ enum TrackerRowPhase: Equatable {
     case disconnected
     case connecting
     case connected(String)
-    case error
+    /// Carries WHY, which every service's own phase already knew and this
+    /// abstraction used to drop on the floor. "Couldn't connect" on its own sends
+    /// someone to check their network when the tracker has actually rejected the
+    /// app's credentials — and Retry cannot fix that, so the vague message costs
+    /// real time.
+    case error(LocalizedStringResource?)
 }
 
 // MARK: - AniList Relay Code Entry (expanded panel)

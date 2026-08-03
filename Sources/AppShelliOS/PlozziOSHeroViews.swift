@@ -42,6 +42,15 @@ enum PlozziOSPageLayout {
         style == .compactPortrait ? 500 : 480
     }
 
+    /// The hero's title logo, capped so it can never be wider than the column it
+    /// sits in. A logo wider than `heroTextMaxWidth` used to overhang the column
+    /// and, because the column centres oversized content, drag every row of the
+    /// hero left with it — but only for titles whose logo actually reached the
+    /// cap, which is why some heroes looked indented and others didn't.
+    static func heroLogoMaxWidth(for style: HeroArtworkStyle) -> CGFloat {
+        min(style == .compactPortrait ? 330 : 520, heroTextMaxWidth(for: style))
+    }
+
     static func heroStageMaxWidth(
         for style: HeroArtworkStyle,
         surfaceRole: HeroTrailerSurfaceRole
@@ -72,7 +81,13 @@ struct PlozziOSHeroForegroundPlacement: ViewModifier {
                 maxWidth: .infinity,
                 alignment: style == .compactPortrait ? .center : .leading
             )
-            .frame(maxWidth: PlozziOSPageLayout.heroTextMaxWidth(for: style))
+            // Alignment is not optional here: without it the cap centres anything
+            // too wide to fit, so an oversized child overhangs both edges and
+            // moves the column's origin instead of just its own trailing edge.
+            .frame(
+                maxWidth: PlozziOSPageLayout.heroTextMaxWidth(for: style),
+                alignment: style == .compactPortrait ? .center : .leading
+            )
             .frame(
                 maxWidth: .infinity,
                 maxHeight: .infinity,
@@ -962,6 +977,9 @@ struct PlozziOSHomeHeroForeground: View {
     let provider: (any MediaProvider)?
     let onPlay: (MediaItem) -> Void
     var heroRequest: PlozziOSHeroRequest?
+    /// "New episode every Friday" for a returning series, from the shared
+    /// `HeroScheduleLines` the tvOS hero already uses.
+    var scheduleLine: LocalizedStringResource?
 
     var body: some View {
         VStack(
@@ -973,7 +991,8 @@ struct PlozziOSHomeHeroForeground: View {
                 style: style,
                 mode: .home,
                 hidesRatings: appModel.settings.spoilers.settings
-                    .shouldHideRatings(for: item)
+                    .shouldHideRatings(for: item),
+                scheduleLine: scheduleLine
             )
 
             // Keep the actions on a single row: try the full Play pill first, then
@@ -1480,11 +1499,19 @@ private struct PlozziOSDetailHeroForeground: View {
                 if labelled {
                     Label("Trailer", systemImage: "film.fill")
                 } else {
-                    Label("Trailer", systemImage: "film.fill")
-                        .labelStyle(.iconOnly)
+                    Image(systemName: "film.fill")
+                        .font(.headline)
                 }
             }
-            .buttonStyle(PlozziOSHeroActionButtonStyle(kind: .secondary))
+            // Without a label this is a glyph like the watchlist and download
+            // buttons beside it, so it takes their circle. A capsule around a
+            // lone icon read as a different kind of control.
+            .buttonStyle(
+                PlozziOSHeroActionButtonStyle(
+                    kind: .secondary,
+                    circular: !labelled
+                )
+            )
             .accessibilityLabel("Trailer")
         }
     }
@@ -1966,7 +1993,7 @@ private struct PlozziOSHeroMetadata: View {
                 }
                 HeroLogoArtwork(
                     references: presentation.logoReferences,
-                    maxWidth: style == .compactPortrait ? 330 : 520,
+                    maxWidth: PlozziOSPageLayout.heroLogoMaxWidth(for: style),
                     maxHeight: style == .compactPortrait ? 95 : 130,
                     alignment: style == .compactPortrait ? .center : .leading
                 ) {

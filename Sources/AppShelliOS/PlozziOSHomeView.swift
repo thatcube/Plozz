@@ -711,6 +711,9 @@ private struct PlozziOSHomeHeroCarousel: View {
     /// Loaded Seerr season-request availability for featured discovery series,
     /// keyed by item id, so the hero's Request menu can list per-season options.
     @State private var heroSeasonAvailability: [String: MediaRequestAvailability] = [:]
+    /// "New episode every Friday" for a returning series. The same shared store
+    /// the tvOS hero uses — iPhone and iPad simply never adopted it.
+    @State private var schedules = HeroScheduleLines()
 
     var body: some View {
         let style: HeroArtworkStyle = horizontalSizeClass == .compact
@@ -782,12 +785,17 @@ private struct PlozziOSHomeHeroCarousel: View {
 
                     let rootItem = rootItem(for: currentItem)
                     let playItem = playTarget(for: currentItem) ?? currentItem
+                    // Hoisted: folding this call into the view initialiser below
+                    // pushes that expression past the type-checker's budget.
+                    let scheduleLine: LocalizedStringResource? =
+                        schedules.line(for: rootItem)
+                    let watchlistItem: MediaItem = currentItem.watchlistSubject
                     PlozziOSHomeHeroForeground(
                         item: playItem,
                         detailItem: currentItem,
                         // Continue Watching fronts an episode; an episode is not
                         // watchlistable, so save its show — see `watchlistSubject`.
-                        watchlistItem: currentItem.watchlistSubject,
+                        watchlistItem: watchlistItem,
                         presentation: HeroPresentation(
                             item: rootItem,
                             artworkStyle: style,
@@ -796,7 +804,8 @@ private struct PlozziOSHomeHeroCarousel: View {
                         style: style,
                         provider: provider(for: currentItem),
                         onPlay: onPlay,
-                        heroRequest: heroRequest(for: currentItem)
+                        heroRequest: heroRequest(for: currentItem),
+                        scheduleLine: scheduleLine
                     )
                     .id(currentItem.id)
                     .transition(.opacity)
@@ -909,6 +918,17 @@ private struct PlozziOSHomeHeroCarousel: View {
         }
         .task(id: currentItem?.id) {
             await loadHeroSeasonAvailabilityIfNeeded()
+        }
+        // Everything already on disk, published before a single request, so a
+        // returning viewer's badge is there on the first frame.
+        .task(id: items.map(\.id).joined(separator: "|")) {
+            await schedules.loadCached(items)
+        }
+        // Only the slide on screen is fetched; the rest fill in as they front
+        // rather than firing a burst of requests at first paint.
+        .task(id: schedules.fetchKey(for: currentItem)) {
+            guard let currentItem else { return }
+            await schedules.refreshFronted(currentItem)
         }
     }
 

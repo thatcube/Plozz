@@ -43,12 +43,14 @@ public struct HeroPresentation: Sendable, Equatable {
         itemID = item.id
         kind = item.kind
         title = Self.normalizedTitle(for: item)
+        let logos = item.artworkReferences(for: .logo)
         artworkReferences = Self.artworkReferences(
             for: item,
             style: artworkStyle,
-            surface: surface
+            surface: surface,
+            drawsLogoOverArtwork: !logos.isEmpty
         )
-        logoReferences = item.artworkReferences(for: .logo)
+        logoReferences = logos
         metadataComponents = item.metadataComponents()
         metadataText = metadataComponents.isEmpty
             ? nil
@@ -95,15 +97,24 @@ public struct HeroPresentation: Sendable, Equatable {
         return nonempty(item.title) ?? item.title
     }
 
+    /// - Parameter drawsLogoOverArtwork: whether the hero will lay a title logo
+    ///   on top of this artwork. A poster is the better shape for a portrait
+    ///   phone, but a poster's whole job is to carry its own title treatment,
+    ///   and no provider marks which of its posters are textless — so leading
+    ///   with one under a logo reliably produced the title twice. A landscape
+    ///   backdrop is the safer surface to write over, and the TMDb fallback
+    ///   already prefers language-neutral (textless) backdrops.
     public static func artworkReferences(
         for item: MediaItem,
         style: HeroArtworkStyle,
-        surface: HeroPresentationSurface
+        surface: HeroPresentationSurface,
+        drawsLogoOverArtwork: Bool = false
     ) -> [ArtworkReference] {
         let landscapePlacement: ArtworkPlacement = surface == .home
             ? .homeHero
             : .detailBackdrop
-        let placements: [ArtworkPlacement] = style == .compactPortrait
+        let prefersPoster = style == .compactPortrait && !drawsLogoOverArtwork
+        let placements: [ArtworkPlacement] = prefersPoster
             ? [.poster, landscapePlacement]
             : [landscapePlacement, .poster]
         var seen = Set<ArtworkReference>()

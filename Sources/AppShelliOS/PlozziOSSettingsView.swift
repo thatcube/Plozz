@@ -184,6 +184,27 @@ private struct PlozziOSSettingsSplitView: View {
                         shareIDs: appModel.mediaShareAccountIDs
                     )
 
+                    // The active profile's settings come FIRST: they are what
+                    // anyone actually opens Settings to change, where the device
+                    // group is setup done once.
+                    SettingsSectionGroup("This Profile") {
+                        settingsRow(
+                            .myLibraries,
+                            title: SettingsCopy.libraries,
+                            systemImage: "rectangle.stack"
+                        )
+                        settingsRow(.trackers, title: "Trackers", systemImage: "link")
+                        settingsRow(.appearance, title: "Appearance", systemImage: "paintpalette")
+                        settingsRow(.home, title: "Customize Home", systemImage: "house")
+                        settingsRow(.detailPage, title: "Detail Page", systemImage: "rectangle.portrait.on.rectangle.portrait")
+                        settingsRow(.playback, title: "Playback", systemImage: "play.rectangle")
+                        settingsRow(.subtitles, title: "Subtitles", systemImage: "captions.bubble")
+                        settingsRow(.spoilers, title: "Spoilers", systemImage: "eye.slash")
+                        settingsRow(.nightShift, title: "Circadian Mode", systemImage: "moon.stars.fill")
+                    } footer: {
+                        Text("Saved for \(appModel.profiles.activeProfile.name).")
+                    }
+
                     SettingsSectionGroup(deviceSettingsTitle) {
                         Button {
                             selection = .profiles
@@ -223,24 +244,6 @@ private struct PlozziOSSettingsSplitView: View {
                         )
                     } footer: {
                         Text("Shared across every profile on this \(deviceName).")
-                    }
-
-                    SettingsSectionGroup("This Profile") {
-                        settingsRow(
-                            .myLibraries,
-                            title: SettingsCopy.libraries,
-                            systemImage: "rectangle.stack"
-                        )
-                        settingsRow(.trackers, title: "Trackers", systemImage: "link")
-                        settingsRow(.appearance, title: "Appearance", systemImage: "paintpalette")
-                        settingsRow(.home, title: "Customize Home", systemImage: "house")
-                        settingsRow(.detailPage, title: "Detail Page", systemImage: "rectangle.portrait.on.rectangle.portrait")
-                        settingsRow(.playback, title: "Playback", systemImage: "play.rectangle")
-                        settingsRow(.subtitles, title: "Subtitles", systemImage: "captions.bubble")
-                        settingsRow(.spoilers, title: "Spoilers", systemImage: "eye.slash")
-                        settingsRow(.nightShift, title: "Circadian Mode", systemImage: "moon.stars.fill")
-                    } footer: {
-                        Text("Saved for \(appModel.profiles.activeProfile.name).")
                     }
 
                     SettingsSectionGroup("Support") {
@@ -534,56 +537,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                     shareIDs: appModel.mediaShareAccountIDs
                 )
 
-                SettingsSectionGroup(deviceSettingsTitle) {
-                NavigationLink {
-                    PlozziOSProfilesView(appModel: appModel)
-                } label: {
-                    Label("Profiles", systemImage: "person.2")
-                }
-
-                NavigationLink {
-                    PlozziOSSeerrSettingsView(appModel: appModel)
-                } label: {
-                    Label {
-                        Text(verbatim: "Seerr")
-                    } icon: {
-                        Image(systemName: "sparkles.tv")
-                    }
-                }
-
-                NavigationLink {
-                    PlozziOSServersSettingsView(
-                        appModel: appModel,
-                        onAddServer: onAddServer
-                    )
-                } label: {
-                    Label("Servers", systemImage: "externaldrive.connected.to.line.below")
-                }
-                NavigationLink {
-                    PlozziOSDownloadSettingsView(model: appModel.downloads)
-                } label: {
-                    Label("Downloads", systemImage: "arrow.down.circle")
-                }
-                NavigationLink {
-                    PlozziOSSyncSetupSettingsView(appModel: appModel)
-                } label: {
-                    Label("iCloud Sync", systemImage: "icloud")
-                }
-                // Metadata uses the Button + navigationDestination pattern rather than
-                // a NavigationLink: a destination/value NavigationLink nested in a
-                // SettingsSectionGroup eager-pushes/swallows taps on this codebase.
-                Button {
-                    showMetadata = true
-                } label: {
-                    Label("Metadata", systemImage: "sparkles.rectangle.stack")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            } footer: {
-                Text("Shared across every profile on this \(deviceName).")
-            }
-
+                // Profile first — see the compact layout above.
                 SettingsSectionGroup("This Profile") {
                 NavigationLink {
                     PlozziOSMyLibrariesSettingsView(
@@ -660,6 +614,56 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
             } footer: {
                 Text("Saved for \(appModel.profiles.activeProfile.name).")
+            }
+
+                SettingsSectionGroup(deviceSettingsTitle) {
+                NavigationLink {
+                    PlozziOSProfilesView(appModel: appModel)
+                } label: {
+                    Label("Profiles", systemImage: "person.2")
+                }
+
+                NavigationLink {
+                    PlozziOSSeerrSettingsView(appModel: appModel)
+                } label: {
+                    Label {
+                        Text(verbatim: "Seerr")
+                    } icon: {
+                        Image(systemName: "sparkles.tv")
+                    }
+                }
+
+                NavigationLink {
+                    PlozziOSServersSettingsView(
+                        appModel: appModel,
+                        onAddServer: onAddServer
+                    )
+                } label: {
+                    Label("Servers", systemImage: "externaldrive.connected.to.line.below")
+                }
+                NavigationLink {
+                    PlozziOSDownloadSettingsView(model: appModel.downloads)
+                } label: {
+                    Label("Downloads", systemImage: "arrow.down.circle")
+                }
+                NavigationLink {
+                    PlozziOSSyncSetupSettingsView(appModel: appModel)
+                } label: {
+                    Label("iCloud Sync", systemImage: "icloud")
+                }
+                // Metadata uses the Button + navigationDestination pattern rather than
+                // a NavigationLink: a destination/value NavigationLink nested in a
+                // SettingsSectionGroup eager-pushes/swallows taps on this codebase.
+                Button {
+                    showMetadata = true
+                } label: {
+                    Label("Metadata", systemImage: "sparkles.rectangle.stack")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } footer: {
+                Text("Shared across every profile on this \(deviceName).")
             }
 
                 SettingsSectionGroup("Support") {

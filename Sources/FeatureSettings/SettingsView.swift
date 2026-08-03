@@ -325,13 +325,19 @@ public struct SettingsView: View {
                         shareIDs: mediaShareAccountIDs
                     )
 
-                    // Device-shared settings come FIRST: servers + profile
-                    // management belong to the whole Apple TV, not to you.
-                    thisAppleTVSection
-
-                    // Then the active profile's own container: switching
-                    // profiles swaps everything inside it at once.
+                    // The active profile's own container comes FIRST. Almost
+                    // everything anyone opens Settings to change is in here —
+                    // playback, appearance, trackers — while the device-shared
+                    // section is servers and profile management, which is setup
+                    // you do once. Ordering by "what belongs to the whole Apple
+                    // TV" put the rarely-touched half at the top and pushed the
+                    // rest below it. Switching profiles swaps everything inside
+                    // this container at once.
                     profileContainer
+
+                    // Then what the whole Apple TV shares, regardless of who is
+                    // using it.
+                    thisAppleTVSection
 
                     // About + Attributions + Sign Out render INLINE at the bottom.
                     aboutAndSignOut

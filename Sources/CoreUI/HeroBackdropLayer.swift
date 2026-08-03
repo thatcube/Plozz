@@ -104,6 +104,9 @@ public struct HeroBackdropLayer<Video: View>: View {
             references: references,
             maxAspectRatio: 3.0,
             variant: .heroBackdrop,
+            // Put a real image up while the 2000px pass decodes. Home's hero has
+            // always done this; the detail hero opened onto a scrim instead.
+            previewVariant: .heroPreview,
             asyncFallbackURL: asyncFallbackURL
         ) {
             placeholder

@@ -21,6 +21,7 @@ public struct FallbackAsyncImage<Placeholder: View>: View {
     private let references: [ArtworkReference]
     private let maxAspectRatio: CGFloat?
     private let variant: ArtworkImageVariant
+    private let previewVariant: ArtworkImageVariant?
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
     private let placeholder: () -> Placeholder
 
@@ -28,12 +29,14 @@ public struct FallbackAsyncImage<Placeholder: View>: View {
         urls: [URL],
         maxAspectRatio: CGFloat? = nil,
         variant: ArtworkImageVariant = .original,
+        previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.references = urls.map(ArtworkReference.remote)
         self.maxAspectRatio = maxAspectRatio
         self.variant = variant
+        self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
         self.placeholder = placeholder
     }
@@ -42,12 +45,14 @@ public struct FallbackAsyncImage<Placeholder: View>: View {
         references: [ArtworkReference],
         maxAspectRatio: CGFloat? = nil,
         variant: ArtworkImageVariant = .original,
+        previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.references = references
         self.maxAspectRatio = maxAspectRatio
         self.variant = variant
+        self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
         self.placeholder = placeholder
     }
@@ -58,6 +63,7 @@ public struct FallbackAsyncImage<Placeholder: View>: View {
             references: references,
             maxAspectRatio: maxAspectRatio,
             variant: variant,
+            previewVariant: previewVariant,
             asyncFallbackURL: asyncFallbackURL,
             placeholder: placeholder
         )
@@ -119,11 +125,26 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
     let references: [ArtworkReference]
     let maxAspectRatio: CGFloat?
     let variant: ArtworkImageVariant
+    /// A cheaper variant to show FIRST while `variant` is still decoding.
+    ///
+    /// A detail hero asks for a 2000px backdrop; nothing has warmed it, because
+    /// the row that was just scrolled warms each card's own poster at a different
+    /// size entirely. So the page opened onto a scrim and waited on a cold fetch
+    /// plus a full-size decode. Loading a 768px pass first puts a real image up
+    /// roughly seven times sooner (by pixel count) and the full one replaces it in
+    /// place — the same progressive ladder Home's hero already uses, which is why
+    /// that one feels instant.
+    ///
+    /// `nil` keeps the single-pass behaviour every card uses: a poster is already
+    /// small, and a second decode there would cost more than it saves.
+    let previewVariant: ArtworkImageVariant?
     let asyncFallbackURL: (@Sendable () async -> URL?)?
     let placeholder: () -> Placeholder
 
     @State private var image: UIImage?
     @State private var resolved: Bool
+    /// Whether `image` is the cheap pass, and so still owes a full-quality swap.
+    @State private var isPreviewQuality = false
     @Environment(\.themePalette) private var palette
     /// The `.task` id the current `image`/`resolved` state was produced for. Lets
     /// `resolve()` tell "same inputs, keep the result" apart from "the urls
@@ -136,19 +157,30 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
         references: [ArtworkReference],
         maxAspectRatio: CGFloat?,
         variant: ArtworkImageVariant,
+        previewVariant: ArtworkImageVariant? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)?,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.references = references
         self.maxAspectRatio = maxAspectRatio
         self.variant = variant
+        self.previewVariant = previewVariant
         self.asyncFallbackURL = asyncFallbackURL
         self.placeholder = placeholder
         // Seed synchronously from the decoded-image cache so an already-warmed card
         // renders its art on the very first frame — no async hop, no gray flash.
-        let seeded = Self.cachedUsableImage(references: references, maxAspectRatio: maxAspectRatio, variant: variant)
-        _image = State(initialValue: seeded?.image)
-        _resolved = State(initialValue: seeded != nil)
+        let seeded = Self.cachedUsableImage(
+            references: references,
+            maxAspectRatio: maxAspectRatio,
+            variant: variant,
+            stopAtPrimary: true
+        )
+        let seededPreview = seeded == nil ? previewVariant.flatMap {
+            Self.cachedUsableImage(references: references, maxAspectRatio: maxAspectRatio, variant: $0)
+        } : nil
+        _image = State(initialValue: (seeded ?? seededPreview)?.image)
+        _resolved = State(initialValue: seeded != nil || seededPreview != nil)
+        _isPreviewQuality = State(initialValue: seeded == nil && seededPreview != nil)
         _loadedKey = State(initialValue: seeded?.index == references.startIndex
             ? Self.makeKey(references: references, variant: variant, maxAspectRatio: maxAspectRatio)
             : nil)
@@ -179,17 +211,19 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
         let key = taskKey
         // Same inputs we already resolved for — keep the current result rather
         // than wiping it back to gray and re-resolving.
-        if loadedKey == key, image != nil { return }
+        if loadedKey == key, image != nil, !isPreviewQuality { return }
         // The urls changed (or this is the first run). Prefer a synchronous cache
         // hit for the *new* urls so a warmed image shows with no flash.
         let seeded = Self.cachedUsableImage(
             references: references,
             maxAspectRatio: maxAspectRatio,
-            variant: variant
+            variant: variant,
+            stopAtPrimary: true
         )
         if let seeded {
             image = seeded.image
             resolved = true
+            isPreviewQuality = false
             if seeded.index == references.startIndex {
                 loadedKey = key
                 return
@@ -197,9 +231,25 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
         }
         // No cached image for the new inputs: drop any stale art so we never leave
         // a previous track's cover on screen, and show the loading state instead.
-        if seeded == nil {
+        if seeded == nil, !isPreviewQuality {
             image = nil
             resolved = false
+        }
+        // Progressive first pass. Deliberately before the full loop below, and
+        // deliberately only when there is nothing on screen: an image already up is
+        // never replaced by a cheaper one, so this can only ever fill a gap.
+        if image == nil, let previewVariant {
+            for reference in references {
+                guard let loaded = await ArtworkImageCache.shared.image(
+                    for: reference, variant: previewVariant
+                ) else { continue }
+                guard Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) != nil else { continue }
+                guard !Task.isCancelled else { return }
+                image = loaded
+                resolved = true
+                isPreviewQuality = true
+                break
+            }
         }
         // Attempt the network passes more than once. A `nil` from the cache means
         // only "no image came back" — it does NOT distinguish "this title has no
@@ -215,6 +265,7 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
                 guard Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) != nil else { continue }
                 image = loaded
                 resolved = true
+                isPreviewQuality = false
                 loadedKey = key
                 return
             }
@@ -224,6 +275,7 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
                let loaded = await ArtworkImageCache.shared.image(for: url, variant: variant) {
                 image = loaded
                 resolved = true
+                isPreviewQuality = false
                 loadedKey = key
                 return
             }
@@ -252,16 +304,36 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
 
     /// First already-decoded candidate (in priority order) that is acceptable for
     /// this context, read synchronously from `ArtworkImageCache`.
+    /// The best already-decoded image for these references.
+    ///
+    /// `stopAtPrimary` restricts the scan to the FIRST candidate, which is what
+    /// synchronous seeding wants. Seeding used to scan the whole list and take
+    /// whichever image happened to be resident, so a card whose primary poster
+    /// wasn't cached yet — but whose local fallback art was — painted the fallback
+    /// and then visibly swapped to the real poster a moment later. Measured while
+    /// scrolling an NFS library: 742 cards in one pass, every one of them seeding
+    /// from candidate 1 of 2.
+    ///
+    /// A lower-priority image is a reasonable thing to show on a BLANK card, and
+    /// still is — the resolve loop below reaches it. It is not a reasonable thing
+    /// to show when the right image is one decode away, because the viewer sees
+    /// the correction rather than the answer.
     private static func cachedUsableImage(
         references: [ArtworkReference],
         maxAspectRatio: CGFloat?,
-        variant: ArtworkImageVariant
+        variant: ArtworkImageVariant,
+        stopAtPrimary: Bool = false
     ) -> (image: UIImage, index: Int)? {
         for (index, reference) in references.enumerated() {
-            guard let cached = ArtworkImageCache.shared.cachedImage(for: reference, variant: variant) else { continue }
+            if stopAtPrimary, index > references.startIndex { return nil }
+            guard let cached = ArtworkImageCache.shared.cachedImage(for: reference, variant: variant) else {
+                if stopAtPrimary { return nil }
+                continue
+            }
             if usableSize(cached, maxAspectRatio: maxAspectRatio) != nil {
                 return (cached, index)
             }
+            if stopAtPrimary { return nil }
         }
         return nil
     }

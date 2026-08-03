@@ -139,6 +139,8 @@ public struct MediaRowView: View {
     /// Items whose artwork has already been queued for prefetch, so each card's
     /// `onAppear` only ever schedules its forward window once.
     @State private var prefetchedIDs: Set<String> = []
+    /// Cards whose detail-hero backdrop has been warmed — see `prefetchHeroPreview`.
+    @State private var prefetchedHeroIDs: Set<String> = []
     /// The card focus was on when this row's page was covered — see `isCovered`.
     @State private var coveredFocusID: String?
 
@@ -703,17 +705,51 @@ public struct MediaRowView: View {
     /// cancels the previous one, so blasting RIGHT through a long season rebuilds
     /// the hero once — when focus settles — instead of once per card passed.
     private func scheduleFocusReport(for id: String) {
-        guard let onFocusChange else { return }
         let item = itemByID[id]
         pendingReport?.cancel()
         let work = DispatchWorkItem {
             // Only report the card focus actually settled on, skipping every card
             // blown past during a rapid hold.
             guard focusedID == id else { return }
-            onFocusChange(item)
+            prefetchHeroPreview(for: item)
+            onFocusChange?(item)
         }
         pendingReport = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+    }
+
+    /// Warms the focused card's DETAIL BACKDROP at preview size, so opening it
+    /// paints a real image on the first frame instead of a scrim.
+    ///
+    /// The forward-window prefetch above warms each card's own artwork — a poster,
+    /// at poster size. A detail page's hero wants a different image entirely, so
+    /// none of that helps it and every open started cold.
+    ///
+    /// Three things keep this from becoming the kind of unbounded work that
+    /// overheats the device: it runs only for the card focus SETTLES on (the same
+    /// 0.08s coalescing the hero report uses, so holding RIGHT through a row warms
+    /// one image rather than fifty), only at `.heroPreview` — 768px, a fraction of
+    /// the 2000px the page eventually shows — and only once per card. The cache
+    /// itself also skips anything already resident or in flight, and decodes off
+    /// the main thread.
+    ///
+    /// Deliberately no TMDb fallback here: that is a network round trip to decide
+    /// what to fetch, which is far too much to spend on a card the viewer may
+    /// simply be scrolling past. A title with no local backdrop keeps the
+    /// progressive load it already had.
+    ///
+    /// Only the FIRST reference is warmed, while the hero picks the first that is
+    /// also ≤ 3:1 once loaded. A server backdrop is 16:9, so these agree in
+    /// practice; when they don't, the hero simply loads as it did before — a miss
+    /// costs nothing, where warming every candidate would cost on every card.
+    private func prefetchHeroPreview(for item: MediaItem?) {
+        #if canImport(UIKit)
+        guard let item, !prefetchedHeroIDs.contains(item.id) else { return }
+        let references = item.artworkReferences(for: .detailBackdrop)
+        guard let reference = references.first else { return }
+        prefetchedHeroIDs.insert(item.id)
+        ArtworkImageCache.shared.prefetch(reference, variant: .heroPreview)
+        #endif
     }
 
     /// Scrolls the target card into view (realising it in the lazy stack if needed)

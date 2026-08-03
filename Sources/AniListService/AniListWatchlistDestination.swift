@@ -19,12 +19,18 @@ public actor AniListWatchlistDestination: WatchlistDestination {
     public nonisolated let id: WatchlistDestinationID
     /// No IMDb/TMDb/TVDb: AniList cannot look a title up by them, and offering an
     /// identity it cannot use would only mint bindings that resolve to nothing.
+    ///
+    /// AniDB **is** accepted even though AniList's API has no AniDB lookup,
+    /// because ``AnimeIDMapper`` translates it — and that matters more than it
+    /// sounds. Jellyfin and Plex anime libraries (Shoko especially) usually tag
+    /// only AniDB, so without this the destination would decline nearly every
+    /// anime the viewer actually owns while appearing to work.
     public nonisolated let capabilities = WatchlistDestinationCapabilities(
         readable: true,
         writable: true,
         removable: true,
         bindingRequirement: .globalExternalIdentity,
-        globalIdentityNamespaces: [.aniList, .myAnimeList]
+        globalIdentityNamespaces: [.aniList, .myAnimeList, .aniDB]
     )
 
     private let client: AniListClient
@@ -119,6 +125,23 @@ public actor AniListWatchlistDestination: WatchlistDestination {
             return Int(externalID.value)
         case .myAnimeList:
             guard let mal = Int(externalID.value) else { return nil }
+            return try await client.findAnime(
+                anilistID: nil,
+                malID: mal,
+                title: nil,
+                accessToken: accessToken
+            )
+        case .aniDB:
+            // The same translation both scrobblers already rely on: a keyless,
+            // cached AniDB ↔ MAL ↔ AniList lookup. Deliberately NOT a lookup
+            // through another tracker — a viewer who connects only AniList must
+            // not need a second account for AniList to work.
+            guard let anidb = Int(externalID.value) else { return nil }
+            let mapped = await AnimeIDMapper.shared.enrich(
+                AnimeMappedIDs(anidb: anidb)
+            )
+            if let anilist = mapped.anilist { return anilist }
+            guard let mal = mapped.mal else { return nil }
             return try await client.findAnime(
                 anilistID: nil,
                 malID: mal,

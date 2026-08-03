@@ -13,15 +13,17 @@ import Foundation
 /// refreshes on demand — the same shape as Trakt's destination.
 public actor MALWatchlistDestination: WatchlistDestination {
     public nonisolated let id: WatchlistDestinationID
-    /// MAL indexes only its own ids. An AniList id is deliberately not offered:
-    /// translating one would need a third-party mapping service, and inventing an
-    /// id is how a viewer ends up with the wrong show on their list.
+    /// MAL's API indexes only its own ids, but ``AnimeIDMapper`` translates the
+    /// other anime catalogues into one — the same keyless, cached lookup the
+    /// scrobbler already uses. That is what makes this work for real libraries:
+    /// Jellyfin and Plex anime (Shoko especially) usually carry only AniDB, so a
+    /// MAL-only destination would decline nearly everything the viewer owns.
     public nonisolated let capabilities = WatchlistDestinationCapabilities(
         readable: true,
         writable: true,
         removable: true,
         bindingRequirement: .globalExternalIdentity,
-        globalIdentityNamespaces: [.myAnimeList]
+        globalIdentityNamespaces: [.myAnimeList, .aniDB, .aniList]
     )
 
     private let client: MALClient
@@ -66,8 +68,13 @@ public actor MALWatchlistDestination: WatchlistDestination {
         to binding: WatchlistDestinationBinding
     ) async throws {
         guard binding.destinationID == id,
-              let parsed = Self.parse(binding.opaqueValue),
-              let animeID = Int(parsed.externalID.value) else {
+              let parsed = Self.parse(binding.opaqueValue) else {
+            throw WatchlistDestinationError.permanent
+        }
+        guard let animeID = await Self.malID(for: parsed.externalID) else {
+            // No MAL id exists for this title, or the mapping service has never
+            // heard of it. Permanent: the same lookup will keep answering the
+            // same way, and retrying forever helps nobody.
             throw WatchlistDestinationError.permanent
         }
         let token = try await validAccessToken()
@@ -92,6 +99,29 @@ public actor MALWatchlistDestination: WatchlistDestination {
             throw WatchlistDestinationError.authenticationRequired
         } catch {
             throw WatchlistDestinationError.transient
+        }
+    }
+
+    /// The MAL id for `externalID`, translating from another anime catalogue when
+    /// the library did not record one. Never guesses: an id it cannot translate
+    /// yields `nil` rather than something plausible-looking, because a wrong id
+    /// puts the wrong show on the viewer's list.
+    private static func malID(for externalID: WatchlistExternalID) async -> Int? {
+        switch externalID.namespace {
+        case .myAnimeList:
+            return Int(externalID.value)
+        case .aniDB:
+            guard let anidb = Int(externalID.value) else { return nil }
+            return await AnimeIDMapper.shared.enrich(
+                AnimeMappedIDs(anidb: anidb)
+            ).mal
+        case .aniList:
+            guard let anilist = Int(externalID.value) else { return nil }
+            return await AnimeIDMapper.shared.enrich(
+                AnimeMappedIDs(anilist: anilist)
+            ).mal
+        default:
+            return nil
         }
     }
 

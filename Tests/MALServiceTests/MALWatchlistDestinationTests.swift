@@ -47,16 +47,16 @@ final class MALWatchlistDestinationTests: XCTestCase {
         XCTAssertNil(resolved)
     }
 
-    /// An AniList id is NOT accepted as a stand-in. The catalogues number their
-    /// works differently, and MAL has no way to translate — so a destination that
-    /// accepted one would be inventing an id, which is how the wrong show ends up
-    /// on someone's list.
-    func testAniListIdentityAloneDoesNotResolve() async throws {
+    /// An AniList id resolves, because `AnimeIDMapper` can translate it — the
+    /// same keyless, cached lookup the scrobbler uses. The guard against putting
+    /// the wrong show on someone's list lives at WRITE time instead: a title the
+    /// mapper cannot translate fails permanently rather than being guessed at.
+    func testAniListIdentityResolvesViaTranslation() async throws {
         let destination = makeDestination(http: RecordingHTTPClient())
         let frieren = try target(kind: .series, [(.aniList, "154587")])
 
         let resolved = try await destination.resolve(frieren)
-        XCTAssertNil(resolved)
+        XCTAssertEqual(resolved?.opaqueValue, "series|aniList|154587")
     }
 
     func testSeriesWithAMALIdentityResolves() async throws {
@@ -132,4 +132,23 @@ final class MALWatchlistDestinationTests: XCTestCase {
             XCTFail("unexpected error: \(error)")
         }
     }
+
+    /// The case that actually matters for real libraries: Jellyfin and Plex anime
+    /// (Shoko especially) tag only AniDB, so a destination that accepted just its
+    /// own catalogue's ids would decline nearly every anime the viewer owns while
+    /// looking like it worked. Resolving is what makes the title eligible at all;
+    /// the translation itself happens at write time via `AnimeIDMapper`.
+    func testAniDBOnlyAnimeStillResolves() async throws {
+        let destination = makeDestination(http: RecordingHTTPClient())
+        let mushoku = try target(kind: .series, [(.tmdb, "94664"), (.aniDB, "14758")])
+
+        let binding = try await destination.resolve(mushoku)
+
+        XCTAssertNotNil(
+            binding,
+            "an AniDB-tagged anime must not be silently skipped"
+        )
+        XCTAssertTrue(binding?.opaqueValue.contains("14758") == true)
+    }
+
 }

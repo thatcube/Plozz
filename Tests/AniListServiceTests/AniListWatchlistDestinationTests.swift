@@ -157,4 +157,23 @@ final class AniListWatchlistDestinationTests: XCTestCase {
             XCTFail("unexpected error: \(error)")
         }
     }
+
+    /// The case that actually matters for real libraries: Jellyfin and Plex anime
+    /// (Shoko especially) tag only AniDB, so a destination that accepted just its
+    /// own catalogue's ids would decline nearly every anime the viewer owns while
+    /// looking like it worked. Resolving is what makes the title eligible at all;
+    /// the translation itself happens at write time via `AnimeIDMapper`.
+    func testAniDBOnlyAnimeStillResolves() async throws {
+        let destination = makeDestination(http: RecordingHTTPClient())
+        let mushoku = try target(kind: .series, [(.tmdb, "94664"), (.aniDB, "14758")])
+
+        let binding = try await destination.resolve(mushoku)
+
+        XCTAssertNotNil(
+            binding,
+            "an AniDB-tagged anime must not be silently skipped"
+        )
+        XCTAssertTrue(binding?.opaqueValue.contains("14758") == true)
+    }
+
 }

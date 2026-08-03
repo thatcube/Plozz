@@ -110,6 +110,11 @@ public struct URLSessionHTTPClient: HTTPClient {
             throw AppError.notFound
         case 409:
             throw AppError.conflict
+        case 429:
+            throw AppError.rateLimited(
+                retryAfter: http.value(forHTTPHeaderField: "Retry-After")
+                    .flatMap(Double.init)
+            )
         default:
             throw AppError.invalidResponse
         }

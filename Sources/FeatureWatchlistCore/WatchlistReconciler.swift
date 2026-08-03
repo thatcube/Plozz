@@ -279,6 +279,8 @@ public actor WatchlistReconciler {
         FanoutDiagnostics.emit(
             "watchlist.resync writes=\(requests.count) alreadyInSync=\(suppressed) "
             + "staleIdentity=\(await mutationStore.staleIdentitySuppressions) "
+            + "confirmations=\(await mutationStore.reconciliationStateCount(profileID: profileID)) "
+            + "queue=\(await mutationStore.allMutations().count) "
             + "forgotten=\(await mutationStore.forgottenConfirmations)"
         )
         try await mutationStore.enqueueBatch(requests, now: now)

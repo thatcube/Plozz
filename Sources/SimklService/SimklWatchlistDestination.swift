@@ -97,6 +97,10 @@ public actor SimklWatchlistDestination: WatchlistDestination {
             }
         } catch AppError.unauthorized {
             throw WatchlistDestinationError.authenticationRequired
+        } catch AppError.rateLimited(let retryAfter) {
+            // Answering a throttle with more requests is the one response
+            // guaranteed to make it worse; this parks the whole destination.
+            throw WatchlistDestinationError.rateLimited(retryAfter: retryAfter)
         } catch {
             throw WatchlistDestinationError.transient
         }

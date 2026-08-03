@@ -21,6 +21,10 @@ public enum AppError: Error, Equatable, Sendable {
     /// recorded" and is a *success*, so it is surfaced as a distinct case
     /// instead of the generic `.invalidResponse` so callers can treat it that way.
     case conflict
+    /// The server asked us to slow down (HTTP 429), optionally saying for how
+    /// long. Distinct from `.invalidResponse` because answering a rate limit
+    /// with more requests is the one response guaranteed to make it worse.
+    case rateLimited(retryAfter: TimeInterval?)
     /// Quick Connect is disabled on the server.
     case quickConnectUnavailable
     /// The Quick Connect code expired before the user approved it.
@@ -44,7 +48,7 @@ public enum AppError: Error, Equatable, Sendable {
     /// noise we must retry later rather than remember.
     public var isTransportFailure: Bool {
         switch self {
-        case .serverUnreachable, .cancelled, .unauthorized:
+        case .serverUnreachable, .cancelled, .unauthorized, .rateLimited:
             return true
         case .invalidResponse, .invalidCredentials, .notFound, .conflict,
              .quickConnectUnavailable, .quickConnectExpired, .decoding, .unknown:
@@ -66,6 +70,12 @@ public enum AppError: Error, Equatable, Sendable {
                 "error.serverUnreachable",
                 defaultValue: "Can’t reach the server. Check that it’s online and on the same network.",
                 comment: "Shown when the app cannot connect to the user's media server."
+            )
+        case .rateLimited:
+            return LocalizedStringResource(
+                "error.rateLimited",
+                defaultValue: "The service is asking us to slow down. Try again in a moment.",
+                comment: "Shown when a server responds that too many requests have been made."
             )
         case .invalidResponse:
             return LocalizedStringResource(
@@ -147,7 +157,7 @@ public enum CredentialRejection {
                 return true
             case .serverUnreachable, .invalidResponse, .notFound, .conflict,
                  .quickConnectUnavailable, .quickConnectExpired, .cancelled,
-                 .decoding, .unknown:
+                 .decoding, .unknown, .rateLimited:
                 return false
             }
         case is CancellationError:

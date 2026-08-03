@@ -52,6 +52,14 @@ public struct WatchlistRetryPolicy: Sendable {
                 return .init(classification: .authentication, retryDelay: nil)
             case .notFound:
                 return .init(classification: .unsupportedIdentity, retryDelay: nil)
+            case .rateLimited(let retryAfter):
+                // Honour what the server asked for; falling through to the
+                // generic backoff would keep pushing on a throttled service.
+                return .init(
+                    classification: .transient,
+                    retryDelay: retryAfter
+                        ?? delay(attempt: attempt, jitterUnit: jitterUnit)
+                )
             case .serverUnreachable, .cancelled, .invalidResponse, .conflict,
                  .quickConnectUnavailable, .quickConnectExpired, .decoding,
                  .unknown:

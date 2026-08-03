@@ -79,6 +79,7 @@ public enum HandoffDiagnostics {
         case .invalidCredentials: return "invalidCredentials"
         case .notFound: return "notFound"
         case .conflict: return "conflict"
+        case .rateLimited: return "rateLimited"
         case .quickConnectUnavailable: return "quickConnectUnavailable"
         case .quickConnectExpired: return "quickConnectExpired"
         case .cancelled: return "cancelled"

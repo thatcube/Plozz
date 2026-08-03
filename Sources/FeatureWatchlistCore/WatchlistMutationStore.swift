@@ -327,13 +327,24 @@ public actor DurableWatchlistMutationStore {
             }
             mutationsByKey[key] = mutation
 
+            // Removal bookkeeping and the durable confirmation share this record.
+            // Queueing an add used to clear the whole thing, which threw away the
+            // memory of what the destination already holds — so the next resync
+            // saw no confirmation, queued the write again, and the watchlist
+            // re-sent itself indefinitely instead of settling.
             if request.desiredState == .absent {
                 var reconciliation = state.reconciliationStates[key] ?? .init()
                 reconciliation.explicitRemovalPending = true
                 reconciliation.observedAbsenceAfterRemoval = false
                 state.reconciliationStates[key] = reconciliation
-            } else {
-                state.reconciliationStates[key] = nil
+            } else if var reconciliation = state.reconciliationStates[key] {
+                reconciliation.explicitRemovalPending = false
+                reconciliation.observedAbsenceAfterRemoval = false
+                // Keep the record only for what outlives this queue entry. A
+                // plain add records nothing, so it must not leave one behind —
+                // the map has to track the watchlist, not every write ever made.
+                state.reconciliationStates[key] =
+                    reconciliation.lastConfirmedState == nil ? nil : reconciliation
             }
         }
         state.mutations = mutationsByKey.values.sorted { $0.key < $1.key }

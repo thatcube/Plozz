@@ -904,6 +904,66 @@ final class WatchlistReconcilerTests: XCTestCase {
         XCTAssertEqual(ready.map(\.key), Array(all.prefix(3)).map(\.key))
     }
 
+    /// Queueing an add must not forget what the destination already holds.
+    /// Clearing the record here made every resync re-send the whole watchlist,
+    /// so it never settled and kept the radio busy indefinitely.
+    func testQueueingAnAddKeepsAnExistingConfirmation() async throws {
+        let store = try DurableWatchlistMutationStore(
+            store: CountingMutationStateStore()
+        )
+        let destination = WatchlistDestinationID(rawValue: "simkl")!
+        let target = makeTarget()
+        let key = WatchlistMutationKey(
+            profileID: "p",
+            aliasID: target.aliasID,
+            destinationID: destination
+        )
+        try await store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: destination
+        )
+        try await store.markSucceeded(key)
+
+        // Something queues the same add again (a fan-out from a user press).
+        try await store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: destination
+        )
+        let stillConfirmed = await store.isAlreadyConfirmed(
+            key, desiredState: .present, target: target
+        )
+        XCTAssertTrue(
+            stillConfirmed,
+            "queueing an add must not erase the confirmation that suppresses resyncs"
+        )
+    }
+
+    /// A 429 must survive the HTTP layer as a rate limit. Collapsing it into a
+    /// generic failure made the queue answer a throttle with more requests —
+    /// measured on device as 66 AniList retries against 11 successes.
+    func testAThrottleKeepsItsMeaningThroughTheRetryPolicy() {
+        let policy = WatchlistRetryPolicy()
+        let honoured = policy.decision(
+            for: AppError.rateLimited(retryAfter: 30),
+            attempt: 0
+        )
+        XCTAssertEqual(honoured.classification, .transient)
+        XCTAssertEqual(honoured.retryDelay, 30)
+
+        // With no Retry-After the normal backoff applies, but it must still be
+        // a delay rather than an immediate retry.
+        let unspecified = policy.decision(
+            for: AppError.rateLimited(retryAfter: nil),
+            attempt: 0
+        )
+        XCTAssertEqual(unspecified.classification, .transient)
+        XCTAssertNotNil(unspecified.retryDelay)
+    }
+
     func testRateLimitedStatusIsClassifiedAsRetryableNotPermanent() {
         let policy = WatchlistRetryPolicy()
         let decision = policy.decision(

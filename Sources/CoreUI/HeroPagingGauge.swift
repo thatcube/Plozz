@@ -55,6 +55,7 @@ public enum HeroPagingGauge {
         height: CGFloat
     ) {
         layer.removeAnimation(forKey: animationKey)
+        layer.removeAnimation(forKey: collapseKey)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.bounds = CGRect(
@@ -63,6 +64,7 @@ public enum HeroPagingGauge {
             width: width(fraction: fraction, trackWidth: trackWidth, height: height),
             height: height
         )
+        layer.opacity = 1
         CATransaction.commit()
     }
 
@@ -95,6 +97,50 @@ public enum HeroPagingGauge {
         return min(clamped + travelled, 1)
     }
 
+    /// Collapses a gauge back to nothing as part of the surrounding animation.
+    ///
+    /// Removing a running animation snaps its layer to the model value, which
+    /// for a gauge is the *finished* width — so a bar that was half full flashed
+    /// full for a frame on its way out. Seeding the model with what is actually
+    /// on screen first means the collapse starts from there, and leaving the
+    /// final change to the ambient transaction lets it shrink alongside the dot
+    /// it lives in rather than disappearing.
+    public static func collapse(
+        _ layer: CALayer,
+        height: CGFloat,
+        duration: TimeInterval
+    ) {
+        let onScreen = layer.presentation()?.bounds.width ?? layer.bounds.width
+        layer.removeAnimation(forKey: animationKey)
+
+        // Stated explicitly rather than left to the surrounding transaction:
+        // whether a bare sublayer picks up an implicit animation depends on
+        // action resolution, and when it didn't the bar simply blinked out.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.bounds = CGRect(x: 0, y: 0, width: 0, height: height)
+        layer.opacity = 0
+        CATransaction.commit()
+
+        guard duration > 0, onScreen > 0 else { return }
+        let shrink = CABasicAnimation(keyPath: "bounds.size.width")
+        shrink.fromValue = onScreen
+        shrink.toValue = 0
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1
+        fade.toValue = 0
+        let group = CAAnimationGroup()
+        group.animations = [shrink, fade]
+        group.duration = duration
+        group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        group.isRemovedOnCompletion = true
+        layer.add(group, forKey: collapseKey)
+    }
+
+    /// Key for the outgoing collapse, separate from the gauge's own ramp so one
+    /// never cancels the other.
+    public static let collapseKey = "plozz.heroPagingGauge.collapse"
+
     public static func animate(
         _ layer: CALayer,
         from fraction: CGFloat,
@@ -110,9 +156,11 @@ public enum HeroPagingGauge {
         }
 
         layer.removeAnimation(forKey: animationKey)
+        layer.removeAnimation(forKey: collapseKey)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.bounds = CGRect(x: 0, y: 0, width: end, height: height)
+        layer.opacity = 1
         CATransaction.commit()
 
         let animation = CABasicAnimation(keyPath: "bounds.size.width")

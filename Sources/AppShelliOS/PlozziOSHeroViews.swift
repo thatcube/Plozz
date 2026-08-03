@@ -2242,6 +2242,10 @@ struct PlozziOSHeroPagingIndicator: View {
     let autoAdvance: Bool
     let autoAdvanceSeconds: Int
     let dwellStart: Date
+    /// True while the hero is moving to a slide that isn't the selected one yet.
+    /// `dwellStart` still belongs to the outgoing slide until the transition
+    /// commits, so without this the incoming bar inherits its progress.
+    var isTransitioning: Bool = false
     let trailerController: HeroTrailerController
 
     var body: some View {
@@ -2256,7 +2260,8 @@ struct PlozziOSHeroPagingIndicator: View {
                 activeIndex: selectedIndex,
                 autoAdvance: autoAdvance,
                 gaugeFraction: gaugeFraction,
-                gaugeRemaining: gaugeRemaining
+                gaugeRemaining: gaugeRemaining,
+                rampID: "\(selectedItemID ?? "-")|\(dwellStart.timeIntervalSinceReferenceDate)"
             ),
             tint: UIColor(palette.primaryText)
         )
@@ -2277,23 +2282,21 @@ struct PlozziOSHeroPagingIndicator: View {
         return index
     }
 
-    /// Where the gauge stands right now, and how long it has left. A trailer
-    /// reports its own clock; otherwise the dwell is a plain ramp from when the
-    /// slide fronted. Both are linear, which is why neither needs sampling.
-    private var gauge: (fraction: CGFloat, remaining: TimeInterval?) {
-        guard autoAdvance else { return (1, nil) }
-        if let selectedItemID, trailerController.isShowing(selectedItemID) {
-            let duration = trailerController.duration
-            guard duration > 0 else { return (0, nil) }
-            let elapsed = trailerController.player.currentTime().seconds
-            guard elapsed.isFinite, elapsed >= 0 else { return (0, nil) }
-            let fraction = min(max(CGFloat(elapsed / duration), 0), 1)
-            return (fraction, max(0, duration - elapsed))
-        }
-        let duration = Double(max(autoAdvanceSeconds, 1))
-        let elapsed = Date().timeIntervalSince(dwellStart)
-        let fraction = min(max(CGFloat(elapsed / duration), 0), 1)
-        return (fraction, max(0, duration - elapsed))
+    /// Where the gauge stands, decided by the shared rules in `HeroGaugeState`
+    /// so this shell cannot drift from tvOS.
+    private var gauge: HeroGaugeState {
+        let trailerIsShowing = selectedItemID.map(trailerController.isShowing) ?? false
+        return HeroGaugeState.resolve(
+            autoAdvance: autoAdvance,
+            dwellStart: dwellStart,
+            dwellDuration: Double(autoAdvanceSeconds),
+            now: Date(),
+            isTransitioning: isTransitioning,
+            trailerElapsed: trailerIsShowing
+                ? trailerController.player.currentTime().seconds
+                : nil,
+            trailerDuration: trailerIsShowing ? trailerController.duration : nil
+        )
     }
 
     private var gaugeFraction: CGFloat { gauge.fraction }

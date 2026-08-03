@@ -25,19 +25,26 @@ public final class HeroPagingDotsView: UIView {
         /// Seconds left in the dwell, or `nil` when it is not running — paused,
         /// or auto-advance switched off — in which case the gauge holds still.
         public var gaugeRemaining: TimeInterval?
+        /// Identifies the countdown currently on screen. The monotonic guard
+        /// must not carry a fraction across two different dwells, or a stale
+        /// reading taken between a slide committing and its dwell resetting gets
+        /// locked in and the bar sits there part-full.
+        public var rampID: String
 
         public init(
             count: Int,
             activeIndex: Int,
             autoAdvance: Bool,
             gaugeFraction: CGFloat,
-            gaugeRemaining: TimeInterval?
+            gaugeRemaining: TimeInterval?,
+            rampID: String
         ) {
             self.count = count
             self.activeIndex = activeIndex
             self.autoAdvance = autoAdvance
             self.gaugeFraction = gaugeFraction
             self.gaugeRemaining = gaugeRemaining
+            self.rampID = rampID
         }
     }
 
@@ -56,7 +63,7 @@ public final class HeroPagingDotsView: UIView {
     private var tint: UIColor = .white
     /// The ramp currently stated to Core Animation, so a restatement mid-slide
     /// can pick up where that one has reached instead of jumping backwards.
-    private var statedRamp: (index: Int, fraction: CGFloat, remaining: TimeInterval, at: Date)?
+    private var statedRamp: (id: String, fraction: CGFloat, remaining: TimeInterval, at: Date)?
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -80,10 +87,12 @@ public final class HeroPagingDotsView: UIView {
         // morph, or the dots would keep sliding on the spot.
         layoutDots(animated: pageChanged && previous != nil, tintChanged: tintChanged)
 
+        let rampChanged = previous?.rampID != configuration.rampID
         let gaugeChanged = pageChanged
+            || rampChanged
             || previous?.gaugeRemaining != configuration.gaugeRemaining
             || previous?.autoAdvance != configuration.autoAdvance
-        if gaugeChanged { refreshGauge(restarting: pageChanged) }
+        if gaugeChanged { refreshGauge(restarting: pageChanged || rampChanged) }
     }
 
     public override func layoutSubviews() {
@@ -190,7 +199,6 @@ public final class HeroPagingDotsView: UIView {
                 fillLayers[slot.dot.index] = fill
             }
             if tintChanged { fill.backgroundColor = tint.cgColor }
-            fill.isHidden = !slot.isActive
             // Geometry only — never animated, or the fill would slide around
             // inside its dot during the page morph.
             CATransaction.begin()
@@ -201,9 +209,23 @@ public final class HeroPagingDotsView: UIView {
                 midY: slot.frame.height / 2
             )
             CATransaction.commit()
-            if !slot.isActive {
-                // An inactive dot holds no gauge; clearing it means the dot this
-                // slide moves to starts empty instead of inheriting a width.
+            let isCollapsing = fill.animation(forKey: HeroPagingGauge.collapseKey) != nil
+            if slot.isActive {
+                fill.isHidden = false
+                fill.opacity = 1
+            } else if animated, !fill.isHidden, !isCollapsing {
+                // Shrink away with the pill that held it, instead of vanishing
+                // the instant the page turns.
+                HeroPagingGauge.collapse(
+                    fill,
+                    height: slot.frame.height,
+                    duration: Metrics.morphDuration
+                )
+            } else if !isCollapsing {
+                // An ordinary layout pass runs moments after a page change — it
+                // must leave a collapse alone rather than tearing it down, which
+                // is what made the bar disappear instantly instead of shrinking.
+                fill.isHidden = true
                 HeroPagingGauge.setStatic(
                     fill,
                     fraction: 0,
@@ -278,7 +300,7 @@ public final class HeroPagingDotsView: UIView {
         let now = Date()
         var fraction = configuration.gaugeFraction
         // Only a page change may send the gauge back to the start.
-        if !restarting, let stated = statedRamp, stated.index == active.dot.index {
+        if !restarting, let stated = statedRamp, stated.id == configuration.rampID {
             fraction = max(
                 fraction,
                 HeroPagingGauge.projectedFraction(
@@ -289,7 +311,7 @@ public final class HeroPagingDotsView: UIView {
                 )
             )
         }
-        statedRamp = (active.dot.index, fraction, remaining, now)
+        statedRamp = (configuration.rampID, fraction, remaining, now)
         HeroPagingGauge.animate(
             fill,
             from: fraction,

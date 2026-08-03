@@ -685,6 +685,10 @@ private struct PlozziOSHomeHeroCarousel: View {
     @Environment(HeroTrailerController.self) private var trailerController
     @State private var selectedItemID: String?
     @State private var dwellStart = Date()
+    /// The slide `dwellStart` was set for. `selectedItemID` and the dwell reset
+    /// on separate passes, so the id is the only reliable way to tell whether
+    /// the clock on screen actually belongs to the slide being shown.
+    @State private var dwellItemID: String?
     @State private var dragOffset: CGFloat = 0
     @State private var rootItems: [String: MediaItem] = [:]
     @State private var playTargets: [String: MediaItem] = [:]
@@ -860,6 +864,9 @@ private struct PlozziOSHomeHeroCarousel: View {
                     autoAdvance: autoAdvance,
                     autoAdvanceSeconds: autoAdvanceSeconds,
                     dwellStart: dwellStart,
+                    // The dwell counts only once it belongs to the slide on
+                    // screen; until then this slide's dwell hasn't begun.
+                    isTransitioning: dwellItemID != (transitionTargetID ?? selectedItemID),
                     trailerController: trailerController
                 )
                 .padding(.horizontal, 20)
@@ -870,6 +877,7 @@ private struct PlozziOSHomeHeroCarousel: View {
             if selectedItemID == nil || !itemIDs.contains(selectedItemID ?? "") {
                 selectedItemID = itemIDs.first
                 dwellStart = .now
+                dwellItemID = itemIDs.first
             }
         }
         .task(
@@ -906,6 +914,7 @@ private struct PlozziOSHomeHeroCarousel: View {
         }
         .onChange(of: selectedItemID, initial: true) {
             dwellStart = .now
+            dwellItemID = selectedItemID
             installTrailerEndHandler()
         }
         .task(id: selectedItemID) {

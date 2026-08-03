@@ -793,6 +793,10 @@ let package = Package(
             dependencies: ["TraktService", "CoreModels", "CoreNetworking"]
         ),
         .testTarget(
+            name: "SimklServiceTests",
+            dependencies: ["SimklService", "CoreModels", "CoreNetworking"]
+        ),
+        .testTarget(
             name: "SeerServiceTests",
             dependencies: ["SeerService", "CoreModels", "CoreNetworking"]
         ),

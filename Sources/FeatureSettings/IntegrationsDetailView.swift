@@ -68,7 +68,7 @@ struct IntegrationsDetailView: View {
             SettingsSplitRow(
                 id: "simkl",
                 verbatimTitle: "Simkl",
-                description: "Sync your watch history and track what to watch next with Simkl.",
+                description: "Scrobble and sync your watch history and watchlist with Simkl.",
             ) {
                 if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
                     DeviceCodeConnectingView(

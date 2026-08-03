@@ -149,3 +149,65 @@ struct SimklScrobbleEpisodeRef: Encodable, Equatable {
     var season: Int?
     var number: Int?
 }
+
+// MARK: - Watchlist ("plan to watch") DTOs
+
+/// One title in a Simkl list response. Simkl nests the work under `movie`/`show`
+/// alongside per-user fields, so the decoder reaches through to the ids.
+struct SimklListEntry: Decodable, Equatable {
+    struct Title: Decodable, Equatable {
+        var title: String?
+        var year: Int?
+        var ids: SimklResponseIDs?
+    }
+
+    var movie: Title?
+    var show: Title?
+
+    var title: Title? { movie ?? show }
+}
+
+/// The id block Simkl returns. Deliberately separate from the `Encodable`
+/// ``SimklIDs`` the write path sends: reads can carry ids the app never writes,
+/// and a decoding type that must also round-trip is a type that fights both jobs.
+struct SimklResponseIDs: Decodable, Equatable {
+    var simkl: Int?
+    var imdb: String?
+    var tmdb: StringOrInt?
+    var tvdb: StringOrInt?
+}
+
+/// Simkl returns numeric ids as either a JSON number or a string depending on
+/// the field and the endpoint. Decoding either keeps one shape out of the rest of
+/// the code.
+struct StringOrInt: Decodable, Equatable {
+    let value: String
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let int = try? container.decode(Int.self) {
+            value = String(int)
+        } else {
+            value = try container.decode(String.self)
+        }
+    }
+}
+
+/// `GET /sync/all-items/{type}/plantowatch`
+struct SimklListResponse: Decodable, Equatable {
+    var movies: [SimklListEntry]?
+    var shows: [SimklListEntry]?
+}
+
+/// One entry in an add-to-list request.
+struct SimklListMutationEntry: Encodable, Equatable {
+    var ids: SimklIDs
+    /// Only sent when adding: the list to place the title in.
+    var to: String?
+}
+
+/// `POST /sync/add-to-list` and `POST /sync/remove-from-list`.
+struct SimklListMutationBody: Encodable, Equatable {
+    var movies: [SimklListMutationEntry]?
+    var shows: [SimklListMutationEntry]?
+}

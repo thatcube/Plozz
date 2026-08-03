@@ -79,6 +79,55 @@ struct SimklClient: Sendable {
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 
+    // MARK: - Watchlist ("plan to watch")
+
+    /// `GET /sync/all-items/{type}/plantowatch` — the user's plan-to-watch list.
+    ///
+    /// Movies and shows are separate endpoints on Simkl, so this is called once
+    /// per kind and the destination concatenates.
+    func planToWatch(
+        type: String,
+        accessToken: String
+    ) async throws -> SimklListResponse {
+        let endpoint = Endpoint(
+            method: .get,
+            path: "/sync/all-items/\(type)/plantowatch",
+            queryItems: [URLQueryItem(name: "client_id", value: config.clientID ?? "")],
+            headers: headers(accessToken: accessToken)
+        )
+        return try await http.decode(
+            SimklListResponse.self,
+            from: endpoint,
+            baseURL: baseURL
+        )
+    }
+
+    /// `POST /sync/add-to-list` — place titles on a list (`plantowatch` here).
+    func addToList(
+        body: SimklListMutationBody,
+        accessToken: String
+    ) async throws {
+        let endpoint = try Endpoint(
+            method: .post,
+            path: "/sync/add-to-list",
+            headers: headers(accessToken: accessToken)
+        ).jsonBody(body)
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
+    /// `POST /sync/remove-from-list` — take titles off every list they are on.
+    func removeFromList(
+        body: SimklListMutationBody,
+        accessToken: String
+    ) async throws {
+        let endpoint = try Endpoint(
+            method: .post,
+            path: "/sync/remove-from-list",
+            headers: headers(accessToken: accessToken)
+        ).jsonBody(body)
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
     // MARK: - Real-time scrobble
 
     /// `POST /scrobble/{action}` — reports real-time playback (start/pause/stop).

@@ -17,8 +17,15 @@ extension PlozziOSAppModel: UniversalWatchlistHost {
         Self.universalWatchlistStorageDirectory()
     }
 
-    var traktWatchlistDestination: (any WatchlistDestination)? {
-        traktService.watchlistDestination
+    var trackerWatchlistDestinations: [any WatchlistDestination] {
+        // Peers, not a fallback chain: a viewer may sync to both, and
+        // one service being unconfigured or unusable must not affect the
+        // other.
+        let candidates: [(any WatchlistDestination)?] = [
+            traktService.watchlistDestination,
+            simklService.watchlistDestination,
+        ]
+        return candidates.compactMap { $0 }
     }
 }
 #endif

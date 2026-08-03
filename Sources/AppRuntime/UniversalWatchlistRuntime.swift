@@ -29,9 +29,14 @@ public protocol UniversalWatchlistHost: AnyObject {
     var identityIndex: IdentityIndexModel { get }
     var accountsProviders: AccountsProvidersModel { get }
 
-    /// Trakt's watchlist destination when connected. Passed as a destination rather
-    /// than as the whole `TraktService` so `AppRuntime` need not depend on it.
-    var traktWatchlistDestination: (any WatchlistDestination)? { get }
+    /// The connected TRACKER destinations — Trakt, Simkl, and anything added
+    /// later. Passed as destinations rather than as the services themselves so
+    /// `AppRuntime` need not depend on any of them.
+    ///
+    /// A list rather than one property because these are peers: a viewer may sync
+    /// to both, and when one service's API becomes unusable the others must carry
+    /// on untouched.
+    var trackerWatchlistDestinations: [any WatchlistDestination] { get }
 
     /// Where the durable mutation outbox lives. Each shell resolves its own writable
     /// state directory (they differ between tvOS and iOS).
@@ -517,9 +522,7 @@ public extension UniversalWatchlistHost {
                 destinations.append(destination)
             }
         }
-        if let trakt = traktWatchlistDestination {
-            destinations.append(trakt)
-        }
+        destinations.append(contentsOf: trackerWatchlistDestinations)
         let fileURL = universalWatchlistStorageDirectory?
             .appendingPathComponent("Mutations", isDirectory: true)
             .appendingPathComponent("\(profileID).json")

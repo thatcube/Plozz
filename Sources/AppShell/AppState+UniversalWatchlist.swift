@@ -20,7 +20,14 @@ extension AppState: UniversalWatchlistHost {
 
     public var profiles: ProfilesModel { profilesModel }
 
-    public var traktWatchlistDestination: (any WatchlistDestination)? {
-        traktService.watchlistDestination
+    public var trackerWatchlistDestinations: [any WatchlistDestination] {
+        // Peers, not a fallback chain: a viewer may sync to both, and
+        // one service being unconfigured or unusable must not affect the
+        // other.
+        let candidates: [(any WatchlistDestination)?] = [
+            traktService.watchlistDestination,
+            simklService.watchlistDestination,
+        ]
+        return candidates.compactMap { $0 }
     }
 }

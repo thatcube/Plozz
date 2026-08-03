@@ -28,15 +28,26 @@ public final class SimklService {
     @ObservationIgnored private var connectTask: Task<Void, Never>?
     @ObservationIgnored private var profileGeneration: UInt64 = 0
 
+    /// The universal watchlist's Simkl destination, or `nil` when Simkl is not
+    /// configured in this build. Mirrors `TraktService.watchlistDestination`.
+    @ObservationIgnored public let watchlistDestination:
+        SimklWatchlistDestination?
+
     public init(config: SimklConfig, http: HTTPClient = URLSessionHTTPClient(), tokenStore: SimklTokenStoring) {
         self.config = config
         self.auth = SimklAuthService(config: config, http: http)
         self.tokenStore = tokenStore
         if config.isConfigured {
             self.scrobbler = SimklScrobbler(config: config, http: http, tokenStore: tokenStore)
+            self.watchlistDestination = SimklWatchlistDestination(
+                config: config,
+                http: http,
+                tokenStore: tokenStore
+            )
             self.phase = .unknown
         } else {
             self.scrobbler = DisabledSimklScrobbler()
+            self.watchlistDestination = nil
             self.phase = .unavailable
         }
     }

@@ -115,6 +115,13 @@ public final class TraktService {
             guard generation == profileGeneration.current else { return }
             // Token rejected/unusable — surface as disconnected so the user can
             // reconnect. The stale token is cleared so the scrobbler no-ops.
+            // A network blip is not evidence the token is bad; only the
+            // server rejecting it is. Discarding it here made a momentary
+            // failure a permanent sign-out.
+            guard CredentialRejection.discardsStoredCredential(error) else {
+                phase = .unknown
+                return
+            }
             try? tokenStore.clear()
             phase = .disconnected
         }

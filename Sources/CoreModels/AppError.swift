@@ -130,3 +130,31 @@ public enum AppError: Error, Equatable, Sendable {
         }
     }
 }
+
+/// Whether a failed identity check means the stored credential is actually bad.
+///
+/// Signing someone out is destructive and, for a tracker, unrecoverable without
+/// a fresh OAuth round trip on a TV remote. Only the server saying "this
+/// credential is rejected" justifies it. Anything else — offline, DNS, timeout,
+/// a 500, a malformed body, a cancelled task — says nothing about the token, and
+/// discarding it there turns a momentary network blip into a permanent sign-out.
+public enum CredentialRejection {
+    public static func discardsStoredCredential(_ error: Error) -> Bool {
+        switch error {
+        case let error as AppError:
+            switch error {
+            case .unauthorized, .invalidCredentials:
+                return true
+            case .serverUnreachable, .invalidResponse, .notFound, .conflict,
+                 .quickConnectUnavailable, .quickConnectExpired, .cancelled,
+                 .decoding, .unknown:
+                return false
+            }
+        case is CancellationError:
+            return false
+        default:
+            // An unclassified error is not evidence against the credential.
+            return false
+        }
+    }
+}

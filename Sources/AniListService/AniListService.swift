@@ -80,6 +80,13 @@ public final class AniListService {
             phase = .connected(username: user.name)
         } catch {
             guard generation == profileGeneration else { return }
+            // A network blip is not evidence the token is bad; only the
+            // server rejecting it is. Discarding it here made a momentary
+            // failure a permanent sign-out.
+            guard CredentialRejection.discardsStoredCredential(error) else {
+                phase = .unknown
+                return
+            }
             try? tokenStore.clear()
             phase = .disconnected
         }

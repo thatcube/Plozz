@@ -77,3 +77,37 @@ final class TrackerTokenSyncBridgeTests: XCTestCase {
         XCTAssertTrue(touched.isEmpty)
     }
 }
+
+/// A momentary network failure must never sign someone out. This is what
+/// silently dropped a freshly-synced AniList token: the arriving credential was
+/// validated immediately, the check failed transiently, and the token was
+/// deleted as though the server had rejected it.
+final class CredentialRejectionTests: XCTestCase {
+    func testOnlyAServerRejectionDiscardsTheCredential() {
+        XCTAssertTrue(CredentialRejection.discardsStoredCredential(AppError.unauthorized))
+        XCTAssertTrue(
+            CredentialRejection.discardsStoredCredential(AppError.invalidCredentials)
+        )
+    }
+
+    func testTransportAndServerFaultsKeepTheCredential() {
+        let survivable: [Error] = [
+            AppError.serverUnreachable,
+            AppError.invalidResponse,
+            AppError.notFound,
+            AppError.conflict,
+            AppError.decoding,
+            AppError.cancelled,
+            AppError.unknown("boom"),
+            CancellationError(),
+            URLError(.timedOut),
+            URLError(.notConnectedToInternet)
+        ]
+        for error in survivable {
+            XCTAssertFalse(
+                CredentialRejection.discardsStoredCredential(error),
+                "\(error) must not sign the user out"
+            )
+        }
+    }
+}

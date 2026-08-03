@@ -46,17 +46,37 @@ public enum TrackerTokenSyncBridge {
         fallback: [SyncRecordID: Data]
     ) -> [SyncRecordID: Data] {
         var records: [SyncRecordID: Data] = [:]
+        var signedOut: Set<SyncRecordID> = []
         for account in SyncedTokenRegistry.shared.knownAccounts() {
+            let name = recordName(for: account)
+            if SyncedTokenRegistry.shared.isSignedOut(account) {
+                // Omitted below, which is how the ledger expresses a deletion.
+                signedOut.insert(name)
+                continue
+            }
             let store = SyncedTokenRegistry.store(for: account)
             guard let raw = store.string(for: account.account),
                   let data = raw.data(using: .utf8) else { continue }
-            records[recordName(for: account)] = data
+            records[name] = data
         }
-        // Anything this device doesn't know about yet stays as it was, rather
-        // than being treated as removed.
         for (name, value) in fallback where records[name] == nil {
-            guard account(fromRecordName: name) != nil else { continue }
+            guard let account = account(fromRecordName: name) else { continue }
+            // A real sign-out must not be resurrected by its own ledger entry.
+            guard !signedOut.contains(name) else { continue }
+            // Otherwise this device simply doesn't have the token: either it has
+            // never signed in, or something local discarded it. Keep publishing
+            // what the account already agreed on rather than deleting it, and
+            // restore the local copy so the device heals itself instead of
+            // waiting for a remote edit it may never get.
             records[name] = value
+            let store = SyncedTokenRegistry.store(for: account)
+            if store.string(for: account.account) == nil,
+               let raw = String(data: value, encoding: .utf8) {
+                try? store.setString(raw, for: account.account)
+                FanoutDiagnostics.emit(
+                    "keychain.cloudHeal account=\(account.account)"
+                )
+            }
         }
         return records
     }
@@ -73,6 +93,10 @@ public enum TrackerTokenSyncBridge {
             guard let account = account(fromRecordName: name) else { continue }
             let store = SyncedTokenRegistry.store(for: account)
             guard let value else {
+                // Another device signed out. Match it, and remember that this is
+                // a sign-out rather than a gap, so the next capture doesn't
+                // publish the token straight back.
+                SyncedTokenRegistry.shared.markSignedOut(account)
                 if store.string(for: account.account) != nil {
                     try? store.removeValue(for: account.account)
                     touched.append(account)
@@ -84,6 +108,7 @@ public enum TrackerTokenSyncBridge {
             // re-trigger the change handler on every fetch.
             guard store.string(for: account.account) != raw else { continue }
             try? store.setString(raw, for: account.account)
+            SyncedTokenRegistry.shared.clearSignedOut(account)
             SyncedTokenRegistry.shared.register(
                 service: account.service,
                 account: account.account

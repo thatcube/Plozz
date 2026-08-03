@@ -100,6 +100,9 @@ public final class SyncedTokenBox<Token: Codable & Sendable>: @unchecked Sendabl
         do {
             try synced.setString(raw, for: account)
             registerForSync()
+            SyncedTokenRegistry.shared.clearSignedOut(
+                .init(service: service, account: account)
+            )
             SyncedTokenRegistry.shared.noteChanged()
             // Never the token itself — only whether the synced write landed and
             // whether the item reads back as synchronizable.
@@ -139,6 +142,10 @@ public final class SyncedTokenBox<Token: Codable & Sendable>: @unchecked Sendabl
     public func clear() throws {
         let account = currentAccount()
         try synced.removeValue(for: account)
+        // Deliberate: this must sign the account's other devices out too.
+        SyncedTokenRegistry.shared.markSignedOut(
+            .init(service: service, account: account)
+        )
         SyncedTokenRegistry.shared.noteChanged()
         // Signing out must not leave a pre-migration copy behind for `load` to
         // resurrect on the next launch.

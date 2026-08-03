@@ -45,6 +45,48 @@ public final class SyncedTokenRegistry: @unchecked Sendable {
         }
     }
 
+    /// Accounts this device deliberately signed out of.
+    ///
+    /// Absence of a token is ambiguous — a device that has never signed in looks
+    /// identical to one that just signed out — and the two must behave in
+    /// opposite ways: the first must leave everyone else alone, the second must
+    /// sign every device out. Only a real sign-out records this. Account names
+    /// are not secret; no token material is stored here.
+    private static let tombstoneDefaultsKey = "com.plozz.app.trackerTokenTombstones"
+
+    private func tombstoneKey(_ account: Account) -> String {
+        "\(account.service)|\(account.account)"
+    }
+
+    public func markSignedOut(_ account: Account) {
+        var stored = Set(
+            UserDefaults.standard.stringArray(forKey: Self.tombstoneDefaultsKey) ?? []
+        )
+        stored.insert(tombstoneKey(account))
+        UserDefaults.standard.set(
+            Array(stored).sorted(),
+            forKey: Self.tombstoneDefaultsKey
+        )
+    }
+
+    public func clearSignedOut(_ account: Account) {
+        var stored = Set(
+            UserDefaults.standard.stringArray(forKey: Self.tombstoneDefaultsKey) ?? []
+        )
+        guard stored.remove(tombstoneKey(account)) != nil else { return }
+        UserDefaults.standard.set(
+            Array(stored).sorted(),
+            forKey: Self.tombstoneDefaultsKey
+        )
+    }
+
+    public func isSignedOut(_ account: Account) -> Bool {
+        let stored = UserDefaults.standard.stringArray(
+            forKey: Self.tombstoneDefaultsKey
+        ) ?? []
+        return stored.contains(tombstoneKey(account))
+    }
+
     public func setChangeHandler(_ handler: (@Sendable () -> Void)?) {
         lock.lock(); onChange = handler; lock.unlock()
     }

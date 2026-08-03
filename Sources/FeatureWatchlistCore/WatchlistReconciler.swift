@@ -277,13 +277,22 @@ public actor WatchlistReconciler {
             }
         }
         FanoutDiagnostics.emit(
-            "watchlist.resync writes=\(requests.count) alreadyInSync=\(suppressed)"
+            "watchlist.resync writes=\(requests.count) alreadyInSync=\(suppressed) "
+            + "staleIdentity=\(await mutationStore.staleIdentitySuppressions) "
+            + "forgotten=\(await mutationStore.forgottenConfirmations)"
         )
         try await mutationStore.enqueueBatch(requests, now: now)
     }
 
     /// Drains at most three writes. Calls are serialized per profile, and the
     /// durable composite key prevents duplicate destination/title work.
+    /// Per-destination rate-limit backoff, escalating while a destination keeps
+    /// refusing and cleared as soon as it accepts a write. In memory on purpose:
+    /// a relaunch is a reasonable moment to try a service again.
+    private var rateLimitCooldowns: [WatchlistDestinationID: TimeInterval] = [:]
+    private static let minimumRateLimitCooldown: TimeInterval = 60
+    private static let maximumRateLimitCooldown: TimeInterval = 30 * 60
+
     @discardableResult
     public func drain(
         profileID: String,
@@ -541,6 +550,8 @@ public actor WatchlistReconciler {
             }
             try await destination.apply(mutation.desiredState, to: binding)
             try await mutationStore.markSucceeded(mutation.key, now: now)
+            // The destination is answering again, so stop punishing it.
+            rateLimitCooldowns[destination.id] = nil
             FanoutDiagnostics.emit(
                 "watchlist.apply dest=\(destination.id.rawValue) "
                 + "state=\(mutation.desiredState) outcome=OK"
@@ -574,13 +585,26 @@ public actor WatchlistReconciler {
             }
             if case .rateLimited = error as? WatchlistDestinationError,
                let retryDelay = decision.retryDelay {
+                // Each queued title is a fresh mutation on attempt zero, so the
+                // per-mutation backoff never grows no matter how often the
+                // destination refuses. Escalate per destination instead, or a
+                // service that wants a long pause is asked again immediately.
+                let escalated = max(
+                    retryDelay,
+                    min(
+                        Self.maximumRateLimitCooldown,
+                        (rateLimitCooldowns[destination.id] ?? 0) * 2
+                    )
+                )
+                let cooldown = max(escalated, Self.minimumRateLimitCooldown)
+                rateLimitCooldowns[destination.id] = cooldown
                 let deferred = (try? await mutationStore.deferDestination(
                     destination.id,
-                    until: now.addingTimeInterval(retryDelay)
+                    until: now.addingTimeInterval(cooldown)
                 )) ?? 0
                 FanoutDiagnostics.emit(
                     "watchlist.cooldown dest=\(destination.id.rawValue) "
-                    + "seconds=\(Int(retryDelay)) deferred=\(deferred)"
+                    + "seconds=\(Int(cooldown)) deferred=\(deferred)"
                 )
             }
         }

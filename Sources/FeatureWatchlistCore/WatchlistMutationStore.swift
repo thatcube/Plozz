@@ -340,6 +340,12 @@ public actor DurableWatchlistMutationStore {
         try persist()
     }
 
+    /// Counts confirmations rejected purely because the identity fingerprint
+    /// moved. A steady stream means identity is churning between launches, which
+    /// would silently re-send the whole watchlist every session.
+    public private(set) var staleIdentitySuppressions = 0
+    public private(set) var forgottenConfirmations = 0
+
     /// Whether a destination is already known to hold `desiredState` for this
     /// target under the same identity, making a write a no-op.
     public func isAlreadyConfirmed(
@@ -348,9 +354,13 @@ public actor DurableWatchlistMutationStore {
         target: WatchlistMutationTarget
     ) -> Bool {
         guard let reconciliation = state.reconciliationStates[key],
-              reconciliation.lastConfirmedState == desiredState,
-              reconciliation.lastConfirmedIdentity == target.identityFingerprint
+              reconciliation.lastConfirmedState == desiredState
         else { return false }
+        guard reconciliation.lastConfirmedIdentity == target.identityFingerprint
+        else {
+            staleIdentitySuppressions += 1
+            return false
+        }
         // A pending removal is unfinished business regardless of what was last
         // confirmed, so never suppress a write while one is outstanding.
         return !reconciliation.explicitRemovalPending
@@ -376,6 +386,7 @@ public actor DurableWatchlistMutationStore {
             return kept.contains(key.aliasID)
         }
         let removed = before - state.reconciliationStates.count
+        forgottenConfirmations += removed
         if removed > 0 { try persist() }
         return removed
     }
@@ -618,8 +629,14 @@ public actor DurableWatchlistMutationStore {
                 observation = .noChange
             }
 
+            // Removal bookkeeping is transient; the confirmation of what a
+            // destination holds is not. Clearing the whole record here erased
+            // that memory on every native import, so the next resync re-sent
+            // the entire watchlist. Keep the confirmation, drop only the
+            // bookkeeping.
             if reconciliation.explicitRemovalPending
-                || reconciliation.observedAbsenceAfterRemoval {
+                || reconciliation.observedAbsenceAfterRemoval
+                || reconciliation.lastConfirmedState != nil {
                 if state.reconciliationStates[key] != reconciliation {
                     state.reconciliationStates[key] = reconciliation
                     changed = true
@@ -637,6 +654,7 @@ public actor DurableWatchlistMutationStore {
         let obsolete = state.reconciliationStates.filter {
             !$0.value.explicitRemovalPending
                 && !$0.value.observedAbsenceAfterRemoval
+                && $0.value.lastConfirmedState == nil
                 && !liveKeys.contains($0.key)
         }.map(\.key)
         if !obsolete.isEmpty {

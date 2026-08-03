@@ -765,6 +765,52 @@ final class WatchlistReconcilerTests: XCTestCase {
         XCTAssertEqual(afterImprovement.count, 1)
     }
 
+    /// Importing a native watchlist must not erase what we already confirmed a
+    /// destination holds. Removal bookkeeping is transient; the confirmation is
+    /// durable, and both live in the same record — clearing the record wholesale
+    /// wiped the memory on every launch and re-sent the whole watchlist.
+    func testNativeImportKeepsConfirmationsItDidNotWrite() async throws {
+        let store = try DurableWatchlistMutationStore(
+            store: CountingMutationStateStore()
+        )
+        let destination = WatchlistDestinationID(rawValue: "plex.acct")!
+        let target = makeTarget()
+        let key = WatchlistMutationKey(
+            profileID: "p",
+            aliasID: target.aliasID,
+            destinationID: destination
+        )
+        try await store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: destination
+        )
+        try await store.markSucceeded(key)
+        let confirmed = await store.isAlreadyConfirmed(
+            key, desiredState: .present, target: target
+        )
+        XCTAssertTrue(confirmed)
+
+        // A native import sweep observes the title already present remotely.
+        _ = try await store.observeNativeBatch([
+            WatchlistNativeObservationRequest(
+                key: key,
+                isPresent: true,
+                localDesiredState: .present,
+                isEligibleTarget: true
+            )
+        ])
+
+        let survived = await store.isAlreadyConfirmed(
+            key, desiredState: .present, target: target
+        )
+        XCTAssertTrue(
+            survived,
+            "a native import must not erase an existing confirmation"
+        )
+    }
+
     func testRateLimitedStatusIsClassifiedAsRetryableNotPermanent() {
         let policy = WatchlistRetryPolicy()
         let decision = policy.decision(

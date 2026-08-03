@@ -1,4 +1,5 @@
 import Foundation
+import CoreSecureStore
 #if canImport(Security)
 import Security
 #endif
@@ -15,67 +16,28 @@ public protocol LastFmTokenStoring: Sendable {
 
 #if canImport(Security)
 /// Keychain-backed token store for Last.fm.
+
+/// Keychain-backed token store for LastFm, on the shared synced box so this
+/// sign-in reaches the account's other devices.
 public final class KeychainLastFmTokenStore: LastFmTokenStoring, @unchecked Sendable {
-    private let service: String
-    private let baseAccount: String
-    private let lock = NSLock()
-    private var namespace: String?
+    private let box: SyncedTokenBox<LastFmTokens>
 
-    public init(service: String = "com.plozz.app.tokens", account: String = "lastfm.session", namespace: String? = nil) {
-        self.service = service
-        self.baseAccount = account
-        self.namespace = namespace
+    public init(
+        service: String = "com.plozz.app.tokens",
+        account: String = "lastfm.session",
+        namespace: String? = nil
+    ) {
+        box = SyncedTokenBox(
+            service: service,
+            account: account,
+            namespace: namespace
+        )
     }
 
-    public func setNamespace(_ namespace: String?) {
-        lock.lock(); defer { lock.unlock() }
-        self.namespace = namespace
-    }
-
-    private func currentAccount() -> String {
-        lock.lock(); defer { lock.unlock() }
-        if let namespace, !namespace.isEmpty {
-            return "\(baseAccount).\(namespace)"
-        }
-        return baseAccount
-    }
-
-    private func baseQuery(account: String) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-    }
-
-    public func load() -> LastFmTokens? {
-        var query = baseQuery(account: currentAccount())
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return try? JSONDecoder().decode(LastFmTokens.self, from: data)
-    }
-
-    public func save(_ tokens: LastFmTokens) throws {
-        let data = try JSONEncoder().encode(tokens)
-        var query = baseQuery(account: currentAccount())
-        SecItemDelete(query as CFDictionary)
-        query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-
-        let status = SecItemAdd(query as CFDictionary, nil)
-        guard status == errSecSuccess else { throw LastFmTokenStoreError.unexpectedStatus(status) }
-    }
-
-    public func clear() throws {
-        let status = SecItemDelete(baseQuery(account: currentAccount()) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw LastFmTokenStoreError.unexpectedStatus(status)
-        }
-    }
+    public func setNamespace(_ namespace: String?) { box.setNamespace(namespace) }
+    public func load() -> LastFmTokens? { box.load() }
+    public func save(_ tokens: LastFmTokens) throws { try box.save(tokens) }
+    public func clear() throws { try box.clear() }
 }
 
 public enum LastFmTokenStoreError: Error, Equatable {

@@ -42,6 +42,7 @@ let package = Package(
         .library(name: "SimklService", targets: ["SimklService"]),        .library(name: "AniListService", targets: ["AniListService"]),
         .library(name: "MALService", targets: ["MALService"]),
         .library(name: "LastFmService", targets: ["LastFmService"]),
+        .library(name: "CoreSecureStore", targets: ["CoreSecureStore"]),
         .library(name: "FeatureAuthCore", targets: ["FeatureAuthCore"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHomeCore", targets: ["FeatureHomeCore"]),
@@ -284,7 +285,7 @@ let package = Package(
         ),
         .target(
             name: "TraktService",
-            dependencies: ["CoreModels", "CoreNetworking"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreSecureStore"]
         ),
         .target(
             name: "SeerService",
@@ -292,19 +293,19 @@ let package = Package(
         ),
         .target(
             name: "SimklService",
-            dependencies: ["CoreModels", "CoreNetworking"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreSecureStore"]
         ),
         .target(
             name: "AniListService",
-            dependencies: ["CoreModels", "CoreNetworking"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreSecureStore"]
         ),
         .target(
             name: "MALService",
-            dependencies: ["CoreModels", "CoreNetworking"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreSecureStore"]
         ),
         .target(
             name: "LastFmService",
-            dependencies: ["CoreModels", "CoreNetworking"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreSecureStore"]
         ),
 
         // MARK: Features
@@ -317,8 +318,12 @@ let package = Package(
             dependencies: ["CoreModels", "CoreUI", "FeatureDiscoveryCore"]
         ),
         .target(
+            name: "CoreSecureStore",
+            dependencies: ["CoreModels"]
+        ),
+        .target(
             name: "FeatureAuthCore",
-            dependencies: ["CoreModels", "CoreNetworking", "ProviderJellyfin", "ProviderPlex"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreSecureStore", "ProviderJellyfin", "ProviderPlex"]
         ),
         .target(
             name: "FeatureAuth",

@@ -787,8 +787,11 @@ private struct PlozziOSHomeHeroCarousel: View {
                     let playItem = playTarget(for: currentItem) ?? currentItem
                     // Hoisted: folding this call into the view initialiser below
                     // pushes that expression past the type-checker's budget.
+                    // Keyed by the item we actually refreshed. Looking this up
+                    // by the root instead missed every slide whose hero fronts
+                    // an episode, because the store keys on the item's own id.
                     let scheduleLine: LocalizedStringResource? =
-                        schedules.line(for: rootItem)
+                        schedules.line(for: currentItem)
                     let watchlistItem: MediaItem = currentItem.watchlistSubject
                     PlozziOSHomeHeroForeground(
                         item: playItem,

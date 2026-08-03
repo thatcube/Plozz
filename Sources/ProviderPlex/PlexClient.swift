@@ -727,7 +727,38 @@ public struct PlexClient: Sendable {
             ],
             headers: headers
         )
-        _ = try await http.send(endpoint, baseURL: Self.watchlistBase)
+        let (data, response) = try await http.sendRaw(endpoint, baseURL: Self.watchlistBase)
+        guard (200...299).contains(response.statusCode) else {
+            // Surface the status (and a short, non-secret body snippet) so a
+            // permanent rejection is diagnosable instead of retrying forever.
+            let snippet = String(decoding: data.prefix(180), as: UTF8.self)
+                .replacingOccurrences(of: "\n", with: " ")
+            FanoutDiagnostics.emit(
+                "plex.watchlist status=\(response.statusCode) on=\(on) body=\(snippet)"
+            )
+            throw Self.watchlistError(status: response.statusCode, headers: response)
+        }
+    }
+
+    /// Classify a Discover watchlist rejection. Without this every non-2xx became
+    /// `invalidResponse`, which the retry policy treats as transient — so a
+    /// permanently rejected title retried forever (observed: 90 attempts).
+    static func watchlistError(
+        status: Int,
+        headers: HTTPURLResponse
+    ) -> WatchlistDestinationError {
+        switch status {
+        case 401, 403:
+            return .authenticationRequired
+        case 429:
+            let retryAfter = (headers.value(forHTTPHeaderField: "Retry-After"))
+                .flatMap(Double.init)
+            return .rateLimited(retryAfter: retryAfter)
+        case 400...499:
+            return .permanent
+        default:
+            return .transient
+        }
     }
 
     /// `GET https://discover.provider.plex.tv/library/sections/watchlist/all` —

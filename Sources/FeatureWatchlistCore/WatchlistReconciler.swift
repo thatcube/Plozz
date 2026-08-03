@@ -142,6 +142,12 @@ public actor WatchlistReconciler {
                 destinationID: destination.id
             ))
         }
+        FanoutDiagnostics.emit(
+            "watchlist.fanout state=\(desiredState) kind=\(target.kind.rawValue) "
+            + "ids=[\(target.externalIDs.map { "\($0.namespace.rawValue):\($0.value)" }.sorted().joined(separator: ","))] "
+            + "eligible=[\(requests.map { $0.destinationID.rawValue }.sorted().joined(separator: ","))] "
+            + "connected=[\(registry.destinations.map { $0.id.rawValue }.sorted().joined(separator: ","))]"
+        )
         try await mutationStore.enqueueBatch(requests, now: now)
     }
 
@@ -502,7 +508,15 @@ public actor WatchlistReconciler {
             }
             try await destination.apply(mutation.desiredState, to: binding)
             try await mutationStore.markSucceeded(mutation.key, now: now)
+            FanoutDiagnostics.emit(
+                "watchlist.apply dest=\(destination.id.rawValue) "
+                + "state=\(mutation.desiredState) outcome=OK"
+            )
         } catch {
+            FanoutDiagnostics.emit(
+                "watchlist.apply dest=\(destination.id.rawValue) "
+                + "state=\(mutation.desiredState) outcome=\(error)"
+            )
             let decision = retryPolicy.decision(
                 for: error,
                 attempt: mutation.attemptCount
@@ -512,6 +526,30 @@ public actor WatchlistReconciler {
                 classification: decision.classification,
                 retryAt: decision.retryDelay.map { now.addingTimeInterval($0) }
             )
+            // A rate limit is the destination talking about itself, not about
+            // this title. Hold the whole queue for that destination back, or the
+            // titles behind it walk straight into the same limit.
+            if decision.classification == .authentication {
+                let parked = (try? await mutationStore
+                    .parkDestinationForAuthentication(destination.id)) ?? 0
+                if parked > 0 {
+                    FanoutDiagnostics.emit(
+                        "watchlist.parked dest=\(destination.id.rawValue) "
+                        + "reason=authentication count=\(parked)"
+                    )
+                }
+            }
+            if case .rateLimited = error as? WatchlistDestinationError,
+               let retryDelay = decision.retryDelay {
+                let deferred = (try? await mutationStore.deferDestination(
+                    destination.id,
+                    until: now.addingTimeInterval(retryDelay)
+                )) ?? 0
+                FanoutDiagnostics.emit(
+                    "watchlist.cooldown dest=\(destination.id.rawValue) "
+                    + "seconds=\(Int(retryDelay)) deferred=\(deferred)"
+                )
+            }
         }
     }
 

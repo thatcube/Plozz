@@ -282,20 +282,38 @@ public actor DurableWatchlistMutationStore {
                 aliasID: request.target.aliasID,
                 destinationID: request.destinationID
             )
-            var mutation = mutationsByKey[key]
+            let existing = mutationsByKey[key]
+            var mutation = existing
                 ?? WatchlistMutation(
                     key: key,
                     desiredState: request.desiredState,
                     target: request.target,
                     createdAt: now
                 )
+            // Re-enqueueing is not the same as changing your mind. A periodic
+            // sync sweep re-offers every entry it already knows about; blindly
+            // resetting retry state there wiped every backoff, cooldown and
+            // authentication park on each wave, so a disconnected or
+            // rate-limited destination was hammered forever. Only a genuinely
+            // new intent — a different desired state — earns a clean slate.
+            let isNewIntent = existing.map { $0.desiredState != request.desiredState }
+                ?? true
+            let targetChanged = existing.map { $0.target != request.target } ?? true
             mutation.desiredState = request.desiredState
             mutation.target = request.target
-            mutation.updatedAt = now
-            mutation.attemptCount = 0
-            mutation.nextAttemptAt = nil
-            mutation.phase = .queued
-            mutation.lastFailureClass = nil
+            if isNewIntent {
+                mutation.updatedAt = now
+                mutation.attemptCount = 0
+                mutation.nextAttemptAt = nil
+                mutation.phase = .queued
+                mutation.lastFailureClass = nil
+            } else if targetChanged, mutation.phase == .waitingForIdentity {
+                // Better ids arrived, so the reason it was parked may be gone.
+                mutation.updatedAt = now
+                mutation.nextAttemptAt = nil
+                mutation.phase = .queued
+                mutation.lastFailureClass = nil
+            }
             mutationsByKey[key] = mutation
 
             if request.desiredState == .absent {
@@ -344,6 +362,32 @@ public actor DurableWatchlistMutationStore {
         try persist()
     }
 
+    /// Push back **every** pending mutation for one destination.
+    ///
+    /// A destination-wide rejection (notably HTTP 429) is a property of the
+    /// destination, not of the title that happened to be first in the queue.
+    /// Backing off only that one title lets the rest of the queue march straight
+    /// into the same limit, which is what turned a 19-title Plex sync into a
+    /// self-sustaining retry storm. Only ever pushes an attempt later, never
+    /// earlier, so it cannot shorten an existing backoff.
+    @discardableResult
+    public func deferDestination(
+        _ destinationID: WatchlistDestinationID,
+        until: Date
+    ) throws -> Int {
+        var deferred = 0
+        for index in state.mutations.indices
+        where state.mutations[index].key.destinationID == destinationID
+            && state.mutations[index].phase != .permanentlyFailed {
+            let current = state.mutations[index].nextAttemptAt
+            guard current == nil || current! < until else { continue }
+            state.mutations[index].nextAttemptAt = until
+            deferred += 1
+        }
+        if deferred > 0 { try persist() }
+        return deferred
+    }
+
     public func markFailed(
         _ key: WatchlistMutationKey,
         classification: WatchlistMutationFailureClass,
@@ -367,6 +411,30 @@ public actor DurableWatchlistMutationStore {
 
     public func resumeAuthentication(destinationID: WatchlistDestinationID) throws {
         _ = try resumeAuthentication(destinationIDs: [destinationID])
+    }
+
+    /// Park every still-queued mutation for a destination that just reported it
+    /// is not authenticated.
+    ///
+    /// Like a rate limit, missing authentication is a fact about the destination,
+    /// not about one title — without this, a disconnected tracker is contacted
+    /// once per queued title (observed: 73 pointless Trakt calls). `resume`
+    /// un-parks them by phase, so this stays symmetric with reconnecting.
+    @discardableResult
+    public func parkDestinationForAuthentication(
+        _ destinationID: WatchlistDestinationID
+    ) throws -> Int {
+        var parked = 0
+        for index in state.mutations.indices
+        where state.mutations[index].key.destinationID == destinationID
+            && (state.mutations[index].phase == .queued
+                || state.mutations[index].phase == .retryScheduled) {
+            state.mutations[index].phase = .waitingForAuthentication
+            state.mutations[index].nextAttemptAt = nil
+            parked += 1
+        }
+        if parked > 0 { try persist() }
+        return parked
     }
 
     @discardableResult

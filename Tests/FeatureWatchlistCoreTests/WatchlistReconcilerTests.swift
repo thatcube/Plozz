@@ -472,6 +472,155 @@ final class WatchlistReconcilerTests: XCTestCase {
         }
         XCTFail("Timed out waiting for asynchronous scheduler")
     }
+
+    /// A 429 is the destination describing itself, so it must hold back the
+    /// whole queue for that destination. Regression for the Plex retry storm:
+    /// 19 queued titles each burned their own 429, which escalated the limit.
+    func testRateLimitDefersEveryPendingMutationForThatDestination() async throws {
+        let store = try DurableWatchlistMutationStore(
+            store: CountingMutationStateStore()
+        )
+        let limited = WatchlistDestinationID(rawValue: "plex.acct")!
+        let other = WatchlistDestinationID(rawValue: "simkl")!
+        for destination in [limited, limited, limited, other] {
+            try await store.enqueue(
+                profileID: "p",
+                desiredState: .present,
+                target: makeTarget(),
+                destinationID: destination
+            )
+        }
+        let now = Date()
+        let deferred = try await store.deferDestination(
+            limited,
+            until: now.addingTimeInterval(600)
+        )
+        XCTAssertEqual(deferred, 3, "every queued Plex title should be held back")
+
+        let ready = await store.ready(
+            profileID: "p",
+            now: now.addingTimeInterval(1),
+            limit: 100
+        )
+        XCTAssertEqual(
+            ready.map { $0.key.destinationID },
+            [other],
+            "only the un-limited destination stays runnable"
+        )
+
+        // The cooldown must never pull an attempt earlier than already planned.
+        let shortened = try await store.deferDestination(
+            limited,
+            until: now.addingTimeInterval(5)
+        )
+        XCTAssertEqual(shortened, 0)
+    }
+
+    /// A disconnected tracker must be contacted once, not once per queued title.
+    func testAuthenticationFailureParksTheWholeDestinationAndResumesCleanly() async throws {
+        let store = try DurableWatchlistMutationStore(
+            store: CountingMutationStateStore()
+        )
+        let tracker = WatchlistDestinationID(rawValue: "trakt")!
+        let other = WatchlistDestinationID(rawValue: "simkl")!
+        for destination in [tracker, tracker, tracker, other] {
+            try await store.enqueue(
+                profileID: "p",
+                desiredState: .present,
+                target: makeTarget(),
+                destinationID: destination
+            )
+        }
+        let parked = try await store.parkDestinationForAuthentication(tracker)
+        XCTAssertEqual(parked, 3)
+
+        let ready = await store.ready(profileID: "p", now: Date(), limit: 100)
+        XCTAssertEqual(
+            ready.map { $0.key.destinationID },
+            [other],
+            "a disconnected tracker should not be retried per title"
+        )
+
+        // Reconnecting must bring exactly those mutations back.
+        let resumed = try await store.resumeAuthentication(destinationIDs: [tracker])
+        XCTAssertEqual(resumed, 3)
+        let afterResume = await store.ready(profileID: "p", now: Date(), limit: 100)
+        XCTAssertEqual(afterResume.count, 4)
+    }
+
+    /// The master regression: a periodic sync sweep re-offers entries it already
+    /// knows about. If that resets retry state, every cooldown and auth park is
+    /// wiped each wave and a broken destination is hammered forever.
+    func testResyncingUnchangedEntriesPreservesBackoffAndParking() async throws {
+        let store = try DurableWatchlistMutationStore(
+            store: CountingMutationStateStore()
+        )
+        let limited = WatchlistDestinationID(rawValue: "plex.acct")!
+        let tracker = WatchlistDestinationID(rawValue: "trakt")!
+        let target = makeTarget()
+        for destination in [limited, tracker] {
+            try await store.enqueue(
+                profileID: "p",
+                desiredState: .present,
+                target: target,
+                destinationID: destination
+            )
+        }
+        let now = Date()
+        try await store.deferDestination(limited, until: now.addingTimeInterval(600))
+        try await store.parkDestinationForAuthentication(tracker)
+        let parkedReady = await store.ready(
+            profileID: "p", now: now.addingTimeInterval(1), limit: 10
+        )
+        XCTAssertTrue(parkedReady.isEmpty)
+
+        // A sweep re-offers exactly the same intent — nothing may be revived.
+        try await store.enqueueBatch(
+            [limited, tracker].map {
+                WatchlistMutationEnqueueRequest(
+                    profileID: "p",
+                    desiredState: .present,
+                    target: target,
+                    destinationID: $0
+                )
+            }
+        )
+        let afterResync = await store.ready(
+            profileID: "p", now: now.addingTimeInterval(1), limit: 10
+        )
+        XCTAssertTrue(
+            afterResync.isEmpty,
+            "a no-op resync must not wipe cooldown or authentication parking"
+        )
+
+        // Changing your mind is different: that is a fresh intent and must run.
+        try await store.enqueue(
+            profileID: "p",
+            desiredState: .absent,
+            target: target,
+            destinationID: tracker
+        )
+        let ready = await store.ready(profileID: "p", now: now.addingTimeInterval(1), limit: 10)
+        XCTAssertEqual(ready.map { $0.key.destinationID }, [tracker])
+    }
+
+    func testRateLimitedStatusIsClassifiedAsRetryableNotPermanent() {
+        let policy = WatchlistRetryPolicy()
+        let decision = policy.decision(
+            for: WatchlistDestinationError.rateLimited(retryAfter: 42),
+            attempt: 0
+        )
+        XCTAssertEqual(decision.classification, .transient)
+        XCTAssertEqual(decision.retryDelay, 42)
+
+        // A 4xx that is not a rate limit must stop, not retry forever.
+        let permanent = policy.decision(
+            for: WatchlistDestinationError.permanent,
+            attempt: 0
+        )
+        XCTAssertEqual(permanent.classification, .permanent)
+        XCTAssertNil(permanent.retryDelay)
+    }
 }
 
 private actor FakeWatchlistDestination: WatchlistDestination {
@@ -506,6 +655,7 @@ private actor FakeWatchlistDestination: WatchlistDestination {
     }
 
     func appliedStates() -> [WatchlistDesiredState] { applied }
+
 }
 
 private actor RetryingWatchlistDestination: WatchlistDestination {

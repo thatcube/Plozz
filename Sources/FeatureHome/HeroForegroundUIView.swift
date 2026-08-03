@@ -52,10 +52,6 @@ final class HeroForegroundUIView: UIView {
     /// to final and cancelling a running page-morph animation.
     private var lastDotsSignature: [Int] = []
 
-    /// Drives the active paging pill's live auto-advance gauge (matches the SwiftUI
-    /// hero's 30 Hz `TimelineView`). Only runs while a slide is auto-advancing and
-    /// not paused; otherwise the fill is set once (full or empty) and the link stops.
-    private var dotsGaugeLink: CADisplayLink?
 
     /// The slide whose logo the view currently expects, so a late async logo load
     /// is dropped if the slide has since changed (belt-and-braces with the
@@ -188,7 +184,6 @@ final class HeroForegroundUIView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    deinit { dotsGaugeLink?.invalidate() }
 
     override func willMove(toWindow newWindow: UIWindow?) {
         super.willMove(toWindow: newWindow)
@@ -498,37 +493,30 @@ final class HeroForegroundUIView: UIView {
             active.setFillFraction(gaugeFraction(start: start, duration: dots.dwellDuration, now: paused))
             return
         }
-        // Live: tick the fill at ~30 Hz until the page changes.
+        // Live: state the remaining ramp once and let Core Animation draw it.
         activeDwellStart = start
         activeDwellDuration = dots.dwellDuration
-        if dotsGaugeLink == nil {
-            let link = CADisplayLink(target: self, selector: #selector(tickDotsGauge))
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
-            link.add(to: .main, forMode: .common)
-            dotsGaugeLink = link
-        }
-        tickDotsGauge()
+        stopDotsGauge()
+        let now = Date()
+        active.runGauge(
+            from: gaugeFraction(start: start, duration: dots.dwellDuration, now: now),
+            remaining: max(0, dots.dwellDuration - now.timeIntervalSince(start))
+        )
     }
 
     private var activeDwellStart: Date?
     private var activeDwellDuration: Double = 0
-
-    @objc private func tickDotsGauge() {
-        guard let start = activeDwellStart, let active = activeDotView else {
-            stopDotsGauge()
-            return
-        }
-        active.setFillFraction(gaugeFraction(start: start, duration: activeDwellDuration, now: Date()))
-    }
 
     private func gaugeFraction(start: Date, duration: Double, now: Date) -> CGFloat {
         guard duration > 0 else { return 1 }
         return CGFloat(min(1, max(0, now.timeIntervalSince(start) / duration)))
     }
 
+    /// The gauge no longer holds a timer, so stopping it is just clearing the
+    /// dwell it would restate on the next layout.
     private func stopDotsGauge() {
-        dotsGaugeLink?.invalidate()
-        dotsGaugeLink = nil
+        activeDwellStart = nil
+        activeDwellDuration = 0
     }
 
     // MARK: Fade (metadataVisible)
@@ -887,17 +875,65 @@ private final class HeroPagingDotView: UIView {
     /// matching the SwiftUI `brightFillWidth`.
     func setFillFraction(_ f: CGFloat) {
         fraction = max(0, min(1, f))
+        runningGauge = nil
+        HeroPagingGauge.setStatic(
+            fill.layer,
+            fraction: fraction,
+            trackWidth: bounds.width,
+            height: bounds.height
+        )
         setNeedsLayout()
     }
+
+    /// Hands the remaining dwell to Core Animation.
+    ///
+    /// The gauge is a linear ramp, so stating it once lets the render server
+    /// draw every frame of it; the display link this replaces woke the app up
+    /// thirty times a second to compute the same thing by hand.
+    func runGauge(from f: CGFloat, remaining: TimeInterval) {
+        fraction = max(0, min(1, f))
+        runningGauge = (fraction, remaining)
+        guard bounds.height > 0 else { return }
+        HeroPagingGauge.animate(
+            fill.layer,
+            from: fraction,
+            remaining: remaining,
+            trackWidth: bounds.width,
+            height: bounds.height
+        )
+    }
+
+    /// Kept so a re-layout (a page morph resizing this dot) can restate the
+    /// animation against the new track rather than dropping it.
+    private var runningGauge: (fraction: CGFloat, remaining: TimeInterval)?
 
     override func layoutSubviews() {
         super.layoutSubviews()
         layer.cornerRadius = bounds.height / 2
         guard isActive, bounds.height > 0 else { return }
-        let w = bounds.height + (bounds.width - bounds.height) * fraction
-        fill.bounds = CGRect(x: 0, y: 0, width: w, height: bounds.height)
-        fill.center = CGPoint(x: w / 2, y: bounds.midY)
-        fill.layer.cornerRadius = bounds.height / 2
+        HeroPagingGauge.prepare(
+            fill.layer,
+            height: bounds.height,
+            midY: bounds.midY
+        )
+        // Restate a running gauge against the new track instead of writing a
+        // frame under it, which would cancel the animation on every layout.
+        if let runningGauge {
+            HeroPagingGauge.animate(
+                fill.layer,
+                from: runningGauge.fraction,
+                remaining: runningGauge.remaining,
+                trackWidth: bounds.width,
+                height: bounds.height
+            )
+        } else {
+            HeroPagingGauge.setStatic(
+                fill.layer,
+                fraction: fraction,
+                trackWidth: bounds.width,
+                height: bounds.height
+            )
+        }
     }
 }
 

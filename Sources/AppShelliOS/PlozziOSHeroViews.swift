@@ -1359,13 +1359,21 @@ private struct PlozziOSDetailHeroForeground: View {
         }
     }
 
-    /// Collapsible inline actions in display order, which is also fold order:
-    /// index 0 folds into "…" first. Play + Request are structural and always
-    /// stay inline, so they're not listed here. The trailer sits last and so
-    /// survives longest — on a title you don't have, it and Request are the only
-    /// two things you can actually do.
+    /// Collapsible inline actions in **display** order. Play + Request are
+    /// structural and always stay inline, so they're not listed here.
+    ///
+    /// Display order and fold order are deliberately separate — see `foldRank`.
+    /// The trailer reads as part of the play affordance so it sits beside Play,
+    /// yet it must survive longest, and those two facts pull in opposite
+    /// directions if one list has to express both.
     private var orderedInlineExtras: [InlineExtra] {
-        var extras = primaryActions.map { InlineExtra.primary($0) }
+        var extras: [InlineExtra] = []
+        // Next to Play: on a title you don't have, the trailer and Request are
+        // the only two things you can actually do.
+        if trailerItem != nil, onPlayTrailer != nil {
+            extras.append(.trailer)
+        }
+        extras.append(contentsOf: primaryActions.map { InlineExtra.primary($0) })
         // On an episode page the breadcrumb above the title carries this, so it
         // isn't repeated as a button in a row of watch-state actions.
         if !presentsEpisodeStill, let parentNavigationEntry {
@@ -1374,13 +1382,20 @@ private struct PlozziOSDetailHeroForeground: View {
         if downloadItem != nil {
             extras.append(.download)
         }
-        // Trailer folds LAST of all, which is why it is appended last: folding
-        // takes from the front. It sheds its label first (see `actionRow`),
-        // which usually buys enough width that it never leaves the row at all.
-        if trailerItem != nil, onPlayTrailer != nil {
-            extras.append(.trailer)
-        }
         return extras
+    }
+
+    /// Fold priority, lowest folds into "…" first. The power-user Download goes
+    /// before everyday watch-state actions, and the trailer is the last to leave
+    /// the row. It sheds its label first (see `actionRow`), which usually buys
+    /// enough width that it never has to leave at all.
+    private func foldRank(_ extra: InlineExtra) -> Int {
+        switch extra {
+        case .download: return 0
+        case .primary(let entry):
+            return entry.action.isNavigation ? 1 : 2
+        case .trailer: return 3
+        }
     }
 
     /// One candidate row that keeps the highest-priority extras inline and folds
@@ -1392,12 +1407,20 @@ private struct PlozziOSDetailHeroForeground: View {
         resume: PlayResumeButtonLabel.ResumeTrailingStyle
     ) -> some View {
         let extras = orderedInlineExtras
-        let keep = max(0, extras.count - collapseCount)
-        // Fold from the left, so the row keeps its right-hand end and the
-        // trailer — the one thing you can do with a title you don't have yet —
-        // is the last to leave. Display order is unchanged.
-        let inline = Array(extras.suffix(keep))
-        let collapsed = Array(extras.prefix(collapseCount))
+        // Fold by priority, then render what survives in display order, so the
+        // row never reshuffles as it narrows — buttons only disappear.
+        let doomed = extras
+            .enumerated()
+            .sorted {
+                let left = foldRank($0.element), right = foldRank($1.element)
+                return left == right ? $0.offset < $1.offset : left < right
+            }
+            .prefix(max(0, collapseCount))
+        let doomedOffsets = Set(doomed.map(\.offset))
+        let inline = extras.enumerated()
+            .filter { !doomedOffsets.contains($0.offset) }
+            .map(\.element)
+        let collapsed = doomed.map(\.element)
         let menu = menuActions(collapsing: collapsed)
         return HStack(spacing: 12) {
             playActionButton(resume: resume)

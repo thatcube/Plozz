@@ -50,8 +50,12 @@ public final class TransientStatusPresenter {
         },
         announcement: @escaping Announcement = { text in
             #if os(tvOS) || os(iOS)
+            // An announcement is spoken at this instant and then gone, so it
+            // must be resolved now: there is no later render to re-resolve for,
+            // which is what the eager rule normally protects, and
+            // `Announcement` accepts no lazy form.
             AccessibilityNotification.Announcement(
-                String(localized: text)
+                String(localized: text)  // l10n:content — resolved to be spoken now
             ).post()
             #endif
         }

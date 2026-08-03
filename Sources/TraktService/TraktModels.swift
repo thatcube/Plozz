@@ -153,12 +153,12 @@ public struct TraktWatchlistIDs: Codable, Hashable, Sendable {
 }
 
 public struct TraktWatchlistTitle: Codable, Hashable, Sendable {
-    public var title: String?
+    public var title: String?   // l10n:content — provider-supplied media title
     public var year: Int?
     public var ids: TraktWatchlistIDs
 
     public init(
-        title: String? = nil,
+        title: String? = nil,   // l10n:content — provider-supplied media title
         year: Int? = nil,
         ids: TraktWatchlistIDs
     ) {

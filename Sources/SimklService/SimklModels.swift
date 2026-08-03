@@ -156,7 +156,7 @@ struct SimklScrobbleEpisodeRef: Encodable, Equatable {
 /// alongside per-user fields, so the decoder reaches through to the ids.
 struct SimklListEntry: Decodable, Equatable {
     struct Title: Decodable, Equatable {
-        var title: String?
+        var title: String?   // l10n:content — provider-supplied media title
         var year: Int?
         var ids: SimklResponseIDs?
     }

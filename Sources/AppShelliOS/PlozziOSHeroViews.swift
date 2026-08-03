@@ -2245,28 +2245,28 @@ struct PlozziOSHeroPagingIndicator: View {
     let trailerController: HeroTrailerController
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: !autoAdvance)) { context in
-            HStack(spacing: HeroPagingIndicatorMetrics.dotSpacing) {
-                ForEach(dotLayout) { dot in
-                    indicator(
-                        active: dot.index == selectedIndex,
-                        scale: HeroPagingIndicatorMetrics.scale(for: dot.size),
-                        progress: progress(at: context.date)
-                    )
-                }
+        // The tick lives on the active dot's fill, not around the whole row.
+        // Wrapping the row meant every dot, plus the row's layout, was rebuilt
+        // on every frame to animate a fill that only one dot draws.
+        HStack(spacing: HeroPagingIndicatorMetrics.dotSpacing) {
+            ForEach(dotLayout) { dot in
+                indicator(
+                    active: dot.index == selectedIndex,
+                    scale: HeroPagingIndicatorMetrics.scale(for: dot.size)
+                )
             }
-            .frame(
-                width: HeroPagingIndicatorMetrics.rowWidth(count: itemIDs.count),
-                height: HeroPagingIndicatorMetrics.dotSize
-            )
-            .animation(
-                .easeInOut(duration: HeroPagingIndicatorMetrics.morphDuration),
-                value: selectedItemID
-            )
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Hero item")
-            .accessibilityValue(accessibilityValue)
         }
+        .frame(
+            width: HeroPagingIndicatorMetrics.rowWidth(count: itemIDs.count),
+            height: HeroPagingIndicatorMetrics.dotSize
+        )
+        .animation(
+            .easeInOut(duration: HeroPagingIndicatorMetrics.morphDuration),
+            value: selectedItemID
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Hero item")
+        .accessibilityValue(accessibilityValue)
     }
 
     private var selectedIndex: Int {
@@ -2288,22 +2288,20 @@ struct PlozziOSHeroPagingIndicator: View {
 
     private func indicator(
         active: Bool,
-        scale: CGFloat,
-        progress: CGFloat
+        scale: CGFloat
     ) -> some View {
         let metrics = HeroPagingIndicatorMetrics.self
         let trackWidth = metrics.activeWidth
         let dotSize = metrics.dotSize
-        let fillWidth = active
-            ? dotSize + (trackWidth - dotSize) * progress
-            : 0
 
         return Capsule()
             .fill(palette.primaryText.opacity(0.28))
             .overlay(alignment: .leading) {
-                Capsule()
-                    .fill(palette.primaryText)
-                    .frame(width: fillWidth, height: dotSize)
+                activeDotFill(
+                    active: active,
+                    trackWidth: trackWidth,
+                    dotSize: dotSize
+                )
             }
             .frame(
                 width: active ? trackWidth : dotSize * scale,
@@ -2314,6 +2312,30 @@ struct PlozziOSHeroPagingIndicator: View {
                 width: active ? trackWidth : dotSize,
                 height: dotSize
             )
+    }
+
+    /// Only the active dot's fill ticks; the others stay paused at zero rather
+    /// than each invalidating on every frame to redraw nothing.
+    private func activeDotFill(
+        active: Bool,
+        trackWidth: CGFloat,
+        dotSize: CGFloat
+    ) -> some View {
+        TimelineView(.animation(
+            minimumInterval: HeroPagingIndicatorMetrics.fillUpdateInterval(
+                dwellSeconds: Double(autoAdvanceSeconds)
+            ),
+            paused: !active || !autoAdvance
+        )) { context in
+            Capsule()
+                .fill(palette.primaryText)
+                .frame(
+                    width: active
+                        ? dotSize + (trackWidth - dotSize) * progress(at: context.date)
+                        : 0,
+                    height: dotSize
+                )
+        }
     }
 
     private func progress(at date: Date) -> CGFloat {

@@ -2282,7 +2282,9 @@ struct HomeHeroView: View {
     /// inactive dots stay paused at zero instead of each invalidating at 30 Hz.
     private func activeDotFill(active: Bool, trackWidth: CGFloat, height: CGFloat) -> some View {
         TimelineView(.animation(
-            minimumInterval: 1.0 / 30.0,
+            minimumInterval: HeroPagingIndicatorMetrics.fillUpdateInterval(
+                dwellSeconds: Double(settings.autoAdvanceSeconds)
+            ),
             paused: !active || !settings.autoAdvance || pausedAt != nil
         )) { timeline in
             Capsule()

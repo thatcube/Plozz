@@ -1675,7 +1675,10 @@ private struct PlozziOSDetailHeroForeground: View {
             }
             .accessibilityLabel(entry.action.title)
             .accessibilityValue(
-                entry.action.accessibilityState.map(Text.init) ?? Text("")
+                // Verbatim: "no accessibility value" is the absence of copy, not
+                // a string to translate. `Text("")` made the empty string a
+                // catalog key that every language then had to "translate".
+                entry.action.accessibilityState.map(Text.init) ?? Text(verbatim: "")
             )
         }
         sourceVersionMenuActions

@@ -148,7 +148,7 @@ public struct MediaItemContextMenu: ViewModifier {
                     }
                     .accessibilityLabel(Text(action.title))
                     .accessibilityValue(
-                        action.accessibilityState.map(Text.init) ?? Text("")
+                        action.accessibilityState.map(Text.init) ?? Text(verbatim: "")
                     )
                 }
             }

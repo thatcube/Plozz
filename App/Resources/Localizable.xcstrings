@@ -41477,6 +41477,7 @@
       }
     },
     "Available digitally on %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -41697,6 +41698,7 @@
       }
     },
     "Available digitally since %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -131633,6 +131635,226 @@
         }
       }
     },
+    "In Watchlist" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "في قائمة المشاهدة"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "В списъка за гледане"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "A la llista de seguiment"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "V seznamu ke zhlédnutí"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "På se-listen"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Auf der Merkliste"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Στη Λίστα παρακολούθησης"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "En la lista de seguimiento"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "در فهرست تماشا"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Katselulistalla"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dans la liste de suivi"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ברשימת הצפייה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "वॉचलिस्ट में"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na popisu za gledanje"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "A Megnézendőkben"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ada di Daftar Tonton"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nella watchlist"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ウォッチリストに追加済み"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "관심 목록에 있음"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dalam Senarai Tonton"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "På Se-liste"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "In Kijklijst"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na liście do obejrzenia"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na Lista"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "În Lista de urmărit"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "В списке просмотра"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "V zozname na pozretie"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na seznamu za ogled"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na listi za gledanje"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "I bevakningslistan"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "อยู่ในรายการที่อยากดู"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzleme Listesinde"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "У списку до перегляду"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Có trong Danh sách xem"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已加入观看列表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已加入觀看列表"
+          }
+        }
+      }
+    },
     "In theaters %@" : {
       "localizations" : {
         "ar" : {
@@ -172959,6 +173181,226 @@
         }
       }
     },
+    "Not in Watchlist" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ليس في قائمة المشاهدة"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Не е в списъка за гледане"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No és a la llista de seguiment"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Není v seznamu ke zhlédnutí"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ikke på se-listen"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nicht auf der Merkliste"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Όχι στη Λίστα παρακολούθησης"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No está en la lista de seguimiento"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "در فهرست تماشا نیست"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ei katselulistalla"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pas dans la liste de suivi"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "לא ברשימת הצפייה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "वॉचलिस्ट में नहीं"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nije na popisu za gledanje"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nincs a Megnézendőkben"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tidak ada di Daftar Tonton"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Non nella watchlist"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ウォッチリスト未追加"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "관심 목록에 없음"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tiada dalam Senarai Tonton"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ikke på Se-liste"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Niet in Kijklijst"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Poza listą do obejrzenia"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fora da Lista"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nu este în Lista de urmărit"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Не в списке просмотра"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nie je v zozname na pozretie"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ni na seznamu za ogled"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nije na listi za gledanje"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Inte i bevakningslistan"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ไม่อยู่ในรายการที่อยากดู"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzleme Listesinde Değil"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Немає в списку до перегляду"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Không có trong Danh sách xem"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "未加入观看列表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "未加入觀看列表"
+          }
+        }
+      }
+    },
     "Not now" : {
       "comment" : "Secondary button on the tvOS first-run Use Profiles screen to skip enabling profiles for now.",
       "extractionState" : "stale",
@@ -173182,6 +173624,7 @@
       }
     },
     "Not on your watchlist" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -179589,6 +180032,7 @@
       }
     },
     "On your watchlist" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -203642,6 +204086,7 @@
       }
     },
     "Premiered %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -214468,12 +214913,6 @@
     },
     "Releases %@ at %@" : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Releases %1$@ at %2$@"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -214514,6 +214953,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Κυκλοφορεί στις %1$@, ώρα %2$@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Releases %1$@ at %2$@"
           }
         },
         "es" : {
@@ -221625,6 +222070,7 @@
     },
     "Repeat All" : {
       "comment" : "Transient status label in the tvOS music Now Playing screen after the user cycles repeat mode to repeat the whole queue.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -221846,6 +222292,7 @@
     },
     "Repeat Off" : {
       "comment" : "Transient status label in the tvOS music Now Playing screen after the user turns repeat mode off.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -222067,6 +222514,7 @@
     },
     "Repeat One" : {
       "comment" : "Transient status label in the tvOS music Now Playing screen after the user cycles repeat mode to repeat the current track.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -243242,6 +243690,7 @@
       }
     },
     "Scrobble and sync your Jellyfin watch history to Trakt." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -243457,6 +243906,886 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "將 Jellyfin 的觀看紀錄自動記錄並同步到 Trakt。"
+          }
+        }
+      }
+    },
+    "Scrobble and sync your anime progress and watchlist with AniList." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "سجّل تلقائيًا وزامِن تقدمك في الأنمي وقائمة المشاهدة مع AniList."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Автоматично отчитайте и синхронизирайте напредъка си в анимето и списъка за гледане с AniList."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registra automàticament i sincronitza el progrés dels teus animes i la llista de seguiment amb AniList."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automaticky zaznamenávejte a synchronizujte svůj průběh sledování anime a seznam ke zhlédnutí s AniList."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registrér automatisk og synkroniser din animefremgang og se-liste med AniList."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble und synchronisiere deinen Anime-Fortschritt und deine Merkliste mit AniList."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αυτόματη καταγραφή και συγχρονισμός της προόδου σας σε anime και της Λίστας παρακολούθησης με το AniList."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registra automáticamente y sincroniza tu progreso de anime y tu lista de seguimiento con AniList."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "پیشرفت تماشای انیمه و فهرست تماشای خود را به‌طور خودکار ثبت و با AniList همگام کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kirjaa automaattisesti animen katselun edistyminen ja synkronoi katselulista AniListin kanssa."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblez et synchronisez votre progression dans les animes et votre liste de suivi avec AniList."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "דיווח אוטומטי וסנכרון של התקדמות הצפייה באנימה ושל רשימת הצפייה שלך עם AniList."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "AniList के साथ अपने एनीमे की प्रगति और वॉचलिस्ट को स्क्रॉबल और सिंक करें."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automatski bilježi i sinkroniziraj napredak gledanja animea i popis za gledanje s AniList."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automatikusan naplózd és szinkronizáld anime-előrehaladásodat és Megnézendőidet az AniList szolgáltatással."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Catat otomatis dan sinkronkan progres anime serta Daftar Tonton Anda dengan AniList."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobbla e sincronizza i progressi degli anime e la watchlist con AniList."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "AniList にアニメの視聴状況とウォッチリストを自動送信して同期します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "AniList와 애니메이션 시청 진행 상황 및 관심 목록을 스크로블하고 동기화합니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Laporkan secara automatik dan segerakkan kemajuan anime serta Senarai Tonton anda dengan AniList."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble og synkroniser animefremdriften og Se-listen din med AniList."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble en synchroniseer je animevoortgang en Kijklijst met AniList."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobbluj i synchronizuj postępy oglądania anime oraz listę do obejrzenia z AniList."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Faça scrobble e sincronize seu progresso em animes e sua Lista com AniList."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblează și sincronizează progresul anime și Lista de urmărit cu AniList."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Скробблинг и синхронизация прогресса аниме и списка просмотра с AniList."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblujte a synchronizujte svoj postup v anime a zoznam na pozretie s AniList."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblajte in sinhronizirajte napredek pri animejih ter seznam za ogled z AniList."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skrobluj i sinhronizuj napredak u animeu i listu za gledanje sa AniList."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skrobbla och synka dina animeframsteg och din bevakningslista med AniList."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "รายงานอัตโนมัติและซิงค์ความคืบหน้าอนิเมะกับรายการที่อยากดูของคุณกับ AniList."
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Anime ilerlemenizi ve İzleme Listenizi AniList ile otomatik bildirin ve eşitleyin."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Автоматично надсилайте й синхронізуйте прогрес перегляду аніме та список до перегляду з AniList."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tự động ghi nhận và đồng bộ tiến độ xem anime cùng Danh sách xem với AniList."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自动上报并与 AniList 同步你的动漫观看进度和观看列表。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自動回報並與 AniList 同步你的動畫觀看進度和觀看列表。"
+          }
+        }
+      }
+    },
+    "Scrobble and sync your anime progress and watchlist with MyAnimeList." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "سجّل تلقائيًا وزامِن تقدمك في الأنمي وقائمة المشاهدة مع MyAnimeList."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Автоматично отчитайте и синхронизирайте напредъка си в анимето и списъка за гледане с MyAnimeList."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registra automàticament i sincronitza el progrés dels teus animes i la llista de seguiment amb MyAnimeList."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automaticky zaznamenávejte a synchronizujte svůj průběh sledování anime a seznam ke zhlédnutí s MyAnimeList."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registrér automatisk og synkroniser din animefremgang og se-liste med MyAnimeList."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble und synchronisiere deinen Anime-Fortschritt und deine Merkliste mit MyAnimeList."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αυτόματη καταγραφή και συγχρονισμός της προόδου σας σε anime και της Λίστας παρακολούθησης με το MyAnimeList."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registra automáticamente y sincroniza tu progreso de anime y tu lista de seguimiento con MyAnimeList."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "پیشرفت تماشای انیمه و فهرست تماشای خود را به‌طور خودکار ثبت و با MyAnimeList همگام کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kirjaa automaattisesti animen katselun edistyminen ja synkronoi katselulista MyAnimeListin kanssa."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblez et synchronisez votre progression dans les animes et votre liste de suivi avec MyAnimeList."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "דיווח אוטומטי וסנכרון של התקדמות הצפייה באנימה ושל רשימת הצפייה שלך עם MyAnimeList."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "MyAnimeList के साथ अपने एनीमे की प्रगति और वॉचलिस्ट को स्क्रॉबल और सिंक करें."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automatski bilježi i sinkroniziraj napredak gledanja animea i popis za gledanje s MyAnimeList."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automatikusan naplózd és szinkronizáld anime-előrehaladásodat és Megnézendőidet a MyAnimeList szolgáltatással."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Catat otomatis dan sinkronkan progres anime serta Daftar Tonton Anda dengan MyAnimeList."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobbla e sincronizza i progressi degli anime e la watchlist con MyAnimeList."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "MyAnimeList にアニメの視聴状況とウォッチリストを自動送信して同期します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "MyAnimeList와 애니메이션 시청 진행 상황 및 관심 목록을 스크로블하고 동기화합니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Laporkan secara automatik dan segerakkan kemajuan anime serta Senarai Tonton anda dengan MyAnimeList."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble og synkroniser animefremdriften og Se-listen din med MyAnimeList."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble en synchroniseer je animevoortgang en Kijklijst met MyAnimeList."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobbluj i synchronizuj postępy oglądania anime oraz listę do obejrzenia z MyAnimeList."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Faça scrobble e sincronize seu progresso em animes e sua Lista com MyAnimeList."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblează și sincronizează progresul anime și Lista de urmărit cu MyAnimeList."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Скробблинг и синхронизация прогресса аниме и списка просмотра с MyAnimeList."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblujte a synchronizujte svoj postup v anime a zoznam na pozretie s MyAnimeList."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblajte in sinhronizirajte napredek pri animejih ter seznam za ogled z MyAnimeList."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skrobluj i sinhronizuj napredak u animeu i listu za gledanje sa MyAnimeList."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skrobbla och synka dina animeframsteg och din bevakningslista med MyAnimeList."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "รายงานอัตโนมัติและซิงค์ความคืบหน้าอนิเมะกับรายการที่อยากดูของคุณกับ MyAnimeList."
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Anime ilerlemenizi ve İzleme Listenizi MyAnimeList ile otomatik bildirin ve eşitleyin."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Автоматично надсилайте й синхронізуйте прогрес перегляду аніме та список до перегляду з MyAnimeList."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tự động ghi nhận và đồng bộ tiến độ xem anime cùng Danh sách xem với MyAnimeList."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自动上报并与 MyAnimeList 同步你的动漫观看进度和观看列表。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自動回報並與 MyAnimeList 同步你的動畫觀看進度和觀看列表。"
+          }
+        }
+      }
+    },
+    "Scrobble and sync your watch history and watchlist with Simkl." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "سجّل تلقائيًا وزامِن سجل مشاهدتك وقائمة المشاهدة مع Simkl."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Автоматично отчитайте и синхронизирайте историята си на гледане и списъка за гледане с Simkl."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registra automàticament i sincronitza l'historial de visualització i la llista de seguiment amb Simkl."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automaticky zaznamenávejte a synchronizujte svou historii sledování a seznam ke zhlédnutí se Simkl."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registrér automatisk og synkroniser din sehistorik og se-liste med Simkl."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble und synchronisiere deinen Wiedergabeverlauf und deine Merkliste mit Simkl."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αυτόματη καταγραφή και συγχρονισμός του ιστορικού προβολής σας και της Λίστας παρακολούθησης με το Simkl."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registra automáticamente y sincroniza tu historial de reproducción y tu lista de seguimiento con Simkl."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تاریخچه تماشا و فهرست تماشای خود را به‌طور خودکار ثبت و با Simkl همگام کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kirjaa automaattisesti katseluhistoria ja synkronoi katselulista Simklin kanssa."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblez et synchronisez votre historique de visionnage et votre liste de suivi avec Simkl."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "דיווח אוטומטי וסנכרון של היסטוריית הצפייה ורשימת הצפייה שלך עם Simkl."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Simkl के साथ अपना देखने का इतिहास और वॉचलिस्ट स्क्रॉबल और सिंक करें."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automatski bilježi i sinkroniziraj povijest gledanja i popis za gledanje s Simkl."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automatikusan naplózd és szinkronizáld megtekintési előzményeidet és Megnézendőidet a Simkl szolgáltatással."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Catat otomatis dan sinkronkan riwayat tontonan serta Daftar Tonton Anda dengan Simkl."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobbla e sincronizza la cronologia di visione e la watchlist con Simkl."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Simkl に視聴履歴とウォッチリストを自動送信して同期します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Simkl와 시청 기록 및 관심 목록을 스크로블하고 동기화합니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Laporkan secara automatik dan segerakkan sejarah tontonan serta Senarai Tonton anda dengan Simkl."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble og synkroniser seerhistorikken og Se-listen din med Simkl."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble en synchroniseer je kijkgeschiedenis en Kijklijst met Simkl."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobbluj i synchronizuj historię oglądania oraz listę do obejrzenia z Simkl."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Faça scrobble e sincronize seu histórico de exibição e sua Lista com Simkl."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblează și sincronizează istoricul vizionărilor și Lista de urmărit cu Simkl."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Скробблинг и синхронизация истории просмотров и списка просмотра с Simkl."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblujte a synchronizujte svoju históriu pozerania a zoznam na pozretie so Simkl."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblajte in sinhronizirajte zgodovino ogledov ter seznam za ogled s Simkl."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skrobluj i sinhronizuj istoriju gledanja i listu za gledanje sa Simkl."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skrobbla och synka din visningshistorik och bevakningslista med Simkl."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "รายงานอัตโนมัติและซิงค์ประวัติการรับชมกับรายการที่อยากดูของคุณกับ Simkl."
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzleme geçmişinizi ve İzleme Listenizi Simkl ile otomatik bildirin ve eşitleyin."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Автоматично надсилайте й синхронізуйте історію перегляду та список до перегляду з Simkl."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tự động ghi nhận và đồng bộ lịch sử xem cùng Danh sách xem với Simkl."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自动上报并与 Simkl 同步你的观看历史和观看列表。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自動回報並與 Simkl 同步你的觀看記錄和觀看列表。"
+          }
+        }
+      }
+    },
+    "Scrobble and sync your watch history and watchlist with Trakt." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "سجّل تلقائيًا وزامِن سجل مشاهدتك وقائمة المشاهدة مع Trakt."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Автоматично отчитайте и синхронизирайте историята си на гледане и списъка за гледане с Trakt."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registra automàticament i sincronitza l'historial de visualització i la llista de seguiment amb Trakt."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automaticky zaznamenávejte a synchronizujte svou historii sledování a seznam ke zhlédnutí s Trakt."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registrér automatisk og synkroniser din sehistorik og se-liste med Trakt."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble und synchronisiere deinen Wiedergabeverlauf und deine Merkliste mit Trakt."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αυτόματη καταγραφή και συγχρονισμός του ιστορικού προβολής σας και της Λίστας παρακολούθησης με το Trakt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registra automáticamente y sincroniza tu historial de reproducción y tu lista de seguimiento con Trakt."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تاریخچه تماشا و فهرست تماشای خود را به‌طور خودکار ثبت و با Trakt همگام کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kirjaa automaattisesti katseluhistoria ja synkronoi katselulista Traktin kanssa."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblez et synchronisez votre historique de visionnage et votre liste de suivi avec Trakt."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "דיווח אוטומטי וסנכרון של היסטוריית הצפייה ורשימת הצפייה שלך עם Trakt."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt के साथ अपना देखने का इतिहास और वॉचलिस्ट स्क्रॉबल और सिंक करें."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automatski bilježi i sinkroniziraj povijest gledanja i popis za gledanje s Trakt."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Automatikusan naplózd és szinkronizáld megtekintési előzményeidet és Megnézendőidet a Trakt szolgáltatással."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Catat otomatis dan sinkronkan riwayat tontonan serta Daftar Tonton Anda dengan Trakt."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobbla e sincronizza la cronologia di visione e la watchlist con Trakt."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt に視聴履歴とウォッチリストを自動送信して同期します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt와 시청 기록 및 관심 목록을 스크로블하고 동기화합니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Laporkan secara automatik dan segerakkan sejarah tontonan serta Senarai Tonton anda dengan Trakt."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble og synkroniser seerhistorikken og Se-listen din med Trakt."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobble en synchroniseer je kijkgeschiedenis en Kijklijst met Trakt."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobbluj i synchronizuj historię oglądania oraz listę do obejrzenia z Trakt."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Faça scrobble e sincronize seu histórico de exibição e sua Lista com Trakt."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblează și sincronizează istoricul vizionărilor și Lista de urmărit cu Trakt."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Скробблинг и синхронизация истории просмотров и списка просмотра с Trakt."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblujte a synchronizujte svoju históriu pozerania a zoznam na pozretie s Trakt."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Scrobblajte in sinhronizirajte zgodovino ogledov ter seznam za ogled s Trakt."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skrobluj i sinhronizuj istoriju gledanja i listu za gledanje sa Trakt."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Skrobbla och synka din visningshistorik och bevakningslista med Trakt."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "รายงานอัตโนมัติและซิงค์ประวัติการรับชมกับรายการที่อยากดูของคุณกับ Trakt."
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzleme geçmişinizi ve İzleme Listenizi Trakt ile otomatik bildirin ve eşitleyin."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Автоматично надсилайте й синхронізуйте історію перегляду та список до перегляду з Trakt."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tự động ghi nhận và đồng bộ lịch sử xem cùng Danh sách xem với Trakt."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自动上报并与 Trakt 同步你的观看历史和观看列表。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自動回報並與 Trakt 同步你的觀看記錄和觀看列表。"
           }
         }
       }
@@ -262882,6 +264211,7 @@
     },
     "Shuffle Off" : {
       "comment" : "Transient status message above the transport controls in the tvOS music Now Playing screen after the user turns shuffle off.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -263103,6 +264433,7 @@
     },
     "Shuffle On" : {
       "comment" : "Transient status message above the transport controls in the tvOS music Now Playing screen after the user turns shuffle on.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -281970,6 +283301,7 @@
       }
     },
     "Streaming on %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -287708,6 +289040,7 @@
       }
     },
     "Sync your watch history and track what to watch next with Simkl." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -318276,6 +319609,7 @@
       }
     },
     "Track anime and manga progress on your AniList profile." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -318496,6 +319830,7 @@
       }
     },
     "Track anime and manga progress on your MyAnimeList profile." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -330263,6 +331598,226 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "Updating library" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "جارٍ تحديث المكتبة"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Обновяване на библиотеката"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Actualitzant la biblioteca"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aktualizuje se knihovna"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Opdaterer bibliotek"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Mediathek wird aktualisiert"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ενημέρωση βιβλιοθήκης"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Actualizando biblioteca"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "در حال به‌روزرسانی کتابخانه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Päivitetään kirjastoa"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Mise à jour de la bibliothèque"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "מעדכן ספרייה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "लाइब्रेरी अपडेट हो रही है"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ažuriranje biblioteke"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Könyvtár frissítése"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Memperbarui pustaka"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aggiornamento libreria"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ライブラリを更新中"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "라이브러리 업데이트 중"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Mengemas kini pustaka"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Oppdaterer bibliotek"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bibliotheek wordt bijgewerkt"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aktualizowanie biblioteki"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Atualizando biblioteca"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Se actualizează biblioteca"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Обновление медиатеки"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aktualizuje sa knižnica"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Posodabljanje knjižnice"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ažuriranje biblioteke"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Uppdaterar bibliotek"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "กำลังอัปเดตคลัง"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kitaplık güncelleniyor"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Оновлення бібліотеки"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Đang cập nhật thư viện"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "正在更新媒体库"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "正在更新媒體庫"
           }
         }
       }
@@ -355597,6 +357152,234 @@
         }
       }
     },
+    "error.rateLimited" : {
+      "comment" : "Shown when a server responds that too many requests have been made.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The service is asking us to slow down. Try again in a moment."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تطلب منا الخدمة الإبطاء. حاول مجددًا بعد قليل."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Услугата ни моли да забавим темпото. Опитайте пак след малко."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "El servei ens demana que anem més a poc a poc. Torna-ho a provar d'aquí a un moment."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Služba nás žádá, abychom zpomalili. Zkuste to znovu za chvíli."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tjenesten beder os om at sætte farten ned. Prøv igen om lidt."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Der Dienst bittet uns, langsamer zu machen. Versuch es gleich noch einmal."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Η υπηρεσία μάς ζητά να επιβραδύνουμε. Δοκιμάστε ξανά σε λίγο."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "El servicio nos pide que vayamos más despacio. Inténtalo de nuevo en un momento."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "سرویس از ما می‌خواهد کمی آهسته‌تر عمل کنیم. کمی بعد دوباره امتحان کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Palvelu pyytää meitä hidastamaan. Yritä hetken päästä uudelleen."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Le service nous demande de ralentir. Réessayez dans un instant."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "השירות מבקש שנאט. נסה שוב בעוד רגע."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "सेवा हमें धीमे चलने के लिए कह रही है। कुछ देर बाद फिर कोशिश करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usluga traži da usporimo. Pokušajte ponovno za trenutak."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "A szolgáltatás lassítást kér. Próbáld újra hamarosan."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Layanan meminta kita melambat. Coba lagi sebentar lagi."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Il servizio ci chiede di rallentare. Riprova tra poco."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "サービスからアクセスを控えるよう求められています。少し待ってからもう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "서비스에서 요청을 늦춰 달라고 합니다. 잠시 후 다시 시도하세요."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Perkhidmatan meminta kami memperlahankan permintaan. Cuba lagi sebentar lagi."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tjenesten ber oss om å senke tempoet. Prøv igjen om et øyeblikk."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "De service vraagt ons rustiger aan te doen. Probeer het over een moment opnieuw."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usługa prosi nas o zwolnienie tempa. Spróbuj ponownie za chwilę."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "O serviço pediu para reduzirmos o ritmo. Tente novamente em instantes."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Serviciul ne cere să încetinim. Încearcă din nou peste puțin timp."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сервис просит нас снизить частоту запросов. Повторите попытку чуть позже."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Služba nás žiada spomaliť. Skúste to znova o chvíľu."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Storitev nas prosi, da upočasnimo. Poskusite znova čez trenutek."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Servis traži da usporimo. Pokušaj ponovo za trenutak."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tjänsten ber oss att sakta ner. Försök igen om en stund."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "บริการขอให้เราชะลอการใช้งาน ลองอีกครั้งในอีกสักครู่."
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Servis yavaşlamamızı istiyor. Birazdan tekrar deneyin."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сервіс просить нас сповільнитися. Спробуйте ще раз за мить."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dịch vụ đang yêu cầu chúng tôi chậm lại. Hãy thử lại sau giây lát."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "服务要求我们放慢速度。请稍后再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "服務要求我們放慢速度。請稍後再試。"
+          }
+        }
+      }
+    },
     "error.serverUnreachable" : {
       "comment" : "Shown when the app cannot connect to the user's media server.",
       "localizations" : {
@@ -361936,12 +363719,6 @@
       "comment" : "Accessibility label for the corner mark on a poster whose title the viewer does not own. Describes a state, not a command.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Not in your library"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -361982,6 +363759,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δεν βρίσκεται στη βιβλιοθήκη σας"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Not in your library"
           }
         },
         "es" : {
@@ -362164,12 +363947,6 @@
       "comment" : "Accessibility label for the corner mark on a poster whose title the viewer does not own but can request through Seerr. Describes a state; selecting the card opens the title, it does not request it.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Not in your library — can be requested"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -362210,6 +363987,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δεν βρίσκεται στη βιβλιοθήκη σας — μπορεί να ζητηθεί"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Not in your library — can be requested"
           }
         },
         "es" : {
@@ -366019,6 +367802,462 @@
         }
       }
     },
+    "mediaAction.watchlist.notSelected" : {
+      "comment" : "Accessibility value for a title not saved to Watchlist.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Not in Watchlist"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ليس في قائمة المشاهدة"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Не е в списъка за гледане"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No és a la llista de seguiment"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Není v seznamu ke zhlédnutí"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ikke på se-listen"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nicht auf der Merkliste"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Όχι στη Λίστα παρακολούθησης"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No está en la lista de seguimiento"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "در فهرست تماشا نیست"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ei katselulistalla"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pas dans la liste de suivi"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "לא ברשימת הצפייה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "वॉचलिस्ट में नहीं"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nije na popisu za gledanje"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nincs a Megnézendőkben"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tidak ada di Daftar Tonton"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Non nella watchlist"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ウォッチリスト未追加"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "관심 목록에 없음"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tiada dalam Senarai Tonton"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ikke på Se-liste"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Niet in Kijklijst"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Poza listą do obejrzenia"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fora da Lista"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nu este în Lista de urmărit"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Не в списке просмотра"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nie je v zozname na pozretie"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ni na seznamu za ogled"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nije na listi za gledanje"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Inte i bevakningslistan"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ไม่อยู่ในรายการที่อยากดู"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzleme Listesinde Değil"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Немає в списку до перегляду"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Không có trong Danh sách xem"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "未加入观看列表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "未加入觀看列表"
+          }
+        }
+      }
+    },
+    "mediaAction.watchlist.selected" : {
+      "comment" : "Accessibility value for a title saved to Watchlist.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "In Watchlist"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "في قائمة المشاهدة"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "В списъка за гледане"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "A la llista de seguiment"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "V seznamu ke zhlédnutí"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "På se-listen"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Auf der Merkliste"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Στη Λίστα παρακολούθησης"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "En la lista de seguimiento"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "در فهرست تماشا"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Katselulistalla"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dans la liste de suivi"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ברשימת הצפייה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "वॉचलिस्ट में"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na popisu za gledanje"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "A Megnézendőkben"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ada di Daftar Tonton"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nella watchlist"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ウォッチリストに追加済み"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "관심 목록에 있음"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dalam Senarai Tonton"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "På Se-liste"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "In Kijklijst"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na liście do obejrzenia"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na Lista"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "În Lista de urmărit"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "В списке просмотра"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "V zozname na pozretie"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na seznamu za ogled"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Na listi za gledanje"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "I bevakningslistan"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "อยู่ในรายการที่อยากดู"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzleme Listesinde"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "У списку до перегляду"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Có trong Danh sách xem"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已加入观看列表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已加入觀看列表"
+          }
+        }
+      }
+    },
     "mediaDetail.section.about" : {
       "comment" : "Header of the synopsis section on a movie or series detail page. A noun meaning 'about this title', not the Settings > About page.",
       "extractionState" : "extracted_with_value",
@@ -366697,6 +368936,1146 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "推薦"
+          }
+        }
+      }
+    },
+    "music.transport.repeatAll" : {
+      "comment" : "Transient confirmation after setting music to repeat the full queue.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Repeat All"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تكرار الكل"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Повтаряй всички"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repeteix-ho tot"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Opakovat vše"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gentag alle"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alle wiederholen"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Επανάληψη όλων"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repetir todo"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تکرار همه"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Toista kaikki"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tout répéter"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "חזרה על הכול"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "सभी दोहराएँ"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ponavljaj sve"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Összes ismétlése"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ulangi Semua"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ripeti tutto"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "すべてリピート"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "전체 반복"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ulang Semua"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gjenta alle"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Herhaal alles"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Powtarzaj wszystko"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repetir tudo"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repetă tot"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Повторять всё"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Opakovať všetko"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ponovi vse"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ponavljaj sve"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Upprepa alla"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เล่นซ้ำทั้งหมด"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tümünü Tekrarla"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Повтор усіх"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lặp lại tất cả"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "全部循环"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "重複播放全部"
+          }
+        }
+      }
+    },
+    "music.transport.repeatOff" : {
+      "comment" : "Transient confirmation after turning music repeat off.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Repeat Off"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "إيقاف التكرار"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Повторение изкл."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repetició desactivada"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Opakování vypnuto"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gentag fra"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Wiederholung aus"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Επανάληψη ανενεργή"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repetición desactivada"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تکرار خاموش"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Toisto pois päältä"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Répétition désactivée"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "חזרה כבויה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "दोहराना बंद"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ponavljanje isključeno"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ismétlés kikapcsolva"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pengulangan Mati"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ripetizione disattivata"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "リピートオフ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "반복 끔"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ulang Mati"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gjenta av"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Herhalen uit"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Powtarzanie wył."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repetir desativado"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repetare oprită"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Повтор выкл."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Opakovanie vypnuté"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ponavljanje izklopljeno"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ponavljanje isključeno"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Upprepning av"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ปิดเล่นซ้ำ"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tekrar Kapalı"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Повтор вимкнено"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tắt lặp lại"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "关闭循环"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "關閉重複播放"
+          }
+        }
+      }
+    },
+    "music.transport.repeatOne" : {
+      "comment" : "Transient confirmation after setting music to repeat the current track.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Repeat One"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تكرار واحد"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Повтаряй една"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repeteix una"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Opakovat jednu"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gentag én"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Einen wiederholen"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Επανάληψη ενός"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repetir una"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تکرار یکی"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Toista yksi"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Répéter un titre"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "חזרה על אחד"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "एक दोहराएँ"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ponavljaj jedno"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Egy ismétlése"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ulangi Satu"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ripeti uno"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1曲リピート"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "한 곡 반복"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ulang Satu"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gjenta én"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Herhaal één"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Powtarzaj jeden"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repetir uma"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Repetă una"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Повторять один"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Opakovať jednu"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ponovi eno"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ponavljaj jedno"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Upprepa en"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เล่นซ้ำหนึ่งรายการ"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Birini Tekrarla"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Повтор одного"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lặp lại một bài"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "单曲循环"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "單曲重複播放"
+          }
+        }
+      }
+    },
+    "music.transport.shuffleOff" : {
+      "comment" : "Transient confirmation after turning music shuffle off.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Shuffle Off"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "إيقاف التشغيل العشوائي"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Разбъркване изкл."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aleatori desactivat"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Náhodné přehrávání vypnuto"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bland fra"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zufallswiedergabe aus"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Τυχαία σειρά ανενεργή"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aleatorio desactivado"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "پخش تصادفی خاموش"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Satunnaistoisto pois"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lecture aléatoire désactivée"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ערבוב כבוי"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "शफ़ल बंद"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nasumično isključeno"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Keverés kikapcsolva"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Acak Mati"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Casuale disattivato"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "シャッフルオフ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "셔플 끔"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rawak Mati"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tilfeldig av"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Shuffle uit"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Losowo wył."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aleatório desativado"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aleatoriu oprit"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Случайно выкл."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Náhodné vypnuté"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Naključno izklopljeno"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nasumično isključeno"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Blanda av"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ปิดสุ่ม"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Karıştırma Kapalı"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Перемішування вимкнено"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tắt trộn bài"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "关闭随机播放"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "關閉隨機播放"
+          }
+        }
+      }
+    },
+    "music.transport.shuffleOn" : {
+      "comment" : "Transient confirmation after turning music shuffle on.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Shuffle On"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تشغيل عشوائي"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Разбъркване вкл."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aleatori activat"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Náhodné přehrávání zapnuto"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bland til"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zufallswiedergabe ein"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Τυχαία σειρά ενεργή"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aleatorio activado"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "پخش تصادفی روشن"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Satunnaistoisto päällä"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lecture aléatoire activée"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ערבוב פעיל"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "शफ़ल चालू"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nasumično uključeno"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Keverés bekapcsolva"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Acak Aktif"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Casuale attivo"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "シャッフルオン"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "셔플 켬"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rawak Hidup"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tilfeldig på"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Shuffle aan"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Losowo wł."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aleatório ativado"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aleatoriu pornit"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Случайно вкл."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Náhodné zapnuté"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Naključno vklopljeno"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nasumično uključeno"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Blanda på"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เปิดสุ่ม"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Karıştırma Açık"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Перемішування ввімкнено"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bật trộn bài"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "开启随机播放"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "開啟隨機播放"
           }
         }
       }
@@ -389160,6 +392539,234 @@
         }
       }
     },
+    "trakt.error.clientRejected" : {
+      "comment" : "Shown when Trakt refuses the app's own client credentials, so no sign-in can succeed until they are replaced.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Trakt rejected this app's API credentials. The application may have been removed, or its API access may no longer be active."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "رفض Trakt بيانات اعتماد API لهذا التطبيق. ربما أُزيل التطبيق، أو لم يعد وصوله إلى API نشطًا."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt отхвърли API идентификационните данни на това приложение. Приложението може да е премахнато или API достъпът му вече да не е активен."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt ha rebutjat les credencials d'API d'aquesta app. És possible que l'aplicació s'hagi eliminat o que el seu accés a l'API ja no estigui actiu."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt odmítl přihlašovací údaje API této aplikace. Aplikace mohla být odstraněna nebo její přístup k API už nemusí být aktivní."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt afviste denne apps API-legitimationsoplysninger. Appen kan være blevet fjernet, eller dens API-adgang er muligvis ikke længere aktiv."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt hat die API-Zugangsdaten dieser App abgelehnt. Die Anwendung wurde möglicherweise entfernt oder ihr API-Zugriff ist nicht mehr aktiv."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Το Trakt απέρριψε τα διαπιστευτήρια API αυτής της εφαρμογής. Η εφαρμογή μπορεί να έχει αφαιρεθεί ή η πρόσβασή της στο API να μην είναι πλέον ενεργή."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt rechazó las credenciales de API de esta app. Es posible que la aplicación se haya eliminado o que su acceso a la API ya no esté activo."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt اعتبارنامه‌های API این برنامه را رد کرد. ممکن است برنامه حذف شده باشد یا دسترسی API آن دیگر فعال نباشد."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt hylkäsi tämän apin API-tunnistetiedot. Sovellus on ehkä poistettu tai sen API-käyttöoikeus ei ole enää aktiivinen."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt a rejeté les identifiants d’API de cette app. L’application a peut-être été supprimée ou son accès à l’API n’est peut-être plus actif."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt דחה את פרטי ה-API של האפליקציה הזו. ייתכן שהאפליקציה הוסרה או שגישת ה-API שלה כבר אינה פעילה."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt ने इस ऐप के API क्रेडेंशियल अस्वीकार कर दिए हैं। एप्लिकेशन हटाया गया हो सकता है, या इसका API एक्सेस अब सक्रिय न हो."
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt je odbio API vjerodajnice ove aplikacije. Aplikacija je možda uklonjena ili njezin API pristup više nije aktivan."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt elutasította az alkalmazás API-hitelesítő adatait. Lehet, hogy az alkalmazást eltávolították, vagy az API-hozzáférése már nem aktív."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt menolak kredensial API aplikasi ini. Aplikasi mungkin telah dihapus, atau akses API-nya tidak lagi aktif."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt ha rifiutato le credenziali API di questa app. L'applicazione potrebbe essere stata rimossa oppure il suo accesso API potrebbe non essere più attivo."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt がこのアプリの API 認証情報を拒否しました。アプリケーションが削除されたか、API アクセスが無効になっている可能性があります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt가 이 앱의 API 자격 증명을 거부했습니다. 애플리케이션이 삭제되었거나 API 액세스가 더 이상 활성 상태가 아닐 수 있습니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt menolak kelayakan API apl ini. Aplikasi ini mungkin telah dialih keluar, atau akses APInya mungkin tidak lagi aktif."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt avviste appens API-legitimasjon. Applikasjonen kan ha blitt fjernet, eller API-tilgangen er kanskje ikke lenger aktiv."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt heeft de API-referenties van deze app geweigerd. De applicatie is mogelijk verwijderd, of de API-toegang is mogelijk niet meer actief."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt odrzucił dane uwierzytelniające API tej aplikacji. Aplikacja mogła zostać usunięta albo jej dostęp do API nie jest już aktywny."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "O Trakt rejeitou as credenciais de API deste app. O aplicativo pode ter sido removido ou o acesso à API pode não estar mais ativo."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt a respins datele de autentificare API ale aplicației. Este posibil ca aplicația să fi fost eliminată sau accesul ei API să nu mai fie activ."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt отклонил API-учётные данные приложения. Возможно, приложение было удалено или его доступ к API больше не активен."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt odmietol API prihlasovacie údaje tejto aplikácie. Aplikácia mohla byť odstránená alebo jej prístup k API už nemusí byť aktívny."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt je zavrnil API poverilnice te aplikacije. Aplikacija je bila morda odstranjena ali njen dostop do API-ja ni več aktiven."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt je odbio API podatke ove aplikacije. Aplikacija je možda uklonjena ili njen API pristup više nije aktivan."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt avvisade appens API-uppgifter. Appen kan ha tagits bort, eller så är dess API-åtkomst inte längre aktiv."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt ปฏิเสธข้อมูลรับรอง API ของแอปนี้ แอปพลิเคชันอาจถูกลบออก หรือสิทธิ์เข้าถึง API อาจไม่ได้ใช้งานแล้ว."
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt, bu uygulamanın API kimlik bilgilerini reddetti. Uygulama kaldırılmış olabilir veya API erişimi artık etkin olmayabilir."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt відхилив облікові дані API цього застосунку. Застосунок могли видалити або його доступ до API вже не активний."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt đã từ chối thông tin xác thực API của ứng dụng này. Ứng dụng có thể đã bị gỡ bỏ hoặc quyền truy cập API không còn hoạt động."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt 拒绝了此应用的 API 凭据。该应用可能已被移除，或其 API 访问权限可能已不再有效。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Trakt 拒絕了此 App 的 API 憑證。此應用程式可能已被移除，或其 API 存取權可能已不再有效。"
+          }
+        }
+      }
+    },
     "transparency.detail.off" : {
       "comment" : "One-line explanation shown under the transparency picker.",
       "extractionState" : "extracted_with_value",
@@ -394603,6 +398210,690 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "已看"
+          }
+        }
+      }
+    },
+    "watchlist.feedback.added" : {
+      "comment" : "Transient confirmation after a title is saved locally to the user's Watchlist.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Added to Watchlist"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "أُضيف إلى قائمة المشاهدة"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Добавено в списъка за гледане"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "S'ha afegit a la llista de seguiment"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Přidáno do seznamu ke zhlédnutí"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Føjet til se-listen"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zur Merkliste hinzugefügt"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Προστέθηκε στη Λίστα παρακολούθησης"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Añadido a la lista de seguimiento"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "به فهرست تماشا افزوده شد"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lisätty katselulistalle"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ajouté à la liste de suivi"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "נוסף לרשימת הצפייה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "वॉचलिस्ट में जोड़ा गया"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodano na popis za gledanje"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hozzáadva a Megnézendőkhöz"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ditambahkan ke Daftar Tonton"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aggiunto alla watchlist"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ウォッチリストに追加しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "관심 목록에 추가됨"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ditambahkan pada Senarai Tonton"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lagt til i Se-liste"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Toegevoegd aan Kijklijst"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodano do listy do obejrzenia"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Adicionado à Lista"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Adăugat în Lista de urmărit"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Добавлено в список просмотра"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pridané do zoznamu na pozretie"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodano na seznam za ogled"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dodato na listu za gledanje"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tillagd i bevakningslistan"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "เพิ่มไปยังรายการที่อยากดูแล้ว"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzleme Listesine eklendi"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Додано до списку до перегляду"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Đã thêm vào Danh sách xem"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已添加到观看列表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已加入觀看列表"
+          }
+        }
+      }
+    },
+    "watchlist.feedback.failed" : {
+      "comment" : "Transient message shown when saving a title to, or removing it from, the Watchlist did not succeed.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Couldn't update Watchlist"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تعذّر تحديث قائمة المشاهدة"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Списъкът за гледане не можа да се обнови"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No s'ha pogut actualitzar la llista de seguiment"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Seznam ke zhlédnutí se nepodařilo aktualizovat"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kunne ikke opdatere se-listen"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Merkliste konnte nicht aktualisiert werden"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Δεν ήταν δυνατή η ενημέρωση της Λίστας παρακολούθησης"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No se pudo actualizar la lista de seguimiento"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "فهرست تماشا به‌روزرسانی نشد"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Katselulistaa ei voitu päivittää"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Impossible de mettre à jour la liste de suivi"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "לא ניתן לעדכן את רשימת הצפייה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "वॉचलिस्ट अपडेट नहीं हो सकी"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nije moguće ažurirati popis za gledanje"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nem sikerült frissíteni a Megnézendőket"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tidak dapat memperbarui Daftar Tonton"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Impossibile aggiornare la watchlist"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ウォッチリストを更新できませんでした"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "관심 목록을 업데이트할 수 없음"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tidak dapat mengemas kini Senarai Tonton"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kunne ikke oppdatere Se-liste"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kijklijst kon niet worden bijgewerkt"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nie udało się zaktualizować listy do obejrzenia"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Não foi possível atualizar a Lista"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lista de urmărit nu a putut fi actualizată"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Не удалось обновить список просмотра"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zoznam na pozretie sa nepodarilo aktualizovať"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Seznama za ogled ni bilo mogoče posodobiti"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lista za gledanje nije mogla da se ažurira"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kunde inte uppdatera bevakningslistan"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "อัปเดตรายการที่อยากดูไม่ได้"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzleme Listesi güncellenemedi"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Не вдалося оновити список до перегляду"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Không thể cập nhật Danh sách xem"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "无法更新观看列表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "無法更新觀看列表"
+          }
+        }
+      }
+    },
+    "watchlist.feedback.removed" : {
+      "comment" : "Transient confirmation after a title is removed locally from the user's Watchlist.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Removed from Watchlist"
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "أُزيل من قائمة المشاهدة"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Премахнато от списъка за гледане"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "S'ha eliminat de la llista de seguiment"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odebráno ze seznamu ke zhlédnutí"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fjernet fra se-listen"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Von der Merkliste entfernt"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Αφαιρέθηκε από τη Λίστα παρακολούθησης"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Eliminado de la lista de seguimiento"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "از فهرست تماشا حذف شد"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Poistettu katselulistalta"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Retiré de la liste de suivi"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "הוסר מרשימת הצפייה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "वॉचलिस्ट से हटाया गया"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Uklonjeno s popisa za gledanje"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Eltávolítva a Megnézendőkből"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dihapus dari Daftar Tonton"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rimosso dalla watchlist"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ウォッチリストから削除しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "관심 목록에서 제거됨"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dialih keluar daripada Senarai Tonton"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fjernet fra Se-liste"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Verwijderd uit Kijklijst"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Usunięto z listy do obejrzenia"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Removido da Lista"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Eliminat din Lista de urmărit"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Удалено из списка просмотра"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odstránené zo zoznamu na pozretie"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Odstranjeno s seznama za ogled"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Uklonjeno sa liste za gledanje"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Borttagen från bevakningslistan"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "นำออกจากรายการที่อยากดูแล้ว"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "İzleme Listesinden kaldırıldı"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Вилучено зі списку до перегляду"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Đã xóa khỏi Danh sách xem"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已从观看列表移除"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已從觀看列表移除"
           }
         }
       }

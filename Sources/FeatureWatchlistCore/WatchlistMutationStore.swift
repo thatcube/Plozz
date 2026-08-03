@@ -91,15 +91,25 @@ public struct WatchlistDestinationReconciliationState: Codable, Hashable, Sendab
     public var explicitRemovalPending: Bool
     public var observedAbsenceAfterRemoval: Bool
     public var lastConfirmedAt: Date?
+    /// What this destination was last confirmed to hold, and the identity it was
+    /// confirmed under. Without this the queue has no memory that a destination
+    /// already agrees, so every identity refresh re-sends the whole watchlist.
+    /// Optional so records written before this existed still decode.
+    public var lastConfirmedState: WatchlistDesiredState?
+    public var lastConfirmedIdentity: String?
 
     public init(
         explicitRemovalPending: Bool = false,
         observedAbsenceAfterRemoval: Bool = false,
-        lastConfirmedAt: Date? = nil
+        lastConfirmedAt: Date? = nil,
+        lastConfirmedState: WatchlistDesiredState? = nil,
+        lastConfirmedIdentity: String? = nil
     ) {
         self.explicitRemovalPending = explicitRemovalPending
         self.observedAbsenceAfterRemoval = observedAbsenceAfterRemoval
         self.lastConfirmedAt = lastConfirmedAt
+        self.lastConfirmedState = lastConfirmedState
+        self.lastConfirmedIdentity = lastConfirmedIdentity
     }
 }
 
@@ -241,6 +251,7 @@ public actor DurableWatchlistMutationStore {
         state.reconciliationStates = state.reconciliationStates.filter {
             $0.value.explicitRemovalPending
                 || $0.value.observedAbsenceAfterRemoval
+                || $0.value.lastConfirmedState != nil
                 || mutationKeys.contains($0.key)
         }
         if state.reconciliationStates.count != originalStateCount {
@@ -329,6 +340,46 @@ public actor DurableWatchlistMutationStore {
         try persist()
     }
 
+    /// Whether a destination is already known to hold `desiredState` for this
+    /// target under the same identity, making a write a no-op.
+    public func isAlreadyConfirmed(
+        _ key: WatchlistMutationKey,
+        desiredState: WatchlistDesiredState,
+        target: WatchlistMutationTarget
+    ) -> Bool {
+        guard let reconciliation = state.reconciliationStates[key],
+              reconciliation.lastConfirmedState == desiredState,
+              reconciliation.lastConfirmedIdentity == target.identityFingerprint
+        else { return false }
+        // A pending removal is unfinished business regardless of what was last
+        // confirmed, so never suppress a write while one is outstanding.
+        return !reconciliation.explicitRemovalPending
+    }
+
+    /// Drop confirmations for titles the watchlist no longer tracks.
+    ///
+    /// The map is keyed by (alias, destination), so without this it would grow
+    /// with every title ever watchlisted rather than with the watchlist itself.
+    @discardableResult
+    public func forgetConfirmations(
+        profileID: String,
+        keepingAliasIDs kept: Set<MediaAliasID>
+    ) throws -> Int {
+        let mutationKeys = Set(state.mutations.map(\.key))
+        let before = state.reconciliationStates.count
+        state.reconciliationStates = state.reconciliationStates.filter { key, value in
+            guard key.profileID == profileID else { return true }
+            if mutationKeys.contains(key) { return true }
+            if value.explicitRemovalPending || value.observedAbsenceAfterRemoval {
+                return true
+            }
+            return kept.contains(key.aliasID)
+        }
+        let removed = before - state.reconciliationStates.count
+        if removed > 0 { try persist() }
+        return removed
+    }
+
     public func ready(
         profileID: String,
         now: Date = Date(),
@@ -354,11 +405,15 @@ public actor DurableWatchlistMutationStore {
         state.mutations.removeAll { $0.key == key }
         var reconciliation = state.reconciliationStates[key] ?? .init()
         reconciliation.lastConfirmedAt = now
+        reconciliation.lastConfirmedState = mutation.desiredState
+        reconciliation.lastConfirmedIdentity = mutation.target.identityFingerprint
         if mutation.desiredState == .present {
-            state.reconciliationStates[key] = nil
-        } else {
-            state.reconciliationStates[key] = reconciliation
+            // An add settles any pending-removal bookkeeping, but the
+            // confirmation itself is kept so a later resync knows to stay quiet.
+            reconciliation.explicitRemovalPending = false
+            reconciliation.observedAbsenceAfterRemoval = false
         }
+        state.reconciliationStates[key] = reconciliation
         try persist()
     }
 
@@ -476,11 +531,15 @@ public actor DurableWatchlistMutationStore {
             guard let target = targetsByAlias[
                 state.mutations[index].key.aliasID
             ] else { continue }
-            if state.mutations[index].target != target {
+            let targetChanged = state.mutations[index].target != target
+            if targetChanged {
                 state.mutations[index].target = target
                 changed = true
             }
-            if state.mutations[index].phase == .waitingForIdentity {
+            // Only better ids can change whether a destination can resolve this
+            // title. Re-queueing on an identical refresh meant a destination
+            // that will never resolve it was retried on every identity wave.
+            if targetChanged, state.mutations[index].phase == .waitingForIdentity {
                 state.mutations[index].phase = .queued
                 state.mutations[index].nextAttemptAt = nil
                 changed = true

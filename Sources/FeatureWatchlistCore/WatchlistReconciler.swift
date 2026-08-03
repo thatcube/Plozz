@@ -220,6 +220,19 @@ public actor WatchlistReconciler {
         )
     }
 
+    /// Forget confirmations for titles that are no longer watchlisted, keeping
+    /// the bookkeeping proportional to the watchlist rather than to history.
+    @discardableResult
+    public func forgetConfirmations(
+        profileID: String,
+        keepingAliasIDs kept: Set<MediaAliasID>
+    ) async -> Int {
+        (try? await mutationStore.forgetConfirmations(
+            profileID: profileID,
+            keepingAliasIDs: kept
+        )) ?? 0
+    }
+
     public func identityEvidenceChanged(
         profileID: String,
         changes: [WatchlistIdentityEvidenceChange],
@@ -231,11 +244,28 @@ public actor WatchlistReconciler {
             targets: changes.map(\.target)
         )
         var requests: [WatchlistMutationEnqueueRequest] = []
+        var suppressed = 0
         for change in changes {
             for destinationID in registry.destinationIDs(for: change.target) {
                 guard let destination = registry[destinationID],
                       change.desiredState != .absent
                         || destination.capabilities.write.isRemovable else {
+                    continue
+                }
+                // This runs on every identity refresh over the whole watchlist.
+                // A destination that already agreed, under the same identity,
+                // needs nothing — re-sending was what rate-limited Plex.
+                let key = WatchlistMutationKey(
+                    profileID: profileID,
+                    aliasID: change.target.aliasID,
+                    destinationID: destinationID
+                )
+                if await mutationStore.isAlreadyConfirmed(
+                    key,
+                    desiredState: change.desiredState,
+                    target: change.target
+                ) {
+                    suppressed += 1
                     continue
                 }
                 requests.append(.init(
@@ -246,6 +276,9 @@ public actor WatchlistReconciler {
                 ))
             }
         }
+        FanoutDiagnostics.emit(
+            "watchlist.resync writes=\(requests.count) alreadyInSync=\(suppressed)"
+        )
         try await mutationStore.enqueueBatch(requests, now: now)
     }
 

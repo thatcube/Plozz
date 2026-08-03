@@ -604,6 +604,167 @@ final class WatchlistReconcilerTests: XCTestCase {
         XCTAssertEqual(ready.map { $0.key.destinationID }, [tracker])
     }
 
+    /// The identity refresh walks the whole watchlist on every library update.
+    /// Without confirmation memory it re-sent every title to every destination,
+    /// which is what earned the Plex rate limit in the first place.
+    func testConfirmedDestinationsAreNotRewrittenOnResync() async throws {
+        let store = try DurableWatchlistMutationStore(
+            store: CountingMutationStateStore()
+        )
+        let destination = WatchlistDestinationID(rawValue: "plex.acct")!
+        let target = makeTarget()
+        let key = WatchlistMutationKey(
+            profileID: "p",
+            aliasID: target.aliasID,
+            destinationID: destination
+        )
+        try await store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: destination
+        )
+        let beforeSuccess = await store.isAlreadyConfirmed(
+            key, desiredState: .present, target: target
+        )
+        XCTAssertFalse(beforeSuccess)
+        try await store.markSucceeded(key)
+        let afterSuccess = await store.isAlreadyConfirmed(
+            key, desiredState: .present, target: target
+        )
+        XCTAssertTrue(afterSuccess, "a confirmed add must suppress an identical resync")
+        // The opposite intent is never suppressed.
+        let opposite = await store.isAlreadyConfirmed(
+            key, desiredState: .absent, target: target
+        )
+        XCTAssertFalse(opposite)
+    }
+
+    /// Better ids mean a destination that previously could not resolve the title
+    /// might now succeed, so a changed identity must re-open the write.
+    func testChangedIdentityReopensAConfirmedDestination() async throws {
+        let store = try DurableWatchlistMutationStore(
+            store: CountingMutationStateStore()
+        )
+        let destination = WatchlistDestinationID(rawValue: "anilist")!
+        let target = makeTarget()
+        let key = WatchlistMutationKey(
+            profileID: "p",
+            aliasID: target.aliasID,
+            destinationID: destination
+        )
+        try await store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: destination
+        )
+        try await store.markSucceeded(key)
+
+        var richer = target
+        richer.externalIDs.append(
+            WatchlistExternalID(namespace: .aniList, value: "12345")!
+        )
+        XCTAssertNotEqual(
+            target.identityFingerprint,
+            richer.identityFingerprint
+        )
+        let reopened = await store.isAlreadyConfirmed(
+            key, desiredState: .present, target: richer
+        )
+        XCTAssertFalse(
+            reopened,
+            "new ids must re-open a destination that could not resolve before"
+        )
+    }
+
+    /// Confirmations must track the watchlist, not everything ever watchlisted.
+    func testConfirmationsAreForgottenForUnwatchlistedTitles() async throws {
+        let store = try DurableWatchlistMutationStore(
+            store: CountingMutationStateStore()
+        )
+        let destination = WatchlistDestinationID(rawValue: "simkl")!
+        let kept = makeTarget()
+        let dropped = makeTarget()
+        for target in [kept, dropped] {
+            try await store.enqueue(
+                profileID: "p",
+                desiredState: .present,
+                target: target,
+                destinationID: destination
+            )
+            try await store.markSucceeded(
+                WatchlistMutationKey(
+                    profileID: "p",
+                    aliasID: target.aliasID,
+                    destinationID: destination
+                )
+            )
+        }
+        let removed = try await store.forgetConfirmations(
+            profileID: "p",
+            keepingAliasIDs: [kept.aliasID]
+        )
+        XCTAssertEqual(removed, 1)
+        let keptConfirmed = await store.isAlreadyConfirmed(
+            WatchlistMutationKey(
+                profileID: "p", aliasID: kept.aliasID, destinationID: destination
+            ),
+            desiredState: .present,
+            target: kept
+        )
+        XCTAssertTrue(keptConfirmed)
+        let droppedConfirmed = await store.isAlreadyConfirmed(
+            WatchlistMutationKey(
+                profileID: "p", aliasID: dropped.aliasID, destinationID: destination
+            ),
+            desiredState: .present,
+            target: dropped
+        )
+        XCTAssertFalse(droppedConfirmed)
+    }
+
+    /// A destination that cannot resolve a title must not be retried on every
+    /// identity wave — only genuinely better ids can change the answer.
+    func testUnresolvableTitleIsRetriedOnlyWhenItsIdentityImproves() async throws {
+        let store = try DurableWatchlistMutationStore(
+            store: CountingMutationStateStore()
+        )
+        let destination = WatchlistDestinationID(rawValue: "anilist")!
+        let target = makeTarget()
+        try await store.enqueue(
+            profileID: "p",
+            desiredState: .present,
+            target: target,
+            destinationID: destination
+        )
+        let key = WatchlistMutationKey(
+            profileID: "p", aliasID: target.aliasID, destinationID: destination
+        )
+        try await store.markFailed(
+            key, classification: .unsupportedIdentity, retryAt: nil
+        )
+        let parked = await store.ready(profileID: "p", now: Date(), limit: 10)
+        XCTAssertTrue(parked.isEmpty)
+
+        // An identical refresh must not revive it.
+        try await store.refreshTargets(profileID: "p", targets: [target])
+        let afterNoOp = await store.ready(profileID: "p", now: Date(), limit: 10)
+        XCTAssertTrue(
+            afterNoOp.isEmpty,
+            "an unchanged identity must not re-open an unresolvable destination"
+        )
+
+        // Better ids must revive it.
+        var richer = target
+        richer.externalIDs.append(
+            WatchlistExternalID(namespace: .aniList, value: "999")!
+        )
+        try await store.refreshTargets(profileID: "p", targets: [richer])
+        let afterImprovement = await store.ready(profileID: "p", now: Date(), limit: 10)
+        XCTAssertEqual(afterImprovement.count, 1)
+    }
+
     func testRateLimitedStatusIsClassifiedAsRetryableNotPermanent() {
         let policy = WatchlistRetryPolicy()
         let decision = policy.decision(

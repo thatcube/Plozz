@@ -461,6 +461,10 @@ public extension UniversalWatchlistHost {
                 target: target
             ))
         }
+        await reconciler.forgetConfirmations(
+            profileID: profileID,
+            keepingAliasIDs: Set(intents.map(\.aliasID))
+        )
         try? await reconciler.identityEvidenceChanged(
             profileID: profileID,
             changes: changes

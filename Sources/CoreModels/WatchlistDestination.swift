@@ -275,6 +275,16 @@ public struct WatchlistMutationTarget: Codable, Hashable, Sendable {
         try container.encode(externalIDs, forKey: .externalIDs)
         try container.encode(validatedBindings, forKey: .validatedBindings)
     }
+    /// A stable, cross-launch fingerprint of the parts of this target that can
+    /// change what a write would do. Deliberately **not** `hashValue`, which
+    /// Swift randomizes per process and must never be persisted.
+    public var identityFingerprint: String {
+        kind.rawValue + "#" + externalIDs
+            .map { "\($0.namespace.rawValue):\($0.value)" }
+            .sorted()
+            .joined(separator: "|")
+    }
+
 }
 
 /// Destination-private address. Its opaque value may be a provider item ID and

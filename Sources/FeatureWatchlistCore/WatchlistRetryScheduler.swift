@@ -25,6 +25,16 @@ public actor WatchlistRetryScheduler {
     private let now: @Sendable () -> Date
     private let sleeper: Sleeper
     private let minimumContentionDelay: TimeInterval
+    /// Floor between drain waves while a backlog is still working itself off.
+    ///
+    /// `earliestNextAttempt` reports `.distantPast` whenever anything is queued,
+    /// which is "there is work now" rather than a time to wait for. Taking it
+    /// literally produced a zero-delay wake → drain → reschedule → wake cycle
+    /// that pegged a core for as long as the backlog lasted; on an iPhone that
+    /// was measured at ~106% CPU sustained with the device in the Serious
+    /// thermal state. A drain wave writes several records and is bounded by the
+    /// network anyway, so pacing it costs nothing a person can perceive.
+    private let minimumDrainInterval: TimeInterval
     private var wakeTask: Task<Void, Never>?
     private var generation: UInt64 = 0
 
@@ -34,6 +44,7 @@ public actor WatchlistRetryScheduler {
         drain: @escaping Drain,
         now: @escaping @Sendable () -> Date = { Date() },
         minimumContentionDelay: TimeInterval = 0.05,
+        minimumDrainInterval: TimeInterval = 0.25,
         sleeper: @escaping Sleeper = { delay in
             guard delay > 0 else { return }
             try await Task.sleep(
@@ -46,6 +57,7 @@ public actor WatchlistRetryScheduler {
         self.drain = drain
         self.now = now
         self.minimumContentionDelay = max(0, minimumContentionDelay)
+        self.minimumDrainInterval = max(0, minimumDrainInterval)
         self.sleeper = sleeper
     }
 
@@ -63,10 +75,11 @@ public actor WatchlistRetryScheduler {
         wakeTask?.cancel()
         wakeTask = nil
         guard let date = await nextAttempt(profileID) else { return }
-        let delay = max(
-            minimumDelay,
-            max(0, date.timeIntervalSince(now()))
-        )
+        let scheduled = max(0, date.timeIntervalSince(now()))
+        // A due-now date means "work is waiting", not "spin". Anything already
+        // due is paced; a genuine future retry keeps its own longer delay.
+        let paced = scheduled <= 0 ? minimumDrainInterval : scheduled
+        let delay = max(minimumDelay, paced)
         let sleeper = self.sleeper
         wakeTask = Task { [weak self] in
             do {

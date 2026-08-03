@@ -401,6 +401,9 @@ final class WatchlistReconcilerTests: XCTestCase {
             },
             drain: { _, _ in contention.drain() },
             minimumContentionDelay: 0.25,
+            // Distinct from the contention delay so the two floors are
+            // distinguishable; a due-now backlog is paced by this one.
+            minimumDrainInterval: 0.05,
             sleeper: { delay in delays.append(delay) }
         )
 
@@ -409,7 +412,9 @@ final class WatchlistReconcilerTests: XCTestCase {
         await scheduler.cancel()
 
         XCTAssertEqual(contention.drainCount, 2)
-        XCTAssertEqual(delays.values.first, 0)
+        // Was 0 — a due-now wake with no delay, which is what let the scheduler
+        // spin a core flat out while a backlog drained.
+        XCTAssertEqual(delays.values.first, 0.05)
         XCTAssertEqual(delays.values.dropFirst().first, 0.25)
     }
 
@@ -811,6 +816,94 @@ final class WatchlistReconcilerTests: XCTestCase {
         )
     }
 
+    /// The scheduler must not spin. `earliestNextAttempt` reports `.distantPast`
+    /// while anything is queued, which means "there is work now" — taking it as
+    /// a delay produced a zero-delay wake/drain/reschedule cycle that pegged a
+    /// core for as long as the backlog lasted and put the phone into the Serious
+    /// thermal state.
+    func testBacklogDrainIsPacedRatherThanSpun() async {
+        let requested = SleepRecorder()
+        let scheduler = WatchlistRetryScheduler(
+            profileID: "p",
+            nextAttempt: { _ in .distantPast },
+            drain: { _, _ in .completed },
+            now: { Date() },
+            sleeper: { delay in
+                await requested.record(delay)
+                // Stop after a few waves; an unpaced scheduler would spin here.
+                if await requested.count() > 4 { throw CancellationError() }
+            }
+        )
+        await scheduler.reschedule()
+        await waitUntil { await requested.count() > 4 }
+        await scheduler.cancel()
+
+        let delays = await requested.delays()
+        XCTAssertFalse(delays.isEmpty)
+        for delay in delays {
+            XCTAssertGreaterThan(
+                delay,
+                0,
+                "a due-now backlog must be paced, never rescheduled with no delay"
+            )
+        }
+    }
+
+    /// A future retry keeps its own delay; pacing is a floor, not an override.
+    func testAGenuineFutureRetryKeepsItsOwnDelay() async {
+        let requested = SleepRecorder()
+        let start = Date()
+        let scheduler = WatchlistRetryScheduler(
+            profileID: "p",
+            nextAttempt: { _ in start.addingTimeInterval(60) },
+            drain: { _, _ in .completed },
+            now: { start },
+            sleeper: { delay in
+                await requested.record(delay)
+                throw CancellationError()
+            }
+        )
+        await scheduler.reschedule()
+        await waitUntil { await requested.count() >= 1 }
+        await scheduler.cancel()
+        let delays = await requested.delays()
+        XCTAssertEqual(delays.first.map { Int($0.rounded()) }, 60)
+    }
+
+    /// Selecting the next few mutations must not cost more as the backlog grows
+    /// in ways that scale with copying every pending record.
+    func testReadySelectsTheOldestFewRegardlessOfBacklogSize() async throws {
+        let store = try DurableWatchlistMutationStore(
+            store: CountingMutationStateStore()
+        )
+        let destination = WatchlistDestinationID(rawValue: "simkl")!
+        var targets: [WatchlistMutationTarget] = []
+        for _ in 0..<200 { targets.append(makeTarget()) }
+        try await store.enqueueBatch(
+            targets.map {
+                WatchlistMutationEnqueueRequest(
+                    profileID: "p",
+                    desiredState: .present,
+                    target: $0,
+                    destinationID: destination
+                )
+            }
+        )
+        let ready = await store.ready(profileID: "p", now: Date(), limit: 3)
+        XCTAssertEqual(ready.count, 3)
+
+        // Same ordering the old filter+sort produced: oldest first, key as the
+        // tie-break.
+        let all = await store.allMutations().filter {
+            $0.phase == .queued || $0.phase == .retryScheduled
+        }.sorted {
+            $0.updatedAt != $1.updatedAt
+                ? $0.updatedAt < $1.updatedAt
+                : $0.key < $1.key
+        }
+        XCTAssertEqual(ready.map(\.key), Array(all.prefix(3)).map(\.key))
+    }
+
     func testRateLimitedStatusIsClassifiedAsRetryableNotPermanent() {
         let policy = WatchlistRetryPolicy()
         let decision = policy.decision(
@@ -828,6 +921,14 @@ final class WatchlistReconcilerTests: XCTestCase {
         XCTAssertEqual(permanent.classification, .permanent)
         XCTAssertNil(permanent.retryDelay)
     }
+}
+
+/// Records the delays the scheduler asks to sleep for.
+private actor SleepRecorder {
+    private var recorded: [TimeInterval] = []
+    func record(_ delay: TimeInterval) { recorded.append(delay) }
+    func count() -> Int { recorded.count }
+    func delays() -> [TimeInterval] { recorded }
 }
 
 private actor FakeWatchlistDestination: WatchlistDestination {

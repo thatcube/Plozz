@@ -396,14 +396,39 @@ public actor DurableWatchlistMutationStore {
         now: Date = Date(),
         limit: Int = 3
     ) -> [WatchlistMutation] {
-        state.mutations.filter {
-            $0.key.profileID == profileID
-                && ($0.phase == .queued || $0.phase == .retryScheduled)
-                && ($0.nextAttemptAt == nil || $0.nextAttemptAt! <= now)
-        }.sorted {
-            if $0.updatedAt != $1.updatedAt { return $0.updatedAt < $1.updatedAt }
-            return $0.key < $1.key
-        }.prefix(max(0, limit)).map { $0 }
+        // Selected by index rather than by filtering and sorting the whole
+        // array. `WatchlistMutation` is a large struct, so the old form copied
+        // every pending mutation twice per call — with a few hundred queued and
+        // the scheduler draining continuously, copying them dominated the app's
+        // CPU time. `limit` is tiny, so an insertion-select is O(n · limit) and
+        // copies only what it returns.
+        let capacity = max(0, limit)
+        guard capacity > 0 else { return [] }
+        var chosen: [Int] = []
+        chosen.reserveCapacity(capacity)
+
+        func ordersBefore(_ lhs: Int, _ rhs: Int) -> Bool {
+            let left = state.mutations[lhs], right = state.mutations[rhs]
+            if left.updatedAt != right.updatedAt {
+                return left.updatedAt < right.updatedAt
+            }
+            return left.key < right.key
+        }
+
+        for index in state.mutations.indices {
+            let mutation = state.mutations[index]
+            guard mutation.key.profileID == profileID,
+                  mutation.phase == .queued || mutation.phase == .retryScheduled,
+                  mutation.nextAttemptAt == nil || mutation.nextAttemptAt! <= now
+            else { continue }
+            if chosen.count == capacity, !ordersBefore(index, chosen[capacity - 1]) {
+                continue
+            }
+            let slot = chosen.firstIndex { ordersBefore(index, $0) } ?? chosen.count
+            chosen.insert(index, at: slot)
+            if chosen.count > capacity { chosen.removeLast() }
+        }
+        return chosen.map { state.mutations[$0] }
     }
 
     public func markSucceeded(

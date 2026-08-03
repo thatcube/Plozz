@@ -20,6 +20,10 @@ public struct CloudSyncSchemaDescriptor: Sendable, Equatable {
     }
 
     public let recordType: String
+    /// Whether the payload rides in `encryptedValues`, which CloudKit encrypts
+    /// end-to-end so the field is unreadable to anyone but this iCloud account —
+    /// including Apple. Required for anything carrying a credential.
+    public let encryptsValue: Bool
     public let zoneName: String
     public let fieldKind: String
     public let fieldValue: String
@@ -29,6 +33,7 @@ public struct CloudSyncSchemaDescriptor: Sendable, Equatable {
 
     public init(
         recordType: String,
+        encryptsValue: Bool = false,
         zoneName: String,
         fieldKind: String = "kind",
         fieldValue: String = "value",
@@ -37,6 +42,7 @@ public struct CloudSyncSchemaDescriptor: Sendable, Equatable {
         kindDerivation: KindDerivation = .prefixBeforeFirstColon
     ) {
         self.recordType = recordType
+        self.encryptsValue = encryptsValue
         self.zoneName = zoneName
         self.fieldKind = fieldKind
         self.fieldValue = fieldValue
@@ -50,6 +56,16 @@ public struct CloudSyncSchemaDescriptor: Sendable, Equatable {
         zoneName: "PlozzSyncV3Zone",
         legacyZoneNames: ["PlozzConfig", "PlozzConfigV2"],
         kindDerivation: .syncRecordKey
+    )
+
+    /// Tracker sign-ins. Its own zone so the payload can be encrypted without
+    /// changing how the existing plaintext channels are read or written, and so
+    /// dropping the channel never touches config or watch state.
+    public static let trackerTokensV1 = CloudSyncSchemaDescriptor(
+        recordType: "PlozzTrackerTokensV1Record",
+        encryptsValue: true,
+        zoneName: "PlozzTrackerTokensV1Zone",
+        kindDerivation: .prefixBeforeFirstColon
     )
 
     public static let mediaStateV1 = CloudSyncSchemaDescriptor(
@@ -133,7 +149,11 @@ extension SyncUpload {
         schema: CloudSyncSchemaDescriptor
     ) {
         record[schema.fieldKind] = schema.kind(forRecordName: recordName) as CKRecordValue
-        record[schema.fieldValue] = value as CKRecordValue
+        if schema.encryptsValue {
+            record.encryptedValues[schema.fieldValue] = value as CKRecordValue
+        } else {
+            record[schema.fieldValue] = value as CKRecordValue
+        }
         record[schema.fieldEditedAt] = editedAt as CKRecordValue
     }
 
@@ -150,8 +170,11 @@ extension SyncRemoteRecord {
         ckRecord record: CKRecord,
         schema: CloudSyncSchemaDescriptor
     ) {
+        let payload: Data? = schema.encryptsValue
+            ? record.encryptedValues[schema.fieldValue] as? Data
+            : record[schema.fieldValue] as? Data
         guard schema.matches(record),
-              let value = record[schema.fieldValue] as? Data,
+              let value = payload,
               let editedAt = schema.int64(record[schema.fieldEditedAt])
         else { return nil }
         self.init(

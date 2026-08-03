@@ -35,6 +35,7 @@ public final class SyncedTokenBox<Token: Codable & Sendable>: @unchecked Sendabl
         // Trackers are account-level, not device-level: the same sign-in is
         // meant to be true everywhere. Not user-independent, because a tracker
         // belongs to a person rather than to the household.
+        defer { registerForSync() }
         self.synced = KeychainStore(
             service: service,
             userIndependent: false,
@@ -44,8 +45,17 @@ public final class SyncedTokenBox<Token: Codable & Sendable>: @unchecked Sendabl
     }
 
     public func setNamespace(_ namespace: String?) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         self.namespace = namespace
+        lock.unlock()
+        registerForSync()
+    }
+
+    private func registerForSync() {
+        SyncedTokenRegistry.shared.register(
+            service: service,
+            account: currentAccount()
+        )
     }
 
     private func currentAccount() -> String {
@@ -89,6 +99,8 @@ public final class SyncedTokenBox<Token: Codable & Sendable>: @unchecked Sendabl
         let account = currentAccount()
         do {
             try synced.setString(raw, for: account)
+            registerForSync()
+            SyncedTokenRegistry.shared.noteChanged()
             // Never the token itself — only whether the synced write landed and
             // whether the item reads back as synchronizable.
             FanoutDiagnostics.emit(
@@ -127,6 +139,7 @@ public final class SyncedTokenBox<Token: Codable & Sendable>: @unchecked Sendabl
     public func clear() throws {
         let account = currentAccount()
         try synced.removeValue(for: account)
+        SyncedTokenRegistry.shared.noteChanged()
         // Signing out must not leave a pre-migration copy behind for `load` to
         // resurrect on the next launch.
         removeLegacy(account: account)

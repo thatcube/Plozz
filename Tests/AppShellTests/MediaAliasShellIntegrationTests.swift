@@ -64,9 +64,29 @@ final class MediaAliasShellIntegrationTests: XCTestCase {
         // a second service instance.
         let schemas = sync?.channelSchemas ?? []
         let stateFileURLs = sync?.channelStateFileURLs ?? []
-        XCTAssertEqual(schemas, [.configV3, .mediaStateV1])
-        XCTAssertEqual(stateFileURLs.map(\.lastPathComponent), ["cloud-config-v3.json", "cloud-media-state-v1.json"])
+        XCTAssertEqual(schemas, [.configV3, .mediaStateV1, .trackerTokensV1])
+        XCTAssertEqual(
+            stateFileURLs.map(\.lastPathComponent),
+            [
+                "cloud-config-v3.json",
+                "cloud-media-state-v1.json",
+                "cloud-tracker-tokens-v1.json"
+            ]
+        )
         XCTAssertEqual(Set(stateFileURLs).count, stateFileURLs.count, "channel state files must be disjoint")
+        XCTAssertEqual(
+            Set(schemas.map(\.zoneName)).count,
+            schemas.count,
+            "channel zones must be disjoint"
+        )
+
+        // Credentials must never ride in a plaintext field, and nothing else
+        // should quietly start being encrypted either.
+        XCTAssertEqual(
+            schemas.filter(\.encryptsValue),
+            [.trackerTokensV1],
+            "only the tracker-token channel carries an encrypted payload"
+        )
     }
 
     func testMediaStateChannelCapturesAndAppliesWatchlistIntentExactly() async throws {

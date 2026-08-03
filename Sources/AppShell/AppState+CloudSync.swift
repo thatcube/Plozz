@@ -1,6 +1,8 @@
 import Foundation
 import Observation
+import AppRuntime
 import CoreModels
+import CoreSecureStore
 import CoreNetworking
 import FeatureSyncSetup
 import FeatureSyncCloud
@@ -96,6 +98,43 @@ extension AppState {
             }
         )
 
+        // Tracker sign-ins. Same shared bridge on both shells; the payload is
+        // encrypted end-to-end, and the Keychain stays the local store of record.
+        let trackerTokenChannel = CloudConfigSyncService.ChannelConfiguration(
+            schema: .trackerTokensV1,
+            stateFileURL: syncDir.appendingPathComponent(
+                "cloud-tracker-tokens-v1.json"
+            ),
+            captureRecords: { fallback in
+                TrackerTokenSyncBridge.capture(fallback: fallback)
+            },
+            applyRecords: { changes in
+                TrackerTokenSyncBridge.apply(changes)
+            }
+        )
+
+        // A sign-in that arrived from another device is just bytes in the
+        // Keychain until the services re-read it, so re-run their status checks.
+        NotificationCenter.default.addObserver(
+            forName: .plozzTrackerTokensDidChangeRemotely,
+            object: nil,
+            queue: nil
+        ) { [weak appState] _ in
+            Task { @MainActor in
+                guard let appState else { return }
+                await appState.traktService.refreshStatus()
+                await appState.simklService.refreshStatus()
+                await appState.anilistService.refreshStatus()
+                await appState.malService.refreshStatus()
+            }
+        }
+
+        // A local sign-in has nothing to observe it, so the store raises this and
+        // the engine publishes it rather than waiting for the next sweep.
+        SyncedTokenRegistry.shared.setChangeHandler { [weak appState] in
+            Task { await appState?.cloudSync?.publishLocalChanges() }
+        }
+
         return CloudConfigSyncService(.init(
             containerIdentifier: cloudContainerIdentifier,
             stateFileURL: configStateURL,
@@ -111,7 +150,7 @@ extension AppState {
                 await appState?.clearRemoteDerivedSyncState()
             },
             status: appState.cloudSyncStatus
-        ), channels: [mediaChannel])
+        ), channels: [mediaChannel, trackerTokenChannel])
     }
 
     /// Force an immediate two-way sync (manual "Sync Now").

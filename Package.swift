@@ -624,6 +624,7 @@ let package = Package(
                 "ProviderJellyfin",
                 "ProviderPlex",
                 "ProviderShare",
+                "CoreSecureStore"
             ]
         ),
 

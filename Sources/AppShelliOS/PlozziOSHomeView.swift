@@ -785,7 +785,9 @@ private struct PlozziOSHomeHeroCarousel: View {
                     PlozziOSHomeHeroForeground(
                         item: playItem,
                         detailItem: currentItem,
-                        watchlistItem: currentItem,
+                        // Continue Watching fronts an episode; an episode is not
+                        // watchlistable, so save its show — see `watchlistSubject`.
+                        watchlistItem: currentItem.watchlistSubject,
                         presentation: HeroPresentation(
                             item: rootItem,
                             artworkStyle: style,

@@ -1162,7 +1162,11 @@ private struct PlozziOSDetailHeroForeground: View {
     private var actions: [ActionEntry] {
         var seen = Set<MediaItemAction>()
         var entries: [ActionEntry] = []
-        for target in [item, rootItem] {
+        // A series page rests its hero on the episode Play would run, and an
+        // episode is not watchlistable — so the button did not act on the wrong
+        // thing, it vanished. `watchlistSubject` promotes it to its show, the
+        // same way the tvOS heroes already do.
+        for target in [item, item.watchlistSubject, rootItem] {
             for action in actionHandler.actions(for: target, context: .none)
                 where offersAction(action) && seen.insert(action).inserted {
                 entries.append(ActionEntry(action: action, target: target))
@@ -1355,10 +1359,11 @@ private struct PlozziOSDetailHeroForeground: View {
         }
     }
 
-    /// Collapsible inline actions in keep-inline priority order (index 0 collapses
-    /// last). Play + Request are structural and always stay inline, so they're not
-    /// listed here. Everyday actions (watchlist / mark-watched) outrank the
-    /// power-user Download, which folds into "…" first as width shrinks.
+    /// Collapsible inline actions in display order, which is also fold order:
+    /// index 0 folds into "…" first. Play + Request are structural and always
+    /// stay inline, so they're not listed here. The trailer sits last and so
+    /// survives longest — on a title you don't have, it and Request are the only
+    /// two things you can actually do.
     private var orderedInlineExtras: [InlineExtra] {
         var extras = primaryActions.map { InlineExtra.primary($0) }
         // On an episode page the breadcrumb above the title carries this, so it
@@ -1369,10 +1374,9 @@ private struct PlozziOSDetailHeroForeground: View {
         if downloadItem != nil {
             extras.append(.download)
         }
-        // Trailer folds LAST of all: on a title you don't have, it and Request are
-        // the only two things you can actually do, so it earns its place ahead of
-        // everything else here. It sheds its label first (see `actionRow`), which
-        // usually buys enough width that it never has to leave the row at all.
+        // Trailer folds LAST of all, which is why it is appended last: folding
+        // takes from the front. It sheds its label first (see `actionRow`),
+        // which usually buys enough width that it never leaves the row at all.
         if trailerItem != nil, onPlayTrailer != nil {
             extras.append(.trailer)
         }
@@ -1389,8 +1393,11 @@ private struct PlozziOSDetailHeroForeground: View {
     ) -> some View {
         let extras = orderedInlineExtras
         let keep = max(0, extras.count - collapseCount)
-        let inline = Array(extras.prefix(keep))
-        let collapsed = Array(extras.suffix(collapseCount))
+        // Fold from the left, so the row keeps its right-hand end and the
+        // trailer — the one thing you can do with a title you don't have yet —
+        // is the last to leave. Display order is unchanged.
+        let inline = Array(extras.suffix(keep))
+        let collapsed = Array(extras.prefix(collapseCount))
         let menu = menuActions(collapsing: collapsed)
         return HStack(spacing: 12) {
             playActionButton(resume: resume)

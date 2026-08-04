@@ -437,7 +437,7 @@ private struct AddProfileTileLabel: View {
                             )
                     }
                     Image(systemName: systemImage)
-                        .font(.system(size: isProminent ? 112 : 96, weight: .semibold))
+                        .font(.system(size: isProminent ? 102 : 88, weight: .semibold))
                         .foregroundStyle(
                             isProminent
                                 ? Color.black
@@ -469,13 +469,13 @@ private enum ProfilePickerLayout {
     /// count. tvOS reserves ~60pt of title-safe inset per side, leaving ~1800 of
     /// a 1920 screen, and everything below has to live inside that:
     ///
-    ///     5×(280 + 2×24) + 4×24 + 2×28 = 1640 + 96 + 56 = 1792
+    ///     5×(256 + 2×24) + 4×36 + 2×40 = 1520 + 144 + 80 = 1744
     ///
     /// The halo's clearance is NOT the place to find room — shrinking it made
     /// the focus ring read as a thin rim instead of a halo. The gaps and the row
     /// inset give way first; past that, growing the avatar trades the fifth tile
     /// for size. Change these together rather than one at a time.
-    static let avatarSize: CGFloat = 280
+    static let avatarSize: CGFloat = 256
     /// Clearance between the avatar and the circular focus glass — the visible
     /// "padding" the focus halo adds around the avatar when selected.
     ///
@@ -484,13 +484,14 @@ private enum ProfilePickerLayout {
     static let focusPadding: CGFloat = 24
     /// The reserved avatar-slot size (avatar + focus clearance on each side).
     static let slot: CGFloat = avatarSize + focusPadding * 2
-    /// Tightened as the avatars grew, so five still fit without scrolling. The
-    /// halo already separates neighbours visually, so the gap can be modest.
-    static let tileSpacing: CGFloat = 24
+    /// Sized against the avatar so five still fit without scrolling; the slack
+    /// the smaller avatar frees goes back into breathing room rather than being
+    /// hoarded.
+    static let tileSpacing: CGFloat = 36
     /// Row inset, inside the tvOS title-safe area.
-    static let rowPadding: CGFloat = 28
-    /// Scaled back up with the avatar — big art with a timid label reads
-    /// unbalanced, and this is a 10-foot screen.
-    static let nameFont: Font = .system(size: 30, weight: .semibold)
+    static let rowPadding: CGFloat = 40
+    /// Deliberately generous for a 10-foot screen: the name is read at a glance
+    /// from a sofa, and it's the only text on the tile.
+    static let nameFont: Font = .system(size: 34, weight: .semibold)
 }
 #endif

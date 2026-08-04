@@ -22,6 +22,19 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
+BAKE_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --bake-only) BAKE_ONLY=1 ;;
+    -h|--help)
+      echo "usage: tools/generate-project.sh [--bake-only]"
+      echo "  --bake-only  update version/build settings in an existing project without running XcodeGen"
+      exit 0
+      ;;
+    *) echo "unknown flag: $arg" >&2; exit 2 ;;
+  esac
+done
+
 # Per-branch bundle-id / display-name suffixes (see project.yml). Default EMPTY so
 # a normal run generates the canonical `com.thatcube.Plozz` / "Plozz". An opt-in
 # per-branch build (tools/deploy-*.sh --branded) exports these before calling us so
@@ -40,7 +53,12 @@ export PLOZZ_TV_TOPSHELF_ENTITLEMENTS="${PLOZZ_TV_TOPSHELF_ENTITLEMENTS:-TopShel
 # canonical app's Push / iCloud / Associated Domains capabilities.
 export PLOZZ_IOS_APP_ENTITLEMENTS="${PLOZZ_IOS_APP_ENTITLEMENTS:-App/PlozziOS/PlozziOS.entitlements}"
 
-xcodegen generate
+if [ "$BAKE_ONLY" != "1" ]; then
+  xcodegen generate
+elif [ ! -f "Plozz.xcodeproj/project.pbxproj" ]; then
+  echo "error: --bake-only requires an existing Plozz.xcodeproj; run without it once" >&2
+  exit 1
+fi
 
 proj="Plozz.xcodeproj/project.pbxproj"
 
@@ -68,7 +86,7 @@ if [ -n "${PLOZZ_SENTRY_DSN:-}" ]; then
     /usr/bin/sed -i '' -E "s|PLOZZ_SENTRY_DSN = [^;]*;|PLOZZ_SENTRY_DSN = \"${esc_dsn}\";|g" "$proj"
     echo "Baked PLOZZ_SENTRY_DSN into ${proj} (crash reporting endpoint configured)"
   else
-    echo "warning: $proj not found after xcodegen generate; skipping DSN bake"
+    echo "warning: $proj not found; skipping DSN bake"
   fi
 fi
 
@@ -107,7 +125,7 @@ fi
 
 proj="Plozz.xcodeproj/project.pbxproj"
 if [ ! -f "$proj" ]; then
-  echo "warning: $proj not found after xcodegen generate; skipping build-number bake"
+  echo "warning: $proj not found; skipping build-number bake"
   exit 0
 fi
 

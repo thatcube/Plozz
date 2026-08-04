@@ -63,11 +63,10 @@ SETTINGS_TIMEOUT="${PLOZZ_BUILD_SETTINGS_TIMEOUT:-30}"
 GENERATE_TIMEOUT="${PLOZZ_GENERATE_TIMEOUT:-60}"
 
 BUILD_ONLY=0
-# Regenerate (and re-bake the git-commit-count build number) by DEFAULT so every
-# deploy carries a distinct, verifiable CFBundleVersion. Without this the number
-# went stale across commits and the install verifier could false-positive (see
-# install-verified.sh). Pass --no-regen to skip (e.g. rapid same-commit rebuilds).
-REGEN=1
+# Full XcodeGen is expensive and unnecessary for edits to existing files. Normal
+# deploys only bake a fresh version into the existing project; --regen (or a
+# missing project) performs full generation after files are added/removed/renamed.
+REGEN=0
 SIM_BUILD=0
 CLEAN=0
 BRANDED=0
@@ -135,13 +134,18 @@ if [[ "$CLEAN" == "1" ]]; then
   [[ -n "${DD:-}" ]] && rm -rf "$(dirname "$(dirname "$DD")")"
 fi
 
-if [[ "$REGEN" == "1" ]]; then
+if [[ "$REGEN" == "1" || ! -f "$PROJECT/project.pbxproj" ]]; then
   echo "▸ Regenerating Xcode project + baking a fresh build number…"
-  if [[ -x tools/generate-project.sh ]]; then
-    "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "project generation" -- tools/generate-project.sh
-  else
-    "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "XcodeGen" -- xcodegen generate
-  fi
+  generate_args=()
+else
+  echo "▸ Baking a fresh build number (skipping XcodeGen)…"
+  generate_args=(--bake-only)
+fi
+if [[ -x tools/generate-project.sh ]]; then
+  "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "project/version generation" -- \
+    tools/generate-project.sh "${generate_args[@]}"
+else
+  "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "XcodeGen" -- xcodegen generate
 fi
 
 # --- Destination -------------------------------------------------------------

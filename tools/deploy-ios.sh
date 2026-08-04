@@ -50,11 +50,9 @@ DEPLOY_IPHONE=1
 DEPLOY_IPAD=1
 BUILD_ONLY=0
 NO_BUILD=0
-# Regenerate + re-bake the git-commit-count build number by DEFAULT so every deploy
-# carries a distinct, verifiable CFBundleVersion (a stale number lets the install
-# verifier false-positive; see install-verified.sh). --no-regen skips it; --no-build
-# implies it (nothing new is compiled).
-REGEN=1
+# Normal deploys bake a fresh build number without rerunning XcodeGen. Full
+# regeneration is reserved for --regen, branded builds, or a missing project.
+REGEN=0
 # Metadata provider keys ship on EVERY platform. iOS used to blank them by
 # default, which silently left iPhone and iPad with no provider that covers
 # films (TheTVDB and TMDb are the only two; the keyless sources are anime- or
@@ -132,9 +130,16 @@ if [[ "$INCLUDE_METADATA_KEYS" != "1" ]]; then
   BUILD_SETTING_OVERRIDES+=("TMDB_BEARER_TOKEN=" "OMDB_API_KEY=")
 fi
 
-if [[ "$REGEN" == "1" ]]; then
-  echo "▸ Regenerating Xcode project + baking a fresh build number…"
-  "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "project generation" -- tools/generate-project.sh
+if [[ "$NO_BUILD" != "1" ]]; then
+  if [[ "$REGEN" == "1" || ! -f "$PROJECT/project.pbxproj" ]]; then
+    echo "▸ Regenerating Xcode project + baking a fresh build number…"
+    generate_args=()
+  else
+    echo "▸ Baking a fresh build number (skipping XcodeGen)…"
+    generate_args=(--bake-only)
+  fi
+  "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "project/version generation" -- \
+    tools/generate-project.sh "${generate_args[@]}"
 fi
 
 # --- Build destination -------------------------------------------------------

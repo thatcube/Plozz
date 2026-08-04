@@ -183,18 +183,56 @@ final class ProfileBackgroundPalettes {
 
             guard let self else { return }
             self.inFlight.remove(key)
-            if let backgroundColorIndex {
-                let background = ProfileTileColor.color(
-                    forIndex: backgroundColorIndex
+            if !colors.isEmpty {
+                self.cache[key] = self.weightedEmojiPalette(
+                    extracted: colors,
+                    backgroundColorIndex: backgroundColorIndex
                 )
-                // The selected disc colour is part of the avatar's identity, but
-                // should not bury the emoji itself. Give it one slot; the
-                // extracted artwork supplies the remaining palette.
-                self.cache[key] = [background] + Array(colors.prefix(3))
-            } else if !colors.isEmpty {
-                self.cache[key] = colors
             }
         }
+        #endif
+    }
+
+    /// LiquidArtworkBackground anchors palette[0] at the mesh centre. Make the
+    /// emoji's strongest chromatic colour the centre and three of five total
+    /// slots. A chosen disc colour gets one supporting slot, never the centre.
+    private func weightedEmojiPalette(
+        extracted colors: [Color],
+        backgroundColorIndex: Int?
+    ) -> [Color] {
+        #if canImport(UIKit)
+        let vivid = colors.filter { color in
+            var hue: CGFloat = 0
+            var saturation: CGFloat = 0
+            var brightness: CGFloat = 0
+            var alpha: CGFloat = 0
+            guard UIColor(color).getHue(
+                &hue,
+                saturation: &saturation,
+                brightness: &brightness,
+                alpha: &alpha
+            ) else { return false }
+            // White disc / black seams are useful detail in the avatar, but poor
+            // identity colours for a full-screen wash.
+            return saturation >= 0.22 && brightness >= 0.16 && brightness <= 0.94
+        }
+        let identity = vivid.isEmpty ? colors : vivid
+        guard let dominant = identity.first else { return [] }
+        let secondary = identity.dropFirst().first ?? dominant
+        let tertiary = identity.dropFirst(2).first ?? secondary
+        let support = backgroundColorIndex.map {
+            ProfileTileColor.color(forIndex: $0)
+        } ?? tertiary
+
+        return [
+            dominant,  // mesh centre
+            secondary,
+            dominant,
+            support,   // chosen emoji-disc colour, if any
+            dominant
+        ]
+        #else
+        return colors
         #endif
     }
 }

@@ -653,6 +653,24 @@ public struct PlexHomeUserBinding: Codable, Hashable, Sendable {
 }
 
 extension Profile {
+    /// Stable identity of who this profile plays as on each active Plex account.
+    ///
+    /// This is UI/content identity, not credential identity. Plex may rotate the
+    /// access token during a background refresh while the person remains exactly
+    /// the same; keying SwiftUI on that token-generation counter destroyed and
+    /// rebuilt the entire Home screen, making the hero visibly load again.
+    public func plexPlaybackIdentityKey(for accounts: [Account]) -> String {
+        accounts
+            .filter { $0.server.provider == .plex }
+            .map { account in
+                let homeUserID = homeUserBinding(forPlexAccount: account.id)?
+                    .homeUserID ?? "owner"
+                return "\(account.id)#\(homeUserID)"
+            }
+            .sorted()
+            .joined(separator: "|")
+    }
+
     /// Returns this profile's Plex Home-user binding for `accountID`, falling
     /// back to the legacy single-mapping fields (`plexHomeUserID` et al.)
     /// when no per-account dict exists yet. This is the **upgrade path**:

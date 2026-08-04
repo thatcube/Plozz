@@ -26,8 +26,8 @@ import MetadataKit
 /// curated items from one profile can never leak into another. Extracted as a
 /// pure function so this profile-isolation invariant is locked by a test.
 enum HomeRuntimeScope {
-    static func identityKey(profileID: String, plexIdentityGeneration: Int) -> String {
-        "\(profileID)#\(plexIdentityGeneration)"
+    static func identityKey(profileID: String, plexPlaybackIdentityKey: String) -> String {
+        "\(profileID)#\(plexPlaybackIdentityKey)"
     }
 
     static func accountScopeKey(_ accounts: [Account]) -> String {
@@ -180,9 +180,11 @@ public struct RootView: View {
     /// flag because a change here throws away every `@State` below it — including
     /// Home's view model and its in-flight load.
     private var rootScopeIdentity: String {
-        HomeRuntimeScope.identityKey(
-            profileID: appState.profilesModel.activeProfileID,
-            plexIdentityGeneration: appState.plexHomeUsers.plexIdentityGeneration
+        let profile = appState.profilesModel.activeProfile
+        let accounts = appState.accountsProviders.homeAccounts.map(\.account)
+        return HomeRuntimeScope.identityKey(
+            profileID: profile.id,
+            plexPlaybackIdentityKey: profile.plexPlaybackIdentityKey(for: accounts)
         )
     }
 
@@ -228,7 +230,8 @@ public struct RootView: View {
                             profileID: appState.profilesModel.activeProfileID,
                             identityMaterial: HomeRuntimeScope.identityKey(
                                 profileID: appState.profilesModel.activeProfileID,
-                                plexIdentityGeneration: appState.plexHomeUsers.plexIdentityGeneration
+                                plexPlaybackIdentityKey: appState.profilesModel.activeProfile
+                                    .plexPlaybackIdentityKey(for: accounts.map(\.account))
                             ) + "|" + HomeRuntimeScope.accountScopeKey(accounts.map(\.account))
                         )
                     )

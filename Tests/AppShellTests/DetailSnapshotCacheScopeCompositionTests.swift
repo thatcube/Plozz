@@ -5,7 +5,7 @@ import MetadataKit
 
 /// End-to-end check of the E1 wiring: the detail-cache scope `RootView` composes
 /// from `HomeRuntimeScope.identityKey` + `accountScopeKey` must change on every
-/// effective-content-identity transition (profile, Plex Home-user generation,
+/// effective-content-identity transition (profile, Plex Home user,
 /// provider enable/disable, credential rotation, account removal/re-add) and stay
 /// stable when nothing changed.
 final class DetailSnapshotCacheScopeCompositionTests: XCTestCase {
@@ -13,33 +13,33 @@ final class DetailSnapshotCacheScopeCompositionTests: XCTestCase {
     /// real wiring, not a parallel formula.
     private func scope(
         profileID: String,
-        plexIdentityGeneration: Int,
+        plexPlaybackIdentityKey: String,
         accounts: [Account]
     ) -> DetailSnapshotCacheScope {
         let material = HomeRuntimeScope.identityKey(
             profileID: profileID,
-            plexIdentityGeneration: plexIdentityGeneration
+            plexPlaybackIdentityKey: plexPlaybackIdentityKey
         ) + "|" + HomeRuntimeScope.accountScopeKey(accounts)
         return DetailSnapshotCacheScope(profileID: profileID, identityMaterial: material)
     }
 
     func testProfileSwitchChangesScope() {
-        let a = scope(profileID: "alice", plexIdentityGeneration: 0, accounts: [account(id: "a")])
-        let b = scope(profileID: "bob", plexIdentityGeneration: 0, accounts: [account(id: "a")])
+        let a = scope(profileID: "alice", plexPlaybackIdentityKey: "", accounts: [account(id: "a")])
+        let b = scope(profileID: "bob", plexPlaybackIdentityKey: "", accounts: [account(id: "a")])
         XCTAssertNotEqual(a.digest, b.digest)
     }
 
-    func testPlexHomeUserGenerationChangesScope() {
-        let owner = scope(profileID: "p", plexIdentityGeneration: 0, accounts: [account(id: "a")])
-        let homeUser = scope(profileID: "p", plexIdentityGeneration: 1, accounts: [account(id: "a")])
+    func testPlexHomeUserChangesScope() {
+        let owner = scope(profileID: "p", plexPlaybackIdentityKey: "plex#owner", accounts: [account(id: "a")])
+        let homeUser = scope(profileID: "p", plexPlaybackIdentityKey: "plex#managed", accounts: [account(id: "a")])
         XCTAssertNotEqual(owner.digest, homeUser.digest)
     }
 
     func testEnablingAProviderChangesScope() {
-        let single = scope(profileID: "p", plexIdentityGeneration: 0, accounts: [account(id: "a")])
+        let single = scope(profileID: "p", plexPlaybackIdentityKey: "", accounts: [account(id: "a")])
         let paired = scope(
             profileID: "p",
-            plexIdentityGeneration: 0,
+            plexPlaybackIdentityKey: "",
             accounts: [account(id: "a"), account(id: "b")]
         )
         XCTAssertNotEqual(single.digest, paired.digest)
@@ -49,8 +49,8 @@ final class DetailSnapshotCacheScopeCompositionTests: XCTestCase {
         let original = account(id: "a")
         var rotated = original
         rotated.credentialRevision = CredentialRevision()
-        let before = scope(profileID: "p", plexIdentityGeneration: 0, accounts: [original])
-        let after = scope(profileID: "p", plexIdentityGeneration: 0, accounts: [rotated])
+        let before = scope(profileID: "p", plexPlaybackIdentityKey: "", accounts: [original])
+        let after = scope(profileID: "p", plexPlaybackIdentityKey: "", accounts: [rotated])
         XCTAssertNotEqual(before.digest, after.digest)
     }
 
@@ -59,15 +59,19 @@ final class DetailSnapshotCacheScopeCompositionTests: XCTestCase {
         // Re-add mints a new credential revision even when the id is reused.
         var readded = original
         readded.credentialRevision = CredentialRevision()
-        let before = scope(profileID: "p", plexIdentityGeneration: 0, accounts: [original])
-        let after = scope(profileID: "p", plexIdentityGeneration: 0, accounts: [readded])
+        let before = scope(profileID: "p", plexPlaybackIdentityKey: "", accounts: [original])
+        let after = scope(profileID: "p", plexPlaybackIdentityKey: "", accounts: [readded])
         XCTAssertNotEqual(before.digest, after.digest)
     }
 
     func testUnchangedIdentityReusesScope() {
         let accounts = [account(id: "a"), account(id: "b")]
-        let first = scope(profileID: "p", plexIdentityGeneration: 3, accounts: accounts)
-        let second = scope(profileID: "p", plexIdentityGeneration: 3, accounts: accounts.reversed())
+        let first = scope(profileID: "p", plexPlaybackIdentityKey: "plex#owner", accounts: accounts)
+        let second = scope(
+            profileID: "p",
+            plexPlaybackIdentityKey: "plex#owner",
+            accounts: accounts.reversed()
+        )
         XCTAssertEqual(first, second)
         XCTAssertEqual(first.digest, second.digest)
     }

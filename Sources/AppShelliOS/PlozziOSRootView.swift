@@ -341,8 +341,11 @@ public struct PlozziOSRootView: View {
             && !completedLaunchProfileSelection {
             return "profile-picker"
         }
-        return "\(appModel.profiles.activeProfileID)#"
-            + "\(appModel.plexHomeUsers.plexIdentityGeneration)"
+        let profile = appModel.profiles.activeProfile
+        return "\(profile.id)#"
+            + profile.plexPlaybackIdentityKey(
+                for: appModel.accountsProviders.homeAccounts.map(\.account)
+            )
     }
 
     private var plexUserSelectionBinding:

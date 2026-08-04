@@ -144,6 +144,7 @@ struct ProfileSelectionView: View {
                 canDelete: false,
                 photoSourceAccounts: appState.accountsProviders.accounts,
                 existingColorIndices: appState.profilesModel.profiles.map(\.colorIndex),
+                existingEmojiAvatars: appState.profilesModel.profiles.compactMap(\.avatarEmoji),
                 plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
                 onSave: { draft in
                     // Creates and switches in: setup needs the profile active so

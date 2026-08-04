@@ -499,7 +499,7 @@ extension Profile {
         avatarSymbolCategories.flatMap(\.symbols)
 
     /// Curated, fun **native Apple emoji** offered as profile avatars, grouped
-    /// into browsable 8-wide sections (each category is exactly one row). Rendered
+    /// into horizontally browsable categories. Rendered
     /// as *text* via the system Color Emoji font — nothing is bundled or
     /// redistributed — so this is legally clean on Apple platforms.
     /// Personality-forward but tightly themed, from real usage/PFP-culture
@@ -513,47 +513,69 @@ extension Profile {
     public static let avatarEmojiCategories: [AvatarEmojiCategory] = [
         AvatarEmojiCategory(id: "faces", title: "Faces", emojis: [
             AvatarEmoji("😎"), AvatarEmoji("🤠"), AvatarEmoji("😈"), AvatarEmoji("🤓"),
-            AvatarEmoji("🥴"), AvatarEmoji("🫠"), AvatarEmoji("🙃"), AvatarEmoji("🤨")
+            AvatarEmoji("🥴"), AvatarEmoji("🫠"), AvatarEmoji("🙃"), AvatarEmoji("🤨"),
+            AvatarEmoji("😀"), AvatarEmoji("🥳"), AvatarEmoji("🤩"), AvatarEmoji("🧐"),
+            AvatarEmoji("🥸"), AvatarEmoji("😴"), AvatarEmoji("🤯"), AvatarEmoji("🥶")
         ]),
         AvatarEmojiCategory(id: "reactions", title: "Reactions", emojis: [
             AvatarEmoji("💀"), AvatarEmoji("🗿"), AvatarEmoji("🤡"), AvatarEmoji("👀"),
-            AvatarEmoji("🧢"), AvatarEmoji("😭"), AvatarEmoji("🫡"), AvatarEmoji("💯")
+            AvatarEmoji("🧢"), AvatarEmoji("😭"), AvatarEmoji("🫡"), AvatarEmoji("💯"),
+            AvatarEmoji("✨"), AvatarEmoji("🤌"), AvatarEmoji("👏"), AvatarEmoji("🙌"),
+            AvatarEmoji("🫶"), AvatarEmoji("🫣"), AvatarEmoji("🤪"), AvatarEmoji("😤")
         ]),
         AvatarEmojiCategory(id: "cute-animals", title: "Cute Animals", emojis: [
             AvatarEmoji("🐱"), AvatarEmoji("🐶"), AvatarEmoji("🐼"), AvatarEmoji("🦊"),
-            AvatarEmoji("🐰"), AvatarEmoji("🐧"), AvatarEmoji("🦔"), AvatarEmoji("🪿")
+            AvatarEmoji("🐰"), AvatarEmoji("🐧"), AvatarEmoji("🦔"), AvatarEmoji("🪿"),
+            AvatarEmoji("🐨"), AvatarEmoji("🐯"), AvatarEmoji("🐸"), AvatarEmoji("🐵"),
+            AvatarEmoji("🐹"), AvatarEmoji("🦦"), AvatarEmoji("🦥"), AvatarEmoji("🐙")
         ]),
         AvatarEmojiCategory(id: "beasts", title: "Beasts", emojis: [
             AvatarEmoji("🦁"), AvatarEmoji("🐺"), AvatarEmoji("🦅"), AvatarEmoji("🦈"),
-            AvatarEmoji("🦖"), AvatarEmoji("🐉"), AvatarEmoji("🐦‍🔥"), AvatarEmoji("🫎")
+            AvatarEmoji("🦖"), AvatarEmoji("🐉"), AvatarEmoji("🐦‍🔥"), AvatarEmoji("🫎"),
+            AvatarEmoji("🐻"), AvatarEmoji("🐗"), AvatarEmoji("🦬"), AvatarEmoji("🐊"),
+            AvatarEmoji("🦂"), AvatarEmoji("🦍"), AvatarEmoji("🐲"), AvatarEmoji("🦇")
         ]),
         AvatarEmojiCategory(id: "fantasy-sci-fi", title: "Fantasy & Sci-Fi", emojis: [
             AvatarEmoji("👽"), AvatarEmoji("🤖"), AvatarEmoji("👾"), AvatarEmoji("🧙"),
-            AvatarEmoji("🧛"), AvatarEmoji("🧟"), AvatarEmoji("🦄"), AvatarEmoji("👻")
+            AvatarEmoji("🧛"), AvatarEmoji("🧟"), AvatarEmoji("🦄"), AvatarEmoji("👻"),
+            AvatarEmoji("🧚"), AvatarEmoji("🧜"), AvatarEmoji("🧞"), AvatarEmoji("🧝"),
+            AvatarEmoji("🥷"), AvatarEmoji("🦸"), AvatarEmoji("🦹"), AvatarEmoji("🧌")
         ]),
         AvatarEmojiCategory(id: "food-drink", title: "Food & Drink", emojis: [
             AvatarEmoji("🍕"), AvatarEmoji("🍔"), AvatarEmoji("🍣"), AvatarEmoji("🌮"),
-            AvatarEmoji("🍦"), AvatarEmoji("🍩"), AvatarEmoji("🧋"), AvatarEmoji("🍿")
+            AvatarEmoji("🍦"), AvatarEmoji("🍩"), AvatarEmoji("🧋"), AvatarEmoji("🍿"),
+            AvatarEmoji("🍓"), AvatarEmoji("🍉"), AvatarEmoji("🍪"), AvatarEmoji("🧁"),
+            AvatarEmoji("🥐"), AvatarEmoji("🥑"), AvatarEmoji("🍜"), AvatarEmoji("🧀")
         ]),
         AvatarEmojiCategory(id: "play-hobbies", title: "Play & Hobbies", emojis: [
             AvatarEmoji("🎮"), AvatarEmoji("🏆"), AvatarEmoji("🎸"), AvatarEmoji("🎧"),
-            AvatarEmoji("⚽"), AvatarEmoji("🏀"), AvatarEmoji("🎲"), AvatarEmoji("🎬")
+            AvatarEmoji("⚽"), AvatarEmoji("🏀"), AvatarEmoji("🎲"), AvatarEmoji("🎬"),
+            AvatarEmoji("🏈"), AvatarEmoji("⚾"), AvatarEmoji("🏐"), AvatarEmoji("🎾"),
+            AvatarEmoji("🛹"), AvatarEmoji("🎨"), AvatarEmoji("📚"), AvatarEmoji("🚀")
         ]),
         AvatarEmojiCategory(id: "nature-sky", title: "Nature & Sky", emojis: [
             AvatarEmoji("🌙"), AvatarEmoji("⭐"), AvatarEmoji("🌈"), AvatarEmoji("🪐"),
-            AvatarEmoji("☀️"), AvatarEmoji("⚡"), AvatarEmoji("🌊"), AvatarEmoji("🪼")
+            AvatarEmoji("☀️"), AvatarEmoji("⚡"), AvatarEmoji("🌊"), AvatarEmoji("🪼"),
+            AvatarEmoji("🌻"), AvatarEmoji("🌵"), AvatarEmoji("🍄"), AvatarEmoji("🌲"),
+            AvatarEmoji("🌸"), AvatarEmoji("❄️"), AvatarEmoji("☁️"), AvatarEmoji("🌋")
         ]),
         AvatarEmojiCategory(id: "adventure", title: "Adventure", emojis: [
             AvatarEmoji("👑"), AvatarEmoji("💎"), AvatarEmoji("🔮"), AvatarEmoji("🗡️"),
-            AvatarEmoji("🛡️"), AvatarEmoji("🏴‍☠️"), AvatarEmoji("🔥"), AvatarEmoji("🧭")
+            AvatarEmoji("🛡️"), AvatarEmoji("🏴‍☠️"), AvatarEmoji("🔥"), AvatarEmoji("🧭"),
+            AvatarEmoji("🏕️"), AvatarEmoji("🗺️"), AvatarEmoji("⛵"), AvatarEmoji("🚁"),
+            AvatarEmoji("🏎️"), AvatarEmoji("🎒"), AvatarEmoji("⚓"), AvatarEmoji("🪂")
         ]),
         AvatarEmojiCategory(id: "flair", title: "Flair", emojis: [
             AvatarEmoji("💅"), AvatarEmoji("🧊"), AvatarEmoji("🫧"), AvatarEmoji("🤙"),
-            AvatarEmoji("💫"), AvatarEmoji("🪄"), AvatarEmoji("💥"), AvatarEmoji("🎀")
+            AvatarEmoji("💫"), AvatarEmoji("🪄"), AvatarEmoji("💥"), AvatarEmoji("🎀"),
+            AvatarEmoji("🕶️"), AvatarEmoji("🎩"), AvatarEmoji("🪩"), AvatarEmoji("🎉"),
+            AvatarEmoji("🎊"), AvatarEmoji("💡"), AvatarEmoji("🔔"), AvatarEmoji("🧿")
         ]),
         AvatarEmojiCategory(id: "hearts", title: "Hearts", emojis: [
             AvatarEmoji("❤️"), AvatarEmoji("🧡"), AvatarEmoji("💛"), AvatarEmoji("💚"),
-            AvatarEmoji("💙"), AvatarEmoji("💜"), AvatarEmoji("🖤"), AvatarEmoji("🩷")
+            AvatarEmoji("💙"), AvatarEmoji("💜"), AvatarEmoji("🖤"), AvatarEmoji("🩷"),
+            AvatarEmoji("🤍"), AvatarEmoji("🤎"), AvatarEmoji("💔"), AvatarEmoji("💕"),
+            AvatarEmoji("💖"), AvatarEmoji("💘"), AvatarEmoji("💝"), AvatarEmoji("💞")
         ])
     ]
 
@@ -561,9 +583,10 @@ extension Profile {
     /// created profiles get a playful emoji avatar instead of a plain symbol.
     /// Drawn only from the ungated (always-renderable) emoji so it's safe on any
     /// supported OS.
-    public static func randomAvatarEmoji() -> String {
+    public static func randomAvatarEmoji(excluding used: Set<String> = []) -> String {
         let pool = avatarEmojiCategories.flatMap(\.emojis).filter { $0.minMajor == 0 }
-        return pool.randomElement()?.value ?? "😎"
+        let unused = pool.filter { !used.contains($0.value) }
+        return (unused.isEmpty ? pool : unused).randomElement()?.value ?? "😎"
     }
 
     /// Palette indices for `colorIndex`. Resolved to concrete colors in the UI

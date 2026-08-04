@@ -37,6 +37,7 @@ struct ProfileDetailView: View {
                 canDelete: false,
                 photoSourceAccounts: context.accounts,
                 existingColorIndices: context.profiles.map(\.colorIndex),
+                existingEmojiAvatars: context.profiles.compactMap(\.avatarEmoji),
                 plexHomeUsersFetcher: context.plexHomeUsersFetcher,
                 onSave: { draft in
                     // Same path as the picker: create, switch in, then the

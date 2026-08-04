@@ -138,6 +138,7 @@ public struct ProfileEditorView: View {
         canDelete: Bool = false,
         photoSourceAccounts: [Account] = [],
         existingColorIndices: [Int] = [],
+        existingEmojiAvatars: [String] = [],
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser] = { _ in [] },
         onSave: @escaping (ProfileDraft) -> Void,
         onLiveChange: ((ProfileDraft) -> Void)? = nil,
@@ -167,7 +168,9 @@ public struct ProfileEditorView: View {
         // Create (without opening the picker) still yields an emoji avatar
         // rather than a plain symbol.
         if editingProfile == nil, normalizedEmoji == nil {
-            normalizedEmoji = Profile.randomAvatarEmoji()
+            normalizedEmoji = Profile.randomAvatarEmoji(
+                excluding: Set(existingEmojiAvatars)
+            )
         }
         let startEmojiColor = editingProfile?.avatarEmojiColorIndex
 
@@ -681,28 +684,21 @@ public struct ProfileEditorView: View {
         }
     }
 
-    /// Eager rows of 8 (same rationale as `symbolRows`: a lazy grid would blank
-    /// tiles out as they scroll near the dialog's top edge).
+    /// One eager horizontal rail per category. Eager construction avoids the
+    /// focus-time blanking a lazy stack caused near the outer vertical scroll
+    /// view's edges, while horizontal scrolling lets categories grow freely.
     @ViewBuilder
     private func emojiRows(for emojis: [String]) -> some View {
-        let perRow = 8
-        let rows = stride(from: 0, to: emojis.count, by: perRow).map {
-            Array(emojis[$0..<min($0 + perRow, emojis.count)])
-        }
-        VStack(spacing: 18) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: 18) {
-                    ForEach(row, id: \.self) { emoji in
-                        emojiTile(emoji).frame(maxWidth: .infinity)
-                    }
-                    if row.count < perRow {
-                        ForEach(0..<(perRow - row.count), id: \.self) { _ in
-                            Color.clear.frame(maxWidth: .infinity)
-                        }
-                    }
+        ScrollView(.horizontal) {
+            HStack(spacing: 18) {
+                ForEach(emojis, id: \.self) { emoji in
+                    emojiTile(emoji)
                 }
             }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 12)
         }
+        .scrollClipDisabled()
     }
 
     private func emojiTile(_ emoji: String) -> some View {
@@ -1403,8 +1399,16 @@ fileprivate struct IOSProfileEmojiPicker: View {
                 if !available.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         IOSProfileCategoryHeader(text: category.title)
-                        IOSProfileCategoryGrid(items: available) { emoji in
-                            IOSProfileEmojiTile(emoji: emoji, avatarEmoji: $avatarEmoji)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 14) {
+                                ForEach(available, id: \.self) { emoji in
+                                    IOSProfileEmojiTile(
+                                        emoji: emoji,
+                                        avatarEmoji: $avatarEmoji
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, 2)
                         }
                     }
                 }

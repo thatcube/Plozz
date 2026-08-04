@@ -62,6 +62,7 @@ struct PlozziOSProfileEditorHost: View {
             canDelete: canDelete,
             photoSourceAccounts: appModel.accountsProviders.accounts,
             existingColorIndices: appModel.profiles.profiles.map(\.colorIndex),
+            existingEmojiAvatars: appModel.profiles.profiles.compactMap(\.avatarEmoji),
             plexHomeUsersFetcher: { accountID in
                 await appModel.plexHomeUsers.plexHomeUsers(forAccountID: accountID)
             },

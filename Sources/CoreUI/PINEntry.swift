@@ -20,13 +20,13 @@ enum PINMetrics {
     static let badgeSize: CGFloat = 72
     static let keyDiameter: CGFloat = 108
     static let keySpacing: CGFloat = 22
-    static let dotSize: CGFloat = 22
+    static let dotSize: CGFloat = 30
     #else
     static let horizontalPadding: CGFloat = 24
     static let badgeSize: CGFloat = 48
     static let keyDiameter: CGFloat = 74
     static let keySpacing: CGFloat = 16
-    static let dotSize: CGFloat = 16
+    static let dotSize: CGFloat = 24
     #endif
 
     #if os(tvOS)
@@ -125,6 +125,12 @@ public struct PINEntryScaffold<Badge: View>: View {
                 prose
                     .frame(maxWidth: .infinity, alignment: .leading)
                 padColumn
+                    // The equal two-column layout puts the pad near 75% of the
+                    // screen width. That's mathematically centered in its half,
+                    // but visually too close to the right edge for the main
+                    // control. Pull it toward the screen center while preserving
+                    // the generous gap from the prose.
+                    .offset(x: -90)
             }
             .padding(.horizontal, PINMetrics.horizontalPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

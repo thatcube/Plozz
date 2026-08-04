@@ -57,10 +57,10 @@ struct AddAccountView: View {
         self.onMediaShareConfigured = onMediaShareConfigured
         self.onCancel = onCancel
         self.onSetUpFromAnotherDevice = onSetUpFromAnotherDevice
-        // Seed the flow's starting screen. Cancelling Quick Connect returns here
-        // with the provider preserved so we land on its server list, not the
-        // chooser. Plex has no intermediate list, so it falls back to the chooser.
-        _choice = State(initialValue: initialProvider?.usesMediaBrowserAPI == true ? initialProvider : nil)
+        // Seed the flow's starting screen. This also lets "Add Another Plex
+        // Account" enter Plex linking directly instead of returning to the
+        // provider chooser.
+        _choice = State(initialValue: initialProvider)
         _plexAuthViewModel = State(initialValue: PlexAuthViewModel(
             service: PlexAuthService(deviceID: deviceID),
             onAuthenticated: onPlexAuthenticated,

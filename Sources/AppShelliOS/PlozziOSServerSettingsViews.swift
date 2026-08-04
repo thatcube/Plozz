@@ -220,11 +220,9 @@ struct PlozziOSMyLibrariesSettingsView: View {
     /// Where this screen is being shown. Shared with tvOS, which renders the same
     /// page in both places for the same reason — see `ProfileLibrariesScope`.
     ///
-    /// The controls are identical; what differs is what the person is in the
-    /// middle of. During setup they're answering a question they were just asked,
-    /// and actions that lead OUT of the flow — signing a whole new server in to
-    /// the device — would present a sheet on top of the setup cover and strand
-    /// them, so they're withheld until setup is done.
+    /// The controls are identical; only surrounding copy and presentation differ.
+    /// Add-account actions are supplied by whichever host owns the screen, so
+    /// they remain inside Settings or profile setup instead of escaping either.
     var presentation: ProfileLibrariesScope.Presentation = .settings
     @State private var libraries: [ProfileLibraryChoice] = []
     @State private var unreachableAccountIDs: Set<String> = []
@@ -244,9 +242,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
                 SettingsSectionGroup {
                     Text("No servers are available on this \(deviceName).")
                         .plozzForeground(.secondary)
-                    if presentation == .settings {
-                        Button("Add Server", systemImage: "plus", action: onAddServer)
-                    }
+                    Button("Add Server", systemImage: "plus", action: onAddServer)
                 }
             } else {
                 ForEach(groups, id: \.serverKey) { group in
@@ -407,8 +403,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
     /// chooser. Matches the tvOS "Watching as" page.
     @ViewBuilder
     private func addUserButton(_ group: ServerAccountGroup) -> some View {
-        if presentation == .settings,
-           group.providerKind != .mediaShare,
+        if group.providerKind != .mediaShare,
            let server = group.accounts.first?.server {
             Button {
                 onAddUser(server)

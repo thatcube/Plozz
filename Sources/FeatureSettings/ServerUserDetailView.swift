@@ -53,17 +53,23 @@ struct ServerUserDetailView: View {
                     Button {
                         choose(account, in: group)
                     } label: {
-                        SettingsRowLabel(
-                            icon: nil,
-                            title: Text(verbatim: account.userName)
-                        ) {
-                            EmptyView()
-                        } trailing: {
+                        HStack(spacing: 16) {
+                            AccountAvatar(
+                                name: account.userName,
+                                imageURL: resolvedAvatarURL(for: account),
+                                size: 52
+                            )
+                            Text(verbatim: account.userName)
+                                .font(.callout.weight(.medium))
+                            Spacer(minLength: 12)
                             if scope.isAccountIncludedInActiveProfile(account.id) {
                                 Image(systemName: "checkmark")
                                     .settingsRowGreenIndicator()
                             }
                         }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 12)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(SettingsFocusButtonStyle())
                 }

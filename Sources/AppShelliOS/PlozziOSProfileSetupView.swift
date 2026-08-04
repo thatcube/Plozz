@@ -1,4 +1,5 @@
 #if os(iOS)
+import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureProfiles
@@ -20,11 +21,15 @@ struct PlozziOSProfileSetupView: View {
     let appModel: PlozziOSAppModel
     let onDone: () -> Void
 
+    @State private var showingAddServer = false
+    @State private var addUserServer: MediaServer?
+
     var body: some View {
         NavigationStack {
             PlozziOSMyLibrariesSettingsView(
                 appModel: appModel,
-                onAddServer: {},
+                onAddServer: showAddServer,
+                onAddUser: showAddUser(on:),
                 presentation: .profileSetup
             )
             .navigationTitle("Set Up \(appModel.profiles.activeProfile.name)")
@@ -50,6 +55,79 @@ struct PlozziOSProfileSetupView: View {
         // import when it does, so a swipe-away is handled as an explicit cancel
         // rather than being allowed to strand the profile mid-flow.
         .interactiveDismissDisabled()
+        .sheet(
+            isPresented: $showingAddServer,
+            onDismiss: {
+                appModel.finishManagedServerPresentation()
+                addUserServer = nil
+            }
+        ) {
+            AddServerView(
+                appModel: appModel,
+                initialProvider: addUserServer?.provider ?? .jellyfin,
+                initialAddress: addUserServer?.baseURL.absoluteString ?? ""
+            )
+            .presentationSizing(.page)
+        }
+        // These belong to the setup cover, not the app root. Keeping them here
+        // prevents Home appearing between account/user selection, Plex PIN and
+        // the libraries step.
+        .sheet(item: plexUserSelectionBinding) { selection in
+            PlozziOSPlexUserSelectionView(
+                selection: selection,
+                onSelect: appModel.selectPlexUserDuringOnboarding
+            )
+        }
+        .fullScreenCover(item: plexPINBinding) { request in
+            PlozziOSPlexPINView(
+                model: appModel.plexHomeUsers,
+                request: request
+            )
+        }
+        .sheet(item: librarySelectionBinding) { selection in
+            PlozziOSLibrarySelectionView(
+                accounts: appModel.accountsProviders.resolvedAccounts(
+                    withIDs: selection.accountIDs
+                ),
+                visibility: appModel.settings.homeVisibility,
+                onContinue: appModel.completeLibrarySelection
+            )
+        }
+    }
+
+    private func showAddUser(on server: MediaServer) {
+        addUserServer = server
+        showAddServer()
+    }
+
+    private func showAddServer() {
+        appModel.beginManagedServerPresentation()
+        showingAddServer = true
+    }
+
+    private var plexUserSelectionBinding:
+        Binding<PlexHomeUsersModel.PendingPlexUserSelection?>
+    {
+        Binding(
+            get: { appModel.plexHomeUsers.pendingPlexUserSelection },
+            set: { if $0 == nil { appModel.cancelPlexUserSelectionDuringOnboarding() } }
+        )
+    }
+
+    private var plexPINBinding: Binding<PlexHomeUsersModel.PlexPINRequest?> {
+        Binding(
+            get: { appModel.plexHomeUsers.pendingPlexPINRequest },
+            set: { if $0 == nil { appModel.plexHomeUsers.dismissPlexPINIfPresented() } }
+        )
+    }
+
+    private var librarySelectionBinding:
+        Binding<PlozziOSAppModel.PendingLibrarySelection?>
+    {
+        Binding(
+            get: { appModel.pendingLibrarySelection },
+            set: { if $0 == nil { appModel.completeLibrarySelection() } }
+        )
     }
 }
 

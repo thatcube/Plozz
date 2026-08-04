@@ -192,7 +192,12 @@ public struct RootView: View {
         // as a dependency of body. The sheet's Binding closures aren't
         // tracked, so without this body never re-evaluates when the request
         // clears and the sheet stays up after a successful PIN.
-        let pinRequest = appState.plexHomeUsers.pendingPlexPINRequest
+        // Profile setup renders Plex PIN entry inside its own full-page flow.
+        // Letting this root-level cover compete with the setup cover tears the
+        // latter down and briefly exposes Home between "Watching as" and the PIN.
+        let pinRequest = appState.profileFlow.pendingSetupProfile == nil
+            ? appState.plexHomeUsers.pendingPlexPINRequest
+            : nil
         return Group {
             switch appState.state {
             case .launching:
@@ -487,10 +492,12 @@ public struct RootView: View {
             // SwiftUI shows one at a time and silently drops the rest.
             onDismiss: { appState.profileFlow.presentPostSetupStep() }
         ) { profile in
-            ProfileSetupLibrariesView(scope: appState.profileLibrariesScope(librariesStore: setupLibraries)) {
-                appState.completeProfileSetup(for: profile.id)
-            }
-            .task { await setupLibraries.reload(appState: appState) }
+            ProfileSetupFlowView(
+                appState: appState,
+                profile: profile,
+                librariesStore: setupLibraries,
+                deviceColorScheme: systemColorScheme
+            )
         }
         // Last onboarding step stays full-screen. An alert here exposed Home
         // underneath an unrelated setup question, making the flow feel finished
@@ -885,6 +892,7 @@ private struct OnboardingPageContent: View {
                             displayName: config.displayName
                         )
                     }
+
                 },
                 onCancel: { appState.cancelAuthentication() },
                 onSetUpFromAnotherDevice: onSetUpFromAnotherDevice
@@ -930,6 +938,48 @@ private struct OnboardingPageContent: View {
     }
 }
 
+/// Keeps every detour from new-profile setup inside the setup cover.
+///
+/// Selecting a PIN-protected Plex user used to ask the ROOT to present another
+/// cover, which replaced the setup cover and exposed Home during the hand-off.
+/// Adding another user changed the session state underneath the unchanged setup
+/// cover, so its auth screen existed but could never be seen. One full-page
+/// switch here handles both: PIN, add-account onboarding, then back to Libraries.
+private struct ProfileSetupFlowView: View {
+    let appState: AppState
+    let profile: Profile
+    let librariesStore: ProfileSetupLibrariesLoader
+    let deviceColorScheme: ColorScheme
+
+    @ViewBuilder
+    var body: some View {
+        if let request = appState.plexHomeUsers.pendingPlexPINRequest {
+            PlexPINEntryView(
+                appState: appState,
+                userName: request.homeUserName,
+                avatarURLString: request.homeUserAvatarURL,
+                dismissOnSuccess: false,
+                onSubmit: { appState.plexHomeUsers.submitPlexPIN($0) },
+                onCancel: { appState.plexHomeUsers.cancelPlexPIN() }
+            )
+        } else if case let .onboarding(step, canReturnToApp) = appState.state {
+            OnboardingFlowView(
+                appState: appState,
+                step: step,
+                canReturnToApp: canReturnToApp,
+                deviceColorScheme: deviceColorScheme
+            )
+        } else {
+            ProfileSetupLibrariesView(
+                scope: appState.profileLibrariesScope(librariesStore: librariesStore)
+            ) {
+                appState.completeProfileSetup(for: profile.id)
+            }
+            .task { await librariesStore.reload(appState: appState) }
+        }
+    }
+}
+
 /// Observes the tvOS display manager at the app root and forwards mode-switch-end
 /// to the window-level `DisplayVeilModel`, so the exit veil can time its hold off
 /// the *reported* settle even after the player has been dismissed. A no-op on
@@ -963,6 +1013,7 @@ private struct PlexPINEntryView: View {
     let appState: AppState
     let userName: String
     let avatarURLString: String?
+    var dismissOnSuccess: Bool = true
     let onSubmit: (String) -> Void
     let onCancel: () -> Void
 
@@ -1016,7 +1067,7 @@ private struct PlexPINEntryView: View {
             // dismiss() directly from inside the cover when AppState clears the
             // pending request (success path). This is the authoritative signal
             // that the PIN was accepted.
-            if newValue == nil {
+            if newValue == nil, dismissOnSuccess {
                 PlozzLog.auth.debug("pendingPlexPINRequest cleared — calling dismiss()")
                 dismiss()
             }

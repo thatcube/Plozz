@@ -1320,6 +1320,23 @@ public final class AppState {
         apply(.serverSelected(server))
     }
 
+    /// Starts the ordinary add-account flow from inside profile setup's
+    /// "Watching as" page.
+    ///
+    /// The old callback called `selectServer` directly while the session machine
+    /// was `.ready`. `serverSelected` is intentionally illegal from `.ready`, so
+    /// the reducer ignored it and the button did exactly nothing. Enter the
+    /// add-account state first, then jump straight to credentials for
+    /// Jellyfin/Emby. Plex stays on the provider step, seeded to `.plex`, because
+    /// its account link flow resolves the server after authentication.
+    public func beginAddingUser(on server: MediaServer) {
+        pendingOnboardingProvider = server.provider
+        apply(.addAccountRequested)
+        if server.provider.usesMediaBrowserAPI {
+            apply(.serverSelected(server))
+        }
+    }
+
     /// Persists a freshly-authenticated account and advances the machine.
     ///
     /// On a brand-new install (no prior accounts and the one-time first-run

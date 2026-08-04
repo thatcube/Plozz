@@ -390,7 +390,7 @@ public struct PlozziOSRootView: View {
     {
         Binding(
             get: {
-                showingSettings
+                showingSettings || appModel.profileOnboardingStep == .libraries
                     ? nil
                     : appModel.plexHomeUsers.pendingPlexPINRequest
             },

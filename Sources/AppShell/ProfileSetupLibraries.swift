@@ -64,7 +64,7 @@ extension AppState {
             },
             // Not offered during setup — see `ProfileLibrariesScope.Presentation`.
             onAddAccount: {},
-            onAddUser: { [weak self] server in self?.selectServer(server) },
+            onAddUser: { [weak self] server in self?.beginAddingUser(on: server) },
             plexHomeUsersFetcher: { [weak self] accountID in
                 await self?.plexHomeUsers.plexHomeUsers(forAccountID: accountID) ?? []
             },

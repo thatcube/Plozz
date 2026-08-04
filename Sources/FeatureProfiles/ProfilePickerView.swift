@@ -195,7 +195,7 @@ public struct ProfilePickerView: View {
                         .focused($focus, equals: .addKids)
                     }
                 }
-                .padding(.horizontal, 80)
+                .padding(.horizontal, ProfilePickerLayout.rowPadding)
                 // Room for the focus halo + lift, which would otherwise be
                 // clipped by the scroll view's bounds.
                 .padding(.vertical, 40)
@@ -437,7 +437,7 @@ private struct AddProfileTileLabel: View {
                             )
                     }
                     Image(systemName: systemImage)
-                        .font(.system(size: isProminent ? 100 : 86, weight: .semibold))
+                        .font(.system(size: isProminent ? 116 : 100, weight: .semibold))
                         .foregroundStyle(
                             isProminent
                                 ? Color.black
@@ -463,19 +463,31 @@ private struct AddProfileTileLabel: View {
 /// identically.
 private enum ProfilePickerLayout {
     /// Deliberately large: the avatar IS the target on this screen, and a 10-foot
-    /// UI can afford it. Five tiles still fit a 1920pt screen —
-    /// 5×(250+2×24) + 4×40 + 2×80 = 1810 — so the common household size never
-    /// scrolls.
-    static let avatarSize: CGFloat = 250
+    /// UI can afford it.
+    ///
+    /// Sized so five still fit without scrolling, which is the common household
+    /// count. tvOS reserves ~60pt of title-safe inset per side, leaving ~1800 of
+    /// a 1920 screen; the row then spends 2×40 on its own padding, so five slots
+    /// and four gaps have to live inside ~1720:
+    ///
+    ///     5×(290 + 2×16) + 4×28 + 2×40 = 1610 + 112 + 80 = 1802
+    ///
+    /// Growing the avatar past this trades the fifth tile for size, so change
+    /// these together rather than one at a time.
+    static let avatarSize: CGFloat = 290
     /// Clearance between the avatar and the circular focus glass — the visible
-    /// "padding" the focus halo adds around the avatar when selected.
-    static let focusPadding: CGFloat = 24
+    /// "padding" the focus halo adds around the avatar when selected. Tightened
+    /// as the avatar grew: it's decorative clearance, and the tile budget is
+    /// better spent on the image.
+    static let focusPadding: CGFloat = 16
     /// The reserved avatar-slot size (avatar + focus clearance on each side).
     static let slot: CGFloat = avatarSize + focusPadding * 2
     /// Tightened as the avatars grew, so five still fit without scrolling.
-    static let tileSpacing: CGFloat = 40
-    /// A step down from `.title3`: with a bigger avatar carrying the identity,
-    /// the name is a caption to it rather than a headline of its own.
-    static let nameFont: Font = .system(size: 26, weight: .semibold)
+    static let tileSpacing: CGFloat = 28
+    /// Row inset, inside the tvOS title-safe area.
+    static let rowPadding: CGFloat = 40
+    /// Scaled back up with the avatar — big art with a timid label reads
+    /// unbalanced, and this is a 10-foot screen.
+    static let nameFont: Font = .system(size: 30, weight: .semibold)
 }
 #endif

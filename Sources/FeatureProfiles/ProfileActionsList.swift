@@ -69,7 +69,7 @@ public struct ProfileActionsList: View {
             actionRow(
                 icon: "paintpalette",
                 title: "Appearance",
-                subtitle: "Name, avatar, and colour",
+                subtitle: "Name, avatar, and color",
                 action: onEditAppearance
             )
 

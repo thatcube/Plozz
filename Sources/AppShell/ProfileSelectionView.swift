@@ -41,7 +41,7 @@ struct ProfileSelectionView: View {
     @State private var lockTarget: Profile?
     /// A management action held back until a PIN proves it's allowed.
     @State private var pendingAction: ManagementAction?
-    /// Error from the last failed authorisation attempt.
+    /// Error from the last failed authorization attempt.
     @State private var authError: String?
     /// Whether management has been proved during this presentation.
     @State private var authorized = false
@@ -196,7 +196,7 @@ struct ProfileSelectionView: View {
         return profile.plexHomeUserBindings?.values.contains { $0.requiresPIN == true } ?? false
     }
 
-    // MARK: Authorisation
+    // MARK: Authorization
 
     /// The locked profile whose PIN authorises managing profiles — a grown-up's.
     ///

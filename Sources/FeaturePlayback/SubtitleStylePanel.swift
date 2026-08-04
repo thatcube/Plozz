@@ -542,7 +542,7 @@ struct SubtitleStylePanel: View {
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
-            Text("They're rendered as images by the source, so font, colour, size and position controls don't apply.")
+            Text("They're rendered as images by the source, so font, color, size and position controls don't apply.")
                 .font(.callout)
                 .foregroundStyle(.white.opacity(0.65))
                 .multilineTextAlignment(.center)

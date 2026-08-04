@@ -14,6 +14,24 @@ public struct PlexClient: Sendable {
     private let resolver: PlexConnectionResolver
     private let deviceProfile: PlexDeviceProfile
     private let token: String
+    /// Token for **plex.tv Discover** calls (watchlist, Discover metadata,
+    /// people) as opposed to per-server ones.
+    ///
+    /// These are genuinely different credentials. `token` is whatever authorizes
+    /// THIS server — and when a profile plays as a Plex Home user it's a
+    /// per-server access token, minted by `plexServerTokenResolve` for the PMS
+    /// instance. Discover is a plex.tv cloud service that wants the
+    /// ACCOUNT-level token of the person; handed a server token it answers
+    /// 401/403, which is exactly how watchlist writes were failing.
+    ///
+    /// `nil` means "same as `token`", correct for an ordinary sign-in where the
+    /// account token is what was stored.
+    private let discoverToken: String?
+
+    /// The credential to send to plex.tv Discover.
+    private var plexTVToken: String { discoverToken ?? token }
+    /// Headers for plex.tv Discover, carrying the account-level token.
+    private var plexTVHeaders: [String: String] { deviceProfile.headers(token: plexTVToken) }
     private let http: HTTPClient
     /// Foreground/critical-path client with its own connection pool (see
     /// ``URLSession/plozzInteractive``) used only for the user-blocking `metadata()`
@@ -52,6 +70,7 @@ public struct PlexClient: Sendable {
         baseURL: URL,
         deviceProfile: PlexDeviceProfile,
         token: String,
+        discoverToken: String? = nil,
         http: HTTPClient = URLSessionHTTPClient(),
         interactiveHTTP: HTTPClient? = nil,
         capabilities: MediaCapabilities = .detected(),
@@ -61,6 +80,25 @@ public struct PlexClient: Sendable {
             resolver: PlexConnectionResolver(candidates: [baseURL], deviceProfile: deviceProfile, token: token),
             deviceProfile: deviceProfile,
             token: token,
+            discoverToken: discoverToken,
+            http: http,
+            interactiveHTTP: interactiveHTTP,
+            capabilities: capabilities,
+            hybridEngineEnabled: hybridEngineEnabled
+        )
+    }
+
+    /// A copy that talks to plex.tv Discover as `discoverToken`.
+    ///
+    /// Used when a profile plays as a Plex Home user: browsing keeps the
+    /// per-server token, while the watchlist uses that person's own
+    /// account-level token so it reads and writes THEIR list.
+    public func withDiscoverToken(_ discoverToken: String?) -> PlexClient {
+        PlexClient(
+            resolver: resolver,
+            deviceProfile: deviceProfile,
+            token: token,
+            discoverToken: discoverToken,
             http: http,
             interactiveHTTP: interactiveHTTP,
             capabilities: capabilities,
@@ -74,6 +112,7 @@ public struct PlexClient: Sendable {
         resolver: PlexConnectionResolver,
         deviceProfile: PlexDeviceProfile,
         token: String,
+        discoverToken: String? = nil,
         http: HTTPClient = URLSessionHTTPClient(),
         interactiveHTTP: HTTPClient? = nil,
         capabilities: MediaCapabilities = .detected(),
@@ -82,6 +121,7 @@ public struct PlexClient: Sendable {
         self.resolver = resolver
         self.deviceProfile = deviceProfile
         self.token = token
+        self.discoverToken = discoverToken
         self.http = http
         // Falls back to `http` when no dedicated foreground client is supplied, so
         // a test injecting a single stub for `http` routes the user-blocking
@@ -651,10 +691,10 @@ public struct PlexClient: Sendable {
         let endpoint = Endpoint(
             path: "/library/metadata/\(metadataID)",
             queryItems: [
-                URLQueryItem(name: "X-Plex-Token", value: token),
+                URLQueryItem(name: "X-Plex-Token", value: plexTVToken),
                 URLQueryItem(name: "includeGuids", value: "1")
             ],
-            headers: headers
+            headers: plexTVHeaders
         )
         let (data, _) = try await http.send(endpoint, baseURL: Self.watchlistBase)
         do {
@@ -686,8 +726,8 @@ public struct PlexClient: Sendable {
     func discoverPerson(id: String) async throws -> PlexPersonRecord {
         let endpoint = Endpoint(
             path: "/library/people/\(id)",
-            queryItems: [URLQueryItem(name: "X-Plex-Token", value: token)],
-            headers: headers
+            queryItems: [URLQueryItem(name: "X-Plex-Token", value: plexTVToken)],
+            headers: plexTVHeaders
         )
         let (data, response): (Data, URLResponse)
         do {
@@ -723,9 +763,9 @@ public struct PlexClient: Sendable {
             path: "/actions/\(on ? "addToWatchlist" : "removeFromWatchlist")",
             queryItems: [
                 URLQueryItem(name: "ratingKey", value: metadataID),
-                URLQueryItem(name: "X-Plex-Token", value: token)
+                URLQueryItem(name: "X-Plex-Token", value: plexTVToken)
             ],
-            headers: headers
+            headers: plexTVHeaders
         )
         let (data, response) = try await http.sendRaw(endpoint, baseURL: Self.watchlistBase)
         guard (200...299).contains(response.statusCode) else {
@@ -768,10 +808,10 @@ public struct PlexClient: Sendable {
         let endpoint = Endpoint(
             path: "/library/sections/watchlist/all",
             queryItems: [
-                URLQueryItem(name: "X-Plex-Token", value: token),
+                URLQueryItem(name: "X-Plex-Token", value: plexTVToken),
                 URLQueryItem(name: "includeFields", value: "title,type,year,thumb,art,guid,ratingKey")
             ],
-            headers: headers
+            headers: plexTVHeaders
         )
         let (data, _) = try await http.send(endpoint, baseURL: Self.watchlistBase)
         do {

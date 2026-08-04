@@ -107,6 +107,14 @@ public final class PlexHomeUsersModel {
     /// so their identity paints instantly without the startup double-load.
     @ObservationIgnored
     private var plexTokenOverrides: [String: String] = [:]
+    /// The Home user's ACCOUNT-level plex.tv token per account.
+    ///
+    /// Separate from `plexTokenOverrides`, which holds the per-SERVER access
+    /// token that PMS authorizes browsing with. plex.tv Discover — the watchlist
+    /// — needs the account-level one; given a server token it answers 401/403.
+    /// Kept in memory only, never persisted, exactly like the server override.
+    @ObservationIgnored
+    private var plexDiscoverTokenOverrides: [String: String] = [:]
     /// Runtime revision for the effective Plex Home-user credential. Owner
     /// credentials continue to use the account's persisted revision.
     @ObservationIgnored
@@ -450,6 +458,12 @@ public final class PlexHomeUsersModel {
         return stash.pin
     }
 
+    /// The account-level plex.tv token to use for Discover (watchlist) calls on
+    /// `accountID`, or `nil` to use the account's stored token.
+    public func discoverToken(for accountID: String) -> String? {
+        plexDiscoverTokenOverrides[accountID]
+    }
+
     /// Drops all Plex token overrides, falling back to stored (admin) tokens.
     private func clearPlexOverrides() {
         pendingPlexPINRequest = nil
@@ -457,6 +471,7 @@ public final class PlexHomeUsersModel {
         if !plexTokenOverrides.isEmpty {
             let accountIDs = Array(plexTokenOverrides.keys)
             plexTokenOverrides.removeAll()
+            plexDiscoverTokenOverrides.removeAll()
             plexOverrideCredentialRevisions.removeAll()
             plexResolvedHomeUser.removeAll()
             for accountID in accountIDs {
@@ -488,6 +503,10 @@ public final class PlexHomeUsersModel {
             // with), mirroring how the owner account was built at sign-in. Falls
             // back to the account token if the per-server lookup fails so the
             // switch never silently dead-ends. See `plexServerTokenResolve`.
+            // `token` IS the Home user's account-level plex.tv token. Keep it for
+            // Discover before it's traded for a per-server one below — the
+            // watchlist needs the account-level credential.
+            plexDiscoverTokenOverrides[accountID] = token
             var resolvedToken = token
             var gotServerToken = false
             if let serverID = accountsProviders.accounts.first(where: { $0.id == accountID })?.server.id,

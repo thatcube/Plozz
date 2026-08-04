@@ -20,6 +20,10 @@ extension AppState: UniversalWatchlistHost {
 
     public var profiles: ProfilesModel { profilesModel }
 
+    public func plexDiscoverToken(forAccount accountID: String) -> String? {
+        plexHomeUsers.discoverToken(for: accountID)
+    }
+
     public var trackerWatchlistDestinations: [any WatchlistDestination] {
         // Peers, not a fallback chain: a viewer may sync to both, and
         // one service being unconfigured or unusable must not affect the

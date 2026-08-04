@@ -51,6 +51,10 @@ public protocol UniversalWatchlistHost: AnyObject {
 
     func scheduleCloudPublish()
 
+    /// The account-level plex.tv token for `accountID` when the active profile
+    /// plays as a Plex Home user, else `nil` to use the account's own.
+    func plexDiscoverToken(forAccount accountID: String) -> String?
+
     /// Guarantees every tracker's token store points at the ACTIVE profile,
     /// re-pointing if it doesn't and returning only once it does.
     ///
@@ -552,17 +556,16 @@ public extension UniversalWatchlistHost {
         for resolved in accountsProviders.homeAccounts {
             if let provider = resolved.provider as? PlexProvider,
                let destination = PlexWatchlistDestination(provider: provider) {
-                // A managed Plex Home user has no Discover watchlist of its own,
-                // so writing to it comes back 401/403 and the mutation parks as
-                // `waitingForAuthentication` — waiting for an authentication that
-                // can never arrive. Don't route to it at all while this profile
-                // watches as one; the title still lands in Plozz's own watchlist.
-                let binding = profile.homeUserBinding(forPlexAccount: resolved.account.id)
-                if binding?.isManaged == true {
-                    PlozzLog.app.info("Plex watchlist skipped — profile watches as a managed Home user")
-                } else {
-                    destinations.append(destination)
-                }
+                // Talk to Discover as the person this profile plays as. Their
+                // account-level plex.tv token, not the per-server one browsing
+                // uses — Discover rejects a server token with 401/403, which is
+                // what parked every watchlist write as `waitingForAuthentication`.
+                destinations.append(
+                    PlexWatchlistDestination(
+                        provider: provider,
+                        discoverToken: plexDiscoverToken(forAccount: resolved.account.id)
+                    ) ?? destination
+                )
             } else if let provider = resolved.provider as? JellyfinProvider,
                       let destination = MediaBrowserWatchlistDestination(
                         provider: provider

@@ -23,17 +23,21 @@ public struct PlexWatchlistDestination: WatchlistDestination {
     }
 
     private let provider: PlexProvider
+    /// The plex.tv client for this destination — the provider's, but pointed at
+    /// the account-level token of whoever the profile plays as.
+    private let client: PlexClient
 
-    public init?(provider: PlexProvider) {
+    public init?(provider: PlexProvider, discoverToken: String? = nil) {
         guard let id = WatchlistDestinationID(
             rawValue: "plex.\(provider.accountID)"
         ) else { return nil }
         self.id = id
         self.provider = provider
+        self.client = provider.client.withDiscoverToken(discoverToken)
     }
 
     public func fetchEntries() async throws -> [WatchlistDestinationEntry] {
-        try await provider.watchlist().compactMap { item in
+        try await provider.watchlist(using: client).compactMap { item in
             guard let guid = item.providerIDs["PlexGuid"],
                   let metadataID = PlexClient.watchlistMetadataID(fromGuid: guid),
                   let binding = WatchlistDestinationBinding(
@@ -91,7 +95,7 @@ public struct PlexWatchlistDestination: WatchlistDestination {
         guard binding.destinationID == id else {
             throw WatchlistDestinationError.permanent
         }
-        try await provider.client.setWatchlisted(
+        try await client.setWatchlisted(
             desiredState == .present,
             metadataID: binding.opaqueValue
         )

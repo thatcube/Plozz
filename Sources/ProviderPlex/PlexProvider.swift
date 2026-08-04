@@ -1790,6 +1790,12 @@ extension PlexProvider: WatchlistProviding {
     /// ids that won't resolve for playback against a specific server (documented
     /// limitation); they appear in the row but may not direct-play.
     public func watchlist() async throws -> [MediaItem] {
+        try await watchlist(using: client)
+    }
+
+    /// Reads the watchlist through a specific client, so the caller can supply
+    /// one scoped to the plex.tv identity the active profile plays as.
+    public func watchlist(using client: PlexClient) async throws -> [MediaItem] {
         try await client.watchlist()
             .map(map(metadata:))
             .map {

@@ -961,6 +961,8 @@ public struct SettingsView: View {
             )
         case let .plexUser(accountID):
             PlexLinkedUserDetailView(scope: context.librariesScope, accountID: accountID)
+        case let .serverUser(serverKey):
+            ServerUserDetailView(scope: context.librariesScope, serverKey: serverKey)
         case let .server(key):
             ServerDetailView(context: context, serverKey: key)
         }

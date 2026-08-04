@@ -26,6 +26,29 @@ struct PlexLinkedUserDetailView: View {
         plexAccounts.first { $0.id == accountID } ?? plexAccounts.first
     }
 
+    /// Signing in a SECOND Plex account on this server.
+    ///
+    /// Different from the Home users above, which all belong to the one account
+    /// listed. Someone whose Plex login isn't in that Home — a housemate with
+    /// their own Plex account and their own watchlist — has to sign in, and this
+    /// is where they'd come looking. Mirrors the Jellyfin/Emby page so both
+    /// providers answer "who am I here?" the same way.
+    @ViewBuilder
+    private func addAccountPanel(_ account: Account) -> some View {
+        SettingsPanel(footer: "Signing in adds the account to this Apple TV. Any profile can then watch as it.") {
+            Button {
+                scope.onAddUser(account.server)
+            } label: {
+                Label("Add Another Plex Account", systemImage: "person.badge.plus")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -60,6 +83,7 @@ struct PlexLinkedUserDetailView: View {
                             }
                         }
                     }
+                    addAccountPanel(account)
                 } else {
                     SettingsPanel(title: "No Plex Account") {
                         VStack(alignment: .leading, spacing: 16) {

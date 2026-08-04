@@ -213,6 +213,9 @@ private struct PlozziOSServerSettingsDetailView: View {
 struct PlozziOSMyLibrariesSettingsView: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
+    /// Signs an additional user in to an already-added server. Same capability as
+    /// the tvOS "Watching as" page, in the idiom iOS uses for this screen.
+    var onAddUser: (MediaServer) -> Void = { _ in }
     @State private var libraries: [ProfileLibraryChoice] = []
     @State private var unreachableAccountIDs: Set<String> = []
     @State private var isLoading = false
@@ -347,6 +350,27 @@ struct PlozziOSMyLibrariesSettingsView: View {
                     Text(account.userName.isEmpty ? "Guest" : account.userName)
                         .tag(account.id)
                 }
+            }
+        }
+        addUserButton(group)
+    }
+
+    /// Signs another user in to this server.
+    ///
+    /// Always shown, including when only one user is signed in — that's precisely
+    /// the case where you can't otherwise tell the person you want is missing,
+    /// and previously the only route was adding the whole server again from the
+    /// chooser. Matches the tvOS "Watching as" page.
+    @ViewBuilder
+    private func addUserButton(_ group: ServerAccountGroup) -> some View {
+        if group.providerKind != .mediaShare, let server = group.accounts.first?.server {
+            Button {
+                onAddUser(server)
+            } label: {
+                Label(
+                    group.providerKind == .plex ? "Add Another Plex Account" : "Add Another User",
+                    systemImage: "person.badge.plus"
+                )
             }
         }
     }

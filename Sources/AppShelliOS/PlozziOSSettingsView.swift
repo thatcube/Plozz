@@ -10,6 +10,9 @@ import UIKit
 struct PlozziOSSettingsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showingAddServer = false
+    /// A server we're signing an ADDITIONAL user into, so the Add Server sheet
+    /// opens pre-filled with it instead of at the provider chooser.
+    @State private var addUserServer: MediaServer?
     @State private var addServerPresentationColorScheme: ColorScheme = .dark
     let appModel: PlozziOSAppModel
     let onClose: () -> Void
@@ -21,13 +24,15 @@ struct PlozziOSSettingsView: View {
                 PlozziOSSettingsSplitView(
                     appModel: appModel,
                     onAddServer: showAddServer,
+                    onAddUser: showAddUser(on:),
                     onClose: onClose
                 )
             } else {
                 NavigationStack {
                     PlozziOSSettingsCompactMenu(
                         appModel: appModel,
-                        onAddServer: showAddServer
+                        onAddServer: showAddServer,
+                        onAddUser: showAddUser(on:)
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
@@ -45,9 +50,16 @@ struct PlozziOSSettingsView: View {
         .tint(palette.primaryText)
         .sheet(
             isPresented: $showingAddServer,
-            onDismiss: appModel.finishManagedServerPresentation
+            onDismiss: {
+                appModel.finishManagedServerPresentation()
+                addUserServer = nil
+            }
         ) {
-            AddServerView(appModel: appModel)
+            AddServerView(
+                appModel: appModel,
+                initialProvider: addUserServer?.provider ?? .jellyfin,
+                initialAddress: addUserServer?.baseURL.absoluteString ?? ""
+            )
                 .preferredColorScheme(addServerPresentationColorScheme)
                 .presentationSizing(.page)
         }
@@ -75,6 +87,14 @@ struct PlozziOSSettingsView: View {
             )
             .preferredColorScheme(addServerPresentationColorScheme)
         }
+    }
+
+    /// Signs an additional user in to a server that's already added — the iOS half
+    /// of "Watching as ▸ Add Another User". Reuses the Add Server sheet,
+    /// pre-filled, so there's one sign-in path rather than two.
+    private func showAddUser(on server: MediaServer) {
+        addUserServer = server
+        showAddServer()
     }
 
     private func showAddServer() {
@@ -179,6 +199,7 @@ private struct PlozziOSSettingsSplitView: View {
     @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
+    var onAddUser: (MediaServer) -> Void = { _ in }
     let onClose: () -> Void
     @State private var selection: PlozziOSSettingsDestination?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -395,7 +416,8 @@ private struct PlozziOSSettingsSplitView: View {
         case .myLibraries:
             PlozziOSMyLibrariesSettingsView(
                 appModel: appModel,
-                onAddServer: onAddServer
+                onAddServer: onAddServer,
+                onAddUser: onAddUser
             )
         case .trackers:
             PlozziOSTrackerSettingsView(appModel: appModel)
@@ -542,6 +564,7 @@ private struct PlozziOSDeveloperInfoSection: View {
 private struct PlozziOSSettingsCompactMenu: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
+    var onAddUser: (MediaServer) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
     @State private var confirmSignOutAll = false
     @State private var confirmEraseICloud = false
@@ -563,7 +586,8 @@ private struct PlozziOSSettingsCompactMenu: View {
                 NavigationLink {
                     PlozziOSMyLibrariesSettingsView(
                         appModel: appModel,
-                        onAddServer: onAddServer
+                        onAddServer: onAddServer,
+                        onAddUser: onAddUser
                     )
                 } label: {
                     Label(

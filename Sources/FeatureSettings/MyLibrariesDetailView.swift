@@ -246,59 +246,31 @@ public struct MyLibrariesDetailView: View {
         .buttonStyle(SettingsFocusButtonStyle())
     }
 
-    /// Jellyfin identity IS one of the server's sign-ins. One → shown plainly;
-    /// several → pick which single login represents this profile.
-    @ViewBuilder
-    private func jellyfinIdentity(_ group: ServerAccountGroup) -> some View {
-        if group.accounts.count <= 1, let only = group.accounts.first {
-            identityRow(
-                title: only.userName,
-                avatar: { AccountAvatar(name: only.userName, imageURL: resolvedAvatarURL(for: only), size: 34) },
-                accessory: .none
-            )
-        } else {
-            ForEach(group.accounts) { account in
-                Button {
-                    setJellyfinIdentity(account, in: group)
-                } label: {
-                    identityRow(
-                        title: account.userName,
-                        avatar: { AccountAvatar(name: account.userName, imageURL: resolvedAvatarURL(for: account), size: 34) },
-                        accessory: .selected(scope.isAccountIncludedInActiveProfile(account.id))
-                    )
-                }
-                .buttonStyle(SettingsFocusButtonStyle())
-            }
-        }
-        addUserRow(group)
-    }
-
-    /// Signs in another user on this server, from where the question is asked.
+    /// Jellyfin/Emby identity is one of the server's sign-ins, so it always
+    /// drills into its own page — even with a single user.
     ///
-    /// A Jellyfin identity IS a sign-in, so watching as someone else needs their
-    /// credentials — previously by adding the whole server again from the
-    /// chooser, which looks like a mistake when the server is right there. Same
-    /// flow underneath (`selectServer` jumps straight to that server's login), so
-    /// the new sign-in lands in the household pool exactly as before and simply
-    /// appears here as another choice.
-    @ViewBuilder
-    private func addUserRow(_ group: ServerAccountGroup) -> some View {
-        if let server = group.accounts.first?.server {
-            Button {
-                scope.onAddUser(server)
-            } label: {
-                identityRow(
-                    title: String(localized: "Add Another User"),
-                    avatar: {
-                        Image(systemName: "person.badge.plus")
-                            .font(.system(size: 20, weight: .regular))
-                            .frame(width: 34, height: 34)
-                    },
-                    accessory: .none
-                )
-            }
-            .buttonStyle(SettingsFocusButtonStyle())
+    /// The single-user case used to render a plain, unfocusable row. But you
+    /// can't tell the person you want is missing until you look, and "sign in as
+    /// someone else" lives on that page, so a row that doesn't open leaves no way
+    /// to reach it.
+    private func jellyfinIdentity(_ group: ServerAccountGroup) -> some View {
+        let selected = group.accounts.first {
+            scope.isAccountIncludedInActiveProfile($0.id)
+        } ?? group.accounts.first
+        return NavigationLink(value: SettingsRoute.serverUser(serverKey: group.serverKey)) {
+            identityRow(
+                title: selected?.userName ?? "",
+                avatar: {
+                    AccountAvatar(
+                        name: selected?.userName ?? "",
+                        imageURL: selected.flatMap { resolvedAvatarURL(for: $0) },
+                        size: 34
+                    )
+                },
+                accessory: .chevron
+            )
         }
+        .buttonStyle(SettingsFocusButtonStyle())
     }
 
     private func setJellyfinIdentity(_ chosen: Account, in group: ServerAccountGroup) {

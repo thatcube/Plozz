@@ -23,21 +23,51 @@ public struct PlexWatchlistDestination: WatchlistDestination {
     }
 
     private let provider: PlexProvider
-    /// The plex.tv client for this destination — the provider's, but pointed at
-    /// the account-level token of whoever the profile plays as.
-    private let client: PlexClient
+    /// Resolves the account-level plex.tv token of whoever the profile plays as,
+    /// **at the moment of use**.
+    ///
+    /// A closure, not a captured value: the token is installed asynchronously
+    /// (the Home-user switch is a network round trip), so a destination built
+    /// during that window captured `nil` and silently fell back to the account
+    /// owner's token — reading the owner's watchlist. Reading it per call means
+    /// the destination is never stale, whenever it was constructed.
+    private let discoverToken: @Sendable () -> String?
+    /// Whether this profile plays as a Home user on this account, i.e. whether a
+    /// missing token is a real problem rather than "no override needed".
+    private let requiresHomeUserToken: Bool
 
-    public init?(provider: PlexProvider, discoverToken: String? = nil) {
+    public init?(
+        provider: PlexProvider,
+        requiresHomeUserToken: Bool = false,
+        discoverToken: @escaping @Sendable () -> String? = { nil }
+    ) {
         guard let id = WatchlistDestinationID(
             rawValue: "plex.\(provider.accountID)"
         ) else { return nil }
         self.id = id
         self.provider = provider
-        self.client = provider.client.withDiscoverToken(discoverToken)
+        self.requiresHomeUserToken = requiresHomeUserToken
+        self.discoverToken = discoverToken
+    }
+
+    /// The plex.tv client to use right now, or `nil` when this profile plays as a
+    /// Home user whose token hasn't arrived yet.
+    ///
+    /// Returning `nil` — and doing nothing — is deliberate. The alternative is
+    /// the provider's own client, which carries the ACCOUNT OWNER's token, and
+    /// using it would read the owner's watchlist into this profile and write this
+    /// profile's changes onto the owner's list. Failing closed is the only safe
+    /// direction: worst case the watchlist is briefly empty and the next pass
+    /// fills it in.
+    private var discoverClient: PlexClient? {
+        let token = discoverToken()
+        if requiresHomeUserToken, token == nil { return nil }
+        return provider.client.withDiscoverToken(token)
     }
 
     public func fetchEntries() async throws -> [WatchlistDestinationEntry] {
-        try await provider.watchlist(using: client).compactMap { item in
+        guard let discoverClient else { return [] }
+        return try await provider.watchlist(using: discoverClient).compactMap { item in
             guard let guid = item.providerIDs["PlexGuid"],
                   let metadataID = PlexClient.watchlistMetadataID(fromGuid: guid),
                   let binding = WatchlistDestinationBinding(
@@ -95,7 +125,12 @@ public struct PlexWatchlistDestination: WatchlistDestination {
         guard binding.destinationID == id else {
             throw WatchlistDestinationError.permanent
         }
-        try await client.setWatchlisted(
+        guard let discoverClient else {
+            // Transient by nature: the token is on its way. Retrying is right —
+            // writing with the owner's token would put this on the WRONG list.
+            throw WatchlistDestinationError.transient
+        }
+        try await discoverClient.setWatchlisted(
             desiredState == .present,
             metadataID: binding.opaqueValue
         )

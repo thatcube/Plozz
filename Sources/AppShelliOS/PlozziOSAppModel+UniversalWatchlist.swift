@@ -1,6 +1,7 @@
 #if os(iOS)
 import AppRuntime
 import CoreModels
+import ProviderPlex
 import FeatureWatchlistCore
 import Foundation
 
@@ -19,9 +20,8 @@ extension PlozziOSAppModel: UniversalWatchlistHost {
 
     var plexWatchlistIdentityGeneration: Int { plexHomeUsers?.plexIdentityGeneration ?? 0 }
 
-    func plexDiscoverToken(forAccount accountID: String) -> String? {
-        plexHomeUsers.discoverToken(for: accountID)
-    }
+    var plexDiscoverTokens: PlexDiscoverTokenBox { plexHomeUsers.plexDiscoverTokens }
+
 
     var trackerWatchlistDestinations: [any WatchlistDestination] {
         // Peers, not a fallback chain: a viewer may sync to both, and

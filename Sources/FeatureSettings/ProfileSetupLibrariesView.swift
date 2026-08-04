@@ -40,9 +40,17 @@ public struct ProfileSetupLibrariesView: View {
                     doneBar
                 }
                 .navigationDestination(for: SettingsRoute.self) { route in
-                    // The only route this screen can push.
-                    if case let .plexUser(accountID) = route {
+                    // Both identity pages the Libraries screen can push. Missing
+                    // one here would dead-end that row during setup only, which
+                    // is exactly the kind of divergence reusing the screen is
+                    // meant to prevent.
+                    switch route {
+                    case let .plexUser(accountID):
                         PlexLinkedUserDetailView(scope: scope, accountID: accountID)
+                    case let .serverUser(serverKey):
+                        ServerUserDetailView(scope: scope, serverKey: serverKey)
+                    default:
+                        EmptyView()
                     }
                 }
             }

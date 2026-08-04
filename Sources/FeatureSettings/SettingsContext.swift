@@ -95,6 +95,8 @@ enum SettingsRoute: Hashable {
     case help
     case recentActivity
     case plexUser(accountID: String)
+    /// Jellyfin/Emby "Watching as" — the server's sign-ins, plus adding one.
+    case serverUser(serverKey: String)
     case server(key: String)
 }
 

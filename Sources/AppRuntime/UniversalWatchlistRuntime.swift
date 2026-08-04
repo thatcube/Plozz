@@ -57,9 +57,9 @@ public protocol UniversalWatchlistHost: AnyObject {
 
     func scheduleCloudPublish()
 
-    /// The account-level plex.tv token for `accountID` when the active profile
-    /// plays as a Plex Home user, else `nil` to use the account's own.
-    func plexDiscoverToken(forAccount accountID: String) -> String?
+    /// Live account-level plex.tv tokens for Discover, read at the moment of use
+    /// by the watchlist destinations.
+    var plexDiscoverTokens: PlexDiscoverTokenBox { get }
 
     /// Guarantees every tracker's token store points at the ACTIVE profile,
     /// re-pointing if it doesn't and returning only once it does.
@@ -569,14 +569,24 @@ public extension UniversalWatchlistHost {
         for resolved in accountsProviders.homeAccounts {
             if let provider = resolved.provider as? PlexProvider,
                let destination = PlexWatchlistDestination(provider: provider) {
-                // Talk to Discover as the person this profile plays as. Their
+                // Talk to Discover as the person this profile plays as: their
                 // account-level plex.tv token, not the per-server one browsing
-                // uses — Discover rejects a server token with 401/403, which is
-                // what parked every watchlist write as `waitingForAuthentication`.
+                // uses (Discover rejects a server token with 401/403).
+                //
+                // Resolved per call rather than captured — the Home-user switch
+                // is a network round trip, so a token captured here is often
+                // still nil — and when the profile IS bound to a Home user the
+                // destination refuses to act until it arrives, instead of falling
+                // back to the account owner's list.
+                let accountID = resolved.account.id
+                let playsAsHomeUser = profile.homeUserBinding(forPlexAccount: accountID) != nil
                 destinations.append(
                     PlexWatchlistDestination(
                         provider: provider,
-                        discoverToken: plexDiscoverToken(forAccount: resolved.account.id)
+                        requiresHomeUserToken: playsAsHomeUser,
+                        discoverToken: { [box = plexDiscoverTokens] in
+                            box.token(for: accountID)
+                        }
                     ) ?? destination
                 )
             } else if let provider = resolved.provider as? JellyfinProvider,

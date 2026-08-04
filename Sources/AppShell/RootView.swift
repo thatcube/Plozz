@@ -474,10 +474,15 @@ public struct RootView: View {
         // which libraries. Presented HERE rather than by whatever created the
         // profile — creating one switches into it, which dismisses the picker, so
         // a cover owned by the picker would be torn down before it appeared.
-        .fullScreenCover(item: Binding(
-            get: { appState.profileFlow.pendingSetupProfile },
-            set: { if $0 == nil { appState.profileFlow.completeSetup(for: appState.profilesModel.activeProfileID) } }
-        )) { profile in
+        .fullScreenCover(
+            item: Binding(
+                get: { appState.profileFlow.pendingSetupProfile },
+                set: { if $0 == nil { appState.profileFlow.completeSetup(for: appState.profilesModel.activeProfileID) } }
+            ),
+            // Only once this cover is really gone can the next one present —
+            // SwiftUI shows one at a time and silently drops the rest.
+            onDismiss: { appState.profileFlow.presentPostSetupStep() }
+        ) { profile in
             ProfileSetupLibrariesView(scope: appState.profileLibrariesScope(librariesStore: setupLibraries)) {
                 appState.completeProfileSetup(for: profile.id)
             }
@@ -514,10 +519,13 @@ public struct RootView: View {
         // One-time theme picker for a profile just created in-app (Settings →
         // "Add Profile"). The app has already switched to the new profile, so
         // this edits its per-profile theme; Continue dismisses into the app.
-        .fullScreenCover(isPresented: Binding(
-            get: { appState.profileFlow.isPickingThemeForNewProfile },
-            set: { newValue in if !newValue { appState.finishNewProfileThemeSelection() } }
-        )) {
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { appState.profileFlow.isPickingThemeForNewProfile },
+                set: { newValue in if !newValue { appState.finishNewProfileThemeSelection() } }
+            ),
+            onDismiss: { appState.profileFlow.presentPostThemeStep() }
+        ) {
             SelectThemeView(
                 appState: appState,
                 onContinue: { appState.finishNewProfileThemeSelection() },

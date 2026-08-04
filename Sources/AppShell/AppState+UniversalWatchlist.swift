@@ -1,5 +1,6 @@
 import AppRuntime
 import CoreModels
+import ProviderPlex
 import FeatureWatchlistCore
 import Foundation
 
@@ -22,9 +23,8 @@ extension AppState: UniversalWatchlistHost {
 
     public var plexWatchlistIdentityGeneration: Int { plexHomeUsers.plexIdentityGeneration }
 
-    public func plexDiscoverToken(forAccount accountID: String) -> String? {
-        plexHomeUsers.discoverToken(for: accountID)
-    }
+    public var plexDiscoverTokens: PlexDiscoverTokenBox { plexHomeUsers.plexDiscoverTokens }
+
 
     public var trackerWatchlistDestinations: [any WatchlistDestination] {
         // Peers, not a fallback chain: a viewer may sync to both, and

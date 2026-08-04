@@ -117,11 +117,6 @@ public final class ProfileFlowModel {
     public func finishPickingThemeForNewProfile() -> Bool {
         guard isPickingThemeForNewProfile else { return false }
         isPickingThemeForNewProfile = false
-        // Now the cover is going away, the lock offer can take the stage.
-        if let next = profileAwaitingLockOffer {
-            profileAwaitingLockOffer = nil
-            pendingLockOfferProfile = next
-        }
         return true
     }
 
@@ -397,16 +392,34 @@ public final class ProfileFlowModel {
         // Only now, with the profile's servers and identity settled, is an
         // import meaningful — see `Profile.isAwaitingSetup`.
         activateUniversalWatchlist()
-        // Theme first, lock offer after it — NOT both now. SwiftUI presents one
-        // cover at a time, so raising both here meant one was silently dropped
-        // (the theme picker, as it turned out). `finishPickingThemeForNewProfile`
-        // hands over to the lock offer when the picker closes.
+        // NOTHING is presented here. This runs from inside the setup cover, and
+        // SwiftUI shows one cover at a time — asking for the next one while the
+        // current is still on screen gets it dropped, which is why the theme
+        // picker kept not appearing. The caller raises it from the cover's
+        // `onDismiss`, once the screen is actually free. See `presentPostSetupStep`.
+        profileAwaitingThemePick = profile
+    }
+
+    /// Held between one cover closing and the next opening.
+    @ObservationIgnored private var profileAwaitingThemePick: Profile?
+    @ObservationIgnored private var profileAwaitingLockOffer: Profile?
+
+    /// Raises the theme picker for a just-set-up profile. Call from the setup
+    /// cover's `onDismiss`, never while it's still presented.
+    public func presentPostSetupStep() {
+        guard let profile = profileAwaitingThemePick else { return }
+        profileAwaitingThemePick = nil
         profileAwaitingLockOffer = profile
         isPickingThemeForNewProfile = true
     }
 
-    /// Held between the theme picker closing and the lock offer opening.
-    @ObservationIgnored private var profileAwaitingLockOffer: Profile?
+    /// Raises the lock offer once the theme picker has actually gone. Call from
+    /// the theme cover's `onDismiss`.
+    public func presentPostThemeStep() {
+        guard let profile = profileAwaitingLockOffer else { return }
+        profileAwaitingLockOffer = nil
+        pendingLockOfferProfile = profile
+    }
 
     /// Dismisses the post-setup lock offer.
     public func dismissLockOffer() {

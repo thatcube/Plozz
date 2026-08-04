@@ -115,6 +115,10 @@ public final class PlexHomeUsersModel {
     /// Kept in memory only, never persisted, exactly like the server override.
     @ObservationIgnored
     private var plexDiscoverTokenOverrides: [String: String] = [:]
+    /// The same values, in a box the watchlist destinations can read without an
+    /// actor hop — see `PlexDiscoverTokenBox`.
+    @ObservationIgnored
+    public let plexDiscoverTokens = PlexDiscoverTokenBox()
     /// Runtime revision for the effective Plex Home-user credential. Owner
     /// credentials continue to use the account's persisted revision.
     @ObservationIgnored
@@ -472,6 +476,7 @@ public final class PlexHomeUsersModel {
             let accountIDs = Array(plexTokenOverrides.keys)
             plexTokenOverrides.removeAll()
             plexDiscoverTokenOverrides.removeAll()
+            plexDiscoverTokens.removeAll()
             plexOverrideCredentialRevisions.removeAll()
             plexResolvedHomeUser.removeAll()
             for accountID in accountIDs {
@@ -507,6 +512,7 @@ public final class PlexHomeUsersModel {
             // Discover before it's traded for a per-server one below — the
             // watchlist needs the account-level credential.
             plexDiscoverTokenOverrides[accountID] = token
+            plexDiscoverTokens.setToken(token, for: accountID)
             var resolvedToken = token
             var gotServerToken = false
             if let serverID = accountsProviders.accounts.first(where: { $0.id == accountID })?.server.id,

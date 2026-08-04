@@ -669,9 +669,14 @@ final class PlozziOSAppModel {
         if !requiresLaunchProfileSelection {
             plexHomeUsers.ensurePlexIdentityForActiveProfile()
         }
-        updateTrackersForActiveProfile()
         drainWatchOutbox()
-        Task { await prepareUniversalWatchlist() }
+        // Ordered: the import reads whatever credentials the trackers hold, so
+        // it must not start until they point at THIS profile — otherwise it
+        // writes the previous profile's watchlist into this one.
+        Task { @MainActor in
+            await updateTrackersForActiveProfile()
+            await prepareUniversalWatchlist()
+        }
         applyCrashReportingPreference()
         Task {
             let namespaces = [nil] + profiles.profiles.map { Optional($0.id) }
@@ -945,26 +950,36 @@ final class PlozziOSAppModel {
         reloadAccountsAndCrashContext()
         identityIndex.reset()
         identityIndex.warmIdentityIndex()
-        updateTrackersForActiveProfile()
         drainWatchOutbox()
-        Task { await prepareUniversalWatchlist() }
+        // Ordered: the import reads whatever credentials the trackers hold, so
+        // it must not start until they point at THIS profile — otherwise it
+        // writes the previous profile's watchlist into this one.
+        Task { @MainActor in
+            await updateTrackersForActiveProfile()
+            await prepareUniversalWatchlist()
+        }
         Task { await seerService.setActiveProfile(namespace: profiles.activeNamespace) }
     }
 
-    private func updateTrackersForActiveProfile() {
+    /// Re-points every tracker at the active profile's namespace.
+    ///
+    /// `async` rather than fire-and-forget: each `setActiveProfile` suspends, so
+    /// a detached Task flipped the namespaces one at a time with real suspension
+    /// points between them — long enough for the watchlist import to read a
+    /// tracker still pointing at the previous profile and write its watchlist
+    /// into the new one. See the matching note in `AppState`.
+    private func updateTrackersForActiveProfile() async {
         let namespace = profiles.activeNamespace
         trackerProfileGeneration &+= 1
         let generation = trackerProfileGeneration
-        Task {
-            guard generation == trackerProfileGeneration else { return }
-            await traktService.setActiveProfile(namespace: namespace)
-            guard generation == trackerProfileGeneration else { return }
-            await simklService.setActiveProfile(namespace: namespace)
-            guard generation == trackerProfileGeneration else { return }
-            await anilistService.setActiveProfile(namespace: namespace)
-            guard generation == trackerProfileGeneration else { return }
-            await malService.setActiveProfile(namespace: namespace)
-        }
+        guard generation == trackerProfileGeneration else { return }
+        await traktService.setActiveProfile(namespace: namespace)
+        guard generation == trackerProfileGeneration else { return }
+        await simklService.setActiveProfile(namespace: namespace)
+        guard generation == trackerProfileGeneration else { return }
+        await anilistService.setActiveProfile(namespace: namespace)
+        guard generation == trackerProfileGeneration else { return }
+        await malService.setActiveProfile(namespace: namespace)
     }
 
     private func applyWatchMutation(_ mutation: WatchMutation) {
@@ -1326,9 +1341,14 @@ final class PlozziOSAppModel {
         reloadAccountsAndCrashContext()
         identityIndex.reset()
         identityIndex.warmIdentityIndex()
-        updateTrackersForActiveProfile()
         drainWatchOutbox()
-        Task { await prepareUniversalWatchlist() }
+        // Ordered: the import reads whatever credentials the trackers hold, so
+        // it must not start until they point at THIS profile — otherwise it
+        // writes the previous profile's watchlist into this one.
+        Task { @MainActor in
+            await updateTrackersForActiveProfile()
+            await prepareUniversalWatchlist()
+        }
         Task { await seerService.setActiveProfile(namespace: profiles.activeNamespace) }
     }
 

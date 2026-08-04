@@ -151,7 +151,8 @@ final class ProfileFlowModelTests: XCTestCase {
 
     private func makeEnv(
         accounts: [(String, ProviderKind)] = [],
-        updateTrackers: @escaping @MainActor () -> Void = {},
+        updateTrackers: @escaping @MainActor () async -> Void = {},
+        activateWatchlist: @escaping @MainActor () -> Void = {},
         discardReconciler: @escaping @MainActor (String) -> Void = { _ in }
     ) throws -> Env {
         let store = AccountStore(secureStore: InMemorySecureStore())
@@ -177,7 +178,8 @@ final class ProfileFlowModelTests: XCTestCase {
             profileSettings: settings,
             audioController: AudioPlaybackController(),
             updateTrackersForActiveProfile: updateTrackers,
-            discardWatchReconciler: discardReconciler
+            discardWatchReconciler: discardReconciler,
+            activateUniversalWatchlist: activateWatchlist
         )
         return Env(flow: flow, profiles: profiles, hub: hub, plex: plex, store: store)
     }
@@ -263,6 +265,11 @@ final class ProfileFlowModelTests: XCTestCase {
     /// switchProfile runs the full re-scope: selects the target, re-points trackers,
     /// dismisses the picker, and re-applies the target's Plex identity (dropping the
     /// previous profile's override since the target has no binding).
+    ///
+    /// The tracker re-point is now awaited rather than fired and forgotten, so the
+    /// assertion yields first — see
+    /// `testWatchlistIsNotActivatedUntilTrackersArePointedAtTheNewProfile` for why
+    /// that ordering matters.
     func testSwitchProfileRunsFullReScopeIncludingPlexEnsure() async throws {
         var trackerReScopes = 0
         let env = try makeEnv(accounts: [("a", .plex)], updateTrackers: { trackerReScopes += 1 })
@@ -280,9 +287,61 @@ final class ProfileFlowModelTests: XCTestCase {
 
         XCTAssertEqual(env.profiles.activeProfileID, second.id, "target selected")
         XCTAssertFalse(env.flow.isChoosingProfile, "picker dismissed")
-        XCTAssertEqual(trackerReScopes, trackersBefore + 1, "trackers re-pointed once")
         // ensure ran: the previous profile's override dropped (target has no binding).
         XCTAssertEqual(env.plex.resolvedToken(for: "a"), "admin-a")
+
+        await settle()
+        XCTAssertEqual(trackerReScopes, trackersBefore + 1, "trackers re-pointed once")
+    }
+
+    /// The regression that put another profile's watchlist on disk.
+    ///
+    /// The universal watchlist import reads whatever credentials the trackers
+    /// currently hold. When the re-point was fire-and-forget, the import could run
+    /// first and pull the PREVIOUS profile's Simkl/AniList/MAL/Plex watchlist into
+    /// the profile just opened — and persist it. Order is the fix, so the order is
+    /// what's asserted.
+    func testWatchlistIsNotActivatedUntilTrackersArePointedAtTheNewProfile() async throws {
+        var events: [String] = []
+        let env = try makeEnv(
+            updateTrackers: {
+                // Model the real thing: setActiveProfile suspends per service, and
+                // those suspension points are exactly where the import used to slip in.
+                await Task.yield()
+                events.append("trackers")
+            },
+            activateWatchlist: { events.append("watchlist") }
+        )
+        let second = env.profiles.add(name: "Second")
+
+        env.flow.switchProfile(to: second.id)
+        await settle()
+
+        XCTAssertEqual(events, ["trackers", "watchlist"], "trackers must be re-pointed first")
+    }
+
+    /// Switching away again before the re-point finishes must hand the import to the
+    /// LATER switch — otherwise the abandoned one imports into a profile nobody is on.
+    func testSupersededSwitchDoesNotActivateTheWatchlist() async throws {
+        var activations = 0
+        let env = try makeEnv(
+            updateTrackers: { await Task.yield() },
+            activateWatchlist: { activations += 1 }
+        )
+        let second = env.profiles.add(name: "Second")
+        let third = env.profiles.add(name: "Third")
+
+        env.flow.switchProfile(to: second.id)
+        env.flow.switchProfile(to: third.id)
+        await settle()
+
+        XCTAssertEqual(env.profiles.activeProfileID, third.id)
+        XCTAssertEqual(activations, 1, "only the surviving switch prepares the watchlist")
+    }
+
+    /// Lets queued MainActor work drain before asserting.
+    private func settle() async {
+        for _ in 0 ..< 10 { await Task.yield() }
     }
 }
 

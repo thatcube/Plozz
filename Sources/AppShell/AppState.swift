@@ -754,7 +754,7 @@ public final class AppState {
         plexHomeUsers: plexHomeUsers,
         profileSettings: profileSettings,
         audioController: audioController,
-        updateTrackersForActiveProfile: { [weak self] in self?.updateTraktForActiveProfile() },
+        updateTrackersForActiveProfile: { [weak self] in await self?.updateTraktForActiveProfile() },
         discardWatchReconciler: { [weak self] id in self?.watchReconcilers[id] = nil },
         removeMediaAliases: { [weak self] id in self?.removeMediaAliases(forProfileID: id) },
         activateUniversalWatchlist: { [weak self] in
@@ -2153,25 +2153,33 @@ public final class AppState {
     /// connection so each household profile scrobbles to its own Trakt account.
     /// Also repoints Simkl, AniList, and MAL. Fire-and-forget: the status refresh
     /// is async and best-effort.
-    private func updateTraktForActiveProfile() {
+    /// Re-points every tracker at the active profile's namespace.
+    ///
+    /// `async` rather than fire-and-forget on purpose. Each `setActiveProfile`
+    /// suspends (it re-reads the namespaced token and refreshes status over the
+    /// network), so when this spawned its own detached `Task` the namespaces
+    /// flipped one at a time with real suspension points between them — and the
+    /// universal watchlist import, spawned moments later, could read a tracker
+    /// that still pointed at the PROFILE YOU JUST LEFT and write its watchlist
+    /// into the new profile's store. Callers that care about that ordering now
+    /// await this before preparing the watchlist.
+    private func updateTraktForActiveProfile() async {
         let ns = profilesModel.activeNamespace
         trackerProfileGeneration &+= 1
         let generation = trackerProfileGeneration
         identityIndex.reset()
-        Task {
-            guard generation == trackerProfileGeneration else { return }
-            await traktService.setActiveProfile(namespace: ns)
-            guard generation == trackerProfileGeneration else { return }
-            await simklService.setActiveProfile(namespace: ns)
-            guard generation == trackerProfileGeneration else { return }
-            await seerService.setActiveProfile(namespace: ns)
-            guard generation == trackerProfileGeneration else { return }
-            await anilistService.setActiveProfile(namespace: ns)
-            guard generation == trackerProfileGeneration else { return }
-            await malService.setActiveProfile(namespace: ns)
-            guard generation == trackerProfileGeneration else { return }
-            await lastfmService.setActiveProfile(namespace: ns)
-        }
+        guard generation == trackerProfileGeneration else { return }
+        await traktService.setActiveProfile(namespace: ns)
+        guard generation == trackerProfileGeneration else { return }
+        await simklService.setActiveProfile(namespace: ns)
+        guard generation == trackerProfileGeneration else { return }
+        await seerService.setActiveProfile(namespace: ns)
+        guard generation == trackerProfileGeneration else { return }
+        await anilistService.setActiveProfile(namespace: ns)
+        guard generation == trackerProfileGeneration else { return }
+        await malService.setActiveProfile(namespace: ns)
+        guard generation == trackerProfileGeneration else { return }
+        await lastfmService.setActiveProfile(namespace: ns)
     }
 
     private func apply(_ event: SessionEvent) {

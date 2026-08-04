@@ -45,7 +45,7 @@ public final class ProfileFlowModel {
     /// Re-points the tracker services (Trakt/Simkl/Seerr/AniList/MAL/Last.fm) +
     /// identity index at the active profile. Injected because the tracker services
     /// still live on `AppState`.
-    @ObservationIgnored private let updateTrackersForActiveProfile: @MainActor () -> Void
+    @ObservationIgnored private let updateTrackersForActiveProfile: @MainActor () async -> Void
     /// Drops a removed profile's retained watch reconciler. Injected because the
     /// watch-outbox domain still lives on `AppState`.
     @ObservationIgnored private let discardWatchReconciler: @MainActor (String) -> Void
@@ -60,7 +60,7 @@ public final class ProfileFlowModel {
         plexHomeUsers: PlexHomeUsersModel,
         profileSettings: ProfileSettingsModel,
         audioController: AudioPlaybackController,
-        updateTrackersForActiveProfile: @escaping @MainActor () -> Void,
+        updateTrackersForActiveProfile: @escaping @MainActor () async -> Void,
         discardWatchReconciler: @escaping @MainActor (String) -> Void,
         removeMediaAliases: @escaping @MainActor (String) -> Void = { _ in },
         activateUniversalWatchlist: @escaping @MainActor () -> Void = {}
@@ -162,15 +162,30 @@ public final class ProfileFlowModel {
     }
 
     /// The unconditional switch, past the lock gate.
+    ///
+    /// Ordering is load-bearing. The universal watchlist import reads whatever
+    /// credentials the trackers and Plex currently hold, so it must not start
+    /// until BOTH have been re-pointed at the new profile — otherwise it imports
+    /// the profile you just left into the profile you just opened, and writes it
+    /// to disk. Everything the UI needs synchronously still happens
+    /// synchronously; only the import waits.
     private func performSwitch(to id: String) {
         audioController.stop()
         profilesModel.select(id)
         rebuildSettingsModels()
-        updateTrackersForActiveProfile()
         accountsProviders.reloadAccounts()
-        activateUniversalWatchlist()
         isChoosingProfile = false
+        // Installs the new profile's Plex Home-user token (synchronously from
+        // cache for unprotected users; protected ones raise the PIN prompt).
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.updateTrackersForActiveProfile()
+            // Re-check: the person may have switched again while the trackers
+            // were re-pointing, and the later switch owns the import.
+            guard self.profilesModel.activeProfileID == id else { return }
+            self.activateUniversalWatchlist()
+        }
     }
 
     /// Checks `pin` against the pending profile's lock and, on a match, completes
@@ -255,7 +270,7 @@ public final class ProfileFlowModel {
             }
             if id == profilesModel.activeProfileID {
                 rebuildSettingsModels()
-                updateTrackersForActiveProfile()
+                Task { await updateTrackersForActiveProfile() }
                 accountsProviders.reloadAccounts()
                 activateUniversalWatchlist()
                 plexHomeUsers.ensurePlexIdentityForActiveProfile()
@@ -286,7 +301,7 @@ public final class ProfileFlowModel {
             audioController.stop()
             profilesModel.select(created.id)
             rebuildSettingsModels()
-            updateTrackersForActiveProfile()
+            Task { await updateTrackersForActiveProfile() }
             accountsProviders.reloadAccounts()
             activateUniversalWatchlist()
             isChoosingProfile = false
@@ -369,7 +384,7 @@ public final class ProfileFlowModel {
         if wasActive {
             if enforceLockOnActiveProfile() { return }
             rebuildSettingsModels()
-            updateTrackersForActiveProfile()
+            Task { await updateTrackersForActiveProfile() }
             accountsProviders.reloadAccounts()
             activateUniversalWatchlist()
             // `profilesModel.remove(id)` above already selected the fallback profile

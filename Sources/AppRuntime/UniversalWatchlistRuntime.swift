@@ -263,6 +263,16 @@ public extension UniversalWatchlistHost {
         let profileID = profiles.activeProfileID
         let started = Date()
         let report = await reconciler.fetchNativeEntries()
+        // Belt to the caller's braces. Fetching is network work, and what comes
+        // back reflects whatever credentials the destinations held when it
+        // started; if the active profile moved underneath us in the meantime,
+        // these are somebody else's entries and must not be written here.
+        // Ordering the switch is the real fix — this makes a mistake there
+        // fail closed instead of silently persisting a stranger's watchlist.
+        guard profiles.activeProfileID == profileID else {
+            PlozzLog.app.info("Watchlist import dropped — profile changed mid-fetch")
+            return
+        }
         let successfulDestinationIDs = Set(
             report.successes.map(\.destinationID)
         )

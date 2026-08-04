@@ -74,13 +74,20 @@ public struct ProfileActionsList: View {
     @State private var showingLockOptions = false
     @State private var showingKidsOptions = false
     @State private var confirmDelete = false
+    /// Immediate sheet-local unlock result. The app-level unlocked-id set is
+    /// deliberately non-observable, so the Bool passed when this sheet opened
+    /// cannot update until the sheet is recreated. Keep the successful verdict
+    /// here too so this presentation unlocks in place.
+    @State private var didUnlockHere = false
 
     /// A locked profile is sealed until its own PIN is entered — every route in,
     /// not just the picker. Editing includes *removing the lock*, so anyone who
     /// can't open the profile must not be able to unlock it from the outside; a
     /// gate on one entry point would just move the hole. Kids Profiles are no
     /// exception: they can carry a PIN too.
-    private var isSealed: Bool { profile.isLocked && !isUnlocked }
+    private var isSealed: Bool {
+        profile.isLocked && !isUnlocked && !didUnlockHere
+    }
 
     public var body: some View {
         Group {
@@ -125,6 +132,7 @@ public struct ProfileActionsList: View {
         }
         unlockError = nil
         unlocking = false
+        didUnlockHere = true
         onUnlock()
     }
 

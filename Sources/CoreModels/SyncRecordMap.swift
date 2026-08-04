@@ -418,6 +418,9 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
     /// on every other device in the household. Carries a salted verifier only —
     /// never the PIN itself (see `ProfileLock`).
     public var lock: ProfileLock?
+    /// Field-level revision: prevents a stale whole-profile record from erasing
+    /// a newer lock during an unrelated name/avatar sync.
+    public var lockRevision: ProfileLockRevision?
     /// Whether this is a restricted Kids Profile. Synced for the same reason the
     /// lock is: a restriction that only applied on one device wouldn't restrict
     /// anything.
@@ -438,6 +441,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         self.avatarEmoji = p.avatarEmoji
         self.avatarEmojiColorIndex = p.avatarEmojiColorIndex
         self.lock = p.lock
+        self.lockRevision = p.effectiveLockRevision
         self.isKidsProfile = p.isKidsProfile
         self.isAwaitingSetup = p.isAwaitingSetup
     }
@@ -465,7 +469,17 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         }
         p.avatarEmoji = avatarEmoji
         p.avatarEmojiColorIndex = avatarEmojiColorIndex
-        p.lock = lock
+        let localRevision = existing.effectiveLockRevision
+        if let incomingRevision = lockRevision {
+            if localRevision == nil || incomingRevision > localRevision! {
+                p.lock = lock
+                p.lockRevision = incomingRevision
+            }
+        } else if localRevision == nil {
+            // Legacy peer: honour it only when this device has no revisioned (or
+            // legacy-baselined) lock state to protect.
+            p.lock = lock
+        }
         p.isKidsProfile = isKidsProfile
         p.isAwaitingSetup = isAwaitingSetup
         return p
@@ -478,6 +492,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
             createdAt: createdAt,
             avatarImageURL: SyncURLSanitizer.sanitize(string: avatarImageURL),
             avatarEmoji: avatarEmoji, avatarEmojiColorIndex: avatarEmojiColorIndex,
-            lock: lock, isKidsProfile: isKidsProfile, isAwaitingSetup: isAwaitingSetup)
+            lock: lock, lockRevision: lockRevision,
+            isKidsProfile: isKidsProfile, isAwaitingSetup: isAwaitingSetup)
     }
 }

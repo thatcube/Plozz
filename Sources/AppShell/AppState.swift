@@ -1590,7 +1590,7 @@ public final class AppState {
     /// state rather than an unlock the old one granted.
     public func setLock(_ lock: ProfileLock?, forProfile id: String) {
         guard var profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }
-        profile.lock = lock
+        profile.replaceLock(with: lock)
         profilesModel.update(profile)
         // Drop any unlock the OLD PIN granted, then re-grant it when a new PIN
         // was just chosen: whoever typed it demonstrably knows it, and asking for

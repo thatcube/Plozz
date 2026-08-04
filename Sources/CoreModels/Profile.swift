@@ -116,6 +116,8 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// The flip side is that with iCloud Sync off it *is* device-only, which the
     /// setup screen says out loud.
     public var lock: ProfileLock?
+    /// Field-level conflict revision for `lock`. See `ProfileLockRevision`.
+    public var lockRevision: ProfileLockRevision?
 
     /// Whether this is a **Kids Profile**: shared, household-level settings are
     /// hidden while it's active.
@@ -191,6 +193,18 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         return plexHomeUserBindings?.values.contains { $0.requiresPIN == true } ?? false
     }
 
+    /// Revision used for conflict resolution, including an immediate baseline for
+    /// locks created by an older build before `lockRevision` existed.
+    public var effectiveLockRevision: ProfileLockRevision? {
+        lockRevision ?? lock.map { ProfileLockRevision.legacy(for: $0) }
+    }
+
+    /// Adds, changes or removes the lock and advances its field-level revision.
+    public mutating func replaceLock(with newLock: ProfileLock?) {
+        lockRevision = .next(after: effectiveLockRevision)
+        lock = newLock
+    }
+
     /// Whether an answer is owed about who this profile watches as on any of
     /// `accountIDs`. See `accountsAwaitingIdentity`.
     ///
@@ -237,6 +251,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         seerrUserName: String? = nil,
         seerrUserAvatarURL: String? = nil,
         lock: ProfileLock? = nil,
+        lockRevision: ProfileLockRevision? = nil,
         isKidsProfile: Bool? = nil,
         isAwaitingSetup: Bool? = nil
     ) {
@@ -259,6 +274,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.seerrUserName = seerrUserName
         self.seerrUserAvatarURL = seerrUserAvatarURL
         self.lock = lock
+        self.lockRevision = lockRevision
         self.isKidsProfile = isKidsProfile
         self.isAwaitingSetup = isAwaitingSetup
     }

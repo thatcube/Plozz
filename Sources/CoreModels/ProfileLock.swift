@@ -121,3 +121,43 @@ public struct ProfileLock: Codable, Hashable, Sendable {
         return diff == 0
     }
 }
+
+/// Field-level revision for a profile lock.
+///
+/// Profiles sync as one record. Without a revision on the lock itself, a device
+/// changing the profile's name or avatar from an older snapshot can legitimately
+/// win the whole-record conflict and replace a newly-created lock with `nil`.
+/// That is especially bad for a security control: unrelated cosmetic edits must
+/// never unlock a profile.
+///
+/// Counter handles ordinary sequential edits. Nonce deterministically breaks the
+/// rare tie where two devices edit from the same counter before seeing each
+/// other. A deletion gets a revision too, so "no lock" can be distinguished from
+/// "this old record predates lock revisions."
+public struct ProfileLockRevision: Codable, Hashable, Sendable, Comparable {
+    public var counter: Int64
+    public var nonce: String
+
+    public init(counter: Int64, nonce: String) {
+        self.counter = counter
+        self.nonce = nonce
+    }
+
+    public static func < (lhs: Self, rhs: Self) -> Bool {
+        if lhs.counter != rhs.counter { return lhs.counter < rhs.counter }
+        return lhs.nonce < rhs.nonce
+    }
+
+    public static func next(after revision: Self?) -> Self {
+        Self(
+            counter: (revision?.counter ?? 0) + 1,
+            nonce: UUID().uuidString
+        )
+    }
+
+    /// Existing locks created before revisions shipped are still protected from
+    /// a stale `nil` record immediately after upgrade.
+    public static func legacy(for lock: ProfileLock) -> Self {
+        Self(counter: 0, nonce: lock.verifier)
+    }
+}

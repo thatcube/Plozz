@@ -1,5 +1,8 @@
 import CoreModels
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// Platform metrics for the PIN screen. A 10-foot remote-driven UI and a phone
 /// held at arm's length need genuinely different sizes, and these live at file
@@ -145,7 +148,7 @@ public struct PINEntryScaffold<Badge: View>: View {
                     // but visually too close to the right edge for the main
                     // control. Pull it toward the screen center while preserving
                     // the generous gap from the prose.
-                    .offset(x: -90)
+                    .offset(x: -150)
             }
             .padding(.horizontal, PINMetrics.horizontalPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -153,7 +156,7 @@ public struct PINEntryScaffold<Badge: View>: View {
             VStack(spacing: 32) {
                 Spacer(minLength: 0)
                 prose
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: proseFrameAlignment)
                 padColumn
                 Spacer(minLength: 0)
                 Button("Cancel", action: onCancel)
@@ -177,7 +180,7 @@ public struct PINEntryScaffold<Badge: View>: View {
 
     @ViewBuilder
     private var prose: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: proseAlignment, spacing: 20) {
             if let sequenceStep, sequenceStep.total > 1 {
                 PINSequenceIndicator(step: sequenceStep)
                     .padding(.bottom, 4)
@@ -187,12 +190,14 @@ public struct PINEntryScaffold<Badge: View>: View {
                 .font(PINMetrics.titleFont)
                 .foregroundStyle(palette.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(proseTextAlignment)
 
             if let subtitle {
                 Text(subtitle)
                     .font(PINMetrics.subtitleFont)
                     .foregroundStyle(palette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(proseTextAlignment)
             }
 
             // Whose PIN this is. Small and secondary — the person already knows
@@ -212,6 +217,7 @@ public struct PINEntryScaffold<Badge: View>: View {
                 .font(.callout)
                 .foregroundStyle(errorMessage == nil ? Color.clear : .red)
                 .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(proseTextAlignment)
 
             if let footnote {
                 Label {
@@ -225,7 +231,29 @@ public struct PINEntryScaffold<Badge: View>: View {
             }
         }
 
-        .frame(maxWidth: PINMetrics.proseMaxWidth, alignment: .leading)
+        .frame(maxWidth: PINMetrics.proseMaxWidth, alignment: proseFrameAlignment)
+    }
+
+    /// iPhone benefits from a centred, compact identity block above the dial pad.
+    /// iPad keeps the left-aligned tablet composition the user explicitly prefers.
+    private var centersPhoneProse: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
+    }
+
+    private var proseAlignment: HorizontalAlignment {
+        centersPhoneProse ? .center : .leading
+    }
+
+    private var proseFrameAlignment: Alignment {
+        centersPhoneProse ? .center : .leading
+    }
+
+    private var proseTextAlignment: TextAlignment {
+        centersPhoneProse ? .center : .leading
     }
 
     // MARK: Pad column

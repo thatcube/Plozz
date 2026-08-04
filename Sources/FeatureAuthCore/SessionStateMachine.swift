@@ -39,6 +39,9 @@ public enum OnboardingStep: Equatable, Sendable {
     /// First-ever account was just added on a brand-new install; confirm (or
     /// edit) the profile we seeded from the sign-in before entering the app.
     case confirmProfile
+    /// First run: optionally connect Seerr and choose the active profile's acting
+    /// user before entering the app.
+    case selectSeerr
     /// Brand-new install only: after the profile is confirmed, pick the app's
     /// appearance/theme before entering the app. Never shown again once
     /// first-run setup is done.
@@ -80,6 +83,7 @@ public enum SessionEvent: Sendable {
     case librarySelectionRequired
     /// The user confirmed (or edited) their seeded profile on first run.
     case profileConfirmed
+    case seerrSelected
     /// The user picked an app theme on the one-time first-run theme step.
     case themeSelected
     case authenticationFailed(AppError)
@@ -163,9 +167,10 @@ public struct SessionStateMachine: Sendable {
         case (.onboarding(.selectPlexUser, _), .accountAuthenticated):
             return .ready
 
-        // Finished the one-time first-run profile confirm step — continue to the
-        // one-time theme picker before entering the app.
+        // First profile: choose Seerr request identity, then theme.
         case (.onboarding(.confirmProfile, _), .profileConfirmed):
+            return .onboarding(.selectSeerr, canReturnToApp: true)
+        case (.onboarding(.selectSeerr, _), .seerrSelected):
             return .onboarding(.selectTheme, canReturnToApp: true)
 
         // Picked an app theme on the one-time first-run theme step — enter the app.

@@ -663,6 +663,7 @@ private enum OnboardingPage: Equatable {
     case selectPlexUser(PlexHomeUsersModel.PendingPlexUserSelection?)
     case selectLibraries
     case confirmProfile
+    case selectSeerr
     case selectTheme
 
     init(
@@ -681,6 +682,8 @@ private enum OnboardingPage: Equatable {
             self = .selectLibraries
         case .confirmProfile:
             self = .confirmProfile
+        case .selectSeerr:
+            self = .selectSeerr
         case .selectTheme:
             self = .selectTheme
         }
@@ -693,7 +696,8 @@ private enum OnboardingPage: Equatable {
         case .selectPlexUser: 2
         case .selectLibraries: 3
         case .confirmProfile: 4
-        case .selectTheme: 5
+        case .selectSeerr: 5
+        case .selectTheme: 6
         }
     }
 
@@ -709,6 +713,8 @@ private enum OnboardingPage: Equatable {
             "selectLibraries"
         case .confirmProfile:
             "confirmProfile"
+        case .selectSeerr:
+            "selectSeerr"
         case .selectTheme:
             "selectTheme"
         }
@@ -920,6 +926,19 @@ private struct OnboardingPageContent: View {
         case .confirmProfile:
             FirstRunProfileView(appState: appState)
 
+        case .selectSeerr:
+            ProfileSeerrSetupView(
+                seer: appState.seerService,
+                profile: appState.profilesModel.activeProfile,
+                onSelect: { user in
+                    appState.setSeerrUserForProfile(
+                        profileID: appState.profilesModel.activeProfileID,
+                        user: user
+                    )
+                },
+                onContinue: { appState.completeFirstRunSeerrSetup() }
+            )
+
         case .selectTheme:
             SelectThemeView(
                 appState: appState,
@@ -942,6 +961,7 @@ private struct ProfileSetupFlowView: View {
     let profile: Profile
     let librariesStore: ProfileSetupLibrariesLoader
     let deviceColorScheme: ColorScheme
+    @State private var stage: ProfileSetupStage = .libraries
 
     @ViewBuilder
     var body: some View {
@@ -961,15 +981,31 @@ private struct ProfileSetupFlowView: View {
                 canReturnToApp: canReturnToApp,
                 deviceColorScheme: deviceColorScheme
             )
-        } else {
+        } else if stage == .libraries {
             ProfileSetupLibrariesView(
                 scope: appState.profileLibrariesScope(librariesStore: librariesStore)
             ) {
-                appState.completeProfileSetup(for: profile.id)
+                stage = .seerr
             }
             .task { await librariesStore.reload(appState: appState) }
+        } else {
+            let liveProfile = appState.profilesModel.profiles
+                .first(where: { $0.id == profile.id }) ?? profile
+            ProfileSeerrSetupView(
+                seer: appState.seerService,
+                profile: liveProfile,
+                onSelect: { user in
+                    appState.setSeerrUserForProfile(profileID: profile.id, user: user)
+                },
+                onContinue: { appState.completeProfileSetup(for: profile.id) }
+            )
         }
     }
+}
+
+private enum ProfileSetupStage {
+    case libraries
+    case seerr
 }
 
 /// Persistent profile-entry gate: profile PIN first, Plex PIN second when needed.

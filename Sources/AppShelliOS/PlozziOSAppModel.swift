@@ -49,6 +49,7 @@ final class PlozziOSAppModel {
         case plexUser
         case libraries
         case confirmProfile
+        case seerr
         case theme
 
         var id: Self { self }
@@ -856,6 +857,8 @@ final class PlozziOSAppModel {
     enum ProfileOnboardingStep: String, Identifiable, CaseIterable {
         /// Which servers this profile uses, and who it watches as on each.
         case libraries
+        /// Optional household Seerr connection + this profile's acting user.
+        case seerr
         /// Its colour scheme, which is per-profile.
         case theme
         /// Whether to put a PIN on it — offered at creation, like on tvOS, since
@@ -867,7 +870,8 @@ final class PlozziOSAppModel {
 
         var next: ProfileOnboardingStep? {
             switch self {
-            case .libraries: .theme
+            case .libraries: .seerr
+            case .seerr: .theme
             case .theme: .lockOffer
             case .lockOffer: nil
             }
@@ -1814,6 +1818,10 @@ final class PlozziOSAppModel {
     }
 
     func confirmFirstRunProfile() {
+        advanceFirstRunStep(to: .seerr)
+    }
+
+    func completeFirstRunSeerrSetup() {
         advanceFirstRunStep(to: .theme)
     }
 

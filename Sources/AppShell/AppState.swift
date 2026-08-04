@@ -1570,6 +1570,11 @@ public final class AppState {
         apply(.profileConfirmed)
     }
 
+    /// Completes the first profile's Seerr connection/acting-user step.
+    public func completeFirstRunSeerrSetup() {
+        apply(.seerrSelected)
+    }
+
     /// Completes the one-time first-run theme picker and enters the app. Applying
     /// any Plex Home-user binding (which can raise a PIN prompt) is deferred to
     /// here so it surfaces as the user actually enters the app — not over the

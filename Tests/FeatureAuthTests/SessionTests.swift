@@ -47,6 +47,8 @@ final class SessionStateMachineTests: XCTestCase {
         m.apply(.accountAuthenticatedNeedsProfile)
         XCTAssertEqual(m.state, .onboarding(.confirmProfile, canReturnToApp: true))
         m.apply(.profileConfirmed)
+        XCTAssertEqual(m.state, .onboarding(.selectSeerr, canReturnToApp: true))
+        m.apply(.seerrSelected)
         XCTAssertEqual(m.state, .onboarding(.selectTheme, canReturnToApp: true))
         m.apply(.themeSelected)
         XCTAssertEqual(m.state, .ready)

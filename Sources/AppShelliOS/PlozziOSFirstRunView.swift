@@ -3,6 +3,7 @@ import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureProfiles
+import FeatureSettings
 import Foundation
 import SwiftUI
 
@@ -95,6 +96,18 @@ struct PlozziOSFirstRunView: View {
             }
         case .confirmProfile:
             PlozziOSFirstProfileView(appModel: appModel)
+        case .seerr:
+            ProfileSeerrSetupView(
+                seer: appModel.seerService,
+                profile: appModel.profiles.activeProfile,
+                onSelect: { user in
+                    appModel.setSeerrUser(
+                        user,
+                        for: appModel.profiles.activeProfileID
+                    )
+                },
+                onContinue: appModel.completeFirstRunSeerrSetup
+            )
         case .theme:
             NavigationStack {
                 PlozziOSThemeWelcomeView(

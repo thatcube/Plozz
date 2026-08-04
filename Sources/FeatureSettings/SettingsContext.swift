@@ -56,6 +56,11 @@ struct SettingsContext {
     let onSetProfileLock: (String, ProfileLock?) -> Void
     /// Marks a profile as restricted (or lifts it).
     let onSetKidsProfile: (String, Bool) -> Void
+    /// Whether a profile's PIN has already been proved this run, so a locked
+    /// profile's settings stay sealed until someone enters it.
+    let isProfileUnlocked: (String) -> Bool
+    /// Records that a profile's PIN was just proved.
+    let onProfileUnlocked: (String) -> Void
 }
 
 /// Typed routes for the Settings drill-down NavigationStack. Defined at file

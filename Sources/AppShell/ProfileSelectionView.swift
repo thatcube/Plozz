@@ -39,12 +39,11 @@ struct ProfileSelectionView: View {
     @State private var newlyCreated: Profile?
     /// Set once the user accepts that offer, presenting the PIN setup.
     @State private var lockTarget: Profile?
-    /// A management action held back until a PIN proves it's allowed.
-    @State private var pendingAction: ManagementAction?
+    /// A management action held back until a PIN proves it's allowed, together
+    /// with whose PIN that is.
+    @State private var pendingAction: PendingAuthorization?
     /// Error from the last failed authorization attempt.
     @State private var authError: String?
-    /// Whether management has been proved during this presentation.
-    @State private var authorized = false
 
     private enum CreationKind: Identifiable {
         case ordinary
@@ -53,13 +52,28 @@ struct ProfileSelectionView: View {
         var isKids: Bool { self == .kids }
     }
 
-    private enum ManagementAction: Identifiable {
+    private enum ManagementAction {
         case add(isKids: Bool)
         case edit(Profile)
+    }
+
+    /// An action waiting on a PIN, and the profile whose PIN unlocks it.
+    private struct PendingAuthorization: Identifiable {
+        let action: ManagementAction
+        let gatekeeper: Profile
+
+        /// True when the PIN being asked for belongs to the very profile being
+        /// edited — in which case the prompt needs no explanation beyond the name
+        /// and avatar already on screen. Only the *add* case, where the PIN comes
+        /// from some other profile, has to justify itself.
+        var isEditingGatekeeper: Bool {
+            if case let .edit(profile) = action { return profile.id == gatekeeper.id }
+            return false
+        }
 
         var id: String {
-            switch self {
-            case let .add(isKids): return isKids ? "add.kids" : "add"
+            switch action {
+            case let .add(isKids): return "add.\(isKids)"
             case let .edit(profile): return "edit.\(profile.id)"
             }
         }
@@ -108,6 +122,8 @@ struct ProfileSelectionView: View {
                         appState.profileFlow.removeProfile(id: profile.id)
                         actionsProfileID = nil
                     },
+                    isUnlocked: appState.profileFlow.isUnlockedThisRun(profile.id),
+                    onUnlock: { appState.profileFlow.noteUnlocked(profile.id) },
                     onClose: { actionsProfileID = nil }
                 )
             }
@@ -173,18 +189,16 @@ struct ProfileSelectionView: View {
                 onCancel: { lockTarget = nil }
             )
         }
-        .fullScreenCover(item: $pendingAction) { action in
-            if let guardianProfile {
-                PINEntryScaffold(
-                    title: ProfileLockCopy.manageTitle,
-                    subtitle: ProfileLockCopy.manageSubtitle,
-                    name: guardianProfile.name,
-                    errorMessage: authError,
-                    onSubmit: { submitAuthorization($0, action: action) },
-                    onCancel: { pendingAction = nil; authError = nil }
-                ) {
-                    ProfileAvatarView(profile: guardianProfile, size: 200)
-                }
+        .fullScreenCover(item: $pendingAction) { pending in
+            PINEntryScaffold(
+                title: ProfileLockCopy.manageTitle,
+                subtitle: ProfileLockCopy.manageSubtitle,
+                name: pending.gatekeeper.name,
+                errorMessage: authError,
+                onSubmit: { submitAuthorization($0, pending: pending) },
+                onCancel: { pendingAction = nil; authError = nil }
+            ) {
+                ProfileAvatarView(profile: pending.gatekeeper, size: PINLayout.badgeSize)
             }
         }
     }
@@ -198,52 +212,68 @@ struct ProfileSelectionView: View {
 
     // MARK: Authorization
 
-    /// The locked profile whose PIN authorises managing profiles — a grown-up's.
+    /// Which profile's PIN a given action needs, if any.
     ///
-    /// Prefers a locked, unrestricted profile: a Kids Profile with a lock on it
-    /// is still a child's, and its PIN shouldn't be the key to the household.
+    /// Two different questions, and conflating them is what made the prompt read
+    /// oddly ("adding or changing profiles needs the PIN from a locked profile"
+    /// while editing your own):
+    ///
+    /// - **Editing** a profile is gated by *that profile's own* lock, inside the
+    ///   actions list — the only PIN that means anything there, since editing
+    ///   includes removing the lock.
+    /// - **Adding** a profile has no profile to take a PIN from, and a new
+    ///   profile is unrestricted — which is an escape hatch out of a Kids
+    ///   Profile. So it's gated by any locked grown-up profile, but ONLY when the
+    ///   household is actually using parental controls (a Kids Profile exists and
+    ///   something is locked). Otherwise there's nothing to escape and the prompt
+    ///   would be pure friction on the ordinary "add a second profile" case.
+    private func gatekeeper(for action: ManagementAction) -> Profile? {
+        switch action {
+        case .edit:
+            // Not gated here: `ProfileActionsList` seals a locked profile itself,
+            // so every route into it — picker, Settings, either platform — is
+            // covered by one rule instead of a gate per entry point.
+            return nil
+        case .add:
+            guard householdUsesParentalControls else { return nil }
+            return guardianProfile
+        }
+    }
+
+    /// A locked, unrestricted profile — a grown-up's. A Kids Profile that happens
+    /// to carry a lock is still a child's, so its PIN shouldn't be the key to the
+    /// household.
     private var guardianProfile: Profile? {
-        let locked = appState.profilesModel.profiles.filter(\.isLocked)
-        return locked.first(where: { !$0.isKids }) ?? locked.first
+        appState.profilesModel.profiles.first { $0.isLocked && !$0.isKids }
     }
 
-    /// Whether managing profiles has to be proved first.
-    ///
-    /// The picker can create profiles, and a new profile is unrestricted — so
-    /// without a gate a child could step straight out of a Kids Profile by making
-    /// themselves a new one, and the launch picker (which is *forced* when the
-    /// profile we'd restore is locked) would hand the same escape to anyone.
-    ///
-    /// The gate is deliberately narrow:
-    /// - Nothing locked anywhere? Nothing to protect, and demanding a PIN would
-    ///   just block the ordinary first-run case of adding a second profile.
-    /// - A live session behind the picker (opened from Switch Profile) already
-    ///   passed whatever gate that profile had — unless it's a Kids Profile.
-    private var requiresAuthorization: Bool {
-        guard guardianProfile != nil else { return false }
-        if appState.profilesModel.activeProfile.isKids { return true }
-        return !canCancel
+    /// Whether the household has actually set up parental controls: a restricted
+    /// profile to contain someone, and a lock to contain them with.
+    private var householdUsesParentalControls: Bool {
+        let profiles = appState.profilesModel.profiles
+        return profiles.contains(where: \.isKids) && profiles.contains { $0.isLocked && !$0.isKids }
     }
 
-    /// Runs a management action, asking for a PIN first when required.
+    /// Runs a management action, asking for a PIN first when one is required.
     private func request(_ action: ManagementAction) {
-        guard requiresAuthorization, !authorized else {
+        guard let gate = gatekeeper(for: action) else {
             perform(action)
             return
         }
         authError = nil
-        pendingAction = action
+        pendingAction = PendingAuthorization(action: action, gatekeeper: gate)
     }
 
-    private func submitAuthorization(_ pin: String, action: ManagementAction) {
-        guard let lock = guardianProfile?.lock, lock.matches(pin: pin) else {
+    private func submitAuthorization(_ pin: String, pending: PendingAuthorization) {
+        guard let lock = pending.gatekeeper.lock, lock.matches(pin: pin) else {
             authError = String(localized: "Incorrect PIN. Try again.")
             return
         }
-        authorized = true
+        // Knowing a profile's PIN is knowing it — don't re-ask to open it later.
+        appState.profileFlow.noteUnlocked(pending.gatekeeper.id)
         authError = nil
         pendingAction = nil
-        perform(action)
+        perform(pending.action)
     }
 
     private func perform(_ action: ManagementAction) {

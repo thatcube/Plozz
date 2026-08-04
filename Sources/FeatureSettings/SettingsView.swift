@@ -50,6 +50,10 @@ public struct SettingsView: View {
     @State private var showDeveloperUnlockedAlert = false
     /// Presents the profile editor sheet for the active profile (Edit button in
     /// the profile header). Mirrors the editor flow in ``ProfileDetailView``.
+    /// Presents the active profile's actions sheet — the same one the picker's
+    /// per-tile Edit opens. Held as a flag rather than a `Profile` so the sheet
+    /// re-reads the live profile and reflects a lock set from inside it.
+    @State private var showingProfileActions = false
     @State private var editingProfile: Profile?
 
     /// Focus scope for the Settings root list. Turning profiles off pops the
@@ -148,6 +152,8 @@ public struct SettingsView: View {
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
     private let onSetProfileLock: (String, ProfileLock?) -> Void
     private let onSetKidsProfile: (String, Bool) -> Void
+    private let isProfileUnlocked: (String) -> Bool
+    private let onProfileUnlocked: (String) -> Void
     private let onSetSeerrUser: (String, SeerUser?) -> Void
     /// Step 6 metadata settings surface (providers, attribution, diagnostics,
     /// cache). Optional so tests/previews can omit it; the row + page appear only
@@ -203,6 +209,8 @@ public struct SettingsView: View {
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void,
         onSetProfileLock: @escaping (String, ProfileLock?) -> Void = { _, _ in },
         onSetKidsProfile: @escaping (String, Bool) -> Void = { _, _ in },
+        isProfileUnlocked: @escaping (String) -> Bool = { _ in true },
+        onProfileUnlocked: @escaping (String) -> Void = { _ in },
         onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in },
         onSetUpAnotherDevice: (() -> Void)? = nil,
         syncEnabled: Bool = false,
@@ -263,6 +271,8 @@ public struct SettingsView: View {
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
         self.onSetProfileLock = onSetProfileLock
         self.onSetKidsProfile = onSetKidsProfile
+        self.isProfileUnlocked = isProfileUnlocked
+        self.onProfileUnlocked = onProfileUnlocked
         self.onSetSeerrUser = onSetSeerrUser
         self.onSetUpAnotherDevice = onSetUpAnotherDevice
         self.syncEnabled = syncEnabled
@@ -318,7 +328,9 @@ public struct SettingsView: View {
             plexHomeUsersFetcher: plexHomeUsersFetcher,
             onSelectPlexHomeUser: onSelectPlexHomeUser,
             onSetProfileLock: onSetProfileLock,
-            onSetKidsProfile: onSetKidsProfile
+            onSetKidsProfile: onSetKidsProfile,
+            isProfileUnlocked: isProfileUnlocked,
+            onProfileUnlocked: onProfileUnlocked
         )
     }
 
@@ -393,6 +405,32 @@ public struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Deletes the whole household — every profile and server — from iCloud (all your devices), wipes this Apple TV to first-run, and turns iCloud Sync OFF here. Use to test a clean cold start (e.g. set up only on this Apple TV, then fresh-install another device). Re-enable Sync when done.")
+        }
+        // Edit opens the same actions sheet as the picker: appearance, lock,
+        // Kids Profile, delete. No PIN gate here — you are already *inside* this
+        // profile, so its lock has been satisfied by definition.
+        .sheet(isPresented: $showingProfileActions) {
+            ProfileActionsSheet(
+                profile: activeProfile,
+                syncEnabled: syncEnabled,
+                offersPlexPINReuse: boundToProtectedPlexUser(activeProfile),
+                householdHasOtherLock: profiles.contains {
+                    $0.id != activeProfile.id && $0.isLocked
+                },
+                onEditAppearance: {
+                    showingProfileActions = false
+                    editingProfile = activeProfile
+                },
+                onSetLock: { onSetProfileLock(activeProfile.id, $0) },
+                onSetKids: { onSetKidsProfile(activeProfile.id, $0) },
+                onDelete: activeProfile.id == profiles.first?.id ? nil : {
+                    onDeleteProfile(activeProfile.id)
+                    showingProfileActions = false
+                },
+                isUnlocked: isProfileUnlocked(activeProfile.id),
+                onUnlock: { onProfileUnlocked(activeProfile.id) },
+                onClose: { showingProfileActions = false }
+            )
         }
         .sheet(item: $editingProfile) { profile in
             ProfileEditorView(
@@ -676,6 +714,13 @@ public struct SettingsView: View {
         }
     }
 
+    /// Whether a profile plays as a Plex Home user that already asks for a PIN,
+    /// so one entry can satisfy both.
+    private func boundToProtectedPlexUser(_ profile: Profile) -> Bool {
+        if profile.plexHomeUserRequiresPIN == true { return true }
+        return profile.plexHomeUserBindings?.values.contains { $0.requiresPIN == true } ?? false
+    }
+
     /// Records one select of the About panel and surfaces the unlock confirmation
     /// when the seventh crosses the threshold.
     private func handleAboutActivation() {
@@ -935,7 +980,7 @@ public struct SettingsView: View {
                 Spacer()
                 HStack(spacing: 12) {
                     Button {
-                        editingProfile = activeProfile
+                        showingProfileActions = true
                     } label: {
                         Label("Edit", systemImage: "pencil")
                     }

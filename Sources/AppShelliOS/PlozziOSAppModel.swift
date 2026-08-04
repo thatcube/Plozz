@@ -891,7 +891,22 @@ final class PlozziOSAppModel {
         guard var profile = profiles.profiles.first(where: { $0.id == id }) else { return }
         profile.lock = lock
         profiles.update(profile)
+        // Drop any unlock the OLD PIN granted, then re-grant it when a new PIN
+        // was just chosen: whoever typed it demonstrably knows it.
         unlockedProfileIDs.remove(id)
+        if lock != nil { unlockedProfileIDs.insert(id) }
+    }
+
+    /// Whether a profile's PIN has been proved this run, so a locked profile's
+    /// settings stay sealed until someone enters it.
+    func isUnlockedThisRun(_ id: String) -> Bool {
+        unlockedProfileIDs.contains(id)
+    }
+
+    /// Records that a profile's PIN was proved outside `submitProfileLockPIN` —
+    /// e.g. to edit it. Knowing the PIN is knowing the PIN.
+    func noteUnlocked(_ id: String) {
+        unlockedProfileIDs.insert(id)
     }
 
     /// Marks a profile as restricted, or lifts the restriction.

@@ -206,6 +206,19 @@ public final class ProfileFlowModel {
         profileLockError = nil
     }
 
+    /// Whether `id` has already been proved this run, so a second gate (editing
+    /// it from the picker) doesn't ask for the same PIN again.
+    public func isUnlockedThisRun(_ id: String) -> Bool {
+        unlockedProfileIDs.contains(id)
+    }
+
+    /// Records that `id`'s PIN was proved outside `submitProfileLockPIN` — e.g.
+    /// to edit it from the picker. Knowing the PIN is knowing the PIN, so it
+    /// counts for opening the profile too.
+    public func noteUnlocked(_ id: String) {
+        unlockedProfileIDs.insert(id)
+    }
+
     /// Forgets that `id` was unlocked this run — called when its PIN changes or
     /// is removed, so a stale unlock can't outlive the lock that granted it.
     public func forgetUnlock(for id: String) {

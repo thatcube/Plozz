@@ -1575,7 +1575,11 @@ public final class AppState {
         guard var profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }
         profile.lock = lock
         profilesModel.update(profile)
+        // Drop any unlock the OLD PIN granted, then re-grant it when a new PIN
+        // was just chosen: whoever typed it demonstrably knows it, and asking for
+        // it back a second later would be theatre.
         profileFlow.forgetUnlock(for: id)
+        if lock != nil { profileFlow.noteUnlocked(id) }
     }
 
     /// Creates a profile from the picker without switching into it.

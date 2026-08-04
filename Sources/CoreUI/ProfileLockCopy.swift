@@ -85,14 +85,35 @@ public enum ProfileLockCopy {
 
     public static let usePlexPIN = LocalizedStringResource(
         "settings.profileLock.usePlexPIN",
-        defaultValue: "Use my Plex PIN",
-        comment: "Toggle offered when this profile plays as a PIN-protected Plex Home user, so one PIN opens both."
+        defaultValue: "Use this for Plex too?",
+        comment: "Asked after choosing a PIN, when this profile plays as a PIN-protected Plex Home user, so one PIN can open both."
     )
 
     public static let usePlexPINDetail = LocalizedStringResource(
         "settings.profileLock.usePlexPIN.detail",
-        defaultValue: "This profile plays as a Plex user that already asks for a PIN. Enter the same one and you'll only be asked once.",
-        comment: "Explains the 'Use my Plex PIN' option."
+        defaultValue: "This profile plays as a Plex user that asks for its own PIN. If it's the same one, Plozz can send it to Plex for you so you're only asked once.",
+        comment: "Explains what saying yes does — including that the PIN is sent to Plex, which the person should know before agreeing."
+    )
+
+    public static let usePlexPINYes = LocalizedStringResource(
+        "settings.profileLock.usePlexPIN.yes",
+        defaultValue: "It's the Same PIN",
+        comment: "Confirms that the Plozz PIN and the Plex PIN match, so Plozz may forward it."
+    )
+
+    public static let usePlexPINNo = LocalizedStringResource(
+        "settings.profileLock.usePlexPIN.no",
+        defaultValue: "Keep Separate",
+        comment: "Declines forwarding the PIN to Plex; the Plex prompt will still appear separately."
+    )
+
+    /// Shown on the lock row when Plex — not Plozz — is what's asking for a PIN.
+    /// Without it the row reads a bare "Off" on a profile you demonstrably can't
+    /// open without a code, which looks like a bug.
+    public static let plexAlreadyAsks = LocalizedStringResource(
+        "settings.profileLock.plexAlreadyAsks",
+        defaultValue: "Plex asks for its own PIN to play as this user. A Profile Lock covers the whole profile.",
+        comment: "Second line on the Profile Lock row when the profile has no Plozz lock but does play as a PIN-protected Plex Home user."
     )
 
     /// Shown under the keypad, and on the setup screen, when iCloud Sync is off.
@@ -124,16 +145,28 @@ public enum ProfileLockCopy {
         comment: "Body of the prompt offering a PIN on a newly created Kids Profile. It explains why the answer is usually no, since locking the child's own profile is the common misunderstanding."
     )
 
+    public static let unlockToEdit = LocalizedStringResource(
+        "settings.profileLock.unlockToEdit",
+        defaultValue: "Enter PIN to Edit",
+        comment: "Row and heading shown when someone opens a locked profile's settings. Its PIN is required before anything about it can be changed."
+    )
+
+    public static let unlockToEditDetail = LocalizedStringResource(
+        "settings.profileLock.unlockToEdit.detail",
+        defaultValue: "This profile is locked.",
+        comment: "Second line under 'Enter PIN to Edit'."
+    )
+
     public static let manageTitle = LocalizedStringResource(
         "settings.profileLock.manage.title",
         defaultValue: "Enter your PIN",
-        comment: "Heading shown when someone tries to add or edit profiles and the household has a locked profile, so the action needs proving first."
+        comment: "Heading shown when a PIN is needed before adding or editing a profile."
     )
 
     public static let manageSubtitle = LocalizedStringResource(
         "settings.profileLock.manage.subtitle",
-        defaultValue: "Adding or changing profiles needs the PIN from a locked profile.",
-        comment: "Explains why a PIN is being asked for before managing profiles."
+        defaultValue: "Adding a profile needs the PIN from a locked profile.",
+        comment: "Explains why a PIN is being asked for before adding a profile. Only shown for adding — editing a locked profile asks for that profile's own PIN, which needs no explanation."
     )
 
     public static let forgotPIN = LocalizedStringResource(

@@ -203,6 +203,10 @@ struct MainTabView: View {
     var onSetProfileLock: (String, ProfileLock?) -> Void = { _, _ in }
     /// Marks a profile as restricted (or lifts it).
     var onSetKidsProfile: (String, Bool) -> Void = { _, _ in }
+    /// Whether a profile's PIN has been proved this run.
+    var isProfileUnlocked: (String) -> Bool = { _ in true }
+    /// Records that a profile's PIN was just proved.
+    var onProfileUnlocked: (String) -> Void = { _ in }
     /// Maps a household profile to a Seerr user (or clears it) — forwarded to the
     /// Settings "requests are made as" list.
     var onSetSeerrUser: (String, SeerUser?) -> Void = { _, _ in }
@@ -360,6 +364,8 @@ struct MainTabView: View {
                 onSelectPlexHomeUser: onSelectPlexHomeUser,
                 onSetProfileLock: onSetProfileLock,
                 onSetKidsProfile: onSetKidsProfile,
+                isProfileUnlocked: isProfileUnlocked,
+                onProfileUnlocked: onProfileUnlocked,
                 onSetSeerrUser: onSetSeerrUser,
                 onSetUpAnotherDevice: onSetUpAnotherDevice,
                 syncEnabled: syncEnabled,

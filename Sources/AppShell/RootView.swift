@@ -308,6 +308,8 @@ public struct RootView: View {
                         onSelectPlexHomeUser: { appState.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
                         onSetProfileLock: { appState.setLock($1, forProfile: $0) },
                         onSetKidsProfile: { appState.setKidsProfile($1, forProfile: $0) },
+                        isProfileUnlocked: { appState.profileFlow.isUnlockedThisRun($0) },
+                        onProfileUnlocked: { appState.profileFlow.noteUnlocked($0) },
                         onSetSeerrUser: { appState.setSeerrUserForProfile(profileID: $0, user: $1) },
                         metadataSettings: appState.makeMetadataSettingsDependencies(),
                         identitySources: appState.identityIndex.identitySourcesProvider,

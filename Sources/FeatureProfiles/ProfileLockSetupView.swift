@@ -42,6 +42,8 @@ public struct ProfileLockSetupView: View {
     /// between the two entries and never persisted.
     @State private var firstEntry: String?
     @State private var errorMessage: String?
+    /// A confirmed PIN waiting on the "share it with Plex?" question.
+    @State private var pinAwaitingPlexChoice: String?
 
     private var isConfirming: Bool { firstEntry != nil }
 
@@ -57,6 +59,37 @@ public struct ProfileLockSetupView: View {
         ) {
             ProfileAvatarView(profile: profile, size: PINLayout.badgeSize)
         }
+        // Reusing the PIN for Plex has to be ASKED, not assumed. Saying yes means
+        // Plozz forwards these digits to plex.tv when this profile plays as that
+        // Home user — a third party the person didn't necessarily have in mind
+        // when they chose a PIN for Plozz. Only shown when the profile actually
+        // plays as a PIN-protected Plex user.
+        .confirmationDialog(
+            Text(ProfileLockCopy.usePlexPIN),
+            isPresented: Binding(
+                get: { pinAwaitingPlexChoice != nil },
+                set: { if !$0 { pinAwaitingPlexChoice = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: ProfileLockCopy.usePlexPINYes)) { finish(sharesWithPlex: true) }
+            Button(String(localized: ProfileLockCopy.usePlexPINNo)) { finish(sharesWithPlex: false) }
+        } message: {
+            Text(ProfileLockCopy.usePlexPINDetail)
+        }
+    }
+
+    /// Builds the lock from the confirmed PIN once the Plex question is settled.
+    private func finish(sharesWithPlex: Bool) {
+        guard let pin = pinAwaitingPlexChoice,
+              let lock = ProfileLock.make(pin: pin, matchesPlexPIN: sharesWithPlex) else {
+            pinAwaitingPlexChoice = nil
+            errorMessage = String(localized: ProfileLockCopy.mismatch)
+            firstEntry = nil
+            return
+        }
+        pinAwaitingPlexChoice = nil
+        onComplete(lock)
     }
 
     private func submit(_ pin: String) {
@@ -72,12 +105,16 @@ public struct ProfileLockSetupView: View {
             firstEntry = nil
             return
         }
-        guard let lock = ProfileLock.make(pin: first, matchesPlexPIN: offersPlexPINReuse) else {
-            errorMessage = String(localized: ProfileLockCopy.mismatch)
-            firstEntry = nil
+        firstEntry = nil
+        guard offersPlexPINReuse else {
+            guard let lock = ProfileLock.make(pin: pin, matchesPlexPIN: false) else {
+                errorMessage = String(localized: ProfileLockCopy.mismatch)
+                return
+            }
+            onComplete(lock)
             return
         }
-        onComplete(lock)
+        pinAwaitingPlexChoice = pin
     }
 }
 #endif

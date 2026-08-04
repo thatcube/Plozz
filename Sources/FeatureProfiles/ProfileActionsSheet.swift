@@ -22,6 +22,8 @@ public struct ProfileActionsSheet: View {
     private let onSetLock: (ProfileLock?) -> Void
     private let onSetKids: (Bool) -> Void
     private let onDelete: (() -> Void)?
+    private let isUnlocked: Bool
+    private let onUnlock: () -> Void
     private let onClose: () -> Void
 
     public init(
@@ -33,6 +35,8 @@ public struct ProfileActionsSheet: View {
         onSetLock: @escaping (ProfileLock?) -> Void,
         onSetKids: @escaping (Bool) -> Void,
         onDelete: (() -> Void)? = nil,
+        isUnlocked: Bool = true,
+        onUnlock: @escaping () -> Void = {},
         onClose: @escaping () -> Void
     ) {
         self.profile = profile
@@ -43,6 +47,8 @@ public struct ProfileActionsSheet: View {
         self.onSetLock = onSetLock
         self.onSetKids = onSetKids
         self.onDelete = onDelete
+        self.isUnlocked = isUnlocked
+        self.onUnlock = onUnlock
         self.onClose = onClose
     }
 
@@ -63,7 +69,9 @@ public struct ProfileActionsSheet: View {
                         onEditAppearance: onEditAppearance,
                         onSetLock: onSetLock,
                         onSetKids: onSetKids,
-                        onDelete: onDelete
+                        onDelete: onDelete,
+                        isUnlocked: isUnlocked,
+                        onUnlock: onUnlock
                     )
                 }
                 .frame(maxWidth: 1000, alignment: .leading)

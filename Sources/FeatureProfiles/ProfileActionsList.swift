@@ -37,6 +37,11 @@ public struct ProfileActionsList: View {
     private let onSetKids: (Bool) -> Void
     /// `nil` for a profile that can't be deleted (the household default).
     private let onDelete: (() -> Void)?
+    /// Whether this profile's PIN has already been proved during this app run.
+    private let isUnlocked: Bool
+    /// Called when the PIN is entered correctly here, so the host can remember it
+    /// for the rest of the run.
+    private let onUnlock: () -> Void
 
     public init(
         profile: Profile,
@@ -46,7 +51,9 @@ public struct ProfileActionsList: View {
         onEditAppearance: @escaping () -> Void,
         onSetLock: @escaping (ProfileLock?) -> Void,
         onSetKids: @escaping (Bool) -> Void,
-        onDelete: (() -> Void)? = nil
+        onDelete: (() -> Void)? = nil,
+        isUnlocked: Bool = true,
+        onUnlock: @escaping () -> Void = {}
     ) {
         self.profile = profile
         self.syncEnabled = syncEnabled
@@ -56,15 +63,73 @@ public struct ProfileActionsList: View {
         self.onSetLock = onSetLock
         self.onSetKids = onSetKids
         self.onDelete = onDelete
+        self.isUnlocked = isUnlocked
+        self.onUnlock = onUnlock
     }
 
     @Environment(\.themePalette) private var palette
+    @State private var unlocking = false
+    @State private var unlockError: String?
     @State private var settingPIN = false
     @State private var showingLockOptions = false
     @State private var showingKidsOptions = false
     @State private var confirmDelete = false
 
+    /// A locked profile is sealed until its own PIN is entered — every route in,
+    /// not just the picker. Editing includes *removing the lock*, so anyone who
+    /// can't open the profile must not be able to unlock it from the outside; a
+    /// gate on one entry point would just move the hole. Kids Profiles are no
+    /// exception: they can carry a PIN too.
+    private var isSealed: Bool { profile.isLocked && !isUnlocked }
+
     public var body: some View {
+        Group {
+            if isSealed {
+                sealedContent
+            } else {
+                actions
+            }
+        }
+        .fullScreenCover(isPresented: $unlocking) {
+            PINEntryScaffold(
+                title: ProfileLockCopy.unlockToEdit,
+                name: profile.name,
+                errorMessage: unlockError,
+                onSubmit: submitUnlock,
+                onCancel: { unlocking = false; unlockError = nil }
+            ) {
+                ProfileAvatarView(profile: profile, size: PINLayout.badgeSize)
+            }
+        }
+    }
+
+    /// What a locked profile shows instead of its settings: one way in.
+    @ViewBuilder
+    private var sealedContent: some View {
+        VStack(spacing: 14) {
+            actionRow(
+                icon: "lock.fill",
+                title: ProfileLockCopy.unlockToEdit,
+                subtitle: ProfileLockCopy.unlockToEditDetail
+            ) {
+                unlockError = nil
+                unlocking = true
+            }
+        }
+    }
+
+    private func submitUnlock(_ pin: String) {
+        guard let lock = profile.lock, lock.matches(pin: pin) else {
+            unlockError = String(localized: "Incorrect PIN. Try again.")
+            return
+        }
+        unlockError = nil
+        unlocking = false
+        onUnlock()
+    }
+
+    @ViewBuilder
+    private var actions: some View {
         VStack(spacing: 14) {
             actionRow(
                 icon: "paintpalette",
@@ -76,6 +141,11 @@ public struct ProfileActionsList: View {
             actionRow(
                 icon: profile.isLocked ? "lock.fill" : "lock.open",
                 title: ProfileLockCopy.title,
+                // A profile bound to a PIN-protected Plex user already asks for a
+                // code, so a bare "Off" here reads as a bug. Say which lock is
+                // which instead: Plex guards playing AS that user, a Profile Lock
+                // guards the whole profile.
+                subtitle: (!profile.isLocked && offersPlexPINReuse) ? ProfileLockCopy.plexAlreadyAsks : nil,
                 value: profile.isLocked ? ProfileLockCopy.on : ProfileLockCopy.off
             ) {
                 // Straight to the thing. No summary page in between.

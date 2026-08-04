@@ -73,6 +73,18 @@ public protocol UniversalWatchlistHost: AnyObject {
     /// idempotent and cheap when already scoped — this is called on every
     /// prepare.
     func ensureTrackersScopedToActiveProfile() async
+
+    /// Whether the ACTIVE profile is locked and nobody has entered its PIN this
+    /// run.
+    ///
+    /// Asked here, in the shared path, rather than trusted to each shell's
+    /// control flow. A profile becomes active through many routes — deleting the
+    /// one before it, a sync arriving, a credential refresh — and every one of
+    /// them ends up invalidating accounts, which re-enters this runtime on its
+    /// own Task. Guarding the routes individually means a route added later
+    /// silently isn't guarded, and the two shells already disagreed about which
+    /// ones were. Reading it once, here, is what makes the rule hold everywhere.
+    var activeProfileAwaitsUnlock: Bool { get }
 }
 
 public extension UniversalWatchlistHost {
@@ -88,6 +100,17 @@ public extension UniversalWatchlistHost {
             try await seedLegacyUniversalWatchlist()
             // Before anything reads a destination.
             await ensureTrackersScopedToActiveProfile()
+            // Every step above suspends, and the active profile can change across
+            // any of them. Building the reconciler for a profile that is no
+            // longer active gives it THAT profile's destinations and credentials,
+            // and the import below would then write one profile's watchlist into
+            // another's store — the guard inside the import only notices changes
+            // that happen after it starts, so it can't catch this. The switch
+            // that superseded us runs its own prepare; dropping here is correct.
+            guard profiles.activeProfileID == profileID else {
+                PlozzLog.app.info("Watchlist prepare superseded — profile changed during hydrate")
+                return
+            }
             try await makeUniversalWatchlistReconciler(profileID: profileID)
             if universalWatchlistShouldResumeAuthentication {
                 universalWatchlistShouldResumeAuthentication = false
@@ -100,8 +123,22 @@ public extension UniversalWatchlistHost {
             // the household, so importing now would hand it the household's
             // aggregate watchlist. Its own state is hydrated above; the import
             // waits until it knows which servers this profile actually uses.
+            // Re-checked immediately before the import for the same reason: the
+            // reconciler build and the auth resume both suspend.
+            guard profiles.activeProfileID == profileID else {
+                PlozzLog.app.info("Watchlist import superseded — profile changed before import")
+                return
+            }
             let profile = profiles.activeProfile
-            if profile.needsSetup {
+            if activeProfileAwaitsUnlock {
+                // Nobody has proved this profile's PIN. Its own watchlist is
+                // still its own, so this isn't a leak between profiles — but
+                // fetching and reconciling it is work done on behalf of someone
+                // who hasn't shown they're allowed to be here, and it lands
+                // behind a lock screen where it can't be seen anyway. The picker
+                // is in front; this resumes when a profile is actually chosen.
+                PlozzLog.app.info("Watchlist import deferred — profile locked")
+            } else if profile.needsSetup {
                 PlozzLog.app.info("Watchlist import deferred — profile awaiting setup")
             } else if profile.needsIdentityAnswer {
                 // A server was switched on and nobody has said who this profile

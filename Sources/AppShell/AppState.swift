@@ -2058,6 +2058,14 @@ public final class AppState {
             mediaShare.accountService.invalidate(shareAccountKey: shareAccountKey)
         }
         plexHomeUsers.forgetAccount(id)
+        // The "who are you here?" question is persisted and gates the watchlist
+        // import. With the account gone nothing can ask it, so an entry left
+        // behind would defer every future import forever. See
+        // `withdrawIdentityQuestions(forAccount:)`.
+        if profilesModel.withdrawIdentityQuestions(forAccount: id) {
+            universalWatchlistRetryScheduler = nil
+            Task { await prepareUniversalWatchlist() }
+        }
         apply(.accountsChanged(accountsProviders.accounts))
     }
 

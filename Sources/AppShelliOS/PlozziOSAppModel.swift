@@ -1863,6 +1863,12 @@ final class PlozziOSAppModel {
         do {
             try accountStore.remove(id: id)
             plexHomeUsers.forgetAccount(id)
+            // The "who are you here?" question is persisted and gates the
+            // watchlist import. With the account gone nothing can ask it, so an
+            // entry left behind would defer every future import forever. Cleared
+            // BEFORE the reload, which is what re-triggers preparation. See
+            // `withdrawIdentityQuestions(forAccount:)`.
+            profiles.withdrawIdentityQuestions(forAccount: id)
             reloadAccountsAndCrashContext()
             identityIndex.reset()
             identityIndex.warmIdentityIndex()

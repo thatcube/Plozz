@@ -65,3 +65,65 @@ extension Profile {
         return true
     }
 }
+
+@MainActor
+public extension ProfilesModel {
+    /// Applies a synced membership set, asking who the profile watches as on any
+    /// Plex server the sync just switched ON.
+    ///
+    /// Membership arriving over sync enables servers exactly as the local toggle
+    /// does, and has exactly the same consequence — with no Home user bound, the
+    /// watchlist import reads that server as the account OWNER. Guarding only the
+    /// local toggle left the sync path as a second, quieter door into the same
+    /// leak: a profile set up correctly on one device could inherit the owner's
+    /// watchlist on another simply by syncing.
+    ///
+    /// - Parameter localPlexAccountIDs: Plex accounts signed in on THIS device.
+    ///   Synced membership carries ids this device may not have; there's nothing
+    ///   to ask about a server that isn't here.
+    func applySyncedMembership(
+        _ accountIDs: [String],
+        forProfile profileID: String,
+        localPlexAccountIDs: Set<String>
+    ) {
+        // The EXPLICIT selection: "never chose" means the profile defaults to
+        // every server, and treating that as a set of enabled ids would report
+        // nothing as newly enabled.
+        let previous = Set(storedActiveAccountIDs(for: profileID) ?? [])
+        setActiveAccountIDs(accountIDs, for: profileID)
+        let newlyEnabled = Set(accountIDs).subtracting(previous).intersection(localPlexAccountIDs)
+        guard !newlyEnabled.isEmpty,
+              var profile = profiles.first(where: { $0.id == profileID })
+        else { return }
+        var changed = false
+        for accountID in newlyEnabled where ProfileServerIdentityPolicy.shouldAsk(
+            provider: .plex,
+            hasExistingBinding: profile.homeUserBinding(forPlexAccount: accountID) != nil
+        ) {
+            changed = profile.noteAccountAwaitingIdentity(accountID) || changed
+        }
+        if changed { update(profile) }
+    }
+
+    /// Withdraws an account's pending identity question from EVERY profile.
+    ///
+    /// Call when the account is removed from the device. The question is
+    /// persisted and gates the watchlist import, and once the account is gone
+    /// there's no screen that can ask it — so leaving the entry behind defers
+    /// every future import forever, silently, with nothing the user can do about
+    /// it. A question that can no longer be answered has to be withdrawn.
+    ///
+    /// - Returns: `true` if the ACTIVE profile changed, so the caller knows to
+    ///   release the import it was holding.
+    @discardableResult
+    func withdrawIdentityQuestions(forAccount accountID: String) -> Bool {
+        var activeChanged = false
+        for profile in profiles {
+            var updated = profile
+            guard updated.resolveAccountAwaitingIdentity(accountID) else { continue }
+            update(updated)
+            if profile.id == activeProfileID { activeChanged = true }
+        }
+        return activeChanged
+    }
+}

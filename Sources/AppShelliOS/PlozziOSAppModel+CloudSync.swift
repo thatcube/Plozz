@@ -285,7 +285,22 @@ extension PlozziOSAppModel {
         // Membership: store the EXACT synced id set (no filter) so capture==apply;
         // consumers intersect with signed-in accounts at the point of use.
         if !membershipSet.isEmpty || !membershipClear.isEmpty {
-            for (pid, ids) in membershipSet { profiles.setActiveAccountIDs(ids, for: pid) }
+            // Applied through the shared path so a server the SYNC switches on
+            // asks who you are there, exactly as the local toggle does — see
+            // `applySyncedMembership`. Without it a profile set up correctly on
+            // one device inherits the account owner's watchlist on another.
+            let localPlexAccountIDs = Set(
+                accountsProviders.accounts
+                    .filter { $0.server.provider == .plex }
+                    .map(\.id)
+            )
+            for (pid, ids) in membershipSet {
+                profiles.applySyncedMembership(
+                    ids,
+                    forProfile: pid,
+                    localPlexAccountIDs: localPlexAccountIDs
+                )
+            }
             for pid in membershipClear { profiles.clearActiveAccountIDs(for: pid) }
         }
         if descriptorsTouched {
@@ -294,6 +309,17 @@ extension PlozziOSAppModel {
             // elsewhere connects silently instead of prompting for a manual sign-in.
             autoConnectFromSyncedCredentials()
             refreshPendingSyncedServers()
+        }
+
+        // A remote change can make a DIFFERENT profile active — a peer deleting
+        // the one we were on falls back to `profiles.first` — and it can also
+        // deliver a lock onto the profile we're already sitting in. Check the
+        // MANDATORY gate before re-scoping, as tvOS does: `selectProfile` below
+        // only raises a cancelable prompt, and cancelling it would reveal the
+        // locked profile that's already active behind it.
+        if enforceActiveProfileLock() {
+            PlozzLog.sync.info("CloudSync: applied \(changes.count) exact change(s) — active profile locked")
+            return
         }
 
         // Rebuild the active profile's settings model so applied preferences take

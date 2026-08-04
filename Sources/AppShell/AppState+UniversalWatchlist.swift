@@ -9,6 +9,9 @@ import Foundation
 /// reconciliation — lives once in `AppRuntime`; this file only says where the tvOS
 /// shell keeps its pieces.
 extension AppState: UniversalWatchlistHost {
+    /// See `UniversalWatchlistHost.activeProfileAwaitsUnlock`.
+    public var activeProfileAwaitsUnlock: Bool { profileFlow.activeProfileAwaitsUnlock }
+
     static func universalWatchlistStorageDirectory() -> URL? {
         writableStateDirectory()?
             .appendingPathComponent("PlozzMediaState", isDirectory: true)

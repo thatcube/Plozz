@@ -118,6 +118,25 @@ public final class PlexHomeUsersModel {
     /// the other, leaving a previous identity's token readable.
     @ObservationIgnored
     public let plexDiscoverTokens = PlexDiscoverTokenBox()
+
+    /// Per-account identity generation, bumped whenever THIS account's resolved
+    /// Plex identity changes.
+    ///
+    /// Beside the global `plexIdentityGeneration` (which the watchlist reconciler
+    /// keys on, and which must move for any identity change) because supersession
+    /// is an account-level question: two in-flight switches on DIFFERENT accounts
+    /// are both current, and arbitrating them with one shared counter rejects
+    /// whichever finishes second, stranding that account on the owner's token.
+    @ObservationIgnored
+    private var plexAccountIdentityGenerations: [String: Int] = [:]
+
+    /// Records that `accountID`'s identity changed: bumps its own generation and
+    /// the global one together, so neither can be updated without the other.
+    private func bumpIdentityGeneration(for accountID: String, site: String) {
+        plexAccountIdentityGenerations[accountID, default: 0] += 1
+        plexIdentityGeneration += 1
+        PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=\(site) acct=\(accountID)")
+    }
     /// Runtime revision for the effective Plex Home-user credential. Owner
     /// credentials continue to use the account's persisted revision.
     @ObservationIgnored
@@ -342,8 +361,7 @@ public final class PlexHomeUsersModel {
                         setPlexTokenOverride(nil, for: account.id)
                         plexResolvedHomeUser[account.id] = nil
                         accountsProviders.registry.invalidate(accountID: account.id)
-                        plexIdentityGeneration += 1
-                        PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.staleOverride acct=\(account.id)")
+                        bumpIdentityGeneration(for: account.id, site: "ensure.staleOverride")
                     }
                     if pinTarget == nil {
                         pinTarget = (account.id, binding)
@@ -371,6 +389,19 @@ public final class PlexHomeUsersModel {
                         plexResolvedHomeUser[account.id] = binding.homeUserID
                         // Restore the Discover credential in the same breath, or
                         // the watchlist is left without one on every warm start.
+                        //
+                        // Cleared FIRST when the identity changed, unconditionally.
+                        // A cache entry can hold the server token without the
+                        // Discover half — it predates that half being cached, or
+                        // the app died between the two writes — and simply not
+                        // overwriting left the PREVIOUS user's Discover token
+                        // live under the new user's server token. The watchlist
+                        // then found a credential, passed the fail-closed check,
+                        // and read the wrong person's list. No credential is the
+                        // correct state here: that path refuses to act.
+                        if identityChanged {
+                            plexDiscoverTokens.setToken(nil, for: account.id)
+                        }
                         if let cachedDiscover = plexHomeUserTokenCache.discoverToken(
                             account: account.id,
                             homeUser: binding.homeUserID
@@ -379,7 +410,7 @@ public final class PlexHomeUsersModel {
                         }
                         accountsProviders.registry.invalidate(accountID: account.id)
                         if identityChanged {
-                            plexIdentityGeneration += 1
+                            bumpIdentityGeneration(for: account.id, site: "ensure.cachedOverride")
                         }
                         PlozzLog.boot("ensure.cachedOverride acct=\(account.id) home=\(binding.homeUserID) — instant paint")
                     } else {
@@ -397,8 +428,7 @@ public final class PlexHomeUsersModel {
                             setPlexTokenOverride(nil, for: account.id)
                             plexResolvedHomeUser[account.id] = nil
                             accountsProviders.registry.invalidate(accountID: account.id)
-                            plexIdentityGeneration += 1
-                            PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.missStaleOverride acct=\(account.id)")
+                            bumpIdentityGeneration(for: account.id, site: "ensure.missStaleOverride")
                         }
                         PlozzLog.boot("ensure.unprotectedSwitch acct=\(account.id) home=\(binding.homeUserID) — cache miss, async")
                     }
@@ -410,7 +440,13 @@ public final class PlexHomeUsersModel {
                     // stale refresh — one whose profile was switched out from under it
                     // during the network window — drops its confirming write instead
                     // of re-installing the OLD Home-user's token under the NEW profile.
-                    let refreshGeneration = plexIdentityGeneration
+                    // Per-ACCOUNT, not the global counter: two valid cache-miss
+                    // switches on different accounts capture the same global
+                    // generation, and whichever lands first bumps it — rejecting
+                    // the other as "stale" though its own binding is still
+                    // current, leaving that account stuck on the owner token.
+                    // Supersession is an account-level question.
+                    let refreshGeneration = plexAccountIdentityGenerations[account.id, default: 0]
                     Task { await performPlexSwitch(accountID: account.id, homeUserID: binding.homeUserID, pin: nil, expectedGeneration: refreshGeneration) }
                 }
             } else {
@@ -418,8 +454,7 @@ public final class PlexHomeUsersModel {
                     setPlexTokenOverride(nil, for: account.id)
                     plexResolvedHomeUser[account.id] = nil
                     accountsProviders.registry.invalidate(accountID: account.id)
-                    plexIdentityGeneration += 1
-                    PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.dropOverride acct=\(account.id)")
+                    bumpIdentityGeneration(for: account.id, site: "ensure.dropOverride")
                 }
             }
         }
@@ -514,6 +549,7 @@ public final class PlexHomeUsersModel {
             plexResolvedHomeUser.removeAll()
             for accountID in accountIDs {
                 accountsProviders.registry.invalidate(accountID: accountID)
+                plexAccountIdentityGenerations[accountID, default: 0] += 1
             }
             plexIdentityGeneration += 1
             PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=clearPlexOverrides")
@@ -588,8 +624,9 @@ public final class PlexHomeUsersModel {
                 PlozzLog.boot("performPlexSwitch superseded acct=\(accountID) home=\(homeUserID) live=\(liveBinding?.homeUserID ?? "owner")")
                 return
             }
-            if let expected = expectedGeneration, expected != plexIdentityGeneration {
-                PlozzLog.boot("performPlexSwitch stale refresh dropped acct=\(accountID) gen=\(expected) live=\(self.plexIdentityGeneration)")
+            let liveAccountGeneration = plexAccountIdentityGenerations[accountID, default: 0]
+            if let expected = expectedGeneration, expected != liveAccountGeneration {
+                PlozzLog.boot("performPlexSwitch stale refresh dropped acct=\(accountID) gen=\(expected) live=\(liveAccountGeneration)")
                 return
             }
             setPlexTokenOverride(resolvedToken, for: accountID)
@@ -619,8 +656,7 @@ public final class PlexHomeUsersModel {
             // must NOT rebuild, or it reintroduces the startup double-load.
             if previousToken != resolvedToken {
                 accountsProviders.registry.invalidate(accountID: accountID)
-                plexIdentityGeneration += 1
-                PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=performPlexSwitch acct=\(accountID) home=\(homeUserID)")
+                bumpIdentityGeneration(for: accountID, site: "performPlexSwitch")
             } else {
                 PlozzLog.boot("refresh unchanged — no genBump acct=\(accountID) home=\(homeUserID)")
             }
@@ -652,6 +688,7 @@ public final class PlexHomeUsersModel {
     public func resetAllForDebug() {
         plexTokenOverrides.removeAll()
         plexDiscoverTokens.removeAll()
+        plexAccountIdentityGenerations.removeAll()
         plexOverrideCredentialRevisions.removeAll()
         plexResolvedHomeUser.removeAll()
         plexHomeUserTokenCache.removeAll()

@@ -514,7 +514,22 @@ extension AppState {
         // for a not-yet-local profile (cross-batch ordering) — it's keyed by id and
         // re-read on capture once the profile lands (S5).
         if !membershipSet.isEmpty || !membershipClear.isEmpty {
-            for (pid, ids) in membershipSet { profilesModel.setActiveAccountIDs(ids, for: pid) }
+            // Applied through the shared path so a server the SYNC switches on
+            // asks who you are there, exactly as the local toggle does — see
+            // `applySyncedMembership`. Without it a profile set up correctly on
+            // one device inherits the account owner's watchlist on another.
+            let localPlexAccountIDs = Set(
+                accountsProviders.accounts
+                    .filter { $0.server.provider == .plex }
+                    .map(\.id)
+            )
+            for (pid, ids) in membershipSet {
+                profilesModel.applySyncedMembership(
+                    ids,
+                    forProfile: pid,
+                    localPlexAccountIDs: localPlexAccountIDs
+                )
+            }
             for pid in membershipClear { profilesModel.clearActiveAccountIDs(for: pid) }
         }
         // 4. Descriptors → pending "needs sign-in" servers.

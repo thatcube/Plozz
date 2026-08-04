@@ -98,9 +98,7 @@ public final class ProfileFlowModel {
     /// `switchProfile(to:)` gate with the picker sitting behind it. It also
     /// matches what people expect from "who's watching?" elsewhere.
     public func prepareLaunchPicker() {
-        let restoredProfileIsLocked = profilesModel.activeProfile.isLocked
-            && !unlockedProfileIDs.contains(profilesModel.activeProfile.id)
-        isChoosingProfile = restoredProfileIsLocked
+        isChoosingProfile = activeProfileAwaitsUnlock
             || (profilesModel.askProfileOnStartup && profilesModel.profiles.count > 1)
         isProfileSelectionCancelable = false
     }
@@ -237,6 +235,13 @@ public final class ProfileFlowModel {
 
     /// Whether `id` has already been proved this run, so a second gate (editing
     /// it from the picker) doesn't ask for the same PIN again.
+    /// Whether the ACTIVE profile is locked and unproven this run.
+    /// See `UniversalWatchlistHost.activeProfileAwaitsUnlock`.
+    public var activeProfileAwaitsUnlock: Bool {
+        let active = profilesModel.activeProfile
+        return active.isLocked && !unlockedProfileIDs.contains(active.id)
+    }
+
     public func isUnlockedThisRun(_ id: String) -> Bool {
         unlockedProfileIDs.contains(id)
     }

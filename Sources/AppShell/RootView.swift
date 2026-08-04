@@ -513,6 +513,11 @@ public struct RootView: View {
         .fullScreenCover(item: $newProfileLockTarget) { profile in
             ProfileLockSetupView(
                 profile: profile,
+                // Matches both the iPhone create-time offer and tvOS's own
+                // Settings path. Omitting it here meant a profile that plays as a
+                // PIN-protected Plex user was offered "use the same PIN" when
+                // created on iPhone but not on the Apple TV.
+                offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
                 syncEnabled: SyncSetupFeatureFlag().isEnabled,
                 onComplete: { lock in
                     appState.setLock(lock, forProfile: profile.id)

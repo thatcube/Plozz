@@ -57,6 +57,8 @@ public struct RootView: View {
     @State private var showSyncReceiveFromSettings = false
     /// A just-set-up profile whose PIN is being chosen.
     @State private var newProfileLockTarget: Profile?
+    /// Library discovery for the setup step's cover.
+    @State private var setupLibraries = ProfileSetupLibrariesLoader()
     @State private var showSyncSend = false
     /// Home's view model, owned here because this is the highest view whose
     /// identity is genuinely stable for the signed-in session. Kept out of the
@@ -458,9 +460,10 @@ public struct RootView: View {
             get: { appState.profileFlow.pendingSetupProfile },
             set: { if $0 == nil { appState.profileFlow.completeSetup(for: appState.profilesModel.activeProfileID) } }
         )) { profile in
-            ProfileSetupView(appState: appState) {
+            ProfileSetupLibrariesView(scope: appState.profileLibrariesScope(librariesStore: setupLibraries)) {
                 appState.completeProfileSetup(for: profile.id)
             }
+            .task { await setupLibraries.reload(appState: appState) }
         }
         // Then offer a lock on it.
         .alert(

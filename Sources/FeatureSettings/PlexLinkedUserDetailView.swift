@@ -8,18 +8,18 @@ import CoreUI
 /// Lists the Plex Home users reachable from each signed-in Plex account, with
 /// the user's real Plex avatar, so the user can change which Plex Home user
 /// the active profile plays as. Tapping a row writes the mapping to the
-/// active profile via `context.onSelectPlexHomeUser`; PIN-protected users
+/// active profile via `scope.onSelectPlexHomeUser`; PIN-protected users
 /// trigger the PIN prompt at the next playback / profile re-apply via the
 /// AppState's pending-request flow, which is unchanged.
 struct PlexLinkedUserDetailView: View {
-    let context: SettingsContext
+    let scope: ProfileLibrariesScope
     let accountID: String
 
     @State private var users: [PlexHomeUser] = []
     @State private var loading = true
 
     private var plexAccounts: [Account] {
-        context.accounts.filter { $0.server.provider == .plex }
+        scope.accounts.filter { $0.server.provider == .plex }
     }
 
     private var account: Account? {
@@ -82,14 +82,14 @@ struct PlexLinkedUserDetailView: View {
         .task(id: account?.id) {
             guard let account else { return }
             loading = true
-            users = await context.plexHomeUsersFetcher(account.id)
+            users = await scope.plexHomeUsersFetcher(account.id)
             loading = false
         }
     }
 
     private var isOwnerSelected: Bool {
         guard let account else { return true }
-        return context.activeProfile.homeUserBinding(forPlexAccount: account.id) == nil
+        return scope.activeProfile.homeUserBinding(forPlexAccount: account.id) == nil
     }
 
     /// The single "play as the account owner" row. Uses the admin Home
@@ -99,7 +99,7 @@ struct PlexLinkedUserDetailView: View {
     /// before: no Home-user switch, admin token, no PIN).
     private func ownerRow(admin: PlexHomeUser?, account: Account) -> some View {
         Button {
-            context.onSelectPlexHomeUser(account.id, nil)
+            scope.onSelectPlexHomeUser(account.id, nil)
         } label: {
             if let admin {
                 // Same shared row as the managed users, flagged as the owner.
@@ -145,9 +145,9 @@ struct PlexLinkedUserDetailView: View {
     }
 
     private func userRow(_ user: PlexHomeUser, account: Account) -> some View {
-        let isSelected = context.activeProfile.homeUserBinding(forPlexAccount: account.id)?.homeUserID == user.id
+        let isSelected = scope.activeProfile.homeUserBinding(forPlexAccount: account.id)?.homeUserID == user.id
         return Button {
-            context.onSelectPlexHomeUser(account.id, user)
+            scope.onSelectPlexHomeUser(account.id, user)
         } label: {
             PlexHomeUserRow(user: user, accessory: isSelected ? .selected : .none)
         }

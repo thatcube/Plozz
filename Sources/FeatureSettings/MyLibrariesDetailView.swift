@@ -20,8 +20,10 @@ import CoreUI
 /// action that touches the household — it adds a brand-new server for everyone.
 ///
 /// (The type + `.myLibraries` route keep their earlier names.)
-struct MyLibrariesDetailView: View {
-    let context: SettingsContext
+public struct MyLibrariesDetailView: View {
+    public let scope: ProfileLibrariesScope
+
+    public init(scope: ProfileLibrariesScope) { self.scope = scope }
 
     /// Bumped on every server/identity mutation so the pushed view re-renders
     /// immediately and re-reads live state through `context`'s closures. This is
@@ -32,10 +34,10 @@ struct MyLibrariesDetailView: View {
     /// a local revision counter driving live re-reads instead.
     @State private var revision = 0
 
-    private var allGroups: [ServerAccountGroup] { serverGroups(from: context.accounts) }
+    private var allGroups: [ServerAccountGroup] { serverGroups(from: scope.accounts) }
 
     private func isWatching(_ group: ServerAccountGroup) -> Bool {
-        group.accounts.contains { context.isAccountIncludedInActiveProfile($0.id) }
+        group.accounts.contains { scope.isAccountIncludedInActiveProfile($0.id) }
     }
 
     /// The server's master on/off for this profile: on ⇒ watch it (include a
@@ -47,7 +49,7 @@ struct MyLibrariesDetailView: View {
         was ? stopWatching(group) : startWatching(group)
     }
 
-    var body: some View {
+    public var body: some View {
         ScrollViewReader { scrollProxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
@@ -71,7 +73,7 @@ struct MyLibrariesDetailView: View {
             }
             .scrollClipDisabled()
         }
-        .task { await context.reloadLibraries() }
+        .task { await scope.reloadLibraries() }
     }
 
     // MARK: - Empty state
@@ -219,7 +221,7 @@ struct MyLibrariesDetailView: View {
     /// Plex identity = a Home user, chosen on a drill-in screen (distinct from
     /// the single shared sign-in).
     private func plexIdentityLink(_ account: Account) -> some View {
-        let binding = context.activeProfile.homeUserBinding(forPlexAccount: account.id)
+        let binding = scope.activeProfile.homeUserBinding(forPlexAccount: account.id)
             ?? ownerBinding(for: account)
         return NavigationLink(value: SettingsRoute.plexUser(accountID: account.id)) {
             identityRow(
@@ -249,7 +251,7 @@ struct MyLibrariesDetailView: View {
                     identityRow(
                         title: account.userName,
                         avatar: { AccountAvatar(name: account.userName, imageURL: resolvedAvatarURL(for: account), size: 34) },
-                        accessory: .selected(context.isAccountIncludedInActiveProfile(account.id))
+                        accessory: .selected(scope.isAccountIncludedInActiveProfile(account.id))
                     )
                 }
                 .buttonStyle(SettingsFocusButtonStyle())
@@ -259,14 +261,14 @@ struct MyLibrariesDetailView: View {
 
     private func setJellyfinIdentity(_ chosen: Account, in group: ServerAccountGroup) {
         for account in group.accounts {
-            context.onSetAccountIncluded(account.id, account.id == chosen.id)
+            scope.onSetAccountIncluded(account.id, account.id == chosen.id)
         }
         revision += 1
     }
 
     private func stopWatching(_ group: ServerAccountGroup) {
         for account in group.accounts {
-            context.onSetAccountIncluded(account.id, false)
+            scope.onSetAccountIncluded(account.id, false)
         }
         revision += 1
     }
@@ -279,7 +281,7 @@ struct MyLibrariesDetailView: View {
     /// make the device scope obvious next to the per-profile toggles above.
     private var addServerSection: some View {
         SettingsPanel {
-            Button(action: context.onAddAccount) {
+            Button(action: scope.onAddAccount) {
                 Label("Add Server to This Apple TV", systemImage: "plus.circle")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 14)
@@ -295,7 +297,7 @@ struct MyLibrariesDetailView: View {
         // "Watching as" once the server appears above.
         guard let first = group.accounts.first else { return }
         for account in group.accounts {
-            context.onSetAccountIncluded(account.id, account.id == first.id)
+            scope.onSetAccountIncluded(account.id, account.id == first.id)
         }
         revision += 1
     }
@@ -304,7 +306,7 @@ struct MyLibrariesDetailView: View {
 
     @ViewBuilder
     private func librarySection(for group: ServerAccountGroup) -> some View {
-        switch context.discoveredLibraries {
+        switch scope.discoveredLibraries {
         case .idle, .loading:
             HStack(spacing: 12) {
                 ProgressView()
@@ -316,7 +318,7 @@ struct MyLibrariesDetailView: View {
             HStack {
                 Text("Couldn't load libraries.").font(.footnote).plozzForeground(.secondary)
                 Spacer()
-                Button { Task { await context.reloadLibraries() } } label: {
+                Button { Task { await scope.reloadLibraries() } } label: {
                     Label("Retry", systemImage: "arrow.clockwise")
                 }
             }
@@ -339,9 +341,9 @@ struct MyLibrariesDetailView: View {
                     title: { $0.library.displayName },
                     bordered: false,
                     flushLeading: false,
-                    isChecked: { context.homeVisibility.isEnabled($0.key) },
+                    isChecked: { scope.homeVisibility.isEnabled($0.key) },
                     onToggle: { lib in
-                        context.homeVisibility.setEnabled(!context.homeVisibility.isEnabled(lib.key), for: lib.key)
+                        scope.homeVisibility.setEnabled(!scope.homeVisibility.isEnabled(lib.key), for: lib.key)
                     }
                 )
             }
@@ -357,7 +359,7 @@ struct MyLibrariesDetailView: View {
 
     private func isRefreshingLibraries(for group: ServerAccountGroup) -> Bool {
         group.accounts.contains {
-            context.refreshingLibraryAccountIDs.contains($0.id)
+            scope.refreshingLibraryAccountIDs.contains($0.id)
         }
     }
 
@@ -367,7 +369,7 @@ struct MyLibrariesDetailView: View {
     private func isUnreachable(_ group: ServerAccountGroup) -> Bool {
         let ids = group.accounts.map(\.id)
         return !ids.isEmpty && ids.allSatisfy {
-            context.unreachableLibraryAccountIDs.contains($0)
+            scope.unreachableLibraryAccountIDs.contains($0)
         }
     }
 
@@ -385,7 +387,7 @@ struct MyLibrariesDetailView: View {
                 .font(.footnote)
                 .plozzForeground(.secondary)
                 Spacer()
-                Button { Task { await context.reloadLibraries() } } label: {
+                Button { Task { await scope.reloadLibraries() } } label: {
                     Label("Retry", systemImage: "arrow.clockwise")
                 }
             }

@@ -895,7 +895,7 @@ public struct SettingsView: View {
         case let .profileSettings(profileID):
             ProfileSettingsDetailView(context: context, profileID: profileID, syncEnabled: syncEnabled)
         case .myLibraries:
-            MyLibrariesDetailView(context: context)
+            MyLibrariesDetailView(scope: context.librariesScope)
         case .appearance:
             AppearanceDetailView(theme: theme, nightShift: nightShift, spoilers: spoilers)
         case .customizeHome:
@@ -956,7 +956,7 @@ public struct SettingsView: View {
                 canSendDiagnostics: crashReportingConfigured && crashReporting.settings.isEnabled
             )
         case let .plexUser(accountID):
-            PlexLinkedUserDetailView(context: context, accountID: accountID)
+            PlexLinkedUserDetailView(scope: context.librariesScope, accountID: accountID)
         case let .server(key):
             ServerDetailView(context: context, serverKey: key)
         }

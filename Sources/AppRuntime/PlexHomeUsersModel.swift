@@ -360,6 +360,15 @@ public final class PlexHomeUsersModel {
                             || plexResolvedHomeUser[account.id] != binding.homeUserID
                         setPlexTokenOverride(cached, for: account.id)
                         plexResolvedHomeUser[account.id] = binding.homeUserID
+                        // Restore the Discover credential in the same breath, or
+                        // the watchlist is left without one on every warm start.
+                        if let cachedDiscover = plexHomeUserTokenCache.discoverToken(
+                            account: account.id,
+                            homeUser: binding.homeUserID
+                        ) {
+                            plexDiscoverTokenOverrides[account.id] = cachedDiscover
+                            plexDiscoverTokens.setToken(cachedDiscover, for: account.id)
+                        }
                         accountsProviders.registry.invalidate(accountID: account.id)
                         if identityChanged {
                             plexIdentityGeneration += 1
@@ -513,6 +522,12 @@ public final class PlexHomeUsersModel {
             // watchlist needs the account-level credential.
             plexDiscoverTokenOverrides[accountID] = token
             plexDiscoverTokens.setToken(token, for: accountID)
+            // Cached alongside the server token so a warm start — which restores
+            // the server token synchronously and skips this switch entirely — can
+            // restore the Discover credential too. Without it the watchlist has
+            // no identity to read as and correctly refuses to act, which reads as
+            // a permanently empty watchlist.
+            plexHomeUserTokenCache.storeDiscoverToken(token, account: accountID, homeUser: homeUserID)
             var resolvedToken = token
             var gotServerToken = false
             if let serverID = accountsProviders.accounts.first(where: { $0.id == accountID })?.server.id,

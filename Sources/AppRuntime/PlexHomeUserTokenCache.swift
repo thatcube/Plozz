@@ -45,6 +45,26 @@ public struct PlexHomeUserTokenCache {
         secureStore.string(for: entryKey(account: account, homeUser: homeUser))
     }
 
+    /// The cached ACCOUNT-LEVEL plex.tv token for an unprotected Home user.
+    ///
+    /// A second credential, not a duplicate: the one above authorizes the media
+    /// server, this one authorizes plex.tv Discover (the watchlist), and they are
+    /// not interchangeable. Cached alongside so the synchronous launch path can
+    /// restore the full identity — without it, a warm start restores the server
+    /// token, skips the network switch entirely, and the watchlist is left with
+    /// no Discover credential at all.
+    func discoverToken(account: String, homeUser: String) -> String? {
+        secureStore.string(for: discoverKey(account: account, homeUser: homeUser))
+    }
+
+    func storeDiscoverToken(_ token: String, account: String, homeUser: String) {
+        try? secureStore.setString(token, for: discoverKey(account: account, homeUser: homeUser))
+    }
+
+    private func discoverKey(account: String, homeUser: String) -> String {
+        entryKey(account: account, homeUser: homeUser) + "\u{1F}discover"
+    }
+
     /// Persists (upserts) a resolved token and records it in the index.
     func store(token: String, account: String, homeUser: String) {
         try? secureStore.setString(token, for: entryKey(account: account, homeUser: homeUser))
@@ -57,6 +77,7 @@ public struct PlexHomeUserTokenCache {
     /// PIN-protected, so its token must no longer sit at rest).
     func remove(account: String, homeUser: String) {
         try? secureStore.removeValue(for: entryKey(account: account, homeUser: homeUser))
+        try? secureStore.removeValue(for: discoverKey(account: account, homeUser: homeUser))
         var index = loadIndex()
         if var users = index[account] {
             users.remove(homeUser)
@@ -70,6 +91,7 @@ public struct PlexHomeUserTokenCache {
         var index = loadIndex()
         for homeUser in index[account] ?? [] {
             try? secureStore.removeValue(for: entryKey(account: account, homeUser: homeUser))
+            try? secureStore.removeValue(for: discoverKey(account: account, homeUser: homeUser))
         }
         index[account] = nil
         saveIndex(index)
@@ -81,6 +103,7 @@ public struct PlexHomeUserTokenCache {
         for (account, users) in index {
             for homeUser in users {
                 try? secureStore.removeValue(for: entryKey(account: account, homeUser: homeUser))
+                try? secureStore.removeValue(for: discoverKey(account: account, homeUser: homeUser))
             }
         }
         try? secureStore.removeValue(for: Self.indexKey)

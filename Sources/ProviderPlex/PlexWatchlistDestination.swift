@@ -66,7 +66,13 @@ public struct PlexWatchlistDestination: WatchlistDestination {
     }
 
     public func fetchEntries() async throws -> [WatchlistDestinationEntry] {
-        guard let discoverClient else { return [] }
+        guard let discoverClient else {
+            // THROW, don't return []. An empty success means "this list is
+            // genuinely empty", and reconciliation would take entries sourced
+            // from here as removed and delete them locally. "Couldn't read" is
+            // the truth, and the retry policy handles it.
+            throw WatchlistDestinationError.transient
+        }
         return try await provider.watchlist(using: discoverClient).compactMap { item in
             guard let guid = item.providerIDs["PlexGuid"],
                   let metadataID = PlexClient.watchlistMetadataID(fromGuid: guid),

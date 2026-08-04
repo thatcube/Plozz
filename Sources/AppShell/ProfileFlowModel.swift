@@ -531,8 +531,8 @@ public final class ProfileFlowModel {
     public var pendingIdentityAccountID: String? {
         profilesModel.actionableIdentityAccountIDs(
             forProfile: profilesModel.activeProfileID,
-            localPlexAccountIDs: ProfileServerIdentityPolicy
-                .localPlexAccountIDs(in: accountsProviders.accounts)
+            importAccountIDs: ProfileServerIdentityPolicy
+                .importPlexAccountIDs(in: accountsProviders.homeAccounts)
         ).first
     }
 
@@ -559,8 +559,8 @@ public final class ProfileFlowModel {
         // it can finally run, against the identity that was just chosen.
         if !profile.needsSetup, profilesModel.actionableIdentityAccountIDs(
             forProfile: profile.id,
-            localPlexAccountIDs: ProfileServerIdentityPolicy
-                .localPlexAccountIDs(in: accountsProviders.accounts)
+            importAccountIDs: ProfileServerIdentityPolicy
+                .importPlexAccountIDs(in: accountsProviders.homeAccounts)
         ).isEmpty {
             activateUniversalWatchlist()
         }

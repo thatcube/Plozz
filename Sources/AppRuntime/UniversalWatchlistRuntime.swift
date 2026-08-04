@@ -142,8 +142,8 @@ public extension UniversalWatchlistHost {
                 PlozzLog.app.info("Watchlist import deferred — profile awaiting setup")
             } else if !profiles.actionableIdentityAccountIDs(
                 forProfile: profileID,
-                localPlexAccountIDs: ProfileServerIdentityPolicy
-                    .localPlexAccountIDs(in: accountsProviders.accounts)
+                importAccountIDs: ProfileServerIdentityPolicy
+                    .importPlexAccountIDs(in: accountsProviders.homeAccounts)
             ).isEmpty {
                 // A server was switched on and nobody has said who this profile
                 // is there yet. Importing now reads it as the account OWNER and

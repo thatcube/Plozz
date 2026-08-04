@@ -991,8 +991,8 @@ final class PlozziOSAppModel {
     var pendingIdentityAccount: Account? {
         guard let id = profiles.actionableIdentityAccountIDs(
             forProfile: profiles.activeProfileID,
-            localPlexAccountIDs: ProfileServerIdentityPolicy
-                .localPlexAccountIDs(in: accountsProviders.accounts)
+            importAccountIDs: ProfileServerIdentityPolicy
+                .importPlexAccountIDs(in: accountsProviders.homeAccounts)
         ).first else { return nil }
         return accounts.first { $0.id == id }
     }
@@ -1027,8 +1027,8 @@ final class PlozziOSAppModel {
         // it can finally run, against the identity that was just chosen.
         guard !profile.needsSetup, profiles.actionableIdentityAccountIDs(
             forProfile: profile.id,
-            localPlexAccountIDs: ProfileServerIdentityPolicy
-                .localPlexAccountIDs(in: accountsProviders.accounts)
+            importAccountIDs: ProfileServerIdentityPolicy
+                .importPlexAccountIDs(in: accountsProviders.homeAccounts)
         ).isEmpty else { return }
         Task { @MainActor in
             await updateTrackersForActiveProfile()

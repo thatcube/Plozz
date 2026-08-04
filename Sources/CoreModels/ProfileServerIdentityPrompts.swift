@@ -22,9 +22,13 @@ import Foundation
 /// enabled-but-unidentified server is still there, importing as the owner every
 /// launch.
 public enum ProfileServerIdentityPolicy {
-    /// The Plex accounts signed in on this device, by id.
-    public static func localPlexAccountIDs(in accounts: [Account]) -> [String] {
-        accounts.filter { $0.server.provider == .plex }.map(\.id)
+    /// The Plex accounts the watchlist import will read from, by id.
+    ///
+    /// Taken from the SAME collection the import fans out over
+    /// (`AccountsProvidersModel.homeAccounts`), so the gate and the import can
+    /// never disagree about which servers are in play.
+    public static func importPlexAccountIDs(in accounts: [ResolvedAccount]) -> [String] {
+        accounts.filter { $0.account.server.provider == .plex }.map(\.account.id)
     }
 
     /// - Parameters:
@@ -81,28 +85,23 @@ public extension ProfilesModel {
     /// held the import, while the presenter picked the first RAW pending id, found
     /// no such account, and showed nothing. Deferred forever, asked never.
     ///
-    /// Three narrowings, all necessary:
-    /// - present on this device: an account that isn't here has nothing to import
-    ///   from, so it can't leak and mustn't gate;
-    /// - Plex: only Plex has identities to choose between, and a liberally
-    ///   recorded id can turn out to be Jellyfin once it arrives;
-    /// - active for this profile: a server the profile no longer watches with
-    ///   can't leak into it either.
-    ///
-    /// - Parameter localPlexAccountIDs: Plex accounts signed in on this device.
+    /// - Parameter importAccountIDs: the Plex accounts the watchlist import will
+    ///   ACTUALLY read from. Passed in rather than derived here so the gate and
+    ///   the import can't disagree about which servers are in play — deriving it
+    ///   from the profile's stored membership looked equivalent and wasn't: an
+    ///   explicitly empty selection reads as "no servers" here while the import
+    ///   falls back to the primary account, and a selection naming only servers
+    ///   that are gone falls back to the whole household. Both fell through the
+    ///   gate and imported as the account owner. Asking the import what it's
+    ///   going to do removes the second, drifting definition.
     func actionableIdentityAccountIDs(
         forProfile profileID: String,
-        localPlexAccountIDs: [String]
+        importAccountIDs: [String]
     ) -> [String] {
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return [] }
         let pending = Set(profile.pendingIdentityAccountIDs)
         guard !pending.isEmpty else { return [] }
-        // "Never chose" means the profile watches with every server, so the
-        // fallback is all of them rather than none.
-        let active = Set(activeAccountIDs(for: profileID, fallback: localPlexAccountIDs))
-        return localPlexAccountIDs
-            .filter { pending.contains($0) && active.contains($0) }
-            .sorted()
+        return importAccountIDs.filter { pending.contains($0) }.sorted()
     }
 
     /// Applies a synced membership set, asking who the profile watches as on any

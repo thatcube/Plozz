@@ -136,7 +136,7 @@ struct ActionableIdentityQuestionsTests {
         let model = makeModel()
         let id = profileAwaiting(["a1"], in: model)
         #expect(
-            model.actionableIdentityAccountIDs(forProfile: id, localPlexAccountIDs: ["a1"])
+            model.actionableIdentityAccountIDs(forProfile: id, importAccountIDs: ["a1"])
                 == ["a1"]
         )
     }
@@ -149,7 +149,7 @@ struct ActionableIdentityQuestionsTests {
         // server this device hasn't signed into — but an absent account has
         // nothing to import from, so it must not defer the import forever.
         #expect(
-            model.actionableIdentityAccountIDs(forProfile: id, localPlexAccountIDs: []).isEmpty
+            model.actionableIdentityAccountIDs(forProfile: id, importAccountIDs: []).isEmpty
         )
     }
 
@@ -160,32 +160,36 @@ struct ActionableIdentityQuestionsTests {
         // Recorded when its provider was unknown; it arrived as Jellyfin, which
         // has no Home user to choose between.
         #expect(
-            model.actionableIdentityAccountIDs(forProfile: id, localPlexAccountIDs: ["b2"])
+            model.actionableIdentityAccountIDs(forProfile: id, importAccountIDs: ["b2"])
                 .isEmpty
         )
     }
 
-    @Test("A server the profile no longer watches with gates nothing")
+    @Test("A server the import won't read from gates nothing")
     func inactiveAccountIsNotActionable() {
         let model = makeModel()
         let id = profileAwaiting(["a1", "a2"], in: model)
-        model.setActiveAccountIDs(["a2"], for: id)
+        // The caller passes exactly what the import will fan out over, so a
+        // server the profile no longer watches with simply isn't in the list.
         #expect(
-            model.actionableIdentityAccountIDs(
-                forProfile: id,
-                localPlexAccountIDs: ["a1", "a2"]
-            ) == ["a2"]
+            model.actionableIdentityAccountIDs(forProfile: id, importAccountIDs: ["a2"])
+                == ["a2"]
         )
     }
 
-    @Test("A profile that never chose servers watches with all of them")
-    func noExplicitSelectionMeansAllServers() {
+    @Test("Whatever the import will read from is what gets gated")
+    func gateFollowsTheImport() {
         let model = makeModel()
         let id = profileAwaiting(["a1"], in: model)
-        // "Never chose" must not read as "chose nothing", or the question would
-        // silently stop gating for every profile that never touched the setting.
+        // Deriving the set from stored membership instead looked equivalent and
+        // wasn't: an explicitly empty selection reads as "no servers" while the
+        // import falls back to the primary account, and imports as its owner.
+        // Asking the import what it will actually do removes that second
+        // definition — an empty explicit selection here still gates, because the
+        // caller hands over the accounts the import resolved.
+        model.setActiveAccountIDs([], for: id)
         #expect(
-            model.actionableIdentityAccountIDs(forProfile: id, localPlexAccountIDs: ["a1"])
+            model.actionableIdentityAccountIDs(forProfile: id, importAccountIDs: ["a1"])
                 == ["a1"]
         )
     }
@@ -198,7 +202,7 @@ struct ActionableIdentityQuestionsTests {
         let id = profileAwaiting(["absent", "present"], in: model)
         let actionable = model.actionableIdentityAccountIDs(
             forProfile: id,
-            localPlexAccountIDs: ["present"]
+            importAccountIDs: ["present"]
         )
         #expect(actionable == ["present"])
         #expect(actionable.first == "present")

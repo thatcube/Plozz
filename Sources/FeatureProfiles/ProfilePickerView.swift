@@ -50,9 +50,20 @@ public struct ProfilePickerView: View {
     }
 
 
-    /// Which profile tile currently holds focus. Drives the background gradient
-    /// so the wash tracks the profile you're hovering. `nil` before focus settles.
-    @FocusState private var focusedProfileID: String?
+    /// What currently holds focus. Richer than a profile id because each column
+    /// now has two focusable controls — the tile and its own Edit button — and
+    /// the column needs to stay "open" while either of them is focused.
+    @FocusState private var focus: PickerFocus?
+
+    /// The profile the focus is currently within, whichever of its two controls
+    /// holds it. Drives the background wash. `nil` while focus is on an Add tile
+    /// or before focus settles.
+    private var focusedProfileID: String? {
+        switch focus {
+        case let .profile(id), let .edit(id): return id
+        default: return nil
+        }
+    }
     /// The profile the background has actually *committed* to. Updated only after
     /// focus rests on a tile for `backgroundSettleDelay`, so sweeping across tiles
     /// (1 → 2 → 3) skips the in-between profiles entirely — the wash only fades to
@@ -105,41 +116,29 @@ public struct ProfilePickerView: View {
     }
 
 
-    /// Focus identities for the trailing tiles, so `focusedProfileID` can tell
-    /// "a profile" from "the Add tiles" without a second piece of state.
-    static let addProfileFocusID = "com.plozz.picker.add"
-    static let addKidsFocusID = "com.plozz.picker.addKids"
-
-    /// The profile the Edit button currently applies to — `nil` while focus is
-    /// on an Add tile.
-    private var focusedProfile: Profile? {
-        guard let focusedProfileID else { return nil }
-        return profiles.first { $0.id == focusedProfileID }
-    }
-
-    /// The Edit affordance, directly beneath the focused profile.
+    /// Each column's own Edit button, directly beneath its avatar.
     ///
-    /// Down from a tile lands here, which is the shortest possible path to
-    /// "rename this / lock this / make it a kid's" — previously a trip into
-    /// Settings. It tracks focus rather than being per-tile so there's one
-    /// button on screen instead of one per profile.
+    /// Rendered for every profile rather than as one shared slot, so it reads as
+    /// belonging to the profile it sits under. It's always present in the layout
+    /// — a button that only *existed* while focused could never receive the Down
+    /// press meant to reach it — but it only becomes visible when focus is
+    /// somewhere in that column, so the row stays quiet while you scan across it.
     @ViewBuilder
-    private var editSlot: some View {
-        ZStack {
-            if let focusedProfile, let onEditProfile {
-                Button {
-                    onEditProfile(focusedProfile)
-                } label: {
-                    Label("Edit", systemImage: "slider.horizontal.3")
-                        .font(.callout.weight(.semibold))
-                }
-                .buttonStyle(.bordered)
-                .transition(.opacity)
-            }
+    private func editButton(for profile: Profile, onEdit: @escaping (Profile) -> Void) -> some View {
+        let isRevealed = focusedProfileID == profile.id
+        Button {
+            onEdit(profile)
+        } label: {
+            Text("Edit")
+                .font(.callout.weight(.semibold))
         }
-        .frame(height: 60)
-        .animation(.easeOut(duration: 0.15), value: focusedProfileID)
-        .focusSection()
+        .buttonStyle(.bordered)
+        .focused($focus, equals: .edit(profile.id))
+        .opacity(isRevealed ? 1 : 0)
+        // Unreachable when hidden, so the focus engine can't land on an
+        // invisible control coming from an odd angle.
+        .disabled(!isRevealed)
+        .animation(.easeOut(duration: 0.15), value: isRevealed)
     }
 
     public var body: some View {
@@ -154,18 +153,28 @@ public struct ProfilePickerView: View {
             // it would have to sit under a *row*, which reads as belonging to
             // all of them.
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 56) {
+                HStack(alignment: .top, spacing: 56) {
                     ForEach(profiles) { profile in
-                        ProfileTile(
-                            profile: profile,
-                            isActive: profile.id == activeProfileID
-                        ) {
-                            onSelect(profile)
+                        VStack(spacing: 20) {
+                            ProfileTile(
+                                profile: profile,
+                                isActive: profile.id == activeProfileID
+                            ) {
+                                onSelect(profile)
+                            }
+                            .focused($focus, equals: .profile(profile.id))
+                            .anchorPreference(key: TileCentersKey.self, value: .center) {
+                                [profile.id: $0]
+                            }
+
+                            if let onEditProfile {
+                                editButton(for: profile, onEdit: onEditProfile)
+                            }
                         }
-                        .focused($focusedProfileID, equals: profile.id)
-                        .anchorPreference(key: TileCentersKey.self, value: .center) {
-                            [profile.id: $0]
-                        }
+                        // Keep each profile's tile and its Edit button in one
+                        // focus region, so Down reaches that column's button
+                        // rather than the nearest one in another column.
+                        .focusSection()
                     }
                     if let onAddProfile {
                         AddProfileTile(
@@ -174,7 +183,7 @@ public struct ProfilePickerView: View {
                             isProminent: true,
                             action: onAddProfile
                         )
-                        .focused($focusedProfileID, equals: Self.addProfileFocusID)
+                        .focused($focus, equals: .add)
                     }
                     if let onAddKidsProfile {
                         AddProfileTile(
@@ -183,7 +192,7 @@ public struct ProfilePickerView: View {
                             isProminent: false,
                             action: onAddKidsProfile
                         )
-                        .focused($focusedProfileID, equals: Self.addKidsFocusID)
+                        .focused($focus, equals: .addKids)
                     }
                 }
                 .padding(.horizontal, 80)
@@ -193,10 +202,6 @@ public struct ProfilePickerView: View {
             }
             .scrollClipDisabled()
             .focusSection()
-
-            // Reserved whether or not it's showing, so the row never shifts up
-            // and down as focus moves between a profile and an Add tile.
-            editSlot
 
             if let onCancel {
                 Button("Cancel", action: onCancel)
@@ -240,10 +245,10 @@ public struct ProfilePickerView: View {
     private func setInitialFocusIfNeeded() {
         guard !didSetInitialFocus else { return }
         didSetInitialFocus = true
-        let target = defaultFocusID
+        guard let target = defaultFocusID else { return }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(50))
-            focusedProfileID = target
+            focus = .profile(target)
         }
     }
 
@@ -262,6 +267,19 @@ public struct ProfilePickerView: View {
         }
         #endif
     }
+}
+
+/// What holds focus in the picker.
+///
+/// A plain profile id isn't enough now that each column owns two focusable
+/// controls: the column has to stay revealed while focus sits on either the tile
+/// or its Edit button, and the Add tiles need identities that can't collide with
+/// a profile id.
+private enum PickerFocus: Hashable {
+    case profile(String)
+    case edit(String)
+    case add
+    case addKids
 }
 
 /// Collects each profile tile's center point (as an `Anchor`) keyed by profile

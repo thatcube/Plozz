@@ -936,24 +936,7 @@ private struct PlozziOSProfilesView: View {
             get: { appModel.isPresentingProfileOnboarding(from: .settings) },
             set: { if !$0 { appModel.cancelProfileOnboarding() } }
         )) {
-            switch appModel.profileOnboardingStep {
-            case .libraries:
-                PlozziOSProfileSetupView(
-                    appModel: appModel,
-                    onDone: { appModel.advanceProfileOnboarding() }
-                )
-            case .theme:
-                NavigationStack {
-                    PlozziOSThemeWelcomeView(
-                        appModel: appModel,
-                        onContinue: { appModel.advanceProfileOnboarding() }
-                    )
-                }
-            case nil:
-                // Reached only in the frame where the last step clears the flag
-                // and the cover is on its way out.
-                EmptyView()
-            }
+            PlozziOSProfileOnboardingCover(appModel: appModel)
         }
     }
 }

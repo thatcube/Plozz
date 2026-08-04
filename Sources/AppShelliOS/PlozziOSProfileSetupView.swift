@@ -76,4 +76,38 @@ struct PlozziOSServerIdentityPromptView: View {
         }
     }
 }
+/// The whole new-profile setup sequence, in ONE cover.
+///
+/// One cover switching its content rather than a cover per step: presenting on
+/// the step itself would tear the cover down and put a new one up each time, and
+/// SwiftUI drops a presentation requested while another is still dismissing —
+/// which is exactly how the theme step went missing before.
+///
+/// A view of its own rather than inline in each presenter: both root and the
+/// Profiles settings page present this (see `ProfileOnboardingOrigin`), and the
+/// iOS root's body is already at the type-checker's budget.
+struct PlozziOSProfileOnboardingCover: View {
+    let appModel: PlozziOSAppModel
+
+    var body: some View {
+        switch appModel.profileOnboardingStep {
+        case .libraries:
+            PlozziOSProfileSetupView(
+                appModel: appModel,
+                onDone: { appModel.advanceProfileOnboarding() }
+            )
+        case .theme:
+            NavigationStack {
+                PlozziOSThemeWelcomeView(
+                    appModel: appModel,
+                    onContinue: { appModel.advanceProfileOnboarding() }
+                )
+            }
+        case nil:
+            // Reached only in the frame where the last step clears the flag and
+            // the cover is on its way out.
+            EmptyView()
+        }
+    }
+}
 #endif

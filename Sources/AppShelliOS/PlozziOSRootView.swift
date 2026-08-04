@@ -3,6 +3,7 @@ import AppRuntime
 import CoreModels
 import CoreUI
 import FeatureHomeCore
+import FeatureProfiles
 import Foundation
 import SwiftUI
 
@@ -82,9 +83,10 @@ public struct PlozziOSRootView: View {
             get: { appModel.pendingLockedProfile },
             set: { newValue in if newValue == nil { appModel.cancelProfileLockPrompt() } }
         )) { profile in
-            PlozziOSProfileLockPINView(
+            ProfileLockPINView(
                 profile: profile,
                 errorMessage: appModel.profileLockError,
+                isSyncEnabled: SyncSetupFeatureFlag().isEnabled,
                 onSubmit: { appModel.submitProfileLockPIN($0) },
                 onCancel: { appModel.cancelProfileLockPrompt() }
             )
@@ -102,22 +104,7 @@ public struct PlozziOSRootView: View {
             get: { appModel.isPresentingProfileOnboarding(from: .launch) },
             set: { if !$0 { appModel.cancelProfileOnboarding() } }
         )) {
-            switch appModel.profileOnboardingStep {
-            case .libraries:
-                PlozziOSProfileSetupView(
-                    appModel: appModel,
-                    onDone: { appModel.advanceProfileOnboarding() }
-                )
-            case .theme:
-                NavigationStack {
-                    PlozziOSThemeWelcomeView(
-                        appModel: appModel,
-                        onContinue: { appModel.advanceProfileOnboarding() }
-                    )
-                }
-            case nil:
-                EmptyView()
-            }
+            PlozziOSProfileOnboardingCover(appModel: appModel)
         }
         .task { appModel.resumeProfileOnboardingIfNeeded() }
         .task {

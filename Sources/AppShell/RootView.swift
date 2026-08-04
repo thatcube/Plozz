@@ -452,6 +452,7 @@ public struct RootView: View {
             ProfileLockPINView(
                 profile: profile,
                 errorMessage: appState.profileFlow.profileLockError,
+                isSyncEnabled: SyncSetupFeatureFlag().isEnabled,
                 onSubmit: { appState.profileFlow.submitProfileLockPIN($0) },
                 onCancel: { appState.profileFlow.cancelProfileLockPrompt() }
             )

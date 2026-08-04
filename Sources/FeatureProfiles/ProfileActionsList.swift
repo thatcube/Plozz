@@ -178,13 +178,11 @@ public struct ProfileActionsList: View {
             }
 
             if onDelete != nil {
-                actionRow(
-                    icon: "trash",
-                    title: "Delete Profile",
-                    subtitle: nil,
-                    isDestructive: true
-                ) {
+                Button(role: .destructive) {
                     confirmDelete = true
+                } label: {
+                    Label("Delete Profile", systemImage: "trash")
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -241,18 +239,16 @@ public struct ProfileActionsList: View {
     /// inverts the whole card on focus and publishes the matching foreground down
     /// the environment, which `.settingsRowSecondary()` and `.settingsRowIcon()`
     /// read; hard-coding a colour here would pin the row to one theme and leave
-    /// the text unreadable against the inverted focus card. The destructive row
-    /// is the one exception, matching Sign Out elsewhere in Settings.
+    /// the text unreadable against the inverted focus card.
     @ViewBuilder
     private func actionRow(
         icon: String,
         title: LocalizedStringResource,
         subtitle: LocalizedStringResource? = nil,
         value: LocalizedStringResource? = nil,
-        isDestructive: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(role: isDestructive ? .destructive : nil, action: action) {
+        Button(action: action) {
             SettingsRowLabel(icon: icon, title: title) {
                 if let subtitle {
                     Text(subtitle)
@@ -268,30 +264,13 @@ public struct ProfileActionsList: View {
                             .settingsRowSecondary()
                             .lineLimit(1)
                     }
-                    if !isDestructive {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 18, weight: .semibold))
-                            .settingsRowSecondary()
-                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 18, weight: .semibold))
+                        .settingsRowSecondary()
                 }
             }
-            .modifier(DestructiveRowTint(isDestructive: isDestructive))
         }
         .buttonStyle(SettingsFocusButtonStyle())
-    }
-}
-
-/// Paints a row red only when it destroys something, leaving every other row to
-/// inherit the theme- and focus-aware colours from the environment.
-private struct DestructiveRowTint: ViewModifier {
-    let isDestructive: Bool
-
-    func body(content: Content) -> some View {
-        if isDestructive {
-            content.foregroundStyle(.red)
-        } else {
-            content
-        }
     }
 }
 #endif

@@ -589,6 +589,12 @@ private struct PlozziOSTabShell: View {
             )
             .frame(width: 0, height: 0)
         }
+        // The setup cover is presented from inside Settings when Settings is up,
+        // and from the root when it isn't — see `ProfileOnboardingOrigin`. That
+        // decision reads this.
+        .onChange(of: showingSettings) { _, presented in
+            appModel.noteSettingsPresented(presented)
+        }
         .sheet(isPresented: $showingSettings) {
             PlozziOSSettingsView(
                 appModel: appModel,

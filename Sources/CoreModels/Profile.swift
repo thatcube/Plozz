@@ -180,6 +180,17 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         set { isAwaitingSetup = newValue ? true : nil }
     }
 
+    /// Whether this profile plays as a Plex Home user that already asks for a
+    /// PIN, so one entry can be offered to satisfy both gates.
+    ///
+    /// Shared because four screens across both shells asked the same question
+    /// with their own copy of it, and a lock offer that disagrees with the lock
+    /// screen about whether PIN reuse applies is a confusing way to fail.
+    public var playsAsPINProtectedPlexUser: Bool {
+        if plexHomeUserRequiresPIN == true { return true }
+        return plexHomeUserBindings?.values.contains { $0.requiresPIN == true } ?? false
+    }
+
     /// Whether an answer is owed about who this profile watches as somewhere.
     /// See `accountsAwaitingIdentity`.
     public var needsIdentityAnswer: Bool {

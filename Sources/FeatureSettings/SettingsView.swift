@@ -421,7 +421,7 @@ public struct SettingsView: View {
             ProfileActionsSheet(
                 profile: activeProfile,
                 syncEnabled: syncEnabled,
-                offersPlexPINReuse: boundToProtectedPlexUser(activeProfile),
+                offersPlexPINReuse: activeProfile.playsAsPINProtectedPlexUser,
                 householdHasOtherLock: profiles.contains {
                     $0.id != activeProfile.id && $0.isLocked
                 },
@@ -722,12 +722,6 @@ public struct SettingsView: View {
         }
     }
 
-    /// Whether a profile plays as a Plex Home user that already asks for a PIN,
-    /// so one entry can satisfy both.
-    private func boundToProtectedPlexUser(_ profile: Profile) -> Bool {
-        if profile.plexHomeUserRequiresPIN == true { return true }
-        return profile.plexHomeUserBindings?.values.contains { $0.requiresPIN == true } ?? false
-    }
 
     /// Records one select of the About panel and surfaces the unlock confirmation
     /// when the seventh crosses the threshold.

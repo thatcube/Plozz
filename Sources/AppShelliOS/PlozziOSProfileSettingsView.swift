@@ -31,12 +31,6 @@ struct PlozziOSProfileSettingsView: View {
         return !appModel.profiles.isDefault(profile)
     }
 
-    /// Whether this profile plays as a Plex Home user that already asks for a
-    /// PIN, so one entry can satisfy both.
-    private func boundToProtectedPlexUser(_ profile: Profile) -> Bool {
-        if profile.plexHomeUserRequiresPIN == true { return true }
-        return profile.plexHomeUserBindings?.values.contains { $0.requiresPIN == true } ?? false
-    }
 
     /// Whether any *other* profile carries a lock — a Kids Profile only contains
     /// anyone if there's something locked to keep them out of.
@@ -51,7 +45,7 @@ struct PlozziOSProfileSettingsView: View {
                     ProfileActionsList(
                         profile: profile,
                         syncEnabled: SyncSetupFeatureFlag().isEnabled,
-                        offersPlexPINReuse: boundToProtectedPlexUser(profile),
+                        offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
                         householdHasOtherLock: householdHasAnyLock,
                         onEditAppearance: { showingEditor = true },
                         onSetLock: { appModel.setLock($0, forProfile: profileID) },

@@ -858,13 +858,18 @@ final class PlozziOSAppModel {
         case libraries
         /// Its colour scheme, which is per-profile.
         case theme
+        /// Whether to put a PIN on it — offered at creation, like on tvOS, since
+        /// that's when someone setting up a household profile is thinking about
+        /// who should be able to open it.
+        case lockOffer
 
         var id: Self { self }
 
         var next: ProfileOnboardingStep? {
             switch self {
             case .libraries: .theme
-            case .theme: nil
+            case .theme: .lockOffer
+            case .lockOffer: nil
             }
         }
     }
@@ -872,19 +877,33 @@ final class PlozziOSAppModel {
     /// Which screen puts the setup sequence on screen.
     ///
     /// A cover can only be presented by a view that isn't itself covered, and the
-    /// sequence starts from two very different places: creating a profile from
-    /// Settings (which is a sheet, so a cover asked for from the root would be
-    /// silently dropped), and resuming an abandoned setup at launch (when
-    /// Settings isn't open at all, and the Profiles page isn't on screen to ask).
-    ///
-    /// Both sites are wired up, and this says which one owns the presentation —
-    /// so they can never both try, which is undefined behaviour.
+    /// sequence starts from two very different places: creating (or resuming) a
+    /// profile from Settings, which is a sheet — so a cover asked for from the
+    /// root would be silently dropped — and resuming an abandoned setup at
+    /// launch, when Settings isn't open and the Profiles page isn't on screen to
+    /// ask from. Both sites are wired up, and this says which one owns it, so
+    /// they can never both try.
     enum ProfileOnboardingOrigin {
         case settings
         case launch
     }
 
-    private(set) var profileOnboardingOrigin: ProfileOnboardingOrigin?
+    /// Whether the Settings sheet is on screen. Set by the sheet itself.
+    private(set) var isSettingsPresented = false
+
+    func noteSettingsPresented(_ presented: Bool) {
+        isSettingsPresented = presented
+    }
+
+    /// DERIVED from what's actually on screen rather than recorded when the flow
+    /// starts. A stored origin has to be written by whoever begins the sequence,
+    /// and the resume path — which can begin it too, from either place — had no
+    /// way to know which it was; it guessed `.launch`, so resuming an unfinished
+    /// profile from Settings asked the covered root to present and the cover
+    /// silently never appeared, with the step left set so nothing retried.
+    var profileOnboardingOrigin: ProfileOnboardingOrigin {
+        isSettingsPresented ? .settings : .launch
+    }
 
     /// Whether `origin` should present the sequence right now.
     func isPresentingProfileOnboarding(from origin: ProfileOnboardingOrigin) -> Bool {
@@ -896,6 +915,12 @@ final class PlozziOSAppModel {
     /// The profile being set up. Held by ID, not by value: the record changes
     /// underneath us as each step writes to it.
     private(set) var profileOnboardingID: String?
+
+    /// The profile the sequence is currently about, read live.
+    var profileBeingOnboarded: Profile? {
+        guard let profileOnboardingID else { return nil }
+        return profiles.profiles.first { $0.id == profileOnboardingID }
+    }
 
     /// Re-presents setup for a profile that never finished it.
     ///
@@ -916,7 +941,6 @@ final class PlozziOSAppModel {
         guard profileOnboardingStep == nil, profileOnboardingID == nil else { return }
         guard profiles.activeProfile.needsSetup else { return }
         profileOnboardingID = profiles.activeProfileID
-        profileOnboardingOrigin = .launch
         profileOnboardingStep = .libraries
     }
 
@@ -941,7 +965,6 @@ final class PlozziOSAppModel {
         } else {
             profileOnboardingStep = nil
             profileOnboardingID = nil
-            profileOnboardingOrigin = nil
         }
     }
 
@@ -957,7 +980,6 @@ final class PlozziOSAppModel {
         }
         profileOnboardingStep = nil
         profileOnboardingID = nil
-        profileOnboardingOrigin = nil
     }
 
     /// The Plex account this profile has just enabled and not yet picked a user
@@ -1528,7 +1550,6 @@ final class PlozziOSAppModel {
             // the claim already in place that resume would take the flow over and
             // present it from the wrong place. See `resumeProfileOnboardingIfNeeded`.
             profileOnboardingID = created.id
-            profileOnboardingOrigin = .settings
             performSelectProfile(created.id)
             // Yielded, not set inline: this runs from inside the Add Profile
             // sheet, and SwiftUI drops a presentation requested while another is

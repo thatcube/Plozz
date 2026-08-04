@@ -88,7 +88,7 @@ struct ProfileSettingsDetailView: View {
             ProfileActionsList(
                 profile: profile,
                 syncEnabled: syncEnabled,
-                offersPlexPINReuse: boundToProtectedPlexUser(profile),
+                offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
                 householdHasOtherLock: context.profiles.contains {
                     $0.id != profile.id && $0.isLocked
                 },
@@ -103,12 +103,6 @@ struct ProfileSettingsDetailView: View {
         }
     }
 
-    /// Whether this profile plays as a Plex Home user that already asks for a
-    /// PIN — the only case where offering to reuse it makes sense.
-    private func boundToProtectedPlexUser(_ profile: Profile) -> Bool {
-        if profile.plexHomeUserRequiresPIN == true { return true }
-        return profile.plexHomeUserBindings?.values.contains { $0.requiresPIN == true } ?? false
-    }
 
 }
 #endif

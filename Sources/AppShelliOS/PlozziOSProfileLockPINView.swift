@@ -21,14 +21,13 @@ struct PlozziOSProfileLockPINView: View {
     var body: some View {
         PINEntryScaffold(
             title: ProfileLockCopy.unlockTitle,
-            subtitle: ProfileLockCopy.unlockSubtitle,
             name: profile.name,
             errorMessage: errorMessage,
             footnote: syncEnabled ? nil : ProfileLockCopy.lockIsDeviceOnly,
             onSubmit: onSubmit,
             onCancel: onCancel
         ) {
-            ProfileAvatarView(profile: profile, size: 200)
+            ProfileAvatarView(profile: profile, size: PINLayout.badgeSize)
         }
     }
 }

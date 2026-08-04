@@ -23,6 +23,8 @@ struct ProfileSelectionView: View {
 
     @Environment(\.themePalette) private var palette
 
+    /// The profile whose actions sheet is open (Edit), if any.
+    @State private var actionsProfile: Profile?
     /// The profile whose cosmetics are being edited, if any.
     @State private var editingProfile: Profile?
     /// Set while creating a profile, so the sheet knows which kind to make.
@@ -78,6 +80,27 @@ struct ProfileSelectionView: View {
         //   silently so Menu can't exit the app from the mandatory picker.
         .onExitCommand {
             if canCancel { appState.profileFlow.cancelProfileSelection() }
+        }
+        .sheet(item: $actionsProfile) { profile in
+            ProfileActionsSheet(
+                profile: profile,
+                syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                offersPlexPINReuse: offersPlexPINReuse(for: profile),
+                householdHasOtherLock: appState.profilesModel.profiles.contains {
+                    $0.id != profile.id && $0.isLocked
+                },
+                onEditAppearance: {
+                    actionsProfile = nil
+                    editingProfile = profile
+                },
+                onSetLock: { appState.setLock($0, forProfile: profile.id) },
+                onSetKids: { appState.setKidsProfile($0, forProfile: profile.id) },
+                onDelete: profile.id == appState.profilesModel.profiles.first?.id ? nil : {
+                    appState.profileFlow.removeProfile(id: profile.id)
+                    actionsProfile = nil
+                },
+                onClose: { actionsProfile = nil }
+            )
         }
         .sheet(item: $editingProfile) { profile in
             ProfileEditorView(
@@ -156,6 +179,13 @@ struct ProfileSelectionView: View {
         }
     }
 
+    /// Whether this profile plays as a Plex Home user that already asks for a
+    /// PIN, so one entry can satisfy both.
+    private func offersPlexPINReuse(for profile: Profile) -> Bool {
+        if profile.plexHomeUserRequiresPIN == true { return true }
+        return profile.plexHomeUserBindings?.values.contains { $0.requiresPIN == true } ?? false
+    }
+
     // MARK: Authorisation
 
     /// The locked profile whose PIN authorises managing profiles — a grown-up's.
@@ -211,7 +241,7 @@ struct ProfileSelectionView: View {
         case let .add(isKids):
             creating = isKids ? .kids : .ordinary
         case let .edit(profile):
-            editingProfile = profile
+            actionsProfile = profile
         }
     }
 }

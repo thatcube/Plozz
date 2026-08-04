@@ -22,9 +22,11 @@ import SwiftUI
 struct ProfileSettingsDetailView: View {
     let context: SettingsContext
     let profileID: String
+    /// Whether these settings currently reach the user's other devices, so a lock
+    /// set here can say when it's device-only.
+    let syncEnabled: Bool
 
     @State private var showingEditor = false
-    @State private var confirmDelete = false
 
     /// Read live from the context so the page reflects edits made on it (a lock
     /// added, a rename) without needing its own copy to be invalidated.
@@ -45,9 +47,7 @@ struct ProfileSettingsDetailView: View {
                         verbatim: profile.name,
                         subtitle: "How this profile looks, and who can open it."
                     )
-                    identityPanel(profile)
-                    accessPanel(profile)
-                    if canDelete { deletePanel(profile) }
+                    actionsPanel(profile)
                 }
             }
             .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
@@ -72,103 +72,41 @@ struct ProfileSettingsDetailView: View {
                 )
             }
         }
-        .alert("Delete this profile?", isPresented: $confirmDelete) {
-            Button("Delete Profile", role: .destructive) {
-                context.onDeleteProfile(profileID)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Deleting removes this profile's preferences (theme, playback, subtitles, spoilers, trackers) and which servers it includes. Signed-in server accounts stay shared.")
-        }
     }
 
-    // MARK: Identity
+    // MARK: Actions
 
-    private func identityPanel(_ profile: Profile) -> some View {
+    /// The same list the picker's Edit sheet shows — one implementation of
+    /// "what can I do to this profile", reached from two places.
+    ///
+    /// Note there's no longer a Profile Lock *page*: selecting the lock row goes
+    /// straight to choosing a PIN (or asks change-or-remove when one is already
+    /// set). The page it replaced held a status line and a button that opened the
+    /// real screen, which was two presses of nothing.
+    private func actionsPanel(_ profile: Profile) -> some View {
         SettingsPanel {
-            Button {
-                showingEditor = true
-            } label: {
-                HStack(spacing: 16) {
-                    ProfileAvatarView(profile: profile, size: 56)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Appearance").font(.headline)
-                        Text("Name, avatar, and colour")
-                            .font(.footnote)
-                            .settingsRowSecondary()
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .settingsRowSecondary()
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    // MARK: Access
-
-    private func accessPanel(_ profile: Profile) -> some View {
-        SettingsPanel(footer: KidsProfileCopy.explanation) {
-            VStack(alignment: .leading, spacing: 14) {
-                NavigationLink(value: SettingsRoute.profileLock(profileID: profile.id)) {
-                    HStack(spacing: 16) {
-                        Image(systemName: profile.isLocked ? "lock" : "lock.open")
-                            .frame(width: 30, height: 30)
-                        Text(ProfileLockCopy.title).font(.callout.weight(.medium))
-                        Spacer()
-                        Text(profile.isLocked ? ProfileLockCopy.on : ProfileLockCopy.off)
-                            .settingsRowSecondary()
-                        Image(systemName: "chevron.right")
-                            .settingsRowSecondary()
-                    }
-                }
-
-                PlozzDivider()
-
-                Toggle(isOn: Binding(
-                    get: { profile.isKids },
-                    set: { context.onSetKidsProfile(profile.id, $0) }
-                )) {
-                    Text(KidsProfileCopy.title)
-                }
-                .toggleStyle(SettingsSwitchToggleStyle())
-
-                // Only nag once the restriction is on AND nothing else is
-                // locked — that's the combination that leaves the child a way
-                // straight into a grown-up's profile.
-                if profile.isKids, !householdHasAnyLock {
-                    Label {
-                        Text(KidsProfileCopy.pairWithLock)
-                            .font(.footnote)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle")
-                    }
-                    .settingsRowSecondary()
-                }
-            }
+            ProfileActionsList(
+                profile: profile,
+                syncEnabled: syncEnabled,
+                offersPlexPINReuse: boundToProtectedPlexUser(profile),
+                householdHasOtherLock: context.profiles.contains {
+                    $0.id != profile.id && $0.isLocked
+                },
+                onEditAppearance: { showingEditor = true },
+                onSetLock: { context.onSetProfileLock(profileID, $0) },
+                onSetKids: { context.onSetKidsProfile(profileID, $0) },
+                onDelete: canDelete ? { context.onDeleteProfile(profileID) } : nil
+            )
             .tvOSFocusSection()
         }
     }
 
-    /// Whether any *other* profile carries a lock. A Kids Profile only contains
-    /// anyone if there's something locked to keep them out of.
-    private var householdHasAnyLock: Bool {
-        context.profiles.contains { $0.id != profileID && $0.isLocked }
+    /// Whether this profile plays as a Plex Home user that already asks for a
+    /// PIN — the only case where offering to reuse it makes sense.
+    private func boundToProtectedPlexUser(_ profile: Profile) -> Bool {
+        if profile.plexHomeUserRequiresPIN == true { return true }
+        return profile.plexHomeUserBindings?.values.contains { $0.requiresPIN == true } ?? false
     }
 
-    // MARK: Delete
-
-    private func deletePanel(_ profile: Profile) -> some View {
-        SettingsPanel {
-            Button(role: .destructive) {
-                confirmDelete = true
-            } label: {
-                Label("Delete Profile", systemImage: "trash")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
 }
 #endif

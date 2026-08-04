@@ -5,6 +5,15 @@ import SwiftUI
 /// held at arm's length need genuinely different sizes, and these live at file
 /// scope because the views that use them are generic (which can't hold static
 /// stored properties).
+/// The size the identity badge must be built at.
+///
+/// Public because the scaffold can't fix a mis-sized badge for you: a view that
+/// draws at its own intrinsic size (`ProfileAvatarView`) is clipped, not scaled,
+/// by an outer `.frame` — which is exactly how the avatar ended up squashed.
+public enum PINLayout {
+    public static var badgeSize: CGFloat { PINMetrics.badgeSize }
+}
+
 enum PINMetrics {
     #if os(tvOS)
     static let horizontalPadding: CGFloat = 110
@@ -165,7 +174,6 @@ public struct PINEntryScaffold<Badge: View>: View {
             // who they picked; this is confirmation, not the headline.
             HStack(spacing: 14) {
                 badge()
-                    .frame(width: PINMetrics.badgeSize, height: PINMetrics.badgeSize)
                     .clipShape(Circle())
                 Text(verbatim: name)
                     .font(PINMetrics.nameFont)

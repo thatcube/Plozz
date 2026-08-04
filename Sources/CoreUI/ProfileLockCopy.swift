@@ -53,25 +53,28 @@ public enum ProfileLockCopy {
     public static let unlockTitle = LocalizedStringResource(
         "settings.profileLock.unlock.title",
         defaultValue: "Enter your PIN",
-        comment: "Heading on the screen asking for a profile's PIN before opening it."
+        comment: "Heading on the screen asking for a profile's PIN before opening it. No supporting line: the profile's name and avatar sit right beneath it, so anything else would just restate the obvious."
     )
 
-    public static let unlockSubtitle = LocalizedStringResource(
-        "settings.profileLock.unlock.subtitle",
-        defaultValue: "This profile is locked.",
-        comment: "Line under the heading on the unlock screen."
+    public static let createTitle = LocalizedStringResource(
+        "settings.profileLock.create.title",
+        defaultValue: "Create a Profile Lock",
+        comment: "Heading on the screen where a new PIN is chosen."
     )
 
-    public static let enterToCreate = LocalizedStringResource(
-        "settings.profileLock.enterToCreate",
-        defaultValue: "Enter 4 numbers to create your Profile Lock PIN",
-        comment: "Instruction shown above the keypad while choosing a new PIN."
+    /// Says what the PIN will DO, rather than restating the instruction. The pad
+    /// and its four dots already say "type four numbers"; a subtitle that repeats
+    /// it is two sentences of nothing.
+    public static let createSubtitle = LocalizedStringResource(
+        "settings.profileLock.create.subtitle",
+        defaultValue: "This PIN will be needed to open this profile.",
+        comment: "Supporting line under the heading while choosing a new PIN."
     )
 
     public static let confirm = LocalizedStringResource(
         "settings.profileLock.confirm",
-        defaultValue: "Enter your PIN again to confirm",
-        comment: "Instruction shown above the keypad for the second, confirming entry of a new PIN."
+        defaultValue: "Enter your PIN again",
+        comment: "Heading for the second, confirming entry of a new PIN."
     )
 
     public static let mismatch = LocalizedStringResource(

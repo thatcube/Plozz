@@ -844,9 +844,7 @@ public struct SettingsView: View {
         case .servers:
             ServersAndLibrariesDetailView(context: context)
         case let .profileSettings(profileID):
-            ProfileSettingsDetailView(context: context, profileID: profileID)
-        case let .profileLock(profileID):
-            ProfileLockDetailView(context: context, profileID: profileID, syncEnabled: syncEnabled)
+            ProfileSettingsDetailView(context: context, profileID: profileID, syncEnabled: syncEnabled)
         case .myLibraries:
             MyLibrariesDetailView(context: context)
         case .appearance:

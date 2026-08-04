@@ -887,7 +887,6 @@ private struct PlexPINEntryView: View {
         let pendingRequest = appState.plexHomeUsers.pendingPlexPINRequest
         return PINEntryScaffold(
             title: "Enter your Plex PIN",
-            subtitle: "This Plex user is protected.",
             name: userName,
             errorMessage: appState.plexHomeUsers.plexPINError,
             isSubmitting: isSubmitting,
@@ -914,6 +913,7 @@ private struct PlexPINEntryView: View {
                     PlexPINFallbackGlyph()
                 }
             }
+            .frame(width: PINLayout.badgeSize, height: PINLayout.badgeSize)
         }
         .onChange(of: appState.plexHomeUsers.plexPINError) { _, newValue in
             // Wrong-PIN response: drop the submitting state so the user can retry
@@ -937,7 +937,7 @@ private struct PlexPINEntryView: View {
 private struct PlexPINFallbackGlyph: View {
     var body: some View {
         Image(systemName: "person.fill")
-            .font(.system(size: 72))
+            .font(.system(size: PINLayout.badgeSize * 0.5))
             .plozzForeground(.secondary)
     }
 }

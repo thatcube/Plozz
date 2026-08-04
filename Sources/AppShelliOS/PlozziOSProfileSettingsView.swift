@@ -1,5 +1,6 @@
 import CoreModels
 import CoreUI
+import FeatureProfiles
 import SwiftUI
 
 /// Settings → Everyone → Profiles → *one profile* on iPhone/iPad.
@@ -18,7 +19,6 @@ struct PlozziOSProfileSettingsView: View {
     let profileID: String
 
     @State private var showingEditor = false
-    @State private var confirmDelete = false
 
     /// Read live so the page reflects a lock added or the profile renamed.
     private var profile: Profile? {
@@ -28,6 +28,13 @@ struct PlozziOSProfileSettingsView: View {
     private var canDelete: Bool {
         guard let profile else { return false }
         return !appModel.profiles.isDefault(profile)
+    }
+
+    /// Whether this profile plays as a Plex Home user that already asks for a
+    /// PIN, so one entry can satisfy both.
+    private func boundToProtectedPlexUser(_ profile: Profile) -> Bool {
+        if profile.plexHomeUserRequiresPIN == true { return true }
+        return profile.plexHomeUserBindings?.values.contains { $0.requiresPIN == true } ?? false
     }
 
     /// Whether any *other* profile carries a lock — a Kids Profile only contains
@@ -40,70 +47,18 @@ struct PlozziOSProfileSettingsView: View {
         List {
             if let profile {
                 SettingsSectionGroup {
-                    Button {
-                        showingEditor = true
-                    } label: {
-                        HStack(spacing: 12) {
-                            PlozziOSProfileAvatar(profile: profile, size: 40)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Appearance")
-                                Text("Name, avatar, and colour")
-                                    .font(.footnote)
-                                    .plozzForeground(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .plozzForeground(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
+                    ProfileActionsList(
+                        profile: profile,
+                        syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                        offersPlexPINReuse: boundToProtectedPlexUser(profile),
+                        householdHasOtherLock: householdHasAnyLock,
+                        onEditAppearance: { showingEditor = true },
+                        onSetLock: { appModel.setLock($0, forProfile: profileID) },
+                        onSetKids: { appModel.setKidsProfile($0, forProfile: profileID) },
+                        onDelete: canDelete ? { appModel.removeProfile(profileID) } : nil
+                    )
                 }
 
-                SettingsSectionGroup {
-                    NavigationLink {
-                        PlozziOSProfileLockSettingsView(appModel: appModel, profileID: profileID)
-                    } label: {
-                        HStack {
-                            Label(
-                                String(localized: ProfileLockCopy.title),
-                                systemImage: profile.isLocked ? "lock" : "lock.open"
-                            )
-                            Spacer()
-                            Text(profile.isLocked ? ProfileLockCopy.on : ProfileLockCopy.off)
-                                .plozzForeground(.secondary)
-                        }
-                    }
-
-                    Toggle(isOn: Binding(
-                        get: { profile.isKids },
-                        set: { appModel.setKidsProfile($0, forProfile: profileID) }
-                    )) {
-                        Text(KidsProfileCopy.title)
-                    }
-
-                    if profile.isKids, !householdHasAnyLock {
-                        Label {
-                            Text(KidsProfileCopy.pairWithLock)
-                                .font(.footnote)
-                                .fixedSize(horizontal: false, vertical: true)
-                        } icon: {
-                            Image(systemName: "exclamationmark.triangle")
-                        }
-                        .plozzForeground(.secondary)
-                    }
-                } footer: {
-                    Text(KidsProfileCopy.explanation)
-                }
-
-                if canDelete {
-                    SettingsSectionGroup {
-                        Button(role: .destructive) {
-                            confirmDelete = true
-                        } label: {
-                            Label("Delete Profile", systemImage: "trash")
-                        }
-                    }
-                }
             }
         }
         .settingsPageSurface()
@@ -119,14 +74,6 @@ struct PlozziOSProfileSettingsView: View {
                 )
             }
             .preferredColorScheme(palette.isLight ? .light : .dark)
-        }
-        .alert("Delete this profile?", isPresented: $confirmDelete) {
-            Button("Delete Profile", role: .destructive) {
-                appModel.removeProfile(profileID)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Deleting removes this profile's preferences and which servers it includes. Signed-in server accounts stay shared.")
         }
     }
 }

@@ -47,15 +47,15 @@ public struct ProfileLockSetupView: View {
 
     public var body: some View {
         PINEntryScaffold(
-            title: isConfirming ? ProfileLockCopy.confirm : ProfileLockCopy.enterToCreate,
-            subtitle: isConfirming ? nil : ProfileLockCopy.explanation,
+            title: isConfirming ? ProfileLockCopy.confirm : ProfileLockCopy.createTitle,
+            subtitle: isConfirming ? nil : ProfileLockCopy.createSubtitle,
             name: profile.name,
             errorMessage: errorMessage,
             footnote: syncEnabled ? nil : ProfileLockCopy.lockIsDeviceOnly,
             onSubmit: submit,
             onCancel: onCancel
         ) {
-            ProfileAvatarView(profile: profile, size: 200)
+            ProfileAvatarView(profile: profile, size: PINLayout.badgeSize)
         }
     }
 

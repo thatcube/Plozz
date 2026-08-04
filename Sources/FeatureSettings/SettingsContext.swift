@@ -67,7 +67,6 @@ enum SettingsRoute: Hashable {
     case profile
     /// Per-profile settings page (Everyone › Profiles › <name>).
     case profileSettings(profileID: String)
-    case profileLock(profileID: String)
     case servers
     case myLibraries
     case appearance

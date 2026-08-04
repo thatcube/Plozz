@@ -39,7 +39,7 @@ struct ProfileServerIdentityPromptsTests {
     func nothingPendingByDefault() {
         let profile = makeProfile()
         #expect(profile.pendingIdentityAccountIDs.isEmpty)
-        #expect(profile.awaitsIdentity(amongAccounts: ["a1"]) == false)
+        #expect(profile.pendingIdentityAccountIDs.isEmpty)
     }
 
     @Test("An unanswered question defers the watchlist import")
@@ -47,23 +47,9 @@ struct ProfileServerIdentityPromptsTests {
         var profile = makeProfile()
         let noted = profile.noteAccountAwaitingIdentity("a1")
         #expect(noted)
-        // This is what the watchlist runtime reads to hold the native import
-        // back — the question surviving in the record is the whole point.
-        #expect(profile.awaitsIdentity(amongAccounts: ["a1"]))
-    }
-
-    @Test("A question about an account that isn't here gates nothing")
-    func absentAccountDoesNotGate() {
-        var profile = makeProfile()
-        profile.noteAccountAwaitingIdentity("a1")
-        // Questions are recorded generously — synced membership can enable a
-        // server this device hasn't signed into yet — but an account that isn't
-        // present has nothing to import from, so it must not defer the import
-        // forever.
-        #expect(profile.awaitsIdentity(amongAccounts: ["other"]) == false)
-        #expect(profile.awaitsIdentity(amongAccounts: []) == false)
-        // …and it starts gating the moment that account does arrive.
-        #expect(profile.awaitsIdentity(amongAccounts: ["other", "a1"]))
+        // Recorded on the profile is the whole point: this is what the watchlist
+        // runtime reads to hold the native import back, and it survives a restart.
+        #expect(profile.pendingIdentityAccountIDs == ["a1"])
     }
 
     @Test("Noting the same account twice changes nothing")
@@ -94,7 +80,7 @@ struct ProfileServerIdentityPromptsTests {
         #expect(profile.pendingIdentityAccountIDs == ["b"])
         let resolvedB = profile.resolveAccountAwaitingIdentity("b")
         #expect(resolvedB)
-        #expect(profile.awaitsIdentity(amongAccounts: ["a", "b"]) == false)
+        #expect(profile.pendingIdentityAccountIDs.isEmpty)
     }
 
     @Test("The last answer clears to absence, not an empty array")
@@ -125,5 +111,96 @@ struct ProfileServerIdentityPromptsTests {
         // enabled-but-unidentified server is still there — importing as the
         // owner on every launch.
         #expect(decoded.pendingIdentityAccountIDs == ["a1"])
+    }
+}
+
+@MainActor
+@Suite("Actionable identity questions")
+struct ActionableIdentityQuestionsTests {
+    private func makeModel() -> ProfilesModel {
+        let defaults = UserDefaults(
+            suiteName: "ActionableIdentityTests.\(UUID().uuidString)"
+        )!
+        return ProfilesModel(store: ProfileStore(defaults: defaults))
+    }
+
+    private func profileAwaiting(_ accountIDs: [String], in model: ProfilesModel) -> String {
+        var profile = model.add(name: "Kid")
+        for id in accountIDs { profile.noteAccountAwaitingIdentity(id) }
+        model.update(profile)
+        return profile.id
+    }
+
+    @Test("A recorded question about a locally present Plex server is actionable")
+    func presentPlexAccountIsActionable() {
+        let model = makeModel()
+        let id = profileAwaiting(["a1"], in: model)
+        #expect(
+            model.actionableIdentityAccountIDs(forProfile: id, localPlexAccountIDs: ["a1"])
+                == ["a1"]
+        )
+    }
+
+    @Test("A question about a server that isn't signed in here gates nothing")
+    func absentAccountIsNotActionable() {
+        let model = makeModel()
+        let id = profileAwaiting(["a1"], in: model)
+        // Questions are recorded generously — synced membership can enable a
+        // server this device hasn't signed into — but an absent account has
+        // nothing to import from, so it must not defer the import forever.
+        #expect(
+            model.actionableIdentityAccountIDs(forProfile: id, localPlexAccountIDs: []).isEmpty
+        )
+    }
+
+    @Test("An id that turns out not to be Plex gates nothing")
+    func nonPlexIsNotActionable() {
+        let model = makeModel()
+        let id = profileAwaiting(["a1"], in: model)
+        // Recorded when its provider was unknown; it arrived as Jellyfin, which
+        // has no Home user to choose between.
+        #expect(
+            model.actionableIdentityAccountIDs(forProfile: id, localPlexAccountIDs: ["b2"])
+                .isEmpty
+        )
+    }
+
+    @Test("A server the profile no longer watches with gates nothing")
+    func inactiveAccountIsNotActionable() {
+        let model = makeModel()
+        let id = profileAwaiting(["a1", "a2"], in: model)
+        model.setActiveAccountIDs(["a2"], for: id)
+        #expect(
+            model.actionableIdentityAccountIDs(
+                forProfile: id,
+                localPlexAccountIDs: ["a1", "a2"]
+            ) == ["a2"]
+        )
+    }
+
+    @Test("A profile that never chose servers watches with all of them")
+    func noExplicitSelectionMeansAllServers() {
+        let model = makeModel()
+        let id = profileAwaiting(["a1"], in: model)
+        // "Never chose" must not read as "chose nothing", or the question would
+        // silently stop gating for every profile that never touched the setting.
+        #expect(
+            model.actionableIdentityAccountIDs(forProfile: id, localPlexAccountIDs: ["a1"])
+                == ["a1"]
+        )
+    }
+
+    @Test("The gate and the prompt agree on which question comes first")
+    func gateAndPromptAgree() {
+        let model = makeModel()
+        // Sorted, and filtered identically, so the presenter can't pick an id the
+        // gate counted but no screen can show — deferred forever, asked never.
+        let id = profileAwaiting(["absent", "present"], in: model)
+        let actionable = model.actionableIdentityAccountIDs(
+            forProfile: id,
+            localPlexAccountIDs: ["present"]
+        )
+        #expect(actionable == ["present"])
+        #expect(actionable.first == "present")
     }
 }

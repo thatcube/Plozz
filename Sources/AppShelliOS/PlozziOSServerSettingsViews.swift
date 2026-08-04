@@ -280,7 +280,14 @@ struct PlozziOSMyLibrariesSettingsView: View {
 
     private var identityPromptBinding: Binding<Account?> {
         Binding(
-            get: { presentation == .settings ? appModel.pendingIdentityAccount : nil },
+            // Only while Settings is actually up: the root presents the same
+            // question when it isn't, and two presenters racing one piece of
+            // state is undefined. Suppressed during setup, which asks inline.
+            get: {
+                presentation == .settings && appModel.isSettingsPresented
+                    ? appModel.pendingIdentityAccount
+                    : nil
+            },
             set: { if $0 == nil { appModel.resolveIdentityPromptForPending() } }
         )
     }

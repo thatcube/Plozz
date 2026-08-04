@@ -989,9 +989,11 @@ final class PlozziOSAppModel {
     /// relaunch, because the enabled-but-unidentified server does. See
     /// `Profile.accountsAwaitingIdentity`.
     var pendingIdentityAccount: Account? {
-        guard let id = profiles.activeProfile.pendingIdentityAccountIDs.first else {
-            return nil
-        }
+        guard let id = profiles.actionableIdentityAccountIDs(
+            forProfile: profiles.activeProfileID,
+            localPlexAccountIDs: ProfileServerIdentityPolicy
+                .localPlexAccountIDs(in: accountsProviders.accounts)
+        ).first else { return nil }
         return accounts.first { $0.id == id }
     }
 
@@ -1010,8 +1012,8 @@ final class PlozziOSAppModel {
     /// Clears whichever question is on screen (the sheet was swiped away).
     /// Dismissing counts as answering: ask once, don't nag.
     func resolveIdentityPromptForPending() {
-        guard let id = profiles.activeProfile.pendingIdentityAccountIDs.first else { return }
-        resolveIdentityPrompt(for: id)
+        guard let account = pendingIdentityAccount else { return }
+        resolveIdentityPrompt(for: account.id)
     }
 
     /// Clears the question once a user is chosen — or the sheet is dismissed.
@@ -1023,7 +1025,11 @@ final class PlozziOSAppModel {
         profiles.update(profile)
         // The import was deferred while this was outstanding; with the answer in
         // it can finally run, against the identity that was just chosen.
-        guard !profile.needsSetup, !profile.awaitsIdentity(amongAccounts: accountsProviders.accounts.map(\.id)) else { return }
+        guard !profile.needsSetup, profiles.actionableIdentityAccountIDs(
+            forProfile: profile.id,
+            localPlexAccountIDs: ProfileServerIdentityPolicy
+                .localPlexAccountIDs(in: accountsProviders.accounts)
+        ).isEmpty else { return }
         Task { @MainActor in
             await updateTrackersForActiveProfile()
             await prepareUniversalWatchlist()

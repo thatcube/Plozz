@@ -624,6 +624,15 @@ public final class PlexHomeUsersModel {
                 PlozzLog.boot("performPlexSwitch superseded acct=\(accountID) home=\(homeUserID) live=\(liveBinding?.homeUserID ?? "owner")")
                 return
             }
+            // Checked for EVERY switch, not just the guarded refresh: the PIN
+            // path passes no `expectedGeneration`, so signing the account out
+            // during the network window left the persisted binding still
+            // matching and the task free to re-install — and re-cache — the
+            // credentials the user had just removed.
+            guard accountsProviders.accounts.contains(where: { $0.id == accountID }) else {
+                PlozzLog.boot("performPlexSwitch dropped — account gone acct=\(accountID)")
+                return
+            }
             let liveAccountGeneration = plexAccountIdentityGenerations[accountID, default: 0]
             if let expected = expectedGeneration, expected != liveAccountGeneration {
                 PlozzLog.boot("performPlexSwitch stale refresh dropped acct=\(accountID) gen=\(expected) live=\(liveAccountGeneration)")

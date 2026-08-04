@@ -529,7 +529,11 @@ public final class ProfileFlowModel {
     /// relaunch, because the enabled-but-unidentified server does. See
     /// `Profile.accountsAwaitingIdentity`.
     public var pendingIdentityAccountID: String? {
-        profilesModel.activeProfile.pendingIdentityAccountIDs.first
+        profilesModel.actionableIdentityAccountIDs(
+            forProfile: profilesModel.activeProfileID,
+            localPlexAccountIDs: ProfileServerIdentityPolicy
+                .localPlexAccountIDs(in: accountsProviders.accounts)
+        ).first
     }
 
     private func noteServerAwaitingIdentity(_ accountID: String, profileID: String) {
@@ -553,7 +557,11 @@ public final class ProfileFlowModel {
         profilesModel.update(profile)
         // The import was deferred while this was outstanding; with the answer in
         // it can finally run, against the identity that was just chosen.
-        if !profile.needsSetup, !profile.awaitsIdentity(amongAccounts: accountsProviders.accounts.map(\.id)) {
+        if !profile.needsSetup, profilesModel.actionableIdentityAccountIDs(
+            forProfile: profile.id,
+            localPlexAccountIDs: ProfileServerIdentityPolicy
+                .localPlexAccountIDs(in: accountsProviders.accounts)
+        ).isEmpty {
             activateUniversalWatchlist()
         }
     }

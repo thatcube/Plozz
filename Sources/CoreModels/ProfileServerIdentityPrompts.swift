@@ -22,6 +22,11 @@ import Foundation
 /// enabled-but-unidentified server is still there, importing as the owner every
 /// launch.
 public enum ProfileServerIdentityPolicy {
+    /// The Plex accounts signed in on this device, by id.
+    public static func localPlexAccountIDs(in accounts: [Account]) -> [String] {
+        accounts.filter { $0.server.provider == .plex }.map(\.id)
+    }
+
     /// - Parameters:
     ///   - provider: only Plex has multiple identities to choose between.
     ///   - hasExistingBinding: a profile that already chose a user on this
@@ -68,6 +73,38 @@ extension Profile {
 
 @MainActor
 public extension ProfilesModel {
+    /// The identity questions this profile can actually act on, in a stable order.
+    ///
+    /// ONE derivation, used both to gate the import and to choose which question
+    /// to present — they were computed differently, and disagreeing is worse than
+    /// either rule alone: the gate saw a pending id somewhere in the household and
+    /// held the import, while the presenter picked the first RAW pending id, found
+    /// no such account, and showed nothing. Deferred forever, asked never.
+    ///
+    /// Three narrowings, all necessary:
+    /// - present on this device: an account that isn't here has nothing to import
+    ///   from, so it can't leak and mustn't gate;
+    /// - Plex: only Plex has identities to choose between, and a liberally
+    ///   recorded id can turn out to be Jellyfin once it arrives;
+    /// - active for this profile: a server the profile no longer watches with
+    ///   can't leak into it either.
+    ///
+    /// - Parameter localPlexAccountIDs: Plex accounts signed in on this device.
+    func actionableIdentityAccountIDs(
+        forProfile profileID: String,
+        localPlexAccountIDs: [String]
+    ) -> [String] {
+        guard let profile = profiles.first(where: { $0.id == profileID }) else { return [] }
+        let pending = Set(profile.pendingIdentityAccountIDs)
+        guard !pending.isEmpty else { return [] }
+        // "Never chose" means the profile watches with every server, so the
+        // fallback is all of them rather than none.
+        let active = Set(activeAccountIDs(for: profileID, fallback: localPlexAccountIDs))
+        return localPlexAccountIDs
+            .filter { pending.contains($0) && active.contains($0) }
+            .sorted()
+    }
+
     /// Applies a synced membership set, asking who the profile watches as on any
     /// Plex server the sync just switched ON.
     ///
@@ -107,8 +144,8 @@ public extension ProfilesModel {
     ///   device hasn't signed into yet, so its provider is genuinely unknown
     ///   here, and declining to record the question means the leak just happens
     ///   later — when the account arrives, already enabled, with nothing pending.
-    ///   Over-recording is safe because `Profile.awaitsIdentity(amongAccounts:)`
-    ///   narrows to accounts that are actually present before gating anything.
+    ///   Over-recording is safe because `actionableIdentityAccountIDs` narrows to
+    ///   accounts that are present, Plex, and active before gating anything.
     func noteIdentityQuestions(
         for accountIDs: some Collection<String>,
         forProfile profileID: String,

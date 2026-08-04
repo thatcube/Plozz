@@ -501,6 +501,12 @@ extension AppState {
                 .filter { $0.server.provider != .plex }
                 .map(\.id)
         )
+        // Which profiles this device had BEFORE applying the upserts, so the
+        // backfill below can tell a genuine first arrival from a cosmetic update
+        // to one we already knew. Backfilling on every upsert would re-record
+        // questions the user has already answered — or declined — and a remote
+        // rename would silently re-gate their imports.
+        let knownProfileIDs = Set(profilesModel.profiles.map(\.id))
         if !profileUpserts.isEmpty || !profileDeletes.isEmpty {
             for profileID in profileDeletes
             where profileID != ProfileStore.defaultProfileID {
@@ -513,7 +519,7 @@ extension AppState {
             // sync shows nothing newly enabled and never asks. Backfill on
             // arrival; a profile new to this device is exactly one nobody here
             // has been asked about.
-            for dto in profileUpserts {
+            for dto in profileUpserts where !knownProfileIDs.contains(dto.key) {
                 profilesModel.noteIdentityQuestionsForArrivedProfile(
                     dto.key,
                     knownNonPlexAccountIDs: knownNonPlexAccountIDs

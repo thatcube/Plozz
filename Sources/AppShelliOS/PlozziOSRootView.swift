@@ -107,6 +107,26 @@ public struct PlozziOSRootView: View {
         )) {
             PlozziOSProfileOnboardingCover(appModel: appModel)
         }
+        // "Who are you on this server?" for a question recorded while the user was
+        // elsewhere — CloudSync enabling a server in the background, or an account
+        // signing in and making an already-recorded question answerable.
+        //
+        // The Libraries screen presents this too, for questions raised by its own
+        // toggle; that one is inside the Settings sheet and can't present when
+        // Settings is closed, which is most of the time. Without a presenter here
+        // the question would gate the watchlist import while nothing ever asked
+        // it. The two are mutually exclusive on `isSettingsPresented` so they
+        // can't both try.
+        .sheet(item: Binding(
+            get: { appModel.isSettingsPresented ? nil : appModel.pendingIdentityAccount },
+            set: { if $0 == nil { appModel.resolveIdentityPromptForPending() } }
+        )) { account in
+            PlozziOSServerIdentityPromptView(
+                appModel: appModel,
+                account: account,
+                onFinish: { appModel.resolveIdentityPrompt(for: account.id) }
+            )
+        }
         .task { appModel.resumeProfileOnboardingIfNeeded() }
         .task {
             // Detect on cold launch: fire immediately if the pending set is already

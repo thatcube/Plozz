@@ -855,9 +855,9 @@ private struct PlozziOSProfilesView: View {
 
             SettingsSectionGroup("Who’s watching?") {
                 ForEach(appModel.profiles.profiles) { profile in
-                    NavigationLink {
-                        PlozziOSProfileSettingsView(appModel: appModel, profileID: profile.id)
-                    } label: {
+                    NavigationLink(
+                        value: PlozziOSProfileSettingsRoute(profileID: profile.id)
+                    ) {
                         HStack {
                             PlozziOSProfileAvatar(
                                 profile: profile,
@@ -897,6 +897,15 @@ private struct PlozziOSProfilesView: View {
         }
         .settingsPageSurface()
         .navigationTitle("Profiles")
+        // One typed value, one push. Closure-based destinations inside this
+        // ForEach were all being activated by the containing split/stack,
+        // producing a back-stack containing every profile in list order.
+        .navigationDestination(for: PlozziOSProfileSettingsRoute.self) { route in
+            PlozziOSProfileSettingsView(
+                appModel: appModel,
+                profileID: route.profileID
+            )
+        }
         .sheet(isPresented: $showingAddProfile) {
             NavigationStack {
                 PlozziOSProfileEditorHost(
@@ -939,6 +948,10 @@ private struct PlozziOSProfilesView: View {
             PlozziOSProfileOnboardingCover(appModel: appModel)
         }
     }
+}
+
+private struct PlozziOSProfileSettingsRoute: Hashable {
+    let profileID: String
 }
 
 struct PlozziOSAccountDetailView: View {

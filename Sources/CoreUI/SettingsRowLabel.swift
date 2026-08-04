@@ -1,14 +1,17 @@
 #if canImport(SwiftUI)
 import SwiftUI
-import CoreUI
 
 // The shared, theme-aware list-row focus style (`SettingsFocusButtonStyle`), its
 // `SettingsRowSize`, the `settingsRowIsFocused` / `settingsRowFocusForeground`
 // environment values, and the `.settingsRowSecondary()/Icon()/GreenIndicator()`
 // helpers now live in CoreUI (`SettingsRowFocusStyle.swift`) so other modules —
 // e.g. the music rails' "See All" — can focus identically instead of drifting
-// from a private copy. The row body + switch toggle below still consume them via
-// the `import CoreUI` above.
+// from a private copy.
+//
+// The row BODY now lives here too, rather than in FeatureSettings: the profile
+// actions (Appearance / Profile Lock / Kids Profile) are rendered from
+// FeatureProfiles as well as from Settings, and a second hand-rolled row would
+// have been the start of exactly the drift this file exists to prevent.
 
 // MARK: - Shared row body (one- or two-line)
 
@@ -39,7 +42,7 @@ private extension VerticalAlignment {
 ///
 /// Row content adapts to focus automatically: pair inner text with
 /// `.settingsRowSecondary()` so it inverts against the focus card.
-struct SettingsRowLabel<Secondary: View, Trailing: View>: View {
+public struct SettingsRowLabel<Secondary: View, Trailing: View>: View {
     private let icon: String?
     private let assetIcon: String?
     private let title: Text
@@ -47,7 +50,7 @@ struct SettingsRowLabel<Secondary: View, Trailing: View>: View {
     private let trailing: Trailing
 
     /// Row label that is app COPY — the common case, so literals work unchanged.
-    init(
+    public init(
         icon: String?,
         assetIcon: String? = nil,
         title: LocalizedStringResource,
@@ -60,7 +63,7 @@ struct SettingsRowLabel<Secondary: View, Trailing: View>: View {
 
     /// Row label already built as `Text` — used when the caller must decide
     /// between copy and verbatim content (e.g. a brand name).
-    init(
+    public init(
         icon: String?,
         assetIcon: String? = nil,
         title: Text,
@@ -74,7 +77,7 @@ struct SettingsRowLabel<Secondary: View, Trailing: View>: View {
         self.trailing = trailing()
     }
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 16) {
             // Icon + text share a custom alignment so the icon centers on the
             // TITLE line, not the two-line block. The trailing accessory stays in

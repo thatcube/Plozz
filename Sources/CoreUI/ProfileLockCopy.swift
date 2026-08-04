@@ -180,6 +180,18 @@ public enum KidsProfileCopy {
         comment: "Tile on the profile picker that creates a new restricted profile, shown beside the ordinary Add Profile tile."
     )
 
+    public static let turnOn = LocalizedStringResource(
+        "settings.kidsProfile.turnOn",
+        defaultValue: "Turn On Kids Profile",
+        comment: "Confirming button that marks a profile as a child's."
+    )
+
+    public static let turnOff = LocalizedStringResource(
+        "settings.kidsProfile.turnOff",
+        defaultValue: "Turn Off Kids Profile",
+        comment: "Confirming button that lifts a profile's Kids restriction."
+    )
+
     public static let restrictedHere = LocalizedStringResource(
         "settings.kidsProfile.restrictedHere",
         defaultValue: "Shared settings are hidden on a Kids Profile. Switch to another profile to change them.",

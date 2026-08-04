@@ -10,10 +10,18 @@ import SwiftUI
 /// Everyone → Profiles → *name*. They were the same four choices rendered twice,
 /// which is how they'd have drifted.
 ///
-/// Notably there is **no** intermediate "Profile Lock" page. Selecting the lock
-/// row does the thing: unlocked, it goes straight to choosing a PIN; locked, it
-/// asks change-or-remove. A summary page whose only content was a button that
-/// opened the real screen was two presses of nothing.
+/// Rows are `SettingsRowLabel` + `SettingsFocusButtonStyle`, the same pair every
+/// other row in Settings uses, so these read as one control family with the rest
+/// of the app rather than as a bespoke list that happens to look similar.
+///
+/// Every row **opens something** and carries a chevron to say so. Kids Profile is
+/// deliberately not an inline switch: it has a real consequence and an honest
+/// caveat (it restricts settings, not content), and a switch you can nudge past
+/// while scrolling is the wrong affordance for that.
+///
+/// Notably there is no intermediate "Profile Lock" page. Selecting the lock row
+/// does the thing: unlocked, it goes straight to choosing a PIN; locked, it asks
+/// change-or-remove.
 public struct ProfileActionsList: View {
     private let profile: Profile
     /// Whether the lock will reach the user's other devices. Drives the caveat.
@@ -53,21 +61,21 @@ public struct ProfileActionsList: View {
     @Environment(\.themePalette) private var palette
     @State private var settingPIN = false
     @State private var showingLockOptions = false
+    @State private var showingKidsOptions = false
     @State private var confirmDelete = false
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            row(
+        VStack(spacing: 14) {
+            actionRow(
+                icon: "paintpalette",
                 title: "Appearance",
                 subtitle: "Name, avatar, and colour",
-                systemImage: "paintpalette",
                 action: onEditAppearance
             )
 
-            row(
+            actionRow(
+                icon: profile.isLocked ? "lock.fill" : "lock.open",
                 title: ProfileLockCopy.title,
-                subtitle: ProfileLockCopy.explanation,
-                systemImage: profile.isLocked ? "lock.fill" : "lock.open",
                 value: profile.isLocked ? ProfileLockCopy.on : ProfileLockCopy.off
             ) {
                 // Straight to the thing. No summary page in between.
@@ -78,18 +86,12 @@ public struct ProfileActionsList: View {
                 }
             }
 
-            Toggle(isOn: Binding(
-                get: { profile.isKids },
-                set: { onSetKids($0) }
-            )) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(KidsProfileCopy.title)
-                        .font(.callout.weight(.medium))
-                    Text(KidsProfileCopy.explanation)
-                        .font(.footnote)
-                        .foregroundStyle(palette.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            actionRow(
+                icon: "figure.and.child.holdinghands",
+                title: KidsProfileCopy.title,
+                value: profile.isKids ? ProfileLockCopy.on : ProfileLockCopy.off
+            ) {
+                showingKidsOptions = true
             }
 
             if profile.isKids, !householdHasOtherLock {
@@ -101,13 +103,15 @@ public struct ProfileActionsList: View {
                     Image(systemName: "exclamationmark.triangle")
                 }
                 .foregroundStyle(palette.secondaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
             }
 
-            if let onDelete {
-                row(
+            if onDelete != nil {
+                actionRow(
+                    icon: "trash",
                     title: "Delete Profile",
                     subtitle: nil,
-                    systemImage: "trash",
                     isDestructive: true
                 ) {
                     confirmDelete = true
@@ -137,6 +141,20 @@ public struct ProfileActionsList: View {
         } message: {
             Text(ProfileLockCopy.forgotPINDetail)
         }
+        .confirmationDialog(
+            Text(KidsProfileCopy.title),
+            isPresented: $showingKidsOptions,
+            titleVisibility: .visible
+        ) {
+            if profile.isKids {
+                Button(String(localized: KidsProfileCopy.turnOff), role: .destructive) { onSetKids(false) }
+            } else {
+                Button(String(localized: KidsProfileCopy.turnOn)) { onSetKids(true) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(KidsProfileCopy.explanation)
+        }
         .alert("Delete this profile?", isPresented: $confirmDelete) {
             Button("Delete Profile", role: .destructive) { onDelete?() }
             Button("Cancel", role: .cancel) {}
@@ -147,38 +165,65 @@ public struct ProfileActionsList: View {
 
     // MARK: Rows
 
+    /// A row in the app's standard settings shape: icon, title, optional second
+    /// line, then a value and a chevron. The chevron is the point — every one of
+    /// these opens a screen or a choice, and none changes state in place.
+    ///
+    /// Deliberately sets **no** foreground of its own. `SettingsFocusButtonStyle`
+    /// inverts the whole card on focus and publishes the matching foreground down
+    /// the environment, which `.settingsRowSecondary()` and `.settingsRowIcon()`
+    /// read; hard-coding a colour here would pin the row to one theme and leave
+    /// the text unreadable against the inverted focus card. The destructive row
+    /// is the one exception, matching Sign Out elsewhere in Settings.
     @ViewBuilder
-    private func row(
+    private func actionRow(
+        icon: String,
         title: LocalizedStringResource,
-        subtitle: LocalizedStringResource?,
-        systemImage: String,
+        subtitle: LocalizedStringResource? = nil,
         value: LocalizedStringResource? = nil,
         isDestructive: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 16) {
-                Image(systemName: systemImage)
-                    .frame(width: 30, height: 30)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.callout.weight(.medium))
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.footnote)
-                            .foregroundStyle(palette.secondaryText)
-                            .fixedSize(horizontal: false, vertical: true)
+        Button(role: isDestructive ? .destructive : nil, action: action) {
+            SettingsRowLabel(icon: icon, title: title) {
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.footnote)
+                        .settingsRowSecondary()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } trailing: {
+                HStack(spacing: 16) {
+                    if let value {
+                        Text(value)
+                            .font(.subheadline)
+                            .settingsRowSecondary()
+                            .lineLimit(1)
+                    }
+                    if !isDestructive {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 18, weight: .semibold))
+                            .settingsRowSecondary()
                     }
                 }
-                Spacer(minLength: 12)
-                if let value {
-                    Text(value).foregroundStyle(palette.secondaryText)
-                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            .modifier(DestructiveRowTint(isDestructive: isDestructive))
         }
-        .foregroundStyle(isDestructive ? Color.red : palette.primaryText)
+        .buttonStyle(SettingsFocusButtonStyle())
+    }
+}
+
+/// Paints a row red only when it destroys something, leaving every other row to
+/// inherit the theme- and focus-aware colours from the environment.
+private struct DestructiveRowTint: ViewModifier {
+    let isDestructive: Bool
+
+    func body(content: Content) -> some View {
+        if isDestructive {
+            content.foregroundStyle(.red)
+        } else {
+            content
+        }
     }
 }
 #endif

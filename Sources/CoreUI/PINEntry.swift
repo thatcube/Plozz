@@ -116,7 +116,11 @@ public struct PINEntryScaffold<Badge: View>: View {
             Rectangle()
                 .fill(.ultraThinMaterial)
                 .ignoresSafeArea()
-            Color.black.opacity(0.55).ignoresSafeArea()
+            // Deepen the scrim toward the theme's own background rather than
+            // always black, so a light theme dims to a light wash.
+            (palette.isLight ? Color.white : Color.black)
+                .opacity(0.55)
+                .ignoresSafeArea()
 
             #if os(tvOS)
             // Prose on the left, pad on the right. Splitting them lets the pad sit
@@ -348,18 +352,25 @@ private struct PINKeyBody: View {
 
     @Environment(\.isFocused) private var isFocused
     @Environment(\.themePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Focus inverts the key, matching how every Settings row inverts its card —
+    /// derived from the scheme rather than hard-coded white, or the pad would
+    /// glow white-on-white under a light theme.
+    private var focusFill: Color { colorScheme == .dark ? .white : .black }
+    private var focusForeground: Color { colorScheme == .dark ? .black : .white }
 
     var body: some View {
         configuration.label
-            .foregroundStyle(isFocused ? Color.black : palette.primaryText)
+            .foregroundStyle(isFocused ? focusForeground : palette.primaryText)
             .frame(width: width, height: PINMetrics.keyDiameter)
             .background(
                 Capsule(style: .continuous)
-                    .fill(isFocused ? Color.white : palette.primaryText.opacity(0.16))
+                    .fill(isFocused ? focusFill : palette.primaryText.opacity(0.16))
             )
             .scaleEffect(isFocused ? 1.06 : 1.0)
             .shadow(
-                color: Color.white.opacity(isFocused ? 0.28 : 0),
+                color: focusFill.opacity(isFocused ? 0.28 : 0),
                 radius: isFocused ? 26 : 0
             )
             .opacity(configuration.isPressed ? 0.85 : 1.0)

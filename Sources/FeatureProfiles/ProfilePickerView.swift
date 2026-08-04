@@ -153,7 +153,7 @@ public struct ProfilePickerView: View {
             // it would have to sit under a *row*, which reads as belonging to
             // all of them.
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 56) {
+                HStack(alignment: .top, spacing: ProfilePickerLayout.tileSpacing) {
                     ForEach(profiles) { profile in
                         VStack(spacing: 20) {
                             ProfileTile(
@@ -378,7 +378,7 @@ private struct ProfileTileLabel: View {
 
             VStack(spacing: 8) {
                 Text(profile.name)
-                    .font(.title3.weight(.semibold))
+                    .font(ProfilePickerLayout.nameFont)
                     .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
                     .lineLimit(1)
 
@@ -437,7 +437,7 @@ private struct AddProfileTileLabel: View {
                             )
                     }
                     Image(systemName: systemImage)
-                        .font(.system(size: isProminent ? 80 : 68, weight: .semibold))
+                        .font(.system(size: isProminent ? 100 : 86, weight: .semibold))
                         .foregroundStyle(
                             isProminent
                                 ? Color.black
@@ -448,7 +448,7 @@ private struct AddProfileTileLabel: View {
 
             VStack(spacing: 8) {
                 Text(title)
-                    .font(.title3.weight(.semibold))
+                    .font(ProfilePickerLayout.nameFont)
                     .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
                     .lineLimit(1)
 
@@ -462,11 +462,20 @@ private struct AddProfileTileLabel: View {
 /// Shared layout constants so a profile tile and the "Add Profile" tile size
 /// identically.
 private enum ProfilePickerLayout {
-    static let avatarSize: CGFloat = 200
+    /// Deliberately large: the avatar IS the target on this screen, and a 10-foot
+    /// UI can afford it. Five tiles still fit a 1920pt screen —
+    /// 5×(250+2×24) + 4×40 + 2×80 = 1810 — so the common household size never
+    /// scrolls.
+    static let avatarSize: CGFloat = 250
     /// Clearance between the avatar and the circular focus glass — the visible
     /// "padding" the focus halo adds around the avatar when selected.
     static let focusPadding: CGFloat = 24
     /// The reserved avatar-slot size (avatar + focus clearance on each side).
     static let slot: CGFloat = avatarSize + focusPadding * 2
+    /// Tightened as the avatars grew, so five still fit without scrolling.
+    static let tileSpacing: CGFloat = 40
+    /// A step down from `.title3`: with a bigger avatar carrying the identity,
+    /// the name is a caption to it rather than a headline of its own.
+    static let nameFont: Font = .system(size: 26, weight: .semibold)
 }
 #endif

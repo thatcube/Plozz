@@ -23,8 +23,14 @@ struct ProfileSelectionView: View {
 
     @Environment(\.themePalette) private var palette
 
-    /// The profile whose actions sheet is open (Edit), if any.
-    @State private var actionsProfile: Profile?
+    /// The profile whose actions sheet is open (Edit), held as an **id**.
+    ///
+    /// `.sheet(item:)` captures the value it was presented with, so holding a
+    /// `Profile` here meant the sheet kept rendering the profile as it was when
+    /// Edit was pressed — set a lock and the row still read "Off". The id is
+    /// stable and the profile is resolved live from the observable model on every
+    /// render instead.
+    @State private var actionsProfileID: PickerProfileID?
     /// The profile whose cosmetics are being edited, if any.
     @State private var editingProfile: Profile?
     /// Set while creating a profile, so the sheet knows which kind to make.
@@ -81,26 +87,30 @@ struct ProfileSelectionView: View {
         .onExitCommand {
             if canCancel { appState.profileFlow.cancelProfileSelection() }
         }
-        .sheet(item: $actionsProfile) { profile in
-            ProfileActionsSheet(
-                profile: profile,
-                syncEnabled: SyncSetupFeatureFlag().isEnabled,
-                offersPlexPINReuse: offersPlexPINReuse(for: profile),
-                householdHasOtherLock: appState.profilesModel.profiles.contains {
-                    $0.id != profile.id && $0.isLocked
-                },
-                onEditAppearance: {
-                    actionsProfile = nil
-                    editingProfile = profile
-                },
-                onSetLock: { appState.setLock($0, forProfile: profile.id) },
-                onSetKids: { appState.setKidsProfile($0, forProfile: profile.id) },
-                onDelete: profile.id == appState.profilesModel.profiles.first?.id ? nil : {
-                    appState.profileFlow.removeProfile(id: profile.id)
-                    actionsProfile = nil
-                },
-                onClose: { actionsProfile = nil }
-            )
+        .sheet(item: $actionsProfileID) { wrapper in
+            // Resolved on every render so the sheet reflects edits made from
+            // inside it — the lock it just set, a rename, the Kids toggle.
+            if let profile = appState.profilesModel.profiles.first(where: { $0.id == wrapper.id }) {
+                ProfileActionsSheet(
+                    profile: profile,
+                    syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                    offersPlexPINReuse: offersPlexPINReuse(for: profile),
+                    householdHasOtherLock: appState.profilesModel.profiles.contains {
+                        $0.id != profile.id && $0.isLocked
+                    },
+                    onEditAppearance: {
+                        actionsProfileID = nil
+                        editingProfile = profile
+                    },
+                    onSetLock: { appState.setLock($0, forProfile: profile.id) },
+                    onSetKids: { appState.setKidsProfile($0, forProfile: profile.id) },
+                    onDelete: profile.id == appState.profilesModel.profiles.first?.id ? nil : {
+                        appState.profileFlow.removeProfile(id: profile.id)
+                        actionsProfileID = nil
+                    },
+                    onClose: { actionsProfileID = nil }
+                )
+            }
         }
         .sheet(item: $editingProfile) { profile in
             ProfileEditorView(
@@ -241,8 +251,14 @@ struct ProfileSelectionView: View {
         case let .add(isKids):
             creating = isKids ? .kids : .ordinary
         case let .edit(profile):
-            actionsProfile = profile
+            actionsProfileID = PickerProfileID(id: profile.id)
         }
     }
+}
+
+/// Identifiable wrapper so a profile id can drive `.sheet(item:)` without the
+/// sheet capturing a stale copy of the profile itself.
+private struct PickerProfileID: Identifiable, Hashable {
+    let id: String
 }
 #endif

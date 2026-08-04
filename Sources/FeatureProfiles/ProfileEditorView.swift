@@ -698,12 +698,14 @@ public struct ProfileEditorView: View {
                     emojiTile(emoji)
                 }
             }
-            // Keep focus lift inside the scroll viewport; the viewport itself
-            // must clip so horizontally scrolled emoji never paint over the
-            // fixed preview pane to the left.
-            .padding(.horizontal, 16)
+            // No horizontal inset: content travels all the way to the preview
+            // pane boundary instead of disappearing in an unexplained gap.
             .padding(.vertical, shadowClearance)
         }
+        .horizontalEdgeFadeMask(
+            fadeWidth: 28,
+            verticalOverhang: shadowClearance
+        )
         // Same pattern as Home's media rows: expand the clipped viewport around
         // focused content, then cancel that extra room from layout so category
         // spacing remains unchanged.

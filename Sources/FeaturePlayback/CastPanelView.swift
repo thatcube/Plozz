@@ -1334,59 +1334,11 @@ private struct CastCreditsRow: View {
         .scrollClipDisabled()
         #endif
         .frame(maxWidth: .infinity, alignment: .leading)
-        .mask { fadeMask }
+        .horizontalEdgeFadeMask(
+            fadeWidth: Self.fade,
+            verticalOverhang: liftOverhang
+        )
         .onPreferenceChange(CastCreditLabelHeightKey.self) { labelHeights = $0 }
-    }
-
-    /// Clips the sides and feathers them; deliberately taller than the row it
-    /// masks, so the vertical axis is left alone.
-    ///
-    /// BOTH edges, always. The leading fade used to appear only once the row had
-    /// scrolled, which meant it vanished the moment focus left — turning a soft
-    /// edge back into a hard cut. It can be permanent because the content
-    /// margins below inset the row by exactly this width: at rest the gradient
-    /// lies over empty space and dims nothing.
-    private var fadeMask: some View {
-        HStack(spacing: 0) {
-            Self.edgeFade(reversed: false).frame(width: Self.fade)
-            Color.black
-            Self.edgeFade(reversed: true).frame(width: Self.fade)
-        }
-        // Overhang for the focus lift. A mask hides everything its own drawing
-        // does not cover, so a mask the exact height of the row IS a vertical
-        // clip — this is what was still shaving the focused poster.
-        .padding(.vertical, -liftOverhang)
-    }
-
-    /// An EASED ramp, not a straight one.
-    ///
-    /// A two-stop gradient changes opacity at a constant rate, so it leaves a
-    /// visible crease where it begins and ends — the eye reads those corners,
-    /// not the ramp between them. These stops ease in and out of both ends, so
-    /// the fade starts and finishes imperceptibly and only moves quickly through
-    /// its middle, where nothing is looking.
-    private static func edgeFade(reversed: Bool) -> some View {
-        // Sampled from smoothstep rather than written out by hand.
-        //
-        // The hand-picked seven-stop ramp was an approximation of this curve,
-        // and being an approximation it had small kinks in it — a gradient is
-        // read by the eye as a rate of change, so an uneven rate shows up as
-        // banding even when no individual step is large. Sampling the real
-        // function at enough points removes that, and the count is the cheap
-        // part: this is a static gradient, not something re-evaluated per frame.
-        let samples = 24
-        let stops = (0...samples).map { step -> Gradient.Stop in
-            let t = Double(step) / Double(samples)
-            // 3t² − 2t³: zero slope at both ends, so the fade begins and ends
-            // imperceptibly and only moves quickly through its middle, where
-            // nothing is looking.
-            let eased = t * t * (3 - 2 * t)
-            return Gradient.Stop(
-                color: .black.opacity(reversed ? 1 - eased : eased),
-                location: t
-            )
-        }
-        return LinearGradient(stops: stops, startPoint: .leading, endPoint: .trailing)
     }
 
     /// How far a focused poster grows past the row, per edge.

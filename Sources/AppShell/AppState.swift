@@ -2096,6 +2096,18 @@ public final class AppState {
     }
 
     public func cancelAuthentication() {
+        if pendingAdditionalUser != nil {
+            // This auth screen was opened from Watching as, not from the server
+            // picker. The Libraries navigation stack remains mounted underneath;
+            // remove the overlay and return straight to it.
+            pendingAdditionalUser = nil
+            pendingOnboardingProvider = nil
+            pendingLibrarySelectionAccountIDs = []
+            pendingOnboardingContinuation = nil
+            pendingPlexUserApplyToAccountIDs = []
+            apply(.cancelOnboardingToApp)
+            return
+        }
         // Stepping back from Quick Connect keeps the provider so we land on that
         // provider's server list; any other cancel backs out to the chooser.
         let wasAuthenticating: Bool

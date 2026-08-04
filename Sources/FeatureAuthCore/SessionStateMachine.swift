@@ -89,6 +89,10 @@ public enum SessionEvent: Sendable {
     case authenticationFailed(AppError)
     /// Back out of onboarding without adding an account.
     case cancelOnboarding
+    /// Cancel an add-user authentication flow that was launched from an existing
+    /// screen (e.g. Profile setup → Watching as), returning directly to that
+    /// still-mounted origin instead of the generic server picker.
+    case cancelOnboardingToApp
     /// The persisted account set changed (e.g. removal/sign-out); carries the
     /// new list so the machine can decide ready vs. onboarding.
     case accountsChanged([Account])
@@ -188,6 +192,9 @@ public struct SessionStateMachine: Sendable {
         // to go).
         case let (.onboarding(.selectingServer, canReturn), .cancelOnboarding):
             return canReturn ? .ready : .onboarding(.selectingServer, canReturnToApp: false)
+
+        case (.onboarding, .cancelOnboardingToApp):
+            return .ready
 
         // Failure recovery.
         case let (.failed(_, canReturn), .retry),

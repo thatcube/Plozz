@@ -532,7 +532,12 @@ public final class ProfileFlowModel {
         profilesModel.actionableIdentityAccountIDs(
             forProfile: profilesModel.activeProfileID,
             importAccountIDs: ProfileServerIdentityPolicy
-                .importPlexAccountIDs(in: accountsProviders.homeAccounts)
+                .importPlexAccountIDs(
+                    in: NativeWatchlistAccounts.resolve(
+                        profiles: profilesModel,
+                        accountsProviders: accountsProviders
+                    )
+                )
         ).first
     }
 
@@ -560,7 +565,12 @@ public final class ProfileFlowModel {
         if !profile.needsSetup, profilesModel.actionableIdentityAccountIDs(
             forProfile: profile.id,
             importAccountIDs: ProfileServerIdentityPolicy
-                .importPlexAccountIDs(in: accountsProviders.homeAccounts)
+                .importPlexAccountIDs(
+                    in: NativeWatchlistAccounts.resolve(
+                        profiles: profilesModel,
+                        accountsProviders: accountsProviders
+                    )
+                )
         ).isEmpty {
             activateUniversalWatchlist()
         }

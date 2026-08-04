@@ -992,7 +992,12 @@ final class PlozziOSAppModel {
         guard let id = profiles.actionableIdentityAccountIDs(
             forProfile: profiles.activeProfileID,
             importAccountIDs: ProfileServerIdentityPolicy
-                .importPlexAccountIDs(in: accountsProviders.homeAccounts)
+                .importPlexAccountIDs(
+                    in: NativeWatchlistAccounts.resolve(
+                        profiles: profiles,
+                        accountsProviders: accountsProviders
+                    )
+                )
         ).first else { return nil }
         return accounts.first { $0.id == id }
     }
@@ -1028,7 +1033,12 @@ final class PlozziOSAppModel {
         guard !profile.needsSetup, profiles.actionableIdentityAccountIDs(
             forProfile: profile.id,
             importAccountIDs: ProfileServerIdentityPolicy
-                .importPlexAccountIDs(in: accountsProviders.homeAccounts)
+                .importPlexAccountIDs(
+                    in: NativeWatchlistAccounts.resolve(
+                        profiles: profiles,
+                        accountsProviders: accountsProviders
+                    )
+                )
         ).isEmpty else { return }
         Task { @MainActor in
             await updateTrackersForActiveProfile()

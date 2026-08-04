@@ -20,6 +20,40 @@ import ProviderPlex
 /// shells' existing lifecycle code (profile switch, sign-out, teardown) that nils
 /// these out keeps working unchanged. The logic, which is the part that must not
 /// diverge, lives here exactly once.
+/// Which accounts the native watchlist import is allowed to read from.
+///
+/// A free function, not just a member of `UniversalWatchlistHost`, because the
+/// shells' profile coordinators have to answer the same question when deciding
+/// whether an identity question still gates the import — and the gate agreeing
+/// with the import is the entire point. A second, similar-looking derivation is
+/// exactly what this replaced.
+@MainActor
+public enum NativeWatchlistAccounts {
+    /// Deliberately not `homeAccounts`, which exists so the signed-in UI is never
+    /// blank and therefore falls back to the primary account when the active set
+    /// is empty. That's right for a screen and wrong here: a profile that has
+    /// explicitly chosen NO servers would import the primary account's watchlist —
+    /// its owner's — having asked for nothing. The same applies when every server
+    /// a profile chose has since been signed out: browsing falls back to the
+    /// household so the profile isn't left blank, but reading a watchlist from
+    /// servers it never chose is not a sensible recovery.
+    ///
+    /// So: no explicit choice means the household set (which genuinely is "all
+    /// servers"), and an explicit choice is honoured exactly — including the empty
+    /// one, which yields no destinations at all.
+    public static func resolve(
+        profiles: ProfilesModel,
+        accountsProviders: AccountsProvidersModel
+    ) -> [ResolvedAccount] {
+        guard let chosen = profiles.storedActiveAccountIDs(for: profiles.activeProfileID)
+        else { return accountsProviders.resolvedActiveAccounts }
+        let chosenIDs = Set(chosen)
+        return accountsProviders.resolvedActiveAccounts.filter {
+            chosenIDs.contains($0.account.id)
+        }
+    }
+}
+
 @MainActor
 public protocol UniversalWatchlistHost: AnyObject {
     var runtimeFeatureFlags: RuntimeFeatureFlags { get }
@@ -89,6 +123,14 @@ public protocol UniversalWatchlistHost: AnyObject {
 
 public extension UniversalWatchlistHost {
 
+    /// The accounts the NATIVE watchlist import may read from — see
+    /// `NativeWatchlistAccounts.resolve(profiles:accountsProviders:)`.
+    var nativeWatchlistAccounts: [ResolvedAccount] {
+        NativeWatchlistAccounts.resolve(
+            profiles: profiles,
+            accountsProviders: accountsProviders
+        )
+    }
 
     func prepareUniversalWatchlist() async {
         guard runtimeFeatureFlags.isEnabled(.universalWatchlist) else { return }
@@ -143,7 +185,7 @@ public extension UniversalWatchlistHost {
             } else if !profiles.actionableIdentityAccountIDs(
                 forProfile: profileID,
                 importAccountIDs: ProfileServerIdentityPolicy
-                    .importPlexAccountIDs(in: accountsProviders.homeAccounts)
+                    .importPlexAccountIDs(in: nativeWatchlistAccounts)
             ).isEmpty {
                 // A server was switched on and nobody has said who this profile
                 // is there yet. Importing now reads it as the account OWNER and
@@ -614,7 +656,7 @@ public extension UniversalWatchlistHost {
         universalWatchlistRetryScheduler = nil
         var destinations: [any WatchlistDestination] = []
         let profile = profiles.activeProfile
-        for resolved in accountsProviders.homeAccounts {
+        for resolved in nativeWatchlistAccounts {
             if let provider = resolved.provider as? PlexProvider,
                let destination = PlexWatchlistDestination(provider: provider) {
                 // Talk to Discover as the person this profile plays as: their

@@ -76,21 +76,10 @@ public struct PlozziOSRootView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        // Profile Lock: the PIN gate a profile carries with it from any device in
-        // the household. Presented here so it covers whatever is on screen when a
-        // locked profile is chosen — including the launch picker, which is forced
-        // when the profile we'd otherwise restore is locked.
-        .fullScreenCover(item: Binding(
-            get: { appModel.pendingLockedProfile },
-            set: { newValue in if newValue == nil { appModel.cancelProfileLockPrompt() } }
-        )) { profile in
-            ProfileLockPINView(
-                profile: profile,
-                errorMessage: appModel.profileLockError,
-                isSyncEnabled: SyncSetupFeatureFlag().isEnabled,
-                onSubmit: { appModel.submitProfileLockPIN($0) },
-                onCancel: { appModel.cancelProfileLockPrompt() }
-            )
+        // One opaque cover for profile PIN then Plex PIN. Separate presentations
+        // briefly exposed the tab shell between them.
+        .fullScreenCover(isPresented: profileAccessGateBinding) {
+            PlozziOSProfileAccessGateView(appModel: appModel)
         }
         // Setup that was abandoned part-way — quit mid-flow, or arrived over sync
         // from a device where it was never finished. The gate is persisted, so a
@@ -281,15 +270,6 @@ public struct PlozziOSRootView: View {
             .preferredColorScheme(addServerPresentationColorScheme)
         }
         .sheet(
-            item: plexPINBinding
-        ) { request in
-            PlozziOSPlexPINView(
-                model: appModel.plexHomeUsers,
-                request: request
-            )
-            .preferredColorScheme(addServerPresentationColorScheme)
-        }
-        .sheet(
             item: librarySelectionBinding
         ) { selection in
             PlozziOSLibrarySelectionView(
@@ -385,17 +365,18 @@ public struct PlozziOSRootView: View {
         )
     }
 
-    private var plexPINBinding:
-        Binding<PlexHomeUsersModel.PlexPINRequest?>
-    {
+    private var profileAccessGateBinding: Binding<Bool> {
         Binding(
             get: {
-                showingSettings || appModel.profileOnboardingStep == .libraries
-                    ? nil
-                    : appModel.plexHomeUsers.pendingPlexPINRequest
+                if appModel.pendingLockedProfile != nil { return true }
+                guard !showingSettings,
+                      appModel.profileOnboardingStep != .libraries
+                else { return false }
+                return appModel.plexHomeUsers.pendingPlexPINRequest != nil
             },
-            set: { request in
-                if request == nil {
+            set: { presented in
+                if !presented {
+                    appModel.cancelProfileLockPrompt()
                     appModel.plexHomeUsers.dismissPlexPINIfPresented()
                 }
             }
@@ -776,4 +757,57 @@ private struct PlozziOSHomeLandingView: View {
     }
 }
 
+/// iPhone/iPad counterpart of tvOS's persistent profile-entry gate.
+private struct PlozziOSProfileAccessGateView: View {
+    let appModel: PlozziOSAppModel
+
+    @Environment(\.themePalette) private var palette
+    @State private var expectsTwoPINs: Bool
+
+    init(appModel: PlozziOSAppModel) {
+        self.appModel = appModel
+        let profile = appModel.pendingLockedProfile
+        _expectsTwoPINs = State(initialValue:
+            profile?.isLocked == true
+                && profile?.lock?.matchesPlexPIN != true
+                && profile?.playsAsPINProtectedPlexUser == true
+        )
+    }
+
+    var body: some View {
+        ZStack {
+            AppBackground(palette: palette).ignoresSafeArea()
+
+            if let profile = appModel.pendingLockedProfile {
+                ProfileLockPINView(
+                    profile: profile,
+                    errorMessage: appModel.profileLockError,
+                    isSyncEnabled: SyncSetupFeatureFlag().isEnabled,
+                    sequenceStep: expectsTwoPINs
+                        ? .init(current: 1, total: 2)
+                        : nil,
+                    onSubmit: { appModel.submitProfileLockPIN($0) },
+                    onCancel: { appModel.cancelProfileLockPrompt() }
+                )
+                .id("profile-pin")
+                .transition(.opacity)
+            } else if let request = appModel.plexHomeUsers.pendingPlexPINRequest {
+                PlozziOSPlexPINView(
+                    model: appModel.plexHomeUsers,
+                    request: request,
+                    sequenceStep: expectsTwoPINs
+                        ? .init(current: 2, total: 2)
+                        : nil,
+                    dismissOnSuccess: false
+                )
+                .id("plex-pin")
+                .transition(.opacity)
+            }
+        }
+        .animation(
+            .easeInOut(duration: 0.2),
+            value: appModel.pendingLockedProfile?.id
+        )
+    }
+}
 #endif

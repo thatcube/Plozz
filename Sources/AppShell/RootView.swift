@@ -433,33 +433,22 @@ public struct RootView: View {
             presenter: appState.transientStatusPresenter,
             isLightSurface: resolvedPalette.isLight
         )
-        .fullScreenCover(item: Binding(
-            get: { pinRequest },
-            set: { newValue in if newValue == nil { appState.plexHomeUsers.dismissPlexPINIfPresented() } }
-        )) { request in
-            PlexPINEntryView(
-                appState: appState,
-                userName: request.homeUserName,
-                avatarURLString: request.homeUserAvatarURL,
-                onSubmit: { appState.plexHomeUsers.submitPlexPIN($0) },
-                onCancel: { appState.plexHomeUsers.cancelPlexPIN() }
-            )
-        }
-        // Profile Lock: the profile's own PIN, asked BEFORE anything switches —
-        // so this sits in front of the Plex prompt above rather than beside it.
-        // Same screen, deliberately: a person who reused their Plex PIN shouldn't
-        // be able to tell which system is asking.
-        .fullScreenCover(item: Binding(
-            get: { appState.profileFlow.pendingLockedProfile },
-            set: { newValue in if newValue == nil { appState.profileFlow.cancelProfileLockPrompt() } }
-        )) { profile in
-            ProfileLockPINView(
-                profile: profile,
-                errorMessage: appState.profileFlow.profileLockError,
-                isSyncEnabled: SyncSetupFeatureFlag().isEnabled,
-                onSubmit: { appState.profileFlow.submitProfileLockPIN($0) },
-                onCancel: { appState.profileFlow.cancelProfileLockPrompt() }
-            )
+        // One cover for the whole access gate. Two separate covers dismissed the
+        // profile PIN to Home, then presented the Plex PIN — flashing Home as if
+        // access had been granted. This cover stays opaque and switches its
+        // content in place.
+        .fullScreenCover(isPresented: Binding(
+            get: {
+                appState.profileFlow.pendingLockedProfile != nil || pinRequest != nil
+            },
+            set: { presented in
+                if !presented {
+                    appState.profileFlow.cancelProfileLockPrompt()
+                    appState.plexHomeUsers.dismissPlexPINIfPresented()
+                }
+            }
+        )) {
+            ProfileAccessGateView(appState: appState)
         }
         // Turning a server ON for a profile asks the same question setup asks:
         // who does this profile watch as there? Without it the watchlist import
@@ -980,6 +969,68 @@ private struct ProfileSetupFlowView: View {
     }
 }
 
+/// Persistent profile-entry gate: profile PIN first, Plex PIN second when needed.
+///
+/// `expectsTwoPINs` is captured when the cover opens, before the profile switch
+/// clears `pendingLockedProfile`, so step 2 still knows it belongs to a chain.
+private struct ProfileAccessGateView: View {
+    let appState: AppState
+
+    @Environment(\.themePalette) private var palette
+    @State private var expectsTwoPINs: Bool
+
+    init(appState: AppState) {
+        self.appState = appState
+        let profile = appState.profileFlow.pendingLockedProfile
+        _expectsTwoPINs = State(initialValue:
+            profile?.isLocked == true
+                && profile?.lock?.matchesPlexPIN != true
+                && profile?.playsAsPINProtectedPlexUser == true
+        )
+    }
+
+    var body: some View {
+        ZStack {
+            // Remains behind BOTH steps, so even the content cross-fade can never
+            // reveal Home.
+            AppBackground(palette: palette).ignoresSafeArea()
+
+            if let profile = appState.profileFlow.pendingLockedProfile {
+                ProfileLockPINView(
+                    profile: profile,
+                    errorMessage: appState.profileFlow.profileLockError,
+                    isSyncEnabled: SyncSetupFeatureFlag().isEnabled,
+                    sequenceStep: expectsTwoPINs
+                        ? .init(current: 1, total: 2)
+                        : nil,
+                    onSubmit: { appState.profileFlow.submitProfileLockPIN($0) },
+                    onCancel: { appState.profileFlow.cancelProfileLockPrompt() }
+                )
+                .id("profile-pin")
+                .transition(.opacity)
+            } else if let request = appState.plexHomeUsers.pendingPlexPINRequest {
+                PlexPINEntryView(
+                    appState: appState,
+                    userName: request.homeUserName,
+                    avatarURLString: request.homeUserAvatarURL,
+                    sequenceStep: expectsTwoPINs
+                        ? .init(current: 2, total: 2)
+                        : nil,
+                    dismissOnSuccess: false,
+                    onSubmit: { appState.plexHomeUsers.submitPlexPIN($0) },
+                    onCancel: { appState.plexHomeUsers.cancelPlexPIN() }
+                )
+                .id("plex-pin")
+                .transition(.opacity)
+            }
+        }
+        .animation(
+            .easeInOut(duration: 0.2),
+            value: appState.profileFlow.pendingLockedProfile?.id
+        )
+    }
+}
+
 /// Observes the tvOS display manager at the app root and forwards mode-switch-end
 /// to the window-level `DisplayVeilModel`, so the exit veil can time its hold off
 /// the *reported* settle even after the player has been dismissed. A no-op on
@@ -1013,6 +1064,7 @@ private struct PlexPINEntryView: View {
     let appState: AppState
     let userName: String
     let avatarURLString: String?
+    var sequenceStep: PINSequenceStep? = nil
     var dismissOnSuccess: Bool = true
     let onSubmit: (String) -> Void
     let onCancel: () -> Void
@@ -1032,6 +1084,7 @@ private struct PlexPINEntryView: View {
             name: userName,
             errorMessage: appState.plexHomeUsers.plexPINError,
             isSubmitting: isSubmitting,
+            sequenceStep: sequenceStep,
             onSubmit: { pin in
                 // Flip isSubmitting so the user sees a spinner rather than "four
                 // dots and nothing happens" while the network round-trip runs.

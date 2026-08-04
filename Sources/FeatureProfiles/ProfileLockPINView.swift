@@ -27,6 +27,7 @@ public struct ProfileLockPINView: View {
     private let profile: Profile
     private let errorMessage: String?
     private let isSyncEnabled: Bool
+    private let sequenceStep: PINSequenceStep?
     private let onSubmit: (String) -> Void
     private let onCancel: () -> Void
 
@@ -38,12 +39,14 @@ public struct ProfileLockPINView: View {
         profile: Profile,
         errorMessage: String?,
         isSyncEnabled: Bool,
+        sequenceStep: PINSequenceStep? = nil,
         onSubmit: @escaping (String) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.profile = profile
         self.errorMessage = errorMessage
         self.isSyncEnabled = isSyncEnabled
+        self.sequenceStep = sequenceStep
         self.onSubmit = onSubmit
         self.onCancel = onCancel
     }
@@ -54,6 +57,7 @@ public struct ProfileLockPINView: View {
             name: profile.name,
             errorMessage: errorMessage,
             footnote: isSyncEnabled ? nil : ProfileLockCopy.lockIsDeviceOnly,
+            sequenceStep: sequenceStep,
             onSubmit: onSubmit,
             onCancel: onCancel
         ) {

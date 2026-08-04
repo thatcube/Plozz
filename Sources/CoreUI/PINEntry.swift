@@ -46,6 +46,17 @@ enum PINMetrics {
     static var deleteKeyWidth: CGFloat { keyDiameter * 2 + keySpacing }
 }
 
+/// Position inside a chained PIN gate. Omitted for ordinary one-PIN flows.
+public struct PINSequenceStep: Equatable, Sendable {
+    public let current: Int
+    public let total: Int
+
+    public init(current: Int, total: Int) {
+        self.current = current
+        self.total = total
+    }
+}
+
 /// The shared 4-digit PIN screen.
 ///
 /// Everything that asks for four digits uses this — unlocking a profile,
@@ -79,6 +90,8 @@ public struct PINEntryScaffold<Badge: View>: View {
     public let isSubmitting: Bool
     /// Optional caveat under the identity block, e.g. the sync warning.
     public var footnote: LocalizedStringResource?
+    /// Position inside a chained PIN gate. Nil for ordinary one-PIN flows.
+    public var sequenceStep: PINSequenceStep?
     /// Called with the full PIN as soon as the last digit lands.
     public let onSubmit: (String) -> Void
     public let onCancel: () -> Void
@@ -94,6 +107,7 @@ public struct PINEntryScaffold<Badge: View>: View {
         errorMessage: String? = nil,
         isSubmitting: Bool = false,
         footnote: LocalizedStringResource? = nil,
+        sequenceStep: PINSequenceStep? = nil,
         onSubmit: @escaping (String) -> Void,
         onCancel: @escaping () -> Void,
         @ViewBuilder badge: @escaping () -> Badge
@@ -104,6 +118,7 @@ public struct PINEntryScaffold<Badge: View>: View {
         self.errorMessage = errorMessage
         self.isSubmitting = isSubmitting
         self.footnote = footnote
+        self.sequenceStep = sequenceStep
         self.onSubmit = onSubmit
         self.onCancel = onCancel
         self.badge = badge
@@ -163,6 +178,11 @@ public struct PINEntryScaffold<Badge: View>: View {
     @ViewBuilder
     private var prose: some View {
         VStack(alignment: .leading, spacing: 20) {
+            if let sequenceStep, sequenceStep.total > 1 {
+                PINSequenceIndicator(step: sequenceStep)
+                    .padding(.bottom, 4)
+            }
+
             Text(title)
                 .font(PINMetrics.titleFont)
                 .foregroundStyle(palette.primaryText)
@@ -204,6 +224,7 @@ public struct PINEntryScaffold<Badge: View>: View {
                 .foregroundStyle(palette.secondaryText)
             }
         }
+
         .frame(maxWidth: PINMetrics.proseMaxWidth, alignment: .leading)
     }
 
@@ -254,6 +275,40 @@ public struct PINEntryScaffold<Badge: View>: View {
         if !pin.isEmpty { pin.removeLast() }
     }
 
+}
+
+/// Quiet progress for a chained profile-PIN then Plex-PIN gate.
+///
+/// The rail says "this is one continuous two-step action" before the first PIN
+/// is entered, while the text removes any ambiguity about why another PIN screen
+/// follows. Single-PIN flows pass no step and render nothing.
+private struct PINSequenceIndicator: View {
+    let step: PINSequenceStep
+
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
+        HStack(spacing: 14) {
+            HStack(spacing: 7) {
+                ForEach(1 ... step.total, id: \.self) { index in
+                    Capsule()
+                        .fill(
+                            index <= step.current
+                                ? ThemePalette.brandBlue
+                                : palette.secondaryText.opacity(0.28)
+                        )
+                        .frame(width: 42, height: 6)
+                }
+            }
+            Text("PIN \(step.current) of \(step.total)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(palette.secondaryText)
+                .textCase(.uppercase)
+                .tracking(0.8)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("PIN \(step.current) of \(step.total)")
+    }
 }
 
 /// The four progress dots above the pad.

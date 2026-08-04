@@ -471,6 +471,9 @@ public struct PINBadge<Content: View>: View {
             Circle().fill(palette.fillSubtle)
             image()
         }
+        // Own the proposal. A resizable AsyncImage otherwise accepts the whole
+        // prose column and turns a 48pt identity badge into a screen-sized circle.
+        .frame(width: PINLayout.badgeSize, height: PINLayout.badgeSize)
         .clipShape(Circle())
     }
 }

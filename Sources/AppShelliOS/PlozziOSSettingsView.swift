@@ -821,6 +821,9 @@ private struct PlozziOSProfilesView: View {
     let appModel: PlozziOSAppModel
     @State private var showingAddProfile = false
     @State private var editingProfile: Profile?
+    @State private var selectedProfileRoute: PlozziOSProfileSettingsRoute?
+
+    private var orderedProfiles: [Profile] { appModel.profiles.profilesByRecency }
 
     var body: some View {
         List {
@@ -833,7 +836,7 @@ private struct PlozziOSProfilesView: View {
                             set: { appModel.selectProfile($0) }
                         )
                     ) {
-                        ForEach(appModel.profiles.profiles) { profile in
+                        ForEach(orderedProfiles) { profile in
                             Text(profile.name).tag(profile.id)
                         }
                     }
@@ -854,10 +857,16 @@ private struct PlozziOSProfilesView: View {
             }
 
             SettingsSectionGroup("Who’s watching?") {
-                ForEach(appModel.profiles.profiles) { profile in
-                    NavigationLink(
-                        value: PlozziOSProfileSettingsRoute(profileID: profile.id)
-                    ) {
+                ForEach(orderedProfiles) { profile in
+                    Button {
+                        // One optional route owned by this page. A row cannot
+                        // activate another row's destination, and there is no
+                        // per-row NavigationLink state for SwiftUI's split-view
+                        // reconciliation to accidentally stack.
+                        selectedProfileRoute = PlozziOSProfileSettingsRoute(
+                            profileID: profile.id
+                        )
+                    } label: {
                         HStack {
                             PlozziOSProfileAvatar(
                                 profile: profile,
@@ -880,8 +889,12 @@ private struct PlozziOSProfilesView: View {
                                 Image(systemName: "lock.fill")
                                     .plozzForeground(.secondary)
                             }
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .plozzForeground(.tertiary)
                         }
                     }
+                    .buttonStyle(.plain)
                     .swipeActions {
                         if !appModel.profiles.isDefault(profile) {
                             Button("Delete", role: .destructive) {
@@ -900,7 +913,7 @@ private struct PlozziOSProfilesView: View {
         // One typed value, one push. Closure-based destinations inside this
         // ForEach were all being activated by the containing split/stack,
         // producing a back-stack containing every profile in list order.
-        .navigationDestination(for: PlozziOSProfileSettingsRoute.self) { route in
+        .navigationDestination(item: $selectedProfileRoute) { route in
             PlozziOSProfileSettingsView(
                 appModel: appModel,
                 profileID: route.profileID

@@ -17,6 +17,9 @@ struct ProfileDetailView: View {
 
     @State private var showingNewProfile = false
 
+    /// Settings receives profiles in the model's active-first/recency order.
+    private var orderedProfiles: [Profile] { context.profiles }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -64,7 +67,7 @@ struct ProfileDetailView: View {
                     .toggleStyle(SettingsSwitchToggleStyle())
                     PlozzDivider()
                 }
-                ForEach(context.profiles) { profile in
+                ForEach(orderedProfiles) { profile in
                     profileRow(profile)
                 }
                 Button {

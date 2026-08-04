@@ -326,7 +326,7 @@ public struct RootView: View {
                         appliedWatchRecency: { await appState.appliedWatchRecency() },
                         displayAccounts: appState.accountsProviders.accounts,
                         activeAccountID: appState.accountsProviders.primaryActiveAccount?.id,
-                        profiles: appState.profilesModel.profiles,
+                        profiles: appState.profilesModel.profilesByRecency,
                         activeProfile: appState.profilesModel.activeProfile,
                         askProfileOnStartup: appState.profilesModel.askProfileOnStartup,
                         homeRuntime: HomeTabRuntime(

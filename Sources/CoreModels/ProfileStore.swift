@@ -437,9 +437,9 @@ public final class ProfilesModel {
         store.markProfileUsed(id, at: Date())
     }
 
-    /// Profiles ordered for the picker: whoever watched here most recently
-    /// first, then anyone who hasn't watched on this device yet in creation
-    /// order.
+    /// Profiles ordered for pickers/settings: the restored active profile is
+    /// always first, then everyone else by most-recent use, then never-used
+    /// profiles in creation order.
     ///
     /// Recency beats creation order because the picker's job is to make the
     /// likely choice the nearest one — on a shared Apple TV that's whoever used
@@ -447,6 +447,8 @@ public final class ProfilesModel {
     public var profilesByRecency: [Profile] {
         let used = store.lastUsedDates()
         return profiles.enumerated().sorted { lhs, rhs in
+            if lhs.element.id == activeProfileID { return true }
+            if rhs.element.id == activeProfileID { return false }
             switch (used[lhs.element.id], used[rhs.element.id]) {
             case let (l?, r?): return l > r
             case (_?, nil): return true

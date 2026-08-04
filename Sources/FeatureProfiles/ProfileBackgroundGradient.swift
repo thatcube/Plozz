@@ -2,17 +2,19 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Resolves the "signature" colors a profile should tint the picker background
 /// with, with **progressive enhancement** so the gradient is never blocked on
 /// the network:
 ///
-/// 1. Every profile has an **instant** base color from its `colorIndex`
-///    (`ProfileTileColor`) — available synchronously on the very first frame, so
-///    the background can paint immediately at launch. A single hue is expanded
-///    into a small harmonious set so even solid-color profiles drive a rich,
-///    multi-tone morphing field rather than one flat color.
-/// 2. Photo profiles (`avatarImageURL`) additionally kick off a one-time,
+/// 1. Symbol profiles use their chosen `colorIndex` instantly.
+/// 2. Emoji profiles render their actual native Apple emoji into a tiny transparent
+///    image, then extract its prominent colors. A green/black dragon therefore
+///    produces a green/black wash—not an unrelated stale red symbol colour.
+/// 3. Photo profiles (`avatarImageURL`) kick off a one-time,
 ///    off-main-thread extraction of the photo's prominent colors (reusing the
 ///    shared decoded-image cache + `ArtworkColorExtractor`). When that finishes
 ///    the resolver publishes the richer palette and the view crossfades to it.
@@ -24,7 +26,8 @@ import CoreUI
 @MainActor
 @Observable
 final class ProfileBackgroundPalettes {
-    /// Cached *extracted* palettes (multiple colors), keyed by profile id.
+    /// Cached extracted palettes keyed by the actual visual source, not profile id.
+    /// Editing a profile's photo/emoji therefore cannot retain the previous colors.
     /// Observed, so inserting an extracted palette re-renders any view reading it.
     private var cache: [String: [Color]] = [:]
     /// Profile ids whose photo extraction is in flight, to coalesce work.
@@ -42,12 +45,20 @@ final class ProfileBackgroundPalettes {
     /// have no photo, so their `colorIndex` *is* their identity and is used
     /// instantly.
     func palette(for profile: Profile) -> [Color] {
-        if let cached = cache[profile.id] { return cached }
-
         if hasPhoto(profile) {
+            let key = photoKey(for: profile)
+            if let cached = key.flatMap({ cache[$0] }) { return cached }
             // Photo profile, colors not extracted yet: stay neutral and let the
             // real photo colors fade in, rather than showing the assigned tint.
-            scheduleExtractionIfNeeded(for: profile)
+            schedulePhotoExtractionIfNeeded(for: profile)
+            return []
+        }
+
+        if let emoji = profile.avatarEmoji?.trimmingCharacters(in: .whitespaces),
+           !emoji.isEmpty {
+            let key = "emoji:\(emoji)"
+            if let cached = cache[key] { return cached }
+            scheduleEmojiExtractionIfNeeded(emoji)
             return []
         }
 
@@ -59,6 +70,12 @@ final class ProfileBackgroundPalettes {
     private func hasPhoto(_ profile: Profile) -> Bool {
         guard let raw = profile.avatarImageURL?.trimmingCharacters(in: .whitespaces) else { return false }
         return !raw.isEmpty
+    }
+
+    private func photoKey(for profile: Profile) -> String? {
+        guard let raw = profile.avatarImageURL?.trimmingCharacters(in: .whitespaces),
+              !raw.isEmpty else { return nil }
+        return "photo:\(raw)"
     }
 
     /// Expands a single base color into a small set of analogous tones (hue
@@ -90,22 +107,22 @@ final class ProfileBackgroundPalettes {
 
     /// Kicks off photo-color extraction for a profile once, if it has a usable
     /// avatar URL and hasn't already been resolved or started.
-    private func scheduleExtractionIfNeeded(for profile: Profile) {
+    private func schedulePhotoExtractionIfNeeded(for profile: Profile) {
         #if canImport(UIKit)
-        guard cache[profile.id] == nil, !inFlight.contains(profile.id) else { return }
         guard
             let raw = profile.avatarImageURL?.trimmingCharacters(in: .whitespaces),
             !raw.isEmpty,
             let url = URL(string: raw)
         else { return }
+        let key = "photo:\(raw)"
+        guard cache[key] == nil, !inFlight.contains(key) else { return }
 
-        inFlight.insert(profile.id)
-        let id = profile.id
+        inFlight.insert(key)
         Task { [weak self] in
             // Reuse the shared cache (the tile likely already decoded this photo),
             // then extract off the main thread so the UI never stalls.
             guard let image = await ArtworkImageCache.shared.image(for: url, variant: .musicThumbnail) else {
-                self?.inFlight.remove(id)
+                self?.inFlight.remove(key)
                 return
             }
             let colors = await Task.detached(priority: .utility) {
@@ -113,9 +130,42 @@ final class ProfileBackgroundPalettes {
             }.value
 
             guard let self else { return }
-            self.inFlight.remove(id)
+            self.inFlight.remove(key)
             if !colors.isEmpty {
-                self.cache[id] = colors
+                self.cache[key] = colors
+            }
+        }
+        #endif
+    }
+
+    /// Renders the system emoji itself so its real artwork—not a hand-maintained
+    /// lookup table—drives the picker background.
+    private func scheduleEmojiExtractionIfNeeded(_ emoji: String) {
+        #if canImport(UIKit)
+        let key = "emoji:\(emoji)"
+        guard cache[key] == nil, !inFlight.contains(key) else { return }
+        inFlight.insert(key)
+
+        Task { [weak self] in
+            let renderer = ImageRenderer(
+                content: Text(verbatim: emoji)
+                    .font(.system(size: 104))
+                    .frame(width: 144, height: 144)
+            )
+            renderer.scale = 2
+            renderer.isOpaque = false
+            guard let image = renderer.uiImage else {
+                self?.inFlight.remove(key)
+                return
+            }
+            let colors = await Task.detached(priority: .utility) {
+                ArtworkColorExtractor.palette(from: image, maxColors: 4)
+            }.value
+
+            guard let self else { return }
+            self.inFlight.remove(key)
+            if !colors.isEmpty {
+                self.cache[key] = colors
             }
         }
         #endif

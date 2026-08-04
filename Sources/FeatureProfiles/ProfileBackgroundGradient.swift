@@ -56,9 +56,15 @@ final class ProfileBackgroundPalettes {
 
         if let emoji = profile.avatarEmoji?.trimmingCharacters(in: .whitespaces),
            !emoji.isEmpty {
-            let key = "emoji:\(emoji)"
+            let key = emojiKey(
+                emoji,
+                backgroundColorIndex: profile.avatarEmojiColorIndex
+            )
             if let cached = cache[key] { return cached }
-            scheduleEmojiExtractionIfNeeded(emoji)
+            scheduleEmojiExtractionIfNeeded(
+                emoji,
+                backgroundColorIndex: profile.avatarEmojiColorIndex
+            )
             return []
         }
 
@@ -140,9 +146,22 @@ final class ProfileBackgroundPalettes {
 
     /// Renders the system emoji itself so its real artwork—not a hand-maintained
     /// lookup table—drives the picker background.
-    private func scheduleEmojiExtractionIfNeeded(_ emoji: String) {
+    private func emojiKey(
+        _ emoji: String,
+        backgroundColorIndex: Int?
+    ) -> String {
+        "emoji:\(emoji):background:\(backgroundColorIndex.map(String.init) ?? "neutral")"
+    }
+
+    private func scheduleEmojiExtractionIfNeeded(
+        _ emoji: String,
+        backgroundColorIndex: Int?
+    ) {
         #if canImport(UIKit)
-        let key = "emoji:\(emoji)"
+        let key = emojiKey(
+            emoji,
+            backgroundColorIndex: backgroundColorIndex
+        )
         guard cache[key] == nil, !inFlight.contains(key) else { return }
         inFlight.insert(key)
 
@@ -164,7 +183,15 @@ final class ProfileBackgroundPalettes {
 
             guard let self else { return }
             self.inFlight.remove(key)
-            if !colors.isEmpty {
+            if let backgroundColorIndex {
+                let background = ProfileTileColor.color(
+                    forIndex: backgroundColorIndex
+                )
+                // The selected disc colour is part of the avatar's identity, but
+                // should not bury the emoji itself. Give it one slot; the
+                // extracted artwork supplies the remaining palette.
+                self.cache[key] = [background] + Array(colors.prefix(3))
+            } else if !colors.isEmpty {
                 self.cache[key] = colors
             }
         }

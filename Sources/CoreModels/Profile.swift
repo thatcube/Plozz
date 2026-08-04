@@ -556,12 +556,32 @@ public struct PlexHomeUserBinding: Codable, Hashable, Sendable {
     public var name: String
     public var avatarURL: String?
     public var requiresPIN: Bool?
+    /// Whether this is a **managed** Plex Home user — one created inside someone
+    /// else's Plex account, with no email or login of its own.
+    ///
+    /// Recorded because a managed user has no Plex Discover watchlist: writing to
+    /// it returns 401/403, so Plozz must not route watchlist changes at that
+    /// account while a profile watches as one. Without this the mutations sat in
+    /// the outbox as `waitingForAuthentication` forever, waiting for an
+    /// authentication that can never arrive.
+    ///
+    /// Optional for migration: bindings written before this decode as `nil`,
+    /// meaning "unknown", treated as not-managed so nothing changes for an
+    /// ordinary full account.
+    public var isManaged: Bool?
 
-    public init(homeUserID: String, name: String, avatarURL: String? = nil, requiresPIN: Bool? = nil) {
+    public init(
+        homeUserID: String,
+        name: String,
+        avatarURL: String? = nil,
+        requiresPIN: Bool? = nil,
+        isManaged: Bool? = nil
+    ) {
         self.homeUserID = homeUserID
         self.name = name
         self.avatarURL = avatarURL
         self.requiresPIN = requiresPIN
+        self.isManaged = isManaged
     }
 }
 

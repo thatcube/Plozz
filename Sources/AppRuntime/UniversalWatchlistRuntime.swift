@@ -548,10 +548,21 @@ public extension UniversalWatchlistHost {
         await universalWatchlistRetryScheduler?.cancel()
         universalWatchlistRetryScheduler = nil
         var destinations: [any WatchlistDestination] = []
+        let profile = profiles.activeProfile
         for resolved in accountsProviders.homeAccounts {
             if let provider = resolved.provider as? PlexProvider,
                let destination = PlexWatchlistDestination(provider: provider) {
-                destinations.append(destination)
+                // A managed Plex Home user has no Discover watchlist of its own,
+                // so writing to it comes back 401/403 and the mutation parks as
+                // `waitingForAuthentication` — waiting for an authentication that
+                // can never arrive. Don't route to it at all while this profile
+                // watches as one; the title still lands in Plozz's own watchlist.
+                let binding = profile.homeUserBinding(forPlexAccount: resolved.account.id)
+                if binding?.isManaged == true {
+                    PlozzLog.app.info("Plex watchlist skipped — profile watches as a managed Home user")
+                } else {
+                    destinations.append(destination)
+                }
             } else if let provider = resolved.provider as? JellyfinProvider,
                       let destination = MediaBrowserWatchlistDestination(
                         provider: provider

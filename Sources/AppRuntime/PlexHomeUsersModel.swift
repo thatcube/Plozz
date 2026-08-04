@@ -239,7 +239,8 @@ public final class PlexHomeUsersModel {
                 homeUserID: $0.id,
                 name: $0.name,
                 avatarURL: $0.avatarURL?.absoluteString,
-                requiresPIN: $0.requiresPIN
+                requiresPIN: $0.requiresPIN,
+                isManaged: $0.isRestricted
             )
         }
         let updated = profile.settingHomeUserBinding(binding, forPlexAccount: accountID)

@@ -56,7 +56,8 @@ public struct PlozziOSRootView: View {
             } else if appModel.requiresLaunchProfileSelection
                 && !completedLaunchProfileSelection {
                 PlozziOSProfilePickerView(
-                    profiles: appModel.profiles.profiles,
+                    // Whoever watched on this device most recently leads.
+                    profiles: appModel.profiles.profilesByRecency,
                     activeProfileID: appModel.profiles.activeProfileID,
                     onSelect: { profile in
                         appModel.selectProfile(profile.id)

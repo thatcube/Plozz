@@ -23,6 +23,11 @@ public protocol ProfilePersisting: Sendable {
     func activeProfileID() -> String?
     /// Persists (or clears) the selected profile id.
     func setActiveProfileID(_ id: String?)
+    /// When each profile was last opened **on this device**, keyed by profile id.
+    /// Missing entries mean "never opened here".
+    func lastUsedDates() -> [String: Date]
+    /// Stamps a profile as opened on this device, now.
+    func markProfileUsed(_ profileID: String, at date: Date)
     /// The account-id subset this profile uses, or `nil` if it never set one
     /// (callers then fall back to the household default).
     func activeAccountIDs(forProfile profileID: String) -> [String]?
@@ -91,6 +96,13 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     private let activeProfileIDKey = "com.plozz.profiles.activeID"
     private let perProfileActiveAccountsPrefix = "com.plozz.profile.activeAccounts."
     private let askOnStartupKey = "com.plozz.profiles.askOnStartup"
+    /// Per-device recency map, so the picker can lead with whoever watches here.
+    ///
+    /// Deliberately NOT on `Profile` and NOT synced: "who used this Apple TV
+    /// last" is a fact about this device, and syncing it would also mean every
+    /// profile switch published a record — churn on a channel whose whole design
+    /// depends on writes being genuine edits.
+    private let lastUsedKey = "com.plozz.profiles.lastUsed"
     /// Retired household flag ("Profiles are turned on"). Profiles are now always
     /// on, so nothing reads this — it's kept only so `resetForDebugging` purges
     /// the value left behind by older installs.
@@ -124,6 +136,23 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
             return nil
         }
         return id
+    }
+
+    public func lastUsedDates() -> [String: Date] {
+        lock.lock(); defer { lock.unlock() }
+        guard let raw = defaults.dictionary(forKey: lastUsedKey) as? [String: Double] else { return [:] }
+        return raw.mapValues { Date(timeIntervalSince1970: $0) }
+    }
+
+    public func markProfileUsed(_ profileID: String, at date: Date = Date()) {
+        lock.lock(); defer { lock.unlock() }
+        var raw = (defaults.dictionary(forKey: lastUsedKey) as? [String: Double]) ?? [:]
+        raw[profileID] = date.timeIntervalSince1970
+        // Drop entries for profiles that no longer exist so the map can't grow
+        // without bound across a long-lived install.
+        let known = Set(loadProfilesLocked().map(\.id))
+        raw = raw.filter { known.contains($0.key) }
+        defaults.set(raw, forKey: lastUsedKey)
     }
 
     public func setActiveProfileID(_ id: String?) {
@@ -187,6 +216,7 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
         }
         removeShared(forKey: profilesKey)
         defaults.removeObject(forKey: activeProfileIDKey)
+        defaults.removeObject(forKey: lastUsedKey)
         writeSharedBool(nil, forKey: askOnStartupKey)
         writeSharedBool(nil, forKey: legacyProfilesEnabledKey)
         writeSharedBool(nil, forKey: firstRunSetupKey)
@@ -404,6 +434,26 @@ public final class ProfilesModel {
         activeProfileID = id
         hasRememberedSelection = true
         store.setActiveProfileID(id)
+        store.markProfileUsed(id, at: Date())
+    }
+
+    /// Profiles ordered for the picker: whoever watched here most recently
+    /// first, then anyone who hasn't watched on this device yet in creation
+    /// order.
+    ///
+    /// Recency beats creation order because the picker's job is to make the
+    /// likely choice the nearest one — on a shared Apple TV that's whoever used
+    /// it last, and tvOS opens focus on the leading tile.
+    public var profilesByRecency: [Profile] {
+        let used = store.lastUsedDates()
+        return profiles.enumerated().sorted { lhs, rhs in
+            switch (used[lhs.element.id], used[rhs.element.id]) {
+            case let (l?, r?): return l > r
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
     }
 
     /// Adds a profile and returns it. New profiles are *not* auto-selected.

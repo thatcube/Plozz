@@ -121,6 +121,18 @@ public enum ProfileLockCopy {
         comment: "Body of the prompt offering a PIN on a newly created Kids Profile. It explains why the answer is usually no, since locking the child's own profile is the common misunderstanding."
     )
 
+    public static let manageTitle = LocalizedStringResource(
+        "settings.profileLock.manage.title",
+        defaultValue: "Enter your PIN",
+        comment: "Heading shown when someone tries to add or edit profiles and the household has a locked profile, so the action needs proving first."
+    )
+
+    public static let manageSubtitle = LocalizedStringResource(
+        "settings.profileLock.manage.subtitle",
+        defaultValue: "Adding or changing profiles needs the PIN from a locked profile.",
+        comment: "Explains why a PIN is being asked for before managing profiles."
+    )
+
     public static let forgotPIN = LocalizedStringResource(
         "settings.profileLock.forgot",
         defaultValue: "Forgot PIN?",

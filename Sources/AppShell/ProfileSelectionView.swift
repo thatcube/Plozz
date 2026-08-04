@@ -11,11 +11,10 @@ import FeatureProfiles
 /// Settings → "Switch Profile".
 ///
 /// Adding and editing happen here now, not only in Settings. This is where
-/// people already are when they think about profiles, and it's where a new
-/// household's second profile gets made; making them hunt through Settings for
-/// it was the wrong shape. The screens it opens are the same ones Settings uses
-/// — the cosmetic editor and `ProfileLockSetupView` — so there's one
-/// implementation of each, reached from two places.
+/// people already are when they think about profiles, and where a household's
+/// second profile actually gets made. The screens it opens are the same ones
+/// Settings uses — the cosmetic editor and `ProfileLockSetupView` — so there's
+/// one implementation of each, reached from two places.
 struct ProfileSelectionView: View {
     @Bindable var appState: AppState
     /// `true` when there is already an active session behind the picker, so the
@@ -30,8 +29,14 @@ struct ProfileSelectionView: View {
     @State private var creating: CreationKind?
     /// A just-created profile waiting on the "want a lock?" offer.
     @State private var newlyCreated: Profile?
-    /// Set once the user accepts the offer, presenting the PIN setup.
+    /// Set once the user accepts that offer, presenting the PIN setup.
     @State private var lockTarget: Profile?
+    /// A management action held back until a PIN proves it's allowed.
+    @State private var pendingAction: ManagementAction?
+    /// Error from the last failed authorisation attempt.
+    @State private var authError: String?
+    /// Whether management has been proved during this presentation.
+    @State private var authorized = false
 
     private enum CreationKind: Identifiable {
         case ordinary
@@ -40,34 +45,28 @@ struct ProfileSelectionView: View {
         var isKids: Bool { self == .kids }
     }
 
-    /// Whether the picker may create and edit profiles.
-    ///
-    /// Managing profiles from the picker is a hole if it's unconditional: the
-    /// launch picker is *forced* when the profile we'd restore is locked, so an
-    /// unrestricted "Add Profile" there would let anyone walk past a lock by
-    /// simply making themselves a new profile. Same from inside a Kids Profile —
-    /// a child could create an unrestricted one and step out of the restriction.
-    ///
-    /// So management needs someone to have proved they belong:
-    /// - `canCancel` means there's a live session behind the picker (it was
-    ///   opened from Settings → Switch Profile), so whatever gate that profile
-    ///   had has already been passed — unless that profile is a Kids Profile.
-    /// - If nothing in the household is locked there is nothing to protect, and
-    ///   demanding proof would just block the common first-run case of adding a
-    ///   second profile.
-    private var canManageProfiles: Bool {
-        if appState.profilesModel.activeProfile.isKids { return false }
-        return canCancel || !appState.profilesModel.profiles.contains(where: \.isLocked)
+    private enum ManagementAction: Identifiable {
+        case add(isKids: Bool)
+        case edit(Profile)
+
+        var id: String {
+            switch self {
+            case let .add(isKids): return isKids ? "add.kids" : "add"
+            case let .edit(profile): return "edit.\(profile.id)"
+            }
+        }
     }
 
     var body: some View {
         ProfilePickerView(
-            profiles: appState.profilesModel.profiles,
+            // Whoever watched on this Apple TV most recently leads the row, since
+            // tvOS opens focus on the first tile and that's the likeliest pick.
+            profiles: appState.profilesModel.profilesByRecency,
             activeProfileID: appState.profilesModel.activeProfileID,
             onSelect: { appState.profileFlow.switchProfile(to: $0.id) },
-            onAddProfile: canManageProfiles ? { creating = .ordinary } : nil,
-            onEditProfile: canManageProfiles ? { editingProfile = $0 } : nil,
-            onAddKidsProfile: canManageProfiles ? { creating = .kids } : nil,
+            onAddProfile: { request(.add(isKids: false)) },
+            onEditProfile: { request(.edit($0)) },
+            onAddKidsProfile: { request(.add(isKids: true)) },
             onCancel: canCancel ? { appState.profileFlow.cancelProfileSelection() } : nil
         )
         // tvOS Menu button: the picker is rendered as a top-level view (not a
@@ -104,8 +103,7 @@ struct ProfileSelectionView: View {
                 onSave: { draft in
                     // Create WITHOUT switching into it: the picker is a chooser,
                     // and silently activating a profile the moment it's named
-                    // (which `ProfileFlowModel.saveProfile` does) would strand a
-                    // brand-new locked profile behind its own PIN.
+                    // would strand a brand-new locked profile behind its own PIN.
                     let created = appState.createProfileWithoutSwitching(draft, isKids: kind.isKids)
                     creating = nil
                     newlyCreated = created
@@ -114,8 +112,7 @@ struct ProfileSelectionView: View {
             )
         }
         // Offer the lock right after creation. This is the moment the decision
-        // makes sense — the alternative is that locking is something you only
-        // discover later in Settings, which is how it ends up never being set.
+        // makes sense — otherwise locking is something you only discover later.
         .alert(
             Text(ProfileLockCopy.offerTitle),
             isPresented: Binding(
@@ -142,6 +139,79 @@ struct ProfileSelectionView: View {
                 },
                 onCancel: { lockTarget = nil }
             )
+        }
+        .fullScreenCover(item: $pendingAction) { action in
+            if let guardianProfile {
+                PINEntryScaffold(
+                    title: ProfileLockCopy.manageTitle,
+                    subtitle: ProfileLockCopy.manageSubtitle,
+                    name: guardianProfile.name,
+                    errorMessage: authError,
+                    onSubmit: { submitAuthorization($0, action: action) },
+                    onCancel: { pendingAction = nil; authError = nil }
+                ) {
+                    ProfileAvatarView(profile: guardianProfile, size: 200)
+                }
+            }
+        }
+    }
+
+    // MARK: Authorisation
+
+    /// The locked profile whose PIN authorises managing profiles — a grown-up's.
+    ///
+    /// Prefers a locked, unrestricted profile: a Kids Profile with a lock on it
+    /// is still a child's, and its PIN shouldn't be the key to the household.
+    private var guardianProfile: Profile? {
+        let locked = appState.profilesModel.profiles.filter(\.isLocked)
+        return locked.first(where: { !$0.isKids }) ?? locked.first
+    }
+
+    /// Whether managing profiles has to be proved first.
+    ///
+    /// The picker can create profiles, and a new profile is unrestricted — so
+    /// without a gate a child could step straight out of a Kids Profile by making
+    /// themselves a new one, and the launch picker (which is *forced* when the
+    /// profile we'd restore is locked) would hand the same escape to anyone.
+    ///
+    /// The gate is deliberately narrow:
+    /// - Nothing locked anywhere? Nothing to protect, and demanding a PIN would
+    ///   just block the ordinary first-run case of adding a second profile.
+    /// - A live session behind the picker (opened from Switch Profile) already
+    ///   passed whatever gate that profile had — unless it's a Kids Profile.
+    private var requiresAuthorization: Bool {
+        guard guardianProfile != nil else { return false }
+        if appState.profilesModel.activeProfile.isKids { return true }
+        return !canCancel
+    }
+
+    /// Runs a management action, asking for a PIN first when required.
+    private func request(_ action: ManagementAction) {
+        guard requiresAuthorization, !authorized else {
+            perform(action)
+            return
+        }
+        authError = nil
+        pendingAction = action
+    }
+
+    private func submitAuthorization(_ pin: String, action: ManagementAction) {
+        guard let lock = guardianProfile?.lock, lock.matches(pin: pin) else {
+            authError = String(localized: "Incorrect PIN. Try again.")
+            return
+        }
+        authorized = true
+        authError = nil
+        pendingAction = nil
+        perform(action)
+    }
+
+    private func perform(_ action: ManagementAction) {
+        switch action {
+        case let .add(isKids):
+            creating = isKids ? .kids : .ordinary
+        case let .edit(profile):
+            editingProfile = profile
         }
     }
 }

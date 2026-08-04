@@ -64,7 +64,10 @@ public struct MyLibrariesDetailView: View {
                         // being answered, not a setting being adjusted.
                         SettingsPageHeader(
                             "What does this profile watch?",
-                            subtitle: "Pick the servers it uses and who it watches as. Everything's on by default — you can change all of it later."
+                            // Says the two things the screen can't show you: the
+                            // choices are scoped to this profile, and the identity
+                            // picker decides whose watchlist comes with it.
+                            subtitle: "Only this profile is affected. Who you watch as sets whose watchlist it uses."
                         )
                     }
                     if allGroups.isEmpty {

@@ -357,26 +357,13 @@ public final class ProfileFlowModel {
     /// - Returns: the created profile, so the caller can run setup on it.
     @discardableResult
     public func createProfileForSetup(_ draft: ProfileDraft, isKids: Bool) -> Profile {
-        let created = profilesModel.add(
-            name: draft.name,
-            avatarSymbol: draft.avatarSymbol,
-            colorIndex: draft.colorIndex,
-            linkedAccountID: draft.linkedAccountID,
-            activeAccountIDs: draft.activeAccountIDs,
-            plexHomeUserID: draft.plexHomeUserID,
-            plexHomeUserName: draft.plexHomeUserName,
-            plexHomeUserAccountID: draft.plexHomeUserAccountID,
-            plexHomeUserRequiresPIN: draft.plexHomeUserRequiresPIN,
-            plexHomeUserAvatarURL: draft.plexHomeUserAvatarURL,
-            plexHomeUserBindings: draft.plexHomeUserBindings,
-            avatarImageURL: draft.avatarImageURL,
-            avatarEmoji: draft.avatarEmoji,
-            avatarEmojiColorIndex: draft.avatarEmojiColorIndex
+        // Shared with the iOS shell so the setup gate can't be forgotten on one
+        // platform — see `addAwaitingSetup`.
+        let configured = profilesModel.addAwaitingSetup(
+            draft,
+            isKids: isKids,
+            activeAccountIDs: draft.activeAccountIDs
         )
-        var configured = created
-        configured.isKids = isKids
-        configured.needsSetup = true
-        profilesModel.update(configured)
         performSwitch(to: configured.id)
         pendingSetupProfile = configured
         return configured
@@ -385,10 +372,8 @@ public final class ProfileFlowModel {
     /// Marks setup finished and releases the deferred watchlist import.
     public func completeSetup(for id: String) {
         pendingSetupProfile = nil
-        guard var profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }
-        guard profile.needsSetup else { return }
-        profile.needsSetup = false
-        profilesModel.update(profile)
+        guard profilesModel.finishSetup(for: id) else { return }
+        guard let profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }
         // Only now, with the profile's servers and identity settled, is an
         // import meaningful — see `Profile.isAwaitingSetup`.
         activateUniversalWatchlist()
@@ -505,34 +490,35 @@ public final class ProfileFlowModel {
         if included { noteServerAwaitingIdentity(accountID, profileID: profileID) }
     }
 
-    /// Servers switched on for a profile that hasn't yet said who it watches as
-    /// there. Keyed by profile so switching away and back doesn't lose it.
-    ///
-    /// Turning a server on later is the same decision setup asks at creation, and
-    /// it has the same consequence: the watchlist import reads that server as
-    /// whoever the profile plays as, defaulting to the account owner. Silently
-    /// importing the owner's list into a child's profile is exactly what the
-    /// setup step exists to prevent, so the same question gets asked here.
-    @ObservationIgnored private var serversAwaitingIdentity: [String: Set<String>] = [:]
+    /// Servers switched on for a profile that hasn't yet said who it watches as.
+    /// Policy shared with the iOS shell — see `ProfileServerIdentityPrompts`.
+    @ObservationIgnored private let identityPrompts = ProfileServerIdentityPrompts()
 
     /// The server this profile has just enabled and not yet chosen an identity
     /// on, if any. `RootView` presents the picker from this.
     public var pendingIdentityAccountID: String? {
-        serversAwaitingIdentity[profilesModel.activeProfileID]?.first
+        identityPrompts.pendingAccountID(for: profilesModel.activeProfileID)
     }
 
     private func noteServerAwaitingIdentity(_ accountID: String, profileID: String) {
-        // Only Plex has multiple identities to choose between, and only when the
-        // profile hasn't already bound one for this account.
-        guard accountsProviders.accounts.first(where: { $0.id == accountID })?.server.provider == .plex,
-              profilesModel.activeProfile.homeUserBinding(forPlexAccount: accountID) == nil
-        else { return }
-        serversAwaitingIdentity[profileID, default: []].insert(accountID)
+        guard let account = accountsProviders.accounts.first(where: { $0.id == accountID }) else {
+            return
+        }
+        identityPrompts.note(
+            accountID: accountID,
+            profileID: profileID,
+            provider: account.server.provider,
+            hasExistingBinding: profilesModel.activeProfile
+                .homeUserBinding(forPlexAccount: accountID) != nil
+        )
     }
 
     /// Clears the pending question once an identity is chosen (or declined).
     public func resolveIdentityPrompt(for accountID: String) {
-        serversAwaitingIdentity[profilesModel.activeProfileID]?.remove(accountID)
+        identityPrompts.resolve(
+            accountID: accountID,
+            profileID: profilesModel.activeProfileID
+        )
     }
 
     // MARK: Internals

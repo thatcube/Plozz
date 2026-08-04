@@ -1,3 +1,4 @@
+#if os(iOS)
 import CoreUI
 import SwiftUI
 
@@ -21,3 +22,4 @@ struct PlozziOSKidsProfileNote: View {
         }
     }
 }
+#endif

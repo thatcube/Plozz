@@ -1,3 +1,4 @@
+#if os(iOS)
 import CoreModels
 import CoreUI
 import FeatureProfiles
@@ -31,3 +32,4 @@ struct PlozziOSProfileLockPINView: View {
         }
     }
 }
+#endif

@@ -917,6 +917,44 @@ private struct PlozziOSProfilesView: View {
             }
             .preferredColorScheme(palette.isLight ? .light : .dark)
         }
+        // New-profile setup. A profile is created holding EVERY server, so this
+        // runs before its first watchlist import and asks which servers it
+        // actually uses and who it watches as on each — otherwise the household's
+        // aggregate watchlist lands in a brand new (often child) profile. See
+        // `PlozziOSAppModel.ProfileOnboardingStep`.
+        //
+        // Presented from this page, which is the one that presents Add Profile:
+        // a cover asked for from the root would be blocked by the Settings sheet
+        // this page lives inside and silently never appear.
+        //
+        // ONE cover for the whole sequence, switching its content, rather than a
+        // cover per step: presenting on `item` would tear the cover down and put
+        // a new one up on every step, and SwiftUI drops a presentation requested
+        // while another is still dismissing — which is exactly how the theme step
+        // went missing before.
+        .fullScreenCover(isPresented: Binding(
+            get: { appModel.profileOnboardingStep != nil },
+            set: { if !$0 { appModel.cancelProfileOnboarding() } }
+        )) {
+            switch appModel.profileOnboardingStep {
+            case .libraries:
+                PlozziOSProfileSetupView(
+                    appModel: appModel,
+                    onDone: { appModel.advanceProfileOnboarding() }
+                )
+            case .theme:
+                NavigationStack {
+                    PlozziOSThemeWelcomeView(
+                        appModel: appModel,
+                        onContinue: { appModel.advanceProfileOnboarding() }
+                    )
+                }
+            case nil:
+                // Reached only in the frame where the last step clears the flag
+                // and the cover is on its way out.
+                EmptyView()
+            }
+        }
     }
 }
 

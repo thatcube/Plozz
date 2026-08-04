@@ -1,3 +1,4 @@
+#if os(iOS)
 import CoreModels
 import CoreUI
 import FeatureProfiles
@@ -79,3 +80,4 @@ struct PlozziOSProfileSettingsView: View {
         }
     }
 }
+#endif

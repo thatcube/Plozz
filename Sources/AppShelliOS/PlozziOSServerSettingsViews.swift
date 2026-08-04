@@ -2,6 +2,7 @@
 import AppRuntime
 import CoreModels
 import CoreUI
+import FeatureSettings
 import FeatureSyncSetup
 import SwiftUI
 
@@ -216,6 +217,15 @@ struct PlozziOSMyLibrariesSettingsView: View {
     /// Signs an additional user in to an already-added server. Same capability as
     /// the tvOS "Watching as" page, in the idiom iOS uses for this screen.
     var onAddUser: (MediaServer) -> Void = { _ in }
+    /// Where this screen is being shown. Shared with tvOS, which renders the same
+    /// page in both places for the same reason — see `ProfileLibrariesScope`.
+    ///
+    /// The controls are identical; what differs is what the person is in the
+    /// middle of. During setup they're answering a question they were just asked,
+    /// and actions that lead OUT of the flow — signing a whole new server in to
+    /// the device — would present a sheet on top of the setup cover and strand
+    /// them, so they're withheld until setup is done.
+    var presentation: ProfileLibrariesScope.Presentation = .settings
     @State private var libraries: [ProfileLibraryChoice] = []
     @State private var unreachableAccountIDs: Set<String> = []
     @State private var isLoading = false
@@ -234,7 +244,9 @@ struct PlozziOSMyLibrariesSettingsView: View {
                 SettingsSectionGroup {
                     Text("No servers are available on this \(deviceName).")
                         .plozzForeground(.secondary)
-                    Button("Add Server", systemImage: "plus", action: onAddServer)
+                    if presentation == .settings {
+                        Button("Add Server", systemImage: "plus", action: onAddServer)
+                    }
                 }
             } else {
                 ForEach(groups, id: \.serverKey) { group in
@@ -246,6 +258,31 @@ struct PlozziOSMyLibrariesSettingsView: View {
         .task(id: appModel.accounts.map(\.credentialRevision)) {
             await loadLibraries()
         }
+        // Asks who you are on a Plex server you just switched on — the same
+        // question setup asks, at the other moment it matters. Without it,
+        // enabling a server later silently plays (and imports a watchlist) as the
+        // account owner, which is the leak the setup step exists to prevent.
+        //
+        // Presented HERE, from the screen that owns the toggle, rather than from
+        // the root: this screen is already inside a presented Settings sheet, and
+        // SwiftUI won't show a second presentation from a view that's covered —
+        // asking from the root would silently never appear.
+        //
+        // Suppressed during setup, which asks the same question inline.
+        .sheet(item: identityPromptBinding) { account in
+            PlozziOSServerIdentityPromptView(
+                appModel: appModel,
+                account: account,
+                onFinish: { appModel.resolveIdentityPrompt(for: account.id) }
+            )
+        }
+    }
+
+    private var identityPromptBinding: Binding<Account?> {
+        Binding(
+            get: { presentation == .settings ? appModel.pendingIdentityAccount : nil },
+            set: { if $0 == nil { appModel.resolveIdentityPromptForPending() } }
+        )
     }
 
     @ViewBuilder
@@ -363,7 +400,9 @@ struct PlozziOSMyLibrariesSettingsView: View {
     /// chooser. Matches the tvOS "Watching as" page.
     @ViewBuilder
     private func addUserButton(_ group: ServerAccountGroup) -> some View {
-        if group.providerKind != .mediaShare, let server = group.accounts.first?.server {
+        if presentation == .settings,
+           group.providerKind != .mediaShare,
+           let server = group.accounts.first?.server {
             Button {
                 onAddUser(server)
             } label: {

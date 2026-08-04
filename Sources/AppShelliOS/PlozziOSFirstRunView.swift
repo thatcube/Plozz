@@ -96,7 +96,12 @@ struct PlozziOSFirstRunView: View {
         case .confirmProfile:
             PlozziOSFirstProfileView(appModel: appModel)
         case .theme:
-            NavigationStack { PlozziOSThemeWelcomeView(appModel: appModel) }
+            NavigationStack {
+                PlozziOSThemeWelcomeView(
+                    appModel: appModel,
+                    onContinue: appModel.finishFirstRunThemeSelection
+                )
+            }
         }
     }
 
@@ -176,8 +181,14 @@ private struct PlozziOSFirstProfileView: View {
 
 }
 
-private struct PlozziOSThemeWelcomeView: View {
+/// The per-profile theme picker.
+///
+/// Shared by first run and by new-profile setup rather than duplicated: the
+/// theme is a per-profile setting, so every new profile gets asked, not just the
+/// first one. Only what happens on Continue differs, so only that is injected.
+struct PlozziOSThemeWelcomeView: View {
     let appModel: PlozziOSAppModel
+    let onContinue: () -> Void
 
     var body: some View {
         GeometryReader { proxy in
@@ -224,9 +235,7 @@ private struct PlozziOSThemeWelcomeView: View {
                         }
                     }
 
-                    Button("Continue") {
-                        appModel.finishFirstRunThemeSelection()
-                    }
+                    Button("Continue", action: onContinue)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .frame(maxWidth: .infinity)

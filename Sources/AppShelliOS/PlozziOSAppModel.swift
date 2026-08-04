@@ -848,6 +848,112 @@ final class PlozziOSAppModel {
     /// re-ask. In-memory on purpose: a cold launch always re-asks.
     private var unlockedProfileIDs: Set<String> = []
 
+    /// Where a newly created profile is in its setup sequence.
+    ///
+    /// An explicit sequence rather than a handful of overlapping optionals: the
+    /// steps are ordered, only one is ever on screen, and "which comes next" is a
+    /// single `switch` instead of an invariant spread across five booleans.
+    enum ProfileOnboardingStep: String, Identifiable, CaseIterable {
+        /// Which servers this profile uses, and who it watches as on each.
+        case libraries
+        /// Its colour scheme, which is per-profile.
+        case theme
+
+        var id: Self { self }
+
+        var next: ProfileOnboardingStep? {
+            switch self {
+            case .libraries: .theme
+            case .theme: nil
+            }
+        }
+    }
+
+    /// The setup step currently being presented, if any.
+    private(set) var profileOnboardingStep: ProfileOnboardingStep?
+    /// The profile being set up. Held by ID, not by value: the record changes
+    /// underneath us as each step writes to it.
+    private(set) var profileOnboardingID: String?
+
+    /// Advances to the next setup step, releasing the watchlist import when the
+    /// server/identity step is finished.
+    func advanceProfileOnboarding() {
+        guard let step = profileOnboardingStep, let id = profileOnboardingID else { return }
+        if step == .libraries {
+            // Only NOW — with this profile's servers and identity settled — is an
+            // import meaningful. Until `finishSetup` clears the gate the profile
+            // holds every server it inherited, and importing against that pulls
+            // the household's aggregate watchlist into it.
+            if profiles.finishSetup(for: id) {
+                Task { @MainActor in
+                    await updateTrackersForActiveProfile()
+                    await prepareUniversalWatchlist()
+                }
+            }
+        }
+        if let next = step.next {
+            profileOnboardingStep = next
+        } else {
+            profileOnboardingStep = nil
+            profileOnboardingID = nil
+        }
+    }
+
+    /// Ends setup early (the cover was swiped away). The gate still has to be
+    /// released, or the profile would never import a watchlist at all.
+    func cancelProfileOnboarding() {
+        guard let id = profileOnboardingID else { return }
+        if profiles.finishSetup(for: id) {
+            Task { @MainActor in
+                await updateTrackersForActiveProfile()
+                await prepareUniversalWatchlist()
+            }
+        }
+        profileOnboardingStep = nil
+        profileOnboardingID = nil
+    }
+
+    /// Servers switched on for a profile that hasn't said who it watches as
+    /// there. Same policy object the tvOS shell uses — see
+    /// `ProfileServerIdentityPrompts` for why the question has to be asked here
+    /// too and not only during new-profile setup.
+    private let identityPrompts = ProfileServerIdentityPrompts()
+
+    /// The Plex account this profile has just enabled and not yet picked a user
+    /// on. `PlozziOSRootView` presents the picker from this.
+    var pendingIdentityAccount: Account? {
+        guard let id = identityPrompts.pendingAccountID(for: profiles.activeProfileID) else {
+            return nil
+        }
+        return accounts.first { $0.id == id }
+    }
+
+    private func noteServerAwaitingIdentity(_ accountID: String, profileID: String) {
+        guard let account = accounts.first(where: { $0.id == accountID }) else { return }
+        identityPrompts.note(
+            accountID: accountID,
+            profileID: profileID,
+            provider: account.server.provider,
+            hasExistingBinding: profiles.activeProfile
+                .homeUserBinding(forPlexAccount: accountID) != nil
+        )
+    }
+
+    /// Clears whichever question is currently on screen (the sheet was swiped
+    /// away). Dismissing counts as answering: the point is to ask once, not nag.
+    func resolveIdentityPromptForPending() {
+        guard let id = identityPrompts.pendingAccountID(for: profiles.activeProfileID) else {
+            return
+        }
+        resolveIdentityPrompt(for: id)
+    }
+
+    /// Clears the question once a user is chosen — or the sheet is dismissed.
+    /// Dismissing counts: ask once, don't nag.
+    func resolveIdentityPrompt(for accountID: String) {
+        identityPrompts.resolve(accountID: accountID, profileID: profiles.activeProfileID)
+    }
+
     /// Switches to `id`, unless it's locked and unproven this run — in which case
     /// the PIN prompt is raised and nothing is re-scoped until it's satisfied.
     ///
@@ -927,6 +1033,22 @@ final class PlozziOSAppModel {
     var activeProfileNeedsUnlock: Bool {
         let active = profiles.activeProfile
         return active.isLocked && !unlockedProfileIDs.contains(active.id)
+    }
+
+    /// Raises the PIN gate if the profile that just became active is locked and
+    /// unproven this run.
+    ///
+    /// `selectProfile(_:)` gates the deliberate route, but the store also
+    /// re-points `activeProfileID` on its own — deleting the active profile falls
+    /// through to whichever is left, and a deletion arriving over sync does the
+    /// same with no user action at all. Landing that way skipped the gate
+    /// entirely, so deleting a profile could drop you straight inside a locked
+    /// one. The prompt has no "cancel into the profile" path: dismissing it
+    /// returns to the picker.
+    func enforceActiveProfileLock() {
+        guard activeProfileNeedsUnlock else { return }
+        profileLockError = nil
+        pendingLockedProfile = profiles.activeProfile
     }
 
     func performSelectProfile(_ id: String) {
@@ -1307,24 +1429,28 @@ final class PlozziOSAppModel {
             profile.plexHomeUserBindings = draft.plexHomeUserBindings
             profiles.update(profile)
         } else {
-            let created = profiles.add(
-                name: trimmed,
-                avatarSymbol: draft.avatarSymbol,
-                colorIndex: draft.colorIndex,
-                linkedAccountID: draft.linkedAccountID,
-                activeAccountIDs: accounts.map(\.id),
-                plexHomeUserID: draft.plexHomeUserID,
-                plexHomeUserName: draft.plexHomeUserName,
-                plexHomeUserAccountID: draft.plexHomeUserAccountID,
-                plexHomeUserRequiresPIN: draft.plexHomeUserRequiresPIN,
-                plexHomeUserAvatarURL: draft.plexHomeUserAvatarURL,
-                plexHomeUserBindings: draft.plexHomeUserBindings,
-                avatarImageURL: draft.avatarImageURL,
-                avatarEmoji: draft.avatarEmoji,
-                avatarEmojiColorIndex: draft.avatarEmojiColorIndex
+            // Created AWAITING SETUP, exactly as on tvOS. A new profile inherits
+            // every server, so importing a watchlist before the user has said
+            // which servers it uses — and who it watches as on them — drops the
+            // household's aggregate watchlist into it. `addAwaitingSetup` gates
+            // the import until `advanceProfileOnboarding` releases it.
+            let created = profiles.addAwaitingSetup(
+                draft,
+                // The editor doesn't create kid profiles; that's set afterwards
+                // from the profile's own settings page, same as on tvOS.
+                isKids: false,
+                activeAccountIDs: accounts.map(\.id)
             )
-            selectProfile(created.id)
-            scheduleFirstRunStep(.theme)
+            performSelectProfile(created.id)
+            profileOnboardingID = created.id
+            // Yielded, not set inline: this runs from inside the Add Profile
+            // sheet, and SwiftUI drops a presentation requested while another is
+            // still dismissing. One runloop turn lets the editor close first —
+            // the same reason `scheduleFirstRunStep` yields.
+            Task { @MainActor in
+                await Task.yield()
+                profileOnboardingStep = .libraries
+            }
         }
     }
 
@@ -1350,7 +1476,10 @@ final class PlozziOSAppModel {
                 authenticatedHTTPResolver: authenticatedHTTPResolver
             )
             plexHomeUsers.ensurePlexIdentityForActiveProfile()
+            // We landed on a profile nobody chose. If it's locked, ask.
+            enforceActiveProfileLock()
         }
+        identityPrompts.clear(profileID: id)
         reloadAccountsAndCrashContext()
         identityIndex.reset()
         identityIndex.warmIdentityIndex()
@@ -1414,6 +1543,11 @@ final class PlozziOSAppModel {
         }
         profiles.setActiveAccountIDs(Array(ids), for: profileID)
         watchReconcilers[profileID] = nil
+        if enabled {
+            noteServerAwaitingIdentity(accountID, profileID: profileID)
+        } else {
+            identityPrompts.resolve(accountID: accountID, profileID: profileID)
+        }
         if profiles.activeProfileID == profileID {
             reloadAccountsAndCrashContext()
             identityIndex.reset()

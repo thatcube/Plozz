@@ -111,16 +111,11 @@ public struct PINEntryScaffold<Badge: View>: View {
 
     public var body: some View {
         ZStack {
-            // Full-bleed dimmed backdrop so the PIN screen reads as a modal OVER
-            // the app, not as an opaque context switch.
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea()
-            // Deepen the scrim toward the theme's own background rather than
-            // always black, so a light theme dims to a light wash.
-            (palette.isLight ? Color.white : Color.black)
-                .opacity(0.55)
-                .ignoresSafeArea()
+            // Opaque, not a translucent scrim. The keys are liquid glass and
+            // glass has to sample a real backdrop — floating them over
+            // `.ultraThinMaterial` was glass on glass, which reads muddy and
+            // costs a second blur pass for nothing.
+            AppBackground(palette: palette).ignoresSafeArea()
 
             #if os(tvOS)
             // Prose on the left, pad on the right. Splitting them lets the pad sit
@@ -352,29 +347,22 @@ private struct PINKeyBody: View {
 
     @Environment(\.isFocused) private var isFocused
     @Environment(\.themePalette) private var palette
-    @Environment(\.colorScheme) private var colorScheme
-
-    /// Focus inverts the key, matching how every Settings row inverts its card —
-    /// derived from the scheme rather than hard-coded white, or the pad would
-    /// glow white-on-white under a light theme.
-    private var focusFill: Color { colorScheme == .dark ? .white : .black }
-    private var focusForeground: Color { colorScheme == .dark ? .black : .white }
 
     var body: some View {
         configuration.label
-            .foregroundStyle(isFocused ? focusForeground : palette.primaryText)
+            .foregroundStyle(palette.primaryText)
             .frame(width: width, height: PINMetrics.keyDiameter)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(isFocused ? focusFill : palette.primaryText.opacity(0.16))
-            )
+            // The app's own liquid-glass card surface, cornered to a capsule.
+            // Using it rather than a hand-rolled fill means the keys pick up the
+            // same focus bloom, the same Reduce Transparency fallback, and the
+            // same tvOS-26 treatment as every card in the app — and can't drift
+            // from them.
+            .plozzGlassCard(cornerRadius: PINMetrics.keyDiameter / 2, isFocused: isFocused)
+            .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
             .scaleEffect(isFocused ? 1.06 : 1.0)
-            .shadow(
-                color: focusFill.opacity(isFocused ? 0.28 : 0),
-                radius: isFocused ? 26 : 0
-            )
-            .opacity(configuration.isPressed ? 0.85 : 1.0)
-            .animation(.easeOut(duration: 0.15), value: isFocused)
+            .opacity(configuration.isPressed ? 0.9 : 1.0)
+            .animation(.easeOut(duration: 0.18), value: isFocused)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 

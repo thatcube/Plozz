@@ -45,6 +45,7 @@ extension AppState {
         librariesStore: ProfileSetupLibrariesLoader
     ) -> ProfileLibrariesScope {
         ProfileLibrariesScope(
+            presentation: .profileSetup,
             accounts: accountsProviders.accounts,
             activeProfile: profilesModel.activeProfile,
             discoveredLibraries: librariesStore.state,
@@ -61,8 +62,7 @@ extension AppState {
             onSetAccountIncluded: { [weak self] id, included in
                 self?.profileFlow.setAccount(id, includedInActiveProfile: included)
             },
-            // Signing in to a NEW server mid-setup is out of scope for the step;
-            // the profile can be pointed at one afterwards from Settings.
+            // Not offered during setup — see `ProfileLibrariesScope.Presentation`.
             onAddAccount: {},
             plexHomeUsersFetcher: { [weak self] accountID in
                 await self?.plexHomeUsers.plexHomeUsers(forAccountID: accountID) ?? []

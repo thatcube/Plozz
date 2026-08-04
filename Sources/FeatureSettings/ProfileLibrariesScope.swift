@@ -13,6 +13,21 @@ import SwiftUI
 ///
 /// Narrowing the dependency is what makes one screen serve both.
 public struct ProfileLibrariesScope {
+    /// Where this screen is being shown, which is the only thing that differs
+    /// between the two uses.
+    ///
+    /// One screen, two contexts — rather than two screens. The controls are
+    /// identical (that's the whole reason setup reuses this page); what changes
+    /// is what the person is in the middle of. In Settings they're adjusting a
+    /// profile they already have. During setup they're answering a question they
+    /// were just asked, and actions that lead OUT of the flow — signing a new
+    /// server in to the whole device — don't belong mid-flight.
+    public enum Presentation {
+        case settings
+        case profileSetup
+    }
+
+    public var presentation: Presentation
     public var accounts: [Account]
     public var activeProfile: Profile
     public var discoveredLibraries: LoadState<[AggregatedLibrary]>
@@ -30,6 +45,7 @@ public struct ProfileLibrariesScope {
     public var onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
 
     public init(
+        presentation: Presentation = .settings,
         accounts: [Account],
         activeProfile: Profile,
         discoveredLibraries: LoadState<[AggregatedLibrary]>,
@@ -43,6 +59,7 @@ public struct ProfileLibrariesScope {
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void
     ) {
+        self.presentation = presentation
         self.accounts = accounts
         self.activeProfile = activeProfile
         self.discoveredLibraries = discoveredLibraries

@@ -117,6 +117,11 @@ public final class ProfileFlowModel {
     public func finishPickingThemeForNewProfile() -> Bool {
         guard isPickingThemeForNewProfile else { return false }
         isPickingThemeForNewProfile = false
+        // Now the cover is going away, the lock offer can take the stage.
+        if let next = profileAwaitingLockOffer {
+            profileAwaitingLockOffer = nil
+            pendingLockOfferProfile = next
+        }
         return true
     }
 
@@ -392,13 +397,16 @@ public final class ProfileFlowModel {
         // Only now, with the profile's servers and identity settled, is an
         // import meaningful — see `Profile.isAwaitingSetup`.
         activateUniversalWatchlist()
-        // The one-time theme picker used to be raised by the old create path,
-        // which nothing reaches now that both creation routes go through
-        // `createProfileForSetup`. Offer it here instead, so a new profile still
-        // gets to pick a look.
+        // Theme first, lock offer after it — NOT both now. SwiftUI presents one
+        // cover at a time, so raising both here meant one was silently dropped
+        // (the theme picker, as it turned out). `finishPickingThemeForNewProfile`
+        // hands over to the lock offer when the picker closes.
+        profileAwaitingLockOffer = profile
         isPickingThemeForNewProfile = true
-        pendingLockOfferProfile = profile
     }
+
+    /// Held between the theme picker closing and the lock offer opening.
+    @ObservationIgnored private var profileAwaitingLockOffer: Profile?
 
     /// Dismisses the post-setup lock offer.
     public func dismissLockOffer() {

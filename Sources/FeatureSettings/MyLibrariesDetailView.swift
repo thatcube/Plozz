@@ -53,10 +53,20 @@ public struct MyLibrariesDetailView: View {
         ScrollViewReader { scrollProxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    SettingsPageHeader(
-                        SettingsCopy.libraries,
-                        subtitle: "Turn servers and libraries on or off, and pick who you watch as."
-                    )
+                    switch scope.presentation {
+                    case .settings:
+                        SettingsPageHeader(
+                            SettingsCopy.libraries,
+                            subtitle: "Turn servers and libraries on or off, and pick who you watch as."
+                        )
+                    case .profileSetup:
+                        // Same controls, different moment: this is a question
+                        // being answered, not a setting being adjusted.
+                        SettingsPageHeader(
+                            "What does this profile watch?",
+                            subtitle: "Pick the servers it uses and who it watches as. Everything's on by default — you can change all of it later."
+                        )
+                    }
                     if allGroups.isEmpty {
                         emptyInventoryState
                     } else {
@@ -279,8 +289,13 @@ public struct MyLibrariesDetailView: View {
     /// lives canonically on This Apple TV › Servers; this mirror of it is styled
     /// identically to that page's "Add Server" row and says "this Apple TV" to
     /// make the device scope obvious next to the per-profile toggles above.
+    @ViewBuilder
     private var addServerSection: some View {
-        SettingsPanel {
+        // Signing a new server in to the whole device is a trip out of the
+        // profile-setup flow (and a dead end inside a cover), so it's offered
+        // only from Settings.
+        if scope.presentation == .settings {
+            SettingsPanel {
             Button(action: scope.onAddAccount) {
                 Label("Add Server to This Apple TV", systemImage: "plus.circle")
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -288,7 +303,8 @@ public struct MyLibrariesDetailView: View {
                     .padding(.horizontal, 14)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+                .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+            }
         }
     }
 

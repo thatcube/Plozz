@@ -521,6 +521,11 @@ extension AppState {
         if descriptorsTouched { refreshPendingSyncedServers() }
 
         rebuildSettingsModels()
+        // A remote change can make a DIFFERENT profile active — a peer deleting
+        // the one we were on falls back to `profiles.first` — and it can also
+        // deliver a lock onto the profile we're already sitting in. Re-check the
+        // gate so neither ends with an unlocked view of a locked profile.
+        profileFlow.enforceLockOnActiveProfile()
         PlozzLog.sync.info("CloudSync: applied \(changes.count) exact change(s)")
     }
 

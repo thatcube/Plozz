@@ -75,9 +75,9 @@ struct SeerDetailView: View {
     /// since that's the first-run context a new user needs to connect.
     private var headerSubtitle: LocalizedStringResource {
         if case .connected = seer.phase {
-            return "Shared across every profile on this Apple TV."
+            return "Shared across every profile."
         }
-        return "Connect a Seerr server (Overseerr / Jellyseerr) to discover and request movies, shows & anime for everyone on this Apple TV."
+        return "Connect a Seerr server (Overseerr / Jellyseerr) to discover and request movies, shows & anime for everyone."
     }
 
     // MARK: - Connect (not yet connected)

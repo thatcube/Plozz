@@ -78,7 +78,7 @@ struct MyLibrariesDetailView: View {
 
     private var emptyInventoryState: some View {
         SettingsPanel(
-            footer: "Sign in to a server under This Apple TV › Servers, then choose what you watch here."
+            footer: "Sign in to a server under Everyone › Servers, then choose what you watch here."
         ) {
             Text("No servers yet.").font(.headline)
         }

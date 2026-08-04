@@ -199,6 +199,9 @@ struct MainTabView: View {
     let debugActions: DebugSettingsActions
     let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
+    /// Sets or clears the active profile's PIN gate. Defaulted so previews/tests
+    /// can omit it.
+    var onSetProfileLock: (ProfileLock?) -> Void = { _ in }
     /// Maps a household profile to a Seerr user (or clears it) — forwarded to the
     /// Settings "requests are made as" list.
     var onSetSeerrUser: (String, SeerUser?) -> Void = { _, _ in }
@@ -354,6 +357,7 @@ struct MainTabView: View {
                 onEraseICloud: debugActions.eraseICloud,
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
                 onSelectPlexHomeUser: onSelectPlexHomeUser,
+                onSetProfileLock: onSetProfileLock,
                 onSetSeerrUser: onSetSeerrUser,
                 onSetUpAnotherDevice: onSetUpAnotherDevice,
                 syncEnabled: syncEnabled,

@@ -1562,6 +1562,22 @@ public final class AppState {
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
     }
 
+    /// Sets or clears (`nil`) the active profile's PIN gate.
+    ///
+    /// Takes an already-derived `ProfileLock` — the raw PIN is turned into a
+    /// salted verifier in the entry view and never reaches this layer, so it
+    /// can't be logged or persisted by accident on the way through.
+    ///
+    /// Also drops any "already unlocked this run" credit for the profile: after
+    /// changing or removing a PIN, the next open should be judged against the new
+    /// state rather than an unlock the old one granted.
+    public func setLockForActiveProfile(_ lock: ProfileLock?) {
+        var profile = profilesModel.activeProfile
+        profile.lock = lock
+        profilesModel.update(profile)
+        profileFlow.forgetUnlock(for: profile.id)
+    }
+
     /// Dismisses the one-time theme picker shown after creating a profile in-app
     /// and applies the (now active) new profile's Plex identity — raising a PIN
     /// prompt if it maps to a protected Home user. Guarded so it's safe to call

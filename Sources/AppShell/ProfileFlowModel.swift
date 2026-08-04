@@ -79,10 +79,19 @@ public final class ProfileFlowModel {
     // MARK: Launch picker lifecycle (driven by AppState bootstrap / onboarding)
 
     /// Configures the launch profile picker: shown when the household opted into
-    /// "ask on startup" and has more than one profile. Mandatory (not cancelable).
+    /// "ask on startup" and has more than one profile.
+    ///
+    /// Also forced when the profile we'd otherwise restore is locked. Landing on
+    /// the picker (rather than restoring the profile and putting a PIN screen
+    /// over it) is both safer and simpler: the locked profile's rows never render
+    /// behind the prompt, and the unlock then runs through the ordinary
+    /// `switchProfile(to:)` gate with the picker sitting behind it. It also
+    /// matches what people expect from "who's watching?" elsewhere.
     public func prepareLaunchPicker() {
-        isChoosingProfile = profilesModel.askProfileOnStartup
-            && profilesModel.profiles.count > 1
+        let restoredProfileIsLocked = profilesModel.activeProfile.isLocked
+            && !unlockedProfileIDs.contains(profilesModel.activeProfile.id)
+        isChoosingProfile = restoredProfileIsLocked
+            || (profilesModel.askProfileOnStartup && profilesModel.profiles.count > 1)
         isProfileSelectionCancelable = false
     }
 
@@ -115,10 +124,45 @@ public final class ProfileFlowModel {
         isChoosingProfile = false
     }
 
+    /// A profile waiting on its PIN before it can be opened.
+    ///
+    /// Set when `switchProfile(to:)` is asked for a locked profile and cleared on
+    /// success or cancel. `RootView` presents the PIN screen off this, exactly
+    /// like the Plex Home PIN prompt it sits in front of.
+    public private(set) var pendingLockedProfile: Profile?
+    /// Message from the last failed unlock attempt, or `nil`.
+    public private(set) var profileLockError: String?
+
+    /// Profiles unlocked during this app run, so a person who has already proved
+    /// they know the PIN isn't asked again every time they hop between profiles.
+    ///
+    /// Deliberately in-memory: it dies with the process, so a cold launch always
+    /// re-asks. Persisting it would quietly turn "locked" into "locked once".
+    @ObservationIgnored private var unlockedProfileIDs: Set<String> = []
+
     /// Switches to `id`, re-scoping settings + the active account set, then
     /// dismisses the picker. Fast: a few `UserDefaults` reads plus an in-memory
     /// account recompute; content reloads async via the rebuilt view subtree.
+    ///
+    /// When the target profile carries a `ProfileLock` and hasn't been unlocked
+    /// yet this run, nothing is switched — the PIN prompt is raised instead and
+    /// the real switch happens in `submitProfileLockPIN(_:)`. The gate sits ahead
+    /// of everything else on purpose: no settings rebuild, no account reload, and
+    /// above all no Plex identity apply happens for a profile the person hasn't
+    /// proved they can open.
     public func switchProfile(to id: String) {
+        if let profile = profilesModel.profiles.first(where: { $0.id == id }),
+           profile.isLocked,
+           !unlockedProfileIDs.contains(id) {
+            profileLockError = nil
+            pendingLockedProfile = profile
+            return
+        }
+        performSwitch(to: id)
+    }
+
+    /// The unconditional switch, past the lock gate.
+    private func performSwitch(to id: String) {
         audioController.stop()
         profilesModel.select(id)
         rebuildSettingsModels()
@@ -127,6 +171,45 @@ public final class ProfileFlowModel {
         activateUniversalWatchlist()
         isChoosingProfile = false
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
+    }
+
+    /// Checks `pin` against the pending profile's lock and, on a match, completes
+    /// the switch that `switchProfile(to:)` held back.
+    ///
+    /// - Returns: `true` when the PIN was accepted.
+    @discardableResult
+    public func submitProfileLockPIN(_ pin: String) -> Bool {
+        guard let profile = pendingLockedProfile, let lock = profile.lock else { return false }
+        guard lock.matches(pin: pin) else {
+            profileLockError = String(localized: "Incorrect PIN. Try again.")
+            return false
+        }
+        unlockedProfileIDs.insert(profile.id)
+        pendingLockedProfile = nil
+        profileLockError = nil
+
+        // Hand the same digits to Plex when the person told us the two PINs are
+        // the same, so a profile bound to a PIN-protected Plex Home user asks
+        // once rather than twice. Advisory only — the local verifier above
+        // already decided, so this failing (offline, PINs drifted since) still
+        // opens the profile and simply leaves the Plex prompt to appear.
+        if lock.matchesPlexPIN {
+            plexHomeUsers.prefillPlexPIN(pin, forProfile: profile.id)
+        }
+        performSwitch(to: profile.id)
+        return true
+    }
+
+    /// Abandons a pending unlock, leaving the active profile untouched.
+    public func cancelProfileLockPrompt() {
+        pendingLockedProfile = nil
+        profileLockError = nil
+    }
+
+    /// Forgets that `id` was unlocked this run — called when its PIN changes or
+    /// is removed, so a stale unlock can't outlive the lock that granted it.
+    public func forgetUnlock(for id: String) {
+        unlockedProfileIDs.remove(id)
     }
 
     /// Creates or updates a profile from an editor draft. Updating the active
@@ -226,12 +309,18 @@ public final class ProfileFlowModel {
 
     /// Removes a profile (the default profile can't be removed). If it was
     /// active, selection falls back to the first profile and re-scopes.
+    ///
+    /// The fallback is chosen by `ProfilesModel.remove(_:)` and may well be a
+    /// LOCKED profile, so this can't just re-scope into it — deleting your own
+    /// profile would otherwise be a way into someone else's without their PIN.
+    /// `enforceLockOnActiveProfile()` sends us to the picker in that case.
     public func removeProfile(id: String) {
         let wasActive = id == profilesModel.activeProfileID
         discardWatchReconciler(id)
         removeMediaAliases(id)
         profilesModel.remove(id)
         if wasActive {
+            if enforceLockOnActiveProfile() { return }
             rebuildSettingsModels()
             updateTrackersForActiveProfile()
             accountsProviders.reloadAccounts()
@@ -244,6 +333,26 @@ public final class ProfileFlowModel {
             // Plex override until the next explicit switch.
             plexHomeUsers.ensurePlexIdentityForActiveProfile()
         }
+    }
+
+    /// Sends the user to the profile picker when the profile that is *already*
+    /// active is locked and hasn't been unlocked this run.
+    ///
+    /// The backstop for every path that makes a profile active without going
+    /// through `switchProfile(to:)` — deleting the active profile, and sync
+    /// applying a remote change that removes it. Routing to the picker (rather
+    /// than raising the PIN over whatever is on screen) keeps the locked
+    /// profile's content from rendering behind the prompt, and the unlock then
+    /// runs through the normal gate.
+    ///
+    /// - Returns: `true` when the picker was raised, so callers can stop.
+    @discardableResult
+    public func enforceLockOnActiveProfile() -> Bool {
+        let active = profilesModel.activeProfile
+        guard active.isLocked, !unlockedProfileIDs.contains(active.id) else { return false }
+        isProfileSelectionCancelable = false
+        isChoosingProfile = true
+        return true
     }
 
     // MARK: Household preferences

@@ -92,8 +92,15 @@ public final class PlexHomeUsersModel {
     /// `RootView` presents the picker bound to this; `nil` when none is pending.
     public private(set) var pendingPlexUserSelection: PendingPlexUserSelection?
 
-    /// In-memory Plex auth-token overrides keyed by `Account.id`. Set when the
-    /// active profile maps to a non-owner Plex Home user so providers resolve as
+    /// A PIN entered to unlock a Plozz profile whose lock the user linked to
+    /// their Plex PIN, waiting to be spent on that profile's next Plex
+    /// Home-user switch so they're only asked once. Never persisted, never
+    /// logged, and dropped after a single read — see
+    /// `prefillPlexPIN(_:forProfile:)`.
+    @ObservationIgnored
+    private var prefilledPlexPIN: (profileID: String, pin: String)?
+
+    /// In-memory Plex auth-token overrides keyed by `Account.id`. Set when the    /// active profile maps to a non-owner Plex Home user so providers resolve as
     /// that user. **PIN-protected** users are never persisted — their token must
     /// not survive relaunch, so Plozz re-prompts each launch. **Unprotected**
     /// users are seeded synchronously from `plexHomeUserTokenCache` (see below)
@@ -250,14 +257,18 @@ public final class PlexHomeUsersModel {
 
     /// Cancels the outstanding Plex PIN prompt, reverting to the default profile
     /// so the UI isn't left under a profile the user couldn't unlock.
+    ///
+    /// Drops the Plex overrides FIRST rather than relying on the fallback switch
+    /// to fix the identity. The switch can now legitimately not happen — if the
+    /// fallback profile carries its own `ProfileLock` the switch defers to that
+    /// prompt, and the user can cancel that too — and without this we'd be left
+    /// sitting inside the profile whose protected Plex user was just declined,
+    /// resolved to the admin token.
     public func cancelPlexPIN() {
-        pendingPlexPINRequest = nil
-        plexPINError = nil
+        clearPlexOverrides()
         if let fallback = profilesModel.profiles.first?.id,
            fallback != profilesModel.activeProfileID {
             switchProfile(fallback)
-        } else {
-            clearPlexOverrides()
         }
     }
 
@@ -279,6 +290,14 @@ public final class PlexHomeUsersModel {
         let plexAccounts = accountsProviders.accounts.filter { $0.server.provider == .plex }
         let boundCount = plexAccounts.filter { profile.homeUserBinding(forPlexAccount: $0.id) != nil }.count
         PlozzLog.boot("ensurePlexIdentity profile=\(profile.id) plexAccounts=\(plexAccounts.count) withBinding=\(boundCount) gen=\(self.plexIdentityGeneration)")
+
+        // Take any stashed "same PIN as Plex" value for THIS profile up front, so
+        // exactly one pass can ever see it. Reading it here rather than inside the
+        // `pinTarget` branch matters: a profile with no protected binding would
+        // otherwise leave the plaintext PIN sitting in memory for the rest of the
+        // run, to be spent on some unrelated later pass (e.g. after the user links
+        // a protected Home user in Settings).
+        let prefilledPIN = consumePrefilledPIN(forProfile: profile.id)
 
         var pinTarget: (accountID: String, binding: PlexHomeUserBinding)?
 
@@ -359,18 +378,75 @@ public final class PlexHomeUsersModel {
         }
 
         if let pin = pinTarget {
-            pendingPlexPINRequest = PlexPINRequest(
-                id: "\(profile.id)#\(pin.accountID)",
-                accountID: pin.accountID,
-                homeUserID: pin.binding.homeUserID,
-                homeUserName: pin.binding.name.isEmpty ? "Plex User" : pin.binding.name,
-                homeUserAvatarURL: pin.binding.avatarURL
-            )
+            // If the user told us their profile PIN is also their Plex PIN, spend
+            // it here instead of asking a second time for the same digits. On
+            // failure we must RE-RAISE the prompt ourselves: nothing else does,
+            // and leaving it unshown would silently drop the profile back to the
+            // admin token — i.e. the restricted Home user's library limits would
+            // quietly not apply. See `prefillPlexPIN(_:forProfile:)`.
+            if let prefilledPIN {
+                PlozzLog.auth.debug("using profile-lock PIN for Plex switch acct=\(pin.accountID)")
+                pendingPlexPINRequest = nil
+                plexPINError = nil
+                let request = Self.pinRequest(profileID: profile.id, target: pin)
+                Task { [weak self] in
+                    await self?.performPlexSwitch(
+                        accountID: pin.accountID,
+                        homeUserID: pin.binding.homeUserID,
+                        pin: prefilledPIN
+                    )
+                    // `performPlexSwitch` clears the request on success and only
+                    // sets an error on failure, so an error still standing here
+                    // means the switch didn't happen and the user needs the
+                    // keypad after all.
+                    guard let self, self.plexPINError != nil, self.pendingPlexPINRequest == nil else { return }
+                    PlozzLog.auth.debug("profile-lock PIN rejected by Plex — raising the normal prompt")
+                    self.pendingPlexPINRequest = request
+                }
+                return
+            }
+            pendingPlexPINRequest = Self.pinRequest(profileID: profile.id, target: pin)
             plexPINError = nil
         } else {
             pendingPlexPINRequest = nil
             plexPINError = nil
         }
+    }
+
+    /// Builds the PIN prompt for a protected Home-user binding.
+    private static func pinRequest(
+        profileID: String,
+        target: (accountID: String, binding: PlexHomeUserBinding)
+    ) -> PlexPINRequest {
+        PlexPINRequest(
+            id: "\(profileID)#\(target.accountID)",
+            accountID: target.accountID,
+            homeUserID: target.binding.homeUserID,
+            homeUserName: target.binding.name.isEmpty ? "Plex User" : target.binding.name,
+            homeUserAvatarURL: target.binding.avatarURL
+        )
+    }
+
+    /// Hands this model the PIN the user just entered to unlock a Plozz profile,
+    /// for the case where they set that profile's lock to "same PIN as Plex".
+    ///
+    /// Read and dropped by the very next `ensurePlexIdentityForActiveProfile()`
+    /// pass — which consumes it up front whether or not it ends up being used —
+    /// so the plaintext can't linger in memory or be replayed against a later
+    /// binding. Purely an optimisation of the *prompt*: the profile is already
+    /// unlocked by the time this is called, so if Plex rejects it the person
+    /// simply gets the Plex PIN screen they'd have got anyway.
+    public func prefillPlexPIN(_ pin: String, forProfile profileID: String) {
+        prefilledPlexPIN = (profileID: profileID, pin: pin)
+    }
+
+    /// Takes the stashed PIN if it belongs to `profileID`, clearing it either way
+    /// — including when it belonged to a different profile, since a stash that
+    /// didn't match is stale by definition.
+    private func consumePrefilledPIN(forProfile profileID: String) -> String? {
+        defer { prefilledPlexPIN = nil }
+        guard let stash = prefilledPlexPIN, stash.profileID == profileID else { return nil }
+        return stash.pin
     }
 
     /// Drops all Plex token overrides, falling back to stored (admin) tokens.

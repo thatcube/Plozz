@@ -413,6 +413,11 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
     public var avatarImageURL: String?
     public var avatarEmoji: String?
     public var avatarEmojiColorIndex: Int?
+    /// The profile's PIN gate, if any. Synced on purpose: a lock that only
+    /// exists on one device isn't a lock, since the same profile is one tap away
+    /// on every other device in the household. Carries a salted verifier only —
+    /// never the PIN itself (see `ProfileLock`).
+    public var lock: ProfileLock?
 
     public init(profile p: Profile) {
         self.id = p.id
@@ -425,6 +430,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         self.avatarImageURL = SyncURLSanitizer.sanitize(string: p.avatarImageURL)
         self.avatarEmoji = p.avatarEmoji
         self.avatarEmojiColorIndex = p.avatarEmojiColorIndex
+        self.lock = p.lock
     }
 
     /// Merge this DTO's cosmetic fields into an existing profile, preserving ALL
@@ -450,6 +456,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         }
         p.avatarEmoji = avatarEmoji
         p.avatarEmojiColorIndex = avatarEmojiColorIndex
+        p.lock = lock
         return p
     }
 
@@ -459,6 +466,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
             id: id, name: name, avatarSymbol: avatarSymbol, colorIndex: colorIndex,
             createdAt: createdAt,
             avatarImageURL: SyncURLSanitizer.sanitize(string: avatarImageURL),
-            avatarEmoji: avatarEmoji, avatarEmojiColorIndex: avatarEmojiColorIndex)
+            avatarEmoji: avatarEmoji, avatarEmojiColorIndex: avatarEmojiColorIndex,
+            lock: lock)
     }
 }

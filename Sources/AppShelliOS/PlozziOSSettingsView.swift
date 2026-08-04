@@ -146,6 +146,7 @@ private enum PlozziOSSettingsDestination: Hashable {
     case subtitles
     case spoilers
     case nightShift
+    case profileLock
     case diagnostics
     case attributions
     case about
@@ -155,11 +156,24 @@ var deviceName: String {
     UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
 }
 
-private var deviceSettingsTitle: LocalizedStringResource {
-    // Interpolated inside the resource (not concatenated around it) so the
-    // placeholder is extracted and translators can move it — word order differs
-    // by language.
-    "On This \(deviceName)"
+/// Heading for the settings every profile shares. Named for the audience rather
+/// than the hardware, because most of what's in the group syncs — see
+/// `SettingsCopy.everyone`. The reach lives in the section footer instead, so
+/// toggling iCloud Sync never appears to move a row into a different scope.
+private var deviceSettingsTitle: LocalizedStringResource { SettingsCopy.everyone }
+
+/// Whether this device is currently sharing settings with the user's others.
+/// Read at render time so the scope footers track the iCloud Sync row live.
+private var settingsScopeSyncEnabled: Bool { SyncSetupFeatureFlag().isEnabled }
+
+/// Reach clause for the shared-settings group.
+private var everyoneScopeFooter: LocalizedStringResource {
+    SettingsCopy.everyoneScope(syncEnabled: settingsScopeSyncEnabled, deviceName: deviceName)
+}
+
+/// Reach clause for the active profile's own settings.
+private var profileScopeFooter: LocalizedStringResource {
+    SettingsCopy.profileScope(syncEnabled: settingsScopeSyncEnabled, deviceName: deviceName)
 }
 
 private struct PlozziOSSettingsSplitView: View {
@@ -187,7 +201,7 @@ private struct PlozziOSSettingsSplitView: View {
                     // The active profile's settings come FIRST: they are what
                     // anyone actually opens Settings to change, where the device
                     // group is setup done once.
-                    SettingsSectionGroup("This Profile") {
+                    SettingsSectionGroup(verbatim: appModel.profiles.activeProfile.name) {
                         settingsRow(
                             .myLibraries,
                             title: SettingsCopy.libraries,
@@ -201,8 +215,13 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.subtitles, title: "Subtitles", systemImage: "captions.bubble")
                         settingsRow(.spoilers, title: "Spoilers", systemImage: "eye.slash")
                         settingsRow(.nightShift, title: "Circadian Mode", systemImage: "moon.stars.fill")
+                        settingsRow(
+                            .profileLock,
+                            title: ProfileLockCopy.title,
+                            systemImage: appModel.profiles.activeProfile.isLocked ? "lock" : "lock.open"
+                        )
                     } footer: {
-                        Text("Saved for \(appModel.profiles.activeProfile.name).")
+                        Text(profileScopeFooter)
                     }
 
                     SettingsSectionGroup(deviceSettingsTitle) {
@@ -243,7 +262,7 @@ private struct PlozziOSSettingsSplitView: View {
                             systemImage: "sparkles.rectangle.stack"
                         )
                     } footer: {
-                        Text("Shared across every profile on this \(deviceName).")
+                        Text(everyoneScopeFooter)
                     }
 
                     SettingsSectionGroup("Support") {
@@ -420,6 +439,8 @@ private struct PlozziOSSettingsSplitView: View {
             PlozziOSSpoilerSettingsView(model: appModel.settings.spoilers)
         case .nightShift:
             PlozziOSNightShiftSettingsView(model: appModel.settings.nightShift)
+        case .profileLock:
+            PlozziOSProfileLockSettingsView(appModel: appModel)
         case .diagnostics:
             PlozziOSDiagnosticsSettingsView(
                 appModel: appModel,
@@ -538,7 +559,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 )
 
                 // Profile first — see the compact layout above.
-                SettingsSectionGroup("This Profile") {
+                SettingsSectionGroup(verbatim: appModel.profiles.activeProfile.name) {
                 NavigationLink {
                     PlozziOSMyLibrariesSettingsView(
                         appModel: appModel,
@@ -613,7 +634,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                     Label("Circadian Mode", systemImage: "moon.stars.fill")
                 }
             } footer: {
-                Text("Saved for \(appModel.profiles.activeProfile.name).")
+                Text(profileScopeFooter)
             }
 
                 SettingsSectionGroup(deviceSettingsTitle) {
@@ -663,7 +684,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
                 .buttonStyle(.plain)
             } footer: {
-                Text("Shared across every profile on this \(deviceName).")
+                Text(everyoneScopeFooter)
             }
 
                 SettingsSectionGroup("Support") {

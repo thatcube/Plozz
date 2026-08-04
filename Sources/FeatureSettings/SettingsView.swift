@@ -64,12 +64,16 @@ public struct SettingsView: View {
     /// page — the home for progress that used to float over Home's top-right.
     @Environment(ShareScanStatusModel.self) private var shareScanStatus: ShareScanStatusModel?
 
-    /// Shared sizing for the two identity headers (This Apple TV + the active
+    /// Shared sizing for the two identity headers (Everyone + the active
     /// profile) so their avatar/icon and title read as the same component. The
     /// circle is sized to sit between the old TV glyph (64) and profile avatar
     /// (104), roughly the combined height of the title + subtitle lines.
     private static let identityAvatarSize: CGFloat = 84
     private static let identityTitleFont: Font = .system(size: 36, weight: .bold)
+
+    /// The device kind used in the scope subtitles when iCloud Sync is off. This
+    /// shell only ever runs on an Apple TV; the iOS shell passes iPhone/iPad.
+    private static let deviceName = "Apple TV"
 
     #if DEBUG
     /// Live A/B override for the Home hero foreground renderer, shared with
@@ -142,6 +146,7 @@ public struct SettingsView: View {
     private let onSetUpFromAnotherDevice: (() -> Void)?
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
+    private let onSetProfileLock: (ProfileLock?) -> Void
     private let onSetSeerrUser: (String, SeerUser?) -> Void
     /// Step 6 metadata settings surface (providers, attribution, diagnostics,
     /// cache). Optional so tests/previews can omit it; the row + page appear only
@@ -195,6 +200,7 @@ public struct SettingsView: View {
         onEraseICloud: (() -> Void)? = nil,
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void,
+        onSetProfileLock: @escaping (ProfileLock?) -> Void = { _ in },
         onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in },
         onSetUpAnotherDevice: (() -> Void)? = nil,
         syncEnabled: Bool = false,
@@ -253,6 +259,7 @@ public struct SettingsView: View {
         self.onEraseICloud = onEraseICloud
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
+        self.onSetProfileLock = onSetProfileLock
         self.onSetSeerrUser = onSetSeerrUser
         self.onSetUpAnotherDevice = onSetUpAnotherDevice
         self.syncEnabled = syncEnabled
@@ -306,7 +313,8 @@ public struct SettingsView: View {
             onRescanShare: onRescanShare,
             onSignOutAll: onSignOutAll,
             plexHomeUsersFetcher: plexHomeUsersFetcher,
-            onSelectPlexHomeUser: onSelectPlexHomeUser
+            onSelectPlexHomeUser: onSelectPlexHomeUser,
+            onSetProfileLock: onSetProfileLock
         )
     }
 
@@ -335,9 +343,8 @@ public struct SettingsView: View {
                     // this container at once.
                     profileContainer
 
-                    // Then what the whole Apple TV shares, regardless of who is
-                    // using it.
-                    thisAppleTVSection
+                    // Then what every profile shares, regardless of who is using it.
+                    everyoneSection
 
                     // About + Attributions + Sign Out render INLINE at the bottom.
                     aboutAndSignOut
@@ -471,23 +478,36 @@ public struct SettingsView: View {
                     .settingsRowSecondary()
                     .lineLimit(2)
             }
+            // The profile's own PIN gate. Belongs to the profile (it travels with
+            // it to every device), so it sits here rather than in the shared
+            // section — even though "who can open this" reads like a household
+            // concern, the lock is a property of this one profile.
+            navRow(ProfileLockCopy.title, icon: activeProfile.isLocked ? "lock" : "lock.open",
+                   value: activeProfile.isLocked ? Text(ProfileLockCopy.on) : Text(ProfileLockCopy.off),
+                   route: .profileLock)
         }
     }
 
-    /// The **This Apple TV** container: everything shared by everyone on the
-    /// device — server sign-ins (shared Keychain via `AccountStore`) and profile
-    /// management (the roster; the launch picker lives one level in, on the
-    /// Profiles screen). It leads the page so the global
-    /// scope is obvious and rhymes visually with the profile card below. Nothing
-    /// here belongs to a single profile; a profile only picks which of these
-    /// servers it watches (see Profile › Your Libraries).
+    /// The **Everyone** container: everything shared by every profile — server
+    /// sign-ins (shared Keychain via `AccountStore`) and profile management (the
+    /// roster; the launch picker lives one level in, on the Profiles screen). It
+    /// follows the profile card, because the profile holds what people actually
+    /// open Settings to change while this is setup you do once. Nothing here
+    /// belongs to a single profile; a profile only picks which of these servers
+    /// it watches (see Profile › Your Libraries).
+    ///
+    /// Named for its audience, not the hardware. Most of what's in here syncs, so
+    /// "This Apple TV" was only ever true when iCloud Sync was off — see
+    /// `SettingsCopy.everyone`. The heading is fixed and the *subtitle* carries the
+    /// reach, so flipping Sync never appears to move a row into another scope.
     @ViewBuilder
-    private var thisAppleTVSection: some View {
+    private var everyoneSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Device "identity on top": an Apple-TV glyph + name + scope note,
-            // mirroring the profile card's avatar header.
+            // "Identity on top", mirroring the profile card's avatar header. The
+            // glyph tracks reach the same way the subtitle does: people when these
+            // settings span the user's devices, a lone Apple TV when they don't.
             HStack(spacing: 20) {
-                Image(systemName: "appletv")
+                Image(systemName: syncEnabled ? "person.2" : "appletv")
                     .font(.system(size: 40, weight: .regular))
                     .plozzForeground(.secondary)
                     .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
@@ -495,9 +515,9 @@ public struct SettingsView: View {
                     .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("This Apple TV")
+                    Text(SettingsCopy.everyone)
                         .font(Self.identityTitleFont)
-                    Text("Shared across every profile on this Apple TV.")
+                    Text(SettingsCopy.everyoneScope(syncEnabled: syncEnabled, deviceName: Self.deviceName))
                         .font(.subheadline)
                         .plozzForeground(.secondary)
                 }
@@ -786,6 +806,8 @@ public struct SettingsView: View {
             )
         case .servers:
             ServersAndLibrariesDetailView(context: context)
+        case .profileLock:
+            ProfileLockDetailView(context: context, syncEnabled: syncEnabled)
         case .myLibraries:
             MyLibrariesDetailView(context: context)
         case .appearance:
@@ -869,7 +891,7 @@ public struct SettingsView: View {
                         .font(Self.identityTitleFont)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
-                    Text("Settings below are saved on this profile.")
+                    Text(SettingsCopy.profileScope(syncEnabled: syncEnabled, deviceName: Self.deviceName))
                         .font(.subheadline)
                         .plozzForeground(.secondary)
                 }

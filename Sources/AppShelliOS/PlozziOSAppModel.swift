@@ -455,8 +455,12 @@ final class PlozziOSAppModel {
             ),
             defaultActiveAccountIDs: accountStore.activeAccountIDs()
         )
+        // Forced when the profile we'd restore is locked, so its content never
+        // renders behind the PIN prompt — the unlock then runs through the
+        // ordinary `selectProfile(_:)` gate with the picker behind it.
         let requiresLaunchProfileSelection =
-            profiles.askProfileOnStartup && profiles.profiles.count > 1
+            profiles.activeProfile.isLocked
+            || (profiles.askProfileOnStartup && profiles.profiles.count > 1)
         let accountsProviders = AccountsProvidersModel(
             accountStore: accountStore,
             registry: registry,
@@ -825,10 +829,80 @@ final class PlozziOSAppModel {
         pendingLibrarySelection = nil
         pendingFirstRunStep = nil
         pendingPairingInvite = nil
-        selectProfile(profiles.activeProfileID)
+        // Bypass the lock gate deliberately: this is the debug "reset to first
+        // run" path and it has just wiped the profiles back to a pristine default.
+        performSelectProfile(profiles.activeProfileID)
     }
 
+    /// A profile waiting on its PIN before it can be opened, or `nil`.
+    /// `PlozziOSRootView` presents the PIN screen off this.
+    private(set) var pendingLockedProfile: Profile?
+    /// Message from the last failed unlock attempt.
+    private(set) var profileLockError: String?
+    /// Profiles unlocked during this app run, so hopping back and forth doesn't
+    /// re-ask. In-memory on purpose: a cold launch always re-asks.
+    private var unlockedProfileIDs: Set<String> = []
+
+    /// Switches to `id`, unless it's locked and unproven this run — in which case
+    /// the PIN prompt is raised and nothing is re-scoped until it's satisfied.
+    ///
+    /// The lock rides the synced profile record, so a profile locked on the Apple
+    /// TV arrives here locked too; without this gate it would open with one tap
+    /// and the lock would be worthless.
     func selectProfile(_ id: String) {
+        if let profile = profiles.profiles.first(where: { $0.id == id }),
+           profile.isLocked,
+           !unlockedProfileIDs.contains(id) {
+            profileLockError = nil
+            pendingLockedProfile = profile
+            return
+        }
+        performSelectProfile(id)
+    }
+
+    /// Checks `pin` against the pending profile's lock, completing the held-back
+    /// switch on a match.
+    @discardableResult
+    func submitProfileLockPIN(_ pin: String) -> Bool {
+        guard let profile = pendingLockedProfile, let lock = profile.lock else { return false }
+        guard lock.matches(pin: pin) else {
+            profileLockError = String(localized: "Incorrect PIN. Try again.")
+            return false
+        }
+        unlockedProfileIDs.insert(profile.id)
+        pendingLockedProfile = nil
+        profileLockError = nil
+        if lock.matchesPlexPIN {
+            plexHomeUsers.prefillPlexPIN(pin, forProfile: profile.id)
+        }
+        performSelectProfile(profile.id)
+        return true
+    }
+
+    /// Abandons a pending unlock, leaving the active profile untouched.
+    func cancelProfileLockPrompt() {
+        pendingLockedProfile = nil
+        profileLockError = nil
+    }
+
+    /// Sets or clears the active profile's PIN gate, dropping any unlock credit
+    /// the previous PIN granted.
+    func setLockForActiveProfile(_ lock: ProfileLock?) {
+        var profile = profiles.activeProfile
+        profile.lock = lock
+        profiles.update(profile)
+        unlockedProfileIDs.remove(profile.id)
+    }
+
+    /// Whether the profile that is already active is locked and unproven — the
+    /// backstop for paths that make a profile active without going through
+    /// `selectProfile(_:)` (a synced deletion re-pointing at `profiles.first`).
+    var activeProfileNeedsUnlock: Bool {
+        let active = profiles.activeProfile
+        return active.isLocked && !unlockedProfileIDs.contains(active.id)
+    }
+
+    func performSelectProfile(_ id: String) {
         universalWatchlistRetryScheduler = nil
         profiles.select(id)
         settings = PlozziOSSettingsModel(namespace: profiles.activeNamespace)

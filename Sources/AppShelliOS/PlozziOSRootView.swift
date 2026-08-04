@@ -73,6 +73,21 @@ public struct PlozziOSRootView: View {
             }
         }
         .scrollContentBackground(.hidden)
+        // Profile Lock: the PIN gate a profile carries with it from any device in
+        // the household. Presented here so it covers whatever is on screen when a
+        // locked profile is chosen — including the launch picker, which is forced
+        // when the profile we'd otherwise restore is locked.
+        .fullScreenCover(item: Binding(
+            get: { appModel.pendingLockedProfile },
+            set: { newValue in if newValue == nil { appModel.cancelProfileLockPrompt() } }
+        )) { profile in
+            PlozziOSProfileLockPINView(
+                profile: profile,
+                errorMessage: appModel.profileLockError,
+                onSubmit: { appModel.submitProfileLockPIN($0) },
+                onCancel: { appModel.cancelProfileLockPrompt() }
+            )
+        }
         .task {
             // Detect on cold launch: fire immediately if the pending set is already
             // warm, and close the cold-launch window after a short grace period so a

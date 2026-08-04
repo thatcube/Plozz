@@ -46,6 +46,9 @@ struct SettingsContext {
     let onSignOutAll: () -> Void
     let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
+    /// Sets (or clears, with `nil`) the active profile's PIN gate. Takes an
+    /// already-derived `ProfileLock` so the raw PIN never leaves the entry view.
+    let onSetProfileLock: (ProfileLock?) -> Void
 }
 
 /// Typed routes for the Settings drill-down NavigationStack. Defined at file
@@ -55,6 +58,7 @@ struct SettingsContext {
 /// future per-account flow can do the same without re-plumbing closures.
 enum SettingsRoute: Hashable {
     case profile
+    case profileLock
     case servers
     case myLibraries
     case appearance

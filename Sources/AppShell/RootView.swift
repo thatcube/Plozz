@@ -306,6 +306,7 @@ public struct RootView: View {
                         debugActions: debugActions,
                         plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
                         onSelectPlexHomeUser: { appState.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
+                        onSetProfileLock: { appState.setLockForActiveProfile($0) },
                         onSetSeerrUser: { appState.setSeerrUserForProfile(profileID: $0, user: $1) },
                         metadataSettings: appState.makeMetadataSettingsDependencies(),
                         identitySources: appState.identityIndex.identitySourcesProvider,
@@ -404,6 +405,21 @@ public struct RootView: View {
                 avatarURLString: request.homeUserAvatarURL,
                 onSubmit: { appState.plexHomeUsers.submitPlexPIN($0) },
                 onCancel: { appState.plexHomeUsers.cancelPlexPIN() }
+            )
+        }
+        // Profile Lock: the profile's own PIN, asked BEFORE anything switches —
+        // so this sits in front of the Plex prompt above rather than beside it.
+        // Same screen, deliberately: a person who reused their Plex PIN shouldn't
+        // be able to tell which system is asking.
+        .fullScreenCover(item: Binding(
+            get: { appState.profileFlow.pendingLockedProfile },
+            set: { newValue in if newValue == nil { appState.profileFlow.cancelProfileLockPrompt() } }
+        )) { profile in
+            ProfileLockPINView(
+                profile: profile,
+                errorMessage: appState.profileFlow.profileLockError,
+                onSubmit: { appState.profileFlow.submitProfileLockPIN($0) },
+                onCancel: { appState.profileFlow.cancelProfileLockPrompt() }
             )
         }
         // One-time theme picker for a profile just created in-app (Settings →
@@ -859,257 +875,67 @@ private struct PlexPINEntryView: View {
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.themePalette) private var palette
-    @State private var pin: String = ""
     @State private var isSubmitting: Bool = false
-
-    private static let pinLength = 4
 
     var body: some View {
         // Track the request directly so a successful switch (which clears
-        // pendingPlexPINRequest on AppState) re-evaluates THIS view and
-        // triggers the onChange-based dismiss below. Belt-and-suspenders
-        // dismissal that does NOT rely on the outer cover binding tracking
-        // anything — call dismiss() ourselves from inside the cover.
+        // pendingPlexPINRequest on AppState) re-evaluates THIS view and triggers
+        // the onChange-based dismiss below. Belt-and-suspenders dismissal that
+        // does NOT rely on the outer cover binding tracking anything — call
+        // dismiss() ourselves from inside the cover.
         let pendingRequest = appState.plexHomeUsers.pendingPlexPINRequest
-        return ZStack {
-            // Full-bleed dimmed backdrop so the PIN screen reads as a modal
-            // OVER the app (like Plex does), not as an opaque context switch.
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea()
-            Color.black.opacity(0.45).ignoresSafeArea()
-
-            VStack(spacing: 32) {
-                Spacer(minLength: 0)
-                avatarBadge
-                Text(userName)
-                    .font(.title2.weight(.semibold))
-                    .multilineTextAlignment(.center)
-                HStack(spacing: 16) {
-                    pinBoxes
-                    if isSubmitting {
-                        ProgressView()
-                            .controlSize(.large)
+        return PINEntryScaffold(
+            name: userName,
+            errorMessage: appState.plexHomeUsers.plexPINError,
+            isSubmitting: isSubmitting,
+            onSubmit: { pin in
+                // Flip isSubmitting so the user sees a spinner rather than "four
+                // dots and nothing happens" while the network round-trip runs.
+                PlozzLog.auth.debug("PIN auto-submit at 4 digits")
+                isSubmitting = true
+                onSubmit(pin)
+            },
+            onCancel: onCancel
+        ) {
+            PINBadge {
+                if let url = avatarURLString.flatMap(URL.init(string:)) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case let .success(image):
+                            image.resizable().scaledToFill()
+                        default:
+                            PlexPINFallbackGlyph()
+                        }
                     }
+                } else {
+                    PlexPINFallbackGlyph()
                 }
-                // Reserve the error slot so the strip doesn't jump up/down
-                // when an error appears/clears between attempts.
-                Text(appState.plexHomeUsers.plexPINError ?? " ")
-                    .font(.callout)
-                    .foregroundStyle(appState.plexHomeUsers.plexPINError == nil ? Color.clear : .red)
-                    .multilineTextAlignment(.center)
-                PINStrip(onDigit: appendDigit, onDelete: deleteDigit)
-                    .disabled(isSubmitting)
-                    .opacity(isSubmitting ? 0.5 : 1.0)
-                Spacer(minLength: 0)
-                Button("Cancel", action: onCancel)
-                    .padding(.bottom, 40)
             }
-            .padding(.horizontal, 90)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onExitCommand(perform: onCancel)
         .onChange(of: appState.plexHomeUsers.plexPINError) { _, newValue in
-            // Wrong-PIN response: clear the entered boxes + drop the submitting
-            // state so the user can retry without first backspacing four times.
-            if newValue != nil {
-                pin = ""
-                isSubmitting = false
-            }
+            // Wrong-PIN response: drop the submitting state so the user can retry
+            // (the scaffold clears the entered boxes off the same signal).
+            if newValue != nil { isSubmitting = false }
         }
         .onChange(of: pendingRequest?.id) { _, newValue in
             // The cover's outer Binding tracking has been flaky on tvOS — call
-            // dismiss() directly from inside the cover when AppState clears
-            // the pending request (success path). This is the authoritative
-            // signal that the PIN was accepted.
+            // dismiss() directly from inside the cover when AppState clears the
+            // pending request (success path). This is the authoritative signal
+            // that the PIN was accepted.
             if newValue == nil {
                 PlozzLog.auth.debug("pendingPlexPINRequest cleared — calling dismiss()")
                 dismiss()
             }
         }
     }
-
-    /// Large circular Plex avatar with a small lock badge — matches Plex's
-    /// tvOS PIN screen. Falls back to a person glyph when no thumb is cached.
-    private var avatarBadge: some View {
-        let url = avatarURLString.flatMap(URL.init(string:))
-        return ZStack(alignment: .bottomTrailing) {
-            ZStack {
-                Circle().fill(palette.fillSubtle)
-                if let url {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case let .success(image):
-                            image.resizable().scaledToFill()
-                        default:
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 72))
-                                .plozzForeground(.secondary)
-                        }
-                    }
-                } else {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 72))
-                        .plozzForeground(.secondary)
-                }
-            }
-            .frame(width: 180, height: 180)
-            .clipShape(Circle())
-
-            // Small lock badge in the corner, à la Plex.
-            ZStack {
-                Circle().fill(Color.green)
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 52, height: 52)
-            .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 2))
-            .offset(x: 4, y: 4)
-        }
-    }
-
-    /// Four large rounded boxes that fill as digits land. Each is dark/outline
-    /// when empty and solid+dot when filled. The next-to-fill box gets a thin
-    /// highlight so the user can see entry progress without any focus on the
-    /// boxes themselves (the strip below owns focus).
-    private var pinBoxes: some View {
-        HStack(spacing: 18) {
-            ForEach(0..<Self.pinLength, id: \.self) { idx in
-                let filled = idx < pin.count
-                let next = !filled && idx == pin.count
-                ZStack {
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
-                        .fill(filled ? Color.white.opacity(0.95) : Color.white.opacity(0.08))
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
-                        .strokeBorder(
-                            next ? Color.white.opacity(0.85) : Color.white.opacity(filled ? 0 : 0.25),
-                            lineWidth: next ? 3 : 2
-                        )
-                    if filled {
-                        Circle()
-                            .fill(Color.black)
-                            .frame(width: 18, height: 18)
-                    }
-                }
-                .frame(width: 72, height: 84)
-            }
-        }
-    }
-
-    private func appendDigit(_ d: String) {
-        guard !isSubmitting else { return }
-        guard d.count == 1, d.first?.isNumber == true else { return }
-        guard pin.count < Self.pinLength else { return }
-        pin.append(d)
-        if pin.count == Self.pinLength {
-            // Auto-submit the moment the 4th digit lands. Snappy is the goal.
-            // Flip isSubmitting so the user sees a spinner instead of "four
-            // dots and nothing happens" while the network round-trip runs.
-            PlozzLog.auth.debug("PIN auto-submit at 4 digits")
-            isSubmitting = true
-            onSubmit(pin)
-        }
-    }
-
-    private func deleteDigit() {
-        guard !isSubmitting else { return }
-        if !pin.isEmpty { pin.removeLast() }
-    }
 }
 
-/// Single horizontal row of digit keys 0–9 plus a delete key — the layout
-/// Plex itself uses on tvOS, and the one-axis path the Siri remote handles
-/// best. Each key is a focusable Button so focus is always anchored and
-/// Menu/Back can't fall through to the system.
-///
-/// Compact, FIXED-size keys (no tile-to-fill). With 11 keys at 84pt + 10×16
-/// spacing the strip is ~1080pt and centers naturally on a 1920pt tvOS
-/// screen, leaving ~400pt clearance per side — zero clipping, and plenty
-/// of room for the focused-key scale lift.
-private struct PINStrip: View {
-    let onDigit: (String) -> Void
-    let onDelete: () -> Void
-
-    private let digits: [String] = ["1","2","3","4","5","6","7","8","9","0"]
-    private let digitKeyWidth: CGFloat = 84
-    private let deleteKeyWidth: CGFloat = 104
-    private let keyHeight: CGFloat = 100
-
+/// Person glyph shown when no Plex thumb is cached for the Home user.
+private struct PlexPINFallbackGlyph: View {
     var body: some View {
-        HStack(spacing: 16) {
-            ForEach(digits, id: \.self) { d in
-                Button {
-                    onDigit(d)
-                } label: {
-                    Text(d)
-                        .font(.system(size: 32, weight: .semibold, design: .rounded))
-                }
-                .buttonStyle(PINKeyStyle(width: digitKeyWidth, height: keyHeight, isDestructive: false))
-            }
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Image(systemName: "delete.left")
-                    .font(.system(size: 28, weight: .semibold))
-            }
-            .buttonStyle(PINKeyStyle(width: deleteKeyWidth, height: keyHeight, isDestructive: true))
-            .accessibilityLabel("Delete")
-        }
-        // Vertical slack so the focus lift has clearance without bumping
-        // neighbors in the column.
-        .padding(.vertical, 12)
-    }
-}
-
-/// Fixed-size, focus-friendly key button. Drawn entirely by this style so
-/// the key's rendered frame is exactly width×height — no auto-expanding
-/// fill from a bordered/prominent style and no inheritance from the parent
-/// layout. Focused state lifts (scale 1.08) and brightens (white fill,
-/// black foreground), with a soft drop shadow for depth.
-private struct PINKeyStyle: ButtonStyle {
-    let width: CGFloat
-    let height: CGFloat
-    let isDestructive: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        PINKeyBody(
-            configuration: configuration,
-            width: width,
-            height: height,
-            isDestructive: isDestructive
-        )
-    }
-}
-
-private struct PINKeyBody: View {
-    let configuration: ButtonStyle.Configuration
-    let width: CGFloat
-    let height: CGFloat
-    let isDestructive: Bool
-    @Environment(\.isFocused) private var isFocused
-
-    var body: some View {
-        configuration.label
-            .frame(width: width, height: height)
-            .background(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
-                    .fill(isFocused ? Color.white : Color.white.opacity(0.18))
-            )
-            .foregroundStyle(
-                isFocused
-                ? (isDestructive ? Color.red : Color.black)
-                : Color.primary
-            )
-            .scaleEffect(isFocused ? 1.08 : 1.0)
-            .shadow(
-                color: Color.black.opacity(isFocused ? 0.38 : 0),
-                radius: isFocused ? 14 : 0,
-                y: isFocused ? 6 : 0
-            )
-            .opacity(configuration.isPressed ? 0.85 : 1.0)
-            .animation(.easeOut(duration: 0.15), value: isFocused)
+        Image(systemName: "person.fill")
+            .font(.system(size: 72))
+            .plozzForeground(.secondary)
     }
 }
 

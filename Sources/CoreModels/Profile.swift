@@ -106,6 +106,17 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// Cached Seerr avatar URL for inline display in Settings.
     public var seerrUserAvatarURL: String?
 
+    /// Optional PIN gate. `nil` (the default) = anyone on this device can open
+    /// the profile, which is the right default and the only behaviour that
+    /// existed before.
+    ///
+    /// Holds a salted verifier, never the PIN — see `ProfileLock`. It rides the
+    /// synced profile record deliberately: a lock that only exists on the Apple
+    /// TV is not a lock, because the same profile is one tap away on the iPhone.
+    /// The flip side is that with iCloud Sync off it *is* device-only, which the
+    /// setup screen says out loud.
+    public var lock: ProfileLock?
+
     public init(
         id: String = UUID().uuidString,
         name: String,
@@ -124,7 +135,8 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         avatarEmojiColorIndex: Int? = nil,
         seerrUserID: Int? = nil,
         seerrUserName: String? = nil,
-        seerrUserAvatarURL: String? = nil
+        seerrUserAvatarURL: String? = nil,
+        lock: ProfileLock? = nil
     ) {
         self.id = id
         self.name = name
@@ -144,7 +156,11 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.seerrUserID = seerrUserID
         self.seerrUserName = seerrUserName
         self.seerrUserAvatarURL = seerrUserAvatarURL
+        self.lock = lock
     }
+
+    /// Whether opening this profile needs a PIN.
+    public var isLocked: Bool { lock != nil }
 
     /// Stable namespace used to scope this profile's settings stores. The
     /// default/primary profile (`isDefault`) returns `nil` so it reads the

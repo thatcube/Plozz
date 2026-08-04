@@ -285,3 +285,151 @@ final class ProfileFlowModelTests: XCTestCase {
         XCTAssertEqual(env.plex.resolvedToken(for: "a"), "admin-a")
     }
 }
+
+// MARK: - Profile Lock gate
+
+extension ProfileFlowModelTests {
+
+    /// Fast rounds keep the suite quick; the derivation is identical.
+    private static func lock(pin: String) -> ProfileLock {
+        ProfileLock.make(pin: pin, iterations: 64)!
+    }
+
+    private func addLockedProfile(
+        _ profiles: ProfilesModel,
+        name: String = "Dad",
+        pin: String = "4821"
+    ) -> Profile {
+        let added = profiles.add(name: name, avatarSymbol: "star", colorIndex: 0, activeAccountIDs: [])
+        var locked = added
+        locked.lock = Self.lock(pin: pin)
+        profiles.update(locked)
+        return locked
+    }
+
+    func testSwitchingToALockedProfileRaisesThePromptInsteadOfSwitching() {
+        let (model, profiles) = makeModel()
+        let original = profiles.activeProfileID
+        let locked = addLockedProfile(profiles)
+        // `add` activates the new profile, so start from a known-unlocked one.
+        model.switchProfile(to: original)
+        XCTAssertNil(model.pendingLockedProfile)
+
+        model.switchProfile(to: locked.id)
+        XCTAssertEqual(model.pendingLockedProfile?.id, locked.id)
+        XCTAssertEqual(profiles.activeProfileID, original, "the switch must not happen before the PIN")
+    }
+
+    func testCorrectPINCompletesTheSwitch() {
+        let (model, profiles) = makeModel()
+        let original = profiles.activeProfileID
+        let locked = addLockedProfile(profiles)
+        model.switchProfile(to: original)
+
+        model.switchProfile(to: locked.id)
+        XCTAssertTrue(model.submitProfileLockPIN("4821"))
+        XCTAssertNil(model.pendingLockedProfile)
+        XCTAssertEqual(profiles.activeProfileID, locked.id)
+    }
+
+    func testWrongPINKeepsThePromptUpAndDoesNotSwitch() {
+        let (model, profiles) = makeModel()
+        let original = profiles.activeProfileID
+        let locked = addLockedProfile(profiles)
+        model.switchProfile(to: original)
+
+        model.switchProfile(to: locked.id)
+        XCTAssertFalse(model.submitProfileLockPIN("0000"))
+        XCTAssertNotNil(model.pendingLockedProfile)
+        XCTAssertNotNil(model.profileLockError)
+        XCTAssertEqual(profiles.activeProfileID, original)
+    }
+
+    func testCancellingLeavesTheActiveProfileUntouched() {
+        let (model, profiles) = makeModel()
+        let original = profiles.activeProfileID
+        let locked = addLockedProfile(profiles)
+        model.switchProfile(to: original)
+
+        model.switchProfile(to: locked.id)
+        model.cancelProfileLockPrompt()
+        XCTAssertNil(model.pendingLockedProfile)
+        XCTAssertEqual(profiles.activeProfileID, original)
+    }
+
+    /// Having proved the PIN once, hopping back shouldn't re-ask for the rest of
+    /// the run — but only for that profile.
+    func testUnlockIsRememberedForTheRunPerProfile() {
+        let (model, profiles) = makeModel()
+        let original = profiles.activeProfileID
+        let locked = addLockedProfile(profiles)
+        model.switchProfile(to: original)
+
+        model.switchProfile(to: locked.id)
+        XCTAssertTrue(model.submitProfileLockPIN("4821"))
+
+        model.switchProfile(to: original)
+        model.switchProfile(to: locked.id)
+        XCTAssertNil(model.pendingLockedProfile, "already proved this run")
+        XCTAssertEqual(profiles.activeProfileID, locked.id)
+    }
+
+    func testChangingThePINRevokesTheRunUnlock() {
+        let (model, profiles) = makeModel()
+        let original = profiles.activeProfileID
+        var locked = addLockedProfile(profiles)
+        model.switchProfile(to: original)
+
+        model.switchProfile(to: locked.id)
+        XCTAssertTrue(model.submitProfileLockPIN("4821"))
+
+        // Simulate Settings changing the PIN.
+        locked.lock = Self.lock(pin: "9999")
+        profiles.update(locked)
+        model.forgetUnlock(for: locked.id)
+
+        model.switchProfile(to: original)
+        model.switchProfile(to: locked.id)
+        XCTAssertEqual(model.pendingLockedProfile?.id, locked.id, "a new PIN must be proved again")
+        XCTAssertFalse(model.submitProfileLockPIN("4821"), "the old PIN must not work")
+        XCTAssertTrue(model.submitProfileLockPIN("9999"))
+    }
+
+    /// Regression: deleting your own profile used to drop you straight into the
+    /// fallback profile, so a child could delete theirs to get into a locked one.
+    func testDeletingTheActiveProfileCannotLandInsideALockedFallback() {
+        let (model, profiles) = makeModel()
+        // The default profile is `profiles.first` and so is the deletion fallback.
+        var fallback = profiles.activeProfile
+        fallback.lock = Self.lock(pin: "4821")
+        profiles.update(fallback)
+
+        let kid = profiles.add(name: "Kid", avatarSymbol: "star", colorIndex: 1, activeAccountIDs: [])
+        model.switchProfile(to: kid.id)
+        XCTAssertEqual(profiles.activeProfileID, kid.id)
+
+        model.removeProfile(id: kid.id)
+        XCTAssertTrue(model.isChoosingProfile, "must land on the picker, not inside the locked fallback")
+        XCTAssertFalse(model.isProfileSelectionCancelable)
+    }
+
+    /// Regression: a locked profile restored at launch would otherwise open with
+    /// no prompt when "ask on startup" is off.
+    func testLaunchPickerIsForcedWhenTheRestoredProfileIsLocked() {
+        let (model, profiles) = makeModel()
+        var active = profiles.activeProfile
+        active.lock = Self.lock(pin: "4821")
+        profiles.update(active)
+        profiles.setAskProfileOnStartup(false)
+
+        model.prepareLaunchPicker()
+        XCTAssertTrue(model.isChoosingProfile)
+        XCTAssertFalse(model.isProfileSelectionCancelable)
+    }
+
+    func testEnforceLockIsANoOpForAnUnlockedActiveProfile() {
+        let (model, _) = makeModel()
+        XCTAssertFalse(model.enforceLockOnActiveProfile())
+        XCTAssertFalse(model.isChoosingProfile)
+    }
+}

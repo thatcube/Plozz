@@ -1,0 +1,105 @@
+import Foundation
+
+/// Copy for the Profile Lock feature, shared by tvOS and iOS.
+///
+/// Wording is borrowed from Netflix's Profile Lock rather than invented, because
+/// this is a feature people meet elsewhere first and the vocabulary is already
+/// settled: "Profile Lock", "Create a Profile Lock", "Enter 4 numbers...",
+/// "Forgot PIN?". Matching it means someone who has locked a Netflix profile
+/// already knows what this row does.
+public enum ProfileLockCopy {
+    public static let title = LocalizedStringResource(
+        "settings.profileLock.title",
+        defaultValue: "Profile Lock",
+        comment: "Settings row for an optional 4-digit PIN that must be entered to open this profile."
+    )
+
+    public static let on = LocalizedStringResource(
+        "settings.profileLock.on",
+        defaultValue: "On",
+        comment: "Value shown on the Profile Lock row when a PIN is set."
+    )
+
+    public static let off = LocalizedStringResource(
+        "settings.profileLock.off",
+        defaultValue: "Off",
+        comment: "Value shown on the Profile Lock row when no PIN is set."
+    )
+
+    public static let explanation = LocalizedStringResource(
+        "settings.profileLock.explanation",
+        defaultValue: "Require a 4-digit PIN to open this profile. Anyone can still use the profiles that aren't locked.",
+        comment: "Explains what turning on a Profile Lock does. The second sentence is important: locking your own profile is how you keep a child out of it, since child profiles are left open."
+    )
+
+    public static let create = LocalizedStringResource(
+        "settings.profileLock.create",
+        defaultValue: "Create a Profile Lock",
+        comment: "Button that starts setting a PIN on this profile."
+    )
+
+    public static let editPIN = LocalizedStringResource(
+        "settings.profileLock.editPIN",
+        defaultValue: "Edit PIN",
+        comment: "Button that replaces the existing Profile Lock PIN with a new one."
+    )
+
+    public static let delete = LocalizedStringResource(
+        "settings.profileLock.delete",
+        defaultValue: "Delete Profile Lock",
+        comment: "Button that removes the PIN so the profile opens without one."
+    )
+
+    public static let enterToCreate = LocalizedStringResource(
+        "settings.profileLock.enterToCreate",
+        defaultValue: "Enter 4 numbers to create your Profile Lock PIN",
+        comment: "Instruction shown above the keypad while choosing a new PIN."
+    )
+
+    public static let confirm = LocalizedStringResource(
+        "settings.profileLock.confirm",
+        defaultValue: "Enter your PIN again to confirm",
+        comment: "Instruction shown above the keypad for the second, confirming entry of a new PIN."
+    )
+
+    public static let mismatch = LocalizedStringResource(
+        "settings.profileLock.mismatch",
+        defaultValue: "Those PINs didn't match. Start again.",
+        comment: "Error shown when the confirming PIN entry differs from the first."
+    )
+
+    public static let usePlexPIN = LocalizedStringResource(
+        "settings.profileLock.usePlexPIN",
+        defaultValue: "Use my Plex PIN",
+        comment: "Toggle offered when this profile plays as a PIN-protected Plex Home user, so one PIN opens both."
+    )
+
+    public static let usePlexPINDetail = LocalizedStringResource(
+        "settings.profileLock.usePlexPIN.detail",
+        defaultValue: "This profile plays as a Plex user that already asks for a PIN. Enter the same one and you'll only be asked once.",
+        comment: "Explains the 'Use my Plex PIN' option."
+    )
+
+    /// Shown under the keypad, and on the setup screen, when iCloud Sync is off.
+    ///
+    /// Worth saying out loud: a parent setting a lock reasonably assumes it
+    /// applies everywhere, and with Sync off it does not — the same profile is
+    /// still open on the iPhone.
+    public static let lockIsDeviceOnly = LocalizedStringResource(
+        "settings.profileLock.deviceOnly",
+        defaultValue: "iCloud Sync is off, so this lock only applies on this device.",
+        comment: "Caveat shown when a Profile Lock is set while iCloud Sync is off, meaning the user's other devices won't have the lock."
+    )
+
+    public static let forgotPIN = LocalizedStringResource(
+        "settings.profileLock.forgot",
+        defaultValue: "Forgot PIN?",
+        comment: "Button offering a way out when the user can't remember their Profile Lock PIN."
+    )
+
+    public static let forgotPINDetail = LocalizedStringResource(
+        "settings.profileLock.forgot.detail",
+        defaultValue: "Removing the lock from another signed-in device, or signing out and setting Plozz up again, will clear it.",
+        comment: "Explains how to recover from a forgotten Profile Lock PIN. There is no email reset because Plozz has no account of its own."
+    )
+}

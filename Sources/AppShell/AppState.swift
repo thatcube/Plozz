@@ -2163,6 +2163,17 @@ public final class AppState {
     /// that still pointed at the PROFILE YOU JUST LEFT and write its watchlist
     /// into the new profile's store. Callers that care about that ordering now
     /// await this before preparing the watchlist.
+    /// The namespace every tracker is currently pointed at, once scoped.
+    /// `.some(nil)` is a real value — the default profile uses a `nil` namespace.
+    @ObservationIgnored private var trackerScopedNamespace: String??
+
+    /// See `UniversalWatchlistHost.ensureTrackersScopedToActiveProfile()`.
+    public func ensureTrackersScopedToActiveProfile() async {
+        let ns = profilesModel.activeNamespace
+        if let scoped = trackerScopedNamespace, scoped == ns { return }
+        await updateTraktForActiveProfile()
+    }
+
     private func updateTraktForActiveProfile() async {
         let ns = profilesModel.activeNamespace
         trackerProfileGeneration &+= 1
@@ -2180,6 +2191,8 @@ public final class AppState {
         await malService.setActiveProfile(namespace: ns)
         guard generation == trackerProfileGeneration else { return }
         await lastfmService.setActiveProfile(namespace: ns)
+        guard generation == trackerProfileGeneration else { return }
+        trackerScopedNamespace = .some(ns)
     }
 
     private func apply(_ event: SessionEvent) {

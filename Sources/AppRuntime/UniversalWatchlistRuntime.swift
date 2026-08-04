@@ -50,6 +50,19 @@ public protocol UniversalWatchlistHost: AnyObject {
     var universalWatchlistIdentityUpdateTask: Task<Void, Never>? { get set }
 
     func scheduleCloudPublish()
+
+    /// Guarantees every tracker's token store points at the ACTIVE profile,
+    /// re-pointing if it doesn't and returning only once it does.
+    ///
+    /// The import reads whatever credentials the destinations hold, so this has
+    /// to be true before it runs — otherwise it pulls another profile's
+    /// watchlist and writes it here. Ordering the profile-switch path fixed the
+    /// obvious caller and missed a second one (accounts invalidating re-enters
+    /// `prepareUniversalWatchlist` on its own Task), which is why the guarantee
+    /// belongs here rather than at each call site. Implementations must be
+    /// idempotent and cheap when already scoped — this is called on every
+    /// prepare.
+    func ensureTrackersScopedToActiveProfile() async
 }
 
 public extension UniversalWatchlistHost {
@@ -63,6 +76,8 @@ public extension UniversalWatchlistHost {
             try universalWatchlist.activate(profileID: profileID)
             try await mediaAliasLedger.activate(profileID: profileID)
             try await seedLegacyUniversalWatchlist()
+            // Before anything reads a destination.
+            await ensureTrackersScopedToActiveProfile()
             try await makeUniversalWatchlistReconciler(profileID: profileID)
             if universalWatchlistShouldResumeAuthentication {
                 universalWatchlistShouldResumeAuthentication = false

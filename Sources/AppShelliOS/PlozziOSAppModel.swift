@@ -968,6 +968,17 @@ final class PlozziOSAppModel {
     /// points between them — long enough for the watchlist import to read a
     /// tracker still pointing at the previous profile and write its watchlist
     /// into the new one. See the matching note in `AppState`.
+    /// The namespace every tracker is currently pointed at, once scoped.
+    /// `.some(nil)` is a real value — the default profile uses a `nil` namespace.
+    private var trackerScopedNamespace: String??
+
+    /// See `UniversalWatchlistHost.ensureTrackersScopedToActiveProfile()`.
+    func ensureTrackersScopedToActiveProfile() async {
+        let ns = profiles.activeNamespace
+        if let scoped = trackerScopedNamespace, scoped == ns { return }
+        await updateTrackersForActiveProfile()
+    }
+
     private func updateTrackersForActiveProfile() async {
         let namespace = profiles.activeNamespace
         trackerProfileGeneration &+= 1
@@ -980,6 +991,8 @@ final class PlozziOSAppModel {
         await anilistService.setActiveProfile(namespace: namespace)
         guard generation == trackerProfileGeneration else { return }
         await malService.setActiveProfile(namespace: namespace)
+        guard generation == trackerProfileGeneration else { return }
+        trackerScopedNamespace = .some(namespace)
     }
 
     private func applyWatchMutation(_ mutation: WatchMutation) {

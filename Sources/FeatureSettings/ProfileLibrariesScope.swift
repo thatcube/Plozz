@@ -41,6 +41,14 @@ public struct ProfileLibrariesScope {
     public var isAccountIncludedInActiveProfile: (String) -> Bool
     public var onSetAccountIncluded: (String, Bool) -> Void
     public var onAddAccount: () -> Void
+    /// Signs in an ADDITIONAL user on a server that's already added.
+    ///
+    /// Jellyfin identity is a sign-in, not a sub-user of one — so "watching as
+    /// someone else" means having their credentials. Until now that meant adding
+    /// the whole server again from the chooser, which reads like a mistake when
+    /// the server is right there on screen. Same underlying flow, entered from
+    /// where the question is actually asked.
+    public var onAddUser: (MediaServer) -> Void
     public var plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     public var onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
 
@@ -56,6 +64,7 @@ public struct ProfileLibrariesScope {
         isAccountIncludedInActiveProfile: @escaping (String) -> Bool,
         onSetAccountIncluded: @escaping (String, Bool) -> Void,
         onAddAccount: @escaping () -> Void,
+        onAddUser: @escaping (MediaServer) -> Void = { _ in },
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void
     ) {
@@ -70,6 +79,7 @@ public struct ProfileLibrariesScope {
         self.isAccountIncludedInActiveProfile = isAccountIncludedInActiveProfile
         self.onSetAccountIncluded = onSetAccountIncluded
         self.onAddAccount = onAddAccount
+        self.onAddUser = onAddUser
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
     }
@@ -89,6 +99,7 @@ extension SettingsContext {
             isAccountIncludedInActiveProfile: isAccountIncludedInActiveProfile,
             onSetAccountIncluded: onSetAccountIncluded,
             onAddAccount: onAddAccount,
+            onAddUser: onAddUser,
             plexHomeUsersFetcher: plexHomeUsersFetcher,
             onSelectPlexHomeUser: onSelectPlexHomeUser
         )

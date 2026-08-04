@@ -37,6 +37,8 @@ struct SettingsContext {
     let onUpdateProfileCosmetics: (ProfileDraft) -> Void
     let onDeleteProfile: (String) -> Void
     let onAddAccount: () -> Void
+    /// Signs in another user on an already-added server.
+    let onAddUser: (MediaServer) -> Void
     let onRemoveAccount: (Account) -> Void
     /// Remove a server from EVERY device on this iCloud account (household tombstone).
     let onRemoveAccountEverywhere: (Account) -> Void

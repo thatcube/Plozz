@@ -187,6 +187,7 @@ struct MainTabView: View {
     let onUpdateProfileCosmetics: (ProfileDraft) -> Void
     let onDeleteProfile: (String) -> Void
     let onAddAccount: () -> Void
+    var onAddUser: (MediaServer) -> Void = { _ in }
     let onRemoveAccount: (Account) -> Void
     let onRemoveAccountEverywhere: (Account) -> Void
     var offersRemoveEverywhere: Bool = false
@@ -362,6 +363,7 @@ struct MainTabView: View {
                 onUpdateProfileCosmetics: onUpdateProfileCosmetics,
                 onDeleteProfile: onDeleteProfile,
                 onAddAccount: onAddAccount,
+                onAddUser: onAddUser,
                 onRemoveAccount: onRemoveAccount,
                 onRemoveAccountEverywhere: onRemoveAccountEverywhere,
                 offersRemoveEverywhere: offersRemoveEverywhere,

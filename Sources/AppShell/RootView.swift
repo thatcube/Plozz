@@ -326,6 +326,7 @@ public struct RootView: View {
                         onUpdateProfileCosmetics: { appState.profileFlow.updateProfileCosmetics($0) },
                         onDeleteProfile: { appState.profileFlow.removeProfile(id: $0) },
                         onAddAccount: { appState.addAccount() },
+                        onAddUser: { appState.selectServer($0) },
                         onRemoveAccount: { appState.removeAccount(id: $0.id) },
                         onRemoveAccountEverywhere: { appState.removeAccountEverywhere(id: $0.id) },
                         offersRemoveEverywhere: appState.offersRemoveEverywhere,

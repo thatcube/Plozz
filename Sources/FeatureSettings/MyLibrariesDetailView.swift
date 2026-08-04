@@ -270,6 +270,35 @@ public struct MyLibrariesDetailView: View {
                 .buttonStyle(SettingsFocusButtonStyle())
             }
         }
+        addUserRow(group)
+    }
+
+    /// Signs in another user on this server, from where the question is asked.
+    ///
+    /// A Jellyfin identity IS a sign-in, so watching as someone else needs their
+    /// credentials — previously by adding the whole server again from the
+    /// chooser, which looks like a mistake when the server is right there. Same
+    /// flow underneath (`selectServer` jumps straight to that server's login), so
+    /// the new sign-in lands in the household pool exactly as before and simply
+    /// appears here as another choice.
+    @ViewBuilder
+    private func addUserRow(_ group: ServerAccountGroup) -> some View {
+        if let server = group.accounts.first?.server {
+            Button {
+                scope.onAddUser(server)
+            } label: {
+                identityRow(
+                    title: String(localized: "Add Another User"),
+                    avatar: {
+                        Image(systemName: "person.badge.plus")
+                            .font(.system(size: 20, weight: .regular))
+                            .frame(width: 34, height: 34)
+                    },
+                    accessory: .none
+                )
+            }
+            .buttonStyle(SettingsFocusButtonStyle())
+        }
     }
 
     private func setJellyfinIdentity(_ chosen: Account, in group: ServerAccountGroup) {

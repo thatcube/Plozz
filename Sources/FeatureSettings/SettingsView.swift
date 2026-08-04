@@ -129,6 +129,7 @@ public struct SettingsView: View {
     private let onUpdateProfileCosmetics: (ProfileDraft) -> Void
     private let onDeleteProfile: (String) -> Void
     private let onAddAccount: () -> Void
+    private let onAddUser: (MediaServer) -> Void
     private let onRemoveAccount: (Account) -> Void
     private let onRemoveAccountEverywhere: (Account) -> Void
     private let offersRemoveEverywhere: Bool
@@ -200,6 +201,7 @@ public struct SettingsView: View {
         onUpdateProfileCosmetics: @escaping (ProfileDraft) -> Void,
         onDeleteProfile: @escaping (String) -> Void,
         onAddAccount: @escaping () -> Void,
+        onAddUser: @escaping (MediaServer) -> Void = { _ in },
         onRemoveAccount: @escaping (Account) -> Void,
         onRemoveAccountEverywhere: @escaping (Account) -> Void = { _ in },
         offersRemoveEverywhere: Bool = false,
@@ -263,6 +265,7 @@ public struct SettingsView: View {
         self.onUpdateProfileCosmetics = onUpdateProfileCosmetics
         self.onDeleteProfile = onDeleteProfile
         self.onAddAccount = onAddAccount
+        self.onAddUser = onAddUser
         self.onRemoveAccount = onRemoveAccount
         self.onRemoveAccountEverywhere = onRemoveAccountEverywhere
         self.offersRemoveEverywhere = offersRemoveEverywhere
@@ -324,6 +327,7 @@ public struct SettingsView: View {
             onUpdateProfileCosmetics: onUpdateProfileCosmetics,
             onDeleteProfile: onDeleteProfile,
             onAddAccount: onAddAccount,
+            onAddUser: onAddUser,
             onRemoveAccount: onRemoveAccount,
             onRemoveAccountEverywhere: onRemoveAccountEverywhere,
             offersRemoveEverywhere: offersRemoveEverywhere,

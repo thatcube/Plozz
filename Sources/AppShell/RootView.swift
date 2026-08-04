@@ -201,7 +201,19 @@ public struct RootView: View {
             ? appState.plexHomeUsers.pendingPlexPINRequest
             : nil
         return Group {
-            switch appState.state {
+            // Profile setup outranks the global session machine. Add-user auth
+            // temporarily moves that machine to `.onboarding`, but setup must
+            // remain mounted underneath so its exact NavigationStack path
+            // survives and the auth screen can behave as an overlay.
+            if let setupProfile = appState.profileFlow.pendingSetupProfile {
+                ProfileSetupFlowView(
+                    appState: appState,
+                    profile: setupProfile,
+                    librariesStore: setupLibraries,
+                    deviceColorScheme: systemColorScheme
+                )
+            } else {
+                switch appState.state {
             case .launching:
                 LaunchView()
 
@@ -219,14 +231,7 @@ public struct RootView: View {
 
             case .ready:
                 ZStack {
-                if let setupProfile = appState.profileFlow.pendingSetupProfile {
-                    ProfileSetupFlowView(
-                        appState: appState,
-                        profile: setupProfile,
-                        librariesStore: setupLibraries,
-                        deviceColorScheme: systemColorScheme
-                    )
-                } else if appState.profileFlow.isChoosingProfile {
+                if appState.profileFlow.isChoosingProfile {
                     ProfileSelectionView(appState: appState, canCancel: appState.profileFlow.isProfileSelectionCancelable)
                         .transition(.opacity)
                 } else {
@@ -386,6 +391,7 @@ public struct RootView: View {
                 FailureView(message: error.userMessage) {
                     appState.retry()
                 }
+            }
             }
         }
         .background { AppBackground(palette: resolvedPalette) }

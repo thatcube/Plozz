@@ -129,14 +129,14 @@ public enum ProfileLockCopy {
 
     public static let offerTitle = LocalizedStringResource(
         "settings.profileLock.offer.title",
-        defaultValue: "Lock this profile?",
-        comment: "Title of the prompt offered immediately after a profile is created, asking whether to set a PIN."
+        defaultValue: "Create a PIN",
+        comment: "Title of the optional PIN step shown after a profile is created."
     )
 
     public static let offerMessage = LocalizedStringResource(
         "settings.profileLock.offer.message",
-        defaultValue: "A PIN will be needed to open it.",
-        comment: "Body of the prompt offering a PIN on a newly created ordinary profile. One line: the title asks the question and the button says what happens, so anything more is padding."
+        defaultValue: "",
+        comment: "Ordinary profiles need no supporting sentence on the optional PIN step."
     )
 
     public static let offerMessageKids = LocalizedStringResource(

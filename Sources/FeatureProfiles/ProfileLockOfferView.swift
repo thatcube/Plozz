@@ -66,20 +66,18 @@ public struct ProfileLockOfferView: View {
                     .foregroundStyle(palette.primaryText)
                     .multilineTextAlignment(.center)
 
-                Text(
-                    profile.isKids
-                        ? ProfileLockCopy.offerMessageKids
-                        : ProfileLockCopy.offerMessage
-                )
-                .font(.title3)
-                .foregroundStyle(palette.secondaryText)
-                .multilineTextAlignment(.center)
+                if profile.isKids {
+                    Text(ProfileLockCopy.offerMessageKids)
+                        .font(.title3)
+                        .foregroundStyle(palette.secondaryText)
+                        .multilineTextAlignment(.center)
+                }
             }
 
             Spacer()
 
             HStack(spacing: 24) {
-                Button("Not Now", action: onSkip)
+                Button("No PIN", action: onSkip)
                     .buttonStyle(.bordered)
                     .controlSize(.large)
 

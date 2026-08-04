@@ -373,8 +373,11 @@ public final class ProfileFlowModel {
             isKids: isKids,
             activeAccountIDs: draft.activeAccountIDs
         )
-        performSwitch(to: configured.id)
+        // Claim the root setup page BEFORE switching dismisses the picker. Root
+        // can then render setup directly underneath the editor sheet, so the
+        // sheet's fade-out never exposes Home.
         pendingSetupProfile = configured
+        performSwitch(to: configured.id)
         return configured
     }
 

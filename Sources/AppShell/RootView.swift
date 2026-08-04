@@ -219,7 +219,14 @@ public struct RootView: View {
 
             case .ready:
                 ZStack {
-                if appState.profileFlow.isChoosingProfile {
+                if let setupProfile = appState.profileFlow.pendingSetupProfile {
+                    ProfileSetupFlowView(
+                        appState: appState,
+                        profile: setupProfile,
+                        librariesStore: setupLibraries,
+                        deviceColorScheme: systemColorScheme
+                    )
+                } else if appState.profileFlow.isChoosingProfile {
                     ProfileSelectionView(appState: appState, canCancel: appState.profileFlow.isProfileSelectionCancelable)
                         .transition(.opacity)
                 } else {
@@ -471,23 +478,6 @@ public struct RootView: View {
         // from a device where it was never finished. The gate is persisted, so a
         // profile left behind it would otherwise never import a watchlist at all.
         .task { appState.profileFlow.resumeSetupIfNeeded() }
-        // A newly created profile's setup step: which servers, who it watches as,
-        // which libraries. Presented HERE rather than by whatever created the
-        // profile — creating one switches into it, which dismisses the picker, so
-        // a cover owned by the picker would be torn down before it appeared.
-        .fullScreenCover(
-            item: Binding(
-                get: { appState.profileFlow.pendingSetupProfile },
-                set: { if $0 == nil { appState.profileFlow.completeSetup(for: appState.profilesModel.activeProfileID) } }
-            )
-        ) { profile in
-            ProfileSetupFlowView(
-                appState: appState,
-                profile: profile,
-                librariesStore: setupLibraries,
-                deviceColorScheme: systemColorScheme
-            )
-        }
         // Last onboarding step stays full-screen. An alert here exposed Home
         // underneath an unrelated setup question, making the flow feel finished
         // before it actually was.

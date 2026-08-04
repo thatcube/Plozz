@@ -3,6 +3,18 @@ import CoreModels
 import CoreUI
 import SwiftUI
 
+/// Navigation state owned by the outer profile-setup flow.
+///
+/// Add-user authentication temporarily overlays/rebuilds the Libraries view. If
+/// the path lives inside that child, SwiftUI may recreate it at `[]` and return
+/// too far to "What does this profile watch?". Keeping this reference in the
+/// persistent flow preserves the exact Watching as destination.
+public final class ProfileSetupNavigationState: ObservableObject {
+    @Published var path: [SettingsRoute] = []
+
+    public init() {}
+}
+
 /// The new-profile setup step: the REAL Libraries screen, with a Done button.
 ///
 /// Deliberately not a second implementation. Setup asks exactly what Settings →
@@ -18,15 +30,19 @@ import SwiftUI
 public struct ProfileSetupLibrariesView: View {
     private let scope: ProfileLibrariesScope
     private let onDone: () -> Void
+    @ObservedObject private var navigationState: ProfileSetupNavigationState
 
-    public init(scope: ProfileLibrariesScope, onDone: @escaping () -> Void) {
+    public init(
+        scope: ProfileLibrariesScope,
+        navigationState: ProfileSetupNavigationState = ProfileSetupNavigationState(),
+        onDone: @escaping () -> Void
+    ) {
         self.scope = scope
+        self.navigationState = navigationState
         self.onDone = onDone
     }
 
     @Environment(\.themePalette) private var palette
-    @State private var path: [SettingsRoute] = []
-
     public var body: some View {
         // The background sits OUTSIDE the NavigationStack. Inside its root
         // content it belonged to the root view, so pushing "Watching as"
@@ -34,7 +50,7 @@ public struct ProfileSetupLibrariesView: View {
         // through the cover. Out here it backs every page in the stack.
         ZStack {
             AppBackground(palette: palette).ignoresSafeArea()
-            NavigationStack(path: $path) {
+            NavigationStack(path: $navigationState.path) {
                 VStack(spacing: 0) {
                     MyLibrariesDetailView(scope: scope)
                     doneBar

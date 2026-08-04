@@ -949,6 +949,7 @@ private struct ProfileSetupFlowView: View {
     let librariesStore: ProfileSetupLibrariesLoader
     let deviceColorScheme: ColorScheme
     @State private var stage: ProfileSetupStage = .libraries
+    @StateObject private var librariesNavigation = ProfileSetupNavigationState()
 
     private var setupPalette: ThemePalette {
         ThemePalette.palette(
@@ -966,7 +967,8 @@ private struct ProfileSetupFlowView: View {
             .ignoresSafeArea()
 
             ProfileSetupLibrariesView(
-                scope: appState.profileLibrariesScope(librariesStore: librariesStore)
+                scope: appState.profileLibrariesScope(librariesStore: librariesStore),
+                navigationState: librariesNavigation
             ) {
                 appState.completeProfileLibrariesInsideSetup(for: profile.id)
                 stage = .seerr

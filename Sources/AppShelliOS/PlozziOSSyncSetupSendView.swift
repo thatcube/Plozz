@@ -56,18 +56,17 @@ struct SyncSetupSentSuccessView: View {
                 }
                 if !profiles.isEmpty {
                     sectionCard(title: profiles.count == 1 ? "Profile" : "Profiles") {
-                        HStack(spacing: 18) {
-                            ForEach(profiles, id: \.id) { profile in
-                                VStack(spacing: 6) {
-                                    ProfileAvatarView(profile: profile, size: 56)
-                                    Text(profile.name)
-                                        .font(.caption).foregroundStyle(palette.primaryText)
-                                        .lineLimit(1)
-                                }
-                                .frame(maxWidth: 84)
-                            }
-                            Spacer(minLength: 0)
-                        }
+                        // Wraps: a fixed row clipped the household's first and
+                        // last profiles once there were more than about five,
+                        // with nothing to say they were there.
+                        ProfileSummaryGrid(
+                            profiles: profiles,
+                            avatarSize: 56,
+                            itemWidth: 78,
+                            spacing: 14,
+                            nameFont: .caption
+                        )
+                        .foregroundStyle(palette.primaryText)
                     }
                 }
             }

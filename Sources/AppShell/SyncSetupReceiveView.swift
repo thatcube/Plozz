@@ -156,20 +156,14 @@ struct SyncSetupReceiveView: View {
                 }
                 if !profiles.isEmpty {
                     summarySection(title: profiles.count == 1 ? "Profile" : "Profiles") {
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 132), spacing: 24)],
-                            spacing: 22
-                        ) {
-                            ForEach(profiles, id: \.id) { profile in
-                                VStack(spacing: 10) {
-                                    ProfileAvatarView(profile: profile, size: 92)
-                                    Text(profile.name)
-                                        .font(.callout).foregroundStyle(palette.primaryText)
-                                        .lineLimit(1).minimumScaleFactor(0.7)
-                                        .frame(maxWidth: 124)
-                                }
-                            }
-                        }
+                        ProfileSummaryGrid(
+                            profiles: profiles,
+                            avatarSize: 92,
+                            itemWidth: 132,
+                            spacing: 24,
+                            nameFont: .callout
+                        )
+                        .foregroundStyle(palette.primaryText)
                     }
                 }
             }

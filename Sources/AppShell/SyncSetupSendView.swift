@@ -191,16 +191,20 @@ struct SyncSetupSendView: View {
                 }
                 if !profiles.isEmpty {
                     section(title: profiles.count == 1 ? "Profile" : "Profiles") {
-                        HStack(alignment: .top, spacing: 28) {
-                            ForEach(profiles, id: \.id) { profile in
-                                VStack(spacing: 10) {
-                                    ProfileAvatarView(profile: profile, size: 96)
-                                    Text(profile.name).font(.callout)
-                                        .foregroundStyle(palette.primaryText).lineLimit(1)
-                                }
-                                .frame(maxWidth: 140)
-                            }
-                        }
+                        // Wraps, for the same reason as iPhone — there's just
+                        // more room here before it bites. A definite width is
+                        // needed because this sits in an HStack beside the
+                        // servers column, which offers the grid no width to wrap
+                        // within.
+                        ProfileSummaryGrid(
+                            profiles: profiles,
+                            avatarSize: 92,
+                            itemWidth: 132,
+                            spacing: 24,
+                            nameFont: .callout
+                        )
+                        .foregroundStyle(palette.primaryText)
+                        .frame(width: 624)
                     }
                 }
             }

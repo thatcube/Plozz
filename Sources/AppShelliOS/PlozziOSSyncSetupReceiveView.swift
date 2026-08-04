@@ -214,20 +214,14 @@ struct PlozziOSSyncSetupReceiveView: View {
                 }
                 if !profiles.isEmpty {
                     card(title: profiles.count == 1 ? "Profile" : "Profiles") {
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 78), spacing: 14)],
-                            spacing: 16
-                        ) {
-                            ForEach(profiles, id: \.id) { profile in
-                                VStack(spacing: 6) {
-                                    ProfileAvatarView(profile: profile, size: 56)
-                                    Text(profile.name).font(.caption)
-                                        .foregroundStyle(palette.primaryText)
-                                        .lineLimit(1).minimumScaleFactor(0.7)
-                                        .frame(maxWidth: 76)
-                                }
-                            }
-                        }
+                        ProfileSummaryGrid(
+                            profiles: profiles,
+                            avatarSize: 56,
+                            itemWidth: 78,
+                            spacing: 14,
+                            nameFont: .caption
+                        )
+                        .foregroundStyle(palette.primaryText)
                     }
                 }
             }

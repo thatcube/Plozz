@@ -493,12 +493,32 @@ extension AppState {
         }
 
         // 1. Profiles: cosmetic upserts + deletions (default never deleted).
+        // Accounts this device KNOWS aren't Plex. Synced ids for servers not
+        // signed in here have an unknown provider, and are deliberately treated
+        // as possibly-Plex — see `noteIdentityQuestions`.
+        let knownNonPlexAccountIDs = Set(
+            accountsProviders.accounts
+                .filter { $0.server.provider != .plex }
+                .map(\.id)
+        )
         if !profileUpserts.isEmpty || !profileDeletes.isEmpty {
             for profileID in profileDeletes
             where profileID != ProfileStore.defaultProfileID {
                 removeMediaAliases(forProfileID: profileID)
             }
             profilesModel.applySyncedProfileDTOs(profileUpserts, deletions: profileDeletes)
+            // A profile can arrive in a LATER batch than its membership, so that
+            // membership was applied with no profile to record the identity
+            // question against — and being already persisted, an identical later
+            // sync shows nothing newly enabled and never asks. Backfill on
+            // arrival; a profile new to this device is exactly one nobody here
+            // has been asked about.
+            for dto in profileUpserts {
+                profilesModel.noteIdentityQuestionsForArrivedProfile(
+                    dto.key,
+                    knownNonPlexAccountIDs: knownNonPlexAccountIDs
+                )
+            }
         }
         // 2. Settings: write/remove exactly the changed keys, under each profile's ns.
         for w in settingWrites {
@@ -518,16 +538,11 @@ extension AppState {
             // asks who you are there, exactly as the local toggle does — see
             // `applySyncedMembership`. Without it a profile set up correctly on
             // one device inherits the account owner's watchlist on another.
-            let localPlexAccountIDs = Set(
-                accountsProviders.accounts
-                    .filter { $0.server.provider == .plex }
-                    .map(\.id)
-            )
             for (pid, ids) in membershipSet {
                 profilesModel.applySyncedMembership(
                     ids,
                     forProfile: pid,
-                    localPlexAccountIDs: localPlexAccountIDs
+                    knownNonPlexAccountIDs: knownNonPlexAccountIDs
                 )
             }
             for pid in membershipClear { profilesModel.clearActiveAccountIDs(for: pid) }

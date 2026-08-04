@@ -140,7 +140,9 @@ public extension UniversalWatchlistHost {
                 PlozzLog.app.info("Watchlist import deferred — profile locked")
             } else if profile.needsSetup {
                 PlozzLog.app.info("Watchlist import deferred — profile awaiting setup")
-            } else if profile.needsIdentityAnswer {
+            } else if profile.awaitsIdentity(
+                amongAccounts: accountsProviders.accounts.map(\.id)
+            ) {
                 // A server was switched on and nobody has said who this profile
                 // is there yet. Importing now reads it as the account OWNER and
                 // pulls their watchlist in — the same leak setup defers, arriving

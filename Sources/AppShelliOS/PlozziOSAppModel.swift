@@ -1023,7 +1023,7 @@ final class PlozziOSAppModel {
         profiles.update(profile)
         // The import was deferred while this was outstanding; with the answer in
         // it can finally run, against the identity that was just chosen.
-        guard !profile.needsSetup, !profile.needsIdentityAnswer else { return }
+        guard !profile.needsSetup, !profile.awaitsIdentity(amongAccounts: accountsProviders.accounts.map(\.id)) else { return }
         Task { @MainActor in
             await updateTrackersForActiveProfile()
             await prepareUniversalWatchlist()

@@ -39,7 +39,7 @@ struct ProfileServerIdentityPromptsTests {
     func nothingPendingByDefault() {
         let profile = makeProfile()
         #expect(profile.pendingIdentityAccountIDs.isEmpty)
-        #expect(profile.needsIdentityAnswer == false)
+        #expect(profile.awaitsIdentity(amongAccounts: ["a1"]) == false)
     }
 
     @Test("An unanswered question defers the watchlist import")
@@ -49,7 +49,21 @@ struct ProfileServerIdentityPromptsTests {
         #expect(noted)
         // This is what the watchlist runtime reads to hold the native import
         // back — the question surviving in the record is the whole point.
-        #expect(profile.needsIdentityAnswer)
+        #expect(profile.awaitsIdentity(amongAccounts: ["a1"]))
+    }
+
+    @Test("A question about an account that isn't here gates nothing")
+    func absentAccountDoesNotGate() {
+        var profile = makeProfile()
+        profile.noteAccountAwaitingIdentity("a1")
+        // Questions are recorded generously — synced membership can enable a
+        // server this device hasn't signed into yet — but an account that isn't
+        // present has nothing to import from, so it must not defer the import
+        // forever.
+        #expect(profile.awaitsIdentity(amongAccounts: ["other"]) == false)
+        #expect(profile.awaitsIdentity(amongAccounts: []) == false)
+        // …and it starts gating the moment that account does arrive.
+        #expect(profile.awaitsIdentity(amongAccounts: ["other", "a1"]))
     }
 
     @Test("Noting the same account twice changes nothing")
@@ -80,7 +94,7 @@ struct ProfileServerIdentityPromptsTests {
         #expect(profile.pendingIdentityAccountIDs == ["b"])
         let resolvedB = profile.resolveAccountAwaitingIdentity("b")
         #expect(resolvedB)
-        #expect(profile.needsIdentityAnswer == false)
+        #expect(profile.awaitsIdentity(amongAccounts: ["a", "b"]) == false)
     }
 
     @Test("The last answer clears to absence, not an empty array")

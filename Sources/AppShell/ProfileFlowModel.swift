@@ -553,7 +553,7 @@ public final class ProfileFlowModel {
         profilesModel.update(profile)
         // The import was deferred while this was outstanding; with the answer in
         // it can finally run, against the identity that was just chosen.
-        if !profile.needsSetup, !profile.needsIdentityAnswer {
+        if !profile.needsSetup, !profile.awaitsIdentity(amongAccounts: accountsProviders.accounts.map(\.id)) {
             activateUniversalWatchlist()
         }
     }

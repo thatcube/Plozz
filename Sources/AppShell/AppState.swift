@@ -2100,8 +2100,19 @@ public final class AppState {
         for accountKey in confirmedShareAccountKeys {
             mediaShare.accountService.invalidate(shareAccountKey: accountKey)
         }
+        var releasedIdentityGate = false
         for account in confirmedRemovedAccounts {
             plexHomeUsers.forgetAccount(account.id)
+            // Same reason as single-account removal: the identity question is
+            // persisted and gates the import, and with the account gone nothing
+            // can ask it. Omitted here, signing out of everything left every
+            // future import deferred forever.
+            releasedIdentityGate = profilesModel
+                .withdrawIdentityQuestions(forAccount: account.id) || releasedIdentityGate
+        }
+        if releasedIdentityGate {
+            universalWatchlistRetryScheduler = nil
+            Task { await prepareUniversalWatchlist() }
         }
         apply(.accountsChanged(accountsProviders.accounts))
     }

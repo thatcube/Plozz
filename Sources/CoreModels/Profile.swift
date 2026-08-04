@@ -191,10 +191,24 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         return plexHomeUserBindings?.values.contains { $0.requiresPIN == true } ?? false
     }
 
-    /// Whether an answer is owed about who this profile watches as somewhere.
-    /// See `accountsAwaitingIdentity`.
-    public var needsIdentityAnswer: Bool {
-        !(accountsAwaitingIdentity ?? []).isEmpty
+    /// Whether an answer is owed about who this profile watches as on any of
+    /// `accountIDs`. See `accountsAwaitingIdentity`.
+    ///
+    /// Scoped to accounts that are actually signed in on THIS device rather than
+    /// asking "is anything pending at all". The two requirements pull against
+    /// each other: questions must be recorded generously — synced membership can
+    /// enable a server this device hasn't signed into yet, and refusing to note
+    /// it there means the leak simply happens later, once it does — but a
+    /// question about an account that isn't here must not gate anything, or a
+    /// server that never arrives defers every import forever.
+    ///
+    /// Narrowing at the point of USE satisfies both: an account that isn't signed
+    /// in has nothing to import from, so it can't leak and mustn't gate; the
+    /// question stays on the record and starts gating the moment it arrives.
+    public func awaitsIdentity(amongAccounts accountIDs: some Collection<String>) -> Bool {
+        let pending = pendingIdentityAccountIDs
+        guard !pending.isEmpty else { return false }
+        return accountIDs.contains { pending.contains($0) }
     }
 
     /// Whether this profile is restricted. See `isKidsProfile`.

@@ -680,6 +680,12 @@ public final class PlexHomeUsersModel {
         setPlexTokenOverride(nil, for: id)
         plexResolvedHomeUser[id] = nil
         plexHomeUserTokenCache.removeAll(account: id)
+        // Invalidates any refresh still awaiting the network for this account.
+        // Removal changes neither the profile's binding nor — without this — the
+        // generation, so a switch that was already in flight would pass both
+        // guards and re-install (and re-cache) credentials for an account the
+        // user has just signed out of.
+        bumpIdentityGeneration(for: id, site: "forgetAccount")
     }
 
     /// Wipes ALL Plex Home-user state (overrides, revisions, resolved-user map,

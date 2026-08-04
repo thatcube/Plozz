@@ -440,7 +440,7 @@ private struct AddProfileTileLabel: View {
                         .font(.system(size: isProminent ? 102 : 88, weight: .semibold))
                         .foregroundStyle(
                             isProminent
-                                ? Color.black
+                                ? (isFocused ? Color.black : palette.settingsBackground)
                                 : (isFocused ? palette.primaryText : palette.secondaryText)
                         )
                 }

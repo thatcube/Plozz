@@ -176,6 +176,7 @@ struct PlozziOSDetectedSetupView: View {
                     }
                 }
                 .fontWeight(.semibold)
+                .foregroundStyle(palette.onAccent)
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)

@@ -14,6 +14,10 @@ import SwiftUI
 /// verifier here and only that is handed back up.
 struct ProfileLockDetailView: View {
     let context: SettingsContext
+    /// The profile being locked — not necessarily the active one. Locks are
+    /// managed for the whole household from Everyone › Profiles, so a grown-up
+    /// can lock their own profile without switching into it first.
+    let profileID: String
     /// Whether these settings currently reach the user's other devices, so the
     /// page can be honest that a lock set with Sync off is device-only.
     let syncEnabled: Bool
@@ -41,7 +45,10 @@ struct ProfileLockDetailView: View {
         case confirming
     }
 
-    private var profile: Profile { context.activeProfile }
+    /// Read live from the context so the page updates as the lock is set/cleared.
+    private var profile: Profile {
+        context.profiles.first(where: { $0.id == profileID }) ?? context.activeProfile
+    }
     private var isLocked: Bool { profile.isLocked }
 
     /// Whether this profile plays as a Plex Home user that already asks for a
@@ -109,7 +116,7 @@ struct ProfileLockDetailView: View {
                     description: ProfileLockCopy.forgotPINDetail
                 ) {
                     Button(ProfileLockCopy.delete, role: .destructive) {
-                        context.onSetProfileLock(nil)
+                        context.onSetProfileLock(profileID, nil)
                     }
                 }
             )
@@ -202,7 +209,7 @@ struct ProfileLockDetailView: View {
                 step = .creating
                 return
             }
-            context.onSetProfileLock(lock)
+            context.onSetProfileLock(profileID, lock)
             firstEntry = nil
             step = .idle
         case .idle:

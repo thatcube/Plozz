@@ -146,7 +146,6 @@ private enum PlozziOSSettingsDestination: Hashable {
     case subtitles
     case spoilers
     case nightShift
-    case profileLock
     case diagnostics
     case attributions
     case about
@@ -215,13 +214,6 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.subtitles, title: "Subtitles", systemImage: "captions.bubble")
                         settingsRow(.spoilers, title: "Spoilers", systemImage: "eye.slash")
                         settingsRow(.nightShift, title: "Circadian Mode", systemImage: "moon.stars.fill")
-                        if !appModel.profiles.activeProfile.isKids {
-                            settingsRow(
-                                .profileLock,
-                                title: ProfileLockCopy.title,
-                                systemImage: appModel.profiles.activeProfile.isLocked ? "lock" : "lock.open"
-                            )
-                        }
                     } footer: {
                         Text(profileScopeFooter)
                     }
@@ -449,8 +441,6 @@ private struct PlozziOSSettingsSplitView: View {
             PlozziOSSpoilerSettingsView(model: appModel.settings.spoilers)
         case .nightShift:
             PlozziOSNightShiftSettingsView(model: appModel.settings.nightShift)
-        case .profileLock:
-            PlozziOSProfileLockSettingsView(appModel: appModel)
         case .diagnostics:
             PlozziOSDiagnosticsSettingsView(
                 appModel: appModel,
@@ -841,8 +831,8 @@ private struct PlozziOSProfilesView: View {
 
             SettingsSectionGroup("Who’s watching?") {
                 ForEach(appModel.profiles.profiles) { profile in
-                    Button {
-                        editingProfile = profile
+                    NavigationLink {
+                        PlozziOSProfileSettingsView(appModel: appModel, profileID: profile.id)
                     } label: {
                         HStack {
                             PlozziOSProfileAvatar(
@@ -856,8 +846,16 @@ private struct PlozziOSProfilesView: View {
                                 Image(systemName: "checkmark")
                                     .foregroundStyle(.tint)
                             }
-                            Image(systemName: "pencil")
-                                .plozzForeground(.secondary)
+                            // Glance the access state so the list answers
+                            // "who's locked?" without opening each one.
+                            if profile.isKids {
+                                Image(systemName: "figure.and.child.holdinghands")
+                                    .plozzForeground(.secondary)
+                            }
+                            if profile.isLocked {
+                                Image(systemName: "lock.fill")
+                                    .plozzForeground(.secondary)
+                            }
                         }
                     }
                     .swipeActions {

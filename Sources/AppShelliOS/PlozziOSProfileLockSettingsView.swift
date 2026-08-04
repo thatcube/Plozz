@@ -10,6 +10,8 @@ import SwiftUI
 /// leaves this view.
 struct PlozziOSProfileLockSettingsView: View {
     let appModel: PlozziOSAppModel
+    /// The profile being locked — not necessarily the active one.
+    let profileID: String
 
     @State private var entry: String = ""
     @State private var firstEntry: String?
@@ -19,7 +21,9 @@ struct PlozziOSProfileLockSettingsView: View {
     @State private var reusePlexPIN = false
     @State private var confirmDelete = false
 
-    private var profile: Profile { appModel.profiles.activeProfile }
+    private var profile: Profile {
+        appModel.profiles.profiles.first(where: { $0.id == profileID }) ?? appModel.profiles.activeProfile
+    }
     private var isLocked: Bool { profile.isLocked }
     private var syncEnabled: Bool { SyncSetupFeatureFlag().isEnabled }
 
@@ -42,7 +46,7 @@ struct PlozziOSProfileLockSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .alert(Text(ProfileLockCopy.delete), isPresented: $confirmDelete) {
             Button(String(localized: ProfileLockCopy.delete), role: .destructive) {
-                appModel.setLockForActiveProfile(nil)
+                appModel.setLock(nil, forProfile: profileID)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -163,7 +167,7 @@ struct PlozziOSProfileLockSettingsView: View {
             isConfirming = false
             return
         }
-        appModel.setLockForActiveProfile(lock)
+        appModel.setLock(lock, forProfile: profileID)
         reset()
     }
 

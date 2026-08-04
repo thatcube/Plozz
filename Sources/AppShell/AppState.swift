@@ -1562,7 +1562,7 @@ public final class AppState {
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
     }
 
-    /// Sets or clears (`nil`) the active profile's PIN gate.
+    /// Sets or clears (`nil`) a profile's PIN gate.
     ///
     /// Takes an already-derived `ProfileLock` — the raw PIN is turned into a
     /// salted verifier in the entry view and never reaches this layer, so it
@@ -1571,11 +1571,18 @@ public final class AppState {
     /// Also drops any "already unlocked this run" credit for the profile: after
     /// changing or removing a PIN, the next open should be judged against the new
     /// state rather than an unlock the old one granted.
-    public func setLockForActiveProfile(_ lock: ProfileLock?) {
-        var profile = profilesModel.activeProfile
+    public func setLock(_ lock: ProfileLock?, forProfile id: String) {
+        guard var profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }
         profile.lock = lock
         profilesModel.update(profile)
-        profileFlow.forgetUnlock(for: profile.id)
+        profileFlow.forgetUnlock(for: id)
+    }
+
+    /// Marks a profile as restricted, or lifts the restriction.
+    public func setKidsProfile(_ isKids: Bool, forProfile id: String) {
+        guard var profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }
+        profile.isKids = isKids
+        profilesModel.update(profile)
     }
 
     /// Dismisses the one-time theme picker shown after creating a profile in-app

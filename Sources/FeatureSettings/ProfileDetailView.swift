@@ -15,25 +15,14 @@ struct ProfileDetailView: View {
     let appBuild: String
     let repoURL: String
 
-    @State private var editorContext: EditorContext?
-
-    private enum EditorContext: Identifiable {
-        case edit(Profile)
-        case new
-        var id: String {
-            switch self {
-            case let .edit(p): return "edit.\(p.id)"
-            case .new: return "new"
-            }
-        }
-    }
+    @State private var showingNewProfile = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 SettingsPageHeader(
                     "Profiles",
-                    subtitle: "Each profile keeps its own settings — theme, playback, subtitles, spoilers, trackers, and Home layout. Only your servers are shared."
+                    subtitle: "Each profile keeps its own settings — theme, playback, subtitles, spoilers, trackers, and Home layout. Only your servers are shared. Open one to lock it or make it a Kids Profile."
                 )
                 profilesListPanel
             }
@@ -43,43 +32,18 @@ struct ProfileDetailView: View {
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
-        .sheet(item: $editorContext) { ctx in
-            switch ctx {
-            case let .edit(profile):
-                ProfileEditorView(
-                    editingProfile: profile,
-                    canDelete: profile.id != context.profiles.first?.id,
-                    // This screen lives in the shared section, which a Kids
-                    // Profile can't reach — so being here already proves the
-                    // person is on an unrestricted profile.
-                    canEditRestrictions: true,
-                    photoSourceAccounts: context.accounts,
-                    plexHomeUsersFetcher: context.plexHomeUsersFetcher,
-                    onSave: { draft in
-                        context.onSaveProfile(draft)
-                        editorContext = nil
-                    },
-                    onLiveChange: { context.onUpdateProfileCosmetics($0) },
-                    onDelete: {
-                        context.onDeleteProfile(profile.id)
-                        editorContext = nil
-                    },
-                    onCancel: { editorContext = nil }
-                )
-            case .new:
-                ProfileEditorView(
-                    canDelete: false,
-                    canEditRestrictions: true,
-                    photoSourceAccounts: context.accounts,
-                    existingColorIndices: context.profiles.map(\.colorIndex),
-                    plexHomeUsersFetcher: context.plexHomeUsersFetcher,
-                    onSave: { draft in
-                        context.onSaveProfile(draft)
-                        editorContext = nil
-                    },
-                    onCancel: { editorContext = nil }
-                )
-            }
+        .sheet(isPresented: $showingNewProfile) {
+            ProfileEditorView(
+                canDelete: false,
+                photoSourceAccounts: context.accounts,
+                existingColorIndices: context.profiles.map(\.colorIndex),
+                plexHomeUsersFetcher: context.plexHomeUsersFetcher,
+                onSave: { draft in
+                    context.onSaveProfile(draft)
+                    showingNewProfile = false
+                },
+                onCancel: { showingNewProfile = false }
+            )
         }
     }
 
@@ -100,7 +64,7 @@ struct ProfileDetailView: View {
                     profileRow(profile)
                 }
                 Button {
-                    editorContext = .new
+                    showingNewProfile = true
                 } label: {
                     Label("Add Profile", systemImage: "plus.circle")
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -111,25 +75,31 @@ struct ProfileDetailView: View {
     }
 
     private func profileRow(_ profile: Profile) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            ProfileAvatarView(profile: profile, size: 40)
-                .padding(.top, 4)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(profile.name).font(.headline)
-                if profile.id == context.activeProfile.id {
-                    StatusChip("Active")
+        NavigationLink(value: SettingsRoute.profileSettings(profileID: profile.id)) {
+            HStack(alignment: .center, spacing: 16) {
+                ProfileAvatarView(profile: profile, size: 40)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(profile.name).font(.headline)
+                    if profile.id == context.activeProfile.id {
+                        StatusChip("Active")
+                    }
                 }
+                Spacer()
+                // Glance the access state so the list answers "who's locked?"
+                // and "which one is the kid's?" without drilling into each.
+                if profile.isKids {
+                    Image(systemName: "figure.and.child.holdinghands")
+                        .settingsRowSecondary()
+                }
+                if profile.isLocked {
+                    Image(systemName: "lock.fill")
+                        .settingsRowSecondary()
+                }
+                Image(systemName: "chevron.right")
+                    .settingsRowSecondary()
             }
-            Spacer()
-            Button {
-                editorContext = .edit(profile)
-            } label: {
-                Image(systemName: "pencil")
-            }
-            .accessibilityLabel("Edit \(profile.name)")
-            .padding(.top, 6)
+            .padding(.vertical, 2)
         }
-        .padding(.vertical, 2)
     }
 
 }

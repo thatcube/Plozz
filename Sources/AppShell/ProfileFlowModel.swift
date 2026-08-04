@@ -235,7 +235,6 @@ public final class ProfileFlowModel {
                 profile.avatarImageURL = draft.avatarImageURL
                 profile.avatarEmoji = draft.avatarEmoji
                 profile.avatarEmojiColorIndex = draft.avatarEmojiColorIndex
-                profile.isKids = draft.isKidsProfile
                 profilesModel.update(profile)
             }
             if !draft.activeAccountIDs.isEmpty {
@@ -265,11 +264,6 @@ public final class ProfileFlowModel {
                 avatarEmoji: draft.avatarEmoji,
                 avatarEmojiColorIndex: draft.avatarEmojiColorIndex
             )
-            if draft.isKidsProfile {
-                var restricted = created
-                restricted.isKids = true
-                profilesModel.update(restricted)
-            }
             // Switch to the freshly created profile so the per-profile theme
             // picker edits *its* namespace, then present it. Mirrors
             // `switchProfile(to:)` minus the Plex identity check, which is
@@ -310,11 +304,6 @@ public final class ProfileFlowModel {
         profile.avatarImageURL = draft.avatarImageURL
         profile.avatarEmoji = draft.avatarEmoji
         profile.avatarEmojiColorIndex = draft.avatarEmojiColorIndex
-        // Not strictly a cosmetic, but this path IS the save for an existing
-        // profile — the editor auto-saves and its Done button never calls
-        // `saveProfile`. Harmless when the editor didn't offer the toggle: the
-        // draft was seeded from the profile, so this rewrites the same value.
-        profile.isKids = draft.isKidsProfile
         profilesModel.update(profile)
     }
 

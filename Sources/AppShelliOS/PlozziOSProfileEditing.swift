@@ -60,9 +60,6 @@ struct PlozziOSProfileEditorHost: View {
         ProfileEditorView(
             editingProfile: editingProfile,
             canDelete: canDelete,
-            // The roster lives in the shared section, which a Kids Profile can't
-            // reach — so being here already proves an unrestricted profile.
-            canEditRestrictions: !appModel.profiles.activeProfile.isKids,
             photoSourceAccounts: appModel.accountsProviders.accounts,
             existingColorIndices: appModel.profiles.profiles.map(\.colorIndex),
             plexHomeUsersFetcher: { accountID in

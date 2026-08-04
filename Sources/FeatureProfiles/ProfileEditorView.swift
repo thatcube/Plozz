@@ -44,8 +44,6 @@ public struct ProfileDraft: Equatable, Sendable {
     /// Optional background colour for an emoji avatar (see
     /// `Profile.avatarEmojiColorIndex`). `nil` = neutral disc (default).
     public var avatarEmojiColorIndex: Int?
-    /// Whether this is a restricted Kids Profile (see `Profile.isKidsProfile`).
-    public var isKidsProfile: Bool
 
     public init(
         id: String?,
@@ -62,8 +60,7 @@ public struct ProfileDraft: Equatable, Sendable {
         plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil,
         avatarImageURL: String? = nil,
         avatarEmoji: String? = nil,
-        avatarEmojiColorIndex: Int? = nil,
-        isKidsProfile: Bool = false
+        avatarEmojiColorIndex: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -80,7 +77,6 @@ public struct ProfileDraft: Equatable, Sendable {
         self.avatarImageURL = avatarImageURL
         self.avatarEmoji = avatarEmoji
         self.avatarEmojiColorIndex = avatarEmojiColorIndex
-        self.isKidsProfile = isKidsProfile
     }
 }
 
@@ -94,10 +90,6 @@ public struct ProfileDraft: Equatable, Sendable {
 public struct ProfileEditorView: View {
     private let editingProfile: Profile?
     private let canDelete: Bool
-    /// Whether the Kids Profile toggle is offered. False when the *editing*
-    /// profile is itself restricted — a Kids Profile must not be able to lift its
-    /// own restriction.
-    private let canEditRestrictions: Bool
     private let photoSourceAccounts: [Account]
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSave: (ProfileDraft) -> Void
@@ -119,12 +111,10 @@ public struct ProfileEditorView: View {
     private let initialEmoji: String?
     private let initialEmojiColorIndex: Int?
     private let initialMode: AvatarMode
-    private let initialIsKids: Bool
 
     @Environment(\.themePalette) private var palette
 
     @State private var name: String
-    @State private var isKidsProfile: Bool
     @State private var avatarSymbol: String
     @State private var colorIndex: Int
     @State private var avatarImageURL: String?
@@ -146,7 +136,6 @@ public struct ProfileEditorView: View {
     public init(
         editingProfile: Profile? = nil,
         canDelete: Bool = false,
-        canEditRestrictions: Bool = false,
         photoSourceAccounts: [Account] = [],
         existingColorIndices: [Int] = [],
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser] = { _ in [] },
@@ -157,7 +146,6 @@ public struct ProfileEditorView: View {
     ) {
         self.editingProfile = editingProfile
         self.canDelete = canDelete
-        self.canEditRestrictions = canEditRestrictions
         self.photoSourceAccounts = photoSourceAccounts
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSave = onSave
@@ -182,7 +170,6 @@ public struct ProfileEditorView: View {
             normalizedEmoji = Profile.randomAvatarEmoji()
         }
         let startEmojiColor = editingProfile?.avatarEmojiColorIndex
-        let startIsKids = editingProfile?.isKids ?? false
 
         // Open in the mode that matches the profile's current avatar. A NEW
         // profile (nothing set yet) defaults to Emoji — the funnest, most
@@ -205,10 +192,8 @@ public struct ProfileEditorView: View {
         self.initialEmoji = normalizedEmoji
         self.initialEmojiColorIndex = startEmojiColor
         self.initialMode = startMode
-        self.initialIsKids = startIsKids
 
         _name = State(initialValue: startName)
-        _isKidsProfile = State(initialValue: startIsKids)
         _avatarSymbol = State(initialValue: startSymbol)
         _colorIndex = State(initialValue: startColor)
         _avatarImageURL = State(initialValue: normalizedPhoto)
@@ -277,8 +262,7 @@ public struct ProfileEditorView: View {
             plexHomeUserBindings: editingProfile?.plexHomeUserBindings,
             avatarImageURL: effectiveImageURL,
             avatarEmoji: effectiveEmoji,
-            avatarEmojiColorIndex: effectiveEmojiColorIndex,
-            isKidsProfile: isKidsProfile
+            avatarEmojiColorIndex: effectiveEmojiColorIndex
         )
     }
 
@@ -290,7 +274,6 @@ public struct ProfileEditorView: View {
             || effectiveImageURL != initialImageURL
             || effectiveEmoji != initialEmoji
             || effectiveEmojiColorIndex != initialEmojiColorIndex
-            || isKidsProfile != initialIsKids
     }
 
     public var body: some View {
@@ -396,41 +379,6 @@ public struct ProfileEditorView: View {
     /// Icon-only destructive trash button for the header. A red glyph on a
     /// circular chip wearing the shared focus halo (same treatment as the
     /// avatar tiles), so it reads as destructive and focuses consistently.
-    /// The Kids Profile switch, plus the nudge that it only works paired with a
-    /// lock on the grown-ups' profiles. Shown only when `canEditRestrictions`,
-    /// so a Kids Profile can't lift its own restriction.
-    private var kidsProfileToggle: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: $isKidsProfile) {
-                Text(KidsProfileCopy.title)
-                    .font(.headline)
-            }
-            Text(KidsProfileCopy.explanation)
-                .font(.footnote)
-                .foregroundStyle(palette.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-            if isKidsProfile {
-                Label {
-                    Text(KidsProfileCopy.pairWithLock)
-                        .font(.footnote)
-                        .fixedSize(horizontal: false, vertical: true)
-                } icon: {
-                    Image(systemName: "lock")
-                }
-                .foregroundStyle(palette.secondaryText)
-            }
-        }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
-                .fill(palette.cardSurface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
-                .strokeBorder(palette.cardBorder, lineWidth: 1)
-        )
-    }
-
     private var deleteButton: some View {
         let diameter: CGFloat = 60
         return Button {
@@ -509,10 +457,6 @@ public struct ProfileEditorView: View {
                     .foregroundStyle(palette.secondaryText)
             }
             .frame(maxWidth: .infinity)
-
-            if canEditRestrictions {
-                kidsProfileToggle
-            }
 
             // Colour lives here — high up beside the live preview, not buried at
             // the bottom of the scrolling picker — so it reads as prominent and
@@ -1075,9 +1019,6 @@ extension ProfileEditorView {
                         colorIndex: $colorIndex,
                         emojiColorIndex: $emojiColorIndex
                     )
-                }
-                if canEditRestrictions {
-                    IOSKidsProfileSection(isKidsProfile: $isKidsProfile)
                 }
                 if isEditing, canDelete, onDelete != nil {
                     IOSProfileDeleteSection(showConfirmation: $showDeleteConfirmation)
@@ -1924,36 +1865,6 @@ fileprivate extension View {
                     }
             }
         }
-    }
-}
-
-fileprivate struct IOSKidsProfileSection: View {
-    @Binding var isKidsProfile: Bool
-
-    @Environment(\.themePalette) private var palette
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle(isOn: $isKidsProfile) {
-                Text(KidsProfileCopy.title)
-                    .font(.headline)
-            }
-            Text(KidsProfileCopy.explanation)
-                .font(.footnote)
-                .foregroundStyle(palette.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-            if isKidsProfile {
-                Label {
-                    Text(KidsProfileCopy.pairWithLock)
-                        .font(.footnote)
-                        .fixedSize(horizontal: false, vertical: true)
-                } icon: {
-                    Image(systemName: "lock")
-                }
-                .foregroundStyle(palette.secondaryText)
-            }
-        }
-        .padding(.top, 8)
     }
 }
 

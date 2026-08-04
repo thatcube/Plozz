@@ -46,9 +46,16 @@ struct SettingsContext {
     let onSignOutAll: () -> Void
     let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
-    /// Sets (or clears, with `nil`) the active profile's PIN gate. Takes an
+    /// Sets (or clears, with `nil`) a profile's PIN gate. Takes an
     /// already-derived `ProfileLock` so the raw PIN never leaves the entry view.
-    let onSetProfileLock: (ProfileLock?) -> Void
+    ///
+    /// Keyed by profile id rather than acting on the active one: locks are
+    /// managed for the whole household from Everyone › Profiles, the way Netflix
+    /// does it, so a grown-up can lock their own profile from a child's device
+    /// without switching into it first.
+    let onSetProfileLock: (String, ProfileLock?) -> Void
+    /// Marks a profile as restricted (or lifts it).
+    let onSetKidsProfile: (String, Bool) -> Void
 }
 
 /// Typed routes for the Settings drill-down NavigationStack. Defined at file
@@ -58,7 +65,9 @@ struct SettingsContext {
 /// future per-account flow can do the same without re-plumbing closures.
 enum SettingsRoute: Hashable {
     case profile
-    case profileLock
+    /// Per-profile settings page (Everyone › Profiles › <name>).
+    case profileSettings(profileID: String)
+    case profileLock(profileID: String)
     case servers
     case myLibraries
     case appearance

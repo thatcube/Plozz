@@ -885,13 +885,20 @@ final class PlozziOSAppModel {
         profileLockError = nil
     }
 
-    /// Sets or clears the active profile's PIN gate, dropping any unlock credit
-    /// the previous PIN granted.
-    func setLockForActiveProfile(_ lock: ProfileLock?) {
-        var profile = profiles.activeProfile
+    /// Sets or clears a profile's PIN gate, dropping any unlock credit the
+    /// previous PIN granted.
+    func setLock(_ lock: ProfileLock?, forProfile id: String) {
+        guard var profile = profiles.profiles.first(where: { $0.id == id }) else { return }
         profile.lock = lock
         profiles.update(profile)
-        unlockedProfileIDs.remove(profile.id)
+        unlockedProfileIDs.remove(id)
+    }
+
+    /// Marks a profile as restricted, or lifts the restriction.
+    func setKidsProfile(_ isKids: Bool, forProfile id: String) {
+        guard var profile = profiles.profiles.first(where: { $0.id == id }) else { return }
+        profile.isKids = isKids
+        profiles.update(profile)
     }
 
     /// Whether the profile that is already active is locked and unproven — the

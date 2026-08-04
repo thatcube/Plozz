@@ -146,7 +146,8 @@ public struct SettingsView: View {
     private let onSetUpFromAnotherDevice: (() -> Void)?
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
-    private let onSetProfileLock: (ProfileLock?) -> Void
+    private let onSetProfileLock: (String, ProfileLock?) -> Void
+    private let onSetKidsProfile: (String, Bool) -> Void
     private let onSetSeerrUser: (String, SeerUser?) -> Void
     /// Step 6 metadata settings surface (providers, attribution, diagnostics,
     /// cache). Optional so tests/previews can omit it; the row + page appear only
@@ -200,7 +201,8 @@ public struct SettingsView: View {
         onEraseICloud: (() -> Void)? = nil,
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void,
-        onSetProfileLock: @escaping (ProfileLock?) -> Void = { _ in },
+        onSetProfileLock: @escaping (String, ProfileLock?) -> Void = { _, _ in },
+        onSetKidsProfile: @escaping (String, Bool) -> Void = { _, _ in },
         onSetSeerrUser: @escaping (String, SeerUser?) -> Void = { _, _ in },
         onSetUpAnotherDevice: (() -> Void)? = nil,
         syncEnabled: Bool = false,
@@ -260,6 +262,7 @@ public struct SettingsView: View {
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
         self.onSetProfileLock = onSetProfileLock
+        self.onSetKidsProfile = onSetKidsProfile
         self.onSetSeerrUser = onSetSeerrUser
         self.onSetUpAnotherDevice = onSetUpAnotherDevice
         self.syncEnabled = syncEnabled
@@ -314,7 +317,8 @@ public struct SettingsView: View {
             onSignOutAll: onSignOutAll,
             plexHomeUsersFetcher: plexHomeUsersFetcher,
             onSelectPlexHomeUser: onSelectPlexHomeUser,
-            onSetProfileLock: onSetProfileLock
+            onSetProfileLock: onSetProfileLock,
+            onSetKidsProfile: onSetKidsProfile
         )
     }
 
@@ -394,10 +398,6 @@ public struct SettingsView: View {
             ProfileEditorView(
                 editingProfile: profile,
                 canDelete: profile.id != profiles.first?.id,
-                // Edits the ACTIVE profile, so the restriction toggle is
-                // deliberately absent — a Kids Profile must not be able to lift
-                // its own restriction. Mark one from Everyone › Profiles.
-                canEditRestrictions: false,
                 photoSourceAccounts: accounts,
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
                 onSave: { draft in
@@ -496,13 +496,6 @@ public struct SettingsView: View {
             // it to every device), so it sits here rather than in the shared
             // section — even though "who can open this" reads like a household
             // concern, the lock is a property of this one profile.
-            // Withheld on a Kids Profile: letting a child set a PIN here would let
-            // them lock the grown-ups out of the profile the grown-ups manage.
-            if !activeProfile.isKids {
-                navRow(ProfileLockCopy.title, icon: activeProfile.isLocked ? "lock" : "lock.open",
-                       value: activeProfile.isLocked ? Text(ProfileLockCopy.on) : Text(ProfileLockCopy.off),
-                       route: .profileLock)
-            }
         }
     }
 
@@ -850,8 +843,10 @@ public struct SettingsView: View {
             )
         case .servers:
             ServersAndLibrariesDetailView(context: context)
-        case .profileLock:
-            ProfileLockDetailView(context: context, syncEnabled: syncEnabled)
+        case let .profileSettings(profileID):
+            ProfileSettingsDetailView(context: context, profileID: profileID)
+        case let .profileLock(profileID):
+            ProfileLockDetailView(context: context, profileID: profileID, syncEnabled: syncEnabled)
         case .myLibraries:
             MyLibrariesDetailView(context: context)
         case .appearance:

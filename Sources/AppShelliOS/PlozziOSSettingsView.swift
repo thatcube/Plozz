@@ -893,6 +893,8 @@ private struct PlozziOSProfilesView: View {
                                 .font(.caption.weight(.semibold))
                                 .plozzForeground(.tertiary)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .swipeActions {

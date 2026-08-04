@@ -225,3 +225,55 @@ final class KidsProfileTests: XCTestCase {
         XCTAssertFalse(adult.isKids)
     }
 }
+
+/// A new profile inherits every server in the household, so its watchlist import
+/// has to wait until someone says which servers it actually uses — otherwise it
+/// is born holding the household's aggregate list.
+final class ProfileSetupGateTests: XCTestCase {
+
+    func testExistingProfilesAreNotAwaitingSetup() throws {
+        let legacy = #"{"id":"p1","name":"Kid","avatarSymbol":"star","colorIndex":0,"createdAt":0}"#
+        let profile = try JSONDecoder().decode(Profile.self, from: Data(legacy.utf8))
+        XCTAssertFalse(profile.needsSetup, "a profile from before this existed is already set up")
+    }
+
+    func testDefaultIsNotAwaitingSetup() {
+        XCTAssertFalse(Profile(name: "Brando").needsSetup)
+    }
+
+    func testFlagRoundTrips() {
+        var profile = Profile(name: "New")
+        profile.needsSetup = true
+        XCTAssertTrue(profile.needsSetup)
+        profile.needsSetup = false
+        XCTAssertFalse(profile.needsSetup)
+    }
+
+    /// Cleared must mean ABSENT, not `false` — an older peer omits the key, and
+    /// the sync layer needs capture(apply(x)) to be byte-stable.
+    func testClearedFlagIsOmittedRatherThanWrittenAsFalse() throws {
+        var profile = Profile(name: "New")
+        profile.needsSetup = true
+        profile.needsSetup = false
+        let json = String(decoding: try JSONEncoder().encode(profile), as: UTF8.self)
+        XCTAssertFalse(json.contains("isAwaitingSetup"), json)
+    }
+
+    /// Synced so a half-created profile doesn't start importing on a second
+    /// device while the first is still choosing its servers.
+    func testFlagSurvivesTheSyncRoundTrip() {
+        var profile = Profile(name: "New")
+        profile.needsSetup = true
+        XCTAssertTrue(ProfileSyncDTO(profile: profile).makeProfile().needsSetup)
+    }
+
+    func testCompletingSetupPropagatesThroughTheDTO() {
+        var local = Profile(id: "p1", name: "New")
+        local.needsSetup = true
+
+        var remoteDone = Profile(id: "p1", name: "New")
+        remoteDone.needsSetup = false
+        local = ProfileSyncDTO(profile: remoteDone).merged(into: local)
+        XCTAssertFalse(local.needsSetup)
+    }
+}

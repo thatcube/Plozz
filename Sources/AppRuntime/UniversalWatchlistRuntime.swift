@@ -86,7 +86,15 @@ public extension UniversalWatchlistHost {
             PlozzLog.app.info(
                 "Watchlist hydrate entries=\(universalWatchlist.activeSnapshot.orderedEntries.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
             )
-            await importUniversalNativeWatchlists()
+            // A profile that hasn't been through setup inherits every server in
+            // the household, so importing now would hand it the household's
+            // aggregate watchlist. Its own state is hydrated above; the import
+            // waits until it knows which servers this profile actually uses.
+            if profiles.activeProfile.needsSetup {
+                PlozzLog.app.info("Watchlist import deferred — profile awaiting setup")
+            } else {
+                await importUniversalNativeWatchlists()
+            }
         } catch {
             PlozzLog.app.error("Watchlist local preparation failed")
         }

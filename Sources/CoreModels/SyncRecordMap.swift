@@ -422,6 +422,9 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
     /// lock is: a restriction that only applied on one device wouldn't restrict
     /// anything.
     public var isKidsProfile: Bool?
+    /// Whether the profile still owes its setup pass. Synced so a half-created
+    /// profile doesn't start importing on a second device either.
+    public var isAwaitingSetup: Bool?
 
     public init(profile p: Profile) {
         self.id = p.id
@@ -436,6 +439,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         self.avatarEmojiColorIndex = p.avatarEmojiColorIndex
         self.lock = p.lock
         self.isKidsProfile = p.isKidsProfile
+        self.isAwaitingSetup = p.isAwaitingSetup
     }
 
     /// Merge this DTO's cosmetic fields into an existing profile, preserving ALL
@@ -463,6 +467,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         p.avatarEmojiColorIndex = avatarEmojiColorIndex
         p.lock = lock
         p.isKidsProfile = isKidsProfile
+        p.isAwaitingSetup = isAwaitingSetup
         return p
     }
 
@@ -473,6 +478,6 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
             createdAt: createdAt,
             avatarImageURL: SyncURLSanitizer.sanitize(string: avatarImageURL),
             avatarEmoji: avatarEmoji, avatarEmojiColorIndex: avatarEmojiColorIndex,
-            lock: lock, isKidsProfile: isKidsProfile)
+            lock: lock, isKidsProfile: isKidsProfile, isAwaitingSetup: isAwaitingSetup)
     }
 }

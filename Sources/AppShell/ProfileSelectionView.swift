@@ -35,7 +35,9 @@ struct ProfileSelectionView: View {
     @State private var editingProfile: Profile?
     /// Set while creating a profile, so the sheet knows which kind to make.
     @State private var creating: CreationKind?
-    /// A just-created profile waiting on the "want a lock?" offer.
+    /// A just-created profile currently in its setup step.
+    @State private var settingUp: Profile?
+    /// A just-set-up profile waiting on the "want a lock?" offer.
     @State private var newlyCreated: Profile?
     /// Set once the user accepts that offer, presenting the PIN setup.
     @State private var lockTarget: Profile?
@@ -150,17 +152,26 @@ struct ProfileSelectionView: View {
                 existingColorIndices: appState.profilesModel.profiles.map(\.colorIndex),
                 plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
                 onSave: { draft in
-                    // Create WITHOUT switching into it: the picker is a chooser,
-                    // and silently activating a profile the moment it's named
-                    // would strand a brand-new locked profile behind its own PIN.
-                    let created = appState.createProfileWithoutSwitching(draft, isKids: kind.isKids)
+                    // Creates and switches in: setup needs the profile active so
+                    // it can drive the ordinary per-profile machinery. Its
+                    // watchlist import stays deferred until setup finishes.
+                    let created = appState.createProfileForSetup(draft, isKids: kind.isKids)
                     creating = nil
-                    newlyCreated = created
+                    settingUp = created
                 },
                 onCancel: { creating = nil }
             )
         }
-        // Offer the lock right after creation. This is the moment the decision
+        // Which servers, who it watches as, which libraries — before anything
+        // imports on its behalf.
+        .fullScreenCover(item: $settingUp) { profile in
+            ProfileSetupView(appState: appState) {
+                appState.completeProfileSetup(for: profile.id)
+                settingUp = nil
+                newlyCreated = profile
+            }
+        }
+        // Then offer the lock. This is the moment the decision
         // makes sense — otherwise locking is something you only discover later.
         .alert(
             Text(ProfileLockCopy.offerTitle),

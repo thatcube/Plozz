@@ -1582,11 +1582,16 @@ public final class AppState {
         if lock != nil { profileFlow.noteUnlocked(id) }
     }
 
-    /// Creates a profile from the picker without switching into it.
-    /// - Returns: the created profile so the caller can offer to lock it.
+    /// Creates a profile from the picker and switches into it for setup.
+    /// - Returns: the created profile so the caller can run setup on it.
     @discardableResult
-    public func createProfileWithoutSwitching(_ draft: ProfileDraft, isKids: Bool) -> Profile {
-        profileFlow.createProfileWithoutSwitching(draft, isKids: isKids)
+    public func createProfileForSetup(_ draft: ProfileDraft, isKids: Bool) -> Profile {
+        profileFlow.createProfileForSetup(draft, isKids: isKids)
+    }
+
+    /// Marks a profile's setup finished, releasing its watchlist import.
+    public func completeProfileSetup(for id: String) {
+        profileFlow.completeSetup(for: id)
     }
 
     /// Marks a profile as restricted, or lifts the restriction.

@@ -335,17 +335,18 @@ public final class ProfileFlowModel {
         profilesModel.update(profile)
     }
 
-    /// Creates a profile from a draft **without** activating it.
+    /// Creates a profile from a draft and switches into it, ready for setup.
     ///
-    /// `saveProfile` deliberately switches into a newly created profile (it's
-    /// called from a flow that then shows the one-time theme picker for it). The
-    /// picker needs the opposite: it's a chooser, and creating a profile there —
-    /// especially one that's about to be locked — must not silently move the
-    /// household into it and strand the user behind a PIN they haven't set yet.
+    /// Switching in is what makes the setup step simple: every per-profile model
+    /// (membership, Plex identity, library visibility) then points at the new
+    /// profile, so setup drives the same code Settings does instead of a
+    /// parallel set of "…forProfile:" variants. Safe because the profile is
+    /// empty and marked `needsSetup`, which defers its watchlist import until
+    /// setup says which servers it actually uses.
     ///
-    /// - Returns: the created profile, so the caller can offer to lock it.
+    /// - Returns: the created profile, so the caller can run setup on it.
     @discardableResult
-    public func createProfileWithoutSwitching(_ draft: ProfileDraft, isKids: Bool) -> Profile {
+    public func createProfileForSetup(_ draft: ProfileDraft, isKids: Bool) -> Profile {
         let created = profilesModel.add(
             name: draft.name,
             avatarSymbol: draft.avatarSymbol,
@@ -362,11 +363,23 @@ public final class ProfileFlowModel {
             avatarEmoji: draft.avatarEmoji,
             avatarEmojiColorIndex: draft.avatarEmojiColorIndex
         )
-        guard isKids else { return created }
-        var restricted = created
-        restricted.isKids = true
-        profilesModel.update(restricted)
-        return restricted
+        var configured = created
+        configured.isKids = isKids
+        configured.needsSetup = true
+        profilesModel.update(configured)
+        performSwitch(to: configured.id)
+        return configured
+    }
+
+    /// Marks setup finished and releases the deferred watchlist import.
+    public func completeSetup(for id: String) {
+        guard var profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }
+        guard profile.needsSetup else { return }
+        profile.needsSetup = false
+        profilesModel.update(profile)
+        // Only now, with the profile's servers and identity settled, is an
+        // import meaningful — see `Profile.isAwaitingSetup`.
+        activateUniversalWatchlist()
     }
 
     /// Removes a profile (the default profile can't be removed). If it was

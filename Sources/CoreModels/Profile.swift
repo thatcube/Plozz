@@ -140,6 +140,26 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// anti-clobber invariant). Read it through `isKids`.
     public var isKidsProfile: Bool?
 
+    /// Whether this profile has never been through its setup step.
+    ///
+    /// A brand-new profile inherits every server in the household (no explicit
+    /// membership means "all of them"), so left alone it would immediately
+    /// import every server's native watchlist and be born holding the
+    /// household's aggregate list. While this is `true` the native import is
+    /// skipped entirely — the profile's own local state still hydrates — and it
+    /// runs once, properly, after the person has said which servers this profile
+    /// uses and who it watches as.
+    ///
+    /// Optional for migration: existing profiles decode `nil`, which means
+    /// "set up long ago", so nothing changes for them.
+    public var isAwaitingSetup: Bool?
+
+    /// Whether the setup step still owes this profile a pass. See `isAwaitingSetup`.
+    public var needsSetup: Bool {
+        get { isAwaitingSetup == true }
+        set { isAwaitingSetup = newValue ? true : nil }
+    }
+
     /// Whether this profile is restricted. See `isKidsProfile`.
     public var isKids: Bool {
         get { isKidsProfile == true }
@@ -166,7 +186,8 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         seerrUserName: String? = nil,
         seerrUserAvatarURL: String? = nil,
         lock: ProfileLock? = nil,
-        isKidsProfile: Bool? = nil
+        isKidsProfile: Bool? = nil,
+        isAwaitingSetup: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -188,6 +209,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.seerrUserAvatarURL = seerrUserAvatarURL
         self.lock = lock
         self.isKidsProfile = isKidsProfile
+        self.isAwaitingSetup = isAwaitingSetup
     }
 
     /// Whether opening this profile needs a PIN.

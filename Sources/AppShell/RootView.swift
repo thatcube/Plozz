@@ -57,6 +57,9 @@ public struct RootView: View {
     @State private var showSyncReceiveFromSettings = false
     /// A just-set-up profile whose PIN is being chosen.
     @State private var newProfileLockTarget: Profile?
+    /// Identifies the server awaiting an identity choice, for `.fullScreenCover(item:)`.
+    private struct PendingIdentityAccount: Identifiable { let id: String }
+
     /// Library discovery for the setup step's cover.
     @State private var setupLibraries = ProfileSetupLibrariesLoader()
     @State private var showSyncSend = false
@@ -450,6 +453,20 @@ public struct RootView: View {
                 errorMessage: appState.profileFlow.profileLockError,
                 onSubmit: { appState.profileFlow.submitProfileLockPIN($0) },
                 onCancel: { appState.profileFlow.cancelProfileLockPrompt() }
+            )
+        }
+        // Turning a server ON for a profile asks the same question setup asks:
+        // who does this profile watch as there? Without it the watchlist import
+        // reads that server as the account owner and quietly pulls their list
+        // into, say, a child's profile.
+        .fullScreenCover(item: Binding(
+            get: { appState.profileFlow.pendingIdentityAccountID.map(PendingIdentityAccount.init(id:)) },
+            set: { if $0 == nil { appState.profileFlow.resolveIdentityPrompt(for: appState.profileFlow.pendingIdentityAccountID ?? "") } }
+        )) { pending in
+            ProfileServerIdentityPromptView(
+                appState: appState,
+                accountID: pending.id,
+                onFinish: { appState.profileFlow.resolveIdentityPrompt(for: pending.id) }
             )
         }
         // A newly created profile's setup step: which servers, who it watches as,

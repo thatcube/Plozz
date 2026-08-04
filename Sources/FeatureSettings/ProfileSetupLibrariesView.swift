@@ -28,20 +28,27 @@ public struct ProfileSetupLibrariesView: View {
     @State private var path: [SettingsRoute] = []
 
     public var body: some View {
-        NavigationStack(path: $path) {
-            ZStack {
-                AppBackground(palette: palette).ignoresSafeArea()
+        // The background sits OUTSIDE the NavigationStack. Inside its root
+        // content it belonged to the root view, so pushing "Watching as"
+        // replaced it — leaving the pushed page transparent and showing Home
+        // through the cover. Out here it backs every page in the stack.
+        ZStack {
+            AppBackground(palette: palette).ignoresSafeArea()
+            NavigationStack(path: $path) {
                 VStack(spacing: 0) {
                     MyLibrariesDetailView(scope: scope)
                     doneBar
                 }
-            }
-            .navigationDestination(for: SettingsRoute.self) { route in
-                // The only route this screen can push.
-                if case let .plexUser(accountID) = route {
-                    PlexLinkedUserDetailView(scope: scope, accountID: accountID)
+                .navigationDestination(for: SettingsRoute.self) { route in
+                    // The only route this screen can push.
+                    if case let .plexUser(accountID) = route {
+                        PlexLinkedUserDetailView(scope: scope, accountID: accountID)
+                    }
                 }
             }
+            // The stack's own surface would otherwise paint over the shared
+            // background on every page.
+            .background(Color.clear)
         }
         .environment(\.colorScheme, palette.isLight ? .light : .dark)
     }

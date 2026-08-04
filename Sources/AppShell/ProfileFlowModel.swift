@@ -392,6 +392,11 @@ public final class ProfileFlowModel {
         // Only now, with the profile's servers and identity settled, is an
         // import meaningful — see `Profile.isAwaitingSetup`.
         activateUniversalWatchlist()
+        // The one-time theme picker used to be raised by the old create path,
+        // which nothing reaches now that both creation routes go through
+        // `createProfileForSetup`. Offer it here instead, so a new profile still
+        // gets to pick a look.
+        isPickingThemeForNewProfile = true
         pendingLockOfferProfile = profile
     }
 
@@ -476,6 +481,37 @@ public final class ProfileFlowModel {
         if included { next.insert(accountID) } else { next.remove(accountID) }
         profilesModel.setActiveAccountIDs(Array(next), for: profileID)
         accountsProviders.reloadAccounts()
+        if included { noteServerAwaitingIdentity(accountID, profileID: profileID) }
+    }
+
+    /// Servers switched on for a profile that hasn't yet said who it watches as
+    /// there. Keyed by profile so switching away and back doesn't lose it.
+    ///
+    /// Turning a server on later is the same decision setup asks at creation, and
+    /// it has the same consequence: the watchlist import reads that server as
+    /// whoever the profile plays as, defaulting to the account owner. Silently
+    /// importing the owner's list into a child's profile is exactly what the
+    /// setup step exists to prevent, so the same question gets asked here.
+    @ObservationIgnored private var serversAwaitingIdentity: [String: Set<String>] = [:]
+
+    /// The server this profile has just enabled and not yet chosen an identity
+    /// on, if any. `RootView` presents the picker from this.
+    public var pendingIdentityAccountID: String? {
+        serversAwaitingIdentity[profilesModel.activeProfileID]?.first
+    }
+
+    private func noteServerAwaitingIdentity(_ accountID: String, profileID: String) {
+        // Only Plex has multiple identities to choose between, and only when the
+        // profile hasn't already bound one for this account.
+        guard accountsProviders.accounts.first(where: { $0.id == accountID })?.server.provider == .plex,
+              profilesModel.activeProfile.homeUserBinding(forPlexAccount: accountID) == nil
+        else { return }
+        serversAwaitingIdentity[profileID, default: []].insert(accountID)
+    }
+
+    /// Clears the pending question once an identity is chosen (or declined).
+    public func resolveIdentityPrompt(for accountID: String) {
+        serversAwaitingIdentity[profilesModel.activeProfileID]?.remove(accountID)
     }
 
     // MARK: Internals

@@ -35,6 +35,18 @@ enum HomeRuntimeScope {
             .sorted()
             .joined(separator: "|")
     }
+
+    /// The identity of the Home/Search subtree: which accounts AND which profile.
+    ///
+    /// The profile half is the point. `accountScopeKey` alone was the `.id()` of
+    /// both tabs, so switching between two profiles that share the same servers —
+    /// the normal case in a household — produced an unchanged key, SwiftUI kept
+    /// the subtree, and the cached `HomeViewModel` went on serving the previous
+    /// profile's content. The watchlist row was the visible symptom; every
+    /// curated row had the same problem.
+    static func homeScopeKey(profileID: String, accounts: [Account]) -> String {
+        "\(profileID)|" + accountScopeKey(accounts)
+    }
 }
 
 /// Top-level view that renders one screen per `SessionState`.
@@ -286,7 +298,10 @@ public struct RootView: View {
                         askProfileOnStartup: appState.profilesModel.askProfileOnStartup,
                         homeRuntime: HomeTabRuntime(
                             homeViewModel: homeViewModelBox,
-                            scopeKey: HomeRuntimeScope.accountScopeKey(accounts.map(\.account)),
+                            scopeKey: HomeRuntimeScope.homeScopeKey(
+                                profileID: appState.profilesModel.activeProfileID,
+                                accounts: accounts.map(\.account)
+                            ),
                             pendingPlay: appState.pendingPlay
                         ),
                         isAccountIncludedInActiveProfile: { appState.profileFlow.isAccountIncludedInActiveProfile($0) },

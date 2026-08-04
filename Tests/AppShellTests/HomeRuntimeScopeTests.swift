@@ -64,4 +64,48 @@ final class HomeRuntimeScopeTests: XCTestCase {
             deviceID: "device"
         )
     }
+
+    // MARK: - homeScopeKey (the Home/Search subtree identity)
+
+    /// The regression this exists for: two profiles sharing the same servers
+    /// produced an identical `accountScopeKey`, so SwiftUI kept the Home subtree
+    /// and its cached view model went on serving the previous profile's rows —
+    /// the watchlist most visibly. The key must move when the profile does, even
+    /// when nothing about the accounts has.
+    func testHomeScopeKeyChangesOnProfileSwitchWithIdenticalAccounts() {
+        let accounts = [account(id: "a"), account(id: "b")]
+        let alice = HomeRuntimeScope.homeScopeKey(profileID: "alice", accounts: accounts)
+        let bob = HomeRuntimeScope.homeScopeKey(profileID: "bob", accounts: accounts)
+        XCTAssertNotEqual(alice, bob)
+    }
+
+    func testHomeScopeKeyStillChangesWhenAccountsChange() {
+        let before = HomeRuntimeScope.homeScopeKey(profileID: "alice", accounts: [account(id: "a")])
+        let after = HomeRuntimeScope.homeScopeKey(
+            profileID: "alice",
+            accounts: [account(id: "a"), account(id: "b")]
+        )
+        XCTAssertNotEqual(before, after)
+    }
+
+    /// Stable for an unchanged profile + account set: the key is a SwiftUI `.id`,
+    /// so a spurious change tears down and rebuilds Home and Search.
+    func testHomeScopeKeyIsStableForTheSameInputs() {
+        let accounts = [account(id: "a"), account(id: "b")]
+        XCTAssertEqual(
+            HomeRuntimeScope.homeScopeKey(profileID: "alice", accounts: accounts),
+            HomeRuntimeScope.homeScopeKey(profileID: "alice", accounts: accounts)
+        )
+    }
+
+    /// Account ORDER is not identity — the underlying key sorts — so a reshuffled
+    /// list must not rebuild the world.
+    func testHomeScopeKeyIgnoresAccountOrder() {
+        let accounts = [account(id: "a"), account(id: "b")]
+        XCTAssertEqual(
+            HomeRuntimeScope.homeScopeKey(profileID: "alice", accounts: accounts),
+            HomeRuntimeScope.homeScopeKey(profileID: "alice", accounts: accounts.reversed())
+        )
+    }
+
 }

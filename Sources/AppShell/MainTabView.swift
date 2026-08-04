@@ -298,8 +298,15 @@ struct MainTabView: View {
         ThemePalette.palette(for: themeModel.theme, systemColorScheme: systemColorScheme)
     }
 
-    private var accountScopeKey: String {
-        HomeRuntimeScope.accountScopeKey(accounts.map(\.account))
+    /// The identity of both tab subtrees. Includes the active profile, so
+    /// switching profiles rebuilds Home/Search even when the two profiles share
+    /// the same servers — otherwise the cached view model keeps serving the
+    /// previous profile's rows.
+    private var homeScopeKey: String {
+        HomeRuntimeScope.homeScopeKey(
+            profileID: activeProfile.id,
+            accounts: accounts.map(\.account)
+        )
     }
 
 
@@ -440,7 +447,7 @@ struct MainTabView: View {
                 isActiveTab: isActiveTab(.home),
                 runtime: homeRuntime
             )
-            .id(accountScopeKey)
+            .id(homeScopeKey)
     }
 
     /// Extracted for the same reason as ``homeTabContent`` — see there.
@@ -475,7 +482,7 @@ struct MainTabView: View {
                 pendingTitleRoute: $pendingTitleRoute,
                 isActiveTab: isActiveTab(.search)
             )
-            .id(accountScopeKey)
+            .id(homeScopeKey)
     }
 
     var body: some View {
@@ -530,8 +537,8 @@ struct MainTabView: View {
             // asked for, so restoring the live stream never costs the repro.
             PersonDiagnostics.armLatchIfTracing()
         }
-        .onChange(of: accountScopeKey) { previous, current in
-            // TEMPORARY. `accountScopeKey` is the `.id()` of BOTH tab subtrees, so
+        .onChange(of: homeScopeKey) { previous, current in
+            // TEMPORARY. `homeScopeKey` is the `.id()` of BOTH tab subtrees, so
             // every change destroys and rebuilds the whole Home/Search tree —
             // including any detail page pushed on top of it. That is the only
             // thing on this path that explains `DetailStackDepth` cycling

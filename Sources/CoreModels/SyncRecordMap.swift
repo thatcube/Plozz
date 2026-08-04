@@ -418,6 +418,10 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
     /// on every other device in the household. Carries a salted verifier only —
     /// never the PIN itself (see `ProfileLock`).
     public var lock: ProfileLock?
+    /// Whether this is a restricted Kids Profile. Synced for the same reason the
+    /// lock is: a restriction that only applied on one device wouldn't restrict
+    /// anything.
+    public var isKidsProfile: Bool?
 
     public init(profile p: Profile) {
         self.id = p.id
@@ -431,6 +435,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         self.avatarEmoji = p.avatarEmoji
         self.avatarEmojiColorIndex = p.avatarEmojiColorIndex
         self.lock = p.lock
+        self.isKidsProfile = p.isKidsProfile
     }
 
     /// Merge this DTO's cosmetic fields into an existing profile, preserving ALL
@@ -457,6 +462,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         p.avatarEmoji = avatarEmoji
         p.avatarEmojiColorIndex = avatarEmojiColorIndex
         p.lock = lock
+        p.isKidsProfile = isKidsProfile
         return p
     }
 
@@ -467,6 +473,6 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
             createdAt: createdAt,
             avatarImageURL: SyncURLSanitizer.sanitize(string: avatarImageURL),
             avatarEmoji: avatarEmoji, avatarEmojiColorIndex: avatarEmojiColorIndex,
-            lock: lock)
+            lock: lock, isKidsProfile: isKidsProfile)
     }
 }

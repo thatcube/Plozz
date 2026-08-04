@@ -103,3 +103,35 @@ public enum ProfileLockCopy {
         comment: "Explains how to recover from a forgotten Profile Lock PIN. There is no email reset because Plozz has no account of its own."
     )
 }
+
+/// Copy for Kids Profiles — the restriction half of the lock.
+///
+/// "Kids Profile" is the term Netflix, Disney+ and Hulu all use, so it needs no
+/// explaining. The description is deliberately precise about what it does and
+/// does NOT do: Plozz has no maturity filtering yet, so promising "only suitable
+/// content" would be a lie.
+public enum KidsProfileCopy {
+    public static let title = LocalizedStringResource(
+        "settings.kidsProfile.title",
+        defaultValue: "Kids Profile",
+        comment: "Toggle marking a profile as a child's, which hides the shared household settings while it's in use."
+    )
+
+    public static let explanation = LocalizedStringResource(
+        "settings.kidsProfile.explanation",
+        defaultValue: "Hides shared settings while this profile is in use, so servers, profiles and sign-outs can't be changed from it. It doesn't filter what can be watched.",
+        comment: "Explains exactly what marking a profile as a Kids Profile does. The last sentence matters: there is no content filtering yet and the copy must not imply otherwise."
+    )
+
+    public static let pairWithLock = LocalizedStringResource(
+        "settings.kidsProfile.pairWithLock",
+        defaultValue: "Lock your own profile too, so this one can't be used to open yours.",
+        comment: "Nudge shown when a Kids Profile is turned on but the current profile has no Profile Lock — the two features only work as a pair."
+    )
+
+    public static let restrictedHere = LocalizedStringResource(
+        "settings.kidsProfile.restrictedHere",
+        defaultValue: "Shared settings are hidden on a Kids Profile. Switch to another profile to change them.",
+        comment: "Shown in Settings while a Kids Profile is active, explaining why the shared section isn't there."
+    )
+}

@@ -144,3 +144,84 @@ final class ProfileLockTests: XCTestCase {
         XCTAssertNil(local.lock)
     }
 }
+
+/// The restriction half: a Kids Profile hides the shared settings so a child in
+/// their own (deliberately unlocked) profile can't route around the lock on the
+/// grown-ups' profiles by deleting them, removing servers, or signing out.
+final class KidsProfileTests: XCTestCase {
+
+    func testDefaultsToUnrestricted() {
+        let profile = Profile(name: "Brando")
+        XCTAssertFalse(profile.isKids)
+        XCTAssertNil(profile.isKidsProfile)
+    }
+
+    func testSettingAndClearingTheFlag() {
+        var profile = Profile(name: "Kid")
+        profile.isKids = true
+        XCTAssertTrue(profile.isKids)
+        profile.isKids = false
+        XCTAssertFalse(profile.isKids)
+    }
+
+    /// Profiles written before this field existed must keep decoding, unrestricted.
+    func testLegacyProfileDecodesAsUnrestricted() throws {
+        let legacy = #"{"id":"p1","name":"Kid","avatarSymbol":"star","colorIndex":0,"createdAt":0}"#
+        let profile = try JSONDecoder().decode(Profile.self, from: Data(legacy.utf8))
+        XCTAssertFalse(profile.isKids)
+    }
+
+    /// Clearing must write *absence*, not `false` — an older peer omits the key
+    /// entirely, and the sync layer requires capture(apply(x)) to be byte-stable.
+    func testClearedFlagIsOmittedFromTheEncodingRatherThanWrittenAsFalse() throws {
+        var profile = Profile(name: "Kid")
+        profile.isKids = true
+        profile.isKids = false
+
+        let json = String(decoding: try JSONEncoder().encode(profile), as: UTF8.self)
+        XCTAssertFalse(json.contains("isKidsProfile"), json)
+    }
+
+    func testFlagSurvivesTheSyncRoundTrip() {
+        var profile = Profile(name: "Kid")
+        profile.isKids = true
+
+        let restored = ProfileSyncDTO(profile: profile).makeProfile()
+        XCTAssertTrue(restored.isKids, "a restriction that stayed on one device wouldn't restrict anything")
+    }
+
+    func testMergingPreservesDeviceLocalStateWhileApplyingTheFlag() {
+        var remote = Profile(id: "p1", name: "Kid")
+        remote.isKids = true
+        var local = Profile(id: "p1", name: "Kid", plexHomeUserID: "home-1")
+
+        local = ProfileSyncDTO(profile: remote).merged(into: local)
+        XCTAssertTrue(local.isKids)
+        XCTAssertEqual(local.plexHomeUserID, "home-1")
+    }
+
+    /// Lifting the restriction on one device must lift it everywhere.
+    func testClearingTheFlagPropagates() {
+        var local = Profile(id: "p1", name: "Kid")
+        local.isKids = true
+
+        let remoteUnrestricted = Profile(id: "p1", name: "Kid")
+        local = ProfileSyncDTO(profile: remoteUnrestricted).merged(into: local)
+        XCTAssertFalse(local.isKids)
+    }
+
+    /// The two features are independent: a Kids Profile is normally left UNLOCKED
+    /// (the child has to be able to get in) while the grown-ups' profiles carry
+    /// the locks.
+    func testRestrictionAndLockAreIndependent() {
+        var kid = Profile(name: "Kid")
+        kid.isKids = true
+        XCTAssertTrue(kid.isKids)
+        XCTAssertFalse(kid.isLocked, "a kids profile is normally left open")
+
+        var adult = Profile(name: "Brando")
+        adult.lock = ProfileLock.make(pin: "4821", iterations: 64)
+        XCTAssertTrue(adult.isLocked)
+        XCTAssertFalse(adult.isKids)
+    }
+}

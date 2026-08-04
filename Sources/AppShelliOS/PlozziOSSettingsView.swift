@@ -215,54 +215,64 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.subtitles, title: "Subtitles", systemImage: "captions.bubble")
                         settingsRow(.spoilers, title: "Spoilers", systemImage: "eye.slash")
                         settingsRow(.nightShift, title: "Circadian Mode", systemImage: "moon.stars.fill")
-                        settingsRow(
-                            .profileLock,
-                            title: ProfileLockCopy.title,
-                            systemImage: appModel.profiles.activeProfile.isLocked ? "lock" : "lock.open"
-                        )
+                        if !appModel.profiles.activeProfile.isKids {
+                            settingsRow(
+                                .profileLock,
+                                title: ProfileLockCopy.title,
+                                systemImage: appModel.profiles.activeProfile.isLocked ? "lock" : "lock.open"
+                            )
+                        }
                     } footer: {
                         Text(profileScopeFooter)
                     }
 
-                    SettingsSectionGroup(deviceSettingsTitle) {
-                        Button {
-                            selection = .profiles
-                        } label: {
-                            Label("Profiles", systemImage: "person.2")
-                                .frame(
-                                    maxWidth: .infinity,
-                                    alignment: .leading
-                                )
-                                .contentShape(Rectangle())
+                    // Withheld on a Kids Profile: every destructive control in the app
+                    // lives in here (remove server, delete profile, sign out of
+                    // everything), and a child's profile is deliberately left
+                    // unlocked, so otherwise the lock could simply be routed around.
+                    if appModel.profiles.activeProfile.isKids {
+                        PlozziOSKidsProfileNote()
+                    } else {
+                        SettingsSectionGroup(deviceSettingsTitle) {
+                            Button {
+                                selection = .profiles
+                            } label: {
+                                Label("Profiles", systemImage: "person.2")
+                                    .frame(
+                                        maxWidth: .infinity,
+                                        alignment: .leading
+                                    )
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            settingsRow(
+                                .requests,
+                                verbatimTitle: "Seerr",
+                                systemImage: "sparkles.tv"
+                            )
+                            settingsRow(
+                                .servers,
+                                title: "Servers",
+                                systemImage: "externaldrive.connected.to.line.below"
+                            )
+                            settingsRow(
+                                .downloads,
+                                title: "Downloads",
+                                systemImage: "arrow.down.circle"
+                            )
+                            settingsRow(
+                                .syncSetup,
+                                title: "iCloud Sync",
+                                systemImage: "icloud"
+                            )
+                            settingsRow(
+                                .metadata,
+                                title: "Metadata",
+                                systemImage: "sparkles.rectangle.stack"
+                            )
+                        } footer: {
+                            Text(everyoneScopeFooter)
                         }
-                        .buttonStyle(.plain)
-                        settingsRow(
-                            .requests,
-                            verbatimTitle: "Seerr",
-                            systemImage: "sparkles.tv"
-                        )
-                        settingsRow(
-                            .servers,
-                            title: "Servers",
-                            systemImage: "externaldrive.connected.to.line.below"
-                        )
-                        settingsRow(
-                            .downloads,
-                            title: "Downloads",
-                            systemImage: "arrow.down.circle"
-                        )
-                        settingsRow(
-                            .syncSetup,
-                            title: "iCloud Sync",
-                            systemImage: "icloud"
-                        )
-                        settingsRow(
-                            .metadata,
-                            title: "Metadata",
-                            systemImage: "sparkles.rectangle.stack"
-                        )
-                    } footer: {
-                        Text(everyoneScopeFooter)
                     }
 
                     SettingsSectionGroup("Support") {
@@ -451,7 +461,7 @@ private struct PlozziOSSettingsSplitView: View {
             PlozziOSAttributionsView()
         case .about:
             PlozziOSAboutSettingsView(
-                hasAccounts: !appModel.accounts.isEmpty,
+                hasAccounts: !appModel.accounts.isEmpty && !appModel.profiles.activeProfile.isKids,
                 onSignOutAll: { confirmSignOutAll = true }
             )
         }
@@ -637,55 +647,63 @@ private struct PlozziOSSettingsCompactMenu: View {
                 Text(profileScopeFooter)
             }
 
-                SettingsSectionGroup(deviceSettingsTitle) {
-                NavigationLink {
-                    PlozziOSProfilesView(appModel: appModel)
-                } label: {
-                    Label("Profiles", systemImage: "person.2")
-                }
-
-                NavigationLink {
-                    PlozziOSSeerrSettingsView(appModel: appModel)
-                } label: {
-                    Label {
-                        Text(verbatim: "Seerr")
-                    } icon: {
-                        Image(systemName: "sparkles.tv")
+                // Withheld on a Kids Profile: every destructive control in the app
+                // lives in here (remove server, delete profile, sign out of
+                // everything), and a child's profile is deliberately left
+                // unlocked, so otherwise the lock could simply be routed around.
+                if appModel.profiles.activeProfile.isKids {
+                    PlozziOSKidsProfileNote()
+                } else {
+                    SettingsSectionGroup(deviceSettingsTitle) {
+                    NavigationLink {
+                        PlozziOSProfilesView(appModel: appModel)
+                    } label: {
+                        Label("Profiles", systemImage: "person.2")
                     }
+    
+                    NavigationLink {
+                        PlozziOSSeerrSettingsView(appModel: appModel)
+                    } label: {
+                        Label {
+                            Text(verbatim: "Seerr")
+                        } icon: {
+                            Image(systemName: "sparkles.tv")
+                        }
+                    }
+    
+                    NavigationLink {
+                        PlozziOSServersSettingsView(
+                            appModel: appModel,
+                            onAddServer: onAddServer
+                        )
+                    } label: {
+                        Label("Servers", systemImage: "externaldrive.connected.to.line.below")
+                    }
+                    NavigationLink {
+                        PlozziOSDownloadSettingsView(model: appModel.downloads)
+                    } label: {
+                        Label("Downloads", systemImage: "arrow.down.circle")
+                    }
+                    NavigationLink {
+                        PlozziOSSyncSetupSettingsView(appModel: appModel)
+                    } label: {
+                        Label("iCloud Sync", systemImage: "icloud")
+                    }
+                    // Metadata uses the Button + navigationDestination pattern rather than
+                    // a NavigationLink: a destination/value NavigationLink nested in a
+                    // SettingsSectionGroup eager-pushes/swallows taps on this codebase.
+                    Button {
+                        showMetadata = true
+                    } label: {
+                        Label("Metadata", systemImage: "sparkles.rectangle.stack")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } footer: {
+                    Text(everyoneScopeFooter)
                 }
-
-                NavigationLink {
-                    PlozziOSServersSettingsView(
-                        appModel: appModel,
-                        onAddServer: onAddServer
-                    )
-                } label: {
-                    Label("Servers", systemImage: "externaldrive.connected.to.line.below")
                 }
-                NavigationLink {
-                    PlozziOSDownloadSettingsView(model: appModel.downloads)
-                } label: {
-                    Label("Downloads", systemImage: "arrow.down.circle")
-                }
-                NavigationLink {
-                    PlozziOSSyncSetupSettingsView(appModel: appModel)
-                } label: {
-                    Label("iCloud Sync", systemImage: "icloud")
-                }
-                // Metadata uses the Button + navigationDestination pattern rather than
-                // a NavigationLink: a destination/value NavigationLink nested in a
-                // SettingsSectionGroup eager-pushes/swallows taps on this codebase.
-                Button {
-                    showMetadata = true
-                } label: {
-                    Label("Metadata", systemImage: "sparkles.rectangle.stack")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            } footer: {
-                Text(everyoneScopeFooter)
-            }
 
                 SettingsSectionGroup("Support") {
                 NavigationLink {
@@ -714,7 +732,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 LabeledContent("Build") {
                     Text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
                 }
-                if !appModel.accounts.isEmpty {
+                if !appModel.accounts.isEmpty, !appModel.profiles.activeProfile.isKids {
                     Button("Sign Out of All Accounts", role: .destructive) {
                         confirmSignOutAll = true
                     }

@@ -117,6 +117,35 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// setup screen says out loud.
     public var lock: ProfileLock?
 
+    /// Whether this is a **Kids Profile**: shared, household-level settings are
+    /// hidden while it's active.
+    ///
+    /// The other half of the lock. A lock keeps a child *out* of the grown-ups'
+    /// profiles; this keeps them from wrecking the household from inside their
+    /// own — removing servers, deleting profiles, signing everything out. Both
+    /// are needed, because the destructive controls live in a section every
+    /// profile can reach.
+    ///
+    /// Only settable from a profile that isn't itself a Kids Profile, so it
+    /// can't be switched off from inside. Synced, for the same reason the lock
+    /// is: a restriction that applied on one device wouldn't be a restriction.
+    ///
+    /// NOTE: this restricts *settings*, not *content* — Plozz has no maturity
+    /// filtering yet, so a Kids Profile still sees everything its libraries
+    /// contain. Named for what it will grow into, but don't oversell it in copy.
+    ///
+    /// Optional purely for migration: profiles encoded before this field existed
+    /// decode as `nil`, and the synthesized encoder omits `nil` rather than
+    /// writing `false`, so an older peer's bytes round-trip unchanged (the sync
+    /// anti-clobber invariant). Read it through `isKids`.
+    public var isKidsProfile: Bool?
+
+    /// Whether this profile is restricted. See `isKidsProfile`.
+    public var isKids: Bool {
+        get { isKidsProfile == true }
+        set { isKidsProfile = newValue ? true : nil }
+    }
+
     public init(
         id: String = UUID().uuidString,
         name: String,
@@ -136,7 +165,8 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         seerrUserID: Int? = nil,
         seerrUserName: String? = nil,
         seerrUserAvatarURL: String? = nil,
-        lock: ProfileLock? = nil
+        lock: ProfileLock? = nil,
+        isKidsProfile: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -157,6 +187,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.seerrUserName = seerrUserName
         self.seerrUserAvatarURL = seerrUserAvatarURL
         self.lock = lock
+        self.isKidsProfile = isKidsProfile
     }
 
     /// Whether opening this profile needs a PIN.

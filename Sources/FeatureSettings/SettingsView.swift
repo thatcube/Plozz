@@ -343,8 +343,18 @@ public struct SettingsView: View {
                     // this container at once.
                     profileContainer
 
-                    // Then what every profile shares, regardless of who is using it.
-                    everyoneSection
+                    // Then what every profile shares, regardless of who is using
+                    // it — unless a Kids Profile is active, in which case the
+                    // whole section is withheld. Every destructive control in the
+                    // app lives in there (remove server, delete profile, sign out
+                    // of everything), and a child's profile is deliberately left
+                    // unlocked, so without this the lock on the grown-ups'
+                    // profiles could simply be routed around.
+                    if activeProfile.isKids {
+                        kidsProfileNote
+                    } else {
+                        everyoneSection
+                    }
 
                     // About + Attributions + Sign Out render INLINE at the bottom.
                     aboutAndSignOut
@@ -384,6 +394,10 @@ public struct SettingsView: View {
             ProfileEditorView(
                 editingProfile: profile,
                 canDelete: profile.id != profiles.first?.id,
+                // Edits the ACTIVE profile, so the restriction toggle is
+                // deliberately absent — a Kids Profile must not be able to lift
+                // its own restriction. Mark one from Everyone › Profiles.
+                canEditRestrictions: false,
                 photoSourceAccounts: accounts,
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
                 onSave: { draft in
@@ -482,9 +496,13 @@ public struct SettingsView: View {
             // it to every device), so it sits here rather than in the shared
             // section — even though "who can open this" reads like a household
             // concern, the lock is a property of this one profile.
-            navRow(ProfileLockCopy.title, icon: activeProfile.isLocked ? "lock" : "lock.open",
-                   value: activeProfile.isLocked ? Text(ProfileLockCopy.on) : Text(ProfileLockCopy.off),
-                   route: .profileLock)
+            // Withheld on a Kids Profile: letting a child set a PIN here would let
+            // them lock the grown-ups out of the profile the grown-ups manage.
+            if !activeProfile.isKids {
+                navRow(ProfileLockCopy.title, icon: activeProfile.isLocked ? "lock" : "lock.open",
+                       value: activeProfile.isLocked ? Text(ProfileLockCopy.on) : Text(ProfileLockCopy.off),
+                       route: .profileLock)
+            }
         }
     }
 
@@ -571,6 +589,32 @@ public struct SettingsView: View {
         .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
     }
 
+    /// Stands in for the withheld shared section on a Kids Profile, so the page
+    /// doesn't just silently lose a card — a grown-up looking for Servers needs to
+    /// be told where it went rather than assuming the app is broken.
+    private var kidsProfileNote: some View {
+        HStack(spacing: 20) {
+            Image(systemName: "figure.and.child.holdinghands")
+                .font(.system(size: 34, weight: .regular))
+                .plozzForeground(.secondary)
+                .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
+                .background(Circle().fill(palette.fillSubtle))
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(KidsProfileCopy.title)
+                    .font(Self.identityTitleFont)
+                Text(KidsProfileCopy.restrictedHere)
+                    .font(.subheadline)
+                    .plozzForeground(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(28)
+        .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
+    }
+
     /// About info + Attributions entry + Sign Out, rendered INLINE at the
     /// bottom of the main Settings page. About no longer drills in — only
     /// "Attributions" pushes one level deeper. Spacing here mirrors
@@ -601,7 +645,7 @@ public struct SettingsView: View {
 
             // The only Sign-Out-All entry point now lives here, inline, guarded
             // by the are-you-sure confirmation alert on the root view.
-            if !accounts.isEmpty {
+            if !accounts.isEmpty, !activeProfile.isKids {
                 signOutAllRow
             }
 

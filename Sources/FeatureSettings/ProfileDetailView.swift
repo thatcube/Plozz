@@ -49,6 +49,10 @@ struct ProfileDetailView: View {
                 ProfileEditorView(
                     editingProfile: profile,
                     canDelete: profile.id != context.profiles.first?.id,
+                    // This screen lives in the shared section, which a Kids
+                    // Profile can't reach — so being here already proves the
+                    // person is on an unrestricted profile.
+                    canEditRestrictions: true,
                     photoSourceAccounts: context.accounts,
                     plexHomeUsersFetcher: context.plexHomeUsersFetcher,
                     onSave: { draft in
@@ -65,6 +69,7 @@ struct ProfileDetailView: View {
             case .new:
                 ProfileEditorView(
                     canDelete: false,
+                    canEditRestrictions: true,
                     photoSourceAccounts: context.accounts,
                     existingColorIndices: context.profiles.map(\.colorIndex),
                     plexHomeUsersFetcher: context.plexHomeUsersFetcher,

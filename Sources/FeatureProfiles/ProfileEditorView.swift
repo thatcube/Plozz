@@ -689,6 +689,9 @@ public struct ProfileEditorView: View {
     /// view's edges, while horizontal scrolling lets categories grow freely.
     @ViewBuilder
     private func emojiRows(for emojis: [String]) -> some View {
+        let shadowClearance =
+            PlozzTheme.Metrics.railShadowLiftAllowance
+            + PlozzTheme.Metrics.railShadowFixedExtent
         ScrollView(.horizontal) {
             HStack(spacing: 18) {
                 ForEach(emojis, id: \.self) { emoji in
@@ -699,8 +702,12 @@ public struct ProfileEditorView: View {
             // must clip so horizontally scrolled emoji never paint over the
             // fixed preview pane to the left.
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, shadowClearance)
         }
+        // Same pattern as Home's media rows: expand the clipped viewport around
+        // focused content, then cancel that extra room from layout so category
+        // spacing remains unchanged.
+        .padding(.vertical, 12 - shadowClearance)
     }
 
     private func emojiTile(_ emoji: String) -> some View {

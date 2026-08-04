@@ -188,6 +188,10 @@ public final class ProfileFlowModel {
         // Installs the new profile's Plex Home-user token (synchronously from
         // cache for unprotected users; protected ones raise the PIN prompt).
         plexHomeUsers.ensurePlexIdentityForActiveProfile()
+        // Switching INTO a profile that never finished setup — abandoned here, or
+        // created on another device and synced across — asks the question again
+        // rather than leaving it permanently unable to import.
+        resumeSetupIfNeeded()
         Task { @MainActor [weak self] in
             guard let self else { return }
             await self.updateTrackersForActiveProfile()
@@ -367,6 +371,20 @@ public final class ProfileFlowModel {
         performSwitch(to: configured.id)
         pendingSetupProfile = configured
         return configured
+    }
+
+    /// Re-presents setup for a profile that never finished it.
+    ///
+    /// The gate is PERSISTED, so quitting mid-setup leaves it set — and a profile
+    /// stuck behind it never imports a watchlist at all, silently and forever.
+    /// Resuming asks the question that was never answered, which is the only
+    /// answer that's both safe and correct: importing anyway is the leak the gate
+    /// exists to prevent, and clearing it without asking is the same thing.
+    public func resumeSetupIfNeeded() {
+        guard pendingSetupProfile == nil else { return }
+        let active = profilesModel.activeProfile
+        guard active.needsSetup else { return }
+        pendingSetupProfile = active
     }
 
     /// Marks setup finished and releases the deferred watchlist import.

@@ -869,11 +869,47 @@ final class PlozziOSAppModel {
         }
     }
 
+    /// Which screen puts the setup sequence on screen.
+    ///
+    /// A cover can only be presented by a view that isn't itself covered, and the
+    /// sequence starts from two very different places: creating a profile from
+    /// Settings (which is a sheet, so a cover asked for from the root would be
+    /// silently dropped), and resuming an abandoned setup at launch (when
+    /// Settings isn't open at all, and the Profiles page isn't on screen to ask).
+    ///
+    /// Both sites are wired up, and this says which one owns the presentation —
+    /// so they can never both try, which is undefined behaviour.
+    enum ProfileOnboardingOrigin {
+        case settings
+        case launch
+    }
+
+    private(set) var profileOnboardingOrigin: ProfileOnboardingOrigin?
+
+    /// Whether `origin` should present the sequence right now.
+    func isPresentingProfileOnboarding(from origin: ProfileOnboardingOrigin) -> Bool {
+        profileOnboardingStep != nil && profileOnboardingOrigin == origin
+    }
+
     /// The setup step currently being presented, if any.
     private(set) var profileOnboardingStep: ProfileOnboardingStep?
     /// The profile being set up. Held by ID, not by value: the record changes
     /// underneath us as each step writes to it.
     private(set) var profileOnboardingID: String?
+
+    /// Re-presents setup for a profile that never finished it.
+    ///
+    /// The gate is PERSISTED, so quitting mid-setup leaves it set — and a profile
+    /// stuck behind it never imports a watchlist at all, silently and forever.
+    /// Resuming asks the question that was never answered: importing anyway is
+    /// the leak the gate exists to prevent, and clearing it without asking is the
+    /// same thing by another route.
+    func resumeProfileOnboardingIfNeeded() {
+        guard profileOnboardingStep == nil, profiles.activeProfile.needsSetup else { return }
+        profileOnboardingID = profiles.activeProfileID
+        profileOnboardingOrigin = .launch
+        profileOnboardingStep = .libraries
+    }
 
     /// Advances to the next setup step, releasing the watchlist import when the
     /// server/identity step is finished.
@@ -896,6 +932,7 @@ final class PlozziOSAppModel {
         } else {
             profileOnboardingStep = nil
             profileOnboardingID = nil
+            profileOnboardingOrigin = nil
         }
     }
 
@@ -911,6 +948,7 @@ final class PlozziOSAppModel {
         }
         profileOnboardingStep = nil
         profileOnboardingID = nil
+        profileOnboardingOrigin = nil
     }
 
     /// Servers switched on for a profile that hasn't said who it watches as
@@ -1054,6 +1092,15 @@ final class PlozziOSAppModel {
     func performSelectProfile(_ id: String) {
         universalWatchlistRetryScheduler = nil
         profiles.select(id)
+        // Switching INTO a profile that never finished setup — abandoned here, or
+        // created on another device and synced across — asks the question again
+        // rather than leaving it permanently unable to import. Deferred by a
+        // runloop turn for the same reason creation is: this can run from inside
+        // a sheet that has to close first.
+        Task { @MainActor in
+            await Task.yield()
+            resumeProfileOnboardingIfNeeded()
+        }
         settings = PlozziOSSettingsModel(namespace: profiles.activeNamespace)
         seriesTrackStore = SeriesTrackPreferenceStore(
             namespace: profiles.activeNamespace
@@ -1447,6 +1494,7 @@ final class PlozziOSAppModel {
             // sheet, and SwiftUI drops a presentation requested while another is
             // still dismissing. One runloop turn lets the editor close first —
             // the same reason `scheduleFirstRunStep` yields.
+            profileOnboardingOrigin = .settings
             Task { @MainActor in
                 await Task.yield()
                 profileOnboardingStep = .libraries

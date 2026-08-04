@@ -933,7 +933,7 @@ private struct PlozziOSProfilesView: View {
         // while another is still dismissing — which is exactly how the theme step
         // went missing before.
         .fullScreenCover(isPresented: Binding(
-            get: { appModel.profileOnboardingStep != nil },
+            get: { appModel.isPresentingProfileOnboarding(from: .settings) },
             set: { if !$0 { appModel.cancelProfileOnboarding() } }
         )) {
             switch appModel.profileOnboardingStep {

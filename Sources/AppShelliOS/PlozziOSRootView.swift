@@ -89,6 +89,37 @@ public struct PlozziOSRootView: View {
                 onCancel: { appModel.cancelProfileLockPrompt() }
             )
         }
+        // Setup that was abandoned part-way — quit mid-flow, or arrived over sync
+        // from a device where it was never finished. The gate is persisted, so a
+        // profile left behind it never imports a watchlist at all; resuming asks
+        // the question that was never answered.
+        //
+        // Only the launch-origin case presents here. Creating a profile happens
+        // inside the Settings sheet and is presented from there instead — a cover
+        // asked for from this view while Settings is up would never appear. See
+        // `ProfileOnboardingOrigin`.
+        .fullScreenCover(isPresented: Binding(
+            get: { appModel.isPresentingProfileOnboarding(from: .launch) },
+            set: { if !$0 { appModel.cancelProfileOnboarding() } }
+        )) {
+            switch appModel.profileOnboardingStep {
+            case .libraries:
+                PlozziOSProfileSetupView(
+                    appModel: appModel,
+                    onDone: { appModel.advanceProfileOnboarding() }
+                )
+            case .theme:
+                NavigationStack {
+                    PlozziOSThemeWelcomeView(
+                        appModel: appModel,
+                        onContinue: { appModel.advanceProfileOnboarding() }
+                    )
+                }
+            case nil:
+                EmptyView()
+            }
+        }
+        .task { appModel.resumeProfileOnboardingIfNeeded() }
         .task {
             // Detect on cold launch: fire immediately if the pending set is already
             // warm, and close the cold-launch window after a short grace period so a

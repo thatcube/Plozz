@@ -470,6 +470,10 @@ public struct RootView: View {
                 onFinish: { appState.profileFlow.resolveIdentityPrompt(for: pending.id) }
             )
         }
+        // Resumes setup that was abandoned part-way — quit mid-flow, or synced
+        // from a device where it was never finished. The gate is persisted, so a
+        // profile left behind it would otherwise never import a watchlist at all.
+        .task { appState.profileFlow.resumeSetupIfNeeded() }
         // A newly created profile's setup step: which servers, who it watches as,
         // which libraries. Presented HERE rather than by whatever created the
         // profile — creating one switches into it, which dismisses the picker, so

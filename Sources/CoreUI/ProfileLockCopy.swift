@@ -28,25 +28,25 @@ public enum ProfileLockCopy {
 
     public static let explanation = LocalizedStringResource(
         "settings.profileLock.explanation",
-        defaultValue: "Require a 4-digit PIN to open this profile. Anyone can still use the profiles that aren't locked.",
-        comment: "Explains what turning on a Profile Lock does. The second sentence is important: locking your own profile is how you keep a child out of it, since child profiles are left open."
+        defaultValue: "Require a PIN to open this profile.",
+        comment: "Explains what turning on a Profile Lock does."
     )
 
     public static let create = LocalizedStringResource(
         "settings.profileLock.create",
-        defaultValue: "Create a Profile Lock",
-        comment: "Button that starts setting a PIN on this profile."
+        defaultValue: "Create PIN",
+        comment: "Button that starts setting a PIN on this profile. Short on purpose — it sits under a title that already says what's being locked."
     )
 
     public static let editPIN = LocalizedStringResource(
         "settings.profileLock.editPIN",
-        defaultValue: "Edit PIN",
+        defaultValue: "Change PIN",
         comment: "Button that replaces the existing Profile Lock PIN with a new one."
     )
 
     public static let delete = LocalizedStringResource(
         "settings.profileLock.delete",
-        defaultValue: "Delete Profile Lock",
+        defaultValue: "Remove PIN",
         comment: "Button that removes the PIN so the profile opens without one."
     )
 
@@ -67,7 +67,7 @@ public enum ProfileLockCopy {
     /// it is two sentences of nothing.
     public static let createSubtitle = LocalizedStringResource(
         "settings.profileLock.create.subtitle",
-        defaultValue: "This PIN will be needed to open this profile.",
+        defaultValue: "You'll need it to open this profile.",
         comment: "Supporting line under the heading while choosing a new PIN."
     )
 
@@ -135,14 +135,14 @@ public enum ProfileLockCopy {
 
     public static let offerMessage = LocalizedStringResource(
         "settings.profileLock.offer.message",
-        defaultValue: "A 4-digit PIN will be needed to open it. You can change this later in Settings.",
-        comment: "Body of the prompt offering a PIN on a newly created ordinary profile."
+        defaultValue: "A PIN will be needed to open it.",
+        comment: "Body of the prompt offering a PIN on a newly created ordinary profile. One line: the title asks the question and the button says what happens, so anything more is padding."
     )
 
     public static let offerMessageKids = LocalizedStringResource(
         "settings.profileLock.offer.message.kids",
-        defaultValue: "Kids profiles are usually left open — it's the grown-ups' profiles that need locking, so a child can't switch into them. You can lock this one anyway if you'd like.",
-        comment: "Body of the prompt offering a PIN on a newly created Kids Profile. It explains why the answer is usually no, since locking the child's own profile is the common misunderstanding."
+        defaultValue: "Usually you lock the grown-ups' profiles instead.",
+        comment: "Body of the prompt offering a PIN on a newly created Kids Profile. Locking the child's own profile is the common misunderstanding, so this points the other way in one line."
     )
 
     public static let unlockToEdit = LocalizedStringResource(
@@ -197,8 +197,8 @@ public enum KidsProfileCopy {
 
     public static let explanation = LocalizedStringResource(
         "settings.kidsProfile.explanation",
-        defaultValue: "Hides shared settings while this profile is in use, so servers, profiles and sign-outs can't be changed from it. It doesn't filter what can be watched.",
-        comment: "Explains exactly what marking a profile as a Kids Profile does. The last sentence matters: there is no content filtering yet and the copy must not imply otherwise."
+        defaultValue: "Hides shared settings, so servers and profiles can't be changed from it. Doesn't filter what can be watched.",
+        comment: "Explains what marking a profile as a Kids Profile does. The last sentence matters: there is no content filtering yet and the copy must not imply otherwise."
     )
 
     public static let pairWithLock = LocalizedStringResource(

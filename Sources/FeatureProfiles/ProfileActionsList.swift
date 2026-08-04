@@ -208,8 +208,6 @@ public struct ProfileActionsList: View {
             Button(String(localized: ProfileLockCopy.editPIN)) { settingPIN = true }
             Button(String(localized: ProfileLockCopy.delete), role: .destructive) { onSetLock(nil) }
             Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(ProfileLockCopy.forgotPINDetail)
         }
         .confirmationDialog(
             Text(KidsProfileCopy.title),

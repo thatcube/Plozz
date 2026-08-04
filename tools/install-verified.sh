@@ -43,8 +43,9 @@ for arg in "$@"; do
   esac
 done
 
-TIMEOUT="${PLOZZ_INSTALL_TIMEOUT:-90}"
-ATTEMPTS="${PLOZZ_INSTALL_ATTEMPTS:-3}"
+TIMEOUT="${PLOZZ_INSTALL_TIMEOUT:-60}"
+ATTEMPTS="${PLOZZ_INSTALL_ATTEMPTS:-2}"
+BOUNDED=(/usr/bin/python3 "$(dirname "$0")/run-bounded.py")
 
 if [[ ! -d "$APP" ]]; then echo "✗ no .app at: $APP" >&2; exit 1; fi
 plist="$APP/Info.plist"
@@ -57,7 +58,8 @@ LABEL="${BUNDLE##*.} $WANT_VER ($WANT_BUILD)"
 # This is the ONE heavy call — on a wireless Apple TV it takes ~20s (vs instant
 # over USB) — so we make it as rarely as possible (never on a clean install).
 installed_ver_build() {
-  xcrun devicectl device info apps --device "$DEVICE" 2>/dev/null \
+  "${BOUNDED[@]}" 25 "installed-app verification query" -- \
+    xcrun devicectl device info apps --device "$DEVICE" 2>/dev/null \
     | awk -v b="$BUNDLE" '{for(i=1;i<=NF;i++) if($i==b){print $(i+1), $(i+2); exit}}'
 }
 
@@ -103,7 +105,9 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
   # reset that fixes it used to run only after the first attempt had already
   # burned its whole timeout. 15s here replaces up to a full attempt of waiting,
   # and costs nothing when the tunnel is healthy.
-  if ! xcrun devicectl device info details --device "$DEVICE" --timeout 15 >/dev/null 2>&1; then
+  if ! "${BOUNDED[@]}" 20 "CoreDevice liveness probe" -- \
+    xcrun devicectl device info details --device "$DEVICE" --timeout 15 \
+    >/dev/null 2>&1; then
     echo "  · device did not answer a 15s probe; tunnel looks degraded"
     reset_coredevice_daemons
   fi
@@ -119,7 +123,8 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
     # Heartbeat while the install runs. devicectl prints nothing until it is
     # finished, and a silent multi-minute wait is indistinguishable from a hang,
     # which is exactly how a slow wireless install has been read.
-    xcrun devicectl device install app --device "$DEVICE" --timeout "$TIMEOUT" "$APP" \
+    "${BOUNDED[@]}" "$((TIMEOUT + 5))" "device install attempt $attempt" -- \
+      xcrun devicectl device install app --device "$DEVICE" --timeout "$TIMEOUT" "$APP" \
       >/dev/null 2>&1 &
     install_pid=$!
     waited=0
@@ -156,7 +161,9 @@ fi
 # that matters; a launch can fail for benign reasons (e.g. the device is locked),
 # and that's not worth reporting. Only note a confirmed launch.
 if [[ "$LAUNCH" == "1" ]]; then
-  if xcrun devicectl device process launch --device "$DEVICE" --timeout 60 "$BUNDLE" >/dev/null 2>&1; then
+  if "${BOUNDED[@]}" 25 "device launch" -- \
+    xcrun devicectl device process launch --device "$DEVICE" --timeout 20 "$BUNDLE" \
+    >/dev/null 2>&1; then
     echo "✓ Launched $BUNDLE."
   fi
 fi

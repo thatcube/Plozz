@@ -103,9 +103,7 @@ public struct PlexHomeUserRow: View {
             Spacer()
 
             if accessory == .selected {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.title3)
-                    .settingsRowGreenIndicator()
+                SettingsSelectionIndicator()
             }
         }
         .padding(.vertical, 12)

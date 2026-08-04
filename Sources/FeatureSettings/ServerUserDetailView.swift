@@ -63,8 +63,7 @@ struct ServerUserDetailView: View {
                                 .font(.callout.weight(.medium))
                             Spacer(minLength: 12)
                             if scope.isAccountIncludedInActiveProfile(account.id) {
-                                Image(systemName: "checkmark")
-                                    .settingsRowGreenIndicator()
+                                SettingsSelectionIndicator()
                             }
                         }
                         .padding(.vertical, 12)

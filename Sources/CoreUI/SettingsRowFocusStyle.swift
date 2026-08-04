@@ -298,6 +298,22 @@ public struct SettingsRowGreenIndicatorStyle: ViewModifier {
         }()
         return content.foregroundStyle(tint)
     }
+
+}
+
+/// Standard trailing mark for a selected settings choice.
+///
+/// The shape, size and focus-adaptive green belong together; exposing one view
+/// prevents Plex, Jellyfin, Emby, Seerr and future pickers from drifting into
+/// bare checks versus filled circles.
+public struct SettingsSelectionIndicator: View {
+    public init() {}
+
+    public var body: some View {
+        Image(systemName: "checkmark.circle.fill")
+            .font(.title3)
+            .settingsRowGreenIndicator()
+    }
 }
 
 /// Label style for standard settings rows: the leading icon is rendered in the

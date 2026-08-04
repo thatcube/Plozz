@@ -57,6 +57,10 @@ DEVICE_ID="${PLOZZ_TV_ID:-DE913871-CC2D-5F75-B4F2-0D6F44AA30DE}"
 PROJECT="Plozz.xcodeproj"
 SCHEME="Plozz"
 CONFIG="Debug"
+BOUNDED=(/usr/bin/python3 tools/run-bounded.py)
+BUILD_TIMEOUT="${PLOZZ_BUILD_TIMEOUT:-240}"
+SETTINGS_TIMEOUT="${PLOZZ_BUILD_SETTINGS_TIMEOUT:-30}"
+GENERATE_TIMEOUT="${PLOZZ_GENERATE_TIMEOUT:-60}"
 
 BUILD_ONLY=0
 # Regenerate (and re-bake the git-commit-count build number) by DEFAULT so every
@@ -125,14 +129,19 @@ fi
 
 if [[ "$CLEAN" == "1" ]]; then
   echo "▸ Cleaning this worktree's DerivedData…"
-  DD="$(xcodebuild -project "$PROJECT" -scheme "$SCHEME" -showBuildSettings 2>/dev/null \
+  DD="$("${BOUNDED[@]}" "$SETTINGS_TIMEOUT" "clean-path build-settings lookup" -- \
+        xcodebuild -project "$PROJECT" -scheme "$SCHEME" -showBuildSettings 2>/dev/null \
         | awk -F' = ' '/ BUILD_DIR /{print $2; exit}')"
   [[ -n "${DD:-}" ]] && rm -rf "$(dirname "$(dirname "$DD")")"
 fi
 
 if [[ "$REGEN" == "1" ]]; then
   echo "▸ Regenerating Xcode project + baking a fresh build number…"
-  if [[ -x tools/generate-project.sh ]]; then tools/generate-project.sh; else xcodegen generate; fi
+  if [[ -x tools/generate-project.sh ]]; then
+    "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "project generation" -- tools/generate-project.sh
+  else
+    "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "XcodeGen" -- xcodegen generate
+  fi
 fi
 
 # --- Destination -------------------------------------------------------------
@@ -167,7 +176,8 @@ fi
 
 # --- Build -------------------------------------------------------------------
 PREBUILD_APP_PATH="$(
-  xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIG" \
+  "${BOUNDED[@]}" "$SETTINGS_TIMEOUT" "tvOS build-settings lookup" -- \
+    xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIG" \
     -destination "$DESTINATION" -showBuildSettings 2>/dev/null \
     | awk -F' = ' '/ CODESIGNING_FOLDER_PATH / { print $2; exit }'
 )"
@@ -176,7 +186,7 @@ if [[ -n "$PREBUILD_APP_PATH" ]]; then
 fi
 
 set -o pipefail
-xcodebuild \
+"${BOUNDED[@]}" "$BUILD_TIMEOUT" "tvOS build" -- xcodebuild \
   -project "$PROJECT" \
   -scheme "$SCHEME" \
   -configuration "$CONFIG" \
@@ -191,10 +201,18 @@ if [[ "$BUILD_ONLY" == "1" || "$SIM_BUILD" == "1" ]]; then
   exit 0
 fi
 
-# --- Resolve the freshly-built .app (after the build, so the path is current) -
-APP_PATH="$(xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIG" \
-            -destination "$DESTINATION" -showBuildSettings 2>/dev/null \
-            | awk -F' = ' '/ CODESIGNING_FOLDER_PATH /{print $2; exit}')"
+# Build settings do not change during the build. Re-running xcodebuild here was
+# the exact silent hang observed after "Build Succeeded"; reuse the path already
+# resolved above. Fall back only if that first lookup returned nothing.
+APP_PATH="$PREBUILD_APP_PATH"
+if [[ -z "$APP_PATH" ]]; then
+  APP_PATH="$(
+    "${BOUNDED[@]}" "$SETTINGS_TIMEOUT" "post-build tvOS app-path lookup" -- \
+      xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIG" \
+      -destination "$DESTINATION" -showBuildSettings 2>/dev/null \
+      | awk -F' = ' '/ CODESIGNING_FOLDER_PATH /{print $2; exit}'
+  )"
+fi
 
 if [[ -z "${APP_PATH:-}" || ! -d "$APP_PATH" ]]; then
   echo "✗ Could not locate built .app (CODESIGNING_FOLDER_PATH)." >&2
@@ -239,7 +257,9 @@ echo "▸ Installing $BUNDLE_ID → Apple TV (verified)…"
 # matching build number (which the git-commit-count versioning can't distinguish
 # from changed-but-uncommitted code). --no-launch so we can apply the first-run
 # reset env on launch below.
-"$(dirname "$0")/install-verified.sh" "$DEVICE_ID" "$APP_PATH" --force --no-launch
+"${BOUNDED[@]}" "${PLOZZ_DEPLOY_INSTALL_DEADLINE:-150}" \
+  "Apple TV install + verification" -- \
+  "$(dirname "$0")/install-verified.sh" "$DEVICE_ID" "$APP_PATH" --force --no-launch
 
 # Launch is best-effort and silent on failure — install is what matters; a launch
 # can fail for benign reasons (device asleep/locked) and isn't worth reporting.
@@ -249,11 +269,14 @@ fi
 if [[ -n "$PSEUDO" ]]; then
   # Launch arguments, not a device setting: this affects only this launch, so the
   # Apple TV's own language is left alone and the next ordinary launch is normal.
-  xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID" \
+  "${BOUNDED[@]}" 25 "Apple TV launch" -- \
+    xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID" \
     -- -AppleLanguages "($PSEUDO)" -AppleLocale "$PSEUDO" >/dev/null 2>&1 || true
   echo "▸ Launched pseudolocalized ($PSEUDO)."
 else
-  xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+  "${BOUNDED[@]}" 25 "Apple TV launch" -- \
+    xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID" \
+    >/dev/null 2>&1 || true
 fi
 
 echo "✓ Deployed: $BUNDLE_ID"

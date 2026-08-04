@@ -39,6 +39,10 @@ cd "$(dirname "$0")/.."
 PROJECT="Plozz.xcodeproj"
 SCHEME="PlozziOS"
 CONFIG="Debug"
+BOUNDED=(/usr/bin/python3 tools/run-bounded.py)
+BUILD_TIMEOUT="${PLOZZ_BUILD_TIMEOUT:-240}"
+SETTINGS_TIMEOUT="${PLOZZ_BUILD_SETTINGS_TIMEOUT:-30}"
+GENERATE_TIMEOUT="${PLOZZ_GENERATE_TIMEOUT:-60}"
 IPHONE_CORE_ID="${PLOZZ_IPHONE_CORE_ID:-CACB5C41-FBA6-5DE8-9868-98BBDF897991}"
 IPAD_CORE_ID="${PLOZZ_IPAD_CORE_ID:-D1EB8B46-3CEC-5F68-BCDA-B1C9E0E40600}"
 
@@ -129,7 +133,8 @@ if [[ "$INCLUDE_METADATA_KEYS" != "1" ]]; then
 fi
 
 if [[ "$REGEN" == "1" ]]; then
-  tools/generate-project.sh
+  echo "▸ Regenerating Xcode project + baking a fresh build number…"
+  "${BOUNDED[@]}" "$GENERATE_TIMEOUT" "project generation" -- tools/generate-project.sh
 fi
 
 # --- Build destination -------------------------------------------------------
@@ -162,7 +167,8 @@ fi
 device_udid() {
   local reply
   reply="$(
-    xcrun devicectl device info details --device "$1" --timeout 10 2>/dev/null \
+    "${BOUNDED[@]}" 15 "device UDID lookup" -- \
+      xcrun devicectl device info details --device "$1" --timeout 10 2>/dev/null \
       | awk -F': ' '/• UDID:/ { gsub(/^[ \t]+/, "", $2); print $2; exit }'
   )" || return 0
   printf '%s' "$reply"
@@ -184,7 +190,7 @@ if [[ ${#TARGET_UDIDS[@]} -gt 0 ]]; then
 fi
 
 PREBUILD_APP_PATH="$(
-  xcodebuild \
+  "${BOUNDED[@]}" "$SETTINGS_TIMEOUT" "iOS build-settings lookup" -- xcodebuild \
     -project "$PROJECT" \
     -scheme "$SCHEME" \
     -configuration "$CONFIG" \
@@ -200,7 +206,7 @@ fi
 if [[ "$NO_BUILD" != "1" ]]; then
   echo "▸ Building universal iPhone/iPad app…"
   set -o pipefail
-  xcodebuild \
+  "${BOUNDED[@]}" "$BUILD_TIMEOUT" "iOS build" -- xcodebuild \
     -project "$PROJECT" \
     -scheme "$SCHEME" \
     -configuration "$CONFIG" \
@@ -216,16 +222,22 @@ if [[ "$NO_BUILD" != "1" ]]; then
   echo "✓ Build succeeded."
 fi
 
-APP_PATH="$(
-  xcodebuild \
-    -project "$PROJECT" \
-    -scheme "$SCHEME" \
-    -configuration "$CONFIG" \
-    -destination "$BUILD_DESTINATION" \
-    ${BUILD_SETTING_OVERRIDES[@]+"${BUILD_SETTING_OVERRIDES[@]}"} \
-    -showBuildSettings 2>/dev/null \
-    | awk -F' = ' '/ CODESIGNING_FOLDER_PATH / { print $2; exit }'
-)"
+# Reuse the pre-build path. The duplicate xcodebuild -showBuildSettings here was
+# observed hanging after a successful build, making deployment look frozen.
+APP_PATH="$PREBUILD_APP_PATH"
+if [[ -z "$APP_PATH" ]]; then
+  APP_PATH="$(
+    "${BOUNDED[@]}" "$SETTINGS_TIMEOUT" "post-build iOS app-path lookup" -- \
+      xcodebuild \
+      -project "$PROJECT" \
+      -scheme "$SCHEME" \
+      -configuration "$CONFIG" \
+      -destination "$BUILD_DESTINATION" \
+      ${BUILD_SETTING_OVERRIDES[@]+"${BUILD_SETTING_OVERRIDES[@]}"} \
+      -showBuildSettings 2>/dev/null \
+      | awk -F' = ' '/ CODESIGNING_FOLDER_PATH / { print $2; exit }'
+  )"
+fi
 
 if [[ -z "$APP_PATH" || ! -d "$APP_PATH" ]]; then
   echo "✗ Could not locate the built Plozz.app." >&2
@@ -313,7 +325,9 @@ install_device() {
   # changed-but-uncommitted code). The verified installer warms the tunnel, uses
   # a generous timeout, and confirms success by querying the device instead of
   # trusting the install command's exit code (which lies on wireless links).
-  "$(dirname "$0")/install-verified.sh" "$core_id" "$APP_PATH" --force
+  "${BOUNDED[@]}" "${PLOZZ_DEPLOY_INSTALL_DEADLINE:-150}" \
+    "$name install + verification" -- \
+    "$(dirname "$0")/install-verified.sh" "$core_id" "$APP_PATH" --force
 }
 
 STATUS=0

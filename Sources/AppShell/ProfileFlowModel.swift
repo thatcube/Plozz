@@ -408,6 +408,18 @@ public final class ProfileFlowModel {
         profileAwaitingThemePick = profile
     }
 
+    /// Releases the watchlist import after Libraries while keeping the full setup
+    /// cover alive for Seerr, Theme and Lock.
+    public func completeLibrariesInsideSetup(for id: String) {
+        guard profilesModel.finishSetup(for: id) else { return }
+        activateUniversalWatchlist()
+    }
+
+    /// Dismisses the one persistent added-profile setup cover.
+    public func finishSetupFlow() {
+        pendingSetupProfile = nil
+    }
+
     /// Held between one cover closing and the next opening.
     @ObservationIgnored private var profileAwaitingThemePick: Profile?
     @ObservationIgnored private var profileAwaitingLockOffer: Profile?

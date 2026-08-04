@@ -97,7 +97,8 @@ struct PlozziOSProfileSetupView: View {
 
     private func showAddUser(on server: MediaServer) {
         addUserServer = server
-        showAddServer()
+        appModel.beginAddingUser(on: server)
+        showingAddServer = true
     }
 
     private func showAddServer() {
@@ -167,58 +168,62 @@ struct PlozziOSServerIdentityPromptView: View {
 /// iOS root's body is already at the type-checker's budget.
 struct PlozziOSProfileOnboardingCover: View {
     let appModel: PlozziOSAppModel
+    @Environment(\.themePalette) private var palette
 
     var body: some View {
-        switch appModel.profileOnboardingStep {
-        case .libraries:
-            PlozziOSProfileSetupView(
-                appModel: appModel,
-                onDone: { appModel.advanceProfileOnboarding() }
-            )
-        case .seerr:
-            if let profile = appModel.profileBeingOnboarded {
-                ProfileSeerrSetupView(
-                    seer: appModel.seerService,
-                    profile: profile,
-                    onSelect: { user in
-                        appModel.setSeerrUser(user, for: profile.id)
-                    },
-                    onContinue: { appModel.advanceProfileOnboarding() }
-                )
-            } else {
-                Color.clear.onAppear {
-                    appModel.advanceProfileOnboarding()
-                }
-            }
-        case .theme:
-            NavigationStack {
-                PlozziOSThemeWelcomeView(
+        ZStack {
+            // Never expose the profile picker / tab shell between setup pages.
+            AppBackground(palette: palette).ignoresSafeArea()
+            switch appModel.profileOnboardingStep {
+            case .libraries:
+                PlozziOSProfileSetupView(
                     appModel: appModel,
-                    onContinue: { appModel.advanceProfileOnboarding() }
+                    onDone: { appModel.advanceProfileOnboarding() }
                 )
-            }
-        case .lockOffer:
-            if let profile = appModel.profileBeingOnboarded {
-                ProfileLockOfferView(
-                    profile: profile,
-                    syncEnabled: SyncSetupFeatureFlag().isEnabled,
-                    onComplete: { lock in
-                        appModel.setLock(lock, forProfile: profile.id)
+            case .seerr:
+                if let profile = appModel.profileBeingOnboarded {
+                    ProfileSeerrSetupView(
+                        seer: appModel.seerService,
+                        profile: profile,
+                        onSelect: { user in
+                            appModel.setSeerrUser(user, for: profile.id)
+                        },
+                        onContinue: { appModel.advanceProfileOnboarding() }
+                    )
+                } else {
+                    Color.clear.onAppear {
                         appModel.advanceProfileOnboarding()
-                    },
-                    onSkip: { appModel.advanceProfileOnboarding() }
-                )
-            } else {
-                // The profile was deleted underneath the flow.
-                Color.clear.onAppear {
-                    appModel.advanceProfileOnboarding()
+                    }
                 }
+            case .theme:
+                NavigationStack {
+                    PlozziOSThemeWelcomeView(
+                        appModel: appModel,
+                        onContinue: { appModel.advanceProfileOnboarding() }
+                    )
+                }
+            case .lockOffer:
+                if let profile = appModel.profileBeingOnboarded {
+                    ProfileLockOfferView(
+                        profile: profile,
+                        syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                        onComplete: { lock in
+                            appModel.setLock(lock, forProfile: profile.id)
+                            appModel.advanceProfileOnboarding()
+                        },
+                        onSkip: { appModel.advanceProfileOnboarding() }
+                    )
+                } else {
+                    // The profile was deleted underneath the flow.
+                    Color.clear.onAppear {
+                        appModel.advanceProfileOnboarding()
+                    }
+                }
+            case nil:
+                EmptyView()
             }
-        case nil:
-            // Reached only in the frame where the last step clears the flag and
-            // the cover is on its way out.
-            EmptyView()
         }
+        .transaction { $0.animation = nil }
     }
 }
 #endif

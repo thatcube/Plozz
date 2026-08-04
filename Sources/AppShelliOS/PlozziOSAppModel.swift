@@ -919,6 +919,8 @@ final class PlozziOSAppModel {
     /// The profile being set up. Held by ID, not by value: the record changes
     /// underneath us as each step writes to it.
     private(set) var profileOnboardingID: String?
+    /// Additional identity being added from this profile's "Watching as" page.
+    private var pendingAdditionalUser: (serverKey: String, profileID: String)?
 
     /// The profile the sequence is currently about, read live.
     var profileBeingOnboarded: Profile? {
@@ -1712,8 +1714,15 @@ final class PlozziOSAppModel {
                     addedAccounts.append(account)
                 }
             }
+            let completesAdditionalIdentity = pendingAdditionalUser.map { pending in
+                addedAccounts.contains {
+                    $0.server.provider.usesMediaBrowserAPI
+                        && $0.server.identityKey == pending.serverKey
+                }
+            } ?? false
             accountError = nil
             reloadAccountsAndCrashContext()
+            selectNewlyAddedUserIfNeeded(from: addedAccounts)
             identityIndex.warmIdentityIndex()
             if isFirstRun,
                let session = sessions.first(where: {
@@ -1725,13 +1734,45 @@ final class PlozziOSAppModel {
                     avatarImageURL: session.avatarURL?.absoluteString
                 )
             }
-            preparePostSignInOnboarding(
-                for: addedAccounts,
-                beginsFirstRun: isFirstRun && !addedAccounts.isEmpty
-            )
+            if !completesAdditionalIdentity {
+                preparePostSignInOnboarding(
+                    for: addedAccounts,
+                    beginsFirstRun: isFirstRun && !addedAccounts.isEmpty
+                )
+            }
         } catch {
             accountError = error.localizedDescription
         }
+    }
+
+    func beginAddingUser(on server: MediaServer) {
+        pendingAdditionalUser = (
+            serverKey: server.identityKey,
+            profileID: profiles.activeProfileID
+        )
+        beginManagedServerPresentation()
+    }
+
+    private func selectNewlyAddedUserIfNeeded(from addedAccounts: [Account]) {
+        guard let pendingAdditionalUser,
+              let account = addedAccounts.last(where: {
+                  $0.server.identityKey == pendingAdditionalUser.serverKey
+              })
+        else { return }
+
+        var selected = activeAccountIDs(for: pendingAdditionalUser.profileID)
+        for existing in accountsProviders.accounts
+        where existing.server.identityKey == pendingAdditionalUser.serverKey {
+            selected.remove(existing.id)
+        }
+        selected.insert(account.id)
+        profiles.setActiveAccountIDs(
+            Array(selected),
+            for: pendingAdditionalUser.profileID
+        )
+        watchReconcilers[pendingAdditionalUser.profileID] = nil
+        reloadAccountsAndCrashContext()
+        self.pendingAdditionalUser = nil
     }
 
     func selectPlexUserDuringOnboarding(_ user: PlexHomeUser) {
@@ -1801,6 +1842,9 @@ final class PlozziOSAppModel {
                 beginsFirstRun: beginsFirstRun
             )
         }
+        // A dismissed add-user sheet must not make a later unrelated sign-in
+        // auto-select itself for this profile.
+        pendingAdditionalUser = nil
     }
 
     func completeLibrarySelection() {

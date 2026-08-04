@@ -479,10 +479,7 @@ public struct RootView: View {
             item: Binding(
                 get: { appState.profileFlow.pendingSetupProfile },
                 set: { if $0 == nil { appState.profileFlow.completeSetup(for: appState.profilesModel.activeProfileID) } }
-            ),
-            // Only once this cover is really gone can the next one present —
-            // SwiftUI shows one at a time and silently drops the rest.
-            onDismiss: { appState.profileFlow.presentPostSetupStep() }
+            )
         ) { profile in
             ProfileSetupFlowView(
                 appState: appState,
@@ -963,41 +960,90 @@ private struct ProfileSetupFlowView: View {
     let deviceColorScheme: ColorScheme
     @State private var stage: ProfileSetupStage = .libraries
 
-    @ViewBuilder
     var body: some View {
-        if let request = appState.plexHomeUsers.pendingPlexPINRequest {
-            PlexPINEntryView(
-                appState: appState,
-                userName: request.homeUserName,
-                avatarURLString: request.homeUserAvatarURL,
-                dismissOnSuccess: false,
-                onSubmit: { appState.plexHomeUsers.submitPlexPIN($0) },
-                onCancel: { appState.plexHomeUsers.cancelPlexPIN() }
+        ZStack {
+            // Permanent cover backdrop. Every page change happens above this, so
+            // even a frame with neither outgoing nor incoming content cannot
+            // reveal the profile picker/Home below.
+            AppBackground(
+                palette: ThemePalette.palette(
+                    for: appState.profileSettings.themeModel.theme,
+                    systemColorScheme: deviceColorScheme
+                )
             )
-        } else if case let .onboarding(step, canReturnToApp) = appState.state {
-            OnboardingFlowView(
-                appState: appState,
-                step: step,
-                canReturnToApp: canReturnToApp,
-                deviceColorScheme: deviceColorScheme
-            )
-        } else if stage == .libraries {
+            .ignoresSafeArea()
+
             ProfileSetupLibrariesView(
                 scope: appState.profileLibrariesScope(librariesStore: librariesStore)
             ) {
+                appState.completeProfileLibrariesInsideSetup(for: profile.id)
                 stage = .seerr
             }
             .task { await librariesStore.reload(appState: appState) }
-        } else {
-            let liveProfile = appState.profilesModel.profiles
-                .first(where: { $0.id == profile.id }) ?? profile
+            .opacity(stage == .libraries ? 1 : 0)
+            .allowsHitTesting(stage == .libraries && !showsDetour)
+
+            if let request = appState.plexHomeUsers.pendingPlexPINRequest {
+                PlexPINEntryView(
+                    appState: appState,
+                    userName: request.homeUserName,
+                    avatarURLString: request.homeUserAvatarURL,
+                    dismissOnSuccess: false,
+                    onSubmit: { appState.plexHomeUsers.submitPlexPIN($0) },
+                    onCancel: { appState.plexHomeUsers.cancelPlexPIN() }
+                )
+            } else if case let .onboarding(step, canReturnToApp) = appState.state {
+                OnboardingFlowView(
+                    appState: appState,
+                    step: step,
+                    canReturnToApp: canReturnToApp,
+                    deviceColorScheme: deviceColorScheme
+                )
+            } else {
+                stageContent
+            }
+        }
+        // Explicitly disable implicit fades between stage enum values.
+        .transaction { $0.animation = nil }
+    }
+
+    private var showsDetour: Bool {
+        if appState.plexHomeUsers.pendingPlexPINRequest != nil { return true }
+        if case .onboarding = appState.state { return true }
+        return false
+    }
+
+    @ViewBuilder
+    private var stageContent: some View {
+        let liveProfile = appState.profilesModel.profiles
+            .first(where: { $0.id == profile.id }) ?? profile
+        switch stage {
+        case .libraries:
+            EmptyView()
+        case .seerr:
             ProfileSeerrSetupView(
                 seer: appState.seerService,
                 profile: liveProfile,
                 onSelect: { user in
                     appState.setSeerrUserForProfile(profileID: profile.id, user: user)
                 },
-                onContinue: { appState.completeProfileSetup(for: profile.id) }
+                onContinue: { stage = .theme }
+            )
+        case .theme:
+            SelectThemeView(
+                appState: appState,
+                onContinue: { stage = .lock },
+                deviceColorScheme: deviceColorScheme
+            )
+        case .lock:
+            ProfileLockOfferView(
+                profile: liveProfile,
+                syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                onComplete: { lock in
+                    appState.setLock(lock, forProfile: profile.id)
+                    appState.finishProfileSetupFlow()
+                },
+                onSkip: { appState.finishProfileSetupFlow() }
             )
         }
     }
@@ -1006,6 +1052,8 @@ private struct ProfileSetupFlowView: View {
 private enum ProfileSetupStage {
     case libraries
     case seerr
+    case theme
+    case lock
 }
 
 /// Persistent profile-entry gate: profile PIN first, Plex PIN second when needed.

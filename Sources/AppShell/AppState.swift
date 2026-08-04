@@ -50,6 +50,9 @@ public final class AppState {
     /// cancelling Quick Connect returns to *that* provider's server picker
     /// rather than the provider chooser. `nil` starts the flow at the chooser.
     public private(set) var pendingOnboardingProvider: ProviderKind?
+    /// Additional server identity being added from a profile's "Watching as"
+    /// page. Carries enough context to select the new account after persistence.
+    private var pendingAdditionalUser: (serverKey: String, profileID: String)?
 
     /// A Top Shelf deep link (`plozz://item/<id>`) waiting to be opened.
     ///
@@ -1331,6 +1334,10 @@ public final class AppState {
     /// its account link flow resolves the server after authentication.
     public func beginAddingUser(on server: MediaServer) {
         pendingOnboardingProvider = server.provider
+        pendingAdditionalUser = (
+            serverKey: server.identityKey,
+            profileID: profilesModel.activeProfileID
+        )
         apply(.addAccountRequested)
         if server.provider.usesMediaBrowserAPI {
             apply(.serverSelected(server))
@@ -1377,6 +1384,9 @@ public final class AppState {
         previousAccount: Account?,
         isFirstRun: Bool
     ) {
+        let completesAdditionalIdentity =
+            account.server.provider.usesMediaBrowserAPI
+                && pendingAdditionalUser?.serverKey == account.server.identityKey
         // Tear down the OLD credential revision's transport sessions only when the
         // store actually moved to a new revision (a real credential change). An
         // identical re-add is a no-op that keeps the existing revision, so read the
@@ -1387,14 +1397,51 @@ public final class AppState {
             mediaShare.accountService.retireCredential(for: previousAccount)
         }
         accountsProviders.reloadAccounts()
+        selectNewlyAddedUserIfNeeded(account)
         // A (re)added server clears any household-removal tombstone for it, so its
         // descriptor syncs again and peers stop treating it as removed.
         clearRemovalTombstone(for: account.id)
         // Flow finished — next add-account starts at the chooser.
         pendingOnboardingProvider = nil
+        if completesAdditionalIdentity {
+            // "Add Another User" is an identity change on an existing server,
+            // not a new-server onboarding. The existing Libraries screen will
+            // refresh for the newly selected account; return directly to the
+            // still-mounted Watching as page.
+            pendingLibrarySelectionAccountIDs = []
+            pendingPlexUserApplyToAccountIDs = []
+            apply(.accountAuthenticated)
+            return
+        }
         pendingLibrarySelectionAccountIDs = [account.id]
         pendingPlexUserApplyToAccountIDs = session.server.provider == .plex ? [account.id] : []
         finishAuthentication(session: session, accountID: account.id, isFirstRun: isFirstRun)
+    }
+
+    /// Selects the account that was just added from "Watching as", replacing any
+    /// other identity for that same server while preserving every other server.
+    private func selectNewlyAddedUserIfNeeded(_ account: Account) {
+        guard let pendingAdditionalUser,
+              pendingAdditionalUser.serverKey == account.server.identityKey
+        else { return }
+
+        var selected = Set(
+            profilesModel.activeAccountIDs(
+                for: pendingAdditionalUser.profileID,
+                fallback: accountsProviders.accounts.map(\.id)
+            )
+        )
+        for existing in accountsProviders.accounts
+        where existing.server.identityKey == pendingAdditionalUser.serverKey {
+            selected.remove(existing.id)
+        }
+        selected.insert(account.id)
+        profilesModel.setActiveAccountIDs(
+            Array(selected),
+            for: pendingAdditionalUser.profileID
+        )
+        accountsProviders.reloadAccounts()
+        self.pendingAdditionalUser = nil
     }
 
     /// Batch sibling of `didAuthenticate` for a multi-server Plex sign-in: adds
@@ -1614,6 +1661,14 @@ public final class AppState {
     /// Marks a profile's setup finished, releasing its watchlist import.
     public func completeProfileSetup(for id: String) {
         profileFlow.completeSetup(for: id)
+    }
+
+    public func completeProfileLibrariesInsideSetup(for id: String) {
+        profileFlow.completeLibrariesInsideSetup(for: id)
+    }
+
+    public func finishProfileSetupFlow() {
+        profileFlow.finishSetupFlow()
     }
 
     /// Marks a profile as restricted, or lifts the restriction.
@@ -2050,6 +2105,9 @@ public final class AppState {
             wasAuthenticating = false
         }
         apply(.cancelOnboarding)
+        if case .ready = state {
+            pendingAdditionalUser = nil
+        }
         if !wasAuthenticating {
             pendingOnboardingProvider = nil
         }

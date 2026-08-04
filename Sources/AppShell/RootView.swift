@@ -960,17 +960,19 @@ private struct ProfileSetupFlowView: View {
     let deviceColorScheme: ColorScheme
     @State private var stage: ProfileSetupStage = .libraries
 
+    private var setupPalette: ThemePalette {
+        ThemePalette.palette(
+            for: appState.profileSettings.themeModel.theme,
+            systemColorScheme: deviceColorScheme
+        )
+    }
+
     var body: some View {
         ZStack {
             // Permanent cover backdrop. Every page change happens above this, so
             // even a frame with neither outgoing nor incoming content cannot
             // reveal the profile picker/Home below.
-            AppBackground(
-                palette: ThemePalette.palette(
-                    for: appState.profileSettings.themeModel.theme,
-                    systemColorScheme: deviceColorScheme
-                )
-            )
+            AppBackground(palette: setupPalette)
             .ignoresSafeArea()
 
             ProfileSetupLibrariesView(
@@ -993,12 +995,18 @@ private struct ProfileSetupFlowView: View {
                     onCancel: { appState.plexHomeUsers.cancelPlexPIN() }
                 )
             } else if case let .onboarding(step, canReturnToApp) = appState.state {
-                OnboardingFlowView(
-                    appState: appState,
-                    step: step,
-                    canReturnToApp: canReturnToApp,
-                    deviceColorScheme: deviceColorScheme
-                )
+                ZStack {
+                    // Embedded onboarding normally inherits RootView's backdrop.
+                    // Here it is an overlay inside another cover, so own an
+                    // opaque surface across every transition frame.
+                    AppBackground(palette: setupPalette).ignoresSafeArea()
+                    OnboardingFlowView(
+                        appState: appState,
+                        step: step,
+                        canReturnToApp: canReturnToApp,
+                        deviceColorScheme: deviceColorScheme
+                    )
+                }
             } else {
                 stageContent
             }

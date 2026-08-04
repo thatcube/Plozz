@@ -695,10 +695,12 @@ public struct ProfileEditorView: View {
                     emojiTile(emoji)
                 }
             }
-            .padding(.horizontal, 4)
+            // Keep focus lift inside the scroll viewport; the viewport itself
+            // must clip so horizontally scrolled emoji never paint over the
+            // fixed preview pane to the left.
+            .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
-        .scrollClipDisabled()
     }
 
     private func emojiTile(_ emoji: String) -> some View {

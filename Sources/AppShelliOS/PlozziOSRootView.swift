@@ -54,8 +54,9 @@ public struct PlozziOSRootView: View {
         Group {
             if appModel.accounts.isEmpty {
                 PlozziOSOnboardingView(appModel: appModel)
-            } else if appModel.requiresLaunchProfileSelection
-                && !completedLaunchProfileSelection {
+            } else if appModel.mustChooseProfile
+                || (appModel.requiresLaunchProfileSelection
+                    && !completedLaunchProfileSelection) {
                 PlozziOSProfilePickerView(
                     // Whoever watched on this device most recently leads.
                     profiles: appModel.profiles.profilesByRecency,

@@ -504,39 +504,53 @@ public final class ProfileFlowModel {
         var next = current
         if included { next.insert(accountID) } else { next.remove(accountID) }
         profilesModel.setActiveAccountIDs(Array(next), for: profileID)
+        // Noted BEFORE the reload, which schedules a watchlist import: the whole
+        // point is that the import waits for the answer, and a note taken after
+        // it has already been scheduled is too late.
+        if included {
+            noteServerAwaitingIdentity(accountID, profileID: profileID)
+        } else {
+            // Switched back off — there's nothing left to be anyone on, and an
+            // unanswerable question would gate the import forever.
+            resolveIdentityPrompt(for: accountID)
+        }
         accountsProviders.reloadAccounts()
-        if included { noteServerAwaitingIdentity(accountID, profileID: profileID) }
     }
-
-    /// Servers switched on for a profile that hasn't yet said who it watches as.
-    /// Policy shared with the iOS shell — see `ProfileServerIdentityPrompts`.
-    @ObservationIgnored private let identityPrompts = ProfileServerIdentityPrompts()
 
     /// The server this profile has just enabled and not yet chosen an identity
     /// on, if any. `RootView` presents the picker from this.
+    ///
+    /// Read from the PROFILE, not from memory: the question has to outlive a
+    /// relaunch, because the enabled-but-unidentified server does. See
+    /// `Profile.accountsAwaitingIdentity`.
     public var pendingIdentityAccountID: String? {
-        identityPrompts.pendingAccountID(for: profilesModel.activeProfileID)
+        profilesModel.activeProfile.pendingIdentityAccountIDs.first
     }
 
     private func noteServerAwaitingIdentity(_ accountID: String, profileID: String) {
-        guard let account = accountsProviders.accounts.first(where: { $0.id == accountID }) else {
-            return
-        }
-        identityPrompts.note(
-            accountID: accountID,
-            profileID: profileID,
-            provider: account.server.provider,
-            hasExistingBinding: profilesModel.activeProfile
-                .homeUserBinding(forPlexAccount: accountID) != nil
-        )
+        guard let account = accountsProviders.accounts.first(where: { $0.id == accountID }),
+              var profile = profilesModel.profiles.first(where: { $0.id == profileID }),
+              ProfileServerIdentityPolicy.shouldAsk(
+                  provider: account.server.provider,
+                  hasExistingBinding: profile.homeUserBinding(forPlexAccount: accountID) != nil
+              ),
+              profile.noteAccountAwaitingIdentity(accountID)
+        else { return }
+        profilesModel.update(profile)
     }
 
     /// Clears the pending question once an identity is chosen (or declined).
     public func resolveIdentityPrompt(for accountID: String) {
-        identityPrompts.resolve(
-            accountID: accountID,
-            profileID: profilesModel.activeProfileID
-        )
+        let profileID = profilesModel.activeProfileID
+        guard var profile = profilesModel.profiles.first(where: { $0.id == profileID }),
+              profile.resolveAccountAwaitingIdentity(accountID)
+        else { return }
+        profilesModel.update(profile)
+        // The import was deferred while this was outstanding; with the answer in
+        // it can finally run, against the identity that was just chosen.
+        if !profile.needsSetup, !profile.needsIdentityAnswer {
+            activateUniversalWatchlist()
+        }
     }
 
     // MARK: Internals

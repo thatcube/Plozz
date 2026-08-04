@@ -383,6 +383,23 @@ public final class PlexHomeUsersModel {
                         }
                         PlozzLog.boot("ensure.cachedOverride acct=\(account.id) home=\(binding.homeUserID) — instant paint")
                     } else {
+                        // Cache miss on a DIFFERENT user than the one currently
+                        // installed. Drop the old credentials now rather than
+                        // leaving them live for the length of the network switch:
+                        // the profile already reads as bound to the new user, so
+                        // a watchlist import in that window sees a binding, finds
+                        // the PREVIOUS user's Discover token, passes the
+                        // fail-closed check, and imports the wrong person's list.
+                        // Better to hold no credential — that path correctly
+                        // refuses to act — than to hold the wrong one.
+                        if plexTokenOverrides[account.id] != nil,
+                           plexResolvedHomeUser[account.id] != binding.homeUserID {
+                            setPlexTokenOverride(nil, for: account.id)
+                            plexResolvedHomeUser[account.id] = nil
+                            accountsProviders.registry.invalidate(accountID: account.id)
+                            plexIdentityGeneration += 1
+                            PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.missStaleOverride acct=\(account.id)")
+                        }
                         PlozzLog.boot("ensure.unprotectedSwitch acct=\(account.id) home=\(binding.homeUserID) — cache miss, async")
                     }
                     // Refresh in the background to keep the cached token fresh.
@@ -552,6 +569,25 @@ public final class PlexHomeUsersModel {
             // for whichever profile is now active, and a fresh ensure runs on switch.
             // The user PIN path passes `nil` here and is never guarded (it's gated by
             // its own `pendingPlexPINRequest` lifecycle).
+            // Identity guard, checked FIRST because it's the one that always
+            // holds: does the active profile still want to be this Home user on
+            // this account? The generation counter can't answer that on its own —
+            // two switches that both miss the cache change no synchronous token
+            // state, so both capture the SAME generation. If the superseded one
+            // lands first it installs its token and bumps the counter, and the
+            // live request is then rejected as "stale", stranding the profile on
+            // the previous user's credentials with nothing left to correct it.
+            // Comparing against the binding can't alias like that.
+            //
+            // A MISSING binding is superseded too, not exempt: every caller
+            // writes the binding before switching, so no binding means the active
+            // profile now plays as the account owner — installing a Home user's
+            // token over that is the same wrong answer in the other direction.
+            let liveBinding = profilesModel.activeProfile.homeUserBinding(forPlexAccount: accountID)
+            guard liveBinding?.homeUserID == homeUserID else {
+                PlozzLog.boot("performPlexSwitch superseded acct=\(accountID) home=\(homeUserID) live=\(liveBinding?.homeUserID ?? "owner")")
+                return
+            }
             if let expected = expectedGeneration, expected != plexIdentityGeneration {
                 PlozzLog.boot("performPlexSwitch stale refresh dropped acct=\(accountID) gen=\(expected) live=\(self.plexIdentityGeneration)")
                 return

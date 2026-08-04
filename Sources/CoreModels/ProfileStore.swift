@@ -472,9 +472,16 @@ public final class ProfilesModel {
         plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil,
         avatarImageURL: String? = nil,
         avatarEmoji: String? = nil,
-        avatarEmojiColorIndex: Int? = nil
+        avatarEmojiColorIndex: Int? = nil,
+        /// Set at CREATION, not by a follow-up `update`, so the profile is never
+        /// durably present without it. A second write can fail (or the app can be
+        /// killed between the two), and a persisted profile with no gate inherits
+        /// every server and imports the household's watchlist on next launch —
+        /// the exact leak the gate exists to stop. See `Profile.isAwaitingSetup`.
+        isAwaitingSetup: Bool? = nil,
+        isKidsProfile: Bool? = nil
     ) -> Profile {
-        let profile = Profile(
+        var profile = Profile(
             name: name,
             avatarSymbol: avatarSymbol,
             colorIndex: colorIndex,
@@ -489,6 +496,8 @@ public final class ProfilesModel {
             avatarEmoji: avatarEmoji,
             avatarEmojiColorIndex: avatarEmojiColorIndex
         )
+        profile.isAwaitingSetup = isAwaitingSetup
+        profile.isKidsProfile = isKidsProfile
         profiles.append(profile)
         profiles.sort { $0.createdAt < $1.createdAt }
         store.saveProfiles(profiles)

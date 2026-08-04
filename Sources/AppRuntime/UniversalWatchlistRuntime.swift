@@ -100,8 +100,15 @@ public extension UniversalWatchlistHost {
             // the household, so importing now would hand it the household's
             // aggregate watchlist. Its own state is hydrated above; the import
             // waits until it knows which servers this profile actually uses.
-            if profiles.activeProfile.needsSetup {
+            let profile = profiles.activeProfile
+            if profile.needsSetup {
                 PlozzLog.app.info("Watchlist import deferred — profile awaiting setup")
+            } else if profile.needsIdentityAnswer {
+                // A server was switched on and nobody has said who this profile
+                // is there yet. Importing now reads it as the account OWNER and
+                // pulls their watchlist in — the same leak setup defers, arriving
+                // through a later door. See `Profile.accountsAwaitingIdentity`.
+                PlozzLog.app.info("Watchlist import deferred — server awaiting identity")
             } else {
                 await importUniversalNativeWatchlists()
             }

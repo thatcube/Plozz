@@ -154,10 +154,36 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// "set up long ago", so nothing changes for them.
     public var isAwaitingSetup: Bool?
 
+    /// Accounts this profile has switched ON but not yet said who it watches as.
+    ///
+    /// PERSISTED, unlike the in-memory prompt that presents the question. The
+    /// question is only half the job: enabling a Plex server immediately reloads
+    /// accounts, which schedules a watchlist import, and with no Home-user
+    /// binding that import reads the server as the account OWNER and pulls their
+    /// list in — before the question has been answered, and again on every launch
+    /// after, since an in-memory prompt doesn't survive a restart.
+    ///
+    /// While this is non-empty the native import is deferred exactly as
+    /// `isAwaitingSetup` defers it. Optional, and cleared to absence rather than
+    /// `[]`, so existing profiles decode as "nothing owed" and the record stays
+    /// byte-stable for the sync layer.
+    public var accountsAwaitingIdentity: [String]?
+
+    /// Accounts this profile still owes an identity answer for.
+    public var pendingIdentityAccountIDs: [String] {
+        accountsAwaitingIdentity ?? []
+    }
+
     /// Whether the setup step still owes this profile a pass. See `isAwaitingSetup`.
     public var needsSetup: Bool {
         get { isAwaitingSetup == true }
         set { isAwaitingSetup = newValue ? true : nil }
+    }
+
+    /// Whether an answer is owed about who this profile watches as somewhere.
+    /// See `accountsAwaitingIdentity`.
+    public var needsIdentityAnswer: Bool {
+        !(accountsAwaitingIdentity ?? []).isEmpty
     }
 
     /// Whether this profile is restricted. See `isKidsProfile`.

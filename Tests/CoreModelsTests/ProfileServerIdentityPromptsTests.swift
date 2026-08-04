@@ -1,73 +1,115 @@
 import CoreModels
+import Foundation
 import Testing
 
 @Suite("Server identity prompts")
 struct ProfileServerIdentityPromptsTests {
+    private func makeProfile() -> Profile {
+        Profile(name: "Kid")
+    }
+
     @Test("Enabling a Plex server with no binding asks who you are")
     func asksForPlex() {
-        let prompts = ProfileServerIdentityPrompts()
-        prompts.note(
-            accountID: "a1",
-            profileID: "kid",
-            provider: .plex,
-            hasExistingBinding: false
+        #expect(
+            ProfileServerIdentityPolicy.shouldAsk(provider: .plex, hasExistingBinding: false)
         )
-        #expect(prompts.pendingAccountID(for: "kid") == "a1")
     }
 
     @Test("Non-Plex servers have no identity to choose, so nothing is asked")
     func skipsNonPlex() {
-        let prompts = ProfileServerIdentityPrompts()
         for provider in [ProviderKind.jellyfin, .emby, .mediaShare] {
-            prompts.note(
-                accountID: "a1",
-                profileID: "kid",
-                provider: provider,
-                hasExistingBinding: false
+            #expect(
+                ProfileServerIdentityPolicy.shouldAsk(
+                    provider: provider,
+                    hasExistingBinding: false
+                ) == false
             )
         }
-        #expect(prompts.pendingAccountID(for: "kid") == nil)
     }
 
     @Test("A profile that already picked a user isn't asked again")
     func skipsWhenAlreadyBound() {
-        let prompts = ProfileServerIdentityPrompts()
-        prompts.note(
-            accountID: "a1",
-            profileID: "kid",
-            provider: .plex,
-            hasExistingBinding: true
+        #expect(
+            ProfileServerIdentityPolicy.shouldAsk(provider: .plex, hasExistingBinding: true)
+                == false
         )
-        #expect(prompts.pendingAccountID(for: "kid") == nil)
     }
 
-    @Test("Questions are per profile, not global")
-    func scopedToProfile() {
-        let prompts = ProfileServerIdentityPrompts()
-        prompts.note(accountID: "a1", profileID: "kid", provider: .plex, hasExistingBinding: false)
-        #expect(prompts.pendingAccountID(for: "grownup") == nil)
-        #expect(prompts.pendingAccountID(for: "kid") == "a1")
+    @Test("A fresh profile owes nothing")
+    func nothingPendingByDefault() {
+        let profile = makeProfile()
+        #expect(profile.pendingIdentityAccountIDs.isEmpty)
+        #expect(profile.needsIdentityAnswer == false)
+    }
+
+    @Test("An unanswered question defers the watchlist import")
+    func pendingQuestionGatesImport() {
+        var profile = makeProfile()
+        let noted = profile.noteAccountAwaitingIdentity("a1")
+        #expect(noted)
+        // This is what the watchlist runtime reads to hold the native import
+        // back — the question surviving in the record is the whole point.
+        #expect(profile.needsIdentityAnswer)
+    }
+
+    @Test("Noting the same account twice changes nothing")
+    func noteIsIdempotent() {
+        var profile = makeProfile()
+        let first = profile.noteAccountAwaitingIdentity("a1")
+        let second = profile.noteAccountAwaitingIdentity("a1")
+        #expect(first)
+        #expect(second == false)
+        #expect(profile.pendingIdentityAccountIDs == ["a1"])
+    }
+
+    @Test("Questions are asked in a stable order across launches")
+    func stableOrder() {
+        var profile = makeProfile()
+        profile.noteAccountAwaitingIdentity("b")
+        profile.noteAccountAwaitingIdentity("a")
+        #expect(profile.pendingIdentityAccountIDs == ["a", "b"])
     }
 
     @Test("Answering clears the question and moves to the next server")
     func resolvesInOrder() {
-        let prompts = ProfileServerIdentityPrompts()
-        prompts.note(accountID: "b", profileID: "kid", provider: .plex, hasExistingBinding: false)
-        prompts.note(accountID: "a", profileID: "kid", provider: .plex, hasExistingBinding: false)
-        // Stable order, not Set hashing — otherwise "answer one, get the next"
-        // jumps around between launches.
-        #expect(prompts.pendingAccountID(for: "kid") == "a")
-        prompts.resolve(accountID: "a", profileID: "kid")
-        #expect(prompts.pendingAccountID(for: "kid") == "b")
-        prompts.resolve(accountID: "b", profileID: "kid")
-        #expect(prompts.pendingAccountID(for: "kid") == nil)
+        var profile = makeProfile()
+        profile.noteAccountAwaitingIdentity("b")
+        profile.noteAccountAwaitingIdentity("a")
+        let resolvedA = profile.resolveAccountAwaitingIdentity("a")
+        #expect(resolvedA)
+        #expect(profile.pendingIdentityAccountIDs == ["b"])
+        let resolvedB = profile.resolveAccountAwaitingIdentity("b")
+        #expect(resolvedB)
+        #expect(profile.needsIdentityAnswer == false)
     }
 
-    @Test("Switching a server back off withdraws its question")
-    func clearingProfileDropsQuestions() {
-        let prompts = ProfileServerIdentityPrompts()
-        prompts.note(accountID: "a1", profileID: "kid", provider: .plex, hasExistingBinding: false)
-        prompts.clear(profileID: "kid")
-        #expect(prompts.pendingAccountID(for: "kid") == nil)
+    @Test("The last answer clears to absence, not an empty array")
+    func clearsToAbsence() {
+        var profile = makeProfile()
+        profile.noteAccountAwaitingIdentity("a1")
+        profile.resolveAccountAwaitingIdentity("a1")
+        // The sync layer requires records to round-trip byte-identically, and
+        // `[]` is not the same bytes as no key at all.
+        #expect(profile.accountsAwaitingIdentity == nil)
+    }
+
+    @Test("Resolving something that was never asked changes nothing")
+    func resolveUnknownIsNoOp() {
+        var profile = makeProfile()
+        let resolved = profile.resolveAccountAwaitingIdentity("nope")
+        #expect(resolved == false)
+        #expect(profile.accountsAwaitingIdentity == nil)
+    }
+
+    @Test("The question survives an encode/decode round trip")
+    func survivesPersistence() throws {
+        var profile = makeProfile()
+        profile.noteAccountAwaitingIdentity("a1")
+        let data = try JSONEncoder().encode(profile)
+        let decoded = try JSONDecoder().decode(Profile.self, from: data)
+        // An in-memory question is forgotten on restart while the
+        // enabled-but-unidentified server is still there — importing as the
+        // owner on every launch.
+        #expect(decoded.pendingIdentityAccountIDs == ["a1"])
     }
 }

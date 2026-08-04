@@ -905,7 +905,16 @@ final class PlozziOSAppModel {
     /// the leak the gate exists to prevent, and clearing it without asking is the
     /// same thing by another route.
     func resumeProfileOnboardingIfNeeded() {
-        guard profileOnboardingStep == nil, profiles.activeProfile.needsSetup else { return }
+        // `profileOnboardingID` — not just the step — because creation claims the
+        // id and origin synchronously and only raises the step a runloop turn
+        // later (so the editor sheet can close first). Switching into the new
+        // profile schedules a resume in that same window; guarding on the step
+        // alone let the resume win the race and relabel a `.settings` flow as
+        // `.launch`, so the cover was asked for from the root while Settings was
+        // still up — and silently never appeared. Exactly what the origin split
+        // exists to prevent.
+        guard profileOnboardingStep == nil, profileOnboardingID == nil else { return }
+        guard profiles.activeProfile.needsSetup else { return }
         profileOnboardingID = profiles.activeProfileID
         profileOnboardingOrigin = .launch
         profileOnboardingStep = .libraries
@@ -951,45 +960,60 @@ final class PlozziOSAppModel {
         profileOnboardingOrigin = nil
     }
 
-    /// Servers switched on for a profile that hasn't said who it watches as
-    /// there. Same policy object the tvOS shell uses — see
-    /// `ProfileServerIdentityPrompts` for why the question has to be asked here
-    /// too and not only during new-profile setup.
-    private let identityPrompts = ProfileServerIdentityPrompts()
-
     /// The Plex account this profile has just enabled and not yet picked a user
-    /// on. `PlozziOSRootView` presents the picker from this.
+    /// on. The Libraries screen presents the picker from this.
+    ///
+    /// Read from the PROFILE, not from memory: the question has to outlive a
+    /// relaunch, because the enabled-but-unidentified server does. See
+    /// `Profile.accountsAwaitingIdentity`.
     var pendingIdentityAccount: Account? {
-        guard let id = identityPrompts.pendingAccountID(for: profiles.activeProfileID) else {
+        guard let id = profiles.activeProfile.pendingIdentityAccountIDs.first else {
             return nil
         }
         return accounts.first { $0.id == id }
     }
 
     private func noteServerAwaitingIdentity(_ accountID: String, profileID: String) {
-        guard let account = accounts.first(where: { $0.id == accountID }) else { return }
-        identityPrompts.note(
-            accountID: accountID,
-            profileID: profileID,
-            provider: account.server.provider,
-            hasExistingBinding: profiles.activeProfile
-                .homeUserBinding(forPlexAccount: accountID) != nil
-        )
+        guard let account = accounts.first(where: { $0.id == accountID }),
+              var profile = profiles.profiles.first(where: { $0.id == profileID }),
+              ProfileServerIdentityPolicy.shouldAsk(
+                  provider: account.server.provider,
+                  hasExistingBinding: profile.homeUserBinding(forPlexAccount: accountID) != nil
+              ),
+              profile.noteAccountAwaitingIdentity(accountID)
+        else { return }
+        profiles.update(profile)
     }
 
-    /// Clears whichever question is currently on screen (the sheet was swiped
-    /// away). Dismissing counts as answering: the point is to ask once, not nag.
+    /// Clears whichever question is on screen (the sheet was swiped away).
+    /// Dismissing counts as answering: ask once, don't nag.
     func resolveIdentityPromptForPending() {
-        guard let id = identityPrompts.pendingAccountID(for: profiles.activeProfileID) else {
-            return
-        }
+        guard let id = profiles.activeProfile.pendingIdentityAccountIDs.first else { return }
         resolveIdentityPrompt(for: id)
     }
 
     /// Clears the question once a user is chosen — or the sheet is dismissed.
-    /// Dismissing counts: ask once, don't nag.
     func resolveIdentityPrompt(for accountID: String) {
-        identityPrompts.resolve(accountID: accountID, profileID: profiles.activeProfileID)
+        let profileID = profiles.activeProfileID
+        guard var profile = profiles.profiles.first(where: { $0.id == profileID }),
+              profile.resolveAccountAwaitingIdentity(accountID)
+        else { return }
+        profiles.update(profile)
+        // The import was deferred while this was outstanding; with the answer in
+        // it can finally run, against the identity that was just chosen.
+        guard !profile.needsSetup, !profile.needsIdentityAnswer else { return }
+        Task { @MainActor in
+            await updateTrackersForActiveProfile()
+            await prepareUniversalWatchlist()
+        }
+    }
+
+    /// Whether the profile that is already active is locked and unproven — the
+    /// backstop for paths that make a profile active without going through
+    /// `selectProfile(_:)` (a synced deletion re-pointing at `profiles.first`).
+    var activeProfileNeedsUnlock: Bool {
+        let active = profiles.activeProfile
+        return active.isLocked && !unlockedProfileIDs.contains(active.id)
     }
 
     /// Switches to `id`, unless it's locked and unproven this run — in which case
@@ -1065,13 +1089,14 @@ final class PlozziOSAppModel {
         profiles.update(profile)
     }
 
-    /// Whether the profile that is already active is locked and unproven — the
-    /// backstop for paths that make a profile active without going through
-    /// `selectProfile(_:)` (a synced deletion re-pointing at `profiles.first`).
-    var activeProfileNeedsUnlock: Bool {
-        let active = profiles.activeProfile
-        return active.isLocked && !unlockedProfileIDs.contains(active.id)
-    }
+    /// Forces the profile picker with no way past it.
+    ///
+    /// The iOS counterpart of tvOS's non-cancelable `isChoosingProfile`. The PIN
+    /// cover alone isn't a gate: it has a Cancel button, and cancelling it while
+    /// a locked profile is already active simply reveals that profile. The picker
+    /// behind it is what makes cancelling harmless — there's nothing to cancel
+    /// *into*.
+    private(set) var mustChooseProfile = false
 
     /// Raises the PIN gate if the profile that just became active is locked and
     /// unproven this run.
@@ -1083,14 +1108,24 @@ final class PlozziOSAppModel {
     /// entirely, so deleting a profile could drop you straight inside a locked
     /// one. The prompt has no "cancel into the profile" path: dismissing it
     /// returns to the picker.
-    func enforceActiveProfileLock() {
-        guard activeProfileNeedsUnlock else { return }
+    /// - Returns: `true` when the gate was raised, meaning the caller must NOT
+    ///   go on to scope this profile in — applying its Plex identity or importing
+    ///   its watchlist before anyone has proved the PIN is most of what the lock
+    ///   is supposed to withhold.
+    @discardableResult
+    func enforceActiveProfileLock() -> Bool {
+        guard activeProfileNeedsUnlock else { return false }
         profileLockError = nil
+        mustChooseProfile = true
         pendingLockedProfile = profiles.activeProfile
+        return true
     }
 
     func performSelectProfile(_ id: String) {
         universalWatchlistRetryScheduler = nil
+        // Reached only past the lock gate, so this is where the forced picker
+        // lifts: a profile has been chosen and proved.
+        mustChooseProfile = false
         profiles.select(id)
         // Switching INTO a profile that never finished setup — abandoned here, or
         // created on another device and synced across — asks the question again
@@ -1488,13 +1523,17 @@ final class PlozziOSAppModel {
                 isKids: false,
                 activeAccountIDs: accounts.map(\.id)
             )
-            performSelectProfile(created.id)
+            // Claimed BEFORE the switch: `performSelectProfile` schedules a
+            // deferred resume, and this new profile does need setup, so without
+            // the claim already in place that resume would take the flow over and
+            // present it from the wrong place. See `resumeProfileOnboardingIfNeeded`.
             profileOnboardingID = created.id
+            profileOnboardingOrigin = .settings
+            performSelectProfile(created.id)
             // Yielded, not set inline: this runs from inside the Add Profile
             // sheet, and SwiftUI drops a presentation requested while another is
             // still dismissing. One runloop turn lets the editor close first —
             // the same reason `scheduleFirstRunStep` yields.
-            profileOnboardingOrigin = .settings
             Task { @MainActor in
                 await Task.yield()
                 profileOnboardingStep = .libraries
@@ -1509,6 +1548,17 @@ final class PlozziOSAppModel {
         profiles.remove(id)
         watchReconcilers[id] = nil
         if profiles.activeProfileID != previousActiveProfileID {
+            // Deleting the active profile falls the selection through to whatever
+            // is left, which can be a LOCKED profile — a route into it that never
+            // passes `selectProfile`'s gate. Stop here if so: re-scoping,
+            // re-pointing the Plex identity and importing that profile's
+            // watchlist is most of what the lock is meant to withhold, and doing
+            // it first would mean the PIN only hid a profile that was already
+            // open behind it.
+            if enforceActiveProfileLock() {
+                reloadAccountsAndCrashContext()
+                return
+            }
             settings = PlozziOSSettingsModel(namespace: profiles.activeNamespace)
             seriesTrackStore = SeriesTrackPreferenceStore(
                 namespace: profiles.activeNamespace
@@ -1524,10 +1574,7 @@ final class PlozziOSAppModel {
                 authenticatedHTTPResolver: authenticatedHTTPResolver
             )
             plexHomeUsers.ensurePlexIdentityForActiveProfile()
-            // We landed on a profile nobody chose. If it's locked, ask.
-            enforceActiveProfileLock()
         }
-        identityPrompts.clear(profileID: id)
         reloadAccountsAndCrashContext()
         identityIndex.reset()
         identityIndex.warmIdentityIndex()
@@ -1591,10 +1638,15 @@ final class PlozziOSAppModel {
         }
         profiles.setActiveAccountIDs(Array(ids), for: profileID)
         watchReconcilers[profileID] = nil
+        // Noted BEFORE the reload below, which schedules a watchlist import: the
+        // whole point is that the import waits for the answer, and a note taken
+        // after it has already been scheduled is too late.
         if enabled {
             noteServerAwaitingIdentity(accountID, profileID: profileID)
         } else {
-            identityPrompts.resolve(accountID: accountID, profileID: profileID)
+            // Switched back off — there's nothing left to be anyone on, and an
+            // unanswerable question would gate the import forever.
+            resolveIdentityPrompt(for: accountID)
         }
         if profiles.activeProfileID == profileID {
             reloadAccountsAndCrashContext()

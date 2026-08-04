@@ -105,94 +105,27 @@ struct PlozziOSProfileOnboardingCover: View {
                 )
             }
         case .lockOffer:
-            PlozziOSProfileLockOfferView(
-                appModel: appModel,
-                onFinish: { appModel.advanceProfileOnboarding() }
-            )
+            if let profile = appModel.profileBeingOnboarded {
+                ProfileLockOfferView(
+                    profile: profile,
+                    syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                    onComplete: { lock in
+                        appModel.setLock(lock, forProfile: profile.id)
+                        appModel.advanceProfileOnboarding()
+                    },
+                    onSkip: { appModel.advanceProfileOnboarding() }
+                )
+            } else {
+                // The profile was deleted underneath the flow.
+                Color.clear.onAppear {
+                    appModel.advanceProfileOnboarding()
+                }
+            }
         case nil:
             // Reached only in the frame where the last step clears the flag and
             // the cover is on its way out.
             EmptyView()
         }
-    }
-}
-/// Offers a PIN on a profile that was just created.
-///
-/// The Apple TV asks this at the same point, for the same reason: creating a
-/// profile is when someone is actually thinking about who should be able to open
-/// it. Skipping it on iPhone left the lock discoverable only by going looking for
-/// it in Settings.
-///
-/// Declining is a first-class answer, not a dismissal to be nagged about — a lock
-/// can be added any time from the profile's own settings page.
-struct PlozziOSProfileLockOfferView: View {
-    let appModel: PlozziOSAppModel
-    let onFinish: () -> Void
-
-    @State private var isChoosingPIN = false
-
-    private var profile: Profile? { appModel.profileBeingOnboarded }
-
-    var body: some View {
-        Group {
-            if let profile {
-                if isChoosingPIN {
-                    ProfileLockSetupView(
-                        profile: profile,
-                        offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
-                        syncEnabled: SyncSetupFeatureFlag().isEnabled,
-                        onComplete: { lock in
-                            appModel.setLock(lock, forProfile: profile.id)
-                            onFinish()
-                        },
-                        // Backing out of the keypad returns to the offer rather
-                        // than ending the flow, so a mistyped confirmation isn't
-                        // a dead end.
-                        onCancel: { isChoosingPIN = false }
-                    )
-                } else {
-                    offer(for: profile)
-                }
-            } else {
-                // The profile was deleted underneath us; nothing to offer.
-                Color.clear.onAppear(perform: onFinish)
-            }
-        }
-    }
-
-    private func offer(for profile: Profile) -> some View {
-        VStack(spacing: 28) {
-            Spacer()
-            PlozziOSProfileAvatar(profile: profile, size: 128)
-            VStack(spacing: 12) {
-                Text(ProfileLockCopy.offerTitle)
-                    .font(.largeTitle.bold())
-                    .multilineTextAlignment(.center)
-                Text(
-                    profile.isKids
-                        ? ProfileLockCopy.offerMessageKids
-                        : ProfileLockCopy.offerMessage
-                )
-                .plozzForeground(.secondary)
-                .multilineTextAlignment(.center)
-            }
-            Spacer()
-            VStack(spacing: 12) {
-                Button(String(localized: ProfileLockCopy.create)) {
-                    isChoosingPIN = true
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                Button("Not Now", action: onFinish)
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .frame(maxWidth: 480)
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 24)
-        .padding(.vertical, 48)
     }
 }
 #endif

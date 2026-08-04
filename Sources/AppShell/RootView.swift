@@ -56,7 +56,6 @@ public struct RootView: View {
     @State private var showSyncReceive = false
     @State private var showSyncReceiveFromSettings = false
     /// A just-set-up profile whose PIN is being chosen.
-    @State private var newProfileLockTarget: Profile?
     /// Identifies the server awaiting an identity choice, for `.fullScreenCover(item:)`.
     private struct PendingIdentityAccount: Identifiable { let id: String }
 
@@ -493,37 +492,23 @@ public struct RootView: View {
             }
             .task { await setupLibraries.reload(appState: appState) }
         }
-        // Then offer a lock on it.
-        .alert(
-            Text(ProfileLockCopy.offerTitle),
-            isPresented: Binding(
-                get: { appState.profileFlow.pendingLockOfferProfile != nil },
-                set: { if !$0 { appState.profileFlow.dismissLockOffer() } }
-            ),
-            presenting: appState.profileFlow.pendingLockOfferProfile
+        // Last onboarding step stays full-screen. An alert here exposed Home
+        // underneath an unrelated setup question, making the flow feel finished
+        // before it actually was.
+        .fullScreenCover(
+            item: Binding(
+                get: { appState.profileFlow.pendingLockOfferProfile },
+                set: { if $0 == nil { appState.profileFlow.dismissLockOffer() } }
+            )
         ) { profile in
-            Button(String(localized: ProfileLockCopy.create)) {
-                appState.profileFlow.dismissLockOffer()
-                newProfileLockTarget = profile
-            }
-            Button("Not Now", role: .cancel) { appState.profileFlow.dismissLockOffer() }
-        } message: { profile in
-            Text(profile.isKids ? ProfileLockCopy.offerMessageKids : ProfileLockCopy.offerMessage)
-        }
-        .fullScreenCover(item: $newProfileLockTarget) { profile in
-            ProfileLockSetupView(
+            ProfileLockOfferView(
                 profile: profile,
-                // Matches both the iPhone create-time offer and tvOS's own
-                // Settings path. Omitting it here meant a profile that plays as a
-                // PIN-protected Plex user was offered "use the same PIN" when
-                // created on iPhone but not on the Apple TV.
-                offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
                 syncEnabled: SyncSetupFeatureFlag().isEnabled,
                 onComplete: { lock in
                     appState.setLock(lock, forProfile: profile.id)
-                    newProfileLockTarget = nil
+                    appState.profileFlow.dismissLockOffer()
                 },
-                onCancel: { newProfileLockTarget = nil }
+                onSkip: { appState.profileFlow.dismissLockOffer() }
             )
         }
         // One-time theme picker for a profile just created in-app (Settings →

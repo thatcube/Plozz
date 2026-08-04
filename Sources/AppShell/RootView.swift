@@ -8,6 +8,7 @@ import CoreModels
 import CoreNetworking
 import CoreUI
 import FeatureHomeCore
+import FeatureProfiles
 import CrashReporting
 import FeatureAuth
 import FeatureDiscovery
@@ -54,6 +55,8 @@ public struct RootView: View {
     @State private var appState: AppState
     @State private var showSyncReceive = false
     @State private var showSyncReceiveFromSettings = false
+    /// A just-set-up profile whose PIN is being chosen.
+    @State private var newProfileLockTarget: Profile?
     @State private var showSyncSend = false
     /// Home's view model, owned here because this is the highest view whose
     /// identity is genuinely stable for the signed-in session. Kept out of the
@@ -223,6 +226,12 @@ public struct RootView: View {
                     // Hoisted into explicitly-typed locals so the (very large)
                     // MainTabView initializer stays within the Swift type-checker's
                     // time budget — inline trailing closures here tip it over.
+                    // Explicitly typed, like its neighbours: this initializer is
+                    // at the Swift type-checker's budget and an inline closure
+                    // here tips it into "unable to type-check in reasonable time".
+                    let createProfileForSetup: (ProfileDraft) -> Void = { draft in
+                        appState.createProfileForSetup(draft, isKids: false)
+                    }
                     let debugActions = DebugSettingsActions(
                         resetToFirstRun: { appState.resetToFirstRunForDebugging() },
                         eraseICloud: { appState.eraseEverythingFromICloudForDebugging() }
@@ -308,6 +317,7 @@ public struct RootView: View {
                         onSetAccountIncluded: { appState.profileFlow.setAccount($0, includedInActiveProfile: $1) },
                         onSetAskProfileOnStartup: { appState.profileFlow.setAskProfileOnStartup($0) },
                         onSaveProfile: { appState.profileFlow.saveProfile($0) },
+                        onCreateProfile: createProfileForSetup,
                         onUpdateProfileCosmetics: { appState.profileFlow.updateProfileCosmetics($0) },
                         onDeleteProfile: { appState.profileFlow.removeProfile(id: $0) },
                         onAddAccount: { appState.addAccount() },
@@ -438,6 +448,46 @@ public struct RootView: View {
                 errorMessage: appState.profileFlow.profileLockError,
                 onSubmit: { appState.profileFlow.submitProfileLockPIN($0) },
                 onCancel: { appState.profileFlow.cancelProfileLockPrompt() }
+            )
+        }
+        // A newly created profile's setup step: which servers, who it watches as,
+        // which libraries. Presented HERE rather than by whatever created the
+        // profile — creating one switches into it, which dismisses the picker, so
+        // a cover owned by the picker would be torn down before it appeared.
+        .fullScreenCover(item: Binding(
+            get: { appState.profileFlow.pendingSetupProfile },
+            set: { if $0 == nil { appState.profileFlow.completeSetup(for: appState.profilesModel.activeProfileID) } }
+        )) { profile in
+            ProfileSetupView(appState: appState) {
+                appState.completeProfileSetup(for: profile.id)
+            }
+        }
+        // Then offer a lock on it.
+        .alert(
+            Text(ProfileLockCopy.offerTitle),
+            isPresented: Binding(
+                get: { appState.profileFlow.pendingLockOfferProfile != nil },
+                set: { if !$0 { appState.profileFlow.dismissLockOffer() } }
+            ),
+            presenting: appState.profileFlow.pendingLockOfferProfile
+        ) { profile in
+            Button(String(localized: ProfileLockCopy.create)) {
+                appState.profileFlow.dismissLockOffer()
+                newProfileLockTarget = profile
+            }
+            Button("Not Now", role: .cancel) { appState.profileFlow.dismissLockOffer() }
+        } message: { profile in
+            Text(profile.isKids ? ProfileLockCopy.offerMessageKids : ProfileLockCopy.offerMessage)
+        }
+        .fullScreenCover(item: $newProfileLockTarget) { profile in
+            ProfileLockSetupView(
+                profile: profile,
+                syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                onComplete: { lock in
+                    appState.setLock(lock, forProfile: profile.id)
+                    newProfileLockTarget = nil
+                },
+                onCancel: { newProfileLockTarget = nil }
             )
         }
         // One-time theme picker for a profile just created in-app (Settings →

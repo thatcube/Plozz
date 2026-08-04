@@ -37,6 +37,16 @@ public final class ProfileFlowModel {
     /// showing (cleared by `finishPickingThemeForNewProfile()`).
     public private(set) var isPickingThemeForNewProfile = false
 
+    /// A just-created profile that still needs its setup step (servers, identity,
+    /// libraries).
+    ///
+    /// Lives here rather than in whichever view created the profile: creating one
+    /// switches into it, which dismisses the picker — so a cover presented BY the
+    /// picker is torn down before it can appear. App-level flow, app-level state.
+    public private(set) var pendingSetupProfile: Profile?
+    /// A profile that has finished setup and is being offered a lock.
+    public private(set) var pendingLockOfferProfile: Profile?
+
     @ObservationIgnored private let profilesModel: ProfilesModel
     @ObservationIgnored private let accountsProviders: AccountsProvidersModel
     @ObservationIgnored private let plexHomeUsers: PlexHomeUsersModel
@@ -368,11 +378,13 @@ public final class ProfileFlowModel {
         configured.needsSetup = true
         profilesModel.update(configured)
         performSwitch(to: configured.id)
+        pendingSetupProfile = configured
         return configured
     }
 
     /// Marks setup finished and releases the deferred watchlist import.
     public func completeSetup(for id: String) {
+        pendingSetupProfile = nil
         guard var profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }
         guard profile.needsSetup else { return }
         profile.needsSetup = false
@@ -380,6 +392,12 @@ public final class ProfileFlowModel {
         // Only now, with the profile's servers and identity settled, is an
         // import meaningful — see `Profile.isAwaitingSetup`.
         activateUniversalWatchlist()
+        pendingLockOfferProfile = profile
+    }
+
+    /// Dismisses the post-setup lock offer.
+    public func dismissLockOffer() {
+        pendingLockOfferProfile = nil
     }
 
     /// Removes a profile (the default profile can't be removed). If it was

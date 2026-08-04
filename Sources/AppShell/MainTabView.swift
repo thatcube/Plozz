@@ -181,6 +181,7 @@ struct MainTabView: View {
     let onSetAccountIncluded: (String, Bool) -> Void
     let onSetAskProfileOnStartup: (Bool) -> Void
     let onSaveProfile: (ProfileDraft) -> Void
+    var onCreateProfile: (ProfileDraft) -> Void = { _ in }
     /// Live cosmetics-only persistence for editing an existing profile (see
     /// `AppState.updateProfileCosmetics`), so the editor can auto-save.
     let onUpdateProfileCosmetics: (ProfileDraft) -> Void
@@ -357,6 +358,7 @@ struct MainTabView: View {
                 onSetAskProfileOnStartup: onSetAskProfileOnStartup,
                 onSwitchProfile: onSwitchProfile,
                 onSaveProfile: onSaveProfile,
+                onCreateProfile: onCreateProfile,
                 onUpdateProfileCosmetics: onUpdateProfileCosmetics,
                 onDeleteProfile: onDeleteProfile,
                 onAddAccount: onAddAccount,

@@ -30,6 +30,9 @@ struct SettingsContext {
     let onSetAskProfileOnStartup: (Bool) -> Void
     let onSwitchProfile: () -> Void
     let onSaveProfile: (ProfileDraft) -> Void
+    /// Creates a NEW profile and hands it to the app-level setup step. Distinct
+    /// from `onSaveProfile`, which also edits existing ones.
+    let onCreateProfile: (ProfileDraft) -> Void
     /// Live cosmetics-only persistence for editing an existing profile.
     let onUpdateProfileCosmetics: (ProfileDraft) -> Void
     let onDeleteProfile: (String) -> Void

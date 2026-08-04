@@ -35,12 +35,6 @@ struct ProfileSelectionView: View {
     @State private var editingProfile: Profile?
     /// Set while creating a profile, so the sheet knows which kind to make.
     @State private var creating: CreationKind?
-    /// A just-created profile currently in its setup step.
-    @State private var settingUp: Profile?
-    /// A just-set-up profile waiting on the "want a lock?" offer.
-    @State private var newlyCreated: Profile?
-    /// Set once the user accepts that offer, presenting the PIN setup.
-    @State private var lockTarget: Profile?
     /// A management action held back until a PIN proves it's allowed, together
     /// with whose PIN that is.
     @State private var pendingAction: PendingAuthorization?
@@ -155,49 +149,13 @@ struct ProfileSelectionView: View {
                     // Creates and switches in: setup needs the profile active so
                     // it can drive the ordinary per-profile machinery. Its
                     // watchlist import stays deferred until setup finishes.
-                    let created = appState.createProfileForSetup(draft, isKids: kind.isKids)
+                    // Creates, switches in, and hands off to the app-level setup
+                    // step — the picker is dismissed by the switch, so it can't
+                    // own what comes next.
+                    appState.createProfileForSetup(draft, isKids: kind.isKids)
                     creating = nil
-                    settingUp = created
                 },
                 onCancel: { creating = nil }
-            )
-        }
-        // Which servers, who it watches as, which libraries — before anything
-        // imports on its behalf.
-        .fullScreenCover(item: $settingUp) { profile in
-            ProfileSetupView(appState: appState) {
-                appState.completeProfileSetup(for: profile.id)
-                settingUp = nil
-                newlyCreated = profile
-            }
-        }
-        // Then offer the lock. This is the moment the decision
-        // makes sense — otherwise locking is something you only discover later.
-        .alert(
-            Text(ProfileLockCopy.offerTitle),
-            isPresented: Binding(
-                get: { newlyCreated != nil },
-                set: { if !$0 { newlyCreated = nil } }
-            ),
-            presenting: newlyCreated
-        ) { profile in
-            Button(String(localized: ProfileLockCopy.create)) {
-                newlyCreated = nil
-                lockTarget = profile
-            }
-            Button("Not Now", role: .cancel) { newlyCreated = nil }
-        } message: { profile in
-            Text(profile.isKids ? ProfileLockCopy.offerMessageKids : ProfileLockCopy.offerMessage)
-        }
-        .fullScreenCover(item: $lockTarget) { profile in
-            ProfileLockSetupView(
-                profile: profile,
-                syncEnabled: SyncSetupFeatureFlag().isEnabled,
-                onComplete: { lock in
-                    appState.setLock(lock, forProfile: profile.id)
-                    lockTarget = nil
-                },
-                onCancel: { lockTarget = nil }
             )
         }
         .fullScreenCover(item: $pendingAction) { pending in

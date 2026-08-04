@@ -39,7 +39,10 @@ struct ProfileDetailView: View {
                 existingColorIndices: context.profiles.map(\.colorIndex),
                 plexHomeUsersFetcher: context.plexHomeUsersFetcher,
                 onSave: { draft in
-                    context.onSaveProfile(draft)
+                    // Same path as the picker: create, switch in, then the
+                    // app-level setup step. Routing both through one call is what
+                    // stops a profile created here from skipping setup.
+                    context.onCreateProfile(draft)
                     showingNewProfile = false
                 },
                 onCancel: { showingNewProfile = false }

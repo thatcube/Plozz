@@ -44,7 +44,13 @@ public protocol UniversalWatchlistHost: AnyObject {
 
     var universalWatchlistReconciler: WatchlistReconciler? { get set }
     var universalWatchlistMutationStore: DurableWatchlistMutationStore? { get set }
+    /// Identity of the built reconciler: profile + Plex identity generation, so a
+    /// "watching as" change rebuilds its destinations. Not just a profile id
+    /// despite the name.
     var universalWatchlistProfileID: String? { get set }
+    /// Bumps whenever the active Plex identity (token override) changes. Keys the
+    /// reconciler above, so "watching as" someone else rebuilds its destinations.
+    var plexWatchlistIdentityGeneration: Int { get }
     var universalWatchlistRetryScheduler: WatchlistRetryScheduler? { get set }
     var universalWatchlistShouldResumeAuthentication: Bool { get set }
     var universalWatchlistIdentityUpdateTask: Task<Void, Never>? { get set }
@@ -546,7 +552,14 @@ public extension UniversalWatchlistHost {
     func makeUniversalWatchlistReconciler(
         profileID: String
     ) async throws {
-        guard universalWatchlistProfileID != profileID else { return }
+        // Keyed by profile AND Plex identity. The destinations capture the token
+        // of whoever the profile plays as, and switching "watching as" changes
+        // that token without changing the profile — so a profile-only key kept
+        // the previous identity's destination alive and went on reading the
+        // previous person's watchlist. `plexIdentityGeneration` bumps on every
+        // override change, which is exactly the event that invalidates them.
+        let scopeKey = "\(profileID)#\(plexWatchlistIdentityGeneration)"
+        guard universalWatchlistProfileID != scopeKey else { return }
         universalWatchlistIdentityUpdateTask?.cancel()
         universalWatchlistIdentityUpdateTask = nil
         await universalWatchlistRetryScheduler?.cancel()
@@ -600,7 +613,7 @@ public extension UniversalWatchlistHost {
             }
         )
         universalWatchlistRetryScheduler = scheduler
-        universalWatchlistProfileID = profileID
+        universalWatchlistProfileID = scopeKey
         await scheduler.reschedule()
     }
 

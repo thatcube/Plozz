@@ -20,6 +20,8 @@ extension AppState: UniversalWatchlistHost {
 
     public var profiles: ProfilesModel { profilesModel }
 
+    public var plexWatchlistIdentityGeneration: Int { plexHomeUsers.plexIdentityGeneration }
+
     public func plexDiscoverToken(forAccount accountID: String) -> String? {
         plexHomeUsers.discoverToken(for: accountID)
     }

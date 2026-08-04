@@ -17,6 +17,8 @@ extension PlozziOSAppModel: UniversalWatchlistHost {
         Self.universalWatchlistStorageDirectory()
     }
 
+    var plexWatchlistIdentityGeneration: Int { plexHomeUsers?.plexIdentityGeneration ?? 0 }
+
     func plexDiscoverToken(forAccount accountID: String) -> String? {
         plexHomeUsers.discoverToken(for: accountID)
     }

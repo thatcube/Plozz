@@ -307,6 +307,40 @@ public final class ProfileFlowModel {
         profilesModel.update(profile)
     }
 
+    /// Creates a profile from a draft **without** activating it.
+    ///
+    /// `saveProfile` deliberately switches into a newly created profile (it's
+    /// called from a flow that then shows the one-time theme picker for it). The
+    /// picker needs the opposite: it's a chooser, and creating a profile there —
+    /// especially one that's about to be locked — must not silently move the
+    /// household into it and strand the user behind a PIN they haven't set yet.
+    ///
+    /// - Returns: the created profile, so the caller can offer to lock it.
+    @discardableResult
+    public func createProfileWithoutSwitching(_ draft: ProfileDraft, isKids: Bool) -> Profile {
+        let created = profilesModel.add(
+            name: draft.name,
+            avatarSymbol: draft.avatarSymbol,
+            colorIndex: draft.colorIndex,
+            linkedAccountID: draft.linkedAccountID,
+            activeAccountIDs: draft.activeAccountIDs,
+            plexHomeUserID: draft.plexHomeUserID,
+            plexHomeUserName: draft.plexHomeUserName,
+            plexHomeUserAccountID: draft.plexHomeUserAccountID,
+            plexHomeUserRequiresPIN: draft.plexHomeUserRequiresPIN,
+            plexHomeUserAvatarURL: draft.plexHomeUserAvatarURL,
+            plexHomeUserBindings: draft.plexHomeUserBindings,
+            avatarImageURL: draft.avatarImageURL,
+            avatarEmoji: draft.avatarEmoji,
+            avatarEmojiColorIndex: draft.avatarEmojiColorIndex
+        )
+        guard isKids else { return created }
+        var restricted = created
+        restricted.isKids = true
+        profilesModel.update(restricted)
+        return restricted
+    }
+
     /// Removes a profile (the default profile can't be removed). If it was
     /// active, selection falls back to the first profile and re-scopes.
     ///

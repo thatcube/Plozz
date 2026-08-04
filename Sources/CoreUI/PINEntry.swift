@@ -7,39 +7,68 @@ import SwiftUI
 /// stored properties).
 enum PINMetrics {
     #if os(tvOS)
-    static let horizontalPadding: CGFloat = 90
-    static let badgeSize: CGFloat = 180
-    static let lockSize: CGFloat = 52
+    static let horizontalPadding: CGFloat = 110
+    static let badgeSize: CGFloat = 72
+    static let keyDiameter: CGFloat = 108
+    static let keySpacing: CGFloat = 22
+    static let dotSize: CGFloat = 22
     #else
     static let horizontalPadding: CGFloat = 24
-    static let badgeSize: CGFloat = 108
-    static let lockSize: CGFloat = 34
+    static let badgeSize: CGFloat = 48
+    static let keyDiameter: CGFloat = 74
+    static let keySpacing: CGFloat = 16
+    static let dotSize: CGFloat = 16
     #endif
+
+    #if os(tvOS)
+    static let titleFont: Font = .system(size: 64, weight: .bold)
+    static let subtitleFont: Font = .title3
+    static let nameFont: Font = .title3.weight(.semibold)
+    static let proseMaxWidth: CGFloat = 720
+    #else
+    static let titleFont: Font = .largeTitle.bold()
+    static let subtitleFont: Font = .body
+    static let nameFont: Font = .headline
+    static let proseMaxWidth: CGFloat = .infinity
+    #endif
+
+    /// Width of the delete key: it spans the two trailing columns of the bottom
+    /// row, so it lines up with the grid rather than floating.
+    static var deleteKeyWidth: CGFloat { keyDiameter * 2 + keySpacing }
 }
 
 /// The shared 4-digit PIN screen.
 ///
-/// Two things ask for a PIN now — the Plex Home user switch Plozz has always
-/// had, and a profile's own `ProfileLock` — and they should be visually
-/// indistinguishable. A person setting the same PIN in both places should not be
-/// able to tell which system is asking; that's the whole point of offering to
-/// reuse the Plex PIN. So the chrome, the boxes, the keypad and the auto-submit
-/// behaviour live here once and both callers supply only what differs: the badge
-/// image, the name, and what to do with the digits.
+/// Everything that asks for four digits uses this — unlocking a profile,
+/// unlocking a Plex Home user, and creating or confirming a new PIN — so they're
+/// visually indistinguishable. That matters most for the "same PIN as Plex"
+/// option: if the two systems looked different, the fact that one PIN satisfies
+/// both would stop being obvious.
 ///
-/// Owns the entry state (typed digits, submitting) but not the *verdict* — the
-/// caller decides whether a PIN was right and feeds an error back down, because
-/// only it knows whether that means a network round-trip (Plex) or a local hash
-/// comparison (`ProfileLock`).
+/// The layout is a **3×4 dial pad**, not the single row this used to be. On a
+/// remote the row meant every digit was up to ten presses away along one axis and
+/// 0 sat past 9; a phone-shaped pad puts any digit within two presses across two
+/// axes, which is the whole reason phones and TV apps settled on it.
+///
+/// Owns the entry state (typed digits) but not the *verdict* — the caller decides
+/// whether a PIN was right and feeds an error back down, because only it knows
+/// whether that means a network round-trip (Plex) or a local hash comparison
+/// (`ProfileLock`).
 public struct PINEntryScaffold<Badge: View>: View {
-    /// Name shown under the badge — the profile or Plex Home user being opened.
+    /// Large heading — what this entry is for ("Enter your PIN", "Create a
+    /// Profile Lock"). Carries the whole meaning of the screen, so it's the one
+    /// thing a caller must supply.
+    public let title: LocalizedStringResource
+    /// Supporting line under the title.
+    public var subtitle: LocalizedStringResource?
+    /// Name shown beside the badge — the profile or Plex Home user in question.
     public let name: String
     /// Error from the last attempt, or `nil`. The slot is reserved either way so
-    /// the keypad doesn't jump when one appears.
+    /// the pad doesn't jump when one appears.
     public let errorMessage: String?
-    /// Whether an attempt is in flight (shows a spinner, blocks the keypad).
+    /// Whether an attempt is in flight (shows a spinner, blocks the pad).
     public let isSubmitting: Bool
-    /// Optional line under the keypad, e.g. the sync caveat.
+    /// Optional caveat under the identity block, e.g. the sync warning.
     public var footnote: LocalizedStringResource?
     /// Called with the full PIN as soon as the last digit lands.
     public let onSubmit: (String) -> Void
@@ -50,14 +79,18 @@ public struct PINEntryScaffold<Badge: View>: View {
     @State private var pin: String = ""
 
     public init(
+        title: LocalizedStringResource,
+        subtitle: LocalizedStringResource? = nil,
         name: String,
-        errorMessage: String?,
-        isSubmitting: Bool,
+        errorMessage: String? = nil,
+        isSubmitting: Bool = false,
         footnote: LocalizedStringResource? = nil,
         onSubmit: @escaping (String) -> Void,
         onCancel: @escaping () -> Void,
         @ViewBuilder badge: @escaping () -> Badge
     ) {
+        self.title = title
+        self.subtitle = subtitle
         self.name = name
         self.errorMessage = errorMessage
         self.isSubmitting = isSubmitting
@@ -67,64 +100,123 @@ public struct PINEntryScaffold<Badge: View>: View {
         self.badge = badge
     }
 
-    /// Clears the typed digits. Callers drive this from their error state so a
-    /// wrong PIN resets the boxes instead of making the user backspace four times.
-    private func reset() { pin = "" }
-
     public var body: some View {
         ZStack {
             // Full-bleed dimmed backdrop so the PIN screen reads as a modal OVER
-            // the app (like Plex does), not as an opaque context switch.
+            // the app, not as an opaque context switch.
             Rectangle()
                 .fill(.ultraThinMaterial)
                 .ignoresSafeArea()
-            Color.black.opacity(0.45).ignoresSafeArea()
+            Color.black.opacity(0.55).ignoresSafeArea()
 
-            VStack(spacing: 32) {
-                Spacer(minLength: 0)
-                badge()
-                Text(verbatim: name)
-                    .font(.title2.weight(.semibold))
-                    .multilineTextAlignment(.center)
-                HStack(spacing: 16) {
-                    PINBoxes(filledCount: pin.count)
-                    if isSubmitting {
-                        ProgressView()
-                            .controlSize(.large)
-                    }
-                }
-                // Reserve the error slot so the strip doesn't jump up/down when
-                // an error appears/clears between attempts.
-                Text(verbatim: errorMessage ?? " ")
-                    .font(.callout)
-                    .foregroundStyle(errorMessage == nil ? Color.clear : .red)
-                    .multilineTextAlignment(.center)
-                PINStrip(onDigit: appendDigit, onDelete: deleteDigit)
-                    .disabled(isSubmitting)
-                    .opacity(isSubmitting ? 0.5 : 1.0)
-                if let footnote {
-                    Text(footnote)
-                        .font(.footnote)
-                        .plozzForeground(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 900)
-                }
-                Spacer(minLength: 0)
-                Button("Cancel", action: onCancel)
-                    .padding(.bottom, 40)
+            #if os(tvOS)
+            // Prose on the left, pad on the right. Splitting them lets the pad sit
+            // at a comfortable reach without squeezing the title, and stops the
+            // eye reading and aiming in the same column.
+            HStack(alignment: .center, spacing: 80) {
+                prose
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                padColumn
             }
             .padding(.horizontal, PINMetrics.horizontalPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            #else
+            VStack(spacing: 32) {
+                Spacer(minLength: 0)
+                prose
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                padColumn
+                Spacer(minLength: 0)
+                Button("Cancel", action: onCancel)
+                    .padding(.bottom, 24)
+            }
+            .padding(.horizontal, PINMetrics.horizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            #endif
         }
-        // tvOS only: Menu on the Siri remote backs out of the prompt. iOS has no
-        // equivalent command (the Cancel button is the way out there).
         #if os(tvOS)
+        // Menu on the Siri remote backs out. iOS has no equivalent command, so
+        // the Cancel button is the way out there.
         .onExitCommand(perform: onCancel)
         #endif
         .onChange(of: errorMessage) { _, newValue in
-            if newValue != nil { reset() }
+            if newValue != nil { pin = "" }
         }
     }
+
+    // MARK: Prose column
+
+    @ViewBuilder
+    private var prose: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(title)
+                .font(PINMetrics.titleFont)
+                .foregroundStyle(palette.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(PINMetrics.subtitleFont)
+                    .foregroundStyle(palette.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Whose PIN this is. Small and secondary — the person already knows
+            // who they picked; this is confirmation, not the headline.
+            HStack(spacing: 14) {
+                badge()
+                    .frame(width: PINMetrics.badgeSize, height: PINMetrics.badgeSize)
+                    .clipShape(Circle())
+                Text(verbatim: name)
+                    .font(PINMetrics.nameFont)
+                    .foregroundStyle(palette.primaryText)
+                    .lineLimit(1)
+            }
+            .padding(.top, 4)
+
+            // Reserved either way so nothing shifts between attempts.
+            Text(verbatim: errorMessage ?? " ")
+                .font(.callout)
+                .foregroundStyle(errorMessage == nil ? Color.clear : .red)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let footnote {
+                Label {
+                    Text(footnote)
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+                .foregroundStyle(palette.secondaryText)
+            }
+        }
+        .frame(maxWidth: PINMetrics.proseMaxWidth, alignment: .leading)
+    }
+
+    // MARK: Pad column
+
+    @ViewBuilder
+    private var padColumn: some View {
+        VStack(spacing: 28) {
+            HStack(spacing: 18) {
+                PINProgressDots(filledCount: pin.count)
+                if isSubmitting {
+                    ProgressView().controlSize(.large)
+                }
+            }
+            PINDialPad(onDigit: appendDigit, onDelete: deleteDigit)
+                .disabled(isSubmitting)
+                .opacity(isSubmitting ? 0.5 : 1.0)
+        }
+        #if os(tvOS)
+        // Keep the pad a single focus region so Left from any key returns to the
+        // prose side rather than hunting between rows.
+        .focusSection()
+        #endif
+    }
+
+    // MARK: Entry
 
     private func appendDigit(_ d: String) {
         guard !isSubmitting else { return }
@@ -134,11 +226,10 @@ public struct PINEntryScaffold<Badge: View>: View {
         if pin.count == ProfileLock.pinLength {
             // Auto-submit the moment the last digit lands. Snappy is the goal.
             //
-            // Clear immediately rather than waiting for an error to come back:
-            // a caller that reports the same message twice in a row (two wrong
+            // Clear immediately rather than waiting for an error to come back: a
+            // caller that reports the same message twice in a row (two wrong
             // PINs, same string) produces no change for `onChange` to see, which
-            // would leave four filled boxes and a keypad that silently ignores
-            // every press.
+            // would leave four filled dots and a pad that ignores every press.
             let entered = pin
             pin = ""
             onSubmit(entered)
@@ -149,97 +240,43 @@ public struct PINEntryScaffold<Badge: View>: View {
         guard !isSubmitting else { return }
         if !pin.isEmpty { pin.removeLast() }
     }
+
 }
 
-/// Large circular badge with a small lock in the corner — the shape both Plex's
-/// tvOS PIN screen and ours use. `image` supplies whatever identity art the
-/// caller has (a Plex thumb, a profile avatar, or a fallback glyph).
-public struct PINBadge<Content: View>: View {
-    @Environment(\.themePalette) private var palette
-    @ViewBuilder public let image: () -> Content
-
-    public init(@ViewBuilder image: @escaping () -> Content) {
-        self.image = image
-    }
-
-
-
-    public var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            ZStack {
-                Circle().fill(palette.fillSubtle)
-                image()
-            }
-            .frame(width: PINMetrics.badgeSize, height: PINMetrics.badgeSize)
-            .clipShape(Circle())
-
-            ZStack {
-                Circle().fill(Color.green)
-                Image(systemName: "lock.fill")
-                    .font(.system(size: PINMetrics.lockSize * 0.42, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: PINMetrics.lockSize, height: PINMetrics.lockSize)
-            .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 2))
-            .offset(x: 4, y: 4)
-        }
-    }
-}
-
-/// Four large rounded boxes that fill as digits land. Each is dark/outline when
-/// empty and solid+dot when filled. The next-to-fill box gets a thin highlight
-/// so entry progress is visible without any focus on the boxes themselves (the
-/// strip below owns focus).
-public struct PINBoxes: View {
+/// The four progress dots above the pad.
+///
+/// Outlines that fill in, rather than the boxes-with-dots this used to draw: at a
+/// distance a filled circle reads as progress instantly, and it keeps the pad and
+/// its indicator in one visual language.
+public struct PINProgressDots: View {
     public let filledCount: Int
+
+    @Environment(\.themePalette) private var palette
 
     public init(filledCount: Int) { self.filledCount = filledCount }
 
-    #if os(tvOS)
-    private static let boxWidth: CGFloat = 72
-    private static let boxHeight: CGFloat = 84
-    private static let boxSpacing: CGFloat = 18
-    #else
-    private static let boxWidth: CGFloat = 56
-    private static let boxHeight: CGFloat = 68
-    private static let boxSpacing: CGFloat = 14
-    #endif
-
     public var body: some View {
-        HStack(spacing: Self.boxSpacing) {
+        HStack(spacing: 18) {
             ForEach(0 ..< ProfileLock.pinLength, id: \.self) { idx in
                 let filled = idx < filledCount
-                let next = !filled && idx == filledCount
-                ZStack {
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
-                        .fill(filled ? Color.white.opacity(0.95) : Color.white.opacity(0.08))
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
-                        .strokeBorder(
-                            next ? Color.white.opacity(0.85) : Color.white.opacity(filled ? 0 : 0.25),
-                            lineWidth: next ? 3 : 2
-                        )
-                    if filled {
-                        Circle()
-                            .fill(Color.black)
-                            .frame(width: 18, height: 18)
-                    }
-                }
-                .frame(width: Self.boxWidth, height: Self.boxHeight)
+                Circle()
+                    .strokeBorder(palette.secondaryText.opacity(0.75), lineWidth: 2)
+                    .background(Circle().fill(filled ? palette.primaryText : .clear))
+                    .frame(width: PINMetrics.dotSize, height: PINMetrics.dotSize)
+                    .animation(.easeOut(duration: 0.12), value: filled)
             }
         }
+        .accessibilityLabel("\(filledCount) of \(ProfileLock.pinLength) digits entered")
     }
 }
 
-/// Single horizontal row of digit keys 0–9 plus a delete key — the layout Plex
-/// itself uses on tvOS, and the one-axis path the Siri remote handles best. Each
-/// key is a focusable Button so focus is always anchored and Menu/Back can't fall
-/// through to the system.
+/// The 3×4 dial pad: 1–9, then 0 and a wide delete key on the bottom row.
 ///
-/// Compact, FIXED-size keys (no tile-to-fill). With 11 keys at 84pt + 10×16
-/// spacing the strip is ~1080pt and centers naturally on a 1920pt tvOS screen,
-/// leaving ~400pt clearance per side — zero clipping, and plenty of room for the
-/// focused-key scale lift.
-public struct PINStrip: View {
+/// Each key is a focusable Button so focus is always anchored and Menu/Back can't
+/// fall through to the system. Round keys, because the shape is what makes a
+/// 10-foot target readable at a glance — and because delete can then be a capsule
+/// that visibly spans two columns without looking like a mistake.
+public struct PINDialPad: View {
     public let onDigit: (String) -> Void
     public let onDelete: () -> Void
 
@@ -248,130 +285,96 @@ public struct PINStrip: View {
         self.onDelete = onDelete
     }
 
-    private let digits: [String] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
-    #if os(tvOS)
-    private let digitKeyWidth: CGFloat = 84
-    private let deleteKeyWidth: CGFloat = 104
-    private let keyHeight: CGFloat = 100
-    #else
-    private let digitKeyWidth: CGFloat = 78
-    private let deleteKeyWidth: CGFloat = 78
-    private let keyHeight: CGFloat = 66
-    #endif
+    private static let rows = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"]]
+
+    private var digitFont: Font {
+        .system(size: PINMetrics.keyDiameter * 0.34, weight: .semibold, design: .rounded)
+    }
 
     public var body: some View {
-        #if os(tvOS)
-        // One row: the shape Plex uses on tvOS and the single axis the Siri
-        // remote handles best. ~1080pt wide, which centres comfortably on a
-        // 1920pt screen.
-        HStack(spacing: 16) {
-            ForEach(digits, id: \.self) { d in digitKey(d) }
-            deleteKey
-        }
-        // Vertical slack so the focus lift has clearance without bumping
-        // neighbors in the column.
-        .padding(.vertical, 12)
-        #else
-        // A phone is nowhere near wide enough for the tvOS strip (11 keys would
-        // need ~1080pt against an iPhone's ~390), so touch platforms get the
-        // familiar 3-across dial pad instead.
-        Grid(horizontalSpacing: 16, verticalSpacing: 16) {
-            ForEach(Array(digits.prefix(9)).chunked(into: 3), id: \.self) { row in
-                GridRow {
-                    ForEach(row, id: \.self) { d in digitKey(d) }
+        VStack(spacing: PINMetrics.keySpacing) {
+            ForEach(Self.rows, id: \.self) { row in
+                HStack(spacing: PINMetrics.keySpacing) {
+                    ForEach(row, id: \.self) { digit in
+                        Button { onDigit(digit) } label: {
+                            Text(verbatim: digit).font(digitFont)
+                        }
+                        .buttonStyle(PINKeyStyle(width: PINMetrics.keyDiameter))
+                    }
                 }
             }
-            GridRow {
-                Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
-                digitKey("0")
-                deleteKey
+            HStack(spacing: PINMetrics.keySpacing) {
+                Button { onDigit("0") } label: {
+                    Text(verbatim: "0").font(digitFont)
+                }
+                .buttonStyle(PINKeyStyle(width: PINMetrics.keyDiameter))
+
+                Button(action: onDelete) {
+                    Image(systemName: "delete.backward")
+                        .font(.system(size: PINMetrics.keyDiameter * 0.28, weight: .semibold))
+                }
+                .buttonStyle(PINKeyStyle(width: PINMetrics.deleteKeyWidth))
+                .accessibilityLabel("Delete")
             }
         }
-        .padding(.vertical, 12)
-        #endif
-    }
-
-    private func digitKey(_ d: String) -> some View {
-        Button {
-            onDigit(d)
-        } label: {
-            Text(verbatim: d)
-                .font(.system(size: 32, weight: .semibold, design: .rounded))
-        }
-        .buttonStyle(PINKeyStyle(width: digitKeyWidth, height: keyHeight, isDestructive: false))
-    }
-
-    private var deleteKey: some View {
-        Button(role: .destructive) {
-            onDelete()
-        } label: {
-            Image(systemName: "delete.left")
-                .font(.system(size: 28, weight: .semibold))
-        }
-        .buttonStyle(PINKeyStyle(width: deleteKeyWidth, height: keyHeight, isDestructive: true))
-        .accessibilityLabel("Delete")
     }
 }
 
-private extension Array {
-    /// Splits into fixed-size rows for the dial-pad grid.
-    func chunked(into size: Int) -> [[Element]] {
-        guard size > 0 else { return [self] }
-        return stride(from: 0, to: count, by: size).map { Array(self[$0 ..< Swift.min($0 + size, count)]) }
-    }
-}
-
-/// Fixed-size, focus-friendly key button. Drawn entirely by this style so the
-/// key's rendered frame is exactly width×height — no auto-expanding fill from a
-/// bordered/prominent style and no inheritance from the parent layout. Focused
-/// state lifts (scale 1.08) and brightens, with a soft drop shadow for depth.
+/// A pill/circular key. Drawn entirely by the style so the rendered frame is
+/// exactly the size asked for — no auto-expanding fill from a bordered style and
+/// no inheritance from the parent layout. Focus inverts it to a solid light key
+/// with a soft bloom, which is what makes the focused digit obvious from a sofa.
 public struct PINKeyStyle: ButtonStyle {
     public let width: CGFloat
-    public let height: CGFloat
-    public let isDestructive: Bool
 
-    public init(width: CGFloat, height: CGFloat, isDestructive: Bool) {
-        self.width = width
-        self.height = height
-        self.isDestructive = isDestructive
-    }
+    public init(width: CGFloat) { self.width = width }
 
     public func makeBody(configuration: Configuration) -> some View {
-        PINKeyBody(
-            configuration: configuration,
-            width: width,
-            height: height,
-            isDestructive: isDestructive
-        )
+        PINKeyBody(configuration: configuration, width: width)
     }
 }
 
 private struct PINKeyBody: View {
     let configuration: ButtonStyle.Configuration
     let width: CGFloat
-    let height: CGFloat
-    let isDestructive: Bool
-    @Environment(\.isFocused) private var isFocused
 
-    public var body: some View {
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.themePalette) private var palette
+
+    var body: some View {
         configuration.label
-            .frame(width: width, height: height)
+            .foregroundStyle(isFocused ? Color.black : palette.primaryText)
+            .frame(width: width, height: PINMetrics.keyDiameter)
             .background(
-                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.Radius.control, style: .continuous)
-                    .fill(isFocused ? Color.white : Color.white.opacity(0.18))
+                Capsule(style: .continuous)
+                    .fill(isFocused ? Color.white : palette.primaryText.opacity(0.16))
             )
-            .foregroundStyle(
-                isFocused
-                    ? (isDestructive ? Color.red : Color.black)
-                    : Color.primary
-            )
-            .scaleEffect(isFocused ? 1.08 : 1.0)
+            .scaleEffect(isFocused ? 1.06 : 1.0)
             .shadow(
-                color: Color.black.opacity(isFocused ? 0.38 : 0),
-                radius: isFocused ? 14 : 0,
-                y: isFocused ? 6 : 0
+                color: Color.white.opacity(isFocused ? 0.28 : 0),
+                radius: isFocused ? 26 : 0
             )
             .opacity(configuration.isPressed ? 0.85 : 1.0)
             .animation(.easeOut(duration: 0.15), value: isFocused)
+    }
+}
+
+/// Circular badge slot for the identity beside the title. Kept as its own type so
+/// the Plex prompt — which has no avatar view of its own to lean on — can drop an
+/// `AsyncImage` or a glyph in and get the same shape as a profile avatar.
+public struct PINBadge<Content: View>: View {
+    @Environment(\.themePalette) private var palette
+    @ViewBuilder public let image: () -> Content
+
+    public init(@ViewBuilder image: @escaping () -> Content) {
+        self.image = image
+    }
+
+    public var body: some View {
+        ZStack {
+            Circle().fill(palette.fillSubtle)
+            image()
+        }
+        .clipShape(Circle())
     }
 }

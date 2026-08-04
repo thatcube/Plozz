@@ -7,9 +7,9 @@ import SwiftUI
 ///
 /// Shares `PINEntryScaffold` with the Apple TV so the two shells can't drift on
 /// behaviour (auto-submit at four digits, reset on a wrong PIN, the reserved
-/// error slot). The keypad is kept rather than swapped for a text field: it's
-/// the same gesture on both platforms, it can't summon a keyboard over the
-/// boxes, and it keeps the entry restricted to digits by construction.
+/// error slot). The dial pad is kept rather than swapped for a text field: it's
+/// the same gesture on both platforms, it can't summon a keyboard over the dots,
+/// and it restricts entry to digits by construction.
 struct PlozziOSProfileLockPINView: View {
     let profile: Profile
     let errorMessage: String?
@@ -20,16 +20,15 @@ struct PlozziOSProfileLockPINView: View {
 
     var body: some View {
         PINEntryScaffold(
+            title: ProfileLockCopy.unlockTitle,
+            subtitle: ProfileLockCopy.unlockSubtitle,
             name: profile.name,
             errorMessage: errorMessage,
-            isSubmitting: false,
             footnote: syncEnabled ? nil : ProfileLockCopy.lockIsDeviceOnly,
             onSubmit: onSubmit,
             onCancel: onCancel
         ) {
-            PINBadge {
-                ProfileAvatarView(profile: profile, size: 180)
-            }
+            ProfileAvatarView(profile: profile, size: 200)
         }
     }
 }

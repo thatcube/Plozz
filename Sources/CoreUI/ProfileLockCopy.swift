@@ -50,6 +50,18 @@ public enum ProfileLockCopy {
         comment: "Button that removes the PIN so the profile opens without one."
     )
 
+    public static let unlockTitle = LocalizedStringResource(
+        "settings.profileLock.unlock.title",
+        defaultValue: "Enter your PIN",
+        comment: "Heading on the screen asking for a profile's PIN before opening it."
+    )
+
+    public static let unlockSubtitle = LocalizedStringResource(
+        "settings.profileLock.unlock.subtitle",
+        defaultValue: "This profile is locked.",
+        comment: "Line under the heading on the unlock screen."
+    )
+
     public static let enterToCreate = LocalizedStringResource(
         "settings.profileLock.enterToCreate",
         defaultValue: "Enter 4 numbers to create your Profile Lock PIN",
@@ -91,6 +103,24 @@ public enum ProfileLockCopy {
         comment: "Caveat shown when a Profile Lock is set while iCloud Sync is off, meaning the user's other devices won't have the lock."
     )
 
+    public static let offerTitle = LocalizedStringResource(
+        "settings.profileLock.offer.title",
+        defaultValue: "Lock this profile?",
+        comment: "Title of the prompt offered immediately after a profile is created, asking whether to set a PIN."
+    )
+
+    public static let offerMessage = LocalizedStringResource(
+        "settings.profileLock.offer.message",
+        defaultValue: "A 4-digit PIN will be needed to open it. You can change this later in Settings.",
+        comment: "Body of the prompt offering a PIN on a newly created ordinary profile."
+    )
+
+    public static let offerMessageKids = LocalizedStringResource(
+        "settings.profileLock.offer.message.kids",
+        defaultValue: "Kids profiles are usually left open — it's the grown-ups' profiles that need locking, so a child can't switch into them. You can lock this one anyway if you'd like.",
+        comment: "Body of the prompt offering a PIN on a newly created Kids Profile. It explains why the answer is usually no, since locking the child's own profile is the common misunderstanding."
+    )
+
     public static let forgotPIN = LocalizedStringResource(
         "settings.profileLock.forgot",
         defaultValue: "Forgot PIN?",
@@ -127,6 +157,12 @@ public enum KidsProfileCopy {
         "settings.kidsProfile.pairWithLock",
         defaultValue: "Lock your own profile too, so this one can't be used to open yours.",
         comment: "Nudge shown when a Kids Profile is turned on but the current profile has no Profile Lock — the two features only work as a pair."
+    )
+
+    public static let addTile = LocalizedStringResource(
+        "settings.kidsProfile.addTile",
+        defaultValue: "Add Kids Profile",
+        comment: "Tile on the profile picker that creates a new restricted profile, shown beside the ordinary Add Profile tile."
     )
 
     public static let restrictedHere = LocalizedStringResource(

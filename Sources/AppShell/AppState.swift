@@ -1578,6 +1578,13 @@ public final class AppState {
         profileFlow.forgetUnlock(for: id)
     }
 
+    /// Creates a profile from the picker without switching into it.
+    /// - Returns: the created profile so the caller can offer to lock it.
+    @discardableResult
+    public func createProfileWithoutSwitching(_ draft: ProfileDraft, isKids: Bool) -> Profile {
+        profileFlow.createProfileWithoutSwitching(draft, isKids: isKids)
+    }
+
     /// Marks a profile as restricted, or lifts the restriction.
     public func setKidsProfile(_ isKids: Bool, forProfile id: String) {
         guard var profile = profilesModel.profiles.first(where: { $0.id == id }) else { return }

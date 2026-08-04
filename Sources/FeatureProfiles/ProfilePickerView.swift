@@ -16,6 +16,15 @@ public struct ProfilePickerView: View {
     private let title: LocalizedStringResource
     private let onSelect: (Profile) -> Void
     private let onAddProfile: (() -> Void)?
+    /// Opens the focused profile's settings. When non-nil an Edit affordance
+    /// appears under whichever tile has focus.
+    private let onEditProfile: ((Profile) -> Void)?
+    /// Creates a restricted profile directly. A separate entry point rather than
+    /// a toggle buried in the editor, the way YouTube splits "Add account" from
+    /// "Add a kid account": the decision is clearest at the moment of creation,
+    /// and it means the restriction is on from the profile's first second rather
+    /// than after a trip through Settings.
+    private let onAddKidsProfile: (() -> Void)?
     private let onCancel: (() -> Void)?
 
     @Environment(\.themePalette) private var palette
@@ -26,6 +35,8 @@ public struct ProfilePickerView: View {
         title: LocalizedStringResource = "Who's watching?",
         onSelect: @escaping (Profile) -> Void,
         onAddProfile: (() -> Void)? = nil,
+        onEditProfile: ((Profile) -> Void)? = nil,
+        onAddKidsProfile: (() -> Void)? = nil,
         onCancel: (() -> Void)? = nil
     ) {
         self.profiles = profiles
@@ -33,10 +44,11 @@ public struct ProfilePickerView: View {
         self.title = title
         self.onSelect = onSelect
         self.onAddProfile = onAddProfile
+        self.onEditProfile = onEditProfile
+        self.onAddKidsProfile = onAddKidsProfile
         self.onCancel = onCancel
     }
 
-    private let columns = [GridItem(.adaptive(minimum: 260, maximum: 320), spacing: 56)]
 
     /// Which profile tile currently holds focus. Drives the background gradient
     /// so the wash tracks the profile you're hovering. `nil` before focus settles.
@@ -93,31 +105,98 @@ public struct ProfilePickerView: View {
     }
 
 
+    /// Focus identities for the trailing tiles, so `focusedProfileID` can tell
+    /// "a profile" from "the Add tiles" without a second piece of state.
+    static let addProfileFocusID = "com.plozz.picker.add"
+    static let addKidsFocusID = "com.plozz.picker.addKids"
+
+    /// The profile the Edit button currently applies to — `nil` while focus is
+    /// on an Add tile.
+    private var focusedProfile: Profile? {
+        guard let focusedProfileID else { return nil }
+        return profiles.first { $0.id == focusedProfileID }
+    }
+
+    /// The Edit affordance, directly beneath the focused profile.
+    ///
+    /// Down from a tile lands here, which is the shortest possible path to
+    /// "rename this / lock this / make it a kid's" — previously a trip into
+    /// Settings. It tracks focus rather than being per-tile so there's one
+    /// button on screen instead of one per profile.
+    @ViewBuilder
+    private var editSlot: some View {
+        ZStack {
+            if let focusedProfile, let onEditProfile {
+                Button {
+                    onEditProfile(focusedProfile)
+                } label: {
+                    Label("Edit", systemImage: "slider.horizontal.3")
+                        .font(.callout.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .transition(.opacity)
+            }
+        }
+        .frame(height: 60)
+        .animation(.easeOut(duration: 0.15), value: focusedProfileID)
+        .focusSection()
+    }
+
     public var body: some View {
         VStack(spacing: 48) {
             Text(title)
                 .font(.system(size: 56, weight: .bold))
                 .foregroundStyle(palette.primaryText)
 
-            LazyVGrid(columns: columns, spacing: 56) {
-                ForEach(profiles) { profile in
-                    ProfileTile(
-                        profile: profile,
-                        isActive: profile.id == activeProfileID
-                    ) {
-                        onSelect(profile)
+            // One horizontal run rather than a wrapping grid. Profiles are a
+            // short list you scan left-to-right, and a single row keeps the
+            // Edit affordance directly under whatever has focus — with a grid
+            // it would have to sit under a *row*, which reads as belonging to
+            // all of them.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 56) {
+                    ForEach(profiles) { profile in
+                        ProfileTile(
+                            profile: profile,
+                            isActive: profile.id == activeProfileID
+                        ) {
+                            onSelect(profile)
+                        }
+                        .focused($focusedProfileID, equals: profile.id)
+                        .anchorPreference(key: TileCentersKey.self, value: .center) {
+                            [profile.id: $0]
+                        }
                     }
-                    .focused($focusedProfileID, equals: profile.id)
-                    .anchorPreference(key: TileCentersKey.self, value: .center) {
-                        [profile.id: $0]
+                    if let onAddProfile {
+                        AddProfileTile(
+                            title: "Add Profile",
+                            systemImage: "plus",
+                            isProminent: true,
+                            action: onAddProfile
+                        )
+                        .focused($focusedProfileID, equals: Self.addProfileFocusID)
+                    }
+                    if let onAddKidsProfile {
+                        AddProfileTile(
+                            title: KidsProfileCopy.addTile,
+                            systemImage: "figure.and.child.holdinghands",
+                            isProminent: false,
+                            action: onAddKidsProfile
+                        )
+                        .focused($focusedProfileID, equals: Self.addKidsFocusID)
                     }
                 }
-                if let onAddProfile {
-                    AddProfileTile(action: onAddProfile)
-                }
+                .padding(.horizontal, 80)
+                // Room for the focus halo + lift, which would otherwise be
+                // clipped by the scroll view's bounds.
+                .padding(.vertical, 40)
             }
-            .padding(.horizontal, 80)
+            .scrollClipDisabled()
             .focusSection()
+
+            // Reserved whether or not it's showing, so the row never shifts up
+            // and down as focus moves between a profile and an Add tile.
+            editSlot
 
             if let onCancel {
                 Button("Cancel", action: onCancel)
@@ -296,15 +375,22 @@ private struct ProfileTileLabel: View {
     }
 }
 
-/// The trailing "Add Profile" tile shown after the profiles. Only rendered
-/// when the caller wants to expose adding (Settings → manage profiles); the
-/// launch picker never shows it.
+/// A trailing "create something" tile. Two of these can appear — an ordinary
+/// profile and a Kids Profile — mirroring how YouTube offers "Add account" and
+/// "Add a kid account" side by side rather than hiding the distinction behind a
+/// toggle. Only rendered when the caller passes the matching closure; the launch
+/// picker shows neither.
 private struct AddProfileTile: View {
+    let title: LocalizedStringResource
+    let systemImage: String
+    /// The plain "Add Profile" tile is the primary action and gets the solid
+    /// treatment; the kid variant is deliberately quieter so it doesn't compete.
+    let isProminent: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            AddProfileTileLabel()
+            AddProfileTileLabel(title: title, systemImage: systemImage, isProminent: isProminent)
         }
         .buttonStyle(ProfileTileButtonStyle())
         .focusEffectDisabled()
@@ -312,6 +398,10 @@ private struct AddProfileTile: View {
 }
 
 private struct AddProfileTileLabel: View {
+    let title: LocalizedStringResource
+    let systemImage: String
+    let isProminent: Bool
+
     @Environment(\.isFocused) private var isFocused
     @Environment(\.themePalette) private var palette
 
@@ -319,21 +409,30 @@ private struct AddProfileTileLabel: View {
         VStack(spacing: 12) {
             FocusGlassAvatar {
                 ZStack {
-                    Circle()
-                        .strokeBorder(
-                            palette.secondaryText.opacity(isFocused ? 0.9 : 0.5),
-                            style: StrokeStyle(lineWidth: 4, dash: [12, 10])
+                    if isProminent {
+                        Circle().fill(isFocused ? Color.white : palette.primaryText.opacity(0.9))
+                    } else {
+                        Circle()
+                            .strokeBorder(
+                                palette.secondaryText.opacity(isFocused ? 0.9 : 0.5),
+                                style: StrokeStyle(lineWidth: 4, dash: [12, 10])
+                            )
+                    }
+                    Image(systemName: systemImage)
+                        .font(.system(size: isProminent ? 80 : 68, weight: .semibold))
+                        .foregroundStyle(
+                            isProminent
+                                ? Color.black
+                                : (isFocused ? palette.primaryText : palette.secondaryText)
                         )
-                    Image(systemName: "plus")
-                        .font(.system(size: 80, weight: .semibold))
-                        .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
                 }
             }
 
             VStack(spacing: 8) {
-                Text("Add Profile")
+                Text(title)
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
+                    .lineLimit(1)
 
                 // Keep the same vertical rhythm as a profile tile's dot slot.
                 Circle().fill(.clear).frame(width: 10, height: 10)

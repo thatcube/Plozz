@@ -886,6 +886,8 @@ private struct PlexPINEntryView: View {
         // dismiss() ourselves from inside the cover.
         let pendingRequest = appState.plexHomeUsers.pendingPlexPINRequest
         return PINEntryScaffold(
+            title: "Enter your Plex PIN",
+            subtitle: "This Plex user is protected.",
             name: userName,
             errorMessage: appState.plexHomeUsers.plexPINError,
             isSubmitting: isSubmitting,
@@ -915,7 +917,7 @@ private struct PlexPINEntryView: View {
         }
         .onChange(of: appState.plexHomeUsers.plexPINError) { _, newValue in
             // Wrong-PIN response: drop the submitting state so the user can retry
-            // (the scaffold clears the entered boxes off the same signal).
+            // (the scaffold clears the entered digits off the same signal).
             if newValue != nil { isSubmitting = false }
         }
         .onChange(of: pendingRequest?.id) { _, newValue in

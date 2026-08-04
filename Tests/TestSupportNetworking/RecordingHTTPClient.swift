@@ -7,7 +7,12 @@ import FoundationNetworking
 
 /// Recording `HTTPClient` test double. Matches stubbed responses by path suffix
 /// and captures the requests it sent (path, decoded JSON body, headers) so tests
-/// can assert on Simkl's payloads and the sequence of polled requests.
+/// can assert on a service's payloads and the sequence of polled requests.
+///
+/// Shared by every watchlist-destination service suite (Trakt, Simkl, AniList,
+/// MAL) and anything else that talks to a JSON API through `HTTPClient`. It used
+/// to be four byte-identical copies, three of which had already drifted to
+/// describe the wrong service in their doc comment.
 final class RecordingHTTPClient: HTTPClient, @unchecked Sendable {
     struct Sent {
         let path: String

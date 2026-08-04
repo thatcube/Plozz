@@ -1,5 +1,6 @@
 import XCTest
 @testable import MediaTransportHTTP
+@testable import TestSupportNetworking
 
 final class WebDAVClientIntegrationTests: XCTestCase {
     override func tearDown() {

@@ -33,13 +33,15 @@ final class FTPSocketTimeoutTests: XCTestCase {
 
         let started = Date()
         do {
-            _ = try await socket.receive(maximumLength: 64, timeout: 1)
+            // A quarter second is as convincing as a full one — the property is
+            // "returns at its bound", not "the bound is 1s" — and 4x cheaper.
+            _ = try await socket.receive(maximumLength: 64, timeout: 0.25)
             XCTFail("expected a timeout from a silent peer")
         } catch let error as MediaTransportError {
             XCTAssertEqual(error, .timeout)
         }
         let elapsed = Date().timeIntervalSince(started)
-        XCTAssertLessThan(elapsed, 4, "receive must time out near its bound, not hang")
+        XCTAssertLessThan(elapsed, 2, "receive must time out near its bound, not hang")
 
         // After the timeout tore the connection down, a further receive must fail
         // promptly rather than hang again.
@@ -78,7 +80,9 @@ final class FTPSocketTimeoutTests: XCTestCase {
         let task = Task {
             _ = try await socket.receive(maximumLength: 64, timeout: 60)
         }
-        try await Task.sleep(nanoseconds: 200_000_000)
+        // Long enough for the receive to be genuinely in flight, short enough not
+        // to dominate the test — the assertion below is what proves the point.
+        try await Task.sleep(nanoseconds: 30_000_000)
         task.cancel()
         do {
             _ = try await task.value

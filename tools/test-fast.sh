@@ -40,6 +40,17 @@ if [[ "${PLOZZ_SKIP_ARCH_GUARD:-0}" != "1" ]]; then
   export PLOZZ_SKIP_ARCH_GUARD=1
 fi
 
+# Test hygiene guard — same deal: catch tests XCTest will never run (a `func
+# testX` nested inside another function) before anything expensive, then let the
+# delegated run-tests.sh skip its copy. See tools/test-hygiene.py.
+if [[ "${PLOZZ_SKIP_TEST_HYGIENE:-0}" != "1" ]]; then
+  python3 "$(dirname "$0")/test-hygiene.py" || {
+    echo "test-fast: test hygiene guard FAILED — those tests do not run."
+    exit 1
+  }
+  export PLOZZ_SKIP_TEST_HYGIENE=1
+fi
+
 IMPACT="tools/test-impact.py"
 
 # --- Parse args ---------------------------------------------------------------

@@ -3,6 +3,7 @@ import Foundation
 import MediaTransportCore
 @testable import MediaTransportHTTP
 @testable import MediaTransportWebDAV
+@testable import TestSupportNetworking
 import XCTest
 
 /// Hermetic coverage for the WebDAV media-transport adapter, driving the full

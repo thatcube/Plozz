@@ -180,40 +180,40 @@ final class PropfindXMLParserTests: XCTestCase {
                 return XCTFail("expected malformedMultistatus, got \(error)")
             }
         }
+    }
 
-        func testWellFormedNonMultistatusDocumentIsRejected() {
-            XCTAssertThrowsError(
-                try PropfindXMLParser.parse(
-                    data: data("<html><body>Not WebDAV</body></html>"),
-                    root: root,
-                    requestPath: "/dav/movies"
-                )
-            ) { error in
-                guard case TransportError.malformedMultistatus = error else {
-                    return XCTFail("expected malformedMultistatus, got \(error)")
-                }
-            }
-        }
-
-        func testNegativeContentLengthIsIgnored() throws {
-            let xml = """
-            <D:multistatus xmlns:D="DAV:">
-              <D:response>
-                <D:href>/dav/movies/Movie.mkv</D:href>
-                <D:propstat>
-                  <D:prop><D:getcontentlength>-1</D:getcontentlength></D:prop>
-                  <D:status>HTTP/1.1 200 OK</D:status>
-                </D:propstat>
-              </D:response>
-            </D:multistatus>
-            """
-            let entries = try PropfindXMLParser.parse(
-                data: data(xml),
+    func testWellFormedNonMultistatusDocumentIsRejected() {
+        XCTAssertThrowsError(
+            try PropfindXMLParser.parse(
+                data: data("<html><body>Not WebDAV</body></html>"),
                 root: root,
                 requestPath: "/dav/movies"
             )
-            XCTAssertNil(entries.first?.contentLength)
+        ) { error in
+            guard case TransportError.malformedMultistatus = error else {
+                return XCTFail("expected malformedMultistatus, got \(error)")
+            }
         }
+    }
+
+    func testNegativeContentLengthIsIgnored() throws {
+        let xml = """
+        <D:multistatus xmlns:D="DAV:">
+          <D:response>
+            <D:href>/dav/movies/Movie.mkv</D:href>
+            <D:propstat>
+              <D:prop><D:getcontentlength>-1</D:getcontentlength></D:prop>
+              <D:status>HTTP/1.1 200 OK</D:status>
+            </D:propstat>
+          </D:response>
+        </D:multistatus>
+        """
+        let entries = try PropfindXMLParser.parse(
+            data: data(xml),
+            root: root,
+            requestPath: "/dav/movies"
+        )
+        XCTAssertNil(entries.first?.contentLength)
     }
 
     func testOversizedResponseThrowsResponseTooLarge() {

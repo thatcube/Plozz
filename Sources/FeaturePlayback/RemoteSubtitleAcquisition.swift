@@ -36,6 +36,7 @@ final class RemoteSubtitleAcquisition {
     private let provider: any MediaProvider
     private let itemID: String
     private weak var host: RemoteSubtitleAcquisitionHost?
+    private let pollRetryDelay: Duration
 
     /// The language used for the most recent manual search, so the per-search
     /// SDH/Forced toggle can re-run it (``refreshSearch(defaultLanguage:preference:)``).
@@ -47,11 +48,22 @@ final class RemoteSubtitleAcquisition {
     /// newer download always supersedes an older one.
     private var downloadTask: Task<Void, Never>?
 
-    init(provider: any MediaProvider, itemID: String, host: RemoteSubtitleAcquisitionHost) {
+    init(
+        provider: any MediaProvider,
+        itemID: String,
+        host: RemoteSubtitleAcquisitionHost,
+        pollRetryDelay: Duration = RemoteSubtitleAcquisition.defaultPollRetryDelay
+    ) {
         self.provider = provider
         self.itemID = itemID
         self.host = host
+        self.pollRetryDelay = pollRetryDelay
     }
+
+    /// A real server attaches the downloaded sidecar asynchronously, so the poll
+    /// waits between attempts. Injectable purely so tests can exercise the
+    /// exhausted-poll path (4 attempts) without paying ~2.1s of wall clock.
+    static let defaultPollRetryDelay: Duration = .milliseconds(700)
 
     /// Whether the active provider supports server-proxied subtitle search &
     /// download (Jellyfin/Plex advertise `.remoteSubtitles`; SMB does not).
@@ -111,6 +123,7 @@ final class RemoteSubtitleAcquisition {
         let language = subtitle.language ?? lastSearchLanguage
         host?.setSubtitleDownloadState(.downloading(subtitle.id))
         downloadTask?.cancel()
+        let pollRetryDelay = self.pollRetryDelay
         downloadTask = Task { [weak self] in
             do {
                 // Snapshot the item's existing server-side subtitle ids first, so the
@@ -120,7 +133,8 @@ final class RemoteSubtitleAcquisition {
                 let baseline = await Self.existingSubtitleTrackIDs(provider: provider, itemID: itemID)
                 try await provider.downloadRemoteSubtitle(itemID: itemID, subtitleID: subtitle.id)
                 let track = try await Self.pollForNewSubtitleTrack(
-                    provider: provider, itemID: itemID, language: language, knownIDs: baseline
+                    provider: provider, itemID: itemID, language: language, knownIDs: baseline,
+                    retryDelay: pollRetryDelay
                 )
                 try Task.checkCancellation()
                 await MainActor.run { [weak self] in
@@ -154,6 +168,7 @@ final class RemoteSubtitleAcquisition {
     func autoDownload(language: String, mode: SubtitleMode, preference: SubtitleSearchPreference) {
         let provider = self.provider
         let itemID = self.itemID
+        let pollRetryDelay = self.pollRetryDelay
         downloadTask = Task { [weak self] in
             do {
                 let results = try await provider.remoteSubtitleSearch(itemID: itemID, language: language, preference: preference)
@@ -169,7 +184,8 @@ final class RemoteSubtitleAcquisition {
                 try await provider.downloadRemoteSubtitle(itemID: itemID, subtitleID: best.id)
                 PlozzLog.playback.info("Auto-downloaded subtitle for item")
                 let track = try await Self.pollForNewSubtitleTrack(
-                    provider: provider, itemID: itemID, language: language, knownIDs: baseline
+                    provider: provider, itemID: itemID, language: language, knownIDs: baseline,
+                    retryDelay: pollRetryDelay
                 )
                 try Task.checkCancellation()
                 await MainActor.run { [weak self] in
@@ -213,11 +229,12 @@ final class RemoteSubtitleAcquisition {
         provider: any MediaProvider,
         itemID: String,
         language: String?,
-        knownIDs: Set<Int> = []
+        knownIDs: Set<Int> = [],
+        retryDelay: Duration = RemoteSubtitleAcquisition.defaultPollRetryDelay
     ) async throws -> MediaTrack? {
         for attempt in 0..<4 {
             if attempt > 0 {
-                try await Task.sleep(nanoseconds: 700_000_000)
+                try await Task.sleep(for: retryDelay)
             }
             try Task.checkCancellation()
             let tracks = (try? await provider.subtitleTracks(forItemID: itemID)) ?? []

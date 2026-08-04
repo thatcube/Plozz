@@ -85,11 +85,41 @@ private final class SpyAcquisitionHost: RemoteSubtitleAcquisitionHost {
 
 @MainActor
 final class RemoteSubtitleAcquisitionTests: XCTestCase {
-    private func waitUntil(timeout: TimeInterval = 2, _ cond: @escaping () -> Bool) async {
+    /// Builds the subject with the post-download poll delay collapsed to zero.
+    /// Production waits ~0.7s between the 4 poll attempts because a real server
+    /// attaches the sidecar asynchronously; paying that here cost these tests
+    /// ~2.5s of pure sleeping and proved nothing the fake can't prove instantly.
+    private func makeAcquisition(
+        provider: any MediaProvider,
+        host: RemoteSubtitleAcquisitionHost
+    ) -> RemoteSubtitleAcquisition {
+        RemoteSubtitleAcquisition(
+            provider: provider, itemID: "i", host: host, pollRetryDelay: .zero
+        )
+    }
+
+    /// Spins until `cond` holds, and FAILS if it never does — a silent return on
+    /// timeout would turn a real regression into a green test that merely takes
+    /// `timeout` seconds.
+    private func waitUntil(
+        timeout: TimeInterval = 2,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ cond: () async -> Bool
+    ) async {
         let deadline = Date().addingTimeInterval(timeout)
-        while !cond() && Date() < deadline {
-            try? await Task.sleep(nanoseconds: 5_000_000)
+        while await !cond() && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
         }
+        let held = await cond()
+        XCTAssertTrue(held, "condition never became true within \(timeout)s", file: file, line: line)
+    }
+
+    /// Lets an already-unblocked task drain its remaining continuations, so a
+    /// "this must NOT have happened" assertion has actually given the code under
+    /// test the chance to do the thing. Bounded yields, not a wall-clock sleep.
+    private func settle() async {
+        for _ in 0..<20 { await Task.yield() }
     }
 
     private func textSidecar(id: Int, language: String?) -> MediaTrack {
@@ -105,7 +135,7 @@ final class RemoteSubtitleAcquisitionTests: XCTestCase {
     func testSearchWithUnsupportedProviderReportsEmptyImmediately() async {
         let provider = FakeSubtitleProvider(capabilities: [.video])
         let host = SpyAcquisitionHost()
-        let acq = RemoteSubtitleAcquisition(provider: provider, itemID: "i", host: host)
+        let acq = makeAcquisition(provider: provider, host: host)
 
         acq.search(requestedLanguage: "eng", defaultLanguage: nil, preference: .default)
 
@@ -117,7 +147,7 @@ final class RemoteSubtitleAcquisitionTests: XCTestCase {
     func testSearchWithNoLanguageReportsEmpty() async {
         let provider = FakeSubtitleProvider()
         let host = SpyAcquisitionHost()
-        let acq = RemoteSubtitleAcquisition(provider: provider, itemID: "i", host: host)
+        let acq = makeAcquisition(provider: provider, host: host)
 
         acq.search(requestedLanguage: nil, defaultLanguage: nil, preference: .default)
 
@@ -128,7 +158,7 @@ final class RemoteSubtitleAcquisitionTests: XCTestCase {
         let results = [RemoteSubtitle(id: "s1", name: "English.srt", language: "eng")]
         let provider = FakeSubtitleProvider(searchResults: results)
         let host = SpyAcquisitionHost()
-        let acq = RemoteSubtitleAcquisition(provider: provider, itemID: "i", host: host)
+        let acq = makeAcquisition(provider: provider, host: host)
 
         acq.search(requestedLanguage: "eng", defaultLanguage: nil, preference: .default)
 
@@ -145,7 +175,7 @@ final class RemoteSubtitleAcquisitionTests: XCTestCase {
     func testSearchWithEmptyResultsReportsEmpty() async {
         let provider = FakeSubtitleProvider(searchResults: [])
         let host = SpyAcquisitionHost()
-        let acq = RemoteSubtitleAcquisition(provider: provider, itemID: "i", host: host)
+        let acq = makeAcquisition(provider: provider, host: host)
 
         acq.search(requestedLanguage: "eng", defaultLanguage: nil, preference: .default)
         await waitUntil { host.downloadStates.count >= 2 }
@@ -156,7 +186,7 @@ final class RemoteSubtitleAcquisitionTests: XCTestCase {
     func testRefreshSearchReusesLastLanguage() async {
         let provider = FakeSubtitleProvider(searchResults: [RemoteSubtitle(id: "s1", name: "n", language: "fra")])
         let host = SpyAcquisitionHost()
-        let acq = RemoteSubtitleAcquisition(provider: provider, itemID: "i", host: host)
+        let acq = makeAcquisition(provider: provider, host: host)
 
         acq.search(requestedLanguage: "fra", defaultLanguage: nil, preference: .default)
         await waitUntil { host.downloadStates.count >= 2 }
@@ -174,7 +204,7 @@ final class RemoteSubtitleAcquisitionTests: XCTestCase {
         let sidecar = textSidecar(id: 42, language: "eng")
         let provider = FakeSubtitleProvider(tracksAfterDownload: [sidecar])
         let host = SpyAcquisitionHost()
-        let acq = RemoteSubtitleAcquisition(provider: provider, itemID: "i", host: host)
+        let acq = makeAcquisition(provider: provider, host: host)
 
         acq.download(RemoteSubtitle(id: "dl1", name: "n", language: "eng"), preference: .default)
 
@@ -192,7 +222,7 @@ final class RemoteSubtitleAcquisitionTests: XCTestCase {
         // Server never surfaces a new sidecar → poll returns nil.
         let provider = FakeSubtitleProvider(tracksAfterDownload: [])
         let host = SpyAcquisitionHost()
-        let acq = RemoteSubtitleAcquisition(provider: provider, itemID: "i", host: host)
+        let acq = makeAcquisition(provider: provider, host: host)
 
         acq.download(RemoteSubtitle(id: "dl1", name: "n", language: "eng"), preference: .default)
         await waitUntil { host.downloadStates.last == .added }
@@ -204,7 +234,7 @@ final class RemoteSubtitleAcquisitionTests: XCTestCase {
     func testDownloadWithEmptyIDIsIgnored() async {
         let provider = FakeSubtitleProvider()
         let host = SpyAcquisitionHost()
-        let acq = RemoteSubtitleAcquisition(provider: provider, itemID: "i", host: host)
+        let acq = makeAcquisition(provider: provider, host: host)
 
         acq.download(RemoteSubtitle(id: "", name: "n", language: "eng"), preference: .default)
 
@@ -221,7 +251,7 @@ final class RemoteSubtitleAcquisitionTests: XCTestCase {
         )
         let host = SpyAcquisitionHost()
         host.primaryOff = true
-        let acq = RemoteSubtitleAcquisition(provider: provider, itemID: "i", host: host)
+        let acq = makeAcquisition(provider: provider, host: host)
 
         acq.autoDownload(language: "eng", mode: .all, preference: .default)
         await waitUntil { !host.hotLoaded.isEmpty }
@@ -241,7 +271,7 @@ final class RemoteSubtitleAcquisitionTests: XCTestCase {
         )
         let host = SpyAcquisitionHost()
         host.primaryOff = false
-        let acq = RemoteSubtitleAcquisition(provider: provider, itemID: "i", host: host)
+        let acq = makeAcquisition(provider: provider, host: host)
 
         acq.autoDownload(language: "eng", mode: .all, preference: .default)
         await waitUntil { !host.hotLoaded.isEmpty }
@@ -257,11 +287,15 @@ final class RemoteSubtitleAcquisitionTests: XCTestCase {
             tracksAfterDownload: [textSidecar(id: 7, language: "spa")]
         )
         let host = SpyAcquisitionHost()
-        let acq = RemoteSubtitleAcquisition(provider: provider, itemID: "i", host: host)
+        let acq = makeAcquisition(provider: provider, host: host)
 
         acq.autoDownload(language: "eng", mode: .all, preference: .default)
-        // Give the task time to run and bail.
-        await waitUntil(timeout: 0.5) { false }
+        // The auto path IS observable: it consults the server, then the
+        // language-match guard drops the only (Spanish) result. Waiting on that
+        // real signal — instead of sleeping a fixed 0.5s and hoping the task got
+        // far enough — makes this deterministic and instant.
+        await waitUntil { await provider.searchCallCount == 1 }
+        await settle()
 
         XCTAssertTrue(host.hotLoaded.isEmpty)
         let downloaded = await provider.downloadedIDs

@@ -86,10 +86,15 @@ fi
 #      DerivedData is cleared, and the invocation is retried ONCE from clean.
 PLOZZ_DERIVED_DATA="${PLOZZ_DERIVED_DATA:-$PWD/.build/test-derived-data}"
 PLOZZ_HANG_SECS="${PLOZZ_HANG_SECS:-180}"
-# How long to let xcodebuild wind down AFTER it has printed its final verdict.
-# Past that point the run is logically over and everything else is teardown, so
-# waiting out the full hang watchdog just delays a result we already have.
-PLOZZ_VERDICT_GRACE="${PLOZZ_VERDICT_GRACE:-20}"
+# How long to let xcodebuild wind down AFTER every test bundle has reported its
+# result. Past that point the run is logically over and everything else is
+# teardown (result bundle, simulator shutdown), so waiting just delays a result
+# we already have. Measured on this Mac: 6s is enough for a clean exit in the
+# common case, and the results are read from the log either way, so reaping early
+# never changes the verdict.
+PLOZZ_VERDICT_GRACE="${PLOZZ_VERDICT_GRACE:-6}"
+# Watchdog/grace poll granularity. Must divide into both budgets sensibly.
+POLL_SECS="${PLOZZ_POLL_SECS:-2}"
 
 # Recursively kill a process and all its descendants (xcodebuild's swift-frontend
 # children don't die with the parent otherwise).
@@ -108,6 +113,18 @@ kill_tree() {
 if [[ "${PLOZZ_SKIP_ARCH_GUARD:-0}" != "1" ]]; then
   python3 "$(dirname "$0")/arch-guard.py" || {
     echo "run-tests.sh: architecture layering guard FAILED — fix the module graph before testing."
+    exit 1
+  }
+fi
+
+# --- Test hygiene guard (fast, source-level) ---------------------------------
+# Catches tests XCTest will never run — most importantly a `func testX` nested
+# inside another function, which compiles, reads like a real test in review, and
+# is silently never executed. Runs here so it costs ~0.5s before the expensive
+# compile rather than being discovered months later. See tools/test-hygiene.py.
+if [[ "${PLOZZ_SKIP_TEST_HYGIENE:-0}" != "1" ]]; then
+  python3 "$(dirname "$0")/test-hygiene.py" || {
+    echo "run-tests.sh: test hygiene guard FAILED — those tests do not run."
     exit 1
   }
 fi
@@ -244,8 +261,17 @@ all_are_test_targets() {
   return 0
 }
 
-LOG_DIR="$(mktemp -d)"
-trap 'restore_project; cleanup_scoped_schemes; rm -rf "$LOG_DIR"' EXIT
+# Raw xcodebuild logs. Ephemeral by default; set PLOZZ_LOG_DIR to keep them (the
+# per-test `Test Case ... passed (N seconds)` lines only exist in the raw log, so
+# this is how you profile which individual tests are slow).
+if [[ -n "${PLOZZ_LOG_DIR:-}" ]]; then
+  LOG_DIR="$PLOZZ_LOG_DIR"
+  mkdir -p "$LOG_DIR"
+  trap 'restore_project; cleanup_scoped_schemes' EXIT
+else
+  LOG_DIR="$(mktemp -d)"
+  trap 'restore_project; cleanup_scoped_schemes; rm -rf "$LOG_DIR"' EXIT
+fi
 
 AVAILABLE_SCHEMES="$(list_schemes)"
 scheme_exists() { grep -qxF -- "$1" <<<"$AVAILABLE_SCHEMES"; }
@@ -319,12 +345,16 @@ _xcb_once() {
   # watchdog there turns an answer we already have into a 3-minute delay — and,
   # because the stall reports as 124, it used to trigger a from-clean rebuild
   # and pay the whole cost a second time. Reap it after a short grace instead.
+  #
+  # The poll interval is deliberately much finer than the grace: at the old 10s
+  # granularity a 20s grace could take 30s to trigger, so every green run paid up
+  # to half a minute of pure waiting after the last bundle had already reported.
   local last_size=-1 stalled=0 hung=0 size verdict_wait=0 reaped_after_verdict=0
   while kill -0 "$xcb_pid" 2>/dev/null; do
-    sleep 10
+    sleep "$POLL_SECS"
     if [[ ${EXPECTED_BUNDLES:-0} -gt 0 ]] \
        && [[ $(reported_bundles_count "$log") -ge ${EXPECTED_BUNDLES} ]]; then
-      verdict_wait=$(( verdict_wait + 10 ))
+      verdict_wait=$(( verdict_wait + POLL_SECS ))
       if [[ $verdict_wait -ge $PLOZZ_VERDICT_GRACE ]]; then
         echo "" >&2
         echo "run-tests.sh: all ${EXPECTED_BUNDLES} test bundle(s) reported; xcodebuild is still winding down after ${PLOZZ_VERDICT_GRACE}s — reaping it and using the reported results." >&2
@@ -335,7 +365,7 @@ _xcb_once() {
     fi
     size=$(stat -f%z "$log" 2>/dev/null || echo 0)
     if [[ "$size" == "$last_size" ]]; then
-      stalled=$(( stalled + 10 ))
+      stalled=$(( stalled + POLL_SECS ))
       if [[ $stalled -ge $PLOZZ_HANG_SECS ]]; then
         echo "" ; echo "run-tests.sh: WATCHDOG — no build output for ${PLOZZ_HANG_SECS}s; xcodebuild is wedged. Killing it." >&2
         kill_tree "$xcb_pid"

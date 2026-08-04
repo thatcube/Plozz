@@ -1,8 +1,5 @@
 import CoreModels
 import SwiftUI
-#if os(iOS)
-import UIKit
-#endif
 
 /// Platform metrics for the PIN screen. A 10-foot remote-driven UI and a phone
 /// held at arm's length need genuinely different sizes, and these live at file
@@ -140,7 +137,7 @@ public struct PINEntryScaffold<Badge: View>: View {
             // at a comfortable reach without squeezing the title, and stops the
             // eye reading and aiming in the same column.
             HStack(alignment: .center, spacing: 80) {
-                prose
+                prose(centered: false)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 padColumn
                     // The equal two-column layout puts the pad near 75% of the
@@ -153,17 +150,34 @@ public struct PINEntryScaffold<Badge: View>: View {
             .padding(.horizontal, PINMetrics.horizontalPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             #else
-            VStack(spacing: 32) {
-                Spacer(minLength: 0)
-                prose
-                    .frame(maxWidth: .infinity, alignment: proseFrameAlignment)
-                padColumn
-                Spacer(minLength: 0)
-                Button("Cancel", action: onCancel)
-                    .padding(.bottom, 24)
+            GeometryReader { proxy in
+                if usesTwoColumnLayout(proxy.size) {
+                    HStack(alignment: .center, spacing: 56) {
+                        prose(centered: false)
+                            .frame(width: 360, alignment: .leading)
+                        VStack(spacing: 24) {
+                            padColumn
+                            Button("Cancel", action: onCancel)
+                        }
+                    }
+                    // Centre the COMPOSITION, not each column independently.
+                    .frame(maxWidth: 780, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 40)
+                } else {
+                    VStack(spacing: 32) {
+                        Spacer(minLength: 0)
+                        prose(centered: true)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        padColumn
+                        Spacer(minLength: 0)
+                        Button("Cancel", action: onCancel)
+                            .padding(.bottom, 24)
+                    }
+                    .padding(.horizontal, PINMetrics.horizontalPadding)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
-            .padding(.horizontal, PINMetrics.horizontalPadding)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             #endif
         }
         #if os(tvOS)
@@ -178,9 +192,8 @@ public struct PINEntryScaffold<Badge: View>: View {
 
     // MARK: Prose column
 
-    @ViewBuilder
-    private var prose: some View {
-        VStack(alignment: proseAlignment, spacing: 20) {
+    private func prose(centered: Bool) -> some View {
+        VStack(alignment: centered ? .center : .leading, spacing: 20) {
             if let sequenceStep, sequenceStep.total > 1 {
                 PINSequenceIndicator(step: sequenceStep)
                     .padding(.bottom, 4)
@@ -190,14 +203,14 @@ public struct PINEntryScaffold<Badge: View>: View {
                 .font(PINMetrics.titleFont)
                 .foregroundStyle(palette.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
-                .multilineTextAlignment(proseTextAlignment)
+                .multilineTextAlignment(centered ? .center : .leading)
 
             if let subtitle {
                 Text(subtitle)
                     .font(PINMetrics.subtitleFont)
                     .foregroundStyle(palette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(proseTextAlignment)
+                    .multilineTextAlignment(centered ? .center : .leading)
             }
 
             // Whose PIN this is. Small and secondary — the person already knows
@@ -217,7 +230,7 @@ public struct PINEntryScaffold<Badge: View>: View {
                 .font(.callout)
                 .foregroundStyle(errorMessage == nil ? Color.clear : .red)
                 .fixedSize(horizontal: false, vertical: true)
-                .multilineTextAlignment(proseTextAlignment)
+                .multilineTextAlignment(centered ? .center : .leading)
 
             if let footnote {
                 Label {
@@ -231,29 +244,16 @@ public struct PINEntryScaffold<Badge: View>: View {
             }
         }
 
-        .frame(maxWidth: PINMetrics.proseMaxWidth, alignment: proseFrameAlignment)
+        .frame(
+            maxWidth: PINMetrics.proseMaxWidth,
+            alignment: centered ? .center : .leading
+        )
     }
 
-    /// iPhone benefits from a centred, compact identity block above the dial pad.
-    /// iPad keeps the left-aligned tablet composition the user explicitly prefers.
-    private var centersPhoneProse: Bool {
-        #if os(iOS)
-        UIDevice.current.userInterfaceIdiom == .phone
-        #else
-        false
-        #endif
-    }
-
-    private var proseAlignment: HorizontalAlignment {
-        centersPhoneProse ? .center : .leading
-    }
-
-    private var proseFrameAlignment: Alignment {
-        centersPhoneProse ? .center : .leading
-    }
-
-    private var proseTextAlignment: TextAlignment {
-        centersPhoneProse ? .center : .leading
+    /// Geometry, not device model: adapts correctly to iPad split view, external
+    /// displays and iPhone landscape.
+    private func usesTwoColumnLayout(_ size: CGSize) -> Bool {
+        size.width >= 760 && size.height >= 620
     }
 
     // MARK: Pad column

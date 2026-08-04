@@ -115,6 +115,83 @@ public struct SyncedAccountDescriptor: Codable, Hashable, Identifiable, Sendable
     }
 }
 
+/// One physical media server with every synced account/login that belongs to it.
+///
+/// Sync records are account descriptors, not server descriptors. Grouping by
+/// provider + backend server id prevents three Jellyfin users on one box from
+/// being presented as three different servers.
+public struct SyncedServerAccountGroup: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let provider: ProviderKind
+    public let serverID: String
+    public let serverName: String
+    public let accounts: [SyncedAccountDescriptor]
+
+    public var userNames: [String] {
+        var seen = Set<String>()
+        return accounts.compactMap { account in
+            let name = account.userName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(name.localizedLowercase).inserted else {
+                return nil
+            }
+            return name
+        }
+    }
+
+    public static func groups(
+        from descriptors: [SyncedAccountDescriptor],
+        localAccounts: [Account] = []
+    ) -> [Self] {
+        let grouped = Dictionary(grouping: descriptors) { descriptor in
+            physicalServerKey(
+                provider: descriptor.provider,
+                serverID: descriptor.serverID,
+                fallbackURL: descriptor.candidateBaseURLs.first
+            )
+        }
+        return grouped.map { key, accounts in
+            let first = accounts[0]
+            let localName = localAccounts.first { account in
+                physicalServerKey(
+                    provider: account.server.provider,
+                    serverID: account.server.id,
+                    fallbackURL: account.server.baseURL
+                ) == key
+            }?.server.name
+            return Self(
+                id: key,
+                provider: first.provider,
+                serverID: first.serverID,
+                serverName: localName ?? first.serverName,
+                accounts: accounts.sorted {
+                    $0.userName.localizedCaseInsensitiveCompare($1.userName)
+                        == .orderedAscending
+                }
+            )
+        }
+        .sorted {
+            $0.serverName.localizedCaseInsensitiveCompare($1.serverName)
+                == .orderedAscending
+        }
+    }
+
+    public static func physicalServerKey(
+        provider: ProviderKind,
+        serverID: String,
+        fallbackURL: URL?
+    ) -> String {
+        let trimmedID = serverID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedID.isEmpty {
+            return "\(provider.rawValue)|id:\(trimmedID.lowercased())"
+        }
+        let host = fallbackURL?.host?.lowercased()
+            ?? fallbackURL?.absoluteString.lowercased()
+            ?? "unknown"
+        let port = fallbackURL?.port.map(String.init) ?? ""
+        return "\(provider.rawValue)|url:\(host):\(port)"
+    }
+}
+
 public extension SyncedAccountDescriptor {
     /// Builds a token-free descriptor from a local `Account` (never copies a token
     /// — `Account` has none). Safe to hand to the sync layer.

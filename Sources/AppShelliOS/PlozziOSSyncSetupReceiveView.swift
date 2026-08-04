@@ -185,6 +185,10 @@ struct PlozziOSSyncSetupReceiveView: View {
             authIDs.contains(account.id)
                 && (requestedServer == nil || account.id == requestedServer?.id)
         }
+        let serverGroups = SyncedServerAccountGroup.groups(
+            from: servers,
+            localAccounts: appModel.accountsProviders.accounts
+        )
         let profiles = requestedServer == nil ? received.config.profiles.map(\.profile) : []
 
         VStack(spacing: 22) {
@@ -193,18 +197,19 @@ struct PlozziOSSyncSetupReceiveView: View {
                 Text("You’re all set").font(.title.bold()).foregroundStyle(palette.primaryText)
             }
             VStack(spacing: 14) {
-                if !servers.isEmpty {
-                    card(title: servers.count == 1 ? "Server" : "Servers") {
-                        ForEach(servers) { server in
+                if !serverGroups.isEmpty {
+                    card(title: serverGroups.count == 1 ? "Server" : "Servers") {
+                        ForEach(serverGroups) { group in
                             HStack(spacing: 14) {
                                 ProviderBrandMark(
-                                    provider: server.provider, size: 32,
+                                    provider: group.provider, size: 32,
                                     mediaShareTransport: MediaShareTransportKind(
-                                        mediaShareScheme: server.candidateBaseURLs.first?.scheme))
+                                        mediaShareScheme: group.accounts.first?
+                                            .candidateBaseURLs.first?.scheme))
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(server.serverName).font(.body.weight(.semibold))
+                                    Text(group.serverName).font(.body.weight(.semibold))
                                         .foregroundStyle(palette.primaryText)
-                                    Text("Signed in").font(.caption)
+                                    Text(signedInSummary(group)).font(.caption)
                                         .foregroundStyle(palette.secondaryText)
                                 }
                                 Spacer()
@@ -224,6 +229,7 @@ struct PlozziOSSyncSetupReceiveView: View {
                         .foregroundStyle(palette.primaryText)
                     }
                 }
+
             }
             Spacer(minLength: 0)
             Button("Start Watching") {
@@ -245,6 +251,13 @@ struct PlozziOSSyncSetupReceiveView: View {
             }
             .syncPrimaryButtonStyle().controlSize(.large)
         }
+    }
+
+    private func signedInSummary(_ group: SyncedServerAccountGroup) -> String {
+        let names = group.userNames
+        return names.isEmpty
+            ? "Signed in"
+            : "Signed in as \(names.joined(separator: ", "))"
     }
 
     @ViewBuilder

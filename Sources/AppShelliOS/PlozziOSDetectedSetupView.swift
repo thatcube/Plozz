@@ -25,6 +25,27 @@ struct PlozziOSDetectedSetupView: View {
     let onSetUpManually: () -> Void
 
     private var servers: [SyncedAccountDescriptor] { appModel.pendingServersNeedingSetup }
+    private var serverGroups: [SyncedServerAccountGroup] {
+        SyncedServerAccountGroup.groups(
+            from: servers,
+            localAccounts: appModel.accountsProviders.accounts
+        )
+    }
+    private var localServerKeys: Set<String> {
+        Set(appModel.accountsProviders.accounts.map {
+            SyncedServerAccountGroup.physicalServerKey(
+                provider: $0.server.provider,
+                serverID: $0.server.id,
+                fallbackURL: $0.server.baseURL
+            )
+        })
+    }
+    private var existingServerGroups: [SyncedServerAccountGroup] {
+        serverGroups.filter { localServerKeys.contains($0.id) }
+    }
+    private var newServerGroups: [SyncedServerAccountGroup] {
+        serverGroups.filter { !localServerKeys.contains($0.id) }
+    }
     private var originName: String? { appModel.pendingSetupOriginName }
 
     /// SF Symbol for the origin device kind, matching the new-server drawer's mapping.
@@ -92,13 +113,13 @@ struct PlozziOSDetectedSetupView: View {
             header
 
             VStack(spacing: 0) {
-                ForEach(Array(servers.prefix(4)), id: \.id) { server in
-                    serverRow(server)
-                    if server.id != servers.prefix(4).last?.id { divider }
+                ForEach(Array(serverGroups.prefix(4))) { group in
+                    serverRow(group)
+                    if group.id != serverGroups.prefix(4).last?.id { divider }
                 }
-                if servers.count > 4 {
+                if serverGroups.count > 4 {
                     divider
-                    Text("+ \(servers.count - 4) more")
+                    Text("+ \(serverGroups.count - 4) more")
                         .font(.subheadline)
                         .foregroundStyle(palette.secondaryText)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -120,11 +141,7 @@ struct PlozziOSDetectedSetupView: View {
 
     private var header: some View {
         VStack(spacing: 8) {
-            // Two separate strings rather than one plural-varied key: the copy
-            // never shows the number, and the toolchain rejects a plural
-            // variation that doesn't reference it — "use separate top-level
-            // strings for one and greater than one".
-            Text(servers.count == 1 ? "We found your server" : "We found your setup")
+            Text(detectionTitle)
                 .font(.title2.weight(.bold))
                 .multilineTextAlignment(.center)
             subtitle
@@ -135,6 +152,20 @@ struct PlozziOSDetectedSetupView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private var detectionTitle: LocalizedStringResource {
+        if newServerGroups.isEmpty {
+            return servers.count == 1
+                ? "We found another user"
+                : "We found more users"
+        }
+        if !existingServerGroups.isEmpty {
+            return "We found more of your setup"
+        }
+        return serverGroups.count == 1
+            ? "We found your server"
+            : "We found your servers"
+    }
+
     private var subtitle: Text {
         if let originName {
             return Text("You’re already set up on \(Image(systemName: originIcon)) \(originName). Bring it here?")
@@ -142,22 +173,30 @@ struct PlozziOSDetectedSetupView: View {
         return Text("You’re already set up on another device. Bring it here?")
     }
 
-    private func serverRow(_ server: SyncedAccountDescriptor) -> some View {
+    private func serverRow(_ group: SyncedServerAccountGroup) -> some View {
         HStack(spacing: 14) {
-            ProviderBrandMark(provider: server.provider, size: 34)
+            ProviderBrandMark(provider: group.provider, size: 34)
             VStack(alignment: .leading, spacing: 2) {
-                Text(server.serverName)
+                Text(group.serverName)
                     .font(.headline)
                     .foregroundStyle(palette.primaryText)
                     .lineLimit(1)
-                Text(server.provider.displayName)
+                Text(userSummary(for: group))
                     .font(.caption)
                     .foregroundStyle(palette.secondaryText)
+                    .lineLimit(2)
             }
             Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+    }
+
+    private func userSummary(for group: SyncedServerAccountGroup) -> String {
+        let names = group.userNames
+        guard !names.isEmpty else { return group.provider.displayName }
+        let prefix = localServerKeys.contains(group.id) ? "Add " : "Sign in as "
+        return prefix + names.joined(separator: ", ")
     }
 
     private var divider: some View {

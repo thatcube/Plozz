@@ -428,7 +428,14 @@ public extension UniversalWatchlistHost {
                 aliasID: intent.aliasID,
                 aliasRecord: record
             ) else { continue }
-            targetsByAlias[intent.aliasID] = target
+            // Only what the person actually asked for may be WRITTEN OUT to a
+            // server. A `.nativeImport` intent is evidence that some server's
+            // list held this title, not a statement that the viewer wants it —
+            // and reasserting it pushed one server's list (often the account
+            // OWNER's, imported before anyone said who this profile is) into
+            // every other server the profile is bound to, where removing it in
+            // Plozz afterwards no longer takes it back out.
+            if intent.origin == .local { targetsByAlias[intent.aliasID] = target }
             var destinationIDs = await reconciler.eligibleDestinationIDs(
                 for: target
             )

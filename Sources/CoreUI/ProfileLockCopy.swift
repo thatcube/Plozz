@@ -2,11 +2,7 @@ import Foundation
 
 /// Copy for the Profile Lock feature, shared by tvOS and iOS.
 ///
-/// Wording is borrowed from Netflix's Profile Lock rather than invented, because
-/// this is a feature people meet elsewhere first and the vocabulary is already
-/// settled: "Profile Lock", "Create a Profile Lock", "Enter 4 numbers...",
-/// "Forgot PIN?". Matching it means someone who has locked a Netflix profile
-/// already knows what this row does.
+/// The feature is a lock; the PIN is the credential people create/change/remove.
 public enum ProfileLockCopy {
     public static let title = LocalizedStringResource(
         "settings.profileLock.title",
@@ -58,17 +54,14 @@ public enum ProfileLockCopy {
 
     public static let createTitle = LocalizedStringResource(
         "settings.profileLock.create.title",
-        defaultValue: "Create a Profile Lock",
+        defaultValue: "Create a PIN",
         comment: "Heading on the screen where a new PIN is chosen."
     )
 
-    /// Says what the PIN will DO, rather than restating the instruction. The pad
-    /// and its four dots already say "type four numbers"; a subtitle that repeats
-    /// it is two sentences of nothing.
     public static let createSubtitle = LocalizedStringResource(
         "settings.profileLock.create.subtitle",
-        defaultValue: "You'll need it to open this profile.",
-        comment: "Supporting line under the heading while choosing a new PIN."
+        defaultValue: "Enter a 4-digit PIN to lock this profile.",
+        comment: "Supporting line under the heading while choosing a new PIN, matching the wording on the preceding offer screen."
     )
 
     public static let confirm = LocalizedStringResource(
@@ -129,14 +122,14 @@ public enum ProfileLockCopy {
 
     public static let offerTitle = LocalizedStringResource(
         "settings.profileLock.offer.title",
-        defaultValue: "Create a PIN",
+        defaultValue: "Create a PIN?",
         comment: "Title of the optional PIN step shown after a profile is created."
     )
 
     public static let offerMessage = LocalizedStringResource(
         "settings.profileLock.offer.message",
-        defaultValue: "",
-        comment: "Ordinary profiles need no supporting sentence on the optional PIN step."
+        defaultValue: "Add a 4-digit PIN to lock this profile.",
+        comment: "Brief explanation of what creating a Profile Lock does."
     )
 
     public static let offerMessageKids = LocalizedStringResource(

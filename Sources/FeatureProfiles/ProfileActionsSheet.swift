@@ -58,6 +58,29 @@ public struct ProfileActionsSheet: View {
         ZStack {
             AppBackground(palette: palette).ignoresSafeArea()
 
+            #if os(tvOS)
+            // Fixed, roomy dialog. Four actions fit without scrolling, and the
+            // reserved height prevents the sheet itself growing when another
+            // profile action is added later.
+            VStack(alignment: .leading, spacing: 28) {
+                header
+                ProfileActionsList(
+                    profile: profile,
+                    syncEnabled: syncEnabled,
+                    offersPlexPINReuse: offersPlexPINReuse,
+                    householdHasOtherLock: householdHasOtherLock,
+                    onEditAppearance: onEditAppearance,
+                    onSetLock: onSetLock,
+                    onSetKids: onSetKids,
+                    onDelete: onDelete,
+                    isUnlocked: isUnlocked,
+                    onUnlock: onUnlock
+                )
+                Spacer(minLength: 0)
+            }
+            .frame(width: 1080, height: 660, alignment: .topLeading)
+            .padding(56)
+            #else
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     header
@@ -80,6 +103,7 @@ public struct ProfileActionsSheet: View {
                 .padding(.vertical, 60)
             }
             .scrollClipDisabled()
+            #endif
         }
         #if os(tvOS)
         .onExitCommand(perform: onClose)

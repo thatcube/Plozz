@@ -306,6 +306,10 @@ struct AccountAvatar: View {
     let imageURL: URL?
     var size: CGFloat = 40
 
+    @Environment(\.settingsRowIsFocused) private var isFocused
+    @Environment(\.settingsRowFocusForeground) private var focusForeground
+    @Environment(\.themePalette) private var palette
+
     var body: some View {
         Group {
             if let imageURL {
@@ -334,10 +338,16 @@ struct AccountAvatar: View {
 
     private var placeholder: some View {
         ZStack {
-            Circle().fill(Color.primary.opacity(0.10))
+            Circle().fill(
+                isFocused
+                    ? focusForeground.opacity(0.16)
+                    : palette.primaryText.opacity(0.10)
+            )
             Text(String(name.prefix(1)).uppercased())
                 .font(.caption.weight(.semibold))
-                .plozzForeground(.secondary)
+                .foregroundStyle(
+                    isFocused ? focusForeground : palette.secondaryText
+                )
         }
     }
 }

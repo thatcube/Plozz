@@ -66,9 +66,14 @@ public struct ProfileLockOfferView: View {
                     .foregroundStyle(palette.primaryText)
                     .multilineTextAlignment(.center)
 
+                Text(ProfileLockCopy.offerMessage)
+                    .font(.title3)
+                    .foregroundStyle(palette.secondaryText)
+                    .multilineTextAlignment(.center)
+
                 if profile.isKids {
                     Text(ProfileLockCopy.offerMessageKids)
-                        .font(.title3)
+                        .font(.callout)
                         .foregroundStyle(palette.secondaryText)
                         .multilineTextAlignment(.center)
                 }

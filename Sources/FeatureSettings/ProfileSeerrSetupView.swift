@@ -138,8 +138,8 @@ public struct ProfileSeerrSetupView: View {
             VStack(spacing: 14) {
                 if !profile.isKids {
                     selectionRow(
-                        title: "Admin — unrestricted",
-                        subtitle: "No per-user quota or approval.",
+                        title: Text("Admin — unrestricted"),
+                        subtitle: Text("No per-user quota or approval."),
                         avatarURL: nil,
                         fallback: "person.crop.circle.badge.checkmark",
                         selected: hasSelection && selectedUserID == nil
@@ -171,8 +171,8 @@ public struct ProfileSeerrSetupView: View {
                 case let .loaded(list):
                     ForEach(list) { user in
                         selectionRow(
-                            title: user.name,
-                            subtitle: user.subtitle,
+                            title: Text(verbatim: user.name),
+                            subtitle: user.subtitle.map { Text(verbatim: $0) },
                             avatarURL: user.avatarURL,
                             fallback: "person.fill",
                             selected: hasSelection && selectedUserID == user.id
@@ -207,9 +207,13 @@ public struct ProfileSeerrSetupView: View {
         .tvOSFocusSection()
     }
 
+    /// - Parameters:
+    ///   - title: `Text` rather than `String` because callers pass BOTH app copy
+    ///     ("Admin — unrestricted") and provider content (a Seerr user's name); a
+    ///     `String` forced the copy case to resolve eagerly and rendered verbatim.
     private func selectionRow(
-        title: String,
-        subtitle: String?,
+        title: Text,
+        subtitle: Text?,
         avatarURL: URL?,
         fallback: String,
         selected: Bool,
@@ -219,9 +223,9 @@ public struct ProfileSeerrSetupView: View {
             HStack(spacing: 16) {
                 avatar(url: avatarURL, fallback: fallback)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(verbatim: title).font(.headline)
+                    title.font(.headline)
                     if let subtitle {
-                        Text(verbatim: subtitle)
+                        subtitle
                             .font(.caption)
                             .settingsRowSecondary()
                     }

@@ -92,8 +92,10 @@ public struct ProfileLockOfferView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.large)
 
-                Button(String(localized: ProfileLockCopy.create)) {
+                Button {
                     isChoosingPIN = true
+                } label: {
+                    Text(ProfileLockCopy.create)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)

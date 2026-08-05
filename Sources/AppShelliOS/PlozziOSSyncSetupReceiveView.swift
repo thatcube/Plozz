@@ -209,7 +209,7 @@ struct PlozziOSSyncSetupReceiveView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(group.serverName).font(.body.weight(.semibold))
                                         .foregroundStyle(palette.primaryText)
-                                    Text(signedInSummary(group)).font(.caption)
+                                    signedInSummary(group).font(.caption)
                                         .foregroundStyle(palette.secondaryText)
                                 }
                                 Spacer()
@@ -253,11 +253,13 @@ struct PlozziOSSyncSetupReceiveView: View {
         }
     }
 
-    private func signedInSummary(_ group: SyncedServerAccountGroup) -> String {
+    /// See `userSummary` in the detected-setup view: copy around content, so it
+    /// returns `Text` and joins names with a list format style.
+    private func signedInSummary(_ group: SyncedServerAccountGroup) -> Text {
         let names = group.userNames
         return names.isEmpty
-            ? "Signed in"
-            : "Signed in as \(names.joined(separator: ", "))"
+            ? Text("Signed in")
+            : Text("Signed in as \(names.formatted(.list(type: .and)))")
     }
 
     @ViewBuilder

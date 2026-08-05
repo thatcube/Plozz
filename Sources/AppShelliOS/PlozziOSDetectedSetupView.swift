@@ -181,7 +181,7 @@ struct PlozziOSDetectedSetupView: View {
                     .font(.headline)
                     .foregroundStyle(palette.primaryText)
                     .lineLimit(1)
-                Text(userSummary(for: group))
+                userSummary(for: group)
                     .font(.caption)
                     .foregroundStyle(palette.secondaryText)
                     .lineLimit(2)
@@ -192,11 +192,17 @@ struct PlozziOSDetectedSetupView: View {
         .padding(.vertical, 14)
     }
 
-    private func userSummary(for group: SyncedServerAccountGroup) -> String {
+    /// Returns `Text`, not a `String`: this is app copy wrapped around provider
+    /// content, and a concatenated `String` reaching `Text` renders verbatim and
+    /// is never translated. Names are joined with a list format style so the
+    /// separator and final conjunction follow the reader's language.
+    private func userSummary(for group: SyncedServerAccountGroup) -> Text {
         let names = group.userNames
-        guard !names.isEmpty else { return group.provider.displayName }
-        let prefix = localServerKeys.contains(group.id) ? "Add " : "Sign in as "
-        return prefix + names.joined(separator: ", ")
+        guard !names.isEmpty else { return Text(verbatim: group.provider.displayName) }
+        let joined = names.formatted(.list(type: .and))
+        return localServerKeys.contains(group.id)
+            ? Text("Add \(joined)")
+            : Text("Sign in as \(joined)")
     }
 
     private var divider: some View {

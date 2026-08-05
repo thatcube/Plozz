@@ -49,10 +49,11 @@ struct ParentalPINDetailView: View {
                             Button(role: .destructive) {
                                 confirmRemove = true
                             } label: {
-                                Label(
-                                    String(localized: KidsProfileCopy.parentalPINRemove),
-                                    systemImage: "lock.slash"
-                                )
+                                Label {
+                                    Text(KidsProfileCopy.parentalPINRemove)
+                                } icon: {
+                                    Image(systemName: "lock.slash")
+                                }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
@@ -78,11 +79,13 @@ struct ParentalPINDetailView: View {
             .toolbar(.hidden, for: .tabBar)
         }
         .alert(
-            String(localized: KidsProfileCopy.parentalPINRemove),
+            Text(KidsProfileCopy.parentalPINRemove),
             isPresented: $confirmRemove
         ) {
-            Button(String(localized: KidsProfileCopy.parentalPINRemove), role: .destructive) {
+            Button(role: .destructive) {
                 context.onSetParentalPIN(nil)
+            } label: {
+                Text(KidsProfileCopy.parentalPINRemove)
             }
             Button("Cancel", role: .cancel) {}
         } message: {

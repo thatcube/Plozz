@@ -249,8 +249,8 @@ public struct ProfileActionsList: View {
             isPresented: $showingLockOptions,
             titleVisibility: .visible
         ) {
-            Button(String(localized: ProfileLockCopy.editPIN)) { onEditLock() }
-            Button(String(localized: ProfileLockCopy.delete), role: .destructive) { onSetLock(nil) }
+            Button { onEditLock() } label: { Text(ProfileLockCopy.editPIN) }
+            Button(role: .destructive) { onSetLock(nil) } label: { Text(ProfileLockCopy.delete) }
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog(
@@ -262,14 +262,14 @@ public struct ProfileActionsList: View {
             // hides the household section, so "go to Everyone" is an instruction
             // this profile can't follow.
             if !hasParentalPIN {
-                Button(String(localized: KidsProfileCopy.parentalPINCreate)) {
-                    onCreateParentalPIN()
+                Button { onCreateParentalPIN() } label: {
+                    Text(KidsProfileCopy.parentalPINCreate)
                 }
             }
             if profile.isKids {
-                Button(String(localized: KidsProfileCopy.turnOff), role: .destructive) { onSetKids(false) }
+                Button(role: .destructive) { onSetKids(false) } label: { Text(KidsProfileCopy.turnOff) }
             } else {
-                Button(String(localized: KidsProfileCopy.turnOn)) { onSetKids(true) }
+                Button { onSetKids(true) } label: { Text(KidsProfileCopy.turnOn) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {

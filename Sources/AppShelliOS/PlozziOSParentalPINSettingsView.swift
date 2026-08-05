@@ -28,12 +28,13 @@ struct PlozziOSParentalPINSettingsView: View {
                     isSettingPIN = true
                 } label: {
                     HStack {
-                        Label(
-                            String(localized: hasPIN
+                        Label {
+                            Text(hasPIN
                                 ? KidsProfileCopy.parentalPINChange
-                                : KidsProfileCopy.parentalPINCreate),
-                            systemImage: hasPIN ? "lock.fill" : "lock.open"
-                        )
+                                : KidsProfileCopy.parentalPINCreate)
+                        } icon: {
+                            Image(systemName: hasPIN ? "lock.fill" : "lock.open")
+                        }
                         Spacer()
                         Text(hasPIN ? ProfileLockCopy.on : ProfileLockCopy.off)
                             .foregroundStyle(.secondary)
@@ -46,10 +47,11 @@ struct PlozziOSParentalPINSettingsView: View {
                     Button(role: .destructive) {
                         confirmRemove = true
                     } label: {
-                        Label(
-                            String(localized: KidsProfileCopy.parentalPINRemove),
-                            systemImage: "lock.slash"
-                        )
+                        Label {
+                            Text(KidsProfileCopy.parentalPINRemove)
+                        } icon: {
+                            Image(systemName: "lock.slash")
+                        }
                     }
                 }
             } footer: {
@@ -72,11 +74,13 @@ struct PlozziOSParentalPINSettingsView: View {
             )
         }
         .alert(
-            String(localized: KidsProfileCopy.parentalPINRemove),
+            Text(KidsProfileCopy.parentalPINRemove),
             isPresented: $confirmRemove
         ) {
-            Button(String(localized: KidsProfileCopy.parentalPINRemove), role: .destructive) {
+            Button(role: .destructive) {
                 appModel.profiles.setParentalPIN(nil)
+            } label: {
+                Text(KidsProfileCopy.parentalPINRemove)
             }
             Button("Cancel", role: .cancel) {}
         } message: {

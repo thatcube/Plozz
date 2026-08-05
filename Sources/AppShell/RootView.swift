@@ -345,7 +345,13 @@ public struct RootView: View {
                         onUpdateProfileCosmetics: { appState.profileFlow.updateProfileCosmetics($0) },
                         onDeleteProfile: { appState.profileFlow.removeProfile(id: $0) },
                         onAddAccount: { appState.addAccount() },
-                        onAddUser: { appState.selectServer($0) },
+                        // `beginAddingUser`, not `selectServer`: the session
+                        // machine is `.ready` here, and `serverSelected` is
+                        // illegal from `.ready`, so the reducer dropped it and
+                        // the button did nothing. Profile setup already learned
+                        // this — Settings has to enter the add-account state the
+                        // same way.
+                        onAddUser: { appState.beginAddingUser(on: $0) },
                         onRemoveAccount: { appState.removeAccount(id: $0.id) },
                         onRemoveAccountEverywhere: { appState.removeAccountEverywhere(id: $0.id) },
                         offersRemoveEverywhere: appState.offersRemoveEverywhere,

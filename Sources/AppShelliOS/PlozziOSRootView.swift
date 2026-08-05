@@ -21,6 +21,9 @@ public struct PlozziOSRootView: View {
     @State private var showingAddServer = false
     @State private var addServerPresentationColorScheme: ColorScheme = .dark
     @State private var showingSettings = false
+    /// Owned here rather than in the tab shell so `receivePairingURL` can see
+    /// whether it is up before asking for another sheet.
+    @State private var showingProfileSwitcher = false
     /// A pairing link that arrived while a sheet was open — see
     /// `receivePairingURL`.
     @State private var deferredPairingURL: URL?
@@ -83,6 +86,7 @@ public struct PlozziOSRootView: View {
                     appModel: appModel,
                     onAddServer: showAddServer,
                     showingSettings: $showingSettings,
+                    showingProfileSwitcher: $showingProfileSwitcher,
                     deferredPairingURL: $deferredPairingURL,
                     systemColorScheme: systemColorScheme
                 )
@@ -263,6 +267,7 @@ public struct PlozziOSRootView: View {
             onDismiss: {
                 serverSetupSeed = nil
                 appModel.finishManagedServerPresentation()
+                consumeDeferredPairingURL()
             }
         ) {
             AddServerView(
@@ -437,12 +442,22 @@ public struct PlozziOSRootView: View {
     /// with `pendingPairingInvite` left set so it is never re-requested, which
     /// means the link simply does nothing until relaunch.
     private func receivePairingURL(_ url: URL) {
-        guard showingSettings else {
+        guard showingSettings || showingProfileSwitcher || showingAddServer else {
             appModel.handleIncomingURL(url)
             return
         }
         deferredPairingURL = url
         showingSettings = false
+        showingProfileSwitcher = false
+        showingAddServer = false
+    }
+
+    /// Raises a link parked by `receivePairingURL` now that the sheet that was
+    /// covering the root has actually gone.
+    private func consumeDeferredPairingURL() {
+        guard let url = deferredPairingURL else { return }
+        deferredPairingURL = nil
+        appModel.handleIncomingURL(url)
     }
 
     private var pendingPairingBinding: Binding<PendingPairing?> {
@@ -549,7 +564,6 @@ private struct PlozziOSTabShell: View {
     /// launch. Presented from the ROOT so the Parental PIN and profile-lock gates
     /// it can raise aren't asked for from underneath the Settings sheet — the
     /// arrangement that fails silently.
-    @State private var showingProfileSwitcher = false
     /// Set while Settings is closing, so the picker can be raised from its
     /// `onDismiss` rather than in the same turn as the dismissal.
     @State private var wantsProfileSwitcher = false
@@ -568,6 +582,7 @@ private struct PlozziOSTabShell: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     @Binding var showingSettings: Bool
+    @Binding var showingProfileSwitcher: Bool
     /// A pairing link parked until this shell's sheets have closed — see
     /// `PlozziOSRootView.receivePairingURL`.
     @Binding var deferredPairingURL: URL?

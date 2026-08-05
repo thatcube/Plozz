@@ -261,23 +261,21 @@ public final class ProfileFlowModel {
     /// to disk. Everything the UI needs synchronously still happens
     /// synchronously; only the import waits.
     private func performSwitch(to id: String) {
-        audioController.stop()
         profilesModel.select(id)
         // `select` NO-OPS for an id this device doesn't have — a peer can delete
         // a profile between the picker rendering and the tap, which is exactly
         // the fall-through case. Releasing the hold and dismissing the forced
         // picker on a switch that never happened would strand the child in the
         // grown-up profile the gate exists to withhold.
-        if profilesModel.activeProfileID == id {
-            // Past both gates, so the hold has done its job — released here
-            // rather than in `submitParentalPIN` so that switching into ANOTHER
-            // Kids Profile (which needs no PIN) also releases it.
-            parentalFallThrough = nil
-        }
+        guard profilesModel.activeProfileID == id else { return }
+        audioController.stop()
+        // Past both gates, so the hold has done its job — released here rather
+        // than in `submitParentalPIN` so that switching into ANOTHER Kids
+        // Profile (which needs no PIN) also releases it.
+        parentalFallThrough = nil
         rebuildSettingsModels()
         accountsProviders.reloadAccounts()
-        // The picker stays up while the hold does.
-        if parentalFallThrough == nil { isChoosingProfile = false }
+        isChoosingProfile = false
         // Installs the new profile's Plex Home-user token (synchronously from
         // cache for unprotected users; protected ones raise the PIN prompt).
         plexHomeUsers.ensurePlexIdentityForActiveProfile()

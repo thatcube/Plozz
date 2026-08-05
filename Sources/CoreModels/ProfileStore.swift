@@ -715,7 +715,10 @@ public final class ProfilesModel {
                 // it: everything else stays local, and only the PIN is offered.
                 var merged = local
                 merged.parentalPIN = p.parentalPIN
-                merged.parentalPINRevision = p.parentalPINRevision
+                // The EFFECTIVE revision, so a sender whose PIN predates
+                // revisions still competes on its synthesized baseline instead of
+                // arriving revisionless and always losing to the receiver.
+                merged.parentalPINRevision = p.effectiveParentalPINRevision
                 merged.resolveSecurityFields(against: local)
                 byID[p.id] = merged
                 continue // otherwise don't clobber a configured receiver's own default

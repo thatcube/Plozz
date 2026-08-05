@@ -424,6 +424,12 @@ public struct SettingsView: View {
                     // of everything), and a child's profile is deliberately left
                     // unlocked, so without this the lock on the grown-ups'
                     // profiles could simply be routed around.
+                    // The parent-controlled group sits between the child's own
+                    // settings and the withheld household section.
+                    if showsParentalControlsSection {
+                        parentalControlsSection
+                    }
+
                     if activeProfile.isKids {
                         kidsProfileNote
                     } else {
@@ -499,6 +505,78 @@ public struct SettingsView: View {
         .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
     }
 
+    /// Whether this profile shows a separate parent-controlled group.
+    ///
+    /// Only a Kids Profile does, and only once the household has a Parental PIN
+    /// — without one there's nothing to control *with*, so splitting the page
+    /// would imply a protection that isn't there.
+    private var showsParentalControlsSection: Bool {
+        activeProfile.isKids && hasParentalPIN
+    }
+
+    /// The parent-controlled group: the settings a child must not change about
+    /// their own profile.
+    ///
+    /// A real section holding real rows, rather than one door labelled for
+    /// contents it didn't have. Each row keeps its own name — a locked Libraries
+    /// row still says "Libraries" — so the page is honest about what's here and
+    /// what's restricted, instead of asking anyone to guess.
+    @ViewBuilder
+    private var parentalControlsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 20) {
+                Image(systemName: isParentalSealed ? "lock.fill" : "lock.open")
+                    .font(.system(size: 40, weight: .regular))
+                    .plozzForeground(.secondary)
+                    .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
+                    .background(Circle().fill(palette.fillSubtle))
+                    .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(KidsProfileCopy.parentalControls)
+                        .font(Self.identityTitleFont)
+                    Text(isParentalSealed
+                        ? KidsProfileCopy.parentalControlsSealed
+                        : KidsProfileCopy.parentalControlsOpen)
+                        .font(.subheadline)
+                        .plozzForeground(.secondary)
+                }
+                Spacer()
+            }
+            .padding(28)
+
+            PlozzDivider().padding(.horizontal, 28)
+
+            VStack(spacing: 14) {
+                // While sealed every row leads to the PIN instead of its own
+                // page. The row still says what it is — the lock is the only
+                // thing that changes.
+                navRow(SettingsCopy.libraries,
+                       icon: isParentalSealed ? "lock.fill" : "rectangle.stack",
+                       value: nil,
+                       route: isParentalSealed ? .grownUps : .myLibraries) {
+                    signedInStrip
+                }
+
+                navRow(KidsProfileCopy.title,
+                       icon: isParentalSealed ? "lock.fill" : "figure.and.child.holdinghands",
+                       value: nil,
+                       route: isParentalSealed
+                           ? .grownUps
+                           : .profileSettings(profileID: activeProfile.id)) {
+                    Text(KidsProfileCopy.profileManagementDetail)
+                        .font(.footnote)
+                        .settingsRowSecondary()
+                        .lineLimit(2)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
+        }
+        .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
+    }
+
     /// Rows nested inside the profile container — the settings this profile
     /// actually *owns*: identity + presentation only. Grouped by concern and
     /// consolidated so there are no thin one-off pages: content/browsing first
@@ -517,19 +595,11 @@ public struct SettingsView: View {
             // Per-profile "Your Libraries": who you watch as + what shows on THIS
             // profile's Home. The personal mirror of This Apple TV › Servers.
             // Its second line glances the household's server sign-ins.
-            // Sealed: one row standing in for everything a grown-up may change,
-            // rather than a list of dead ends. Unsealing reveals the real rows in
-            // place, so nothing moves around.
-            if isParentalSealed {
-                navRow(KidsProfileCopy.grownUps, icon: "lock.fill",
-                       value: nil,
-                       route: .grownUps) {
-                    Text(KidsProfileCopy.grownUpsDetail)
-                        .font(.footnote)
-                        .settingsRowSecondary()
-                        .lineLimit(2)
-                }
-            } else {
+            //
+            // On a Kids Profile this moves to `parentalControlsSection` instead:
+            // it's a parent's setting, and grouping it with the child's own
+            // preferences made the two look equally theirs.
+            if !showsParentalControlsSection {
                 navRow(SettingsCopy.libraries, icon: "rectangle.stack",
                        value: nil,
                        route: .myLibraries) {

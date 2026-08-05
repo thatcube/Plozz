@@ -308,16 +308,36 @@ public enum KidsProfileCopy {
         comment: "Title of the second step when creating a Parental PIN, confirming the digits match."
     )
 
-    public static let grownUps = LocalizedStringResource(
-        "settings.parentalPIN.grownUps",
-        defaultValue: "Grown-ups",
-        comment: "Row inside a Kids Profile's settings gathering everything that needs the Parental PIN."
+    // The parent-controlled group on a Kids Profile's settings page.
+    //
+    // A section, not a door. An earlier version put one row called "Grown-ups"
+    // where Libraries had been: tapping it asked for a PIN and returned you to
+    // the same list, so it was named for contents it never had. Rows keep their
+    // own names now — a locked Libraries row still says Libraries — and the
+    // grouping carries the meaning.
+
+    public static let parentalControls = LocalizedStringResource(
+        "settings.parentalControls.title",
+        defaultValue: "Parental Controls",
+        comment: "Heading for the group of settings on a Kids Profile that only a grown-up may change."
     )
 
-    public static let grownUpsDetail = LocalizedStringResource(
-        "settings.parentalPIN.grownUpsDetail",
-        defaultValue: "Libraries, who this profile watches as, and its restrictions",
-        comment: "Subtitle for the Grown-ups row, listing what sits behind the Parental PIN."
+    public static let parentalControlsSealed = LocalizedStringResource(
+        "settings.parentalControls.sealed",
+        defaultValue: "Needs the Parental PIN",
+        comment: "Subtitle of the Parental Controls group while it's locked."
+    )
+
+    public static let parentalControlsOpen = LocalizedStringResource(
+        "settings.parentalControls.open",
+        defaultValue: "Unlocked until you switch profiles",
+        comment: "Subtitle of the Parental Controls group after the Parental PIN has been entered, making the limited duration clear."
+    )
+
+    public static let profileManagementDetail = LocalizedStringResource(
+        "settings.parentalControls.profileDetail",
+        defaultValue: "Kids Profile, lock, and appearance",
+        comment: "Subtitle of the row leading to this profile's own management page from Parental Controls."
     )
 
     public static let addTile = LocalizedStringResource(

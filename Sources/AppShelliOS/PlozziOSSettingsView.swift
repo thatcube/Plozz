@@ -208,6 +208,14 @@ private struct PlozziOSSettingsSplitView: View {
 
     /// Whether this profile's escalation-capable settings are sealed right now.
     /// Mirrors the tvOS rule exactly, from the same shared policy.
+    /// Whether this profile shows a separate parent-controlled group. Only a
+    /// Kids Profile does, and only once a Parental PIN exists — without one
+    /// there's nothing to control with.
+    private var showsParentalControlsSection: Bool {
+        appModel.profiles.activeProfile.isKids
+            && appModel.profiles.parentalPIN != nil
+    }
+
     private var isParentalSealed: Bool {
         appModel.profiles.activeProfile.isKids
             && appModel.profiles.parentalPIN != nil
@@ -236,17 +244,11 @@ private struct PlozziOSSettingsSplitView: View {
                     // anyone actually opens Settings to change, where the device
                     // group is setup done once.
                     SettingsSectionGroup(verbatim: appModel.profiles.activeProfile.name) {
-                        // Sealed: one row standing in for everything a grown-up
-                        // may change. Same rule as tvOS — a Kids Profile with no
-                        // household Parental PIN seals nothing, because there'd
-                        // be no key and the child could switch profiles anyway.
-                        if isParentalSealed {
-                            settingsRow(
-                                .grownUps,
-                                title: KidsProfileCopy.grownUps,
-                                systemImage: "lock.fill"
-                            )
-                        } else {
+                        // On a Kids Profile, Libraries moves to its own
+                        // parent-controlled group below — it's a parent's
+                        // setting, and sitting it among the child's own
+                        // preferences made the two look equally theirs.
+                        if !showsParentalControlsSection {
                             settingsRow(
                                 .myLibraries,
                                 title: SettingsCopy.libraries,
@@ -263,6 +265,22 @@ private struct PlozziOSSettingsSplitView: View {
                         settingsRow(.nightShift, title: "Circadian Mode", systemImage: "moon.stars.fill")
                     } footer: {
                         Text(profileScopeFooter)
+                    }
+
+                    // Real rows with real names; the grouping and the lock carry
+                    // the meaning. Mirrors tvOS.
+                    if showsParentalControlsSection {
+                        SettingsSectionGroup(KidsProfileCopy.parentalControls) {
+                            settingsRow(
+                                isParentalSealed ? .grownUps : .myLibraries,
+                                title: SettingsCopy.libraries,
+                                systemImage: isParentalSealed ? "lock.fill" : "rectangle.stack"
+                            )
+                        } footer: {
+                            Text(isParentalSealed
+                                ? KidsProfileCopy.parentalControlsSealed
+                                : KidsProfileCopy.parentalControlsOpen)
+                        }
                     }
 
                     // Withheld on a Kids Profile: every destructive control in the app

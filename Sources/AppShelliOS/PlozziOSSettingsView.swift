@@ -541,7 +541,7 @@ private struct PlozziOSSettingsSplitView: View {
     private var settingsDetail: some View {
         switch selection ?? .profiles {
         case .profiles:
-            PlozziOSProfilesView(appModel: appModel)
+            PlozziOSProfilesView(appModel: appModel, onClose: onClose)
         case .requests:
             PlozziOSSeerrSettingsView(appModel: appModel)
         case .servers:
@@ -925,7 +925,7 @@ private struct PlozziOSSettingsCompactMenu: View {
                 if !appModel.profiles.activeProfile.isKids {
                     SettingsSectionGroup(deviceSettingsTitle) {
                     NavigationLink {
-                        PlozziOSProfilesView(appModel: appModel)
+                        PlozziOSProfilesView(appModel: appModel, onClose: { dismiss() })
                     } label: {
                         Label("Profiles", systemImage: "person.2")
                     }
@@ -1086,25 +1086,14 @@ private struct PlozziOSProfilesView: View {
     @State private var showingAddProfile = false
     @State private var editingProfile: Profile?
     @State private var selectedProfileRoute: PlozziOSProfileSettingsRoute?
+    /// Closes Settings, so a switch can raise its gates from the root.
+    var onClose: () -> Void = {}
 
     private var orderedProfiles: [Profile] { appModel.profiles.profilesByRecency }
 
     var body: some View {
         List {
             SettingsSectionGroup {
-                if appModel.profiles.profiles.count > 1 {
-                    Picker(
-                        "Current Profile",
-                        selection: Binding(
-                            get: { appModel.profiles.activeProfileID },
-                            set: { appModel.selectProfile($0) }
-                        )
-                    ) {
-                        ForEach(orderedProfiles) { profile in
-                            Text(profile.name).tag(profile.id)
-                        }
-                    }
-                }
                 Toggle(
                     "Ask Who’s Watching on Startup",
                     isOn: Binding(
@@ -1121,46 +1110,68 @@ private struct PlozziOSProfilesView: View {
             }
 
             SettingsSectionGroup("Who’s watching?") {
+                // Tapping a face SWITCHES to it; the trailing button edits.
+                //
+                // It used to be the other way round — the whole row opened the
+                // editor and switching hid in a small picker above — under a
+                // "Who's watching?" header, beside a checkmark marking the active
+                // profile. Every signal said switcher; the tap said editor.
                 ForEach(orderedProfiles) { profile in
-                    Button {
-                        // One optional route owned by this page. A row cannot
-                        // activate another row's destination, and there is no
-                        // per-row NavigationLink state for SwiftUI's split-view
-                        // reconciliation to accidentally stack.
-                        selectedProfileRoute = PlozziOSProfileSettingsRoute(
-                            profileID: profile.id
-                        )
-                    } label: {
-                        HStack {
-                            PlozziOSProfileAvatar(
-                                profile: profile,
-                                size: 34
-                            )
-                            Text(profile.name)
-                            Spacer()
-                            if profile.id
-                                == appModel.profiles.activeProfileID {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.tint)
+                    HStack(spacing: 12) {
+                        Button {
+                            guard profile.id != appModel.profiles.activeProfileID else { return }
+                            // Close Settings first: the Parental PIN and profile
+                            // lock gates are presented from the root, and a cover
+                            // asked for from under an open sheet is the
+                            // arrangement that fails silently.
+                            onClose()
+                            appModel.selectProfile(profile.id)
+                        } label: {
+                            HStack {
+                                PlozziOSProfileAvatar(
+                                    profile: profile,
+                                    size: 34
+                                )
+                                Text(profile.name)
+                                Spacer()
+                                if profile.id
+                                    == appModel.profiles.activeProfileID {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.tint)
+                                }
+                                // Glance the access state so the list answers
+                                // "who's locked?" without opening each one.
+                                if profile.isKids {
+                                    Image(systemName: "figure.and.child.holdinghands")
+                                        .plozzForeground(.secondary)
+                                }
+                                if profile.isLocked {
+                                    Image(systemName: "lock.fill")
+                                        .plozzForeground(.secondary)
+                                }
                             }
-                            // Glance the access state so the list answers
-                            // "who's locked?" without opening each one.
-                            if profile.isKids {
-                                Image(systemName: "figure.and.child.holdinghands")
-                                    .plozzForeground(.secondary)
-                            }
-                            if profile.isLocked {
-                                Image(systemName: "lock.fill")
-                                    .plozzForeground(.secondary)
-                            }
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .plozzForeground(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+
+                        // Its own hit area, so editing never happens by accident
+                        // when someone meant to switch.
+                        Button {
+                            // One optional route owned by this page. A row cannot
+                            // activate another row's destination, and there is no
+                            // per-row NavigationLink state for SwiftUI's
+                            // split-view reconciliation to accidentally stack.
+                            selectedProfileRoute = PlozziOSProfileSettingsRoute(
+                                profileID: profile.id
+                            )
+                        } label: {
+                            Image(systemName: "info.circle")
+                                .foregroundStyle(.tint)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(Text("Edit \(profile.name)"))
                     }
-                    .buttonStyle(.plain)
                     .swipeActions {
                         if !appModel.profiles.isDefault(profile) {
                             Button("Delete", role: .destructive) {

@@ -289,11 +289,26 @@ public struct ProfileEditorView: View {
 
     #if os(tvOS)
 
-    private var tvOSBody: some View {
-        ZStack {
+    /// Gap the two-column layout puts on each side of the preview divider.
+    private static let columnGap: CGFloat = 48
+    /// The picker column's own content inset, which keeps focus halos off the
+    /// scroll view's edges.
+    private static let pickerInset: CGFloat = 28
+    /// How far an emoji rail has to reach past its own leading edge to touch the
+    /// preview divider.
+    ///
+    /// The rail's viewport is widened by this much (and its content inset by the
+    /// same amount, so nothing moves at rest). Without it the fade began at the
+    /// content edge and tiles dissolved a full `columnGap + pickerInset` short of
+    /// the divider, leaving them to vanish in the middle of an empty gap. Now
+    /// they stay solid at rest and dissolve right against the line, as if
+    /// sliding under the preview.
+    private static var emojiRailDividerBleed: CGFloat { columnGap + pickerInset }
+
+    private var tvOSBody: some View {        ZStack {
             AppBackground(palette: palette).ignoresSafeArea()
 
-            HStack(alignment: .top, spacing: 48) {
+            HStack(alignment: .top, spacing: Self.columnGap) {
                 // Marking each column a focus SECTION makes Left/Right move
                 // between columns as a whole, instead of the focus engine
                 // hunting for the geometrically-nearest control. Without this,
@@ -515,7 +530,7 @@ public struct ProfileEditorView: View {
             }
             // Breathing room so the tiles' focus halos + shadows are never
             // clipped by the scroll view's edges.
-            .padding(.horizontal, 28)
+            .padding(.horizontal, Self.pickerInset)
             .padding(.vertical, 28)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -698,14 +713,20 @@ public struct ProfileEditorView: View {
                     emojiTile(emoji)
                 }
             }
-            // No horizontal inset: content travels all the way to the preview
-            // pane boundary instead of disappearing in an unexplained gap.
+            // Inset by exactly the amount the viewport is widened below, so the
+            // resting position is unchanged and the gap beside the divider is
+            // preserved — only the scrolled-away edge moves.
+            .padding(.leading, Self.emojiRailDividerBleed)
             .padding(.vertical, shadowClearance)
         }
         .horizontalEdgeFadeMask(
             fadeWidth: 28,
             verticalOverhang: shadowClearance
         )
+        // Negative padding proposes a WIDER viewport to the scroll view and
+        // shifts it left, without changing the width this rail reports to the
+        // column. That puts the mask's leading fade on the divider itself.
+        .padding(.leading, -Self.emojiRailDividerBleed)
         // Same pattern as Home's media rows: expand the clipped viewport around
         // focused content, then cancel that extra room from layout so category
         // spacing remains unchanged.

@@ -123,7 +123,7 @@ public enum ProfileLockCopy {
     /// open without a code, which looks like a bug.
     public static let plexAlreadyAsks = LocalizedStringResource(
         "settings.profileLock.plexAlreadyAsks",
-        defaultValue: "Protected by the selected Plex user’s PIN. Changing who this profile watches as may change its protection.",
+        defaultValue: "This user already has a Plex PIN.",
         comment: "Second line on the Profile Lock row when the profile has no Plozz lock but does play as a PIN-protected Plex Home user."
     )
 

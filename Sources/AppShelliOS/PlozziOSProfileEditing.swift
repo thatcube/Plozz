@@ -43,16 +43,20 @@ struct PlozziOSProfileEditorHost: View {
     let editingProfile: Profile?
     let canDelete: Bool
     let onFinished: () -> Void
+    /// Whether a newly created profile should be a Kids Profile.
+    var createsKidsProfile: Bool = false
 
     init(
         appModel: PlozziOSAppModel,
         editingProfile: Profile? = nil,
         canDelete: Bool = false,
+        createsKidsProfile: Bool = false,
         onFinished: @escaping () -> Void
     ) {
         self.appModel = appModel
         self.editingProfile = editingProfile
         self.canDelete = canDelete
+        self.createsKidsProfile = createsKidsProfile
         self.onFinished = onFinished
     }
 
@@ -67,7 +71,7 @@ struct PlozziOSProfileEditorHost: View {
                 await appModel.plexHomeUsers.plexHomeUsers(forAccountID: accountID)
             },
             onSave: { draft in
-                appModel.saveProfile(draft)
+                appModel.saveProfile(draft, isKids: createsKidsProfile)
                 onFinished()
             },
             onDelete: deleteHandler,

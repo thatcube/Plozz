@@ -35,7 +35,7 @@ struct PlozziOSProfilePickerView: View {
 
     /// What the picker has pushed on top of itself.
     private enum Route: Hashable, Identifiable {
-        case add
+        case add(isKids: Bool)
         case edit(profileID: String)
         var id: Self { self }
     }
@@ -90,11 +90,27 @@ struct PlozziOSProfilePickerView: View {
                         }
 
                         if manager != nil, !isEditing {
-                            Button { route = .add } label: {
-                                addCard
+                            Button { route = .add(isKids: false) } label: {
+                                addCard(
+                                    title: "Add Profile",
+                                    systemImage: "plus"
+                                )
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(Text("Add Profile"))
+
+                            // Its own tile, matching tvOS. Creating a child's
+                            // profile and then remembering to mark it as one is
+                            // a step people skip, and the consequence is a
+                            // profile that isn't restricted.
+                            Button { route = .add(isKids: true) } label: {
+                                addCard(
+                                    title: KidsProfileCopy.addTile,
+                                    systemImage: "figure.and.child.holdinghands"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(Text(KidsProfileCopy.addTile))
                         }
                     }
                     .frame(maxWidth: 760)
@@ -141,8 +157,11 @@ struct PlozziOSProfilePickerView: View {
     private func destination(for route: Route) -> some View {
         if let manager {
             switch route {
-            case .add:
-                PlozziOSProfileEditorHost(appModel: manager) {
+            case let .add(isKids):
+                PlozziOSProfileEditorHost(
+                    appModel: manager,
+                    createsKidsProfile: isKids
+                ) {
                     self.route = nil
                     // Close the whole picker: a brand-new profile owes its setup
                     // pass, and that cover is presented by the root — which can't
@@ -156,17 +175,20 @@ struct PlozziOSProfilePickerView: View {
     }
 
     /// Matches a profile card's shape so the grid stays even.
-    private var addCard: some View {
+    private func addCard(
+        title: LocalizedStringResource,
+        systemImage: String
+    ) -> some View {
         VStack(spacing: 14) {
             ZStack {
                 Circle().fill(.quaternary)
-                Image(systemName: "plus")
+                Image(systemName: systemImage)
                     .font(.system(size: 40, weight: .semibold))
                     .plozzForeground(.secondary)
             }
             .frame(width: 116, height: 116)
 
-            Text("Add Profile")
+            Text(title)
                 .font(.headline)
                 .lineLimit(1)
         }

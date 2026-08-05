@@ -1568,7 +1568,11 @@ final class PlozziOSAppModel {
     /// active-account subset) is preserved. A new profile is seeded with the
     /// current household accounts, selected, and handed to the first-run theme
     /// step — mirroring the previous `addProfile` behaviour.
-    func saveProfile(_ draft: ProfileDraft) {
+    /// - Parameter isKids: whether a NEWLY created profile is a Kids Profile.
+    ///   Ignored when editing, where the flag is owned by the profile's own
+    ///   settings page. Matches the tvOS picker, which has always been able to
+    ///   create one directly.
+    func saveProfile(_ draft: ProfileDraft, isKids: Bool = false) {
         let trimmed = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -1603,9 +1607,7 @@ final class PlozziOSAppModel {
             // the import until `advanceProfileOnboarding` releases it.
             let created = profiles.addAwaitingSetup(
                 draft,
-                // The editor doesn't create kid profiles; that's set afterwards
-                // from the profile's own settings page, same as on tvOS.
-                isKids: false,
+                isKids: isKids,
                 activeAccountIDs: accounts.map(\.id)
             )
             // Claimed BEFORE the switch: `performSelectProfile` schedules a

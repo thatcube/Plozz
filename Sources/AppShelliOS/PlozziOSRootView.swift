@@ -64,7 +64,14 @@ public struct PlozziOSRootView: View {
                     onSelect: { profile in
                         appModel.selectProfile(profile.id)
                         completedLaunchProfileSelection = true
-                    }
+                    },
+                    // Same abilities as the switcher. Withholding Add and Edit
+                    // here made one screen behave as two: identical layout, but
+                    // long-press did nothing and the Edit button was missing
+                    // until you'd already picked someone. Netflix and the tvOS
+                    // picker both manage profiles from the launch screen too.
+                    manager: appModel
+                    // No `onCancel`: at launch there is nothing to go back to.
                 )
             } else {
                 PlozziOSTabShell(

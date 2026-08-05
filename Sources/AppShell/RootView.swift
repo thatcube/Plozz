@@ -448,6 +448,7 @@ public struct RootView: View {
         // So a hairline tuned against an SDR backdrop can compensate for SDR
         // white being mapped brighter once the panel switches to HDR.
         .environment(\.plozzHDRDisplayActive, glassPerformance.budget.contentIsHDR)
+        .environment(\.plozzHasParentalPIN, appState.profilesModel.parentalPIN != nil)
         .environment(glassPerformance)
         .environment(displayVeil)
         // Push the theme's effective scheme DOWN into the tree instead of forcing
@@ -467,11 +468,14 @@ public struct RootView: View {
         // content in place.
         .fullScreenCover(isPresented: Binding(
             get: {
-                appState.profileFlow.pendingLockedProfile != nil || pinRequest != nil
+                appState.profileFlow.pendingLockedProfile != nil
+                    || appState.profileFlow.pendingParentalSwitch != nil
+                    || pinRequest != nil
             },
             set: { presented in
                 if !presented {
                     appState.profileFlow.cancelProfileLockPrompt()
+                    appState.profileFlow.cancelParentalSwitch()
                     appState.plexHomeUsers.dismissPlexPINIfPresented()
                 }
             }
@@ -1112,7 +1116,19 @@ private struct ProfileAccessGateView: View {
             // reveal Home.
             AppBackground(palette: palette).ignoresSafeArea()
 
-            if let profile = appState.profileFlow.pendingLockedProfile {
+            if let target = appState.profileFlow.pendingParentalSwitch {
+                // Comes first: this gate decides whether you may leave the
+                // child's profile at all, before any question about the profile
+                // you're heading for.
+                ParentalPINView(
+                    destination: target,
+                    errorMessage: appState.profileFlow.parentalPINError,
+                    onSubmit: { appState.profileFlow.submitParentalPIN($0) },
+                    onCancel: { appState.profileFlow.cancelParentalSwitch() }
+                )
+                .id("parental-pin")
+                .transition(.opacity)
+            } else if let profile = appState.profileFlow.pendingLockedProfile {
                 ProfileLockPINView(
                     profile: profile,
                     errorMessage: appState.profileFlow.profileLockError,

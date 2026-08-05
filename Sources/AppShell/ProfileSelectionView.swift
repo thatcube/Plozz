@@ -105,9 +105,7 @@ struct ProfileSelectionView: View {
                     profile: profile,
                     syncEnabled: SyncSetupFeatureFlag().isEnabled,
                     offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
-                    householdHasOtherLock: appState.profilesModel.profiles.contains {
-                        $0.id != profile.id && $0.isLocked
-                    },
+                    hasParentalPIN: appState.profilesModel.parentalPIN != nil,
                     onEditAppearance: {
                         actionsProfileID = nil
                         editingProfile = profile

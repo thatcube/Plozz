@@ -31,7 +31,7 @@ public struct ProfileActionsList: View {
     private let offersPlexPINReuse: Bool
     /// Whether any *other* profile carries a lock — a Kids Profile only contains
     /// anyone if there's something locked to keep them out of.
-    private let householdHasOtherLock: Bool
+    private let hasParentalPIN: Bool
     private let onEditAppearance: () -> Void
     private let onSetLock: (ProfileLock?) -> Void
     private let onSetKids: (Bool) -> Void
@@ -48,7 +48,7 @@ public struct ProfileActionsList: View {
         profile: Profile,
         syncEnabled: Bool,
         offersPlexPINReuse: Bool = false,
-        householdHasOtherLock: Bool,
+        hasParentalPIN: Bool,
         onEditAppearance: @escaping () -> Void,
         onSetLock: @escaping (ProfileLock?) -> Void,
         onSetKids: @escaping (Bool) -> Void,
@@ -62,7 +62,7 @@ public struct ProfileActionsList: View {
         self.profile = profile
         self.syncEnabled = syncEnabled
         self.offersPlexPINReuse = offersPlexPINReuse
-        self.householdHasOtherLock = householdHasOtherLock
+        self.hasParentalPIN = hasParentalPIN
         self.onEditAppearance = onEditAppearance
         self.onSetLock = onSetLock
         self.onSetKids = onSetKids
@@ -183,9 +183,13 @@ public struct ProfileActionsList: View {
                 showingKidsOptions = true
             }
 
-            if profile.isKids, !householdHasOtherLock {
+            // A Kids Profile with no household Parental PIN restricts nothing —
+            // say so here rather than let the "On" above imply otherwise. This
+            // replaced a nudge to lock your own profile, which was the
+            // workaround for not having a Parental PIN.
+            if profile.isKids, !hasParentalPIN {
                 Label {
-                    Text(KidsProfileCopy.pairWithLock)
+                    Text(KidsProfileCopy.parentalPINExplanation)
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {

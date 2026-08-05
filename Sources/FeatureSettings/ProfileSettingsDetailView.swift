@@ -95,9 +95,7 @@ struct ProfileSettingsDetailView: View {
                 profile: profile,
                 syncEnabled: syncEnabled,
                 offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
-                householdHasOtherLock: context.profiles.contains {
-                    $0.id != profile.id && $0.isLocked
-                },
+                hasParentalPIN: context.hasParentalPIN,
                 onEditAppearance: { showingEditor = true },
                 onSetLock: { context.onSetProfileLock(profileID, $0) },
                 onSetKids: { context.onSetKidsProfile(profileID, $0) },

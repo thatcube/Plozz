@@ -230,10 +230,82 @@ public enum KidsProfileCopy {
         comment: "Explains what marking a profile as a Kids Profile does. The last sentence matters: there is no content filtering yet and the copy must not imply otherwise."
     )
 
-    public static let pairWithLock = LocalizedStringResource(
-        "settings.kidsProfile.pairWithLock",
-        defaultValue: "Lock your own profile too, so this one can't be used to open yours.",
-        comment: "Nudge shown when a Kids Profile is turned on but the current profile has no Profile Lock — the two features only work as a pair."
+    // MARK: Parental PIN
+    //
+    // The household PIN that turns a Kids Profile from curation into
+    // enforcement. Called a "Parental PIN" rather than another kind of lock,
+    // because a Profile Lock is personal ("don't open my profile") while this is
+    // shared ("you're allowed to change what the child can reach"). Netflix and
+    // Apple keep those two ideas apart too; running them together is what forces
+    // someone to put a PIN on four grown-up accounts to protect one child.
+    //
+    // This replaced a nudge telling people to lock their own profile, which was
+    // a workaround for not having this.
+
+    public static let parentalPIN = LocalizedStringResource(
+        "settings.parentalPIN.title",
+        defaultValue: "Parental PIN",
+        comment: "The household PIN required to leave a Kids Profile or change its restricted settings."
+    )
+
+    public static let parentalPINExplanation = LocalizedStringResource(
+        "settings.parentalPIN.explanation",
+        defaultValue: "One PIN for the household. Without it, a Kids Profile only simplifies this screen.",
+        comment: "Explains what adding a Parental PIN buys. Must stay honest that a Kids Profile alone restricts nothing."
+    )
+
+    public static let parentalPINCreate = LocalizedStringResource(
+        "settings.parentalPIN.create",
+        defaultValue: "Create a Parental PIN",
+        comment: "Action that sets the household's Parental PIN for the first time."
+    )
+
+    public static let parentalPINChange = LocalizedStringResource(
+        "settings.parentalPIN.change",
+        defaultValue: "Change Parental PIN",
+        comment: "Action that replaces the household's existing Parental PIN."
+    )
+
+    public static let parentalPINRemove = LocalizedStringResource(
+        "settings.parentalPIN.remove",
+        defaultValue: "Remove Parental PIN",
+        comment: "Action that deletes the household's Parental PIN."
+    )
+
+    public static let parentalPINRemoveDetail = LocalizedStringResource(
+        "settings.parentalPIN.removeDetail",
+        defaultValue: "Kids Profiles stay on, but nothing will be locked.",
+        comment: "Shown when removing the household Parental PIN, clarifying that Kids Profiles are not turned off by it."
+    )
+
+    public static let parentalPINEnter = LocalizedStringResource(
+        "settings.parentalPIN.enter",
+        defaultValue: "Enter the Parental PIN",
+        comment: "Title of the PIN screen shown when leaving a Kids Profile or opening its restricted settings."
+    )
+
+    public static let parentalPINSetTitle = LocalizedStringResource(
+        "settings.parentalPIN.setTitle",
+        defaultValue: "Create a Parental PIN",
+        comment: "Title of the screen that collects a new household Parental PIN."
+    )
+
+    public static let parentalPINConfirmTitle = LocalizedStringResource(
+        "settings.parentalPIN.confirmTitle",
+        defaultValue: "Enter it again",
+        comment: "Title of the second step when creating a Parental PIN, confirming the digits match."
+    )
+
+    public static let grownUps = LocalizedStringResource(
+        "settings.parentalPIN.grownUps",
+        defaultValue: "Grown-ups",
+        comment: "Row inside a Kids Profile's settings gathering everything that needs the Parental PIN."
+    )
+
+    public static let grownUpsDetail = LocalizedStringResource(
+        "settings.parentalPIN.grownUpsDetail",
+        defaultValue: "Libraries, who this profile watches as, and its restrictions",
+        comment: "Subtitle for the Grown-ups row, listing what sits behind the Parental PIN."
     )
 
     public static let addTile = LocalizedStringResource(

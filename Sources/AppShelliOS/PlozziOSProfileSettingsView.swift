@@ -32,12 +32,6 @@ struct PlozziOSProfileSettingsView: View {
     }
 
 
-    /// Whether any *other* profile carries a lock — a Kids Profile only contains
-    /// anyone if there's something locked to keep them out of.
-    private var householdHasAnyLock: Bool {
-        appModel.profiles.profiles.contains { $0.id != profileID && $0.isLocked }
-    }
-
     var body: some View {
         List {
             if let profile {
@@ -46,7 +40,7 @@ struct PlozziOSProfileSettingsView: View {
                         profile: profile,
                         syncEnabled: SyncSetupFeatureFlag().isEnabled,
                         offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
-                        householdHasOtherLock: householdHasAnyLock,
+                        hasParentalPIN: appModel.profiles.parentalPIN != nil,
                         onEditAppearance: { showingEditor = true },
                         onSetLock: { appModel.setLock($0, forProfile: profileID) },
                         onSetKids: { appModel.setKidsProfile($0, forProfile: profileID) },

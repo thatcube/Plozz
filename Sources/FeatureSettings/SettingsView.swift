@@ -149,6 +149,12 @@ public struct SettingsView: View {
     /// Current cross-device sync opt-in state, and the setter. When the setter is
     /// nil the row is hidden (e.g. a host that doesn't wire sync).
     private let syncEnabled: Bool
+    /// Whether the household has a Parental PIN — the switch between a Kids
+    /// Profile being enforced and merely simplified.
+    ///
+    /// Read from the environment rather than passed in: this initializer already
+    /// takes ~60 arguments and one more tipped the type-checker over.
+    @Environment(\.plozzHasParentalPIN) private var hasParentalPIN
     private let onSetSyncEnabled: ((Bool) -> Void)?
     /// Live status summary line for the iCloud Sync page, and a manual sync action.
     private let syncStatusSummary: SyncStatusProvider?
@@ -339,6 +345,7 @@ public struct SettingsView: View {
             onUpdateProfileCosmetics: onUpdateProfileCosmetics,
             onDeleteProfile: onDeleteProfile,
             onAddAccount: onAddAccount,
+            hasParentalPIN: hasParentalPIN,
             onAddUser: onAddUser,
             onRemoveAccount: onRemoveAccount,
             onRemoveAccountEverywhere: onRemoveAccountEverywhere,

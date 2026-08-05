@@ -37,6 +37,9 @@ struct SettingsContext {
     let onUpdateProfileCosmetics: (ProfileDraft) -> Void
     let onDeleteProfile: (String) -> Void
     let onAddAccount: () -> Void
+    /// Whether the household has a Parental PIN, which is what decides if a Kids
+    /// Profile is enforced or merely simplified. See ``ParentalPIN``.
+    var hasParentalPIN: Bool = false
     /// Signs in another user on an already-added server.
     let onAddUser: (MediaServer) -> Void
     let onRemoveAccount: (Account) -> Void

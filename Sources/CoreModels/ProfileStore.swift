@@ -62,6 +62,14 @@ public protocol ProfilePersisting: Sendable {
     /// Persists whether the one-time first-run profile setup has completed.
     func setFirstRunProfileSetupComplete(_ value: Bool)
 
+    /// The household's Parental PIN, or `nil` when none is set (the default).
+    ///
+    /// Household-wide by design — see ``ParentalPIN``. Stored beside the profile
+    /// list so every Apple TV system user sees the same value.
+    func parentalPIN() -> ParentalPIN?
+    /// Persists (or clears with `nil`) the household's Parental PIN.
+    func setParentalPIN(_ value: ParentalPIN?)
+
     /// Debug-only: wipes all household profile state (profiles, the active
     /// selection, household preference overrides, and the first-run flag) so
     /// the next launch behaves like a brand-new install.
@@ -75,6 +83,8 @@ extension ProfilePersisting {
     public func setAskProfileOnStartupOverride(_ value: Bool?) {}
     public func firstRunProfileSetupComplete() -> Bool { false }
     public func setFirstRunProfileSetupComplete(_ value: Bool) {}
+    public func parentalPIN() -> ParentalPIN? { nil }
+    public func setParentalPIN(_ value: ParentalPIN?) {}
     public func resetForDebugging() {}
     public func clearActiveAccountIDs(forProfile profileID: String) {}
 }
@@ -108,6 +118,7 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     /// the value left behind by older installs.
     private let legacyProfilesEnabledKey = "com.plozz.profiles.enabled"
     private let firstRunSetupKey = "com.plozz.profiles.firstRunSetupComplete"
+    private let parentalPINKey = "com.plozz.profiles.parentalPIN"
     /// Stable id assigned to the migrated default profile so its identity is the
     /// same across launches and its `isDefault` status is unambiguous.
     public static let defaultProfileID = "com.plozz.profile.default"
@@ -209,6 +220,24 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
         writeSharedBool(value, forKey: firstRunSetupKey)
     }
 
+    /// Stored beside the profile list (the shared/secure store), so the whole
+    /// household sees one PIN rather than one per Apple TV system user.
+    public func parentalPIN() -> ParentalPIN? {
+        lock.lock(); defer { lock.unlock() }
+        guard let data = sharedData(forKey: parentalPINKey) else { return nil }
+        return try? JSONDecoder().decode(ParentalPIN.self, from: data)
+    }
+
+    public func setParentalPIN(_ value: ParentalPIN?) {
+        lock.lock(); defer { lock.unlock() }
+        guard let value else {
+            removeShared(forKey: parentalPINKey)
+            return
+        }
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        setSharedData(data, forKey: parentalPINKey)
+    }
+
     public func resetForDebugging() {
         lock.lock(); defer { lock.unlock() }
         for profile in loadProfilesLocked() {
@@ -220,6 +249,7 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
         writeSharedBool(nil, forKey: askOnStartupKey)
         writeSharedBool(nil, forKey: legacyProfilesEnabledKey)
         writeSharedBool(nil, forKey: firstRunSetupKey)
+        removeShared(forKey: parentalPINKey)
         didMigrateShared = false
     }
 
@@ -381,6 +411,14 @@ public final class ProfilesModel {
     /// Household-level "Ask which profile on startup" flag. Defaults to
     /// `profiles.count > 1` until the user explicitly toggles it.
     public private(set) var askProfileOnStartup: Bool
+    /// The household's Parental PIN, or `nil` when none is set.
+    ///
+    /// Its presence is the single switch between the two things a Kids Profile
+    /// can be: without it, Kids is *curation* (a simpler page, household
+    /// settings hidden) and nothing is gated; with it, Kids is *enforcement*.
+    /// Deriving both behaviours from one optional is what stops a setting ever
+    /// being locked behind a key nobody holds.
+    public private(set) var parentalPIN: ParentalPIN?
 
     private let store: ProfilePersisting
 
@@ -407,6 +445,7 @@ public final class ProfilesModel {
         // until the user explicitly toggles it.
         let multi = migrated.count > 1
         self.askProfileOnStartup = store.askProfileOnStartupOverride() ?? multi
+        self.parentalPIN = store.parentalPIN()
         // Intentionally does *not* persist a defaulted selection: leaving it
         // unstored is what lets a fresh Apple TV system user get the picker.
     }
@@ -415,6 +454,53 @@ public final class ProfilesModel {
     public var activeProfile: Profile {
         profiles.first { $0.id == activeProfileID } ?? profiles.first
             ?? Profile(id: ProfileStore.defaultProfileID, name: "Me")
+    }
+
+    // MARK: Parental controls
+
+    /// Sets or clears the household's Parental PIN.
+    ///
+    /// Clearing it doesn't touch any Kids Profile: those stay on, they simply
+    /// stop being enforced. That's deliberate — "I don't need the PIN any more"
+    /// shouldn't silently hand a child the household settings back.
+    public func setParentalPIN(_ pin: ParentalPIN?) {
+        parentalPIN = pin
+        store.setParentalPIN(pin)
+    }
+
+    /// Whether `pin` is the household's Parental PIN. `false` when none is set,
+    /// so a caller can never be tricked into treating "no PIN" as "any PIN".
+    public func matchesParentalPIN(_ pin: String) -> Bool {
+        guard let parentalPIN else { return false }
+        return parentalPIN.matches(pin: pin)
+    }
+
+    /// Whether a Kids Profile's restrictions are actually being enforced.
+    ///
+    /// The single rule the whole feature turns on: a Kids Profile restricts
+    /// nothing until the household has a Parental PIN. Without one there is no
+    /// key, so gating a setting would strand it — and the child could switch to
+    /// an unlocked grown-up profile anyway, which makes the gate theatre.
+    public var enforcesKidsRestrictions: Bool { parentalPIN != nil }
+
+    /// Whether `profile` may change who it watches as, which libraries it sees,
+    /// its own Kids flag, and its own Profile Lock.
+    ///
+    /// The one predicate every surface asks, so a new screen can't accidentally
+    /// expose an escalation route the others close.
+    public func canEditRestrictedSettings(of profile: Profile) -> Bool {
+        !(profile.isKids && enforcesKidsRestrictions)
+    }
+
+    /// Whether switching from `from` to `to` has to be authorised first.
+    ///
+    /// Only leaving a Kids Profile asks. Switching between grown-up profiles
+    /// stays free, so the PIN costs the adults nothing in normal use while still
+    /// closing the one route that matters: the child walking out of their own
+    /// profile into an unrestricted one.
+    public func requiresParentalPIN(switchingFrom from: Profile, to: Profile) -> Bool {
+        guard enforcesKidsRestrictions else { return false }
+        return from.isKids && !to.isKids
     }
 
     /// Whether `profile` is the default/primary one (drives `nil`-namespaced

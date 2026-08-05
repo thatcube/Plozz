@@ -141,6 +141,17 @@ public final class ProfileFlowModel {
     /// Message from the last failed unlock attempt, or `nil`.
     public private(set) var profileLockError: String?
 
+    /// A profile the household is trying to reach *out of* a Kids Profile, held
+    /// until the Parental PIN is entered.
+    ///
+    /// Separate from `pendingLockedProfile` because it asks a different question:
+    /// that one is "may you open this profile", this one is "may you leave the
+    /// child's". Both can apply to one switch — a parent leaving the kid for
+    /// their own locked profile answers the Parental PIN, then their own.
+    public private(set) var pendingParentalSwitch: Profile?
+    /// Message from the last failed Parental PIN attempt, or `nil`.
+    public private(set) var parentalPINError: String?
+
     /// Profiles unlocked during this app run, so a person who has already proved
     /// they know the PIN isn't asked again every time they hop between profiles.
     ///
@@ -152,21 +163,69 @@ public final class ProfileFlowModel {
     /// dismisses the picker. Fast: a few `UserDefaults` reads plus an in-memory
     /// account recompute; content reloads async via the rebuilt view subtree.
     ///
-    /// When the target profile carries a `ProfileLock` and hasn't been unlocked
-    /// yet this run, nothing is switched — the PIN prompt is raised instead and
-    /// the real switch happens in `submitProfileLockPIN(_:)`. The gate sits ahead
-    /// of everything else on purpose: no settings rebuild, no account reload, and
-    /// above all no Plex identity apply happens for a profile the person hasn't
-    /// proved they can open.
+    /// Two gates sit in front of the switch, in this order:
+    ///
+    /// 1. **May you leave?** Walking out of a Kids Profile into a grown-up one
+    ///    needs the household's Parental PIN. This is the child's front door, so
+    ///    it is checked before anything is touched.
+    /// 2. **May you enter?** The target's own `ProfileLock`, as before.
+    ///
+    /// Nothing is switched until both are satisfied: no settings rebuild, no
+    /// account reload, and above all no Plex identity apply for a profile the
+    /// person hasn't proved they can open.
     public func switchProfile(to id: String) {
-        if let profile = profilesModel.profiles.first(where: { $0.id == id }),
-           profile.isLocked,
-           !unlockedProfileIDs.contains(id) {
-            profileLockError = nil
-            pendingLockedProfile = profile
+        guard let target = profilesModel.profiles.first(where: { $0.id == id }) else {
+            performSwitch(to: id)
             return
         }
-        performSwitch(to: id)
+        if profilesModel.requiresParentalPIN(
+            switchingFrom: profilesModel.activeProfile,
+            to: target
+        ) {
+            parentalPINError = nil
+            pendingParentalSwitch = target
+            return
+        }
+        continueSwitch(to: target)
+    }
+
+    /// The switch past the parental gate, still subject to the target's own lock.
+    private func continueSwitch(to target: Profile) {
+        if target.isLocked, !unlockedProfileIDs.contains(target.id) {
+            profileLockError = nil
+            pendingLockedProfile = target
+            return
+        }
+        performSwitch(to: target.id)
+    }
+
+    /// Checks `pin` against the household's Parental PIN and, on a match, lets
+    /// the held switch continue.
+    ///
+    /// Deliberately **not** remembered for the run, unlike `unlockedProfileIDs`.
+    /// Remembering it would mean that once a grown-up stepped out of the child's
+    /// profile, the child could too until the next cold launch — which is the
+    /// whole thing this gate exists to prevent. Leaving a Kids Profile is rare
+    /// enough that asking every time costs the adults almost nothing.
+    ///
+    /// - Returns: `true` when the PIN was accepted.
+    @discardableResult
+    public func submitParentalPIN(_ pin: String) -> Bool {
+        guard let target = pendingParentalSwitch else { return false }
+        guard profilesModel.matchesParentalPIN(pin) else {
+            parentalPINError = String(localized: "Incorrect PIN. Try again.")
+            return false
+        }
+        pendingParentalSwitch = nil
+        parentalPINError = nil
+        continueSwitch(to: target)
+        return true
+    }
+
+    /// Abandons a held switch, leaving the child where they were.
+    public func cancelParentalSwitch() {
+        pendingParentalSwitch = nil
+        parentalPINError = nil
     }
 
     /// The unconditional switch, past the lock gate.

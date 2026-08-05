@@ -17,7 +17,7 @@ public struct ProfileActionsSheet: View {
     private let profile: Profile
     private let syncEnabled: Bool
     private let offersPlexPINReuse: Bool
-    private let householdHasOtherLock: Bool
+    private let hasParentalPIN: Bool
     private let onEditAppearance: () -> Void
     private let onSetLock: (ProfileLock?) -> Void
     private let onSetKids: (Bool) -> Void
@@ -31,7 +31,7 @@ public struct ProfileActionsSheet: View {
         profile: Profile,
         syncEnabled: Bool,
         offersPlexPINReuse: Bool = false,
-        householdHasOtherLock: Bool,
+        hasParentalPIN: Bool,
         onEditAppearance: @escaping () -> Void,
         onSetLock: @escaping (ProfileLock?) -> Void,
         onSetKids: @escaping (Bool) -> Void,
@@ -46,7 +46,7 @@ public struct ProfileActionsSheet: View {
         self.profile = profile
         self.syncEnabled = syncEnabled
         self.offersPlexPINReuse = offersPlexPINReuse
-        self.householdHasOtherLock = householdHasOtherLock
+        self.hasParentalPIN = hasParentalPIN
         self.onEditAppearance = onEditAppearance
         self.onSetLock = onSetLock
         self.onSetKids = onSetKids
@@ -69,7 +69,7 @@ public struct ProfileActionsSheet: View {
                 profile: profile,
                 syncEnabled: syncEnabled,
                 offersPlexPINReuse: offersPlexPINReuse,
-                householdHasOtherLock: householdHasOtherLock,
+                hasParentalPIN: hasParentalPIN,
                 onEditAppearance: onEditAppearance,
                 onSetLock: onSetLock,
                 onSetKids: onSetKids,
@@ -95,7 +95,7 @@ public struct ProfileActionsSheet: View {
                         profile: profile,
                         syncEnabled: syncEnabled,
                         offersPlexPINReuse: offersPlexPINReuse,
-                        householdHasOtherLock: householdHasOtherLock,
+                        hasParentalPIN: hasParentalPIN,
                         onEditAppearance: onEditAppearance,
                         onSetLock: onSetLock,
                         onSetKids: onSetKids,

@@ -277,6 +277,141 @@ final class ParentalPINSyncTests: XCTestCase {
         XCTAssertFalse(model.enforcesKidsRestrictions, "Only the first profile anchors the PIN")
         XCTAssertFalse(model.matchesParentalPIN("9999"))
     }
+
+    // MARK: Pairing
+
+    /// Pairing keeps an ALREADY-CONFIGURED receiver's own default profile rather
+    /// than letting the sender's clobber it. The PIN rides that exact record, so
+    /// the skip used to drop it — handing the receiver every Kids Profile with
+    /// nothing enforcing them.
+    func testPairingKeepsTheReceiversDefaultButAdoptsThePIN() {
+        let receiver = makeModel()
+        let localDefault = receiver.profiles[0]
+        var renamed = localDefault
+        renamed.name = "Receiver's own"
+        receiver.update(renamed)
+        _ = receiver.add(name: "Second") // count > 1 ⇒ configured
+        XCTAssertTrue(receiver.firstRunProfileSetupComplete)
+
+        var sender = localDefault
+        sender.name = "Sender's default"
+        sender.replaceParentalPIN(with: ParentalPIN.make(pin: "4821", iterations: fastIterations))
+        receiver.importProfiles([sender])
+
+        XCTAssertEqual(receiver.profiles.first?.name, "Receiver's own")
+        XCTAssertTrue(receiver.matchesParentalPIN("4821"), "The PIN must survive the clobber guard")
+    }
+
+    /// The mirror image: a receiver that already has a NEWER PIN must not have it
+    /// rolled back by an older sender riding the same record.
+    func testPairingDoesNotRollBackANewerLocalPIN() {
+        let receiver = makeModel()
+        _ = receiver.add(name: "Second")
+        receiver.setParentalPIN(ParentalPIN.make(pin: "1111", iterations: fastIterations))
+        let current = receiver.profiles[0]
+
+        var stale = current
+        stale.parentalPIN = ParentalPIN.make(pin: "4821", iterations: fastIterations)
+        stale.parentalPINRevision = ProfileLockRevision(counter: 0, nonce: "older")
+        receiver.importProfiles([stale])
+
+        XCTAssertTrue(receiver.matchesParentalPIN("1111"))
+        XCTAssertFalse(receiver.matchesParentalPIN("4821"))
+    }
+
+    /// Pairing takes the sender wholesale for names and avatars, which is right,
+    /// and used to do the same for the three fields that decide what a child can
+    /// do. A device that has been in a drawer since before the household marked a
+    /// profile as Kids would hand that back and silently un-restrict it.
+    func testPairingCannotClearAKidsFlagWithAStaleCopy() {
+        let receiver = makeModel()
+        let kid = receiver.add(name: "Kid", isKidsProfile: true)
+
+        var stale = kid
+        stale.isKidsProfile = false
+        stale.kidsProfileRevision = ProfileLockRevision(counter: 0, nonce: "older")
+        receiver.importProfiles([stale])
+
+        XCTAssertEqual(
+            receiver.profiles.first(where: { $0.id == kid.id })?.isKids, true,
+            "A stale sender must not un-restrict a child"
+        )
+    }
+
+    /// The same guard must not freeze a profile: a sender that genuinely made the
+    /// newer edit still wins.
+    func testPairingAppliesANewerKidsFlag() throws {
+        let receiver = makeModel()
+        let kid = receiver.add(name: "Kid", isKidsProfile: true)
+        let local = try XCTUnwrap(receiver.profiles.first(where: { $0.id == kid.id }))
+
+        var newer = local
+        newer.isKidsProfile = false
+        newer.kidsProfileRevision = .next(after: local.effectiveKidsProfileRevision)
+        receiver.importProfiles([newer])
+
+        XCTAssertEqual(receiver.profiles.first(where: { $0.id == kid.id })?.isKids, false)
+    }
+
+    /// Pairing must not roll back a Profile Lock either — same rule, same reason.
+    func testPairingCannotClearAProfileLockWithAStaleCopy() {
+        let receiver = makeModel()
+        let second = receiver.add(name: "Second")
+        var locked = second
+        locked.replaceLock(with: ProfileLock.make(pin: "1234", iterations: fastIterations))
+        receiver.update(locked)
+
+        var stale = second
+        stale.lock = nil
+        stale.lockRevision = ProfileLockRevision(counter: 0, nonce: "older")
+        receiver.importProfiles([stale])
+
+        XCTAssertNotNil(
+            receiver.profiles.first(where: { $0.id == second.id })?.lock,
+            "A stale sender must not remove a lock"
+        )
+    }
+}
+
+/// The ordering rule every revisioned field depends on. A tie on `counter` is
+/// the case that actually happens — two devices edit offline from the same
+/// baseline — and without a deterministic tiebreak they'd converge differently.
+final class ProfileLockRevisionOrderingTests: XCTestCase {
+
+    func testAHigherCounterAlwaysWins() {
+        let older = ProfileLockRevision(counter: 1, nonce: "zzz")
+        let newer = ProfileLockRevision(counter: 2, nonce: "aaa")
+        XCTAssertTrue(older < newer, "Counter outranks the nonce")
+    }
+
+    func testEqualCountersFallBackToTheNonce() {
+        let a = ProfileLockRevision(counter: 3, nonce: "aaa")
+        let b = ProfileLockRevision(counter: 3, nonce: "bbb")
+        XCTAssertTrue(a < b)
+        XCTAssertFalse(b < a)
+    }
+
+    /// Both devices must pick the SAME winner, whichever order they see them in.
+    func testTheTiebreakIsSymmetric() {
+        let a = ProfileLockRevision(counter: 3, nonce: "aaa")
+        let b = ProfileLockRevision(counter: 3, nonce: "bbb")
+        XCTAssertEqual(max(a, b), max(b, a))
+    }
+
+    func testNextAlwaysOutranksWhatItFollows() {
+        let first = ProfileLockRevision.next(after: nil)
+        let second = ProfileLockRevision.next(after: first)
+        XCTAssertTrue(first < second)
+        XCTAssertEqual(first.counter, 1)
+    }
+
+    /// The legacy baseline exists so a pre-revision value isn't treated as
+    /// "never set" the moment one device upgrades.
+    func testALegacyRevisionLosesToAnyRealEdit() throws {
+        let lock = try XCTUnwrap(ProfileLock.make(pin: "4821", iterations: 64))
+        let legacy = ProfileLockRevision.legacy(for: lock)
+        XCTAssertTrue(legacy < ProfileLockRevision.next(after: legacy))
+    }
 }
 
 /// The rules that stop a child escaping their own profile, and stop a stale peer

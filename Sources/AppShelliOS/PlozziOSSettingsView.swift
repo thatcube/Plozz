@@ -19,6 +19,14 @@ struct PlozziOSSettingsView: View {
     /// Opens the profile picker. Owned by the root, because the picker can raise
     /// PIN gates that must not be asked for from under the Settings sheet.
     var onSwitchProfile: () -> Void = {}
+    /// Requests a profile switch once Settings is actually gone.
+    ///
+    /// The gates a switch can raise are covers on the ROOT; asking for one from
+    /// under this sheet is the arrangement SwiftUI drops, and because the gate's
+    /// binding stays true it is never re-requested — switching would wedge until
+    /// relaunch. So the row hands the id up and the shell applies it in the
+    /// sheet's `onDismiss`.
+    var onSwitchTo: (String) -> Void = { _ in }
     let systemColorScheme: ColorScheme
 
     var body: some View {
@@ -29,7 +37,8 @@ struct PlozziOSSettingsView: View {
                     onAddServer: showAddServer,
                     onAddUser: showAddUser(on:),
                     onClose: onClose,
-                    onSwitchProfile: onSwitchProfile
+                    onSwitchProfile: onSwitchProfile,
+                    onSwitchTo: onSwitchTo
                 )
             } else {
                 NavigationStack {
@@ -37,7 +46,8 @@ struct PlozziOSSettingsView: View {
                         appModel: appModel,
                         onAddServer: showAddServer,
                         onAddUser: showAddUser(on:),
-                        onSwitchProfile: onSwitchProfile
+                        onSwitchProfile: onSwitchProfile,
+                        onSwitchTo: onSwitchTo
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
@@ -216,6 +226,14 @@ private struct PlozziOSSettingsSplitView: View {
     var onAddUser: (MediaServer) -> Void = { _ in }
     let onClose: () -> Void
     var onSwitchProfile: () -> Void = {}
+    /// Requests a profile switch once Settings is actually gone.
+    ///
+    /// The gates a switch can raise are covers on the ROOT; asking for one from
+    /// under this sheet is the arrangement SwiftUI drops, and because the gate's
+    /// binding stays true it is never re-requested — switching would wedge until
+    /// relaunch. So the row hands the id up and the shell applies it in the
+    /// sheet's `onDismiss`.
+    var onSwitchTo: (String) -> Void = { _ in }
     @State private var selection: PlozziOSSettingsDestination?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
@@ -409,7 +427,7 @@ private struct PlozziOSSettingsSplitView: View {
                     // times in About). Gating on the runtime flag rather than
                     // `#if DEBUG` hides these in every build — including the
                     // Debug-config branded builds — while keeping them reachable.
-                    if developerMode.isEnabled {
+                    if developerMode.isEnabled, !appModel.profiles.activeProfile.isKids {
                         SettingsSectionGroup("Developer") {
                             Button("Reset to First Run") {
                                 appModel.resetToFirstRunForDebugging()
@@ -555,9 +573,9 @@ private struct PlozziOSSettingsSplitView: View {
         // The default pane, NOT just the sidebar rows: a Kids Profile hides the
         // household group, but landing on `.profiles` by default walked straight
         // into profile management (add, edit, delete) without the Parental PIN.
-        switch selection ?? (appModel.profiles.managementRequiresParentalPIN ? .appearance : .profiles) {
+        switch selection ?? (appModel.managementRequiresParentalPIN ? .appearance : .profiles) {
         case .profiles:
-            PlozziOSProfilesView(appModel: appModel, onClose: onClose)
+            PlozziOSProfilesView(appModel: appModel, onClose: onClose, onSwitchTo: onSwitchTo)
         case .requests:
             PlozziOSSeerrSettingsView(appModel: appModel)
         case .servers:
@@ -649,6 +667,7 @@ private struct PlozziOSSettingsSplitView: View {
         case .about:
             PlozziOSAboutSettingsView(
                 hasAccounts: !appModel.accounts.isEmpty && !appModel.profiles.activeProfile.isKids,
+                isKidsProfile: appModel.profiles.activeProfile.isKids,
                 onSignOutAll: { confirmSignOutAll = true }
             )
         }
@@ -657,6 +676,9 @@ private struct PlozziOSSettingsSplitView: View {
 
 private struct PlozziOSAboutSettingsView: View {
     let hasAccounts: Bool
+    /// Whether the Developer Mode unlock gesture is withheld — see
+    /// `handleVersionTap`.
+    let isKidsProfile: Bool
     let onSignOutAll: () -> Void
 
     private var developerMode: DeveloperModeModel { .shared }
@@ -703,6 +725,11 @@ private struct PlozziOSAboutSettingsView: View {
     }
 
     private func handleVersionTap() {
+        // Withheld inside a Kids Profile: seven taps here unlock Developer Mode,
+        // whose "Reset to First Run" wipes the profile list AND the household
+        // Parental PIN — a no-PIN way out of the restrictions this profile
+        // exists to apply.
+        guard !isKidsProfile else { return }
         if case .justEnabled = developerMode.registerUnlockActivation() {
             showDeveloperUnlockedAlert = true
         }
@@ -741,6 +768,14 @@ private struct PlozziOSSettingsCompactMenu: View {
     let onAddServer: () -> Void
     var onAddUser: (MediaServer) -> Void = { _ in }
     var onSwitchProfile: () -> Void = {}
+    /// Requests a profile switch once Settings is actually gone.
+    ///
+    /// The gates a switch can raise are covers on the ROOT; asking for one from
+    /// under this sheet is the arrangement SwiftUI drops, and because the gate's
+    /// binding stays true it is never re-requested — switching would wedge until
+    /// relaunch. So the row hands the id up and the shell applies it in the
+    /// sheet's `onDismiss`.
+    var onSwitchTo: (String) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
     @State private var confirmSignOutAll = false
     @State private var confirmEraseICloud = false
@@ -955,7 +990,11 @@ private struct PlozziOSSettingsCompactMenu: View {
                 if !appModel.profiles.activeProfile.isKids {
                     SettingsSectionGroup(deviceSettingsTitle) {
                     NavigationLink {
-                        PlozziOSProfilesView(appModel: appModel, onClose: { dismiss() })
+                        PlozziOSProfilesView(
+                            appModel: appModel,
+                            onClose: { dismiss() },
+                            onSwitchTo: onSwitchTo
+                        )
                     } label: {
                         Label("Profiles", systemImage: "person.2")
                     }
@@ -1033,6 +1072,9 @@ private struct PlozziOSSettingsCompactMenu: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture {
+                    // See `handleVersionTap`: this unlock is a no-PIN route out
+                    // of a Kids Profile's restrictions.
+                    guard !appModel.profiles.activeProfile.isKids else { return }
                     if case .justEnabled = developerMode.registerUnlockActivation() {
                         showDeveloperUnlockedAlert = true
                     }
@@ -1049,7 +1091,7 @@ private struct PlozziOSSettingsCompactMenu: View {
 
                 // Hidden until Developer Mode is unlocked (tap Version seven
                 // times). Gated on the runtime flag in every build.
-                if developerMode.isEnabled {
+                if developerMode.isEnabled, !appModel.profiles.activeProfile.isKids {
                     SettingsSectionGroup("Developer") {
                         Button("Reset to First Run") {
                             appModel.resetToFirstRunForDebugging()
@@ -1118,6 +1160,8 @@ private struct PlozziOSProfilesView: View {
     @State private var selectedProfileRoute: PlozziOSProfileSettingsRoute?
     /// Closes Settings, so a switch can raise its gates from the root.
     var onClose: () -> Void = {}
+    /// Hands a requested switch to the shell, applied once Settings is gone.
+    var onSwitchTo: (String) -> Void = { _ in }
     /// Whether this list is editing profiles rather than switching between them.
     ///
     /// One screen for both, like the tvOS picker: the rows are the same rows, so
@@ -1166,12 +1210,14 @@ private struct PlozziOSProfilesView: View {
                             openSettings(for: profile)
                         } else {
                             guard profile.id != appModel.profiles.activeProfileID else { return }
-                            // Close Settings first: the Parental PIN and profile
-                            // lock gates are presented from the root, and a cover
-                            // asked for from under an open sheet is the
-                            // arrangement that fails silently.
+                            // Requested, not performed here. The Parental PIN and
+                            // profile lock gates are covers on the ROOT, and one
+                            // asked for from under this sheet is the arrangement
+                            // SwiftUI drops — silently, and with the gate's
+                            // binding left true so it is never re-requested. The
+                            // shell applies this in the sheet's `onDismiss`.
+                            onSwitchTo(profile.id)
                             onClose()
-                            appModel.selectProfile(profile.id)
                         }
                     } label: {
                         HStack {

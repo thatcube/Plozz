@@ -758,7 +758,11 @@ public struct SettingsView: View {
                 version: appVersion,
                 build: appBuild,
                 repoURL: repoURL,
-                onActivate: handleAboutActivation
+                // Withheld inside a Kids Profile. Seven selects here unlock
+                // Developer Mode, whose "Reset to First Run" wipes the profile
+                // list AND the household Parental PIN — a no-PIN way out of the
+                // very restrictions this profile exists to apply.
+                onActivate: activeProfile.isKids ? nil : handleAboutActivation
             )
 
             // The one acceptable deeper page: open-source credits & licensing.
@@ -782,7 +786,10 @@ public struct SettingsView: View {
             // selects on the About panel). Gating on the runtime flag — rather
             // than `#if DEBUG` — hides them by default in every build (including
             // the Debug-config branded builds) while keeping them re-enableable.
-            if developerMode.isEnabled {
+            // Developer Mode is device-wide and persistent, so a parent who
+            // enabled it must not leave the door open when they hand the Apple TV
+            // back to the child.
+            if developerMode.isEnabled, !activeProfile.isKids {
                 developerInfoPanel
                 developerModeRow
 

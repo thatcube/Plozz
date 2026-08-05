@@ -21,7 +21,6 @@ public struct PlozziOSRootView: View {
     @State private var showingAddServer = false
     @State private var addServerPresentationColorScheme: ColorScheme = .dark
     @State private var showingSettings = false
-    @State private var completedLaunchProfileSelection = false
     /// A synced server the user tapped "Set Up" on, used to pre-fill the Add Server
     /// sheet so they only have to sign in.
     @State private var serverSetupSeed: SyncedAccountDescriptor?
@@ -56,21 +55,24 @@ public struct PlozziOSRootView: View {
                 PlozziOSOnboardingView(appModel: appModel)
             } else if appModel.mustChooseProfile
                 || (appModel.requiresLaunchProfileSelection
-                    && !completedLaunchProfileSelection) {
+                    && !appModel.didCompleteLaunchProfileSelection) {
                 PlozziOSProfilePickerView(
                     // Whoever watched on this device most recently leads.
                     profiles: appModel.profiles.profilesByRecency,
                     activeProfileID: appModel.profiles.activeProfileID,
                     onSelect: { profile in
+                        // Completion is recorded by the model when the switch
+                        // actually lands — a locked or PIN-gated profile only
+                        // raises its prompt here, and cancelling it must leave
+                        // the picker up rather than reveal the profile.
                         appModel.selectProfile(profile.id)
-                        completedLaunchProfileSelection = true
                     },
                     // Same abilities as the switcher. Withholding Add and Edit
                     // here made one screen behave as two: identical layout, but
                     // long-press did nothing and the Edit button was missing
                     // until you'd already picked someone. Netflix and the tvOS
                     // picker both manage profiles from the launch screen too.
-                    manager: appModel.profiles.managementRequiresParentalPIN ? nil : appModel
+                    manager: appModel.managementRequiresParentalPIN ? nil : appModel
                     // No `onCancel`: at launch there is nothing to go back to.
                 )
             } else {
@@ -345,7 +347,7 @@ public struct PlozziOSRootView: View {
 
     private var shellIdentity: String {
         if appModel.requiresLaunchProfileSelection
-            && !completedLaunchProfileSelection {
+            && !appModel.didCompleteLaunchProfileSelection {
             return "profile-picker"
         }
         let profile = appModel.profiles.activeProfile
@@ -645,7 +647,7 @@ private struct PlozziOSTabShell: View {
                 },
                 // Withheld inside an enforced Kids Profile — creating a profile
                 // switches into it, which would bypass the Parental PIN gate.
-                manager: appModel.profiles.managementRequiresParentalPIN ? nil : appModel,
+                manager: appModel.managementRequiresParentalPIN ? nil : appModel,
                 onCancel: { showingProfileSwitcher = false }
             )
         }
@@ -654,6 +656,12 @@ private struct PlozziOSTabShell: View {
             if wantsProfileSwitcher {
                 wantsProfileSwitcher = false
                 showingProfileSwitcher = true
+            } else if let id = pendingSwitchProfileID {
+                // Same rule as the picker's `onDismiss`: the gates this can
+                // raise are covers on the ROOT, so the switch waits until
+                // Settings is actually gone.
+                pendingSwitchProfileID = nil
+                appModel.selectProfile(id)
             }
         }) {
             PlozziOSSettingsView(
@@ -668,6 +676,7 @@ private struct PlozziOSTabShell: View {
                     wantsProfileSwitcher = true
                     showingSettings = false
                 },
+                onSwitchTo: { pendingSwitchProfileID = $0 },
                 systemColorScheme: systemColorScheme
             )
             .preferredColorScheme(settingsPresentationColorScheme)

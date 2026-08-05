@@ -824,3 +824,53 @@ extension Profile {
         return copy
     }
 }
+
+extension Profile {
+    /// Resolves this (incoming) profile's security fields against the copy this
+    /// device already holds, keeping whichever side's revision is newer.
+    ///
+    /// Pairing otherwise takes the sender wholesale, which is right for a name or
+    /// an avatar and wrong for the three fields that decide what a child can do:
+    /// a device that has been in a drawer since before the household set a
+    /// Profile Lock, marked a profile as Kids, or set the Parental PIN would
+    /// hand back its stale copy and quietly undo all three. The sync path has
+    /// always applied this rule — pairing is just another peer, so it uses the
+    /// same one rather than a second, subtly different implementation.
+    public mutating func resolveSecurityFields(against local: Profile) {
+        // Each field: the incoming value stands only when its revision is
+        // strictly newer. A revision-less (pre-upgrade) sender loses to any
+        // local revision, including the legacy baseline.
+        let localLock = local.effectiveLockRevision
+        if let incoming = lockRevision {
+            if let localLock, incoming <= localLock {
+                lock = local.lock
+                lockRevision = local.lockRevision
+            }
+        } else if localLock != nil {
+            lock = local.lock
+            lockRevision = local.lockRevision
+        }
+
+        let localPIN = local.effectiveParentalPINRevision
+        if let incoming = parentalPINRevision {
+            if let localPIN, incoming <= localPIN {
+                parentalPIN = local.parentalPIN
+                parentalPINRevision = local.parentalPINRevision
+            }
+        } else if localPIN != nil {
+            parentalPIN = local.parentalPIN
+            parentalPINRevision = local.parentalPINRevision
+        }
+
+        let localKids = local.effectiveKidsProfileRevision
+        if let incoming = kidsProfileRevision {
+            if let localKids, incoming <= localKids {
+                isKidsProfile = local.isKidsProfile
+                kidsProfileRevision = local.kidsProfileRevision
+            }
+        } else if localKids != nil {
+            isKidsProfile = local.isKidsProfile
+            kidsProfileRevision = local.kidsProfileRevision
+        }
+    }
+}

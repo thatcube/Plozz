@@ -182,7 +182,7 @@ TRACKED_MUTABLE_ALLOWLIST = {
     # exposed this deliberately folded its own gate state into single values
     # (`ParentalSwitchRequest`) so it added nothing here. Lower it by extracting a
     # profile-flow facet.
-    "PlozziOSAppModel": 21,
+    "PlozziOSAppModel": 20,
 }
 
 # Soft, INFORMATIONAL thresholds (never fail CI) — used only to surface smells in

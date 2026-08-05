@@ -267,19 +267,6 @@ public final class SeerService {
 
     // MARK: - Requests
 
-    /// One-tap request for a not-in-library title, made **as** `actingUserID`
-    /// (that Seerr user's quota / approval flow / default quality profile), or as
-    /// admin when `nil`.
-    ///
-    /// - **Mapped user:** omits `serverId`/`profileId`/`rootFolder` so Overseerr
-    ///   applies *that user's* defaults (never silently seeds the admin default —
-    ///   that would file under the user with the admin's server/profile).
-    /// - **Admin (unmapped):** seeds the default Radarr/Sonarr server itself, since
-    ///   Seerr won't apply defaults for an omitted body with no user context.
-    ///
-    /// Returns a ``SeerRequestOutcome`` — success carries the resulting
-    /// availability (`.pending` = created, awaiting approval), failure a specific
-    /// user-facing reason. Never throws; transport errors map to `.unreachable`.
     /// Whether an UNMAPPED request — one that would run as the unrestricted
     /// Seerr admin — must be refused.
     ///
@@ -298,6 +285,20 @@ public final class SeerService {
     @ObservationIgnored
     public var refusesAdminRequests: () -> Bool = { false }
 
+    /// One-tap request for a not-in-library title, made **as** `actingUserID`
+    /// (that Seerr user's quota / approval flow / default quality profile), or as
+    /// admin when `nil`.
+    ///
+    /// - **Mapped user:** omits `serverId`/`profileId`/`rootFolder` so Overseerr
+    ///   applies *that user's* defaults (never silently seeds the admin default —
+    ///   that would file under the user with the admin's server/profile).
+    /// - **Admin (unmapped):** seeds the default Radarr/Sonarr server itself, since
+    ///   Seerr won't apply defaults for an omitted body with no user context.
+    ///
+    /// Returns a ``SeerRequestOutcome`` — success carries the resulting
+    /// availability (`.pending` = created, awaiting approval), failure a specific
+    /// user-facing reason. Never throws; transport errors map to `.unreachable`.
+    @discardableResult
     public func request(
         _ item: MediaItem,
         seasons: [Int]? = nil,

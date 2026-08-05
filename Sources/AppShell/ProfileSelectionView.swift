@@ -30,22 +30,39 @@ struct ProfileSelectionView: View {
     /// Edit was pressed — set a lock and the row still read "Off". The id is
     /// stable and the profile is resolved live from the observable model on every
     /// render instead.
-    @State private var actionsProfileID: PickerProfileID?
-    /// The profile whose cosmetics are being edited, if any.
-    @State private var editingProfile: Profile?
-    /// Set while creating a profile, so the sheet knows which kind to make.
-    @State private var creating: CreationKind?
+    ///
+    /// All three management sheets share ONE presentation. Stacking a
+    /// `.sheet` per destination on a single view is the arrangement SwiftUI
+    /// silently drops, and this view had three plus a cover.
+    @State private var route: PickerRoute?
+    /// A sheet to raise once the current one has actually gone.
+    ///
+    /// Swapping `route` straight from one case to another is a dismiss and a
+    /// present in the same runloop turn — the other half of the same hazard —
+    /// so hand-offs park here and `onDismiss` performs them.
+    @State private var pendingRoute: PickerRoute?
     /// A management action held back until a PIN proves it's allowed, together
     /// with whose PIN that is.
     @State private var pendingAction: PendingAuthorization?
     /// Error from the last failed authorization attempt.
     @State private var authError: LocalizedStringResource?
 
-    private enum CreationKind: Identifiable {
-        case ordinary
-        case kids
-        var id: String { self == .kids ? "kids" : "ordinary" }
-        var isKids: Bool { self == .kids }
+    /// The one management sheet this view presents.
+    private enum PickerRoute: Identifiable, Hashable {
+        /// Held as an **id**, not a `Profile`: `.sheet(item:)` captures the value
+        /// it was presented with, so a stored profile kept rendering as it was
+        /// when Edit was pressed — set a lock and the row still read "Off".
+        case actions(String)
+        case editingCosmetics(String)
+        case creating(isKids: Bool)
+
+        var id: String {
+            switch self {
+            case let .actions(id): "actions-\(id)"
+            case let .editingCosmetics(id): "editing-\(id)"
+            case let .creating(isKids): isKids ? "creating-kids" : "creating"
+            }
+        }
     }
 
     private enum ManagementAction {
@@ -78,7 +95,7 @@ struct ProfileSelectionView: View {
     /// Whether profile management is withheld right now — see
     /// `ProfilesModel.managementRequiresParentalPIN`.
     private var managementGated: Bool {
-        appState.profilesModel.managementRequiresParentalPIN
+        appState.profileFlow.managementRequiresParentalPIN
     }
 
     var body: some View {
@@ -107,81 +124,97 @@ struct ProfileSelectionView: View {
         .onExitCommand {
             if canCancel { appState.profileFlow.cancelProfileSelection() }
         }
-        .sheet(item: $actionsProfileID) { wrapper in
-            // Resolved on every render so the sheet reflects edits made from
-            // inside it — the lock it just set, a rename, the Kids toggle.
-            if let profile = appState.profilesModel.profiles.first(where: { $0.id == wrapper.id }) {
-                ProfileActionsSheet(
-                    profile: profile,
-                    syncEnabled: SyncSetupFeatureFlag().isEnabled,
-                    offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
-                    hasParentalPIN: appState.profilesModel.parentalPIN != nil,
-                    onEditAppearance: {
-                        actionsProfileID = nil
-                        editingProfile = profile
+        .sheet(item: $route, onDismiss: {
+            // Perform a parked hand-off only now that the previous sheet is
+            // genuinely gone; doing it at the tap loses the second sheet.
+            if let next = pendingRoute {
+                pendingRoute = nil
+                route = next
+            }
+        }) { destination in
+            switch destination {
+            case let .actions(profileID):
+                // Resolved on every render so the sheet reflects edits made from
+                // inside it — the lock it just set, a rename, the Kids toggle.
+                if let profile = appState.profilesModel.profiles.first(where: { $0.id == profileID }) {
+                    ProfileActionsSheet(
+                        profile: profile,
+                        syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                        offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
+                        hasParentalPIN: appState.profilesModel.parentalPIN != nil,
+                        restrictedActionsSealed: managementGated,
+                        onEditAppearance: {
+                            pendingRoute = .editingCosmetics(profile.id)
+                            route = nil
+                        },
+                        onSetLock: { appState.setLock($0, forProfile: profile.id) },
+                        onSetKids: { appState.setKidsProfile($0, forProfile: profile.id) },
+                        onSetParentalPIN: { appState.profilesModel.setParentalPIN($0) },
+                        validatePlexPIN: {
+                            await appState.plexHomeUsers.validatePlexPIN(
+                                $0,
+                                forProfile: profile.id
+                            )
+                        },
+                        onDelete: profile.id == appState.profilesModel.profiles.first?.id ? nil : {
+                            appState.profileFlow.removeProfile(id: profile.id)
+                            route = nil
+                        },
+                        isUnlocked: appState.profileFlow.isUnlockedThisRun(profile.id),
+                        onUnlock: { appState.profileFlow.noteUnlocked(profile.id) },
+                        onClose: { route = nil }
+                    )
+                }
+            case let .editingCosmetics(profileID):
+                if let profile = appState.profilesModel.profiles.first(where: { $0.id == profileID }) {
+                    ProfileEditorView(
+                        editingProfile: profile,
+                        canDelete: profile.id != appState.profilesModel.profiles.first?.id,
+                        photoSourceAccounts: appState.accountsProviders.accounts,
+                        plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
+                        onSave: { appState.profileFlow.saveProfile($0); route = nil },
+                        onLiveChange: { appState.profileFlow.updateProfileCosmetics($0) },
+                        onDelete: {
+                            appState.profileFlow.removeProfile(id: profile.id)
+                            route = nil
+                        },
+                        onCancel: { route = nil }
+                    )
+                }
+            case let .creating(isKids):
+                ProfileEditorView(
+                    canDelete: false,
+                    photoSourceAccounts: appState.accountsProviders.accounts,
+                    existingColorIndices: appState.profilesModel.profiles.map(\.colorIndex),
+                    existingEmojiAvatars: appState.profilesModel.profiles.compactMap(\.avatarEmoji),
+                    plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
+                    onSave: { draft in
+                        // Creates, switches in, and hands off to the app-level
+                        // setup step — the picker is dismissed by the switch, so
+                        // it can't own what comes next. The watchlist import
+                        // stays deferred until setup finishes.
+                        appState.createProfileForSetup(draft, isKids: isKids)
+                        route = nil
                     },
-                    onSetLock: { appState.setLock($0, forProfile: profile.id) },
-                    onSetKids: { appState.setKidsProfile($0, forProfile: profile.id) },
-                    onSetParentalPIN: { appState.profilesModel.setParentalPIN($0) },
-                    validatePlexPIN: {
-                        await appState.plexHomeUsers.validatePlexPIN(
-                            $0,
-                            forProfile: profile.id
-                        )
-                    },
-                    onDelete: profile.id == appState.profilesModel.profiles.first?.id ? nil : {
-                        appState.profileFlow.removeProfile(id: profile.id)
-                        actionsProfileID = nil
-                    },
-                    isUnlocked: appState.profileFlow.isUnlockedThisRun(profile.id),
-                    onUnlock: { appState.profileFlow.noteUnlocked(profile.id) },
-                    onClose: { actionsProfileID = nil }
+                    onCancel: { route = nil }
                 )
             }
         }
-        .sheet(item: $editingProfile) { profile in
-            ProfileEditorView(
-                editingProfile: profile,
-                canDelete: profile.id != appState.profilesModel.profiles.first?.id,
-                photoSourceAccounts: appState.accountsProviders.accounts,
-                plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
-                onSave: { appState.profileFlow.saveProfile($0); editingProfile = nil },
-                onLiveChange: { appState.profileFlow.updateProfileCosmetics($0) },
-                onDelete: {
-                    appState.profileFlow.removeProfile(id: profile.id)
-                    editingProfile = nil
-                },
-                onCancel: { editingProfile = nil }
-            )
-        }
-        .sheet(item: $creating) { kind in
-            ProfileEditorView(
-                canDelete: false,
-                photoSourceAccounts: appState.accountsProviders.accounts,
-                existingColorIndices: appState.profilesModel.profiles.map(\.colorIndex),
-                existingEmojiAvatars: appState.profilesModel.profiles.compactMap(\.avatarEmoji),
-                plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
-                onSave: { draft in
-                    // Creates and switches in: setup needs the profile active so
-                    // it can drive the ordinary per-profile machinery. Its
-                    // watchlist import stays deferred until setup finishes.
-                    // Creates, switches in, and hands off to the app-level setup
-                    // step — the picker is dismissed by the switch, so it can't
-                    // own what comes next.
-                    appState.createProfileForSetup(draft, isKids: kind.isKids)
-                    creating = nil
-                },
-                onCancel: { creating = nil }
-            )
-        }
-        .fullScreenCover(item: $pendingAction) { pending in
+        .fullScreenCover(item: $pendingAction, onDismiss: {
+            // The authorized action was parked rather than presented from under
+            // this cover; raise it now that the cover has actually gone.
+            if let next = pendingRoute {
+                pendingRoute = nil
+                route = next
+            }
+        }) { pending in
             PINEntryScaffold(
                 title: ProfileLockCopy.manageTitle,
                 subtitle: ProfileLockCopy.manageSubtitle,
                 name: Text(verbatim: pending.gatekeeper.name),
                 errorMessage: authError,
                 onSubmit: { submitAuthorization($0, pending: pending) },
-                onCancel: { pendingAction = nil; authError = nil }
+                onCancel: { pendingAction = nil; authError = nil; pendingRoute = nil }
             ) {
                 ProfileAvatarView(profile: pending.gatekeeper, size: PINLayout.badgeSize)
             }
@@ -251,23 +284,23 @@ struct ProfileSelectionView: View {
         // Knowing a profile's PIN is knowing it — don't re-ask to open it later.
         appState.profileFlow.noteUnlocked(pending.gatekeeper.id)
         authError = nil
+        // Parked, not presented: the cover is still on screen, and asking for a
+        // sheet from under it is the arrangement SwiftUI drops. Its `onDismiss`
+        // raises this once the cover is gone.
+        pendingRoute = route(for: pending.action)
         pendingAction = nil
-        perform(pending.action)
     }
 
     private func perform(_ action: ManagementAction) {
+        route = route(for: action)
+    }
+
+    private func route(for action: ManagementAction) -> PickerRoute {
         switch action {
-        case let .add(isKids):
-            creating = isKids ? .kids : .ordinary
-        case let .edit(profile):
-            actionsProfileID = PickerProfileID(id: profile.id)
+        case let .add(isKids): .creating(isKids: isKids)
+        case let .edit(profile): .actions(profile.id)
         }
     }
 }
 
-/// Identifiable wrapper so a profile id can drive `.sheet(item:)` without the
-/// sheet capturing a stale copy of the profile itself.
-private struct PickerProfileID: Identifiable, Hashable {
-    let id: String
-}
 #endif

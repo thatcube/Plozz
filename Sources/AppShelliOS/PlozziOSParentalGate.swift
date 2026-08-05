@@ -22,13 +22,20 @@ struct PlozziOSParentalGate<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     @State private var errorMessage: LocalizedStringResource?
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         if isSealed {
             ParentalPINView(
                 errorMessage: errorMessage,
                 onSubmit: submit,
-                onCancel: { errorMessage = nil }
+                // The gate renders in place on a pushed page, so clearing the
+                // error alone left Cancel doing nothing visible. Popping back to
+                // the list is what the button appears to promise.
+                onCancel: {
+                    errorMessage = nil
+                    dismiss()
+                }
             )
         } else {
             content()

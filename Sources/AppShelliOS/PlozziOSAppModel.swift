@@ -826,6 +826,10 @@ final class PlozziOSAppModel {
     @discardableResult
     func handleIncomingURL(_ url: URL) -> Bool {
         guard SyncPairingInvite.decode(url.absoluteString) != nil else { return false }
+        // Following a pairing link sends this household's servers, profiles and
+        // credentials to the device that produced it, and that device opens in a
+        // grown-up profile — so it's withheld inside an enforced Kids Profile.
+        guard !managementRequiresParentalPIN else { return false }
         pendingPairingInvite = url.absoluteString
         return true
     }
@@ -857,16 +861,42 @@ final class PlozziOSAppModel {
         performSelectProfile(profiles.activeProfileID)
     }
 
-    /// A profile waiting on its PIN before it can be opened, or `nil`.
-    /// `PlozziOSRootView` presents the PIN screen off this.
-    private(set) var lockedSwitch: ParentalSwitchRequest?
-    /// A switch out of a Kids Profile, held until the Parental PIN is entered.
+    /// Everything guarding entry to a profile, in ONE observable property.
     ///
-    /// The target and its error live in ONE observable property rather than two.
-    /// They're only ever meaningful together — an error without a pending switch
-    /// is nonsense — and this model is already over the observable-fan-out
-    /// ceiling, so a feature shouldn't widen it further than the idea needs.
-    private(set) var parentalSwitch: ParentalSwitchRequest?
+    /// These four are only ever meaningful together — an error without a pending
+    /// switch is nonsense, and "the launch picker is satisfied" is the same
+    /// question as "did a gated switch complete" — and this model is already over
+    /// the observable-fan-out ceiling, so the feature is one property rather than
+    /// four. The read-only accessors below keep the call sites reading plainly.
+    private(set) var gate = ProfileGate()
+
+    /// The state guarding entry to a profile. See `gate`.
+    struct ProfileGate {
+        /// A profile waiting on its PIN before it can be opened, or `nil`.
+        var lockedSwitch: ParentalSwitchRequest?
+        /// A switch out of a Kids Profile, held until the Parental PIN is entered.
+        var parentalSwitch: ParentalSwitchRequest?
+        /// The enforced Kids Profile the device was moved OUT of without anyone
+        /// asking — a local or synced deletion re-points the active profile on
+        /// its own. Held until the Parental PIN clears it; see the tvOS twin.
+        var parentalFallThrough: Profile?
+        /// Whether the launch picker has been satisfied by a switch that actually
+        /// completed. See `performSelectProfile`.
+        var didCompleteLaunchSelection = false
+    }
+
+    /// `PlozziOSRootView` presents the profile-lock PIN screen off this.
+    var lockedSwitch: ParentalSwitchRequest? { gate.lockedSwitch }
+    /// `PlozziOSRootView` presents the Parental PIN screen off this.
+    var parentalSwitch: ParentalSwitchRequest? { gate.parentalSwitch }
+    var parentalFallThrough: Profile? { gate.parentalFallThrough }
+    var didCompleteLaunchProfileSelection: Bool { gate.didCompleteLaunchSelection }
+
+    /// Whether profile management (add/edit) must be withheld right now: the
+    /// household policy plus the fall-through hold.
+    var managementRequiresParentalPIN: Bool {
+        profiles.managementRequiresParentalPIN || gate.parentalFallThrough != nil
+    }
     /// Message from the last failed unlock attempt.
 
     /// Profiles unlocked during this app run, so hopping back and forth doesn't
@@ -1098,8 +1128,14 @@ final class PlozziOSAppModel {
         // May you leave? Walking out of a Kids Profile needs the household
         // Parental PIN, and is checked before the target's own lock — same order
         // as tvOS, from the same shared policy on `ProfilesModel`.
-        if profiles.requiresParentalPIN(switchingFrom: profiles.activeProfile, to: target) {
-            parentalSwitch = ParentalSwitchRequest(target: target)
+        // The hold wins over `activeProfile`: after an involuntary fall-through
+        // the active profile is already the grown-up one, so asking it whether we
+        // may leave a Kids Profile answers "there is no Kids Profile here".
+        if profiles.requiresParentalPIN(
+            switchingFrom: gate.parentalFallThrough ?? profiles.activeProfile,
+            to: target
+        ) {
+            gate.parentalSwitch = ParentalSwitchRequest(target: target)
             return
         }
         continueSelect(target)
@@ -1108,7 +1144,7 @@ final class PlozziOSAppModel {
     /// The switch past the parental gate, still subject to the target's own lock.
     private func continueSelect(_ target: Profile) {
         if target.isLocked, !unlockedProfileIDs.contains(target.id) {
-            lockedSwitch = ParentalSwitchRequest(target: target)
+            gate.lockedSwitch = ParentalSwitchRequest(target: target)
             return
         }
         performSelectProfile(target.id)
@@ -1118,32 +1154,35 @@ final class PlozziOSAppModel {
     /// continue. Deliberately not remembered for the run — see the tvOS twin.
     @discardableResult
     func submitParentalPIN(_ pin: String) -> Bool {
-        guard let target = parentalSwitch?.target else { return false }
+        guard let target = gate.parentalSwitch?.target else { return false }
         guard profiles.matchesParentalPIN(pin) else {
-            parentalSwitch?.error = ProfileLockCopy.incorrectPIN
+            gate.parentalSwitch?.error = ProfileLockCopy.incorrectPIN
             return false
         }
-        parentalSwitch = nil
+        gate.parentalSwitch = nil
         continueSelect(target)
         return true
     }
 
     /// Abandons a held switch, leaving the child where they were.
     func cancelParentalSwitch() {
-        parentalSwitch = nil
+        // Deliberately does NOT clear `parentalFallThrough`: cancelling a switch
+        // the child never asked for must not hand them the profile they were
+        // dropped into.
+        gate.parentalSwitch = nil
     }
 
     /// Checks `pin` against the pending profile's lock, completing the held-back
     /// switch on a match.
     @discardableResult
     func submitProfileLockPIN(_ pin: String) -> Bool {
-        guard let profile = lockedSwitch?.target, let lock = profile.lock else { return false }
+        guard let profile = gate.lockedSwitch?.target, let lock = profile.lock else { return false }
         guard lock.matches(pin: pin) else {
-            lockedSwitch?.error = ProfileLockCopy.incorrectPIN
+            gate.lockedSwitch?.error = ProfileLockCopy.incorrectPIN
             return false
         }
         unlockedProfileIDs.insert(profile.id)
-        lockedSwitch = nil
+        gate.lockedSwitch = nil
         if lock.matchesPlexPIN {
             plexHomeUsers.prefillPlexPIN(pin, forProfile: profile.id)
         }
@@ -1153,7 +1192,7 @@ final class PlozziOSAppModel {
 
     /// Abandons a pending unlock, leaving the active profile untouched.
     func cancelProfileLockPrompt() {
-        lockedSwitch = nil
+        gate.lockedSwitch = nil
     }
 
     /// Sets or clears a profile's PIN gate, dropping any unlock credit the
@@ -1220,17 +1259,30 @@ final class PlozziOSAppModel {
     func enforceActiveProfileLock(leaving outgoing: Profile? = nil) -> Bool {
         if let outgoing,
            profiles.requiresParentalPIN(switchingFrom: outgoing, to: profiles.activeProfile) {
+            // Held for the whole episode, not just this call: `activeProfile` is
+            // already the grown-up, so every predicate derived from it would
+            // stand aside — including the picker's Add/Edit gate.
+            gate.parentalFallThrough = outgoing
             mustChooseProfile = true
-            parentalSwitch = ParentalSwitchRequest(target: profiles.activeProfile)
+            gate.parentalSwitch = ParentalSwitchRequest(target: profiles.activeProfile)
             return true
         }
         guard activeProfileNeedsUnlock else { return false }
         mustChooseProfile = true
-        lockedSwitch = ParentalSwitchRequest(target: profiles.activeProfile)
+        gate.lockedSwitch = ParentalSwitchRequest(target: profiles.activeProfile)
         return true
     }
 
     func performSelectProfile(_ id: String) {
+        // Reached only past both gates, so the hold has done its job. Cleared
+        // here rather than on PIN success so that switching into another Kids
+        // Profile (which needs no PIN) also releases it.
+        gate.parentalFallThrough = nil
+        // The launch picker is satisfied by an ACTUAL switch, never by the tap
+        // that merely asked for one: tapping a locked profile only raises its
+        // PIN, so marking completion at the tap let a cancel fall straight
+        // through into the profile the lock was protecting.
+        gate.didCompleteLaunchSelection = true
         universalWatchlistRetryScheduler = nil
         // Reached only past the lock gate, so this is where the forced picker
         // lifts: a profile has been chosen and proved.

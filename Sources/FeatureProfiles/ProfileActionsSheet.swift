@@ -37,7 +37,7 @@ public struct ProfileActionsSheet: View {
         syncEnabled: Bool,
         offersPlexPINReuse: Bool = false,
         hasParentalPIN: Bool,
-        restrictedActionsSealed: Bool = false,
+        restrictedActionsSealed: Bool,
         onEditAppearance: @escaping () -> Void,
         onSetLock: @escaping (ProfileLock?) -> Void,
         onSetKids: @escaping (Bool) -> Void,

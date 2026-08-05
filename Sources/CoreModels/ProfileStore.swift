@@ -721,7 +721,12 @@ public final class ProfilesModel {
                 continue // otherwise don't clobber a configured receiver's own default
             }
             if byID[p.id] == nil { order.append(p.id) }
-            byID[p.id] = p
+            // Incoming wins — except for the three fields that decide what a
+            // child can do, which are resolved by revision so a stale sender
+            // can't clear a Profile Lock, a Kids flag, or the Parental PIN.
+            var incoming = p
+            if let local = byID[p.id] { incoming.resolveSecurityFields(against: local) }
+            byID[p.id] = incoming
         }
         profiles = order.compactMap { byID[$0] }
         profiles.sort { $0.createdAt < $1.createdAt }

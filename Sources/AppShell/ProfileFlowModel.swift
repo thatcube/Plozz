@@ -150,8 +150,28 @@ public final class ProfileFlowModel {
     /// child's". Both can apply to one switch — a parent leaving the kid for
     /// their own locked profile answers the Parental PIN, then their own.
     public private(set) var pendingParentalSwitch: Profile?
+    /// The enforced Kids Profile the device was moved OUT of without anyone
+    /// asking — a local or synced deletion re-points `activeProfileID` on its
+    /// own. Held until the Parental PIN clears it.
+    ///
+    /// It exists because the obvious check is wrong: after the fall-through
+    /// `activeProfile` is already the grown-up, so anything that derives the
+    /// gate from it concludes there is nothing to gate. This keeps the child's
+    /// profile as the authority for the whole episode, and deliberately survives
+    /// a cancel — otherwise one tap on Cancel lands exactly where the gate was
+    /// meant to prevent.
+    public private(set) var parentalFallThrough: Profile?
     /// Message from the last failed Parental PIN attempt, or `nil`.
     public private(set) var parentalPINError: LocalizedStringResource?
+
+    /// Whether profile management (add/edit) must be withheld right now.
+    ///
+    /// The household policy plus the fall-through hold, so a child dropped into
+    /// a grown-up profile by a synced deletion can't create or edit their way
+    /// out while the picker is up.
+    public var managementRequiresParentalPIN: Bool {
+        profilesModel.managementRequiresParentalPIN || parentalFallThrough != nil
+    }
 
     /// Profiles unlocked during this app run, so a person who has already proved
     /// they know the PIN isn't asked again every time they hop between profiles.
@@ -179,8 +199,11 @@ public final class ProfileFlowModel {
             performSwitch(to: id)
             return
         }
+        // The hold wins over `activeProfile`: after an involuntary fall-through
+        // the active profile is already the grown-up one, and asking it whether
+        // we may leave a Kids Profile answers "there is no Kids Profile here".
         if profilesModel.requiresParentalPIN(
-            switchingFrom: profilesModel.activeProfile,
+            switchingFrom: parentalFallThrough ?? profilesModel.activeProfile,
             to: target
         ) {
             parentalPINError = nil
@@ -239,6 +262,10 @@ public final class ProfileFlowModel {
     /// synchronously; only the import waits.
     private func performSwitch(to id: String) {
         audioController.stop()
+        // Reached only past both gates, so the fall-through hold has done its
+        // job — kept here rather than in `submitParentalPIN` so that switching
+        // into ANOTHER Kids Profile (which needs no PIN) also releases it.
+        parentalFallThrough = nil
         profilesModel.select(id)
         rebuildSettingsModels()
         accountsProviders.reloadAccounts()
@@ -558,6 +585,12 @@ public final class ProfileFlowModel {
         let active = profilesModel.activeProfile
         if let outgoing,
            profilesModel.requiresParentalPIN(switchingFrom: outgoing, to: active) {
+            // Hold the child's profile as the gate's authority. `activeProfile`
+            // is ALREADY the grown-up by now, so every predicate that derives
+            // the answer from it — `switchProfile`'s `from`, the picker's
+            // management gate — would read "not a Kids Profile" and stand aside.
+            // The hold outlives this call and is released only by the PIN.
+            parentalFallThrough = outgoing
             parentalPINError = nil
             isProfileSelectionCancelable = false
             isChoosingProfile = true

@@ -582,6 +582,11 @@ extension PlozziOSAppModel {
         guard SyncSetupFeatureFlag().isEnabled, !isAutoAdoptingSyncSetup, pendingSyncSetupOffer == nil else { return }
         let localIDs = Set(accountsProviders.accounts.map(\.id))
         guard !localIDs.isEmpty else { return }         // nothing to give
+        // Pairing hands another device this household's servers, profiles and
+        // credentials, and the receiver opens in a grown-up profile. That is a
+        // grown-up decision, so it isn't offered from inside an enforced Kids
+        // Profile.
+        guard !profiles.managementRequiresParentalPIN else { return }
         // Surface the freshest offer the user hasn't already declined — so declining
         // one device still lets another simultaneously-advertising device prompt. A
         // per-server request is only fulfillable if THIS device holds that account.
@@ -596,6 +601,7 @@ extension PlozziOSAppModel {
     /// The user confirmed — push config + credentials to the offered device (pinned
     /// key ⇒ no SAS, no typing).
     func confirmSyncSetupOffer() {
+        guard !profiles.managementRequiresParentalPIN else { return }
         guard let offer = pendingSyncSetupOffer else { return }
         pendingSyncSetupOffer = nil
         isAutoAdoptingSyncSetup = true

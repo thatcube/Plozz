@@ -637,7 +637,14 @@ public actor IdentityIndex {
             guard !bucket.isEmpty else { continue }
             byAccount[accountID] = bucket
             warmAccounts.insert(accountID)
-            builtAtByAccount[accountID] = persisted.builtAtByAccount[accountID] ?? .distantPast
+            // Warm, but NOT freshly built. Restoring gives us membership to
+            // answer with immediately; it does not mean the library has been
+            // looked at. Carrying the persisted build time over made a restored
+            // account appear scanned, so the warm loop skipped it — every
+            // launch, forever — and anything added to the library since that
+            // snapshot was written stayed permanently unknown. Dating it to the
+            // distant past keeps the fast start and still asks the server.
+            builtAtByAccount[accountID] = .distantPast
             restoredAny = true
         }
         if restoredAny { cachedSnapshot = nil }

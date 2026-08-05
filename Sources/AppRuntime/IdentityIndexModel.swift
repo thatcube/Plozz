@@ -117,6 +117,24 @@ public final class IdentityIndexModel {
         identitySnapshotStore.sourcesProvider()
     }
 
+    /// The account set the in-flight warm is scanning, so a repeat trigger for
+    /// the SAME set can let it finish instead of starting it over.
+    @ObservationIgnored
+    private var identityWarmKey: String?
+
+    /// Accounts restored from disk this launch that have not yet been verified
+    /// against the live library.
+    ///
+    /// Model state rather than task state on purpose. Every warm trigger cancels
+    /// the wave before it, so the task that performed the restore is routinely
+    /// killed before it reaches the scan — and a task-local flag died with it,
+    /// leaving the replacement task to see a "warm" account and skip the scan.
+    /// The result was an index that was never once verified against the server:
+    /// restore, declare warm, skip, repeat, every launch forever. Cleared only
+    /// when a scan actually completes for that account.
+    @ObservationIgnored
+    private var accountsAwaitingLaunchVerification: Set<String> = []
+
     /// How long an account's index stays fresh before an opportunistic re-warm.
     private let identityIndexTTL: TimeInterval = 600
 
@@ -161,6 +179,24 @@ public final class IdentityIndexModel {
         let store = identityIndexStore
         let fanoutLimit = identityWarmFanoutLimit
 
+        // A scan of a real library takes minutes, and the triggers that ask for
+        // one fire repeatedly during launch (accounts settle, the source scope
+        // key changes). Cancelling and restarting on every trigger meant the
+        // scan was killed and begun again long before it could finish — so it
+        // NEVER finished, the index served only what the restore had put there,
+        // and titles added since that snapshot stayed permanently unknown.
+        //
+        // Restarting is only right when the thing being scanned CHANGED. For the
+        // same account set, letting the in-flight scan run is strictly better
+        // than starting it over.
+        let warmKey = activeIDs.sorted().joined(separator: ",")
+        if !force,
+           let running = identityWarmTask,
+           !running.isCancelled,
+           identityWarmKey == warmKey {
+            return
+        }
+        identityWarmKey = warmKey
         identityWarmTask?.cancel()
         // Supersede any still-in-flight warm from a previous wave: bump the
         // generation (and reset the per-wave high-water mark) so a stale publish
@@ -187,11 +223,12 @@ public final class IdentityIndexModel {
             // owned copy and rendered as one to go and request, and no amount of
             // relaunching fixed it because each launch restored the same stale
             // membership and then declared itself warm.
-            var restoredAccountIDs: Set<String> = []
             if let self, await self.consumePendingRestore() {
                 let persisted = store.load()
                 if !persisted.isEmpty, await index.restore(from: persisted, retaining: activeIDs) {
-                    restoredAccountIDs = activeIDs
+                    await MainActor.run {
+                        self.accountsAwaitingLaunchVerification.formUnion(activeIDs)
+                    }
                     let snapshot = await index.snapshot()
                     publishedInRestore = await MainActor.run { () -> Bool in
                         guard self.publishWarmedSnapshot(snapshot, generation: warmGeneration) else { return false }
@@ -235,15 +272,32 @@ public final class IdentityIndexModel {
                 // A restored account is verified once per launch, however warm
                 // it looks. The scan is incremental and publishes as it goes, so
                 // this costs a background pass rather than a blank screen.
-                if warm,
-                   !force,
-                   !stale.contains(resolvedAccount.account.id),
-                   !restoredAccountIDs.contains(resolvedAccount.account.id) {
+                let needsVerification = await MainActor.run {
+                    self?.accountsAwaitingLaunchVerification
+                        .contains(resolvedAccount.account.id) ?? false
+                }
+                if warm, !force, !stale.contains(resolvedAccount.account.id),
+                   !needsVerification {
                     continue
                 }
                 accountsToWarm.append(resolvedAccount)
             }
 
+            FanoutDiagnostics.emit(
+                "index.select resolved=\(resolved.count) stale=\(stale.count) toWarm=\(accountsToWarm.count) cancelled=\(Task.isCancelled)"
+            )
+            // Cancelled before a single account was selected, yet accounts still
+            // need scanning: ask again rather than dropping the work silently.
+            // Without this the wave that gets cancelled between the restore and
+            // the selection is simply lost, and nothing re-triggers.
+            if Task.isCancelled, !stale.isEmpty, accountsToWarm.isEmpty {
+                await MainActor.run { [weak self] in
+                    guard let self, self.identityWarmTask?.isCancelled != false else { return }
+                    self.identityWarmKey = nil
+                    self.warmIdentityIndex(force: true)
+                }
+                return
+            }
             // Warm accounts CONCURRENTLY but BOUNDED. Cold-boot warm time used to be
             // the *sum* of each server's scan (a sequential loop), which is the
             // visible "takes a while to warm up on first boot" cost. The identity
@@ -289,6 +343,12 @@ public final class IdentityIndexModel {
                     // crossServer staying 0 as accounts warm is the H1 signal
                     // (no union ⇒ nothing fans out).
                     FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(snapshot, phase: "warm"))
+                    // Verified against the live library — stop forcing a rescan
+                    // for this account until the next launch.
+                    await MainActor.run {
+                        self?.accountsAwaitingLaunchVerification
+                            .remove(resolvedAccount.account.id)
+                    }
                 }
 
                 let window = max(1, min(fanoutLimit, accountsToWarm.count))
@@ -375,6 +435,9 @@ public final class IdentityIndexModel {
         var inconclusive = false
         for library in libraries where library.kind == .movie || library.kind == .series {
             if Task.isCancelled { return }
+            FanoutDiagnostics.emit(
+                "index.library begin id=\(library.id) kind=\(library.kind)"
+            )
             var offset = 0
             while offset < maxPerLibrary {
                 if Task.isCancelled { return }
@@ -492,5 +555,13 @@ public final class IdentityIndexModel {
         didRestorePersistedIndex = false
         identitySnapshot = .empty
         identitySnapshotStore.update(.empty)
+        // Flushing the index cancels the warm that was filling it, and nothing
+        // else asks again: the triggers are `.task(id: accounts)`, which does
+        // not re-fire when the account set is unchanged. So a reset — a profile
+        // becoming active, which happens at launch — left the index empty and
+        // permanently unscanned, and every title in the library resolved to no
+        // owned copy. Whoever empties it owns refilling it.
+        FanoutDiagnostics.emit("index.reset — rewarming")
+        warmIdentityIndex(force: true)
     }
 }

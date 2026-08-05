@@ -41,10 +41,7 @@ struct PlozziOSSwitchProfileView: View {
                                     .font(.footnote)
                             }
                             Spacer()
-                            if profile.id == appModel.profiles.activeProfileID {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(palette.accent)
-                            } else if profile.isLocked {
+                            if profile.isLocked {
                                 Image(systemName: "lock.fill")
                                     .foregroundStyle(.secondary)
                                     .font(.footnote)

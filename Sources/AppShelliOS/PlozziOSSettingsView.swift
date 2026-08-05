@@ -1088,8 +1088,23 @@ private struct PlozziOSProfilesView: View {
     @State private var selectedProfileRoute: PlozziOSProfileSettingsRoute?
     /// Closes Settings, so a switch can raise its gates from the root.
     var onClose: () -> Void = {}
+    /// Whether this list is editing profiles rather than switching between them.
+    ///
+    /// One screen for both, like the tvOS picker: the rows are the same rows, so
+    /// sending editing to its own page duplicated the list and cost a tap. The
+    /// toggle is a full-size ROW at the bottom rather than a control in the
+    /// section header — that header is footnote-sized uppercase, so anything in
+    /// it is tiny by construction.
+    @State private var isEditingProfiles = false
 
     private var orderedProfiles: [Profile] { appModel.profiles.profilesByRecency }
+
+    /// One optional route owned by this page. A row cannot activate another
+    /// row's destination, and there is no per-row NavigationLink state for
+    /// SwiftUI's split-view reconciliation to accidentally stack.
+    private func openSettings(for profile: Profile) {
+        selectedProfileRoute = PlozziOSProfileSettingsRoute(profileID: profile.id)
+    }
 
     var body: some View {
         List {
@@ -1109,25 +1124,25 @@ private struct PlozziOSProfilesView: View {
                 Text("Profiles keep Home, settings, and downloads personal. Watch history belongs to the account each profile watches as.")
             }
 
-            SettingsSectionGroup("Who’s watching?") {
-                // Every row here switches. Editing is its own row at the end.
-                //
-                // Two earlier attempts put editing ON these rows — an ⓘ button
-                // per row, then a Manage MODE toggled from the header. The icon
-                // read as "information" and cluttered the common case; the mode
-                // needed its control in a footnote-sized uppercase header, where
-                // it was both tiny and anchored to a title that changed with the
-                // mode. A row is full-size, obvious, and already this screen's
-                // vocabulary.
+            SettingsSectionGroup(isEditingProfiles ? "Edit Profiles" : "Who’s watching?") {
+                // Tapping a row switches; in editing mode it opens that
+                // profile's settings instead. Long-press does the same without
+                // leaving switching mode — the iOS Home screen pairing, and the
+                // touch answer to tvOS's "you can't put a button on a focused
+                // tile".
                 ForEach(orderedProfiles) { profile in
                     Button {
-                        guard profile.id != appModel.profiles.activeProfileID else { return }
-                        // Close Settings first: the Parental PIN and profile lock
-                        // gates are presented from the root, and a cover asked for
-                        // from under an open sheet is the arrangement that fails
-                        // silently.
-                        onClose()
-                        appModel.selectProfile(profile.id)
+                        if isEditingProfiles {
+                            openSettings(for: profile)
+                        } else {
+                            guard profile.id != appModel.profiles.activeProfileID else { return }
+                            // Close Settings first: the Parental PIN and profile
+                            // lock gates are presented from the root, and a cover
+                            // asked for from under an open sheet is the
+                            // arrangement that fails silently.
+                            onClose()
+                            appModel.selectProfile(profile.id)
+                        }
                     } label: {
                         HStack {
                             PlozziOSProfileAvatar(
@@ -1136,10 +1151,6 @@ private struct PlozziOSProfilesView: View {
                             )
                             Text(profile.name)
                             Spacer()
-                            if profile.id == appModel.profiles.activeProfileID {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.tint)
-                            }
                             // Glance the access state so the list answers
                             // "who's locked?" without opening each one.
                             if profile.isKids {
@@ -1150,11 +1161,26 @@ private struct PlozziOSProfilesView: View {
                                 Image(systemName: "lock.fill")
                                     .plozzForeground(.secondary)
                             }
+                            if isEditingProfiles {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .plozzForeground(.tertiary)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Edit Profile", systemImage: "pencil") {
+                            openSettings(for: profile)
+                        }
+                        if !appModel.profiles.isDefault(profile) {
+                            Button("Delete Profile", systemImage: "trash", role: .destructive) {
+                                appModel.removeProfile(profile.id)
+                            }
+                        }
+                    }
                     .swipeActions {
                         if !appModel.profiles.isDefault(profile) {
                             Button("Delete", role: .destructive) {
@@ -1166,10 +1192,16 @@ private struct PlozziOSProfilesView: View {
                 Button("Add Profile", systemImage: "person.badge.plus") {
                     showingAddProfile = true
                 }
-                NavigationLink {
-                    PlozziOSManageProfilesView(appModel: appModel)
+                // Full-size row, so the control is as prominent as what it acts
+                // on. Long-press already reaches editing; this is the version
+                // someone can find without knowing to try.
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { isEditingProfiles.toggle() }
                 } label: {
-                    Label("Manage Profiles", systemImage: "slider.horizontal.3")
+                    Label(
+                        isEditingProfiles ? "Done Editing" : "Edit Profiles",
+                        systemImage: isEditingProfiles ? "checkmark.circle" : "pencil"
+                    )
                 }
             }
         }

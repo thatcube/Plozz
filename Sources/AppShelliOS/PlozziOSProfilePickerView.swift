@@ -59,26 +59,12 @@ struct PlozziOSProfilePickerView: View {
             ProfileAvatarView(profile: profile, size: 116)
                 .frame(width: 116, height: 116)
                 .clipShape(Circle())
-                .overlay {
-                    Circle()
-                        .stroke(
-                            profile.id == activeProfileID
-                                ? Color.accentColor
-                                : Color.clear,
-                            lineWidth: 4
-                        )
-                }
                 .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
 
             Text(profile.name)
                 .font(.headline)
                 .lineLimit(1)
 
-            if profile.id == activeProfileID {
-                Label("Current", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.tint)
-            }
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())

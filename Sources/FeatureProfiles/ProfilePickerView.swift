@@ -156,10 +156,7 @@ public struct ProfilePickerView: View {
                 HStack(alignment: .top, spacing: ProfilePickerLayout.tileSpacing) {
                     ForEach(profiles) { profile in
                         VStack(spacing: 20) {
-                            ProfileTile(
-                                profile: profile,
-                                isActive: profile.id == activeProfileID
-                            ) {
+                            ProfileTile(profile: profile) {
                                 onSelect(profile)
                             }
                             .focused($focus, equals: .profile(profile.id))
@@ -300,15 +297,18 @@ private struct TileCentersKey: PreferenceKey {
 /// clearance so it reads as a round halo, and the whole tile lifts with a gentle
 /// scale + shadow. The name sits *below* the glass, never inside it. A custom
 /// `ButtonStyle` owns focus (with the system focus effect disabled) so there's
-/// exactly one focus indicator. The active profile carries a small accent dot.
+/// exactly one focus indicator.
+///
+/// Deliberately does NOT mark which profile is active. You're on this screen to
+/// choose someone; which profile you happened to arrive as isn't information you
+/// need, and marking it drew the eye to the least useful tile.
 private struct ProfileTile: View {
     let profile: Profile
-    let isActive: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            ProfileTileLabel(profile: profile, isActive: isActive)
+            ProfileTileLabel(profile: profile)
         }
         .buttonStyle(ProfileTileButtonStyle())
         .focusEffectDisabled()
@@ -365,7 +365,6 @@ private extension EnvironmentValues {
 /// button propagates it) so the name gently emphasises on focus.
 private struct ProfileTileLabel: View {
     let profile: Profile
-    let isActive: Bool
 
     @Environment(\.isFocused) private var isFocused
     @Environment(\.themePalette) private var palette
@@ -376,19 +375,10 @@ private struct ProfileTileLabel: View {
                 ProfileAvatarView(profile: profile, size: ProfilePickerLayout.avatarSize)
             }
 
-            VStack(spacing: 8) {
-                Text(profile.name)
-                    .font(ProfilePickerLayout.nameFont)
-                    .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
-                    .lineLimit(1)
-
-                // Subtle "currently active" indicator. Reserves its slot via
-                // opacity so active/inactive tiles keep the same rhythm.
-                Circle()
-                    .fill(palette.accent)
-                    .frame(width: 10, height: 10)
-                    .opacity(isActive ? 1 : 0)
-            }
+            Text(profile.name)
+                .font(ProfilePickerLayout.nameFont)
+                .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
+                .lineLimit(1)
         }
     }
 }

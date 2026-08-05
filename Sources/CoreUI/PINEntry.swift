@@ -94,11 +94,20 @@ public struct PINEntryScaffold<Badge: View>: View {
     public let title: LocalizedStringResource
     /// Supporting line under the title.
     public var subtitle: LocalizedStringResource?
-    /// Name shown beside the badge — the profile or Plex Home user in question.
-    public let name: String
+    /// Name shown beside the badge.
+    ///
+    /// A `Text` rather than a `String` so a caller can pass either provider
+    /// CONTENT (`Text(verbatim: profile.name)`) or app COPY
+    /// (`Text(KidsProfileCopy.parentalPIN)`). When this took a `String`, the
+    /// copy case had to call `String(localized:)`, which resolves at call time
+    /// and freezes the value against a language change.
+    public let name: Text
     /// Error from the last attempt, or `nil`. The slot is reserved either way so
     /// the pad doesn't jump when one appears.
-    public let errorMessage: String?
+    ///
+    /// Carried as a resource, not a resolved `String`: every caller was reaching
+    /// for `String(localized:)` to build one, which resolves eagerly.
+    public let errorMessage: LocalizedStringResource?
     /// Whether an attempt is in flight (shows a spinner, blocks the pad).
     public let isSubmitting: Bool
     /// Optional caveat under the identity block, e.g. the sync warning.
@@ -116,8 +125,8 @@ public struct PINEntryScaffold<Badge: View>: View {
     public init(
         title: LocalizedStringResource,
         subtitle: LocalizedStringResource? = nil,
-        name: String,
-        errorMessage: String? = nil,
+        name: Text,
+        errorMessage: LocalizedStringResource? = nil,
         isSubmitting: Bool = false,
         footnote: LocalizedStringResource? = nil,
         sequenceStep: PINSequenceStep? = nil,
@@ -234,7 +243,7 @@ public struct PINEntryScaffold<Badge: View>: View {
             HStack(spacing: 14) {
                 badge()
                     .clipShape(Circle())
-                Text(verbatim: name)
+                name
                     .font(PINMetrics.nameFont)
                     .foregroundStyle(palette.primaryText)
                     .lineLimit(1)
@@ -242,7 +251,8 @@ public struct PINEntryScaffold<Badge: View>: View {
             .padding(.top, 4)
 
             // Reserved either way so nothing shifts between attempts.
-            Text(verbatim: errorMessage ?? " ")
+            // Reserved either way so nothing shifts between attempts.
+            (errorMessage.map(Text.init) ?? Text(verbatim: " "))
                 .font(.callout)
                 .foregroundStyle(errorMessage == nil ? Color.clear : .red)
                 .fixedSize(horizontal: false, vertical: true)

@@ -39,7 +39,7 @@ struct ProfileSelectionView: View {
     /// with whose PIN that is.
     @State private var pendingAction: PendingAuthorization?
     /// Error from the last failed authorization attempt.
-    @State private var authError: String?
+    @State private var authError: LocalizedStringResource?
 
     private enum CreationKind: Identifiable {
         case ordinary
@@ -75,6 +75,12 @@ struct ProfileSelectionView: View {
         }
     }
 
+    /// Whether profile management is withheld right now — see
+    /// `ProfilesModel.managementRequiresParentalPIN`.
+    private var managementGated: Bool {
+        appState.profilesModel.managementRequiresParentalPIN
+    }
+
     var body: some View {
         ProfilePickerView(
             // Whoever watched on this Apple TV most recently leads the row, since
@@ -82,9 +88,13 @@ struct ProfileSelectionView: View {
             profiles: appState.profilesModel.profilesByRecency,
             activeProfileID: appState.profilesModel.activeProfileID,
             onSelect: { appState.profileFlow.switchProfile(to: $0.id) },
-            onAddProfile: { request(.add(isKids: false)) },
-            onEditProfile: { request(.edit($0)) },
-            onAddKidsProfile: { request(.add(isKids: true)) },
+            // Withheld inside an enforced Kids Profile: creating a profile
+            // switches into it, so offering it here would let a child walk
+            // straight into an unrestricted profile without the Parental PIN.
+            // See `ProfilesModel.managementRequiresParentalPIN`.
+            onAddProfile: managementGated ? nil : { request(.add(isKids: false)) },
+            onEditProfile: managementGated ? nil : { request(.edit($0)) },
+            onAddKidsProfile: managementGated ? nil : { request(.add(isKids: true)) },
             onCancel: canCancel ? { appState.profileFlow.cancelProfileSelection() } : nil
         )
         // tvOS Menu button: the picker is rendered as a top-level view (not a
@@ -168,7 +178,7 @@ struct ProfileSelectionView: View {
             PINEntryScaffold(
                 title: ProfileLockCopy.manageTitle,
                 subtitle: ProfileLockCopy.manageSubtitle,
-                name: pending.gatekeeper.name,
+                name: Text(verbatim: pending.gatekeeper.name),
                 errorMessage: authError,
                 onSubmit: { submitAuthorization($0, pending: pending) },
                 onCancel: { pendingAction = nil; authError = nil }
@@ -235,7 +245,7 @@ struct ProfileSelectionView: View {
 
     private func submitAuthorization(_ pin: String, pending: PendingAuthorization) {
         guard let lock = pending.gatekeeper.lock, lock.matches(pin: pin) else {
-            authError = String(localized: "Incorrect PIN. Try again.")
+            authError = ProfileLockCopy.incorrectPIN
             return
         }
         // Knowing a profile's PIN is knowing it — don't re-ask to open it later.

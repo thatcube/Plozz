@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import AppRuntime
 import CoreModels
+import CoreUI
 import FeatureMusic
 import FeatureProfiles
 
@@ -139,7 +140,7 @@ public final class ProfileFlowModel {
     /// like the Plex Home PIN prompt it sits in front of.
     public private(set) var pendingLockedProfile: Profile?
     /// Message from the last failed unlock attempt, or `nil`.
-    public private(set) var profileLockError: String?
+    public private(set) var profileLockError: LocalizedStringResource?
 
     /// A profile the household is trying to reach *out of* a Kids Profile, held
     /// until the Parental PIN is entered.
@@ -150,7 +151,7 @@ public final class ProfileFlowModel {
     /// their own locked profile answers the Parental PIN, then their own.
     public private(set) var pendingParentalSwitch: Profile?
     /// Message from the last failed Parental PIN attempt, or `nil`.
-    public private(set) var parentalPINError: String?
+    public private(set) var parentalPINError: LocalizedStringResource?
 
     /// Profiles unlocked during this app run, so a person who has already proved
     /// they know the PIN isn't asked again every time they hop between profiles.
@@ -213,7 +214,7 @@ public final class ProfileFlowModel {
     public func submitParentalPIN(_ pin: String) -> Bool {
         guard let target = pendingParentalSwitch else { return false }
         guard profilesModel.matchesParentalPIN(pin) else {
-            parentalPINError = String(localized: "Incorrect PIN. Try again.")
+            parentalPINError = ProfileLockCopy.incorrectPIN
             return false
         }
         pendingParentalSwitch = nil
@@ -267,7 +268,7 @@ public final class ProfileFlowModel {
     public func submitProfileLockPIN(_ pin: String) -> Bool {
         guard let profile = pendingLockedProfile, let lock = profile.lock else { return false }
         guard lock.matches(pin: pin) else {
-            profileLockError = String(localized: "Incorrect PIN. Try again.")
+            profileLockError = ProfileLockCopy.incorrectPIN
             return false
         }
         unlockedProfileIDs.insert(profile.id)

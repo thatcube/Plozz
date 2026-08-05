@@ -461,6 +461,11 @@ private struct PlozziOSSettingsSplitView: View {
         .onChange(of: appModel.profiles.activeProfileID) { _, _ in
             isParentalUnlocked = false
         }
+        // A PIN replaced on another device must invalidate an unlock proved
+        // against the old one.
+        .onChange(of: appModel.profiles.parentalPIN) { _, _ in
+            isParentalUnlocked = false
+        }
         .toolbar(removing: .sidebarToggle)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {
@@ -577,7 +582,8 @@ private struct PlozziOSSettingsSplitView: View {
         case .manageProfile:
             PlozziOSProfileSettingsView(
                 appModel: appModel,
-                profileID: appModel.profiles.activeProfileID
+                profileID: appModel.profiles.activeProfileID,
+                isParentalUnlocked: isParentalUnlocked
             )
         case .myLibraries:
             PlozziOSMyLibrariesSettingsView(
@@ -913,7 +919,8 @@ private struct PlozziOSSettingsCompactMenu: View {
                             NavigationLink {
                                 PlozziOSProfileSettingsView(
                                     appModel: appModel,
-                                    profileID: appModel.profiles.activeProfileID
+                                    profileID: appModel.profiles.activeProfileID,
+                                    isParentalUnlocked: isParentalUnlocked
                                 )
                             } label: {
                                 Label(KidsProfileCopy.manageProfile, systemImage: "person.crop.circle")

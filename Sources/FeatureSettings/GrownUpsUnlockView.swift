@@ -18,7 +18,7 @@ struct GrownUpsUnlockView: View {
     let context: SettingsContext
 
     @Environment(\.dismiss) private var dismiss
-    @State private var errorMessage: String?
+    @State private var errorMessage: LocalizedStringResource?
 
     var body: some View {
         ParentalPINView(
@@ -30,7 +30,7 @@ struct GrownUpsUnlockView: View {
 
     private func submit(_ pin: String) {
         guard context.matchesParentalPIN(pin) else {
-            errorMessage = String(localized: "Incorrect PIN. Try again.")
+            errorMessage = ProfileLockCopy.incorrectPIN
             return
         }
         errorMessage = nil

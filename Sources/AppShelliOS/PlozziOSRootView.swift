@@ -70,7 +70,7 @@ public struct PlozziOSRootView: View {
                     // long-press did nothing and the Edit button was missing
                     // until you'd already picked someone. Netflix and the tvOS
                     // picker both manage profiles from the launch screen too.
-                    manager: appModel
+                    manager: appModel.profiles.managementRequiresParentalPIN ? nil : appModel
                     // No `onCancel`: at launch there is nothing to go back to.
                 )
             } else {
@@ -627,7 +627,9 @@ private struct PlozziOSTabShell: View {
                     showingProfileSwitcher = false
                     appModel.selectProfile(profile.id)
                 },
-                manager: appModel,
+                // Withheld inside an enforced Kids Profile — creating a profile
+                // switches into it, which would bypass the Parental PIN gate.
+                manager: appModel.profiles.managementRequiresParentalPIN ? nil : appModel,
                 onCancel: { showingProfileSwitcher = false }
             )
         }

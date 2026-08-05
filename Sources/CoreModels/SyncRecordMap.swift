@@ -432,6 +432,8 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
     /// a newly-set Parental PIN.
     public var parentalPINRevision: ProfileLockRevision?
     public var isKidsProfile: Bool?
+    /// Field-level revision for the Kids flag — see ``Profile/kidsProfileRevision``.
+    public var kidsProfileRevision: ProfileLockRevision?
     /// Whether the profile still owes its setup pass. Synced so a half-created
     /// profile doesn't start importing on a second device either.
     public var isAwaitingSetup: Bool?
@@ -452,6 +454,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         self.parentalPIN = p.parentalPIN
         self.parentalPINRevision = p.effectiveParentalPINRevision
         self.isKidsProfile = p.isKidsProfile
+        self.kidsProfileRevision = p.effectiveKidsProfileRevision
         self.isAwaitingSetup = p.isAwaitingSetup
     }
 
@@ -499,7 +502,18 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         } else if localPINRevision == nil {
             p.parentalPIN = parentalPIN
         }
-        p.isKidsProfile = isKidsProfile
+        // Same revision rule as the lock and the Parental PIN. Without it a
+        // stale peer's unrelated edit could clear the Kids flag and silently
+        // un-restrict the profile.
+        let localKidsRevision = existing.effectiveKidsProfileRevision
+        if let incomingKidsRevision = kidsProfileRevision {
+            if localKidsRevision == nil || incomingKidsRevision > localKidsRevision! {
+                p.isKidsProfile = isKidsProfile
+                p.kidsProfileRevision = incomingKidsRevision
+            }
+        } else if localKidsRevision == nil {
+            p.isKidsProfile = isKidsProfile
+        }
         p.isAwaitingSetup = isAwaitingSetup
         return p
     }
@@ -513,6 +527,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
             avatarEmoji: avatarEmoji, avatarEmojiColorIndex: avatarEmojiColorIndex,
             lock: lock, lockRevision: lockRevision,
             parentalPIN: parentalPIN, parentalPINRevision: parentalPINRevision,
+            kidsProfileRevision: kidsProfileRevision,
             isKidsProfile: isKidsProfile, isAwaitingSetup: isAwaitingSetup)
     }
 }

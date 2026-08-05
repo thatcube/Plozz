@@ -50,10 +50,23 @@ final class ParentalPINTests: XCTestCase {
         XCTAssertNil(ParentalPIN.make(pin: "12345", iterations: fastIterations))
     }
 
-    func testNeverStoresTheRawPIN() {
-        let pin = ParentalPIN.make(pin: "4821", iterations: fastIterations)
-        XCTAssertFalse(pin?.verifier.contains("4821") ?? true)
-        XCTAssertFalse(pin?.salt.contains("4821") ?? true)
+    /// Inspects the ENCODED form, which is what actually reaches disk and
+    /// CloudKit. Substring checks on random Base64 are probabilistic and would
+    /// pass even if the PIN were stored under another key.
+    func testTheEncodedPINCarriesNoDigits() throws {
+        let pin = try XCTUnwrap(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+        let json = try XCTUnwrap(String(data: JSONEncoder().encode(pin), encoding: .utf8))
+        XCTAssertFalse(json.contains("4821"))
+        XCTAssertEqual(Set(["salt", "verifier", "iterations"]).isSubset(of: fieldNames(in: json)), true)
+        // Any field beyond those three is a new place the PIN could leak.
+        XCTAssertEqual(fieldNames(in: json).count, 3)
+    }
+
+    private func fieldNames(in json: String) -> Set<String> {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [] }
+        return Set(object.keys)
     }
 
     func testTwoPINsWithTheSameValueGetDifferentVerifiers() {
@@ -263,5 +276,121 @@ final class ParentalPINSyncTests: XCTestCase {
 
         XCTAssertFalse(model.enforcesKidsRestrictions, "Only the first profile anchors the PIN")
         XCTAssertFalse(model.matchesParentalPIN("9999"))
+    }
+}
+
+/// The rules that stop a child escaping their own profile, and stop a stale peer
+/// quietly lifting the restriction. These are the security-relevant invariants,
+/// so they're pinned separately from the UI.
+@MainActor
+final class ParentalEnforcementTests: XCTestCase {
+
+    private let fastIterations = 64
+
+    private func makeDefaults() -> UserDefaults {
+        let suite = "ParentalEnforcementTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    private func makeHousehold(
+        defaults: UserDefaults? = nil
+    ) -> (model: ProfilesModel, adult: Profile, kid: Profile) {
+        let model = ProfilesModel(store: ProfileStore(defaults: defaults ?? makeDefaults()))
+        let adult = model.profiles[0]
+        let kid = model.add(name: "Kid", isKidsProfile: true)
+        return (model, adult, kid)
+    }
+
+    // MARK: Management gate
+
+    /// Creating a profile SWITCHES into it, so an ungated "Add Profile" inside a
+    /// Kids Profile is a complete bypass of the switch gate.
+    func testManagementIsWithheldInsideAnEnforcedKidsProfile() {
+        let (model, _, kid) = makeHousehold()
+        model.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+        model.select(kid.id)
+        XCTAssertTrue(model.managementRequiresParentalPIN)
+    }
+
+    func testManagementIsAllowedWithoutAPIN() {
+        let (model, _, kid) = makeHousehold()
+        model.select(kid.id)
+        XCTAssertFalse(model.managementRequiresParentalPIN)
+    }
+
+    func testManagementIsAllowedFromAGrownUpProfile() {
+        let (model, adult, _) = makeHousehold()
+        model.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+        model.select(adult.id)
+        XCTAssertFalse(model.managementRequiresParentalPIN)
+    }
+
+    // MARK: The Kids flag must survive a stale peer
+
+    /// The flag is what makes the gate apply at all, so clobbering it doesn't
+    /// lose a preference — it un-restricts the child everywhere.
+    func testAStaleRecordCannotClearTheKidsFlag() {
+        let (model, _, kid) = makeHousehold()
+        let stale = kid            // captured before it became a Kids Profile
+        var nowKids = kid
+        nowKids.isKids = true
+        model.update(nowKids)
+
+        var renamedElsewhere = stale
+        renamedElsewhere.name = "Renamed"
+        renamedElsewhere.isKidsProfile = nil
+
+        let merged = ProfileSyncDTO(profile: renamedElsewhere).merged(into: nowKids)
+        XCTAssertEqual(merged.name, "Renamed")
+        XCTAssertTrue(merged.isKids, "A stale record must not lift the restriction")
+    }
+
+    /// Turning Kids off deliberately still has to win over an older record.
+    func testADeliberateKidsRemovalWins() {
+        let (model, _, kid) = makeHousehold()
+        var nowKids = kid
+        nowKids.isKids = true
+        model.update(nowKids)
+
+        var lifted = nowKids
+        lifted.isKids = false
+
+        let merged = ProfileSyncDTO(profile: lifted).merged(into: nowKids)
+        XCTAssertFalse(merged.isKids)
+    }
+
+    // MARK: Migration
+
+    /// A PIN the user deliberately removed must not come back when a device that
+    /// still holds the old device-local copy relaunches.
+    func testMigrationDoesNotResurrectARemovedPIN() {
+        let defaults = makeDefaults()
+        let store = ProfileStore(defaults: defaults)
+        // A build that kept the PIN on the device.
+        store.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+
+        // This run migrates it onto the anchor…
+        let first = ProfilesModel(store: store)
+        XCTAssertTrue(first.enforcesKidsRestrictions)
+        // …and the user then removes it.
+        first.setParentalPIN(nil)
+        XCTAssertFalse(first.enforcesKidsRestrictions)
+
+        // A later launch must respect the removal.
+        let second = ProfilesModel(store: ProfileStore(defaults: defaults))
+        XCTAssertFalse(second.enforcesKidsRestrictions, "A removed PIN must stay removed")
+    }
+
+    func testMigrationMovesADeviceLocalPINOntoTheSyncedAnchor() {
+        let defaults = makeDefaults()
+        let store = ProfileStore(defaults: defaults)
+        store.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+
+        let model = ProfilesModel(store: store)
+        XCTAssertNotNil(model.profiles.first?.parentalPIN, "It must ride the profile so it syncs")
+        XCTAssertNil(store.parentalPIN(), "And the device-local copy is retired")
+        XCTAssertTrue(model.matchesParentalPIN("4821"))
     }
 }

@@ -847,9 +847,9 @@ final class PlozziOSAppModel {
     /// until the Parental PIN is entered.
     private(set) var pendingParentalSwitch: Profile?
     /// Message from the last failed Parental PIN attempt, or `nil`.
-    private(set) var parentalPINError: String?
+    private(set) var parentalPINError: LocalizedStringResource?
     /// Message from the last failed unlock attempt.
-    private(set) var profileLockError: String?
+    private(set) var profileLockError: LocalizedStringResource?
     /// Profiles unlocked during this app run, so hopping back and forth doesn't
     /// re-ask. In-memory on purpose: a cold launch always re-asks.
     private var unlockedProfileIDs: Set<String> = []
@@ -1103,7 +1103,7 @@ final class PlozziOSAppModel {
     func submitParentalPIN(_ pin: String) -> Bool {
         guard let target = pendingParentalSwitch else { return false }
         guard profiles.matchesParentalPIN(pin) else {
-            parentalPINError = String(localized: "Incorrect PIN. Try again.")
+            parentalPINError = ProfileLockCopy.incorrectPIN
             return false
         }
         pendingParentalSwitch = nil
@@ -1124,7 +1124,7 @@ final class PlozziOSAppModel {
     func submitProfileLockPIN(_ pin: String) -> Bool {
         guard let profile = pendingLockedProfile, let lock = profile.lock else { return false }
         guard lock.matches(pin: pin) else {
-            profileLockError = String(localized: "Incorrect PIN. Try again.")
+            profileLockError = ProfileLockCopy.incorrectPIN
             return false
         }
         unlockedProfileIDs.insert(profile.id)

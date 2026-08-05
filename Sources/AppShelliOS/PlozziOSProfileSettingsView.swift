@@ -18,6 +18,10 @@ struct PlozziOSProfileSettingsView: View {
     @Environment(\.themePalette) private var palette
     let appModel: PlozziOSAppModel
     let profileID: String
+    /// Whether the Parental PIN has already been entered for this run of the
+    /// settings screen. Without it a correct PIN left this page sealed, so the
+    /// gate looked broken.
+    var isParentalUnlocked: Bool = false
 
     @State private var showingEditor = false
     /// PIN setups are pushed onto the settings stack, matching tvOS. iOS Settings
@@ -52,7 +56,8 @@ struct PlozziOSProfileSettingsView: View {
                         // be able to change it.
                         restrictedActionsSealed: profile.isKids
                             && appModel.profiles.activeProfileID == profileID
-                            && appModel.profiles.parentalPIN != nil,
+                            && appModel.profiles.parentalPIN != nil
+                            && !isParentalUnlocked,
                         onEditAppearance: { showingEditor = true },
                         onEditLock: { showingLockSetup = true },
                         onCreateParentalPIN: { showingParentalSetup = true },

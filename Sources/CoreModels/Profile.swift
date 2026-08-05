@@ -158,6 +158,13 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// writing `false`, so an older peer's bytes round-trip unchanged (the sync
     /// anti-clobber invariant). Read it through `isKids`.
     public var isKidsProfile: Bool?
+    /// Field-level revision for ``isKidsProfile``.
+    ///
+    /// Exists for exactly the reason ``lockRevision`` does, and it matters more:
+    /// the Kids flag is what makes the Parental PIN gate apply at all, so a
+    /// stale record that clears it doesn't just lose a preference — it quietly
+    /// un-restricts a child's profile on every device.
+    public var kidsProfileRevision: ProfileLockRevision?
 
     /// Whether this profile has never been through its setup step.
     ///
@@ -216,6 +223,18 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         lockRevision ?? lock.map { ProfileLockRevision.legacy(for: $0) }
     }
 
+    /// Revision used for conflict resolution, with a baseline for a flag set by
+    /// a build that predates the revision field.
+    public var effectiveKidsProfileRevision: ProfileLockRevision? {
+        kidsProfileRevision ?? isKidsProfile.map { ProfileLockRevision(counter: 0, nonce: $0 ? "kids" : "not-kids") }
+    }
+
+    /// Sets or clears the Kids flag and advances its revision.
+    public mutating func replaceKidsProfile(with isKids: Bool?) {
+        kidsProfileRevision = .next(after: effectiveKidsProfileRevision)
+        isKidsProfile = isKids
+    }
+
     /// Adds, changes or removes the lock and advances its field-level revision.
     public mutating func replaceLock(with newLock: ProfileLock?) {
         lockRevision = .next(after: effectiveLockRevision)
@@ -259,7 +278,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// Whether this profile is restricted. See `isKidsProfile`.
     public var isKids: Bool {
         get { isKidsProfile == true }
-        set { isKidsProfile = newValue ? true : nil }
+        set { replaceKidsProfile(with: newValue ? true : nil) }
     }
 
     public init(
@@ -285,6 +304,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         lockRevision: ProfileLockRevision? = nil,
         parentalPIN: ParentalPIN? = nil,
         parentalPINRevision: ProfileLockRevision? = nil,
+        kidsProfileRevision: ProfileLockRevision? = nil,
         isKidsProfile: Bool? = nil,
         isAwaitingSetup: Bool? = nil
     ) {
@@ -310,6 +330,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.lockRevision = lockRevision
         self.parentalPIN = parentalPIN
         self.parentalPINRevision = parentalPINRevision
+        self.kidsProfileRevision = kidsProfileRevision
         self.isKidsProfile = isKidsProfile
         self.isAwaitingSetup = isAwaitingSetup
     }

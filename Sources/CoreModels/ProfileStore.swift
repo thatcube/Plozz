@@ -469,11 +469,28 @@ public final class ProfilesModel {
     /// someone happened to set it again — the household would look protected on
     /// one device and be wide open on the rest, which is the worst of both.
     private func migrateLocalParentalPINIfNeeded() {
-        guard let local = legacyLocalParentalPIN,
-              var anchor = profiles.first,
-              anchor.parentalPIN == nil else { return }
+        guard let local = legacyLocalParentalPIN, var anchor = profiles.first else { return }
+
+        // A revision means the household has already DECIDED about the PIN —
+        // set it, changed it, or deliberately removed it. `parentalPIN == nil`
+        // alone can't tell "never had one" from "removed", so migrating on that
+        // would resurrect a PIN the user had just deleted (and, because the
+        // migration advances the revision, it would beat the deletion on every
+        // other device too).
+        guard anchor.parentalPIN == nil, anchor.effectiveParentalPINRevision == nil else {
+            // The decision has been made elsewhere; this copy is now noise.
+            legacyLocalParentalPIN = nil
+            store.setParentalPIN(nil)
+            return
+        }
+
         anchor.replaceParentalPIN(with: local)
         update(anchor)
+
+        // Only drop the local copy once the anchor actually carries it.
+        // Persisting profiles is best-effort, and clearing first would leave a
+        // household with no PIN at all if that write didn't land.
+        guard profiles.first?.parentalPIN != nil else { return }
         legacyLocalParentalPIN = nil
         store.setParentalPIN(nil)
     }
@@ -520,6 +537,22 @@ public final class ProfilesModel {
     /// key, so gating a setting would strand it — and the child could switch to
     /// an unlocked grown-up profile anyway, which makes the gate theatre.
     public var enforcesKidsRestrictions: Bool { parentalPIN != nil }
+
+    /// Whether profile MANAGEMENT — creating, editing or deleting profiles — is
+    /// currently withheld.
+    ///
+    /// True only from inside an enforced Kids Profile. Creating a profile
+    /// *switches into it*, so an ungated "Add Profile" was a complete bypass:
+    /// a child could make an ordinary profile and land in it unrestricted,
+    /// never touching the switch gate. Editing is withheld for the same reason —
+    /// the editor reaches the Kids flag, the profile lock and Delete.
+    ///
+    /// A grown-up manages profiles from their own profile; getting there already
+    /// costs the Parental PIN, so nothing is unreachable — it just can't be
+    /// reached from inside the child's profile.
+    public var managementRequiresParentalPIN: Bool {
+        activeProfile.isKids && enforcesKidsRestrictions
+    }
 
     /// Whether `profile` may change who it watches as, which libraries it sees,
     /// its own Kids flag, and its own Profile Lock.

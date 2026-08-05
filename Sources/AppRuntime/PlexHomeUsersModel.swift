@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import CoreModels
+import CoreUI
 import CoreNetworking
 import ProviderPlex
 
@@ -82,7 +83,7 @@ public final class PlexHomeUsersModel {
     /// this; `nil` when no prompt is outstanding.
     public private(set) var pendingPlexPINRequest: PlexPINRequest?
     /// A wrong/failed-PIN message shown in the entry sheet, or `nil`.
-    public private(set) var plexPINError: String?
+    public private(set) var plexPINError: LocalizedStringResource?
     /// Bumped whenever the active Plex identity (token override) changes so
     /// `RootView` rebuilds the signed-in subtree and content reloads as the new
     /// Plex Home user.
@@ -717,10 +718,10 @@ public final class PlexHomeUsersModel {
             if pin != nil { ensurePlexIdentityForActiveProfile() }
         } catch AppError.unauthorized {
             PlozzLog.auth.info("Plex Home-user switch unauthorized — wrong PIN")
-            plexPINError = "Incorrect PIN. Please try again."
+            plexPINError = ProfileLockCopy.incorrectPIN
         } catch {
             PlozzLog.auth.error("Plex Home-user switch failed: \(error)")
-            plexPINError = "Couldn’t switch Plex user. Please try again."
+            plexPINError = ProfileLockCopy.plexSwitchFailed
         }
     }
 

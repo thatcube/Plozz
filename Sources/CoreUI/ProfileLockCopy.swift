@@ -88,6 +88,24 @@ public enum ProfileLockCopy {
         comment: "Heading for the second, confirming entry of a new PIN."
     )
 
+    /// Shown when an entered PIN doesn't match.
+    ///
+    /// One definition: six call sites had this literal inline, each resolving it
+    /// eagerly with `String(localized:)`, so a translator saw six identical
+    /// strings and a language change froze whichever had already been built.
+    public static let incorrectPIN = LocalizedStringResource(
+        "profileLock.incorrectPIN",
+        defaultValue: "Incorrect PIN. Try again.",
+        comment: "Shown under the PIN pad when the entered PIN is wrong."
+    )
+
+    /// Shown when Plex rejects a switch for a reason other than a wrong PIN.
+    public static let plexSwitchFailed = LocalizedStringResource(
+        "plexPIN.switchFailed",
+        defaultValue: "Couldn’t switch Plex user. Please try again.",
+        comment: "Shown under the Plex PIN pad when switching users failed for a reason other than a wrong PIN."
+    )
+
     public static let mismatch = LocalizedStringResource(
         "settings.profileLock.mismatch",
         defaultValue: "Those PINs didn't match. Start again.",

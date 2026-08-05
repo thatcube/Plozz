@@ -36,7 +36,7 @@ public struct ParentalPINSetupView: View {
     /// flag — deriving presentation from the stored digits is what made the
     /// profile lock setup lose a confirmed PIN mid-flow.
     @State private var firstEntry: String?
-    @State private var errorMessage: String?
+    @State private var errorMessage: LocalizedStringResource?
 
     public var body: some View {
         PINEntryScaffold(
@@ -46,7 +46,7 @@ public struct ParentalPINSetupView: View {
                     : KidsProfileCopy.parentalPINSetTitle)
                 : KidsProfileCopy.parentalPINConfirmTitle,
             subtitle: firstEntry == nil ? KidsProfileCopy.parentalPINExplanation : nil,
-            name: String(localized: KidsProfileCopy.parentalPIN),
+            name: Text(KidsProfileCopy.parentalPIN),
             errorMessage: errorMessage,
             // No `sequenceStep` here. That rail means "PIN 1 of 2" — two
             // DIFFERENT PINs in a chained gate, like a profile lock followed by
@@ -70,7 +70,7 @@ public struct ParentalPINSetupView: View {
         }
         guard pin == first, let created = ParentalPIN.make(pin: pin) else {
             firstEntry = nil
-            errorMessage = String(localized: ProfileLockCopy.mismatch)
+            errorMessage = ProfileLockCopy.mismatch
             return
         }
         errorMessage = nil

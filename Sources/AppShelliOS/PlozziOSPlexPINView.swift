@@ -16,7 +16,7 @@ struct PlozziOSPlexPINView: View {
         let pendingRequest = model.pendingPlexPINRequest
         PINEntryScaffold(
             title: "Enter your Plex PIN",
-            name: request.homeUserName,
+            name: Text(verbatim: request.homeUserName),
             errorMessage: model.plexPINError,
             isSubmitting: isSubmitting,
             sequenceStep: sequenceStep,

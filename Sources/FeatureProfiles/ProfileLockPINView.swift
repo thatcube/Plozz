@@ -25,7 +25,7 @@ import SwiftUI
 /// hash comparison — so there's no submitting state to show.
 public struct ProfileLockPINView: View {
     private let profile: Profile
-    private let errorMessage: String?
+    private let errorMessage: LocalizedStringResource?
     private let isSyncEnabled: Bool
     private let sequenceStep: PINSequenceStep?
     private let onSubmit: (String) -> Void
@@ -37,7 +37,7 @@ public struct ProfileLockPINView: View {
     ///   rather than read here so this stays a view over its inputs.
     public init(
         profile: Profile,
-        errorMessage: String?,
+        errorMessage: LocalizedStringResource?,
         isSyncEnabled: Bool,
         sequenceStep: PINSequenceStep? = nil,
         onSubmit: @escaping (String) -> Void,
@@ -54,7 +54,7 @@ public struct ProfileLockPINView: View {
     public var body: some View {
         PINEntryScaffold(
             title: ProfileLockCopy.unlockTitle,
-            name: profile.name,
+            name: Text(verbatim: profile.name),
             errorMessage: errorMessage,
             footnote: isSyncEnabled ? nil : ProfileLockCopy.lockIsDeviceOnly,
             sequenceStep: sequenceStep,

@@ -463,6 +463,9 @@ public struct SettingsView: View {
             // Switching profiles re-seals: an unlock proves who is standing
             // there now, not who was standing there for a different profile.
             .onChange(of: activeProfile.id) { _, _ in isParentalUnlocked = false }
+            // A PIN replaced on another device must invalidate an unlock proved
+            // against the old one.
+            .onChange(of: profilesModel?.parentalPIN) { _, _ in isParentalUnlocked = false }
         }
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Sign Out", role: .destructive, action: onSignOutAll)

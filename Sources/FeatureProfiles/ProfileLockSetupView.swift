@@ -46,7 +46,7 @@ public struct ProfileLockSetupView: View {
     /// The first entry, held while it's confirmed. In memory for the few seconds
     /// between the two entries and never persisted.
     @State private var firstEntry: String?
-    @State private var errorMessage: String?
+    @State private var errorMessage: LocalizedStringResource?
     /// Confirmed PIN data and dialog visibility are deliberately separate.
     /// SwiftUI clears a presentation binding as a dialog dismisses; using that
     /// same optional as the PIN storage erased the PIN during async Plex
@@ -70,7 +70,7 @@ public struct ProfileLockSetupView: View {
                 : (offersPlexPINReuse
                     ? ProfileLockCopy.createAlongsidePlexSubtitle
                     : ProfileLockCopy.createSubtitle),
-            name: profile.name,
+            name: Text(verbatim: profile.name),
             errorMessage: errorMessage,
             isSubmitting: isValidatingPlexPIN,
             footnote: syncEnabled ? nil : ProfileLockCopy.lockIsDeviceOnly,
@@ -89,10 +89,12 @@ public struct ProfileLockSetupView: View {
             isPresented: $showingPlexChoice,
             titleVisibility: .visible
         ) {
-            Button(String(localized: ProfileLockCopy.usePlexPINYes)) {
+            Button {
                 verifyAndFinishSharedPIN()
+            } label: {
+                Text(ProfileLockCopy.usePlexPINYes)
             }
-            Button(String(localized: ProfileLockCopy.usePlexPINNo)) { finish(sharesWithPlex: false) }
+            Button { finish(sharesWithPlex: false) } label: { Text(ProfileLockCopy.usePlexPINNo) }
             Button("Start Over", role: .cancel) {
                 confirmedPIN = nil
                 firstEntry = nil
@@ -120,7 +122,7 @@ public struct ProfileLockSetupView: View {
         guard let pin = confirmedPIN,
               let lock = ProfileLock.make(pin: pin, matchesPlexPIN: sharesWithPlex) else {
             confirmedPIN = nil
-            errorMessage = String(localized: ProfileLockCopy.mismatch)
+            errorMessage = ProfileLockCopy.mismatch
             firstEntry = nil
             return
         }
@@ -142,9 +144,7 @@ public struct ProfileLockSetupView: View {
             case .invalid:
                 confirmedPIN = nil
                 firstEntry = nil
-                errorMessage = String(
-                    localized: ProfileLockCopy.plexPINMismatch
-                )
+                errorMessage = ProfileLockCopy.plexPINMismatch
             case .unavailable:
                 plexValidationUnavailable = true
             }
@@ -160,14 +160,14 @@ public struct ProfileLockSetupView: View {
         guard first == pin else {
             // Start over rather than letting them retry just the confirmation:
             // when the two disagree we don't know which one they meant.
-            errorMessage = String(localized: ProfileLockCopy.mismatch)
+            errorMessage = ProfileLockCopy.mismatch
             firstEntry = nil
             return
         }
         firstEntry = nil
         guard offersPlexPINReuse else {
             guard let lock = ProfileLock.make(pin: pin, matchesPlexPIN: false) else {
-                errorMessage = String(localized: ProfileLockCopy.mismatch)
+                errorMessage = ProfileLockCopy.mismatch
                 return
             }
             onComplete(lock)

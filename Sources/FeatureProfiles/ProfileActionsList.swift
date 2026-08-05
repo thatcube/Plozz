@@ -104,7 +104,7 @@ public struct ProfileActionsList: View {
 
     @Environment(\.themePalette) private var palette
     @State private var unlocking = false
-    @State private var unlockError: String?
+    @State private var unlockError: LocalizedStringResource?
     @State private var showingLockOptions = false
     @State private var showingKidsOptions = false
     @State private var confirmDelete = false
@@ -134,7 +134,7 @@ public struct ProfileActionsList: View {
         .fullScreenCover(isPresented: $unlocking) {
             PINEntryScaffold(
                 title: ProfileLockCopy.unlockToEdit,
-                name: profile.name,
+                name: Text(verbatim: profile.name),
                 errorMessage: unlockError,
                 onSubmit: submitUnlock,
                 onCancel: { unlocking = false; unlockError = nil }
@@ -161,7 +161,7 @@ public struct ProfileActionsList: View {
 
     private func submitUnlock(_ pin: String) {
         guard let lock = profile.lock, lock.matches(pin: pin) else {
-            unlockError = String(localized: "Incorrect PIN. Try again.")
+            unlockError = ProfileLockCopy.incorrectPIN
             return
         }
         unlockError = nil

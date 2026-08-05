@@ -1216,7 +1216,7 @@ private struct PlexPINEntryView: View {
         let pendingRequest = appState.plexHomeUsers.pendingPlexPINRequest
         return PINEntryScaffold(
             title: "Enter your Plex PIN",
-            name: userName,
+            name: Text(verbatim: userName),
             errorMessage: appState.plexHomeUsers.plexPINError,
             isSubmitting: isSubmitting,
             sequenceStep: sequenceStep,

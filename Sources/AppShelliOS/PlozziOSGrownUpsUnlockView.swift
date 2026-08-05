@@ -16,7 +16,7 @@ struct PlozziOSGrownUpsUnlockView: View {
     let onUnlock: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var errorMessage: String?
+    @State private var errorMessage: LocalizedStringResource?
 
     var body: some View {
         ParentalPINView(
@@ -28,7 +28,7 @@ struct PlozziOSGrownUpsUnlockView: View {
 
     private func submit(_ pin: String) {
         guard appModel.profiles.matchesParentalPIN(pin) else {
-            errorMessage = String(localized: "Incorrect PIN. Try again.")
+            errorMessage = ProfileLockCopy.incorrectPIN
             return
         }
         errorMessage = nil

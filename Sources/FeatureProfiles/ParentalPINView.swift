@@ -16,7 +16,7 @@ import SwiftUI
 public struct ParentalPINView: View {
     private let title: LocalizedStringResource
     private let destination: Profile?
-    private let errorMessage: String?
+    private let errorMessage: LocalizedStringResource?
     private let sequenceStep: PINSequenceStep?
     private let onSubmit: (String) -> Void
     private let onCancel: () -> Void
@@ -27,7 +27,7 @@ public struct ParentalPINView: View {
     public init(
         title: LocalizedStringResource = KidsProfileCopy.parentalPINEnter,
         destination: Profile? = nil,
-        errorMessage: String?,
+        errorMessage: LocalizedStringResource?,
         sequenceStep: PINSequenceStep? = nil,
         onSubmit: @escaping (String) -> Void,
         onCancel: @escaping () -> Void
@@ -43,7 +43,7 @@ public struct ParentalPINView: View {
     public var body: some View {
         PINEntryScaffold(
             title: title,
-            name: destination?.name ?? String(localized: KidsProfileCopy.parentalPIN),
+            name: destination.map { Text(verbatim: $0.name) } ?? Text(KidsProfileCopy.parentalPIN),
             errorMessage: errorMessage,
             sequenceStep: sequenceStep,
             onSubmit: onSubmit,

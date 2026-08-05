@@ -392,7 +392,11 @@ public struct PINProgressDots: View {
                     .animation(.spring(response: 0.26, dampingFraction: 0.55), value: filled)
             }
         }
-        .accessibilityLabel("\(filledCount) of \(ProfileLock.pinLength) digits entered")
+        // Phrased as a position rather than "N digits entered": the latter
+        // quantifies a noun, which needs real plural variations in every language
+        // (Polish has four forms, Arabic six). "2 of 4" needs none and reads the
+        // same to VoiceOver.
+        .accessibilityLabel("PIN progress: \(filledCount) of \(ProfileLock.pinLength)")
     }
 }
 

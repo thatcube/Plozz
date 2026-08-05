@@ -516,6 +516,9 @@ def plural_problems(strings: dict) -> list[str]:
         "Episode %lld", "Track %lld", "Downloading %lld%%", "Downloading %lld percent",
         "Left %lld%%", "Right %lld%%", "%lld queued", "%lld unavailable",
         "+ %lld more", "· +%lld more",
+        # PIN entry positions — "PIN 1 of 2", "PIN progress: 2 of 4". Same family
+        # as "Episode %lld": an index, not a count of anything.
+        "PIN %lld of %lld", "PIN progress: %lld of %lld",
         "The media server returned HTTP %lld instead of a media file.",
     }
 

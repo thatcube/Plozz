@@ -26471,6 +26471,15 @@
         }
       }
     },
+    "Add %@" : {
+
+    },
+    "Add Another Plex Account" : {
+
+    },
+    "Add Another User" : {
+
+    },
     "Add FTP Share" : {
       "localizations" : {
         "ar" : {
@@ -29333,6 +29342,9 @@
           }
         }
       }
+    },
+    "Add a profile, or change the one you have." : {
+
     },
     "Add a server" : {
       "localizations" : {
@@ -57227,6 +57239,9 @@
         }
       }
     },
+    "Choose a profile to change it." : {
+
+    },
     "Choose a profile to continue." : {
       "localizations" : {
         "ar" : {
@@ -60091,6 +60106,9 @@
           }
         }
       }
+    },
+    "Choose whose Seerr permissions, quota, approvals, and quality profile this Plozz profile uses." : {
+
     },
     "Choose your libraries" : {
       "localizations" : {
@@ -65475,6 +65493,9 @@
         }
       }
     },
+    "Connect Seerr" : {
+
+    },
     "Connect Simkl" : {
       "comment" : "Button in iOS Tracker settings that starts connecting a Simkl account.",
       "localizations" : {
@@ -65918,6 +65939,7 @@
       }
     },
     "Connect a Seerr server (Overseerr / Jellyseerr) to discover and request movies, shows & anime for everyone on this Apple TV." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -66136,6 +66158,9 @@
           }
         }
       }
+    },
+    "Connect a Seerr server (Overseerr / Jellyseerr) to discover and request movies, shows & anime for everyone." : {
+
     },
     "Connect a media server or an NFS network share to start watching." : {
       "localizations" : {
@@ -70992,6 +71017,9 @@
         }
       }
     },
+    "Couldn't load the users for this server. You can set this later in Libraries." : {
+
+    },
     "Couldn't load your libraries." : {
       "localizations" : {
         "ar" : {
@@ -75613,6 +75641,9 @@
         }
       }
     },
+    "Couldn’t reach this Plex account. Try signing in again." : {
+
+    },
     "Couldn’t reach this SFTP server." : {
       "localizations" : {
         "ar" : {
@@ -78923,6 +78954,7 @@
     },
     "Current" : {
       "comment" : "Badge shown on the active profile in the iOS profile picker.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -79144,6 +79176,7 @@
     },
     "Current Profile" : {
       "comment" : "Picker label in iOS Settings for switching the active household profile.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -83993,6 +84026,9 @@
           }
         }
       }
+    },
+    "Deleting removes this profile's preferences (theme, playback, subtitles, spoilers, trackers) and which servers it includes. Signed-in server accounts stay shared." : {
+
     },
     "Detail Page" : {
       "comment" : "Settings row and page title for options that control the hero area on a movie or show detail page.",
@@ -93486,6 +93522,9 @@
         }
       }
     },
+    "Done Editing" : {
+
+    },
     "Download" : {
       "comment" : "Action button for starting an offline download of the current item.",
       "localizations" : {
@@ -101300,6 +101339,7 @@
       }
     },
     "Each profile keeps its own settings — theme, playback, subtitles, spoilers, trackers, and Home layout. Only your servers are shared." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -101518,6 +101558,9 @@
           }
         }
       }
+    },
+    "Each profile keeps its own settings — theme, playback, subtitles, spoilers, trackers, and Home layout. Only your servers are shared. Open one to lock it or make it a Kids Profile." : {
+
     },
     "Edit" : {
       "comment" : "Button label for editing the current profile on the tvOS first-run profile confirmation screen and in Settings.",
@@ -101742,6 +101785,7 @@
     },
     "Edit %@" : {
       "comment" : "Accessibility label for the edit button beside a profile row in Settings > Profiles on tvOS. %@ is the profile name.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -102181,6 +102225,9 @@
           }
         }
       }
+    },
+    "Edit Profiles" : {
+
     },
     "Edition" : {
       "comment" : "Label in the media details facts list for a version's edition name, such as a director's cut.",
@@ -106814,6 +106861,7 @@
       }
     },
     "Enter this Plex Home user’s PIN." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -107693,6 +107741,9 @@
           }
         }
       }
+    },
+    "Enter your Plex PIN" : {
+
     },
     "Enter your server’s address — an IP or name like 192.168.1.10 or mynas.local, with a port if it uses one (192.168.68.71:8384). Plozz detects whether it’s SMB or WebDAV automatically." : {
       "localizations" : {
@@ -129858,6 +129909,9 @@
         }
       }
     },
+    "How this profile looks, and who can open it." : {
+
+    },
     "How to sign in" : {
       "localizations" : {
         "ar" : {
@@ -135381,6 +135435,9 @@
         }
       }
     },
+    "Keep Separate" : {
+
+    },
     "Keeps your profiles, settings, and server list in sync across every device signed in to your iCloud account, through your private iCloud. Your logins stay private to each device — sign in or pair each server once. Off by default." : {
       "localizations" : {
         "ar" : {
@@ -136040,6 +136097,9 @@
           }
         }
       }
+    },
+    "Kids Profiles must use a Seerr user. Admin requests are unavailable." : {
+
     },
     "Kinda Warm" : {
       "comment" : "One Circadian warmth level in Appearance settings, representing a light warm tint.",
@@ -154667,6 +154727,9 @@
         }
       }
     },
+    "Name, avatar, and color" : {
+
+    },
     "Nature & Sky" : {
       "localizations" : {
         "ar" : {
@@ -160848,6 +160911,9 @@
           }
         }
       }
+    },
+    "No PIN" : {
+
     },
     "No Plex Account" : {
       "localizations" : {
@@ -167450,6 +167516,9 @@
           }
         }
       }
+    },
+    "No per-user quota or approval." : {
+
     },
     "No photo chosen yet" : {
       "comment" : "Profile preview subtitle when photo-avatar mode is selected but no photo is available.",
@@ -178712,6 +178781,7 @@
     },
     "On This %@" : {
       "comment" : "Section header in the iOS Settings root for device-local pages such as Profiles, Servers, Downloads, and iCloud Sync. %@ is the current device name.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -182679,6 +182749,9 @@
         }
       }
     },
+    "Only this profile is affected. Who you watch as sets whose watchlist it uses." : {
+
+    },
     "Opacity" : {
       "comment" : "Label for subtitle appearance controls that adjust text or background opacity.",
       "localizations" : {
@@ -184663,6 +184736,9 @@
           }
         }
       }
+    },
+    "Opens this profile’s settings" : {
+
     },
     "Optional note" : {
       "comment" : "Multi-line text field in the iOS/iPadOS Send Diagnostics screen for an optional user note sent with the diagnostics report.",
@@ -187976,6 +188052,9 @@
         }
       }
     },
+    "Owner" : {
+
+    },
     "PIN" : {
       "comment" : "Short label beside the lock badge for PIN-protected Plex Home users, and on the tvOS Plex PIN entry screen as the code indicator.",
       "localizations" : {
@@ -188193,6 +188272,26 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "PIN 碼"
+          }
+        }
+      }
+    },
+    "PIN %lld of %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "PIN %1$lld of %2$lld"
+          }
+        }
+      }
+    },
+    "PIN progress: %lld of %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "PIN progress: %1$lld of %2$lld"
           }
         }
       }
@@ -193273,6 +193372,9 @@
           }
         }
       }
+    },
+    "Pick the servers %@ watches with, and who they are on each." : {
+
     },
     "Pick up where you left off, front and centre." : {
       "comment" : "Explanation shown under the Continue Watching hero source option in Settings.",
@@ -199456,6 +199558,7 @@
     },
     "Plex PIN" : {
       "comment" : "Navigation title for the iOS screen where the user enters a Plex Home PIN.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -234202,6 +234305,9 @@
         }
       }
     },
+    "Retry loading users" : {
+
+    },
     "Reuse the subtitle you pick for the rest of a series." : {
       "localizations" : {
         "ar" : {
@@ -249420,6 +249526,9 @@
         }
       }
     },
+    "Seerr is shared by every Plozz profile. The acting user is chosen separately for each profile." : {
+
+    },
     "Seerr users" : {
       "comment" : "Caption above the Seerr user list in settings where a profile is mapped to request as a specific Seerr user.",
       "localizations" : {
@@ -253392,6 +253501,9 @@
           }
         }
       }
+    },
+    "Set Up %@" : {
+
     },
     "Set Up Another Device" : {
       "localizations" : {
@@ -257371,6 +257483,7 @@
       }
     },
     "Settings below are saved on this profile." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -260017,6 +260130,7 @@
     },
     "Shared across every profile on this %@." : {
       "comment" : "Footer text under shared settings sections on iPhone or iPad Settings. %@ is the device name.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -260237,6 +260351,7 @@
       }
     },
     "Shared across every profile on this Apple TV." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -260455,6 +260570,9 @@
           }
         }
       }
+    },
+    "Shared across every profile." : {
+
     },
     "Shared rows" : {
       "localizations" : {
@@ -266636,6 +266754,9 @@
         }
       }
     },
+    "Sign in as %@" : {
+
+    },
     "Sign in to %@" : {
       "comment" : "Title on the tvOS username-and-password sign-in screen for a specific server. %@ is the server name.",
       "localizations" : {
@@ -267517,7 +267638,11 @@
         }
       }
     },
+    "Sign in to a server under Everyone › Servers, then choose what you watch here." : {
+
+    },
     "Sign in to a server under This Apple TV › Servers, then choose what you watch here." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -271806,6 +271931,12 @@
           }
         }
       }
+    },
+    "Signing in adds the account to this Apple TV. Any profile can then watch as it." : {
+
+    },
+    "Signing in adds the user to this Apple TV. Any profile can then watch as them." : {
+
     },
     "Signs everyone out and removes this server." : {
       "localizations" : {
@@ -287277,6 +287408,7 @@
     },
     "Switch Profile" : {
       "comment" : "Button label in tvOS Settings that opens the profile picker.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -298951,7 +299083,11 @@
         }
       }
     },
+    "The linked Seerr user no longer exists. Re-link this profile in Settings ▸ Everyone ▸ Seerr." : {
+
+    },
     "The linked Seerr user no longer exists. Re-link this profile in Settings ▸ This Apple TV ▸ Seerr." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -304894,7 +305030,11 @@
         }
       }
     },
+    "They're rendered as images by the source, so font, color, size and position controls don't apply." : {
+
+    },
     "They're rendered as images by the source, so font, colour, size and position controls don't apply." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -305336,6 +305476,7 @@
       }
     },
     "This Apple TV" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -305777,6 +305918,7 @@
     },
     "This Profile" : {
       "comment" : "Section header in iOS Settings for options saved only to the active profile, shown when profiles are enabled.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -311781,6 +311923,12 @@
           }
         }
       }
+    },
+    "This profile watches, and keeps its watchlist, as the user you pick." : {
+
+    },
+    "This profile will watch — and keep its watchlist — as whoever you pick." : {
+
     },
     "This removes %@'s sign-in to %@ on this Apple TV." : {
       "comment" : "tvOS sign-out confirmation message for a non-Plex account on a server. %1$@ is the user name, %2$@ is the server name.",
@@ -329089,6 +329237,7 @@
     },
     "Unlock" : {
       "comment" : "Confirmation button in the iOS Plex PIN sheet. Submits the entered PIN to unlock the selected Plex Home user.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -329310,6 +329459,7 @@
     },
     "Unlock %@" : {
       "comment" : "Section header in the iOS Plex PIN sheet. %@ is the Plex Home user name being unlocked.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -340656,6 +340806,15 @@
         }
       }
     },
+    "We found another user" : {
+
+    },
+    "We found more of your setup" : {
+
+    },
+    "We found more users" : {
+
+    },
     "We found your server" : {
       "localizations" : {
         "ar" : {
@@ -340876,7 +341035,11 @@
         }
       }
     },
+    "We found your servers" : {
+
+    },
     "We found your setup" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -341978,6 +342141,9 @@
           }
         }
       }
+    },
+    "What does this profile watch?" : {
+
     },
     "What to call this share on the Home screen." : {
       "localizations" : {
@@ -343739,6 +343905,15 @@
           }
         }
       }
+    },
+    "Who are you on %@?" : {
+
+    },
+    "Who this profile is on %@." : {
+
+    },
+    "Who this profile is on this server." : {
+
     },
     "Who's watching?" : {
       "comment" : "Title of the tvOS profile picker screen. Asks which local Plozz profile should be opened.",
@@ -357156,12 +357331,6 @@
       "comment" : "Shown when a server responds that too many requests have been made.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "The service is asking us to slow down. Try again in a moment."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -357202,6 +357371,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Η υπηρεσία μάς ζητά να επιβραδύνουμε. Δοκιμάστε ξανά σε λίγο."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The service is asking us to slow down. Try again in a moment."
           }
         },
         "es" : {
@@ -367806,12 +367981,6 @@
       "comment" : "Accessibility value for a title not saved to Watchlist.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Not in Watchlist"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -367852,6 +368021,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Όχι στη Λίστα παρακολούθησης"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Not in Watchlist"
           }
         },
         "es" : {
@@ -368034,12 +368209,6 @@
       "comment" : "Accessibility value for a title saved to Watchlist.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "In Watchlist"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -368080,6 +368249,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Στη Λίστα παρακολούθησης"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "In Watchlist"
           }
         },
         "es" : {
@@ -368944,12 +369119,6 @@
       "comment" : "Transient confirmation after setting music to repeat the full queue.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Repeat All"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -368990,6 +369159,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Επανάληψη όλων"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Repeat All"
           }
         },
         "es" : {
@@ -369172,12 +369347,6 @@
       "comment" : "Transient confirmation after turning music repeat off.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Repeat Off"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -369218,6 +369387,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Επανάληψη ανενεργή"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Repeat Off"
           }
         },
         "es" : {
@@ -369400,12 +369575,6 @@
       "comment" : "Transient confirmation after setting music to repeat the current track.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Repeat One"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -369446,6 +369615,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Επανάληψη ενός"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Repeat One"
           }
         },
         "es" : {
@@ -369628,12 +369803,6 @@
       "comment" : "Transient confirmation after turning music shuffle off.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Shuffle Off"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -369674,6 +369843,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Τυχαία σειρά ανενεργή"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Shuffle Off"
           }
         },
         "es" : {
@@ -369856,12 +370031,6 @@
       "comment" : "Transient confirmation after turning music shuffle on.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Shuffle On"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -369902,6 +370071,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Τυχαία σειρά ενεργή"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Shuffle On"
           }
         },
         "es" : {
@@ -376858,6 +377033,18 @@
         }
       }
     },
+    "plexPIN.switchFailed" : {
+      "comment" : "Shown under the Plex PIN pad when switching users failed for a reason other than a wrong PIN.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Couldn’t switch Plex user. Please try again."
+          }
+        }
+      }
+    },
     "plozz.app/anilist" : {
       "comment" : "Short URL shown on the AniList connection screen in Settings > Integrations on tvOS, beside the QR code and code entry field. The user opens this address on another device to authorize AniList.",
       "localizations" : {
@@ -377980,6 +378167,18 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "符號"
+          }
+        }
+      }
+    },
+    "profileLock.incorrectPIN" : {
+      "comment" : "Shown under the PIN pad when the entered PIN is wrong.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Incorrect PIN. Try again."
           }
         }
       }
@@ -379788,6 +379987,78 @@
         }
       }
     },
+    "settings.kidsProfile.addTile" : {
+      "comment" : "Tile on the profile picker that creates a new restricted profile, shown beside the ordinary Add Profile tile.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Add Kids Profile"
+          }
+        }
+      }
+    },
+    "settings.kidsProfile.explanation" : {
+      "comment" : "Explains what marking a profile as a Kids Profile does. The last sentence matters: there is no content filtering yet and the copy must not imply otherwise.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Hides shared settings, so servers and profiles can't be changed from it. Doesn't filter what can be watched."
+          }
+        }
+      }
+    },
+    "settings.kidsProfile.needsParentalPIN" : {
+      "comment" : "Warning under the Kids Profile row when no household Parental PIN exists. Points at the row directly, because a Kids Profile hides the household section where the PIN otherwise lives.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Not restricted yet — open Kids Profile to add a Parental PIN."
+          }
+        }
+      }
+    },
+    "settings.kidsProfile.title" : {
+      "comment" : "Toggle marking a profile as a child's, which hides the shared household settings while it's in use.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Kids Profile"
+          }
+        }
+      }
+    },
+    "settings.kidsProfile.turnOff" : {
+      "comment" : "Confirming button that lifts a profile's Kids restriction.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Turn Off Kids Profile"
+          }
+        }
+      }
+    },
+    "settings.kidsProfile.turnOn" : {
+      "comment" : "Confirming button that marks a profile as a child's.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Turn On Kids Profile"
+          }
+        }
+      }
+    },
     "settings.nav.attributions" : {
       "comment" : "Navigation row for the screen crediting third-party software and data sources.",
       "localizations" : {
@@ -380238,6 +380509,654 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "媒體庫"
+          }
+        }
+      }
+    },
+    "settings.parentalControls.manageProfile" : {
+      "comment" : "Row inside Parental Controls leading to this profile's own management page.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Manage Profile"
+          }
+        }
+      }
+    },
+    "settings.parentalControls.open" : {
+      "comment" : "Subtitle of the Parental Controls group after the Parental PIN has been entered, making the limited duration clear.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Unlocked until you switch profiles"
+          }
+        }
+      }
+    },
+    "settings.parentalControls.profileDetail" : {
+      "comment" : "Subtitle of the Manage Profile row. Lists what the page holds; must not repeat the row's own title.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Name, avatar, lock, and Kids Profile"
+          }
+        }
+      }
+    },
+    "settings.parentalControls.title" : {
+      "comment" : "Heading for the group of settings on a Kids Profile that only a grown-up may change.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Parental Controls"
+          }
+        }
+      }
+    },
+    "settings.parentalPIN.change" : {
+      "comment" : "Action that replaces the household's existing Parental PIN.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Change Parental PIN"
+          }
+        }
+      }
+    },
+    "settings.parentalPIN.confirmTitle" : {
+      "comment" : "Title of the second step when creating a Parental PIN, confirming the digits match.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter it again"
+          }
+        }
+      }
+    },
+    "settings.parentalPIN.create" : {
+      "comment" : "Action that sets the household's Parental PIN for the first time.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Create a Parental PIN"
+          }
+        }
+      }
+    },
+    "settings.parentalPIN.enter" : {
+      "comment" : "Title of the PIN screen shown when leaving a Kids Profile or opening its restricted settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter the Parental PIN"
+          }
+        }
+      }
+    },
+    "settings.parentalPIN.explanation" : {
+      "comment" : "Subtitle of the Parental PIN page. Must stay honest that a Kids Profile alone restricts nothing.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "One PIN for the household. Without it, Kids Profiles aren't restricted."
+          }
+        }
+      }
+    },
+    "settings.parentalPIN.remove" : {
+      "comment" : "Action that deletes the household's Parental PIN.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Remove Parental PIN"
+          }
+        }
+      }
+    },
+    "settings.parentalPIN.removeDetail" : {
+      "comment" : "Shown when removing the household Parental PIN, clarifying that Kids Profiles are not turned off by it.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Kids Profiles stay on, but nothing will be locked."
+          }
+        }
+      }
+    },
+    "settings.parentalPIN.setTitle" : {
+      "comment" : "Title of the screen that collects a new household Parental PIN.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Create a Parental PIN"
+          }
+        }
+      }
+    },
+    "settings.parentalPIN.title" : {
+      "comment" : "The household PIN required to leave a Kids Profile or change its restricted settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Parental PIN"
+          }
+        }
+      }
+    },
+    "settings.profile.nameAndAvatar" : {
+      "comment" : "Row opening the profile's own name, avatar and colour. Available to a Kids Profile, unlike the parental controls.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Name & Avatar"
+          }
+        }
+      }
+    },
+    "settings.profileLock.confirm" : {
+      "comment" : "Heading for the second, confirming entry of a new PIN.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter your PIN again"
+          }
+        }
+      }
+    },
+    "settings.profileLock.create" : {
+      "comment" : "Button that starts setting a PIN on this profile. Short on purpose — it sits under a title that already says what's being locked.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Create PIN"
+          }
+        }
+      }
+    },
+    "settings.profileLock.create.subtitle" : {
+      "comment" : "Supporting line under the heading while choosing a new PIN, matching the wording on the preceding offer screen.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter a 4-digit PIN to lock this profile."
+          }
+        }
+      }
+    },
+    "settings.profileLock.create.title" : {
+      "comment" : "Heading on the screen where a new PIN is chosen.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Create a PIN"
+          }
+        }
+      }
+    },
+    "settings.profileLock.createAlongsidePlex.subtitle" : {
+      "comment" : "Explains why a separate Plozz PIN can still be useful when the selected Plex user already requires a PIN.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This user already has a Plex PIN. Add another to keep the profile locked if its Plex user changes."
+          }
+        }
+      }
+    },
+    "settings.profileLock.createAlongsidePlex.title" : {
+      "comment" : "Heading when adding a Plozz Profile Lock to a profile already protected by its selected Plex user's PIN.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Add a Profile PIN?"
+          }
+        }
+      }
+    },
+    "settings.profileLock.delete" : {
+      "comment" : "Button that removes the PIN so the profile opens without one.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Remove PIN"
+          }
+        }
+      }
+    },
+    "settings.profileLock.deviceOnly" : {
+      "comment" : "Caveat shown when a Profile Lock is set while iCloud Sync is off, meaning the user's other devices won't have the lock.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "iCloud Sync is off, so this lock only applies on this device."
+          }
+        }
+      }
+    },
+    "settings.profileLock.editPIN" : {
+      "comment" : "Button that replaces the existing Profile Lock PIN with a new one.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Change PIN"
+          }
+        }
+      }
+    },
+    "settings.profileLock.explanation" : {
+      "comment" : "Explains what turning on a Profile Lock does.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Require a PIN to open this profile."
+          }
+        }
+      }
+    },
+    "settings.profileLock.forgot" : {
+      "comment" : "Button offering a way out when the user can't remember their Profile Lock PIN.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Forgot PIN?"
+          }
+        }
+      }
+    },
+    "settings.profileLock.forgot.detail" : {
+      "comment" : "Explains how to recover from a forgotten Profile Lock PIN. There is no email reset because Plozz has no account of its own.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Removing the lock from another signed-in device, or signing out and setting Plozz up again, will clear it."
+          }
+        }
+      }
+    },
+    "settings.profileLock.manage.subtitle" : {
+      "comment" : "Explains why a PIN is being asked for before adding a profile. Only shown for adding — editing a locked profile asks for that profile's own PIN, which needs no explanation.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Adding a profile needs the PIN from a locked profile."
+          }
+        }
+      }
+    },
+    "settings.profileLock.manage.title" : {
+      "comment" : "Heading shown when a PIN is needed before adding or editing a profile.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter your PIN"
+          }
+        }
+      }
+    },
+    "settings.profileLock.mismatch" : {
+      "comment" : "Error shown when the confirming PIN entry differs from the first.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Those PINs didn't match. Start again."
+          }
+        }
+      }
+    },
+    "settings.profileLock.off" : {
+      "comment" : "Value shown on the Profile Lock row when no PIN is set.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Off"
+          }
+        }
+      }
+    },
+    "settings.profileLock.offer.message" : {
+      "comment" : "Brief explanation of what creating a Profile Lock does.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Add a 4-digit PIN to lock this profile."
+          }
+        }
+      }
+    },
+    "settings.profileLock.offer.message.kids" : {
+      "comment" : "Body of the prompt offering a PIN on a newly created Kids Profile. Locking the child's own profile is the common misunderstanding, so this points the other way in one line.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Usually you lock the grown-ups' profiles instead."
+          }
+        }
+      }
+    },
+    "settings.profileLock.offer.title" : {
+      "comment" : "Title of the optional PIN step shown after a profile is created.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Create a PIN?"
+          }
+        }
+      }
+    },
+    "settings.profileLock.on" : {
+      "comment" : "Value shown on the Profile Lock row when a PIN is set.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "On"
+          }
+        }
+      }
+    },
+    "settings.profileLock.plexAlreadyAsks" : {
+      "comment" : "Second line on the Profile Lock row when the profile has no Plozz lock but does play as a PIN-protected Plex Home user.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This user already has a Plex PIN."
+          }
+        }
+      }
+    },
+    "settings.profileLock.plexPIN" : {
+      "comment" : "Value shown when Plex asks for a PIN but the Plozz profile itself does not have a Profile Lock.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Plex PIN"
+          }
+        }
+      }
+    },
+    "settings.profileLock.plexPINMismatch" : {
+      "comment" : "Error shown when the proposed shared Profile Lock PIN is rejected by Plex.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "That isn’t this user’s Plex PIN."
+          }
+        }
+      }
+    },
+    "settings.profileLock.plexPINUnavailable.detail" : {
+      "comment" : "Recovery choices when Plex PIN verification is unavailable.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Try again, or keep the Profile Lock PIN separate."
+          }
+        }
+      }
+    },
+    "settings.profileLock.plexPINUnavailable.title" : {
+      "comment" : "Title shown when Plex cannot be reached while verifying a proposed shared PIN.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Couldn’t verify the Plex PIN"
+          }
+        }
+      }
+    },
+    "settings.profileLock.title" : {
+      "comment" : "Settings row for an optional 4-digit PIN that must be entered to open this profile.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Profile Lock"
+          }
+        }
+      }
+    },
+    "settings.profileLock.unlock.title" : {
+      "comment" : "Heading on the screen asking for a profile's PIN before opening it. No supporting line: the profile's name and avatar sit right beneath it, so anything else would just restate the obvious.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter your PIN"
+          }
+        }
+      }
+    },
+    "settings.profileLock.unlockToEdit" : {
+      "comment" : "Row and heading shown when someone opens a locked profile's settings. Its PIN is required before anything about it can be changed.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter PIN to Edit"
+          }
+        }
+      }
+    },
+    "settings.profileLock.unlockToEdit.detail" : {
+      "comment" : "Second line under 'Enter PIN to Edit'.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This profile is locked."
+          }
+        }
+      }
+    },
+    "settings.profileLock.usePlexPIN" : {
+      "comment" : "Asked after choosing a PIN, when this profile plays as a PIN-protected Plex Home user, so one PIN can open both.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Same as your Plex PIN?"
+          }
+        }
+      }
+    },
+    "settings.profileLock.usePlexPIN.detail" : {
+      "comment" : "Explains what saying yes does — including that the PIN is sent to Plex, which the person should know before agreeing.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "If yes, Plozz can use one PIN entry for both."
+          }
+        }
+      }
+    },
+    "settings.profileLock.usePlexPIN.no" : {
+      "comment" : "Declines forwarding the PIN to Plex; the Plex prompt will still appear separately.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "No, Keep Separate"
+          }
+        }
+      }
+    },
+    "settings.profileLock.usePlexPIN.yes" : {
+      "comment" : "Confirms that the Plozz PIN and the Plex PIN match, so Plozz may forward it.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Yes, Same PIN"
+          }
+        }
+      }
+    },
+    "settings.profiles.manage" : {
+      "comment" : "Opens the profile picker when the household has only one profile, so there is nothing to switch to.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Add or Edit Profiles"
+          }
+        }
+      }
+    },
+    "settings.profiles.switch" : {
+      "comment" : "Opens the profile picker when the household has more than one profile.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Switch Profile"
+          }
+        }
+      }
+    },
+    "settings.scope.everyone" : {
+      "comment" : "Heading for the group of settings shared by every profile, as opposed to the section holding the current profile's own settings.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Everyone"
+          }
+        }
+      }
+    },
+    "settings.scope.everyone.local" : {
+      "comment" : "Subtitle for the group of settings shared by every profile when iCloud Sync is off, so they stay on this one device. The placeholder is the device kind, e.g. 'Apple TV' or 'iPhone'.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Shared across every profile on this %@."
+          }
+        }
+      }
+    },
+    "settings.scope.everyone.synced" : {
+      "comment" : "Subtitle for the group of settings shared by every profile, explaining that they also follow the user to their other devices.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Shared across every profile, on all your devices."
+          }
+        }
+      }
+    },
+    "settings.scope.profile.local" : {
+      "comment" : "Subtitle under a profile's name in Settings when iCloud Sync is off, so the settings stay on this one device. The placeholder is the device kind, e.g. 'Apple TV' or 'iPhone'.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Saved to your profile on this %@."
+          }
+        }
+      }
+    },
+    "settings.scope.profile.synced" : {
+      "comment" : "Subtitle under a profile's name in Settings, explaining that the settings below belong to this profile and follow the user to their other devices.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Saved to your profile, on all your devices."
           }
         }
       }
@@ -392543,12 +393462,6 @@
       "comment" : "Shown when Trakt refuses the app's own client credentials, so no sign-in can succeed until they are replaced.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Trakt rejected this app's API credentials. The application may have been removed, or its API access may no longer be active."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -392589,6 +393502,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Το Trakt απέρριψε τα διαπιστευτήρια API αυτής της εφαρμογής. Η εφαρμογή μπορεί να έχει αφαιρεθεί ή η πρόσβασή της στο API να μην είναι πλέον ενεργή."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Trakt rejected this app's API credentials. The application may have been removed, or its API access may no longer be active."
           }
         },
         "es" : {
@@ -398218,12 +399137,6 @@
       "comment" : "Transient confirmation after a title is saved locally to the user's Watchlist.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Added to Watchlist"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -398264,6 +399177,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Προστέθηκε στη Λίστα παρακολούθησης"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Added to Watchlist"
           }
         },
         "es" : {
@@ -398446,12 +399365,6 @@
       "comment" : "Transient message shown when saving a title to, or removing it from, the Watchlist did not succeed.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Couldn't update Watchlist"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -398492,6 +399405,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δεν ήταν δυνατή η ενημέρωση της Λίστας παρακολούθησης"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Couldn't update Watchlist"
           }
         },
         "es" : {
@@ -398674,12 +399593,6 @@
       "comment" : "Transient confirmation after a title is removed locally from the user's Watchlist.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Removed from Watchlist"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -398720,6 +399633,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αφαιρέθηκε από τη Λίστα παρακολούθησης"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Removed from Watchlist"
           }
         },
         "es" : {

@@ -304,6 +304,9 @@ public struct ProfileEditorView: View {
     /// they stay solid at rest and dissolve right against the line, as if
     /// sliding under the preview.
     private static var emojiRailDividerBleed: CGFloat { columnGap + pickerInset }
+    /// Extra viewport on the trailing side, so a little more of the next emoji
+    /// peeks past the fade instead of the rail ending flush with the column.
+    private static let emojiRailTrailingBleed: CGFloat = 16
 
     private var tvOSBody: some View {        ZStack {
             AppBackground(palette: palette).ignoresSafeArea()
@@ -727,6 +730,9 @@ public struct ProfileEditorView: View {
         // shifts it left, without changing the width this rail reports to the
         // column. That puts the mask's leading fade on the divider itself.
         .padding(.leading, -Self.emojiRailDividerBleed)
+        // No matching content inset on this side: the point is to let the rail
+        // run further right, so more of the next emoji shows before it fades.
+        .padding(.trailing, -Self.emojiRailTrailingBleed)
         // Same pattern as Home's media rows: expand the clipped viewport around
         // focused content, then cancel that extra room from layout so category
         // spacing remains unchanged.

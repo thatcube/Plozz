@@ -162,6 +162,9 @@ private enum PlozziOSSettingsDestination: Hashable {
     /// The profile's own name, avatar and colour. Deliberately outside Parental
     /// Controls — it can't escalate anything.
     case profileAppearance
+    /// Choosing a different profile. Always available, including from a Kids
+    /// Profile — the Parental PIN gate is the protection, not hiding the exit.
+    case switchProfile
     /// The household's Parental PIN.
     case parentalPIN
     case trackers
@@ -259,6 +262,16 @@ private struct PlozziOSSettingsSplitView: View {
                     // anyone actually opens Settings to change, where the device
                     // group is setup done once.
                     SettingsSectionGroup(verbatim: appModel.profiles.activeProfile.name) {
+                        // Always here, Kids Profile or not. It used to live only
+                        // in the household group, which a Kids Profile hides —
+                        // leaving that profile with no way out on iOS.
+                        if appModel.profiles.profiles.count > 1 {
+                            settingsRow(
+                                .switchProfile,
+                                title: "Switch Profile",
+                                systemImage: "arrow.trianglehead.2.clockwise.rotate.90"
+                            )
+                        }
                         // On a Kids Profile, Libraries moves to its own
                         // parent-controlled group below — it's a parent's
                         // setting, and sitting it among the child's own
@@ -546,6 +559,8 @@ private struct PlozziOSSettingsSplitView: View {
             }
         case .parentalPIN:
             PlozziOSParentalPINSettingsView(appModel: appModel)
+        case .switchProfile:
+            PlozziOSSwitchProfileView(appModel: appModel, onClose: onClose)
         case .profileAppearance:
             PlozziOSProfileEditorHost(
                 appModel: appModel,
@@ -742,6 +757,18 @@ private struct PlozziOSSettingsCompactMenu: View {
 
                 // Profile first — see the compact layout above.
                 SettingsSectionGroup(verbatim: appModel.profiles.activeProfile.name) {
+                // See the split-view twin: always available, so a Kids Profile
+                // isn't a dead end.
+                if appModel.profiles.profiles.count > 1 {
+                    NavigationLink {
+                        PlozziOSSwitchProfileView(appModel: appModel) { dismiss() }
+                    } label: {
+                        Label(
+                            "Switch Profile",
+                            systemImage: "arrow.trianglehead.2.clockwise.rotate.90"
+                        )
+                    }
+                }
                 // On a Kids Profile this moves to the Parental Controls group
                 // below — see the split-view twin.
                 if !showsParentalControlsSection {

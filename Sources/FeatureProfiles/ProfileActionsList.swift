@@ -147,14 +147,20 @@ public struct ProfileActionsList: View {
             )
 
             actionRow(
-                icon: profile.isLocked ? "lock.fill" : "lock.open",
+                icon: profile.isLocked || offersPlexPINReuse
+                    ? "lock.fill"
+                    : "lock.open",
                 title: ProfileLockCopy.title,
                 // A profile bound to a PIN-protected Plex user already asks for a
                 // code, so a bare "Off" here reads as a bug. Say which lock is
                 // which instead: Plex guards playing AS that user, a Profile Lock
                 // guards the whole profile.
                 subtitle: (!profile.isLocked && offersPlexPINReuse) ? ProfileLockCopy.plexAlreadyAsks : nil,
-                value: profile.isLocked ? ProfileLockCopy.on : ProfileLockCopy.off
+                value: profile.isLocked
+                    ? ProfileLockCopy.on
+                    : (offersPlexPINReuse
+                        ? ProfileLockCopy.plexPIN
+                        : ProfileLockCopy.off)
             ) {
                 // Straight to the thing. No summary page in between.
                 if profile.isLocked {

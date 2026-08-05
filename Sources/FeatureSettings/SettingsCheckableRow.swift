@@ -80,22 +80,4 @@ struct SettingsCheckableRow: View {
     }
 }
 
-/// The shared trailing checkmark glyph. Slightly smaller than the old inline
-/// `.title3` mark (maintainer feedback) so a column of them reads lighter, and
-/// smaller again at `.secondary` prominence for child rows.
-struct SettingsCheckmark: View {
-    let isChecked: Bool
-    var prominence: SettingsRowProminence = .primary
-
-    private var glyphFont: Font {
-        prominence == .primary ? .headline.weight(.bold) : .callout.weight(.bold)
-    }
-
-    var body: some View {
-        Image(systemName: "checkmark")
-            .font(glyphFont)
-            .opacity(isChecked ? 1 : 0)
-            .accessibilityHidden(true)
-    }
-}
 #endif

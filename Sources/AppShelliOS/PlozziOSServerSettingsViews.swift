@@ -362,9 +362,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
             HStack {
                 Text(verbatim: library.title)
                 Spacer(minLength: 12)
-                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                    .font(.title3)
+                SettingsCheckmark(isChecked: isOn, prominence: .secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())

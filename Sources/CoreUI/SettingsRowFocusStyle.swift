@@ -316,6 +316,36 @@ public struct SettingsSelectionIndicator: View {
     }
 }
 
+/// The shared trailing checkmark for a checked settings row.
+///
+/// Lives in CoreUI so both shells draw the SAME mark. It used to be defined only
+/// in the tvOS-side settings module, so when the iPhone/iPad Libraries screen
+/// grew checkmarks they were filled circles against tvOS's bare glyph — the same
+/// idea rendered as two different controls depending on the device.
+///
+/// Reserves its slot when unchecked (opacity, not absence) so a column doesn't
+/// shift as rows are ticked.
+public struct SettingsCheckmark: View {
+    public let isChecked: Bool
+    public var prominence: SettingsRowProminence
+
+    public init(isChecked: Bool, prominence: SettingsRowProminence = .primary) {
+        self.isChecked = isChecked
+        self.prominence = prominence
+    }
+
+    private var glyphFont: Font {
+        prominence == .primary ? .headline.weight(.bold) : .callout.weight(.bold)
+    }
+
+    public var body: some View {
+        Image(systemName: "checkmark")
+            .font(glyphFont)
+            .opacity(isChecked ? 1 : 0)
+            .accessibilityHidden(true)
+    }
+}
+
 /// Label style for standard settings rows: the leading icon is rendered in the
 /// shared ``ThemePalette/secondaryText`` tier while the title keeps its inherited
 /// (primary) colour. Applied once at the group level so every plain

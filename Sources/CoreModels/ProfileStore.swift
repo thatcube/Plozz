@@ -418,7 +418,18 @@ public final class ProfilesModel {
     /// settings hidden) and nothing is gated; with it, Kids is *enforcement*.
     /// Deriving both behaviours from one optional is what stops a setting ever
     /// being locked behind a key nobody holds.
-    public private(set) var parentalPIN: ParentalPIN?
+    ///
+    /// Read from the household's FIRST profile, which is where it's stored so it
+    /// syncs — see ``Profile/parentalPIN``. Falls back to the device-local store
+    /// for a PIN written before it synced, so upgrading doesn't silently unlock
+    /// a household.
+    public var parentalPIN: ParentalPIN? {
+        profiles.first?.parentalPIN ?? legacyLocalParentalPIN
+    }
+
+    /// A Parental PIN written by a build that kept it device-local. Migrated onto
+    /// the first profile the next time one is set, and read until then.
+    @ObservationIgnored private var legacyLocalParentalPIN: ParentalPIN?
 
     private let store: ProfilePersisting
 
@@ -445,7 +456,7 @@ public final class ProfilesModel {
         // until the user explicitly toggles it.
         let multi = migrated.count > 1
         self.askProfileOnStartup = store.askProfileOnStartupOverride() ?? multi
-        self.parentalPIN = store.parentalPIN()
+        self.legacyLocalParentalPIN = store.parentalPIN()
         // Intentionally does *not* persist a defaulted selection: leaving it
         // unstored is what lets a fresh Apple TV system user get the picker.
     }
@@ -460,12 +471,22 @@ public final class ProfilesModel {
 
     /// Sets or clears the household's Parental PIN.
     ///
+    /// Written to the first profile so it syncs to every device — a parental
+    /// control that applied on one device only wouldn't control anything.
+    /// Advances a field-level revision so an unrelated edit arriving from a
+    /// stale device can't erase it.
+    ///
     /// Clearing it doesn't touch any Kids Profile: those stay on, they simply
     /// stop being enforced. That's deliberate — "I don't need the PIN any more"
     /// shouldn't silently hand a child the household settings back.
     public func setParentalPIN(_ pin: ParentalPIN?) {
-        parentalPIN = pin
-        store.setParentalPIN(pin)
+        guard var anchor = profiles.first else { return }
+        anchor.replaceParentalPIN(with: pin)
+        update(anchor)
+        // The device-local copy is now redundant; clear it so the synced value is
+        // the only source and a stale local one can't resurrect a removed PIN.
+        legacyLocalParentalPIN = nil
+        store.setParentalPIN(nil)
     }
 
     /// Whether `pin` is the household's Parental PIN. `false` when none is set,

@@ -424,6 +424,13 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
     /// Whether this is a restricted Kids Profile. Synced for the same reason the
     /// lock is: a restriction that only applied on one device wouldn't restrict
     /// anything.
+    /// The household's Parental PIN, carried on the first profile's record.
+    /// Synced for the same reason the lock is: a parental control that applied on
+    /// one device only wouldn't control anything. Salted verifier, never the PIN.
+    public var parentalPIN: ParentalPIN?
+    /// Field-level revision, so an unrelated edit from a stale device can't erase
+    /// a newly-set Parental PIN.
+    public var parentalPINRevision: ProfileLockRevision?
     public var isKidsProfile: Bool?
     /// Whether the profile still owes its setup pass. Synced so a half-created
     /// profile doesn't start importing on a second device either.
@@ -442,6 +449,8 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
         self.avatarEmojiColorIndex = p.avatarEmojiColorIndex
         self.lock = p.lock
         self.lockRevision = p.effectiveLockRevision
+        self.parentalPIN = p.parentalPIN
+        self.parentalPINRevision = p.effectiveParentalPINRevision
         self.isKidsProfile = p.isKidsProfile
         self.isAwaitingSetup = p.isAwaitingSetup
     }
@@ -480,6 +489,16 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
             // legacy-baselined) lock state to protect.
             p.lock = lock
         }
+        // Same revision rule as the lock, for the same reason.
+        let localPINRevision = existing.effectiveParentalPINRevision
+        if let incomingPINRevision = parentalPINRevision {
+            if localPINRevision == nil || incomingPINRevision > localPINRevision! {
+                p.parentalPIN = parentalPIN
+                p.parentalPINRevision = incomingPINRevision
+            }
+        } else if localPINRevision == nil {
+            p.parentalPIN = parentalPIN
+        }
         p.isKidsProfile = isKidsProfile
         p.isAwaitingSetup = isAwaitingSetup
         return p
@@ -493,6 +512,7 @@ public struct ProfileSyncDTO: Codable, Hashable, Sendable {
             avatarImageURL: SyncURLSanitizer.sanitize(string: avatarImageURL),
             avatarEmoji: avatarEmoji, avatarEmojiColorIndex: avatarEmojiColorIndex,
             lock: lock, lockRevision: lockRevision,
+            parentalPIN: parentalPIN, parentalPINRevision: parentalPINRevision,
             isKidsProfile: isKidsProfile, isAwaitingSetup: isAwaitingSetup)
     }
 }

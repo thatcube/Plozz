@@ -645,6 +645,20 @@ private struct PlozziOSSettingsCompactMenu: View {
     @State private var showMetadata = false
     private var developerMode: DeveloperModeModel { .shared }
     @State private var showDeveloperUnlockedAlert = false
+    /// Whether the Parental PIN has been entered for the Kids Profile currently
+    /// open. View state, cleared when the profile changes.
+    @State private var isParentalUnlocked = false
+
+    /// Whether this profile shows a separate parent-controlled group. Only a
+    /// Kids Profile does, and only once a Parental PIN exists.
+    private var showsParentalControlsSection: Bool {
+        appModel.profiles.activeProfile.isKids
+            && appModel.profiles.parentalPIN != nil
+    }
+
+    private var isParentalSealed: Bool {
+        showsParentalControlsSection && !isParentalUnlocked
+    }
 
     var body: some View {
         ScrollView {
@@ -657,17 +671,21 @@ private struct PlozziOSSettingsCompactMenu: View {
 
                 // Profile first — see the compact layout above.
                 SettingsSectionGroup(verbatim: appModel.profiles.activeProfile.name) {
-                NavigationLink {
-                    PlozziOSMyLibrariesSettingsView(
-                        appModel: appModel,
-                        onAddServer: onAddServer,
-                        onAddUser: onAddUser
-                    )
-                } label: {
-                    Label(
-                        SettingsCopy.libraries,
-                        systemImage: "rectangle.stack"
-                    )
+                // On a Kids Profile this moves to the Parental Controls group
+                // below — see the split-view twin.
+                if !showsParentalControlsSection {
+                    NavigationLink {
+                        PlozziOSMyLibrariesSettingsView(
+                            appModel: appModel,
+                            onAddServer: onAddServer,
+                            onAddUser: onAddUser
+                        )
+                    } label: {
+                        Label(
+                            SettingsCopy.libraries,
+                            systemImage: "rectangle.stack"
+                        )
+                    }
                 }
                 NavigationLink {
                     PlozziOSTrackerSettingsView(appModel: appModel)
@@ -735,6 +753,51 @@ private struct PlozziOSSettingsCompactMenu: View {
                 Text(profileScopeFooter)
             }
 
+                // Real rows with real names; the grouping and the lock carry the
+                // meaning. Mirrors the split view and tvOS.
+                if showsParentalControlsSection {
+                    SettingsSectionGroup(KidsProfileCopy.parentalControls) {
+                        if isParentalSealed {
+                            NavigationLink {
+                                PlozziOSGrownUpsUnlockView(appModel: appModel) {
+                                    isParentalUnlocked = true
+                                }
+                            } label: {
+                                Label(SettingsCopy.libraries, systemImage: "lock.fill")
+                            }
+                            NavigationLink {
+                                PlozziOSGrownUpsUnlockView(appModel: appModel) {
+                                    isParentalUnlocked = true
+                                }
+                            } label: {
+                                Label(KidsProfileCopy.manageProfile, systemImage: "lock.fill")
+                            }
+                        } else {
+                            NavigationLink {
+                                PlozziOSMyLibrariesSettingsView(
+                                    appModel: appModel,
+                                    onAddServer: onAddServer,
+                                    onAddUser: onAddUser
+                                )
+                            } label: {
+                                Label(SettingsCopy.libraries, systemImage: "rectangle.stack")
+                            }
+                            NavigationLink {
+                                PlozziOSProfileSettingsView(
+                                    appModel: appModel,
+                                    profileID: appModel.profiles.activeProfileID
+                                )
+                            } label: {
+                                Label(KidsProfileCopy.manageProfile, systemImage: "person.crop.circle")
+                            }
+                        }
+                    } footer: {
+                        if !isParentalSealed {
+                            Text(KidsProfileCopy.parentalControlsOpen)
+                        }
+                    }
+                }
+
                 // Withheld on a Kids Profile: every destructive control in the app
                 // lives in here (remove server, delete profile, sign out of
                 // everything).
@@ -744,6 +807,15 @@ private struct PlozziOSSettingsCompactMenu: View {
                         PlozziOSProfilesView(appModel: appModel)
                     } label: {
                         Label("Profiles", systemImage: "person.2")
+                    }
+                    // Household-level, so it sits here rather than on a profile.
+                    NavigationLink {
+                        PlozziOSParentalPINSettingsView(appModel: appModel)
+                    } label: {
+                        Label(
+                            KidsProfileCopy.parentalPIN,
+                            systemImage: "figure.and.child.holdinghands"
+                        )
                     }
     
                     NavigationLink {

@@ -151,3 +151,117 @@ final class ParentalPINTests: XCTestCase {
         XCTAssertTrue(second.matchesParentalPIN("4821"))
     }
 }
+
+/// The Parental PIN rides the household's first profile record so it syncs.
+/// These pin the conflict rules, because a parental control that a stale device
+/// can erase is worse than none — you'd believe it was on.
+@MainActor
+final class ParentalPINSyncTests: XCTestCase {
+
+    private let fastIterations = 64
+
+    private func makeDefaults() -> UserDefaults {
+        let suite = "ParentalPINSyncTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    private func makeModel() -> ProfilesModel {
+        ProfilesModel(store: ProfileStore(defaults: makeDefaults()))
+    }
+
+    func testThePINIsCarriedOnTheFirstProfile() {
+        let model = makeModel()
+        model.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+        XCTAssertNotNil(model.profiles.first?.parentalPIN)
+    }
+
+    /// The whole point of moving it off device-local storage.
+    func testThePINTravelsInTheSyncDTO() {
+        let model = makeModel()
+        model.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+        let dto = ProfileSyncDTO(profile: model.profiles[0])
+        XCTAssertNotNil(dto.parentalPIN)
+        XCTAssertEqual(dto.parentalPIN?.matches(pin: "4821"), true)
+    }
+
+    func testAnIncomingPINIsAdopted() {
+        let model = makeModel()
+        var remote = model.profiles[0]
+        remote.replaceParentalPIN(with: ParentalPIN.make(pin: "4821", iterations: fastIterations))
+
+        let merged = ProfileSyncDTO(profile: remote).merged(into: model.profiles[0])
+        XCTAssertEqual(merged.parentalPIN?.matches(pin: "4821"), true)
+    }
+
+    /// The failure that erased profile locks once already: an unrelated rename
+    /// syncing from a device that never saw the PIN.
+    func testAStaleRecordCannotEraseThePIN() {
+        let model = makeModel()
+        let stale = model.profiles[0]
+
+        model.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+        let current = model.profiles[0]
+
+        var renamed = stale
+        renamed.name = "Renamed elsewhere"
+        let merged = ProfileSyncDTO(profile: renamed).merged(into: current)
+
+        XCTAssertEqual(merged.name, "Renamed elsewhere")
+        XCTAssertEqual(merged.parentalPIN?.matches(pin: "4821"), true, "A stale record must not clear the PIN")
+    }
+
+    /// Removal has to survive too, or "Remove Parental PIN" would silently undo
+    /// itself on the next sync.
+    func testARemovalWinsOverAnOlderPIN() {
+        let model = makeModel()
+        model.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+        let withPIN = model.profiles[0]
+
+        model.setParentalPIN(nil)
+        let removed = model.profiles[0]
+
+        let merged = ProfileSyncDTO(profile: removed).merged(into: withPIN)
+        XCTAssertNil(merged.parentalPIN)
+    }
+
+    func testANewerPINReplacesAnOlderOne() {
+        let model = makeModel()
+        model.setParentalPIN(ParentalPIN.make(pin: "1111", iterations: fastIterations))
+        let older = model.profiles[0]
+
+        model.setParentalPIN(ParentalPIN.make(pin: "2222", iterations: fastIterations))
+        let newer = model.profiles[0]
+
+        let merged = ProfileSyncDTO(profile: newer).merged(into: older)
+        XCTAssertEqual(merged.parentalPIN?.matches(pin: "2222"), true)
+        XCTAssertEqual(merged.parentalPIN?.matches(pin: "1111"), false)
+    }
+
+    /// A device arriving with no knowledge of the field mustn't clear it.
+    func testALegacyPeerWithoutRevisionsCannotClearThePIN() {
+        let model = makeModel()
+        model.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+        let current = model.profiles[0]
+
+        var legacy = ProfileSyncDTO(profile: current)
+        legacy.parentalPIN = nil
+        legacy.parentalPINRevision = nil
+
+        XCTAssertEqual(legacy.merged(into: current).parentalPIN?.matches(pin: "4821"), true)
+    }
+
+    /// A profile record from another device shouldn't drag its own copy of the
+    /// PIN onto a non-anchor profile and create two sources of truth.
+    func testTheModelReadsThePINFromTheFirstProfileOnly() {
+        let model = makeModel()
+        let second = model.add(name: "Second")
+        var polluted = second
+        polluted.replaceParentalPIN(with: ParentalPIN.make(pin: "9999", iterations: fastIterations))
+        model.update(polluted)
+
+        XCTAssertFalse(model.enforcesKidsRestrictions, "Only the first profile anchors the PIN")
+        XCTAssertFalse(model.matchesParentalPIN("9999"))
+    }
+}

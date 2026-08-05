@@ -119,6 +119,23 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// Field-level conflict revision for `lock`. See `ProfileLockRevision`.
     public var lockRevision: ProfileLockRevision?
 
+    /// The household's Parental PIN, carried on the household's FIRST profile.
+    ///
+    /// It rides a profile record because there is no household-level sync record,
+    /// and adding a `SyncRecordKind` would be unsafe: an older peer can't parse an
+    /// unknown kind, drops it from its captured set, and capture is authoritative
+    /// — so the first old device to sync would delete the household's PIN. The
+    /// first profile always exists and can't be deleted, which makes it a stable
+    /// anchor.
+    ///
+    /// Read it through ``ProfilesModel/parentalPIN``; nothing should reach for
+    /// this field directly.
+    public var parentalPIN: ParentalPIN?
+    /// Field-level revision, for the same reason `lockRevision` exists: an
+    /// unrelated name or avatar edit synced from a stale device must never erase
+    /// a newly-set Parental PIN.
+    public var parentalPINRevision: ProfileLockRevision?
+
     /// Whether this is a **Kids Profile**: shared, household-level settings are
     /// hidden while it's active.
     ///
@@ -205,6 +222,20 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         lock = newLock
     }
 
+    /// Revision used for conflict resolution, with a baseline for a PIN written
+    /// by a build that predates the revision field.
+    public var effectiveParentalPINRevision: ProfileLockRevision? {
+        parentalPINRevision ?? parentalPIN.map {
+            ProfileLockRevision(counter: 0, nonce: $0.verifier)
+        }
+    }
+
+    /// Sets or clears the household Parental PIN and advances its revision.
+    public mutating func replaceParentalPIN(with newPIN: ParentalPIN?) {
+        parentalPINRevision = .next(after: effectiveParentalPINRevision)
+        parentalPIN = newPIN
+    }
+
     /// Whether an answer is owed about who this profile watches as on any of
     /// `accountIDs`. See `accountsAwaitingIdentity`.
     ///
@@ -252,6 +283,8 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         seerrUserAvatarURL: String? = nil,
         lock: ProfileLock? = nil,
         lockRevision: ProfileLockRevision? = nil,
+        parentalPIN: ParentalPIN? = nil,
+        parentalPINRevision: ProfileLockRevision? = nil,
         isKidsProfile: Bool? = nil,
         isAwaitingSetup: Bool? = nil
     ) {
@@ -275,6 +308,8 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.seerrUserAvatarURL = seerrUserAvatarURL
         self.lock = lock
         self.lockRevision = lockRevision
+        self.parentalPIN = parentalPIN
+        self.parentalPINRevision = parentalPINRevision
         self.isKidsProfile = isKidsProfile
         self.isAwaitingSetup = isAwaitingSetup
     }

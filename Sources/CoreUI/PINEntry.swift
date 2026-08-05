@@ -145,7 +145,7 @@ public struct PINEntryScaffold<Badge: View>: View {
                     // but visually too close to the right edge for the main
                     // control. Pull it toward the screen center while preserving
                     // the generous gap from the prose.
-                    .offset(x: -150)
+                    .offset(x: -190)
             }
             .padding(.horizontal, PINMetrics.horizontalPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

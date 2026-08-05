@@ -135,13 +135,37 @@ final class ProfileLockTests: XCTestCase {
 
     /// Removing a lock on one device must clear it everywhere, not be ignored as
     /// "no value sent".
+    ///
+    /// Modelled as a REAL removal — `replaceLock(with: nil)`, which advances the
+    /// field's revision — because that's what the app does. An earlier version
+    /// stood in a peer that had simply never had a lock, which is a different
+    /// thing entirely: see the companion test below.
     func testClearingALockPropagatesThroughTheDTO() throws {
         var local = Profile(id: "p1", name: "Brando")
-        local.lock = ProfileLock.make(pin: "5309", iterations: fastIterations)
+        local.replaceLock(with: ProfileLock.make(pin: "5309", iterations: fastIterations))
 
-        let remoteWithoutLock = Profile(id: "p1", name: "Brando")
-        local = ProfileSyncDTO(profile: remoteWithoutLock).merged(into: local)
+        var remote = local
+        remote.replaceLock(with: nil)
+
+        local = ProfileSyncDTO(profile: remote).merged(into: local)
         XCTAssertNil(local.lock)
+    }
+
+    /// A device that never knew about the lock must NOT clear it.
+    ///
+    /// This is the whole point of `ProfileLockRevision`: "no value sent" and
+    /// "deliberately removed" look identical on the wire, and treating the first
+    /// as the second lets a stale peer unlock a profile by renaming it.
+    func testAPeerThatNeverHadTheLockCannotClearIt() throws {
+        var local = Profile(id: "p1", name: "Brando")
+        local.replaceLock(with: ProfileLock.make(pin: "5309", iterations: fastIterations))
+
+        var oblivious = Profile(id: "p1", name: "Renamed")
+        oblivious.lock = nil
+
+        local = ProfileSyncDTO(profile: oblivious).merged(into: local)
+        XCTAssertEqual(local.name, "Renamed")
+        XCTAssertNotNil(local.lock, "A stale record must not unlock a profile")
     }
 }
 
@@ -201,13 +225,34 @@ final class KidsProfileTests: XCTestCase {
     }
 
     /// Lifting the restriction on one device must lift it everywhere.
+    ///
+    /// A real lift goes through `isKids`, which advances the field's revision.
     func testClearingTheFlagPropagates() {
         var local = Profile(id: "p1", name: "Kid")
         local.isKids = true
 
-        let remoteUnrestricted = Profile(id: "p1", name: "Kid")
-        local = ProfileSyncDTO(profile: remoteUnrestricted).merged(into: local)
+        var remote = local
+        remote.isKids = false
+
+        local = ProfileSyncDTO(profile: remote).merged(into: local)
         XCTAssertFalse(local.isKids)
+    }
+
+    /// A device that never knew the profile was restricted must NOT lift it.
+    ///
+    /// Worse than the lock case: the Kids flag is what makes the Parental PIN
+    /// gate apply at all, so a stale record clearing it un-restricts a child
+    /// everywhere rather than merely losing a preference.
+    func testAPeerThatNeverKnewCannotLiftTheRestriction() {
+        var local = Profile(id: "p1", name: "Kid")
+        local.isKids = true
+
+        var oblivious = Profile(id: "p1", name: "Renamed")
+        oblivious.isKidsProfile = nil
+
+        local = ProfileSyncDTO(profile: oblivious).merged(into: local)
+        XCTAssertEqual(local.name, "Renamed")
+        XCTAssertTrue(local.isKids, "A stale record must not un-restrict a child")
     }
 
     /// The two features are independent: a Kids Profile is normally left UNLOCKED

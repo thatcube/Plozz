@@ -378,9 +378,15 @@ final class ParentalEnforcementTests: XCTestCase {
         first.setParentalPIN(nil)
         XCTAssertFalse(first.enforcesKidsRestrictions)
 
+        // Re-arm the device-local copy: another device on the old build still
+        // holds it, and without this the test would pass merely because the first
+        // migration cleared it — proving nothing about the removal.
+        store.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+
         // A later launch must respect the removal.
         let second = ProfilesModel(store: ProfileStore(defaults: defaults))
         XCTAssertFalse(second.enforcesKidsRestrictions, "A removed PIN must stay removed")
+        XCTAssertFalse(second.matchesParentalPIN("4821"))
     }
 
     func testMigrationMovesADeviceLocalPINOntoTheSyncedAnchor() {

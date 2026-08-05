@@ -230,7 +230,17 @@ final class PlozziOSAppModel {
         for (pid, ids) in (restrictToAccountID == nil ? received.config.profileMemberships : [:]) {
             guard profiles.profiles.contains(where: { $0.id == pid }) else { continue }
             if pid == ProfileStore.defaultProfileID, receiverWasConfigured { continue }
-            profiles.setActiveAccountIDs(ids.filter { receivedAccountIDs.contains($0) }, for: pid)
+            let usable = ids.filter { receivedAccountIDs.contains($0) }
+            // Storing an EMPTY set would read as "this profile chose to watch
+            // nothing" and blank its Home. An empty result here just means the
+            // sender's servers didn't all come across, which is not a choice the
+            // user made — clear the membership instead, which means "watches
+            // whatever the household has".
+            if usable.isEmpty, !ids.isEmpty {
+                profiles.clearActiveAccountIDs(for: pid)
+            } else {
+                profiles.setActiveAccountIDs(usable, for: pid)
+            }
         }
         // Mirror the tvOS receiver: complete first-run so the app never bounces
         // back to onboarding, refresh providers + identity index, and republish
@@ -505,6 +515,13 @@ final class PlozziOSAppModel {
                 : Self.universalWatchlistStorageDirectory()
         )
         self.seerService = seerService
+        // A Kids Profile with no mapped Seerr user would otherwise request as the
+        // unrestricted admin. Wired as a live closure so it always reflects the
+        // CURRENT profile — see `SeerService.refusesAdminRequests`.
+        seerService.refusesAdminRequests = { [weak profiles] in
+            guard let profiles else { return false }
+            return profiles.activeProfile.isKids && profiles.enforcesKidsRestrictions
+        }
         self.traktService = traktService
         self.simklService = simklService
         self.anilistService = anilistService

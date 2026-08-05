@@ -487,10 +487,11 @@ public final class ProfilesModel {
         anchor.replaceParentalPIN(with: local)
         update(anchor)
 
-        // Only drop the local copy once the anchor actually carries it.
-        // Persisting profiles is best-effort, and clearing first would leave a
-        // household with no PIN at all if that write didn't land.
-        guard profiles.first?.parentalPIN != nil else { return }
+        // Only drop the local copy once the PIN is DURABLE. Checking the
+        // in-memory `profiles` proves nothing — it's the value we just assigned —
+        // and `saveProfiles` swallows a Keychain failure, so a failed write would
+        // otherwise leave the household with no PIN anywhere.
+        guard store.loadProfiles().first?.parentalPIN != nil else { return }
         legacyLocalParentalPIN = nil
         store.setParentalPIN(nil)
     }
@@ -660,7 +661,9 @@ public final class ProfilesModel {
             avatarEmojiColorIndex: avatarEmojiColorIndex
         )
         profile.isAwaitingSetup = isAwaitingSetup
-        profile.isKidsProfile = isKidsProfile
+        // Through the revisioned setter, so a profile is never born with a Kids
+        // flag that a stale peer could clear.
+        profile.replaceKidsProfile(with: isKidsProfile)
         profiles.append(profile)
         profiles.sort { $0.createdAt < $1.createdAt }
         store.saveProfiles(profiles)

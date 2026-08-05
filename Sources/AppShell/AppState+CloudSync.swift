@@ -507,6 +507,10 @@ extension AppState {
         // questions the user has already answered — or declined — and a remote
         // rename would silently re-gate their imports.
         let knownProfileIDs = Set(profilesModel.profiles.map(\.id))
+        // Captured BEFORE anything is applied: a synced delete of the ACTIVE
+        // Kids Profile re-points the selection with no user action, and the
+        // parental gate can only tell that happened if it knows where we were.
+        let outgoingProfile = profilesModel.activeProfile
         if !profileUpserts.isEmpty || !profileDeletes.isEmpty {
             for profileID in profileDeletes
             where profileID != ProfileStore.defaultProfileID {
@@ -561,7 +565,7 @@ extension AppState {
         // the one we were on falls back to `profiles.first` — and it can also
         // deliver a lock onto the profile we're already sitting in. Re-check the
         // gate so neither ends with an unlocked view of a locked profile.
-        profileFlow.enforceLockOnActiveProfile()
+        profileFlow.enforceLockOnActiveProfile(leaving: outgoingProfile)
         PlozzLog.sync.info("CloudSync: applied \(changes.count) exact change(s)")
     }
 

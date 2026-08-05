@@ -718,7 +718,17 @@ public final class AppState {
         for (pid, ids) in received.config.profileMemberships {
             guard profilesModel.profiles.contains(where: { $0.id == pid }) else { continue }
             if pid == ProfileStore.defaultProfileID, receiverWasConfigured { continue }
-            profilesModel.setActiveAccountIDs(ids.filter { receivedAccountIDs.contains($0) }, for: pid)
+            let usable = ids.filter { receivedAccountIDs.contains($0) }
+            // Storing an EMPTY set would read as "this profile chose to watch
+            // nothing" and blank its Home. An empty result here just means the
+            // sender's servers didn't all come across, which is not a choice the
+            // user made — clear the membership instead, which means "watches
+            // whatever the household has".
+            if usable.isEmpty, !ids.isEmpty {
+                profilesModel.clearActiveAccountIDs(for: pid)
+            } else {
+                profilesModel.setActiveAccountIDs(usable, for: pid)
+            }
         }
 
         // 4. Complete first-run and enter the app.
@@ -995,6 +1005,13 @@ public final class AppState {
         // Seerr uses ONE shared household connection (user-independent Keychain);
         // profiles differ only by which Seerr user they request as (per request).
         self.seerService = seerService ?? Self.makeDefaultSeerService()
+        // A Kids Profile with no mapped Seerr user would otherwise request as the
+        // unrestricted admin. Live closure so it always reflects the CURRENT
+        // profile — see `SeerService.refusesAdminRequests`.
+        self.seerService.refusesAdminRequests = { [weak resolvedProfilesModel] in
+            guard let profiles = resolvedProfilesModel else { return false }
+            return profiles.activeProfile.isKids && profiles.enforcesKidsRestrictions
+        }
         self.anilistService = anilistService ?? AniListServiceFactory.make(namespace: ns)
         self.malService = malService ?? MALServiceFactory.make(namespace: ns)
         // Last.fm is user-scoped like the trackers; seed it with the active

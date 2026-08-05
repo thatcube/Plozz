@@ -281,6 +281,10 @@ extension PlozziOSAppModel {
         // questions the user has already answered — or declined — and a remote
         // rename would silently re-gate their imports.
         let knownProfileIDs = Set(profiles.profiles.map(\.id))
+        // Captured BEFORE anything is applied: a synced delete of the ACTIVE
+        // Kids Profile re-points the selection with no user action, and the
+        // parental gate can only tell that happened if it knows where we were.
+        let outgoingProfile = profiles.activeProfile
         if !profileUpserts.isEmpty || !profileDeletes.isEmpty {
             for profileID in profileDeletes
             where profileID != ProfileStore.defaultProfileID {
@@ -338,7 +342,7 @@ extension PlozziOSAppModel {
         // MANDATORY gate before re-scoping, as tvOS does: `selectProfile` below
         // only raises a cancelable prompt, and cancelling it would reveal the
         // locked profile that's already active behind it.
-        if enforceActiveProfileLock() {
+        if enforceActiveProfileLock(leaving: outgoingProfile) {
             PlozzLog.sync.info("CloudSync: applied \(changes.count) exact change(s) — active profile locked")
             return
         }

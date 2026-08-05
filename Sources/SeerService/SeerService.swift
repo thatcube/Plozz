@@ -280,13 +280,33 @@ public final class SeerService {
     /// Returns a ``SeerRequestOutcome`` — success carries the resulting
     /// availability (`.pending` = created, awaiting approval), failure a specific
     /// user-facing reason. Never throws; transport errors map to `.unreachable`.
-    @discardableResult
+    /// Whether an UNMAPPED request — one that would run as the unrestricted
+    /// Seerr admin — must be refused.
+    ///
+    /// Set while an enforced Kids Profile is active. A Kids Profile that never
+    /// got a Seerr user mapped otherwise fell through to the admin path, so a
+    /// child could request anything at all with the household's full permissions,
+    /// quota and approval bypass — the one restriction people would most assume
+    /// a "Kids Profile" already had.
+    ///
+    /// Enforced HERE rather than in the views: every request funnels through this
+    /// method, and the detail/search screens reach it by several routes.
+    ///
+    /// A live closure rather than a stored flag, so it can't go stale: the answer
+    /// depends on the ACTIVE profile, which changes without this service being
+    /// told. Defaults to "allowed" so tests and previews behave normally.
+    @ObservationIgnored
+    public var refusesAdminRequests: () -> Bool = { false }
+
     public func request(
         _ item: MediaItem,
         seasons: [Int]? = nil,
         actingUserID: Int? = nil
     ) async -> SeerRequestOutcome {
         guard config.isConfigured else { return .failure(.unknown("Seerr isn’t connected.")) }
+        if actingUserID == nil, refusesAdminRequests() {
+            return .failure(.unknown("Ask a grown-up to request this."))
+        }
         guard let mediaType = SeerMapper.requestMediaType(for: item),
               let tmdbID = SeerMapper.tmdbID(for: item)
         else { return .failure(.unknown("This title can’t be requested.")) }

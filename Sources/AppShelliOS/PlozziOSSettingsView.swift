@@ -552,7 +552,10 @@ private struct PlozziOSSettingsSplitView: View {
 
     @ViewBuilder
     private var settingsDetail: some View {
-        switch selection ?? .profiles {
+        // The default pane, NOT just the sidebar rows: a Kids Profile hides the
+        // household group, but landing on `.profiles` by default walked straight
+        // into profile management (add, edit, delete) without the Parental PIN.
+        switch selection ?? (appModel.profiles.managementRequiresParentalPIN ? .appearance : .profiles) {
         case .profiles:
             PlozziOSProfilesView(appModel: appModel, onClose: onClose)
         case .requests:

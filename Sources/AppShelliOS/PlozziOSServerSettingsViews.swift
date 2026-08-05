@@ -265,6 +265,10 @@ struct PlozziOSMyLibrariesSettingsView: View {
             }
         }
         .navigationTitle(SettingsCopy.libraries)
+        // Optimistic switch positions belong to the profile they were tapped for.
+        .onChange(of: appModel.profiles.activeProfileID) { _, _ in
+            pendingWatching.removeAll()
+        }
         .task(id: appModel.accounts.map(\.credentialRevision)) {
             await loadLibraries()
         }
@@ -485,10 +489,21 @@ struct PlozziOSMyLibrariesSettingsView: View {
     /// natural reading order anyway.
     private func setWatchingSmoothly(_ enabled: Bool, group: ServerAccountGroup) {
         let key = group.serverKey
+        // Pinned BEFORE the wait. `profileID` reads the ACTIVE profile live, so
+        // resolving it after the sleep would write to whatever profile happened
+        // to be active by then — and a synced deletion can re-point that with no
+        // user action at all.
+        let targetProfileID = profileID
         pendingWatching[key] = enabled
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(Self.switchSettleMilliseconds))
-            setWatching(enabled, group: group)
+            // The person moved on; their new profile's membership isn't ours to
+            // change, and the switch they were looking at is long gone.
+            guard profileID == targetProfileID else {
+                if pendingWatching[key] == enabled { pendingWatching[key] = nil }
+                return
+            }
+            setWatching(enabled, group: group, for: targetProfileID)
             // Only clear our own value: a second tap during the wait owns the key.
             if pendingWatching[key] == enabled { pendingWatching[key] = nil }
         }
@@ -541,13 +556,18 @@ struct PlozziOSMyLibrariesSettingsView: View {
         return group.accounts.first { active.contains($0.id) }
     }
 
-    private func setWatching(_ enabled: Bool, group: ServerAccountGroup) {
+    private func setWatching(
+        _ enabled: Bool,
+        group: ServerAccountGroup,
+        for targetProfileID: String? = nil
+    ) {
+        let profile = targetProfileID ?? profileID
         let selectedID = enabled ? group.accounts.first?.id : nil
         for account in group.accounts {
             appModel.setAccount(
                 account.id,
                 enabled: account.id == selectedID,
-                for: profileID
+                for: profile
             )
         }
     }

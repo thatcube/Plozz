@@ -513,14 +513,18 @@ public final class ProfilesModel {
     /// Clearing it doesn't touch any Kids Profile: those stay on, they simply
     /// stop being enforced. That's deliberate — "I don't need the PIN any more"
     /// shouldn't silently hand a child the household settings back.
-    public func setParentalPIN(_ pin: ParentalPIN?) {
-        guard var anchor = profiles.first else { return }
+    /// - Returns: `false` when there was no profile to anchor the PIN to, so a
+    ///   caller can't report success while leaving the household unprotected.
+    @discardableResult
+    public func setParentalPIN(_ pin: ParentalPIN?) -> Bool {
+        guard var anchor = profiles.first else { return false }
         anchor.replaceParentalPIN(with: pin)
         update(anchor)
         // The device-local copy is now redundant; clear it so the synced value is
         // the only source and a stale local one can't resurrect a removed PIN.
         legacyLocalParentalPIN = nil
         store.setParentalPIN(nil)
+        return true
     }
 
     /// Whether `pin` is the household's Parental PIN. `false` when none is set,
@@ -698,8 +702,20 @@ public final class ProfilesModel {
             byID[p.id] = p
         }
         for p in incoming {
-            if p.id == ProfileStore.defaultProfileID, receiverConfigured, byID[p.id] != nil {
-                continue // don't clobber a configured receiver's own default
+            if p.id == ProfileStore.defaultProfileID, receiverConfigured, var local = byID[p.id] {
+                // Keep the receiver's own default, but NOT at the cost of the
+                // household Parental PIN: that rides this record and nothing else
+                // carries it, so skipping wholesale handed the receiver every Kids
+                // Profile with nothing enforcing them — silently, badge and all.
+                // Merged under the same revision rule the sync path uses.
+                let localRevision = local.effectiveParentalPINRevision
+                if let incomingRevision = p.effectiveParentalPINRevision,
+                   localRevision == nil || incomingRevision > localRevision! {
+                    local.parentalPIN = p.parentalPIN
+                    local.parentalPINRevision = incomingRevision
+                    byID[p.id] = local
+                }
+                continue // otherwise don't clobber a configured receiver's own default
             }
             if byID[p.id] == nil { order.append(p.id) }
             byID[p.id] = p

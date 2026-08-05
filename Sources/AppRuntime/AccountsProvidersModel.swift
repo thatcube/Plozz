@@ -36,6 +36,14 @@ public final class AccountsProvidersModel {
     /// for the default profile).
     public private(set) var activeAccountIDs: Set<String> = []
 
+    /// Whether the active profile has EXPLICITLY chosen to watch nothing.
+    ///
+    /// Distinguishes "this profile turned every server off" from "the active set
+    /// came out empty for some other reason" (nothing signed in yet, every
+    /// stored id gone stale). Both look like an empty set, but only the first is
+    /// an instruction — and the fallbacks below exist for the second.
+    public private(set) var watchesNothingByChoice = false
+
     /// The persisted multi-account store (token per account in the Keychain).
     @ObservationIgnored
     public let accountStore: AccountPersisting
@@ -92,7 +100,11 @@ public final class AccountsProvidersModel {
 
     /// The active account that drives the current single-provider UI.
     public var primaryActiveAccount: Account? {
-        accounts.first { activeAccountIDs.contains($0.id) } ?? accounts.first
+        // A profile that chose to watch nothing has no primary account. Without
+        // this the `?? accounts.first` below answered with the household's first
+        // server, so Settings showed every server off while Home played from one.
+        if watchesNothingByChoice { return nil }
+        return accounts.first { activeAccountIDs.contains($0.id) } ?? accounts.first
     }
 
     /// The active accounts paired with their resolved providers. Multi-account
@@ -128,10 +140,16 @@ public final class AccountsProvidersModel {
 
     /// The accounts the unified Home/Search fan out over. Normally the active
     /// set; falls back to the primary account so the signed-in UI is never empty
-    /// even if the active-id set is somehow empty.
+    /// when the active-id set is empty for a reason the user didn't ask for.
+    ///
+    /// The fallback is deliberately NOT applied when the profile chose to watch
+    /// nothing — that's an instruction, not a gap to paper over, and honouring it
+    /// is what stops a Kids Profile with every server switched off still being
+    /// fed the household's first server.
     public var homeAccounts: [ResolvedAccount] {
         let active = resolvedActiveAccounts
         if !active.isEmpty { return active }
+        if watchesNothingByChoice { return [] }
         guard let account = primaryActiveAccount,
               let token = tokenResolver(account.id),
               let provider = resolveProvider(
@@ -227,6 +245,10 @@ public final class AccountsProvidersModel {
             resolved = Set(globalActive.filter { known.contains($0) })
         }
         activeAccountIDs = resolved
+        // Only an explicit, still-honoured empty selection counts as a choice:
+        // the stale-fallback branch above has already re-expanded the other case.
+        watchesNothingByChoice = resolved.isEmpty
+            && (profilesModel.storedActiveAccountIDs(for: profilesModel.activeProfileID)?.isEmpty ?? false)
         onActiveAccountsChanged(resolved, accounts)
     }
 

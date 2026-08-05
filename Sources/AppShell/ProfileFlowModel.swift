@@ -518,11 +518,12 @@ public final class ProfileFlowModel {
     /// `enforceLockOnActiveProfile()` sends us to the picker in that case.
     public func removeProfile(id: String) {
         let wasActive = id == profilesModel.activeProfileID
+        let outgoingProfile = profilesModel.activeProfile
         discardWatchReconciler(id)
         removeMediaAliases(id)
         profilesModel.remove(id)
         if wasActive {
-            if enforceLockOnActiveProfile() { return }
+            if enforceLockOnActiveProfile(leaving: outgoingProfile) { return }
             rebuildSettingsModels()
             Task { await updateTrackersForActiveProfile() }
             accountsProviders.reloadAccounts()
@@ -548,9 +549,20 @@ public final class ProfileFlowModel {
     /// runs through the normal gate.
     ///
     /// - Returns: `true` when the picker was raised, so callers can stop.
+    /// - Parameter leaving: the profile that was active before the fall-through,
+    ///   when the caller knows it. See the iOS twin: a deleted Kids Profile
+    ///   otherwise drops straight into a grown-up profile, and with a Parental
+    ///   PIN in play those profiles deliberately carry no lock of their own.
     @discardableResult
-    public func enforceLockOnActiveProfile() -> Bool {
+    public func enforceLockOnActiveProfile(leaving outgoing: Profile? = nil) -> Bool {
         let active = profilesModel.activeProfile
+        if let outgoing,
+           profilesModel.requiresParentalPIN(switchingFrom: outgoing, to: active) {
+            parentalPINError = nil
+            isProfileSelectionCancelable = false
+            isChoosingProfile = true
+            return true
+        }
         guard active.isLocked, !unlockedProfileIDs.contains(active.id) else { return false }
         isProfileSelectionCancelable = false
         isChoosingProfile = true

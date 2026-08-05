@@ -1197,8 +1197,21 @@ final class PlozziOSAppModel {
     ///   go on to scope this profile in — applying its Plex identity or importing
     ///   its watchlist before anyone has proved the PIN is most of what the lock
     ///   is supposed to withhold.
+    /// - Parameter leaving: the profile that was active before the fall-through,
+    ///   when the caller knows it. A deleted Kids Profile drops the device into
+    ///   whatever profile is left — a route out of the child's profile that never
+    ///   passes `selectProfile`'s parental gate. The lock check below can't catch
+    ///   it, because the whole point of the Parental PIN is that grown-up
+    ///   profiles no longer need individual locks.
     @discardableResult
-    func enforceActiveProfileLock() -> Bool {
+    func enforceActiveProfileLock(leaving outgoing: Profile? = nil) -> Bool {
+        if let outgoing,
+           profiles.requiresParentalPIN(switchingFrom: outgoing, to: profiles.activeProfile) {
+            parentalPINError = nil
+            mustChooseProfile = true
+            pendingParentalSwitch = profiles.activeProfile
+            return true
+        }
         guard activeProfileNeedsUnlock else { return false }
         profileLockError = nil
         mustChooseProfile = true
@@ -1630,6 +1643,7 @@ final class PlozziOSAppModel {
     func removeProfile(_ id: String) {
         universalWatchlistRetryScheduler = nil
         let previousActiveProfileID = profiles.activeProfileID
+        let outgoingProfile = profiles.activeProfile
         removeMediaAliases(forProfileID: id)
         profiles.remove(id)
         watchReconcilers[id] = nil
@@ -1641,7 +1655,7 @@ final class PlozziOSAppModel {
             // watchlist is most of what the lock is meant to withhold, and doing
             // it first would mean the PIN only hid a profile that was already
             // open behind it.
-            if enforceActiveProfileLock() {
+            if enforceActiveProfileLock(leaving: outgoingProfile) {
                 reloadAccountsAndCrashContext()
                 return
             }

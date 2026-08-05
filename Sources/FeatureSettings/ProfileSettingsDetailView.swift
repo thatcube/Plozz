@@ -102,6 +102,7 @@ struct ProfileSettingsDetailView: View {
                 onEditAppearance: { showingEditor = true },
                 onSetLock: { context.onSetProfileLock(profileID, $0) },
                 onSetKids: { context.onSetKidsProfile(profileID, $0) },
+                onSetParentalPIN: context.onSetParentalPIN,
                 validatePlexPIN: {
                     await context.validatePlexPIN($0, profileID)
                 },

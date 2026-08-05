@@ -48,7 +48,10 @@ public struct ParentalPINSetupView: View {
             subtitle: firstEntry == nil ? KidsProfileCopy.parentalPINExplanation : nil,
             name: String(localized: KidsProfileCopy.parentalPIN),
             errorMessage: errorMessage,
-            sequenceStep: .init(current: firstEntry == nil ? 1 : 2, total: 2),
+            // No `sequenceStep` here. That rail means "PIN 1 of 2" — two
+            // DIFFERENT PINs in a chained gate, like a profile lock followed by
+            // a Plex PIN. Confirming one PIN is not that, and labelling it so
+            // told people they were about to set up two.
             onSubmit: submit,
             onCancel: onCancel
         ) {

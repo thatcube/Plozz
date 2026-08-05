@@ -43,6 +43,9 @@ public struct ProfileActionsList: View {
     private let onEditAppearance: () -> Void
     private let onSetLock: (ProfileLock?) -> Void
     private let onSetKids: (Bool) -> Void
+    /// Sets the household's Parental PIN, offered from the Kids row when none
+    /// exists yet.
+    private let onSetParentalPIN: (ParentalPIN?) -> Void
     private let validatePlexPIN: (String) async -> PlexPINValidationResult
     /// `nil` for a profile that can't be deleted (the household default).
     private let onDelete: (() -> Void)?
@@ -61,6 +64,7 @@ public struct ProfileActionsList: View {
         onEditAppearance: @escaping () -> Void,
         onSetLock: @escaping (ProfileLock?) -> Void,
         onSetKids: @escaping (Bool) -> Void,
+        onSetParentalPIN: @escaping (ParentalPIN?) -> Void = { _ in },
         validatePlexPIN: @escaping (String) async -> PlexPINValidationResult = {
             _ in .unavailable
         },
@@ -76,6 +80,7 @@ public struct ProfileActionsList: View {
         self.onEditAppearance = onEditAppearance
         self.onSetLock = onSetLock
         self.onSetKids = onSetKids
+        self.onSetParentalPIN = onSetParentalPIN
         self.validatePlexPIN = validatePlexPIN
         self.onDelete = onDelete
         self.isUnlocked = isUnlocked
@@ -88,6 +93,7 @@ public struct ProfileActionsList: View {
     @State private var settingPIN = false
     @State private var showingLockOptions = false
     @State private var showingKidsOptions = false
+    @State private var settingParentalPIN = false
     @State private var confirmDelete = false
     /// Immediate sheet-local unlock result. The app-level unlocked-id set is
     /// deliberately non-observable, so the Bool passed when this sheet opened
@@ -200,7 +206,7 @@ public struct ProfileActionsList: View {
             // workaround for not having a Parental PIN.
             if profile.isKids, !hasParentalPIN {
                 Label {
-                    Text(KidsProfileCopy.parentalPINExplanation)
+                    Text(KidsProfileCopy.kidsNeedsParentalPIN)
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
@@ -220,6 +226,15 @@ public struct ProfileActionsList: View {
                 }
             }
             }
+        }
+        .fullScreenCover(isPresented: $settingParentalPIN) {
+            ParentalPINSetupView(
+                onComplete: { pin in
+                    onSetParentalPIN(pin)
+                    settingParentalPIN = false
+                },
+                onCancel: { settingParentalPIN = false }
+            )
         }
         .fullScreenCover(isPresented: $settingPIN) {
             ProfileLockSetupView(
@@ -248,6 +263,14 @@ public struct ProfileActionsList: View {
             isPresented: $showingKidsOptions,
             titleVisibility: .visible
         ) {
+            // Offered here rather than pointed at from a warning: a Kids Profile
+            // hides the household section, so "go to Everyone" is an instruction
+            // this profile can't follow.
+            if !hasParentalPIN {
+                Button(String(localized: KidsProfileCopy.parentalPINCreate)) {
+                    settingParentalPIN = true
+                }
+            }
             if profile.isKids {
                 Button(String(localized: KidsProfileCopy.turnOff), role: .destructive) { onSetKids(false) }
             } else {

@@ -112,6 +112,7 @@ struct ProfileSelectionView: View {
                     },
                     onSetLock: { appState.setLock($0, forProfile: profile.id) },
                     onSetKids: { appState.setKidsProfile($0, forProfile: profile.id) },
+                    onSetParentalPIN: { appState.profilesModel.setParentalPIN($0) },
                     validatePlexPIN: {
                         await appState.plexHomeUsers.validatePlexPIN(
                             $0,

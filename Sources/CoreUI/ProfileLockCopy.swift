@@ -250,8 +250,20 @@ public enum KidsProfileCopy {
 
     public static let parentalPINExplanation = LocalizedStringResource(
         "settings.parentalPIN.explanation",
-        defaultValue: "One PIN for the household. Without it, a Kids Profile only simplifies this screen.",
-        comment: "Explains what adding a Parental PIN buys. Must stay honest that a Kids Profile alone restricts nothing."
+        defaultValue: "One PIN for the household. Without it, Kids Profiles aren't restricted.",
+        comment: "Subtitle of the Parental PIN page. Must stay honest that a Kids Profile alone restricts nothing."
+    )
+
+    /// Shown under the Kids Profile row when the household has no Parental PIN.
+    ///
+    /// Says the state and the fix, and nothing else. This replaced a line that
+    /// reused the Parental PIN page's subtitle, which read as a non-sequitur
+    /// under a toggle: it opened with "One PIN for the household" with nothing to
+    /// attach that to, and said "this screen" of a screen it wasn't on.
+    public static let kidsNeedsParentalPIN = LocalizedStringResource(
+        "settings.kidsProfile.needsParentalPIN",
+        defaultValue: "Not restricted yet — open Kids Profile to add a Parental PIN.",
+        comment: "Warning under the Kids Profile row when no household Parental PIN exists. Points at the row directly, because a Kids Profile hides the household section where the PIN otherwise lives."
     )
 
     public static let parentalPINCreate = LocalizedStringResource(

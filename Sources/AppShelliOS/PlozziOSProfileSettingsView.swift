@@ -44,6 +44,7 @@ struct PlozziOSProfileSettingsView: View {
                         onEditAppearance: { showingEditor = true },
                         onSetLock: { appModel.setLock($0, forProfile: profileID) },
                         onSetKids: { appModel.setKidsProfile($0, forProfile: profileID) },
+                        onSetParentalPIN: { appModel.profiles.setParentalPIN($0) },
                         validatePlexPIN: {
                             await appModel.plexHomeUsers.validatePlexPIN(
                                 $0,

@@ -146,6 +146,7 @@ struct PlozziOSServerIdentityPromptView: View {
     /// `PlozziOSAppModel.concludeIdentityPrompt(for:)`. Done and a swipe are the
     /// same gesture here, and neither is consent on its own.
     let onFinish: () -> Void
+    let onDecline: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -155,6 +156,17 @@ struct PlozziOSServerIdentityPromptView: View {
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done", action: onFinish)
+                    }
+                    // Declining has to be sayable, not inferred. Closing the
+                    // sheet means "I'm done here"; only this says "don't read
+                    // this server's watchlist".
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(action: onDecline) {
+                            Text(
+                                "Don't use this server's watchlist",
+                                comment: "Button declining to pick a user, which leaves the server's own watchlist out of this profile."
+                            )
+                        }
                     }
                 }
         }

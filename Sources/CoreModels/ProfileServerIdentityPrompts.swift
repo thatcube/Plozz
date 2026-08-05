@@ -198,6 +198,28 @@ public extension ProfilesModel {
         if changed { update(profile) }
     }
 
+    /// Clears every recorded watchlist decline, once per install.
+    ///
+    /// Declines were briefly INFERRED from a closed sheet: if no Home-user
+    /// binding had been written, the server was treated as declined. Watching as
+    /// the account owner leaves no binding either, so dismissing the question
+    /// excluded the viewer's own server and emptied their watchlist, with
+    /// nothing on screen to explain it or undo it. The flag makes this a
+    /// one-time repair rather than a rule that would keep undoing real declines.
+    func clearInferredWatchlistDeclines() {
+        let key = "plozz.watchlist.declines.repaired.v1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        for profile in profiles {
+            var updated = profile
+            var changed = false
+            for accountID in profile.declinedWatchlistAccountIDs {
+                changed = updated.clearWatchlistDecline(accountID) || changed
+            }
+            if changed { update(updated) }
+        }
+    }
+
     /// The accounts this profile has declined to read a watchlist from.
     func declinedWatchlistAccountIDs(forProfile profileID: String) -> Set<String> {
         Set(

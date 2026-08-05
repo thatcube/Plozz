@@ -178,9 +178,20 @@ public final class IdentityIndexModel {
             // active accounts inside `restore` (B3) so a removed server / switched
             // profile is never resurrected.
             var publishedInRestore = false
+            // Accounts whose membership came off DISK this launch. They are
+            // "warm" by every existing measure, which is exactly the problem:
+            // the persisted snapshot is a fast start, not a substitute for
+            // looking at the library. Skipping the live scan because a restore
+            // filled the index left titles added since the snapshot was written
+            // permanently unknown — a film sitting in the library resolved to no
+            // owned copy and rendered as one to go and request, and no amount of
+            // relaunching fixed it because each launch restored the same stale
+            // membership and then declared itself warm.
+            var restoredAccountIDs: Set<String> = []
             if let self, await self.consumePendingRestore() {
                 let persisted = store.load()
                 if !persisted.isEmpty, await index.restore(from: persisted, retaining: activeIDs) {
+                    restoredAccountIDs = activeIDs
                     let snapshot = await index.snapshot()
                     publishedInRestore = await MainActor.run { () -> Bool in
                         guard self.publishWarmedSnapshot(snapshot, generation: warmGeneration) else { return false }
@@ -221,7 +232,15 @@ public final class IdentityIndexModel {
             for resolvedAccount in resolved {
                 if Task.isCancelled { break }
                 let warm = await index.isWarm(resolvedAccount.account.id)
-                if warm && !force && !stale.contains(resolvedAccount.account.id) { continue }
+                // A restored account is verified once per launch, however warm
+                // it looks. The scan is incremental and publishes as it goes, so
+                // this costs a background pass rather than a blank screen.
+                if warm,
+                   !force,
+                   !stale.contains(resolvedAccount.account.id),
+                   !restoredAccountIDs.contains(resolvedAccount.account.id) {
+                    continue
+                }
                 accountsToWarm.append(resolvedAccount)
             }
 

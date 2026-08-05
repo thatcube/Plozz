@@ -1083,21 +1083,17 @@ final class PlozziOSAppModel {
         concludeIdentityPrompt(for: account.id)
     }
 
-    /// Closes the question according to what the person actually did.
+    /// Closes the question when the sheet goes away.
     ///
-    /// The iOS sheet has no separate decline button — picking a user writes the
-    /// binding, and Done or a swipe closes it either way. So the binding is the
-    /// answer: with one, the question is answered; without one, nobody said who
-    /// this profile is, and reading the server as its OWNER is the outcome the
-    /// question exists to prevent. Closing used to mean the latter silently.
+    /// Closing is NOT declining. Inferring a decline from "no Home-user binding
+    /// was written" looked equivalent and was badly wrong: watching as the
+    /// account OWNER is the normal case and leaves no binding either, so simply
+    /// closing the sheet declined the viewer's own server and emptied their
+    /// watchlist completely. Declining has to be something a person chooses,
+    /// which is what `declineIdentityPrompt` and the button that calls it are
+    /// for.
     func concludeIdentityPrompt(for accountID: String) {
-        let hasBinding = profiles.activeProfile
-            .homeUserBinding(forPlexAccount: accountID) != nil
-        if hasBinding {
-            resolveIdentityPrompt(for: accountID)
-        } else {
-            declineIdentityPrompt(for: accountID)
-        }
+        resolveIdentityPrompt(for: accountID)
     }
 
     /// Clears the question once a user is chosen.

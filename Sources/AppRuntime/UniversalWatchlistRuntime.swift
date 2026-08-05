@@ -164,6 +164,14 @@ public extension UniversalWatchlistHost {
             // intent. Drop those records once, before anything reads the
             // watchlist, so a title only survives while a server that actually
             // holds it is still switched on.
+            // Undo declines that were never chosen. A closed sheet used to be
+            // read as "don't use this server", and watching as the account
+            // owner leaves no Home-user binding either — so a viewer who simply
+            // dismissed the question had their own server excluded and their
+            // watchlist emptied. Clearing once is safe: a decline the person
+            // actually meant is one tap to make again, whereas the silent
+            // version is invisible and unexplained.
+            profiles.clearInferredWatchlistDeclines()
             let retired = try universalWatchlist.retireNativeImports(
                 profileID: profileID
             )
@@ -331,7 +339,7 @@ public extension UniversalWatchlistHost {
             candidates,
             in: aliasSnapshot
         )
-        return (try? universalWatchlist.presentationSnapshot(
+        let resolved = (try? universalWatchlist.presentationSnapshot(
             profileID: profiles.activeProfileID,
             union: universalWatchlistUnion,
             aliasSnapshot: aliasSnapshot,
@@ -342,6 +350,14 @@ public extension UniversalWatchlistHost {
             indexedSources: identityIndex.identitySourcesProvider,
             capabilities: .detected()
         ).map(\.item)) ?? []
+        // What the viewer actually SEES, which is a different question from
+        // whether the index could find a copy: an entry can resolve to an owned
+        // copy and still be rendered from the discovery row it arrived as.
+        // `playable` is the count that should match the library.
+        FanoutDiagnostics.emit(
+            "watchlist.render total=\(resolved.count) playable=\(resolved.filter(\.locallyValidatedPlayableSource).count) liveCandidate=\(current.count)"
+        )
+        return resolved
     }
 
     func performUniversalWatchlist(
@@ -618,9 +634,9 @@ public extension UniversalWatchlistHost {
         await reconcileUniversalWatchlistIdentity(profileID: profileID)
 
         let union = universalWatchlistUnion
-        PlozzLog.app.info(
-            "Watchlist native refresh destinations=\(view.bucketsByDestinationID.count) superseded=\(supersededCount) failures=\(report.failures.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
-        )
+        let refreshLine = "watchlist.refresh destinations=\(view.bucketsByDestinationID.count) accounts=\(nativeWatchlistAccounts.count) enabled=\(universalWatchlistDestinationIDs.count) reads=\(report.successes.count) entries=\(report.successes.reduce(0) { $0 + $1.entries.count }) failures=\(report.failures.map { "\($0.destinationID.rawValue):\($0.classification)" }) superseded=\(supersededCount) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
+        PlozzLog.app.info("Watchlist \(refreshLine)")
+        FanoutDiagnostics.emit(refreshLine)
         // Counts only — no titles, ids or server names. `nativeOnly` is the half
         // that used to be durable intent; if the row shows titles that a card
         // then claims are not on the watchlist, this is the number to look at.
@@ -647,6 +663,9 @@ public extension UniversalWatchlistHost {
         var kindMismatch = 0
         var missMovie = 0
         var missSeries = 0
+        var missNames: [String] = []
+        var missNamespaces: [String: Int] = [:]
+        var hitNamespaces: [String: Int] = [:]
         for entry in union.orderedEntries {
             guard let record = ledger.record(for: entry.aliasID) else { continue }
             var probe = MediaItem(
@@ -666,6 +685,9 @@ public extension UniversalWatchlistHost {
                 $0.kind == nil || $0.kind == entry.kind
             }).isEmpty {
                 indexedHit += 1
+                for evidence in record.strongEvidence {
+                    hitNamespaces[evidence.namespace.canonicalKey, default: 0] += 1
+                }
             } else if !refs.isEmpty {
                 // The index knows this title but only under another KIND. TMDb
                 // and TVDb reuse one integer id space across movies and series,
@@ -678,10 +700,25 @@ public extension UniversalWatchlistHost {
                 case .series: missSeries += 1
                 default: missMovie += 1
                 }
+                // Name them. A count alone can't distinguish "the lookup is
+                // broken" from "you don't actually own this one", and that is
+                // the entire question when someone says a film they own is
+                // asking to be requested. Capped so a large watchlist can't
+                // flood the log.
+                if missNames.count < 25 {
+                    missNames.append(record.presentation?.title ?? "?")
+                }
+                // WHICH ids the miss carries. If the watchlist entry knows a
+                // title only by TMDb while the library copy was matched by
+                // IMDb, the two share no identity atom and nothing can bridge
+                // them — a namespace gap, not a missing film.
+                for evidence in record.strongEvidence {
+                    missNamespaces[evidence.namespace.canonicalKey, default: 0] += 1
+                }
             }
         }
         let indexSnapshot = identityIndex.identitySnapshot
-        let unionLine = "watchlist.index ownedCopyFound=\(indexedHit)/\(union.orderedEntries.count) missMovie=\(missMovie) missSeries=\(missSeries) kindMismatch=\(kindMismatch) indexedIdentities=\(indexSnapshot.identityCount) indexedAccounts=\(indexSnapshot.indexedAccountIDs.count) | total=\(union.orderedEntries.count) explicit=\(union.orderedEntries.filter(\.isExplicit).count) nativeOnly=\(union.orderedEntries.filter { !$0.isExplicit }.count) strongID=\(matchable) weakOnly=\(weakOnly) noRecord=\(noRecord) stale=\(union.hasStaleDestinations)"
+        let unionLine = "watchlist.index ownedCopyFound=\(indexedHit)/\(union.orderedEntries.count) missMovie=\(missMovie) missSeries=\(missSeries) kindMismatch=\(kindMismatch) missNS=\(missNamespaces.sorted { $0.key < $1.key }) hitNS=\(hitNamespaces.sorted { $0.key < $1.key }) missing=\(missNames.sorted()) indexedIdentities=\(indexSnapshot.identityCount) indexedAccounts=\(indexSnapshot.indexedAccountIDs.count) | total=\(union.orderedEntries.count) explicit=\(union.orderedEntries.filter(\.isExplicit).count) nativeOnly=\(union.orderedEntries.filter { !$0.isExplicit }.count) strongID=\(matchable) weakOnly=\(weakOnly) noRecord=\(noRecord) stale=\(union.hasStaleDestinations)"
         PlozzLog.app.info("Watchlist \(unionLine)")
         // Mirrored through the fan-out diagnostics seam so `devicectl … --console`
         // can stream it: `os_log` alone doesn't reach stdout, which is the only

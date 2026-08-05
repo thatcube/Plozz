@@ -47,8 +47,22 @@ public enum WatchlistPresentationResolver {
                 // library item (it is already pointed at its own server) and
                 // refuses to act without a strong external id, so this can only
                 // ever upgrade a discovery row to a copy the index vouched for.
+                // `retargetedToOwnedLibraryCopy` only considers an item whose
+                // `availability` says it is a discovery row — and a Plex
+                // watchlist entry carries NO availability at all, so every one
+                // of them failed that gate and was handed back as the Discover
+                // copy it arrived as. Saying "unknown" is what the placeholder
+                // branch below already does, and it is the honest value: no live
+                // copy has been vouched for yet. The retarget itself still
+                // refuses to act without a strong external id, so this widens
+                // what gets ASKED, never what gets matched.
+                var candidate = item
+                if !candidate.locallyValidatedPlayableSource,
+                   candidate.availability == nil {
+                    candidate.availability = .unknown
+                }
                 var item = indexedSources.flatMap {
-                    item.retargetedToOwnedLibraryCopy(
+                    candidate.retargetedToOwnedLibraryCopy(
                         indexedSources: $0,
                         capabilities: capabilities
                     )

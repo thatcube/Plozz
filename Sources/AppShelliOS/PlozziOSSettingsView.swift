@@ -159,6 +159,8 @@ private enum PlozziOSSettingsDestination: Hashable {
     case grownUps
     /// This profile's own management page, reached from Parental Controls.
     case manageProfile
+    /// The household's Parental PIN.
+    case parentalPIN
     case trackers
     case appearance
     case home
@@ -308,6 +310,14 @@ private struct PlozziOSSettingsSplitView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            // Household-level, so it sits here rather than on a
+                            // profile — one PIN for everyone, not a property of
+                            // any one person. Matches tvOS.
+                            settingsRow(
+                                .parentalPIN,
+                                title: KidsProfileCopy.parentalPIN,
+                                systemImage: "figure.and.child.holdinghands"
+                            )
                             settingsRow(
                                 .requests,
                                 verbatimTitle: "Seerr",
@@ -470,6 +480,8 @@ private struct PlozziOSSettingsSplitView: View {
             )
         case .grownUps:
             PlozziOSGrownUpsUnlockView(appModel: appModel) { isParentalUnlocked = true }
+        case .parentalPIN:
+            PlozziOSParentalPINSettingsView(appModel: appModel)
         case .manageProfile:
             PlozziOSProfileSettingsView(
                 appModel: appModel,

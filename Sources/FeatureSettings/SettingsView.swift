@@ -535,11 +535,15 @@ public struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(KidsProfileCopy.parentalControls)
                         .font(Self.identityTitleFont)
-                    Text(isParentalSealed
-                        ? KidsProfileCopy.parentalControlsSealed
-                        : KidsProfileCopy.parentalControlsOpen)
-                        .font(.subheadline)
-                        .plozzForeground(.secondary)
+                    // Only the unlocked state says anything. While sealed the
+                    // lock glyph already carries it, and a line repeating it was
+                    // noise; "unlocked until you switch profiles" isn't
+                    // guessable, so that one stays.
+                    if !isParentalSealed {
+                        Text(KidsProfileCopy.parentalControlsOpen)
+                            .font(.subheadline)
+                            .plozzForeground(.secondary)
+                    }
                 }
                 Spacer()
             }

@@ -277,9 +277,10 @@ private struct PlozziOSSettingsSplitView: View {
                                 systemImage: isParentalSealed ? "lock.fill" : "rectangle.stack"
                             )
                         } footer: {
-                            Text(isParentalSealed
-                                ? KidsProfileCopy.parentalControlsSealed
-                                : KidsProfileCopy.parentalControlsOpen)
+                            // See the tvOS twin: the lock says "sealed" already.
+                            if !isParentalSealed {
+                                Text(KidsProfileCopy.parentalControlsOpen)
+                            }
                         }
                     }
 

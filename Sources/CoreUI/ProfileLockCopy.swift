@@ -322,12 +322,6 @@ public enum KidsProfileCopy {
         comment: "Heading for the group of settings on a Kids Profile that only a grown-up may change."
     )
 
-    public static let parentalControlsSealed = LocalizedStringResource(
-        "settings.parentalControls.sealed",
-        defaultValue: "Needs the Parental PIN",
-        comment: "Subtitle of the Parental Controls group while it's locked."
-    )
-
     public static let parentalControlsOpen = LocalizedStringResource(
         "settings.parentalControls.open",
         defaultValue: "Unlocked until you switch profiles",

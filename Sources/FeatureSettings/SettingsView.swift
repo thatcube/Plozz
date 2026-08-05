@@ -53,8 +53,28 @@ public struct SettingsView: View {
     /// Presents the active profile's actions sheet — the same one the picker's
     /// per-tile Edit opens. Held as a flag rather than a `Profile` so the sheet
     /// re-reads the live profile and reflects a lock set from inside it.
-    @State private var showingProfileActions = false
-    @State private var editingProfile: Profile?
+    /// Which page of the profile Edit flow is showing.
+    ///
+    /// One `.sheet` modifier drives both, deliberately. This used to be a
+    /// `.sheet(isPresented:)` for the actions and a second `.sheet(item:)` for
+    /// the appearance editor, stacked on the same view — SwiftUI honours only
+    /// one sheet modifier per view, so the header's Edit button drove the losing
+    /// one and did nothing most of the time.
+    ///
+    /// Held as a case rather than a `Profile` so the sheet re-reads the live
+    /// profile and reflects a lock set from inside it.
+    private enum ProfileSheet: Identifiable {
+        case actions
+        case appearance
+
+        var id: Self { self }
+    }
+
+    @State private var profileSheet: ProfileSheet?
+    /// Set when the actions sheet asks for the appearance editor. The editor is
+    /// presented from `onDismiss` rather than immediately, because asking for a
+    /// new presentation in the same turn as a dismissal drops it.
+    @State private var opensAppearanceOnDismiss = false
 
     /// Focus scope for the Settings root list. Turning profiles off pops the
     /// stack back here, and we `resetFocus` into this scope so focus lands on
@@ -422,49 +442,58 @@ public struct SettingsView: View {
         // Edit opens the same actions sheet as the picker: appearance, lock,
         // Kids Profile, delete. No PIN gate here — you are already *inside* this
         // profile, so its lock has been satisfied by definition.
-        .sheet(isPresented: $showingProfileActions) {
-            ProfileActionsSheet(
-                profile: activeProfile,
-                syncEnabled: syncEnabled,
-                offersPlexPINReuse: activeProfile.playsAsPINProtectedPlexUser,
-                householdHasOtherLock: profiles.contains {
-                    $0.id != activeProfile.id && $0.isLocked
-                },
-                onEditAppearance: {
-                    showingProfileActions = false
-                    editingProfile = activeProfile
-                },
-                onSetLock: { onSetProfileLock(activeProfile.id, $0) },
-                onSetKids: { onSetKidsProfile(activeProfile.id, $0) },
-                validatePlexPIN: {
-                    await validatePlexPIN($0, activeProfile.id)
-                },
-                onDelete: activeProfile.id == profiles.first?.id ? nil : {
-                    onDeleteProfile(activeProfile.id)
-                    showingProfileActions = false
-                },
-                isUnlocked: isProfileUnlocked(activeProfile.id),
-                onUnlock: { onProfileUnlocked(activeProfile.id) },
-                onClose: { showingProfileActions = false }
-            )
-        }
-        .sheet(item: $editingProfile) { profile in
-            ProfileEditorView(
-                editingProfile: profile,
-                canDelete: profile.id != profiles.first?.id,
-                photoSourceAccounts: accounts,
-                plexHomeUsersFetcher: plexHomeUsersFetcher,
-                onSave: { draft in
-                    onSaveProfile(draft)
-                    editingProfile = nil
-                },
-                onLiveChange: { onUpdateProfileCosmetics($0) },
-                onDelete: {
-                    onDeleteProfile(profile.id)
-                    editingProfile = nil
-                },
-                onCancel: { editingProfile = nil }
-            )
+        .sheet(item: $profileSheet) {
+            // Chained, not stacked: the appearance editor is presented only once
+            // the actions sheet has actually gone.
+            if opensAppearanceOnDismiss {
+                opensAppearanceOnDismiss = false
+                profileSheet = .appearance
+            }
+        } content: { sheet in
+            switch sheet {
+            case .actions:
+                ProfileActionsSheet(
+                    profile: activeProfile,
+                    syncEnabled: syncEnabled,
+                    offersPlexPINReuse: activeProfile.playsAsPINProtectedPlexUser,
+                    householdHasOtherLock: profiles.contains {
+                        $0.id != activeProfile.id && $0.isLocked
+                    },
+                    onEditAppearance: {
+                        opensAppearanceOnDismiss = true
+                        profileSheet = nil
+                    },
+                    onSetLock: { onSetProfileLock(activeProfile.id, $0) },
+                    onSetKids: { onSetKidsProfile(activeProfile.id, $0) },
+                    validatePlexPIN: {
+                        await validatePlexPIN($0, activeProfile.id)
+                    },
+                    onDelete: activeProfile.id == profiles.first?.id ? nil : {
+                        onDeleteProfile(activeProfile.id)
+                        profileSheet = nil
+                    },
+                    isUnlocked: isProfileUnlocked(activeProfile.id),
+                    onUnlock: { onProfileUnlocked(activeProfile.id) },
+                    onClose: { profileSheet = nil }
+                )
+            case .appearance:
+                ProfileEditorView(
+                    editingProfile: activeProfile,
+                    canDelete: activeProfile.id != profiles.first?.id,
+                    photoSourceAccounts: accounts,
+                    plexHomeUsersFetcher: plexHomeUsersFetcher,
+                    onSave: { draft in
+                        onSaveProfile(draft)
+                        profileSheet = nil
+                    },
+                    onLiveChange: { onUpdateProfileCosmetics($0) },
+                    onDelete: {
+                        onDeleteProfile(activeProfile.id)
+                        profileSheet = nil
+                    },
+                    onCancel: { profileSheet = nil }
+                )
+            }
         }
     }
 
@@ -992,7 +1021,7 @@ public struct SettingsView: View {
                 Spacer()
                 HStack(spacing: 12) {
                     Button {
-                        showingProfileActions = true
+                        profileSheet = .actions
                     } label: {
                         Label("Edit", systemImage: "pencil")
                     }

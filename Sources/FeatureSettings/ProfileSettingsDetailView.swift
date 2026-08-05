@@ -26,12 +26,8 @@ struct ProfileSettingsDetailView: View {
     /// set here can say when it's device-only.
     let syncEnabled: Bool
 
-    @State private var showingEditor = false
-    /// PIN setups are PUSHED here, not presented: modals asked for from inside
-    /// the Settings tab are silently dropped when `RootView`'s stacked covers
-    /// contest the slot. Same reason Appearance above is a push.
-    @State private var showingLockSetup = false
-    @State private var showingParentalSetup = false
+    /// The single pushed destination for this page — see `Route`.
+    @State private var route: Route?
 
     /// Read live from the context so the page reflects edits made on it (a lock
     /// added, a rename) without needing its own copy to be invalidated.
@@ -61,12 +57,34 @@ struct ProfileSettingsDetailView: View {
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
-        // Pushed, not presented. Modals requested from inside the Settings tab
-        // are unreliable — `RootView` stacks several `fullScreenCover` modifiers
-        // on one host, and a contested slot silently drops the request (the
-        // header's Edit button did nothing for exactly this reason). A push uses
-        // the navigation stack this page already lives in.
-        .navigationDestination(isPresented: $showingLockSetup) {
+        // ONE destination for this level, not three booleans.
+        //
+        // Pushed rather than presented: modals requested from inside the Settings
+        // tab are unreliable — `RootView` stacks several `fullScreenCover`
+        // modifiers on one host and a contested slot is silently dropped (the
+        // header's Edit button did nothing for exactly this reason). Stacking
+        // three `navigationDestination(isPresented:)` on one view reintroduces
+        // the same class of bug at the navigation layer: Apple's rule is one
+        // destination per level, and with several attached the last one can win
+        // and the rest quietly become no-ops.
+        .navigationDestination(item: $route) { route in
+            destination(for: route)
+                .toolbar(.hidden, for: .tabBar)
+        }
+    }
+
+    /// What this page can push. One case per destination, so they can't compete.
+    enum Route: Hashable, Identifiable {
+        case lockSetup
+        case parentalSetup
+        case appearance
+        var id: Self { self }
+    }
+
+    @ViewBuilder
+    private func destination(for route: Route) -> some View {
+        switch route {
+        case .lockSetup:
             if let profile {
                 ProfileLockSetupView(
                     profile: profile,
@@ -75,24 +93,20 @@ struct ProfileSettingsDetailView: View {
                     validatePlexPIN: { await context.validatePlexPIN($0, profileID) },
                     onComplete: { lock in
                         context.onSetProfileLock(profileID, lock)
-                        showingLockSetup = false
+                        self.route = nil
                     },
-                    onCancel: { showingLockSetup = false }
+                    onCancel: { self.route = nil }
                 )
-                .toolbar(.hidden, for: .tabBar)
             }
-        }
-        .navigationDestination(isPresented: $showingParentalSetup) {
+        case .parentalSetup:
             ParentalPINSetupView(
                 onComplete: { pin in
                     context.onSetParentalPIN(pin)
-                    showingParentalSetup = false
+                    self.route = nil
                 },
-                onCancel: { showingParentalSetup = false }
+                onCancel: { self.route = nil }
             )
-            .toolbar(.hidden, for: .tabBar)
-        }
-        .navigationDestination(isPresented: $showingEditor) {
+        case .appearance:
             if let profile {
                 ProfileEditorView(
                     editingProfile: profile,
@@ -101,12 +115,11 @@ struct ProfileSettingsDetailView: View {
                     plexHomeUsersFetcher: context.plexHomeUsersFetcher,
                     onSave: { draft in
                         context.onSaveProfile(draft)
-                        showingEditor = false
+                        self.route = nil
                     },
                     onLiveChange: { context.onUpdateProfileCosmetics($0) },
-                    onCancel: { showingEditor = false }
+                    onCancel: { self.route = nil }
                 )
-                .toolbar(.hidden, for: .tabBar)
             }
         }
     }
@@ -134,9 +147,9 @@ struct ProfileSettingsDetailView: View {
                     && context.activeProfile.id == profileID
                     && context.hasParentalPIN
                     && !context.isParentalUnlocked,
-                onEditAppearance: { showingEditor = true },
-                onEditLock: { showingLockSetup = true },
-                onCreateParentalPIN: { showingParentalSetup = true },
+                onEditAppearance: { route = .appearance },
+                onEditLock: { route = .lockSetup },
+                onCreateParentalPIN: { route = .parentalSetup },
                 onSetLock: { context.onSetProfileLock(profileID, $0) },
                 onSetKids: { context.onSetKidsProfile(profileID, $0) },
                 onSetParentalPIN: context.onSetParentalPIN,

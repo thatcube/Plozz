@@ -23,12 +23,8 @@ struct PlozziOSProfileSettingsView: View {
     /// gate looked broken.
     var isParentalUnlocked: Bool = false
 
-    @State private var showingEditor = false
-    /// PIN setups are pushed onto the settings stack, matching tvOS. iOS Settings
-    /// is itself a sheet, so a sheet-over-sheet here would be a presentation from
-    /// inside a presentation.
-    @State private var showingLockSetup = false
-    @State private var showingParentalSetup = false
+    /// The single pushed destination for this page — see `Route`.
+    @State private var route: Route?
 
     /// Read live so the page reflects a lock added or the profile renamed.
     private var profile: Profile? {
@@ -58,9 +54,9 @@ struct PlozziOSProfileSettingsView: View {
                             && appModel.profiles.activeProfileID == profileID
                             && appModel.profiles.parentalPIN != nil
                             && !isParentalUnlocked,
-                        onEditAppearance: { showingEditor = true },
-                        onEditLock: { showingLockSetup = true },
-                        onCreateParentalPIN: { showingParentalSetup = true },
+                        onEditAppearance: { route = .appearance },
+                        onEditLock: { route = .lockSetup },
+                        onCreateParentalPIN: { route = .parentalSetup },
                         onSetLock: { appModel.setLock($0, forProfile: profileID) },
                         onSetKids: { appModel.setKidsProfile($0, forProfile: profileID) },
                         onSetParentalPIN: { appModel.profiles.setParentalPIN($0) },
@@ -81,7 +77,29 @@ struct PlozziOSProfileSettingsView: View {
         .settingsPageSurface()
         .navigationTitle(Text(verbatim: profile?.name ?? ""))
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: $showingLockSetup) {
+        // ONE destination for this level. Three competing presentations lived
+        // here — two boolean `navigationDestination`s plus a sheet — and Apple's
+        // rule is one destination per level; with several attached the last can
+        // win and the rest silently do nothing. Appearance moved from a sheet to
+        // a push for the same reason: this page can itself be inside the Settings
+        // sheet, and a modal from a covered view is dropped.
+        .navigationDestination(item: $route) { route in
+            destination(for: route)
+        }
+    }
+
+    /// What this page can push. One case per destination, so they can't compete.
+    private enum Route: Hashable, Identifiable {
+        case lockSetup
+        case parentalSetup
+        case appearance
+        var id: Self { self }
+    }
+
+    @ViewBuilder
+    private func destination(for route: Route) -> some View {
+        switch route {
+        case .lockSetup:
             if let profile {
                 ProfileLockSetupView(
                     profile: profile,
@@ -92,31 +110,21 @@ struct PlozziOSProfileSettingsView: View {
                     },
                     onComplete: { lock in
                         appModel.setLock(lock, forProfile: profileID)
-                        showingLockSetup = false
+                        self.route = nil
                     },
-                    onCancel: { showingLockSetup = false }
+                    onCancel: { self.route = nil }
                 )
             }
-        }
-        .navigationDestination(isPresented: $showingParentalSetup) {
+        case .parentalSetup:
             ParentalPINSetupView(
                 onComplete: { pin in
                     appModel.profiles.setParentalPIN(pin)
-                    showingParentalSetup = false
+                    self.route = nil
                 },
-                onCancel: { showingParentalSetup = false }
+                onCancel: { self.route = nil }
             )
-        }
-        .sheet(isPresented: $showingEditor) {
-            NavigationStack {
-                PlozziOSProfileEditorHost(
-                    appModel: appModel,
-                    editingProfile: profile,
-                    canDelete: false,
-                    onFinished: { showingEditor = false }
-                )
-            }
-            .preferredColorScheme(palette.isLight ? .light : .dark)
+        case .appearance:
+            PlozziOSProfileAppearancePage(appModel: appModel, profileID: profileID)
         }
     }
 }

@@ -18,6 +18,10 @@ public struct ProfileActionsSheet: View {
     private let syncEnabled: Bool
     private let offersPlexPINReuse: Bool
     private let hasParentalPIN: Bool
+    /// Whether the escalation-capable actions are withheld. Required rather than
+    /// defaulted: a security control that defaults to OPEN is one forgotten
+    /// argument away from a hole.
+    private let restrictedActionsSealed: Bool
     private let onEditAppearance: () -> Void
     private let onSetLock: (ProfileLock?) -> Void
     private let onSetKids: (Bool) -> Void
@@ -33,6 +37,7 @@ public struct ProfileActionsSheet: View {
         syncEnabled: Bool,
         offersPlexPINReuse: Bool = false,
         hasParentalPIN: Bool,
+        restrictedActionsSealed: Bool = false,
         onEditAppearance: @escaping () -> Void,
         onSetLock: @escaping (ProfileLock?) -> Void,
         onSetKids: @escaping (Bool) -> Void,
@@ -49,6 +54,7 @@ public struct ProfileActionsSheet: View {
         self.syncEnabled = syncEnabled
         self.offersPlexPINReuse = offersPlexPINReuse
         self.hasParentalPIN = hasParentalPIN
+        self.restrictedActionsSealed = restrictedActionsSealed
         self.onEditAppearance = onEditAppearance
         self.onSetLock = onSetLock
         self.onSetKids = onSetKids
@@ -115,6 +121,7 @@ public struct ProfileActionsSheet: View {
                 syncEnabled: syncEnabled,
                 offersPlexPINReuse: offersPlexPINReuse,
                 hasParentalPIN: hasParentalPIN,
+                restrictedActionsSealed: restrictedActionsSealed,
                 onEditAppearance: onEditAppearance,
                 onEditLock: { setupStep = .lock },
                 onCreateParentalPIN: { setupStep = .parental },
@@ -144,6 +151,7 @@ public struct ProfileActionsSheet: View {
                         syncEnabled: syncEnabled,
                         offersPlexPINReuse: offersPlexPINReuse,
                         hasParentalPIN: hasParentalPIN,
+                restrictedActionsSealed: restrictedActionsSealed,
                         onEditAppearance: onEditAppearance,
                 onEditLock: { setupStep = .lock },
                 onCreateParentalPIN: { setupStep = .parental },

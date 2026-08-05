@@ -71,7 +71,7 @@ public struct ProfileActionsList: View {
         syncEnabled: Bool,
         offersPlexPINReuse: Bool = false,
         hasParentalPIN: Bool,
-        restrictedActionsSealed: Bool = false,
+        restrictedActionsSealed: Bool,
         onEditAppearance: @escaping () -> Void,
         onEditLock: @escaping () -> Void = {},
         onCreateParentalPIN: @escaping () -> Void = {},

@@ -308,7 +308,8 @@ public struct ProfileEditorView: View {
     /// peeks past the fade instead of the rail ending flush with the column.
     private static let emojiRailTrailingBleed: CGFloat = 16
 
-    private var tvOSBody: some View {        ZStack {
+    private var tvOSBody: some View {
+        ZStack {
             AppBackground(palette: palette).ignoresSafeArea()
 
             HStack(alignment: .top, spacing: Self.columnGap) {

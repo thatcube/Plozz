@@ -900,40 +900,44 @@ private struct PlozziOSSettingsCompactMenu: View {
                 // meaning. Mirrors the split view and tvOS.
                 if showsParentalControlsSection {
                     SettingsSectionGroup(KidsProfileCopy.parentalControls) {
-                        if isParentalSealed {
-                            NavigationLink {
-                                PlozziOSGrownUpsUnlockView(appModel: appModel) {
-                                    isParentalUnlocked = true
-                                }
-                            } label: {
-                                Label(SettingsCopy.libraries, systemImage: "lock.fill")
-                            }
-                            NavigationLink {
-                                PlozziOSGrownUpsUnlockView(appModel: appModel) {
-                                    isParentalUnlocked = true
-                                }
-                            } label: {
-                                Label(KidsProfileCopy.manageProfile, systemImage: "lock.fill")
-                            }
-                        } else {
-                            NavigationLink {
+                        // Stable rows; the GATE is inside the destination. Swapping
+                        // the link on `isParentalSealed` made a correct PIN delete
+                        // the page the user was standing on.
+                        NavigationLink {
+                            PlozziOSParentalGate(
+                                appModel: appModel,
+                                isSealed: isParentalSealed,
+                                onUnlock: { isParentalUnlocked = true }
+                            ) {
                                 PlozziOSMyLibrariesSettingsView(
                                     appModel: appModel,
                                     onAddServer: onAddServer,
                                     onAddUser: onAddUser
                                 )
-                            } label: {
-                                Label(SettingsCopy.libraries, systemImage: "rectangle.stack")
                             }
-                            NavigationLink {
+                        } label: {
+                            Label(
+                                SettingsCopy.libraries,
+                                systemImage: isParentalSealed ? "lock.fill" : "rectangle.stack"
+                            )
+                        }
+                        NavigationLink {
+                            PlozziOSParentalGate(
+                                appModel: appModel,
+                                isSealed: isParentalSealed,
+                                onUnlock: { isParentalUnlocked = true }
+                            ) {
                                 PlozziOSProfileSettingsView(
                                     appModel: appModel,
                                     profileID: appModel.profiles.activeProfileID,
                                     isParentalUnlocked: isParentalUnlocked
                                 )
-                            } label: {
-                                Label(KidsProfileCopy.manageProfile, systemImage: "person.crop.circle")
                             }
+                        } label: {
+                            Label(
+                                KidsProfileCopy.manageProfile,
+                                systemImage: isParentalSealed ? "lock.fill" : "person.crop.circle"
+                            )
                         }
                     } footer: {
                         if !isParentalSealed {

@@ -11,13 +11,6 @@ struct PlozziOSServersSettingsView: View {
     let onAddServer: () -> Void
     @State private var selectedServerKey: String?
 
-    /// Server keys whose switch has been flipped but whose write hasn't landed.
-    @State private var pendingWatching: [String: Bool] = [:]
-
-    /// Slightly longer than the knob's 0.18s travel, so the commit lands after
-    /// the animation rather than during it.
-    private static let switchSettleMilliseconds = 220
-
     private var groups: [ServerAccountGroup] {
         serverGroups(from: appModel.accounts)
     }

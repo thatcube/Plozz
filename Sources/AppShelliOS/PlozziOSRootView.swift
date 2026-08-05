@@ -528,6 +528,13 @@ private struct PlozziOSTabShell: View {
     /// it can raise aren't asked for from underneath the Settings sheet — the
     /// arrangement that fails silently.
     @State private var showingProfileSwitcher = false
+    /// Set while Settings is closing, so the picker can be raised from its
+    /// `onDismiss` rather than in the same turn as the dismissal.
+    @State private var wantsProfileSwitcher = false
+    /// A profile chosen in the picker, switched to once the picker has gone: the
+    /// parental/lock gates are covers on an ANCESTOR, and asking for those while
+    /// this cover is dismissing is the same contested-slot case.
+    @State private var pendingSwitchProfileID: String?
 
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
@@ -619,13 +626,22 @@ private struct PlozziOSTabShell: View {
             // when the sheet is actually gone.
             if presented { appModel.noteSettingsPresented(true) }
         }
-        .fullScreenCover(isPresented: $showingProfileSwitcher) {
+        .fullScreenCover(isPresented: $showingProfileSwitcher, onDismiss: {
+            // The gates `selectProfile` can raise are covers on the ROOT. Asking
+            // for one while this cover is still dismissing can be dropped, and
+            // because the gate's binding stays true SwiftUI never re-requests it —
+            // profile switching would wedge until relaunch.
+            if let id = pendingSwitchProfileID {
+                pendingSwitchProfileID = nil
+                appModel.selectProfile(id)
+            }
+        }) {
             PlozziOSProfilePickerView(
                 profiles: appModel.profiles.profilesByRecency,
                 activeProfileID: appModel.profiles.activeProfileID,
                 onSelect: { profile in
+                    pendingSwitchProfileID = profile.id
                     showingProfileSwitcher = false
-                    appModel.selectProfile(profile.id)
                 },
                 // Withheld inside an enforced Kids Profile — creating a profile
                 // switches into it, which would bypass the Parental PIN gate.
@@ -635,14 +651,22 @@ private struct PlozziOSTabShell: View {
         }
         .sheet(isPresented: $showingSettings, onDismiss: {
             appModel.noteSettingsPresented(false)
+            if wantsProfileSwitcher {
+                wantsProfileSwitcher = false
+                showingProfileSwitcher = true
+            }
         }) {
             PlozziOSSettingsView(
                 appModel: appModel,
                 onClose: { showingSettings = false },
                 onSwitchProfile: {
-                    // Close first, then present: see `showingProfileSwitcher`.
+                    // Requested, not presented here. Dismissing Settings and
+                    // presenting the picker in the SAME turn is the arrangement
+                    // SwiftUI drops — and this is the only way to switch profiles
+                    // on iOS, so losing it strands the user. The sheet's
+                    // `onDismiss` raises the picker once Settings is actually gone.
+                    wantsProfileSwitcher = true
                     showingSettings = false
-                    showingProfileSwitcher = true
                 },
                 systemColorScheme: systemColorScheme
             )

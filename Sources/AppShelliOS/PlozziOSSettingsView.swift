@@ -159,6 +159,9 @@ private enum PlozziOSSettingsDestination: Hashable {
     case grownUps
     /// This profile's own management page, reached from Parental Controls.
     case manageProfile
+    /// The profile's own name, avatar and colour. Deliberately outside Parental
+    /// Controls — it can't escalate anything.
+    case profileAppearance
     /// The household's Parental PIN.
     case parentalPIN
     case trackers
@@ -257,6 +260,15 @@ private struct PlozziOSSettingsSplitView: View {
                                 .myLibraries,
                                 title: SettingsCopy.libraries,
                                 systemImage: "rectangle.stack"
+                            )
+                        }
+                        // Only when Parental Controls has taken the management
+                        // page away, so this doesn't duplicate the row inside it.
+                        if showsParentalControlsSection {
+                            settingsRow(
+                                .profileAppearance,
+                                title: KidsProfileCopy.nameAndAvatar,
+                                systemImage: "person.crop.circle"
                             )
                         }
                         settingsRow(.trackers, title: "Trackers", systemImage: "link")
@@ -482,6 +494,13 @@ private struct PlozziOSSettingsSplitView: View {
             PlozziOSGrownUpsUnlockView(appModel: appModel) { isParentalUnlocked = true }
         case .parentalPIN:
             PlozziOSParentalPINSettingsView(appModel: appModel)
+        case .profileAppearance:
+            PlozziOSProfileEditorHost(
+                appModel: appModel,
+                editingProfile: appModel.profiles.activeProfile,
+                canDelete: false,
+                onFinished: { selection = nil }
+            )
         case .manageProfile:
             PlozziOSProfileSettingsView(
                 appModel: appModel,
@@ -685,6 +704,18 @@ private struct PlozziOSSettingsCompactMenu: View {
                             SettingsCopy.libraries,
                             systemImage: "rectangle.stack"
                         )
+                    }
+                }
+                if showsParentalControlsSection {
+                    NavigationLink {
+                        PlozziOSProfileEditorHost(
+                            appModel: appModel,
+                            editingProfile: appModel.profiles.activeProfile,
+                            canDelete: false,
+                            onFinished: {}
+                        )
+                    } label: {
+                        Label(KidsProfileCopy.nameAndAvatar, systemImage: "person.crop.circle")
                     }
                 }
                 NavigationLink {

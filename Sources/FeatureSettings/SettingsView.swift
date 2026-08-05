@@ -613,6 +613,13 @@ public struct SettingsView: View {
                     signedInStrip
                 }
             }
+            // Only when Parental Controls has taken the management page away.
+            // Otherwise this would duplicate the Appearance row inside it.
+            if showsParentalControlsSection {
+                navRow(KidsProfileCopy.nameAndAvatar, icon: "person.crop.circle",
+                       value: nil,
+                       route: .profileAppearance(profileID: activeProfile.id))
+            }
             navRow("Customize Home", icon: "house",
                    value: nil,
                    route: .customizeHome)
@@ -972,6 +979,8 @@ public struct SettingsView: View {
             ServersAndLibrariesDetailView(context: context)
         case .grownUps:
             GrownUpsUnlockView(context: context)
+        case let .profileAppearance(profileID):
+            ProfileAppearancePage(context: context, profileID: profileID)
         case .parentalPIN:
             ParentalPINDetailView(context: context)
         case let .profileSettings(profileID):

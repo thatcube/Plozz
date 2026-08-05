@@ -328,6 +328,15 @@ public enum KidsProfileCopy {
         comment: "Subtitle of the Parental Controls group after the Parental PIN has been entered, making the limited duration clear."
     )
 
+    /// Distinct from the "Appearance" row that holds theme and layout — this one
+    /// is the profile's own identity, and naming both "Appearance" on one page
+    /// would be two different things wearing the same word.
+    public static let nameAndAvatar = LocalizedStringResource(
+        "settings.profile.nameAndAvatar",
+        defaultValue: "Name & Avatar",
+        comment: "Row opening the profile's own name, avatar and colour. Available to a Kids Profile, unlike the parental controls."
+    )
+
     public static let manageProfile = LocalizedStringResource(
         "settings.parentalControls.manageProfile",
         defaultValue: "Manage Profile",

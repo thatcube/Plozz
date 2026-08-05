@@ -94,6 +94,10 @@ enum SettingsRoute: Hashable {
     /// settings. A pushed page, not a modal — modals asked for from inside the
     /// Settings tab are unreliable (see the Edit button note in `SettingsView`).
     case grownUps
+    /// The profile's own name, avatar and colour. Kept OUT of Parental
+    /// Controls: it can't escalate anything, and a Kids Profile should still be
+    /// able to choose how it looks.
+    case profileAppearance(profileID: String)
     /// The household's Parental PIN settings (Everyone › Parental PIN).
     case parentalPIN
     case servers

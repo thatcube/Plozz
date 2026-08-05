@@ -804,11 +804,46 @@ public struct PlexClient: Sendable {
     /// `GET https://discover.provider.plex.tv/library/sections/watchlist/all` —
     /// the account's current watchlist. Items carry global Discover ids that do
     /// not resolve against a specific PMS for playback (documented limitation).
+    /// Every title on the account's Plex watchlist.
+    ///
+    /// Paginated explicitly. Plex serves this endpoint in pages and, asked for no
+    /// particular window, returns only its own default one — so a 139-title
+    /// watchlist arrived as the first 20-odd titles and everything past that
+    /// simply did not exist as far as Plozz was concerned. Nothing surfaced the
+    /// shortfall either: a short page is indistinguishable from a short list.
+    ///
+    /// Stops on the first short page, on a page that returns nothing, or once
+    /// `totalSize` is reached, and refuses to loop forever if a server keeps
+    /// handing back full pages.
     func watchlist() async throws -> [PlexMetadata] {
+        let pageSize = 100
+        // 10k titles. Far past any real watchlist, and the only purpose is to
+        // stop a misbehaving server turning this into an unbounded loop.
+        let hardCap = 100
+        var collected: [PlexMetadata] = []
+        var start = 0
+
+        for _ in 0..<hardCap {
+            let container = try await watchlistPage(start: start, size: pageSize)
+            let page = container.Metadata ?? []
+            collected.append(contentsOf: page)
+            if page.count < pageSize { break }
+            start += page.count
+            if let total = container.totalSize, start >= total { break }
+        }
+        return collected
+    }
+
+    private func watchlistPage(
+        start: Int,
+        size: Int
+    ) async throws -> PlexMediaContainer {
         let endpoint = Endpoint(
             path: "/library/sections/watchlist/all",
             queryItems: [
                 URLQueryItem(name: "X-Plex-Token", value: plexTVToken),
+                URLQueryItem(name: "X-Plex-Container-Start", value: String(start)),
+                URLQueryItem(name: "X-Plex-Container-Size", value: String(size)),
                 // `includeGuids=1` inlines each entry's external ids
                 // (imdb/tmdb/tvdb). Without it Plex returns only its own
                 // `plex://` guid, which identifies a title inside Plex and
@@ -832,8 +867,10 @@ public struct PlexClient: Sendable {
         )
         let (data, _) = try await http.send(endpoint, baseURL: Self.watchlistBase)
         do {
-            return try JSONDecoder.plozz.decode(PlexMediaContainerResponse.self, from: data)
-                .MediaContainer.Metadata ?? []
+            return try JSONDecoder.plozz.decode(
+                PlexMediaContainerResponse.self,
+                from: data
+            ).MediaContainer
         } catch {
             PlozzLog.networking.error("Decoding Plex watchlist failed")
             throw AppError.decoding

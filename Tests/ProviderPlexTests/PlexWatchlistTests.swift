@@ -190,6 +190,40 @@ final class PlexWatchlistTests: XCTestCase {
         )
     }
 
+    /// Regression: the watchlist read must PAGINATE.
+    ///
+    /// Plex serves this endpoint in pages, and asked for no particular window it
+    /// returns only its own default one — so a 139-title watchlist arrived as
+    /// the first 20-odd titles and the rest simply didn't exist as far as Plozz
+    /// was concerned. A short page is indistinguishable from a short list, so
+    /// nothing surfaced the shortfall.
+    func testWatchlistReadsEveryPage() async throws {
+        let stub = StubHTTPClient()
+        let full = (0..<100).map {
+            """
+            {"ratingKey":"k\($0)","type":"movie","title":"Film \($0)","year":2020}
+            """
+        }.joined(separator: ",")
+        stub.stubSequence(pathSuffix: "/library/sections/watchlist/all", jsons: [
+            """
+            {"MediaContainer":{"size":100,"totalSize":103,"Metadata":[\(full)]}}
+            """,
+            """
+            {"MediaContainer":{"size":3,"totalSize":103,"Metadata":[
+              {"ratingKey":"k100","type":"movie","title":"Film 100","year":2020},
+              {"ratingKey":"k101","type":"movie","title":"Film 101","year":2020},
+              {"ratingKey":"k102","type":"movie","title":"Film 102","year":2020}
+            ]}}
+            """
+        ])
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.watchlist()
+
+        XCTAssertEqual(items.count, 103)
+        XCTAssertEqual(items.last?.title, "Film 102")
+    }
+
     func testWatchlistWriteUsesDiscoverHost() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/actions/addToWatchlist", json: "{}")

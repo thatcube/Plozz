@@ -26,8 +26,7 @@ public struct WatchlistIntentStoreState: Codable, Hashable, Sendable {
         }
         self.migration = WatchlistMigrationMetadata(
             legacyHomeSeedCompletedAt: migration.legacyHomeSeedCompletedAt,
-            completedNativeImportDestinationIDs:
-                migration.completedNativeImportDestinationIDs
+            nativeImportRetiredAt: migration.nativeImportRetiredAt
         )
     }
 

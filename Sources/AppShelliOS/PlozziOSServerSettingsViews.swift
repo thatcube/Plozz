@@ -280,7 +280,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
             PlozziOSServerIdentityPromptView(
                 appModel: appModel,
                 account: account,
-                onFinish: { appModel.resolveIdentityPrompt(for: account.id) }
+                onFinish: { appModel.concludeIdentityPrompt(for: account.id) }
             )
         }
     }

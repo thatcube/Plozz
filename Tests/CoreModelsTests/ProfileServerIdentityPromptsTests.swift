@@ -207,4 +207,69 @@ struct ActionableIdentityQuestionsTests {
         #expect(actionable == ["present"])
         #expect(actionable.first == "present")
     }
+
+    @Test("Backing out of the question declines it rather than consenting")
+    func decliningIsNotConsent() {
+        var profile = Profile(name: "Kid")
+        profile.noteAccountAwaitingIdentity("a1")
+
+        let declined = profile.declineAccountWatchlist("a1")
+        #expect(declined)
+
+        // The question is closed — nagging isn't the answer either.
+        #expect(profile.pendingIdentityAccountIDs.isEmpty)
+        // But nobody said who this profile is, so the server's own watchlist
+        // stays out. It used to be read as the account OWNER at this point,
+        // which is the very thing the question exists to prevent.
+        #expect(profile.declinedWatchlistAccountIDs == ["a1"])
+    }
+
+    @Test("Answering the question doesn't decline it")
+    func answeringLeavesNoDecline() {
+        var profile = Profile(name: "Kid")
+        profile.noteAccountAwaitingIdentity("a1")
+
+        let resolved = profile.resolveAccountAwaitingIdentity("a1")
+        #expect(resolved)
+
+        #expect(profile.pendingIdentityAccountIDs.isEmpty)
+        #expect(profile.declinedWatchlistAccountIDs.isEmpty)
+    }
+
+    @Test("Switching a declined server off and on asks again")
+    func reEnablingClearsTheDecline() {
+        let model = makeModel()
+        var profile = model.add(name: "Kid")
+        profile.declineAccountWatchlist("a1")
+        model.update(profile)
+
+        model.noteIdentityQuestions(
+            for: ["a1"],
+            forProfile: profile.id,
+            knownNonPlexAccountIDs: []
+        )
+
+        // The only way back from a decline, and it needs no new Settings screen.
+        #expect(model.declinedWatchlistAccountIDs(forProfile: profile.id).isEmpty)
+        #expect(
+            model.actionableIdentityAccountIDs(
+                forProfile: profile.id,
+                importAccountIDs: ["a1"]
+            ) == ["a1"]
+        )
+    }
+
+    @Test("A decline clears to absence, not an empty array")
+    func declineClearsToAbsence() {
+        var profile = Profile(name: "Kid")
+        profile.declineAccountWatchlist("a1")
+        #expect(profile.watchlistDeclinedAccountIDs != nil)
+
+        let cleared = profile.clearWatchlistDecline("a1")
+        #expect(cleared)
+
+        // The sync layer needs a record to round-trip byte-identically, and an
+        // empty array is not the same bytes as no key at all.
+        #expect(profile.watchlistDeclinedAccountIDs == nil)
+    }
 }

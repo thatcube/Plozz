@@ -37,7 +37,6 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         @MainActor (Bool, MediaItem) -> Void
     private let resolveDurableWatchlist: ([MediaItem]) -> [MediaItem]
     private let seedLegacyUniversalWatchlist: ([MediaItem]) async -> Void
-    private let importNativeUniversalWatchlist: ([MediaItem]) async -> Void
     /// Current offline state for an item, or `nil` on a surface without download
     /// capability. Injected as a closure so AppRuntime needn't depend on
     /// MediaDownloads — and so tvOS, which has no downloads, simply omits it.
@@ -110,7 +109,6 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
             $0.filter(\.isFavorite)
         },
         seedLegacyUniversalWatchlist: @escaping ([MediaItem]) async -> Void = { _ in },
-        importNativeUniversalWatchlist: @escaping ([MediaItem]) async -> Void = { _ in },
         downloadState: @escaping (MediaItem) -> MediaItemDownloadState?? = { _ in nil },
         performDownloadAction: @escaping (MediaItemAction, MediaItem) -> Void = { _, _ in }
     ) {
@@ -129,7 +127,6 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
         self.beginUniversalWatchlistFanOut = beginUniversalWatchlistFanOut
         self.resolveDurableWatchlist = resolveDurableWatchlist
         self.seedLegacyUniversalWatchlist = seedLegacyUniversalWatchlist
-        self.importNativeUniversalWatchlist = importNativeUniversalWatchlist
         self.downloadState = downloadState
         self.performDownloadAction = performDownloadAction
     }
@@ -505,10 +502,5 @@ public final class MediaItemActionCoordinator: MediaItemActionHandling {
     public func seedLegacyWatchlist(_ items: [MediaItem]) async {
         guard universalWatchlistEnabled() else { return }
         await seedLegacyUniversalWatchlist(items)
-    }
-
-    public func importNativeWatchlist(_ items: [MediaItem]) async {
-        guard universalWatchlistEnabled() else { return }
-        await importNativeUniversalWatchlist(items)
     }
 }

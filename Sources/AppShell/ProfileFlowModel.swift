@@ -679,11 +679,28 @@ public final class ProfileFlowModel {
         profilesModel.update(profile)
     }
 
-    /// Clears the pending question once an identity is chosen (or declined).
+    /// Clears the pending question once an identity is chosen.
     public func resolveIdentityPrompt(for accountID: String) {
+        applyIdentityAnswer(for: accountID) {
+            $0.resolveAccountAwaitingIdentity(accountID)
+        }
+    }
+
+    /// Records that nobody said who this profile is on this server, so its own
+    /// watchlist is left alone. See `Profile.watchlistDeclinedAccountIDs`.
+    public func declineIdentityPrompt(for accountID: String) {
+        applyIdentityAnswer(for: accountID) {
+            $0.declineAccountWatchlist(accountID)
+        }
+    }
+
+    private func applyIdentityAnswer(
+        for accountID: String,
+        _ apply: (inout Profile) -> Bool
+    ) {
         let profileID = profilesModel.activeProfileID
         guard var profile = profilesModel.profiles.first(where: { $0.id == profileID }),
-              profile.resolveAccountAwaitingIdentity(accountID)
+              apply(&profile)
         else { return }
         profilesModel.update(profile)
         // The import was deferred while this was outstanding; with the answer in

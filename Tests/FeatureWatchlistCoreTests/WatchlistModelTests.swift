@@ -38,27 +38,49 @@ final class WatchlistModelTests: XCTestCase {
         )
     }
 
-    func testNativeImportAppendsDeterministically() throws {
+    /// Native entries follow explicit ones, in the destination's own order, and
+    /// the SAME two reads produce the same row — no dictionary-order shuffle.
+    func testNativeEntriesFollowExplicitOnesInStableOrder() throws {
         let model = WatchlistModel()
         let explicit = MediaAliasID()
         let nativeFirst = MediaAliasID()
         let nativeSecond = MediaAliasID()
+        let destination = WatchlistDestinationID(rawValue: "native")!
         try model.activate(profileID: "p")
         try model.add(profileID: "p", aliasID: explicit, kind: .movie)
 
-        _ = try model.importNativeBatch(
-            profileID: "p",
-            destinationID: WatchlistDestinationID(rawValue: "native")!,
-            candidates: [
-                .init(aliasID: nativeFirst, kind: .movie),
-                .init(aliasID: nativeSecond, kind: .series)
+        var view = NativeWatchlistView()
+        view.applySuccess(
+            destinationID: destination,
+            entries: [
+                NativeWatchlistEntry(aliasID: nativeFirst, kind: .movie, index: 0)!,
+                NativeWatchlistEntry(aliasID: nativeSecond, kind: .series, index: 1)!
             ]
         )
 
+        let first = model.union(
+            profileID: "p",
+            nativeView: view,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: [destination]
+        )
+        let second = model.union(
+            profileID: "p",
+            nativeView: view,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: [destination]
+        )
+
         XCTAssertEqual(
-            model.activeSnapshot.orderedEntries.map(\.aliasID),
+            first.orderedEntries.map(\.aliasID),
             [explicit, nativeFirst, nativeSecond]
         )
+        XCTAssertEqual(
+            first.orderedEntries.map(\.aliasID),
+            second.orderedEntries.map(\.aliasID)
+        )
+        // Only the add is the viewer's own; the rest is the server talking.
+        XCTAssertEqual(first.orderedEntries.map(\.isExplicit), [true, false, false])
     }
 
     func testTombstonePersistsAndReaddKeepsStableRank() throws {
@@ -122,43 +144,82 @@ final class WatchlistModelTests: XCTestCase {
             profileID: "p",
             entries: [(MediaAliasID(), .movie, nil)]
         )
-        try model.markNativeImportComplete(
-            profileID: "p",
-            destinationID: destination
-        )
+        try model.retireNativeImports(profileID: "p")
 
         let metadata = try model.migrationMetadata(profileID: "p")
         XCTAssertNotNil(metadata.legacyHomeSeedCompletedAt)
-        XCTAssertTrue(metadata.hasCompletedNativeImport(destinationID: "native"))
+        XCTAssertNotNil(metadata.nativeImportRetiredAt)
         XCTAssertEqual(model.activeSnapshot.orderedEntries.count, 1)
     }
 
-    func testNativeImportIsAdditiveAndExplicitRemovalNeedsAbsenceBoundary() throws {
+    /// Removing something that lives on a server keeps it gone across re-reads,
+    /// and stays gone — a server still listing it is not a new statement.
+    func testExplicitRemovalOutranksAServerThatStillListsIt() throws {
         let model = WatchlistModel()
         let alias = MediaAliasID()
         let destination = WatchlistDestinationID(rawValue: "native")!
         try model.activate(profileID: "p")
-        XCTAssertTrue(try model.importNative(
-            profileID: "p",
-            aliasID: alias,
-            kind: .movie,
-            destinationID: destination
-        ))
+        try model.add(profileID: "p", aliasID: alias, kind: .movie)
         try model.remove(profileID: "p", aliasID: alias, kind: .movie)
-        XCTAssertFalse(try model.importNative(
-            profileID: "p",
-            aliasID: alias,
-            kind: .movie,
-            destinationID: destination
-        ))
-        XCTAssertTrue(try model.importNative(
-            profileID: "p",
-            aliasID: alias,
-            kind: .movie,
+
+        var view = NativeWatchlistView()
+        view.applySuccess(
             destinationID: destination,
-            observedAfterConfirmedAbsence: true
+            entries: [NativeWatchlistEntry(aliasID: alias, kind: .movie, index: 0)!]
+        )
+
+        for _ in 0..<2 {
+            let union = model.union(
+                profileID: "p",
+                nativeView: view,
+                aliasSnapshot: .empty,
+                enabledDestinationIDs: [destination]
+            )
+            XCTAssertFalse(union.contains(aliasID: alias))
+        }
+    }
+
+    /// A native re-add AFTER the removal was confirmed applied is a new
+    /// statement, so the title comes back — but on the server's evidence, which
+    /// means switching that server off still takes it away again.
+    func testSupersededRemovalSurfacesAgainAndStaysServerOwned() throws {
+        let model = WatchlistModel()
+        let alias = MediaAliasID()
+        let destination = WatchlistDestinationID(rawValue: "native")!
+        try model.activate(profileID: "p")
+        try model.add(profileID: "p", aliasID: alias, kind: .movie)
+        try model.remove(profileID: "p", aliasID: alias, kind: .movie)
+
+        var view = NativeWatchlistView()
+        view.applySuccess(
+            destinationID: destination,
+            entries: [NativeWatchlistEntry(aliasID: alias, kind: .movie, index: 0)!]
+        )
+
+        XCTAssertTrue(try model.markRemovalSuperseded(
+            profileID: "p",
+            aliasID: alias
         ))
-        XCTAssertTrue(model.activeSnapshot.contains(aliasID: alias))
+        XCTAssertTrue(model.union(
+            profileID: "p",
+            nativeView: view,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: [destination]
+        ).contains(aliasID: alias))
+
+        // The tombstone is kept, not deleted: deleting it would let a peer
+        // re-deliver the old `.absent` record with no absence boundary left to
+        // clear it, hiding the title for good.
+        XCTAssertEqual(
+            model.activeSnapshot.intent(for: alias)?.desiredState,
+            .absent
+        )
+        XCTAssertFalse(model.union(
+            profileID: "p",
+            nativeView: view,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: []
+        ).contains(aliasID: alias))
     }
 
     func testRedirectRekeysAndMergesWithoutChangingOldestRank() throws {
@@ -360,17 +421,23 @@ final class WatchlistModelTests: XCTestCase {
         try original.activate(profileID: "p")
         try original.add(profileID: "p", aliasID: first, kind: .movie)
         try original.add(profileID: "p", aliasID: second, kind: .series)
-        _ = try original.importNativeBatch(
-            profileID: "p",
-            destinationID: WatchlistDestinationID(rawValue: "native")!,
-            candidates: [.init(aliasID: native, kind: .movie)]
+        let destination = WatchlistDestinationID(rawValue: "native")!
+        var view = NativeWatchlistView()
+        view.applySuccess(
+            destinationID: destination,
+            entries: [NativeWatchlistEntry(aliasID: native, kind: .movie, index: 0)!]
         )
 
         let relaunched = WatchlistModel(storageDirectory: root)
         try relaunched.activate(profileID: "p")
 
         XCTAssertEqual(
-            relaunched.activeSnapshot.orderedEntries.map(\.aliasID),
+            relaunched.union(
+                profileID: "p",
+                nativeView: view,
+                aliasSnapshot: .empty,
+                enabledDestinationIDs: [destination]
+            ).orderedEntries.map(\.aliasID),
             [second, first, native]
         )
     }
@@ -408,6 +475,12 @@ final class WatchlistModelTests: XCTestCase {
         )
         _ = try model.presentationSnapshot(
             profileID: "p",
+            union: model.union(
+                profileID: "p",
+                nativeView: .empty,
+                aliasSnapshot: aliasSnapshot,
+                enabledDestinationIDs: []
+            ),
             aliasSnapshot: aliasSnapshot,
             currentItemsByAliasID: [:]
         )
@@ -520,6 +593,12 @@ final class WatchlistModelTests: XCTestCase {
 
         let fallback = try model.presentationSnapshot(
             profileID: "p",
+            union: model.union(
+                profileID: "p",
+                nativeView: .empty,
+                aliasSnapshot: aliasSnapshot,
+                enabledDestinationIDs: []
+            ),
             aliasSnapshot: aliasSnapshot,
             currentItemsByAliasID: [:]
         )
@@ -539,6 +618,12 @@ final class WatchlistModelTests: XCTestCase {
         )
         let enriched = try model.presentationSnapshot(
             profileID: "p",
+            union: model.union(
+                profileID: "p",
+                nativeView: .empty,
+                aliasSnapshot: aliasSnapshot,
+                enabledDestinationIDs: []
+            ),
             aliasSnapshot: aliasSnapshot,
             currentItemsByAliasID: [newer: localCopy]
         )
@@ -549,27 +634,31 @@ final class WatchlistModelTests: XCTestCase {
         )
     }
 
-    func testNativeImportBatchPersistsOnceAtOneAndTenThousand() throws {
+    /// Retiring a big imported ledger persists once, whatever its size — this
+    /// runs on activate, in front of the first paint.
+    func testRetiringImportedIntentsPersistsOnceAtOneAndTenThousand() throws {
         for count in [1_000, 10_000] {
             let store = CountingWatchlistIntentStore()
+            try store.save(WatchlistIntentStoreState(
+                intents: (0..<count).map { index in
+                    WatchlistIntent(
+                        aliasID: MediaAliasID(),
+                        kind: .movie,
+                        desiredState: .present,
+                        rank: UInt64(index),
+                        origin: .nativeImport
+                    )!
+                }
+            ))
             let model = WatchlistModel(storeFactory: { _ in store })
+            store.saveCount = 0
             try model.activate(profileID: "p")
-            let candidates = (0..<count).map { _ in
-                WatchlistNativeImportCandidate(
-                    aliasID: MediaAliasID(),
-                    kind: .movie
-                )
-            }
 
-            let imported = try model.importNativeBatch(
-                profileID: "p",
-                destinationID: WatchlistDestinationID(rawValue: "native")!,
-                candidates: candidates
-            )
+            let retired = try model.retireNativeImports(profileID: "p")
 
-            XCTAssertEqual(imported, count)
+            XCTAssertEqual(retired, count)
             XCTAssertEqual(store.saveCount, 1)
-            XCTAssertEqual(store.current.intents.count, count)
+            XCTAssertTrue(store.current.intents.isEmpty)
         }
     }
 
@@ -628,7 +717,7 @@ private final class CountingWatchlistIntentStore:
     WatchlistIntentStoring, @unchecked Sendable {
     private let lock = NSLock()
     private var state = WatchlistIntentStoreState.empty
-    private(set) var saveCount = 0
+    var saveCount = 0
     var current: WatchlistIntentStoreState {
         lock.lock()
         defer { lock.unlock() }

@@ -130,7 +130,7 @@ public struct PlozziOSRootView: View {
             PlozziOSServerIdentityPromptView(
                 appModel: appModel,
                 account: account,
-                onFinish: { appModel.resolveIdentityPrompt(for: account.id) }
+                onFinish: { appModel.concludeIdentityPrompt(for: account.id) }
             )
         }
         .task { appModel.resumeProfileOnboardingIfNeeded() }

@@ -359,9 +359,6 @@ final class PlozziOSAppModel {
             seedLegacyUniversalWatchlist: { [weak self] _ in
                 try? await self?.seedLegacyUniversalWatchlist()
             },
-            importNativeUniversalWatchlist: { [weak self] _ in
-                await self?.importUniversalNativeWatchlists()
-            },
             // Downloads are an iOS/iPadOS capability, so only this shell supplies
             // them; tvOS omits both closures and the catalog offers no download
             // actions there. Reads the registry synchronously (it's already loaded
@@ -394,6 +391,11 @@ final class PlozziOSAppModel {
     @ObservationIgnored private var watchReconcilers: [String: WatchStateReconciler] = [:]
     @ObservationIgnored var universalWatchlistReconciler: WatchlistReconciler?
     @ObservationIgnored var universalWatchlistMutationStore: DurableWatchlistMutationStore?
+    @ObservationIgnored var universalWatchlistNativeView: NativeWatchlistView = .empty
+    @ObservationIgnored var universalWatchlistNativeViewStore:
+        (any NativeWatchlistViewStoring)?
+    @ObservationIgnored var universalWatchlistDestinationIDs:
+        Set<WatchlistDestinationID> = []
     @ObservationIgnored var universalWatchlistProfileID: String?
     @ObservationIgnored var universalWatchlistRetryScheduler:
         WatchlistRetryScheduler?
@@ -1074,18 +1076,52 @@ final class PlozziOSAppModel {
         profiles.update(profile)
     }
 
-    /// Clears whichever question is on screen (the sheet was swiped away).
-    /// Dismissing counts as answering: ask once, don't nag.
+    /// Closes whichever question is on screen (the sheet was swiped away, or
+    /// Done was tapped).
     func resolveIdentityPromptForPending() {
         guard let account = pendingIdentityAccount else { return }
-        resolveIdentityPrompt(for: account.id)
+        concludeIdentityPrompt(for: account.id)
     }
 
-    /// Clears the question once a user is chosen — or the sheet is dismissed.
+    /// Closes the question according to what the person actually did.
+    ///
+    /// The iOS sheet has no separate decline button — picking a user writes the
+    /// binding, and Done or a swipe closes it either way. So the binding is the
+    /// answer: with one, the question is answered; without one, nobody said who
+    /// this profile is, and reading the server as its OWNER is the outcome the
+    /// question exists to prevent. Closing used to mean the latter silently.
+    func concludeIdentityPrompt(for accountID: String) {
+        let hasBinding = profiles.activeProfile
+            .homeUserBinding(forPlexAccount: accountID) != nil
+        if hasBinding {
+            resolveIdentityPrompt(for: accountID)
+        } else {
+            declineIdentityPrompt(for: accountID)
+        }
+    }
+
+    /// Clears the question once a user is chosen.
     func resolveIdentityPrompt(for accountID: String) {
+        applyIdentityAnswer(for: accountID) {
+            $0.resolveAccountAwaitingIdentity(accountID)
+        }
+    }
+
+    /// Records that nobody said who this profile is on this server, so its own
+    /// watchlist is left alone. See `Profile.watchlistDeclinedAccountIDs`.
+    func declineIdentityPrompt(for accountID: String) {
+        applyIdentityAnswer(for: accountID) {
+            $0.declineAccountWatchlist(accountID)
+        }
+    }
+
+    private func applyIdentityAnswer(
+        for accountID: String,
+        _ apply: (inout Profile) -> Bool
+    ) {
         let profileID = profiles.activeProfileID
         guard var profile = profiles.profiles.first(where: { $0.id == profileID }),
-              profile.resolveAccountAwaitingIdentity(accountID)
+              apply(&profile)
         else { return }
         profiles.update(profile)
         // The import was deferred while this was outstanding; with the answer in

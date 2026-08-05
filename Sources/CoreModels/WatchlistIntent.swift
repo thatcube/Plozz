@@ -16,11 +16,28 @@ public struct WatchlistIntentMetadata: Codable, Hashable, Sendable {
     public var sourceDestinationIDs: [String]
     public var lastExplicitRemovalAt: Date?
     public var lastReconciledAt: Date?
+    /// When a native list added this title back AFTER the reconciler confirmed
+    /// the explicit removal had been applied there.
+    ///
+    /// A tombstone must outlive a server that still lists the title, or removing
+    /// something that lives on Plex would reappear on the next read. But a
+    /// genuine later re-add on the server is a new statement, not the old one
+    /// echoing back, and the viewer expects it to show up. This marks the
+    /// removal as answered rather than resurrecting the record as `.present`:
+    /// presence then comes from the native view, so disabling that server still
+    /// takes it away again.
+    ///
+    /// Deleting the tombstone instead was rejected. Deletion propagates, and a
+    /// peer that re-delivered the old `.absent` record would restore the
+    /// suppression with no absence boundary left to clear it — hiding the title
+    /// permanently, on one device only.
+    public var removalSupersededAt: Date?
 
     public init(
         sourceDestinationIDs: [String] = [],
         lastExplicitRemovalAt: Date? = nil,
-        lastReconciledAt: Date? = nil
+        lastReconciledAt: Date? = nil,
+        removalSupersededAt: Date? = nil
     ) {
         self.sourceDestinationIDs = Array(Set(
             sourceDestinationIDs.map {
@@ -29,6 +46,19 @@ public struct WatchlistIntentMetadata: Codable, Hashable, Sendable {
         )).sorted()
         self.lastExplicitRemovalAt = lastExplicitRemovalAt
         self.lastReconciledAt = lastReconciledAt
+        self.removalSupersededAt = removalSupersededAt
+    }
+
+    /// Whether this metadata's removal still hides the title.
+    ///
+    /// Only meaningful on an `.absent` intent. A removal with no recorded
+    /// timestamp (older records, and tombstones that arrived over sync) counts
+    /// as live, because the alternative — treating an unknown removal as
+    /// already answered — un-hides titles the viewer deleted.
+    public var suppressesNativePresence: Bool {
+        guard let removalSupersededAt else { return true }
+        guard let lastExplicitRemovalAt else { return false }
+        return removalSupersededAt <= lastExplicitRemovalAt
     }
 }
 
@@ -84,7 +114,8 @@ public struct WatchlistIntent: Codable, Hashable, Identifiable, Sendable {
         value.metadata = WatchlistIntentMetadata(
             sourceDestinationIDs: metadata.sourceDestinationIDs,
             lastExplicitRemovalAt: metadata.lastExplicitRemovalAt,
-            lastReconciledAt: metadata.lastReconciledAt
+            lastReconciledAt: metadata.lastReconciledAt,
+            removalSupersededAt: metadata.removalSupersededAt
         )
         return value
     }
@@ -145,22 +176,21 @@ public struct WatchlistIntent: Codable, Hashable, Identifiable, Sendable {
 
 public struct WatchlistMigrationMetadata: Codable, Hashable, Sendable {
     public var legacyHomeSeedCompletedAt: Date?
-    public var completedNativeImportDestinationIDs: [String]
+    /// When this profile's imported native entries were retired from the ledger.
+    ///
+    /// The import used to write every native entry as a durable `.present`
+    /// intent, which made it unretractable: disabling the server left everything
+    /// it had contributed behind forever. Native lists are now a read-time view,
+    /// so those records are dropped once — a still-enabled server re-supplies
+    /// them through the union, and a disabled one correctly stops.
+    public var nativeImportRetiredAt: Date?
 
     public init(
         legacyHomeSeedCompletedAt: Date? = nil,
-        completedNativeImportDestinationIDs: [String] = []
+        nativeImportRetiredAt: Date? = nil
     ) {
         self.legacyHomeSeedCompletedAt = legacyHomeSeedCompletedAt
-        self.completedNativeImportDestinationIDs = Array(Set(
-            completedNativeImportDestinationIDs.map {
-                $0.trimmingCharacters(in: .whitespacesAndNewlines)
-            }.filter { !$0.isEmpty }
-        )).sorted()
-    }
-
-    public func hasCompletedNativeImport(destinationID: String) -> Bool {
-        completedNativeImportDestinationIDs.binarySearch(destinationID)
+        self.nativeImportRetiredAt = nativeImportRetiredAt
     }
 }
 
@@ -200,22 +230,5 @@ public struct WatchlistIntentSyncDTO: Codable, Hashable, Sendable {
             presentation: presentation,
             metadata: metadata
         )
-    }
-}
-
-private extension Array where Element == String {
-    func binarySearch(_ value: String) -> Bool {
-        var lower = startIndex
-        var upper = endIndex
-        while lower < upper {
-            let middle = index(lower, offsetBy: distance(from: lower, to: upper) / 2)
-            if self[middle] == value { return true }
-            if self[middle] < value {
-                lower = index(after: middle)
-            } else {
-                upper = middle
-            }
-        }
-        return false
     }
 }

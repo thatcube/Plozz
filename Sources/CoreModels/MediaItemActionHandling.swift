@@ -35,8 +35,6 @@ public protocol MediaItemActionHandling: AnyObject {
     /// One-time bounded Home-cache migration before native imports.
     func seedLegacyWatchlist(_ items: [MediaItem]) async
 
-    /// Additive provider read import. Native absence never deletes Plozz intent.
-    func importNativeWatchlist(_ items: [MediaItem]) async
 }
 
 public extension MediaItemActionHandling {
@@ -46,7 +44,6 @@ public extension MediaItemActionHandling {
         candidates.filter(\.isFavorite)
     }
     func seedLegacyWatchlist(_ items: [MediaItem]) async {}
-    func importNativeWatchlist(_ items: [MediaItem]) async {}
 }
 
 public extension Notification.Name {

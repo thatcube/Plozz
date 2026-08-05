@@ -108,6 +108,14 @@ public final class AppState {
     @ObservationIgnored
     public var universalWatchlistMutationStore: DurableWatchlistMutationStore?
     @ObservationIgnored
+    public var universalWatchlistNativeView: NativeWatchlistView = .empty
+    @ObservationIgnored
+    public var universalWatchlistNativeViewStore:
+        (any NativeWatchlistViewStoring)?
+    @ObservationIgnored
+    public var universalWatchlistDestinationIDs:
+        Set<WatchlistDestinationID> = []
+    @ObservationIgnored
     public var universalWatchlistProfileID: String?
     @ObservationIgnored
     public var universalWatchlistRetryScheduler: WatchlistRetryScheduler?
@@ -240,9 +248,6 @@ public final class AppState {
             },
             seedLegacyUniversalWatchlist: { [weak self] _ in
                 try? await self?.seedLegacyUniversalWatchlist()
-            },
-            importNativeUniversalWatchlist: { [weak self] _ in
-                await self?.importUniversalNativeWatchlists()
             }
         )
 

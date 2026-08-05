@@ -195,9 +195,30 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// byte-stable for the sync layer.
     public var accountsAwaitingIdentity: [String]?
 
+    /// Servers this profile has explicitly declined to read a watchlist from.
+    ///
+    /// Backing out of the identity question used to be treated as consent: the
+    /// question was cleared and the server was then read as the account OWNER,
+    /// which is the very thing being asked about. Someone who dismisses "who are
+    /// you here?" has not said "read this as the owner" — they have declined to
+    /// answer, and the only safe reading of that is to leave the server's own
+    /// watchlist alone.
+    ///
+    /// A declined server still works for browsing and playback; it just does not
+    /// contribute to the watchlist. Switching it off and on again asks afresh.
+    /// Optional and cleared to absence rather than `[]`, like the field above,
+    /// so existing profiles decode unchanged and the record stays byte-stable for
+    /// the sync layer.
+    public var watchlistDeclinedAccountIDs: [String]?
+
     /// Accounts this profile still owes an identity answer for.
     public var pendingIdentityAccountIDs: [String] {
         accountsAwaitingIdentity ?? []
+    }
+
+    /// Accounts whose watchlist this profile has declined to read.
+    public var declinedWatchlistAccountIDs: [String] {
+        watchlistDeclinedAccountIDs ?? []
     }
 
     /// Whether the setup step still owes this profile a pass. See `isAwaitingSetup`.

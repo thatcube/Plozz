@@ -141,6 +141,10 @@ struct PlozziOSProfileSetupView: View {
 struct PlozziOSServerIdentityPromptView: View {
     let appModel: PlozziOSAppModel
     let account: Account
+    /// Closes the question. Whether that counts as answered or declined is
+    /// decided by whether a user was actually picked — see
+    /// `PlozziOSAppModel.concludeIdentityPrompt(for:)`. Done and a swipe are the
+    /// same gesture here, and neither is consent on its own.
     let onFinish: () -> Void
 
     var body: some View {

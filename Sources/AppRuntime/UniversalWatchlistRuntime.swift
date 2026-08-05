@@ -45,11 +45,21 @@ public enum NativeWatchlistAccounts {
         profiles: ProfilesModel,
         accountsProviders: AccountsProvidersModel
     ) -> [ResolvedAccount] {
+        // A server whose identity question was declined is left alone entirely.
+        // See `Profile.watchlistDeclinedAccountIDs`: dismissing "who are you
+        // here?" is not permission to read the account owner's list.
+        let declined = profiles.declinedWatchlistAccountIDs(
+            forProfile: profiles.activeProfileID
+        )
         guard let chosen = profiles.storedActiveAccountIDs(for: profiles.activeProfileID)
-        else { return accountsProviders.resolvedActiveAccounts }
+        else {
+            return accountsProviders.resolvedActiveAccounts.filter {
+                !declined.contains($0.account.id)
+            }
+        }
         let chosenIDs = Set(chosen)
         return accountsProviders.resolvedActiveAccounts.filter {
-            chosenIDs.contains($0.account.id)
+            chosenIDs.contains($0.account.id) && !declined.contains($0.account.id)
         }
     }
 }
@@ -78,6 +88,18 @@ public protocol UniversalWatchlistHost: AnyObject {
 
     var universalWatchlistReconciler: WatchlistReconciler? { get set }
     var universalWatchlistMutationStore: DurableWatchlistMutationStore? { get set }
+    /// The last-known native watchlist of every destination this profile reads,
+    /// and the ids of the destinations currently allowed to contribute.
+    ///
+    /// Evidence, never intent — see `WatchlistUnion`. Held on the host like the
+    /// reconciler beside it, so the shells' existing teardown keeps working, and
+    /// held in memory as well as on disk because watchlist membership is asked
+    /// once per card and must not touch the filesystem to answer.
+    var universalWatchlistNativeView: NativeWatchlistView { get set }
+    var universalWatchlistNativeViewStore:
+        (any NativeWatchlistViewStoring)? { get set }
+    var universalWatchlistDestinationIDs:
+        Set<WatchlistDestinationID> { get set }
     /// Identity of the built reconciler: profile + Plex identity generation, so a
     /// "watching as" change rebuilds its destinations. Not just a profile id
     /// despite the name.
@@ -138,6 +160,17 @@ public extension UniversalWatchlistHost {
         let started = Date()
         do {
             try universalWatchlist.activate(profileID: profileID)
+            // The old import wrote every native entry into the ledger as durable
+            // intent. Drop those records once, before anything reads the
+            // watchlist, so a title only survives while a server that actually
+            // holds it is still switched on.
+            let retired = try universalWatchlist.retireNativeImports(
+                profileID: profileID
+            )
+            if retired > 0 {
+                PlozzLog.app.info("Watchlist retired imported intents count=\(retired)")
+                scheduleCloudPublish()
+            }
             try await mediaAliasLedger.activate(profileID: profileID)
             try await seedLegacyUniversalWatchlist()
             // Before anything reads a destination.
@@ -145,8 +178,8 @@ public extension UniversalWatchlistHost {
             // Every step above suspends, and the active profile can change across
             // any of them. Building the reconciler for a profile that is no
             // longer active gives it THAT profile's destinations and credentials,
-            // and the import below would then write one profile's watchlist into
-            // another's store — the guard inside the import only notices changes
+            // and the refresh below would then cache one profile's watchlist
+            // against another — the guard inside the refresh only notices changes
             // that happen after it starts, so it can't catch this. The switch
             // that superseded us runs its own prepare; dropping here is correct.
             guard profiles.activeProfileID == profileID else {
@@ -162,13 +195,13 @@ public extension UniversalWatchlistHost {
                 "Watchlist hydrate entries=\(universalWatchlist.activeSnapshot.orderedEntries.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
             )
             // A profile that hasn't been through setup inherits every server in
-            // the household, so importing now would hand it the household's
-            // aggregate watchlist. Its own state is hydrated above; the import
+            // the household, so reading now would show it the household's
+            // aggregate watchlist. Its own state is hydrated above; the refresh
             // waits until it knows which servers this profile actually uses.
-            // Re-checked immediately before the import for the same reason: the
+            // Re-checked immediately before the refresh for the same reason: the
             // reconciler build and the auth resume both suspend.
             guard profiles.activeProfileID == profileID else {
-                PlozzLog.app.info("Watchlist import superseded — profile changed before import")
+                PlozzLog.app.info("Watchlist refresh superseded — profile changed before refresh")
                 return
             }
             let profile = profiles.activeProfile
@@ -179,21 +212,21 @@ public extension UniversalWatchlistHost {
                 // who hasn't shown they're allowed to be here, and it lands
                 // behind a lock screen where it can't be seen anyway. The picker
                 // is in front; this resumes when a profile is actually chosen.
-                PlozzLog.app.info("Watchlist import deferred — profile locked")
+                PlozzLog.app.info("Watchlist refresh deferred — profile locked")
             } else if profile.needsSetup {
-                PlozzLog.app.info("Watchlist import deferred — profile awaiting setup")
+                PlozzLog.app.info("Watchlist refresh deferred — profile awaiting setup")
             } else if !profiles.actionableIdentityAccountIDs(
                 forProfile: profileID,
                 importAccountIDs: ProfileServerIdentityPolicy
                     .importPlexAccountIDs(in: nativeWatchlistAccounts)
             ).isEmpty {
                 // A server was switched on and nobody has said who this profile
-                // is there yet. Importing now reads it as the account OWNER and
-                // pulls their watchlist in — the same leak setup defers, arriving
+                // is there yet. Reading it now reads it as the account OWNER and
+                // shows their watchlist — the same leak setup defers, arriving
                 // through a later door. See `Profile.accountsAwaitingIdentity`.
-                PlozzLog.app.info("Watchlist import deferred — server awaiting identity")
+                PlozzLog.app.info("Watchlist refresh deferred — server awaiting identity")
             } else {
-                await importUniversalNativeWatchlists()
+                await refreshNativeWatchlistView()
             }
         } catch {
             PlozzLog.app.error("Watchlist local preparation failed")
@@ -244,7 +277,31 @@ public extension UniversalWatchlistHost {
         hasher.combine(aliases.recordsByID.count)
         hasher.combine(aliases.activeRecordCount)
         hasher.combine(universalWatchlist.activeSnapshot.activeAliasIDs.count)
+        // The native side moves independently of the ledger: a server switched
+        // off, or a refresh that returns a different list, changes what the
+        // viewer sees without touching a single intent. Counting destinations
+        // and their entries keeps this O(1) while still noticing both.
+        hasher.combine(universalWatchlistDestinationIDs.count)
+        hasher.combine(universalWatchlistNativeView.bucketsByDestinationID.count)
+        for bucket in universalWatchlistNativeView.bucketsByDestinationID.values {
+            hasher.combine(bucket.entries.count)
+        }
         return UInt64(bitPattern: Int64(hasher.finalize()))
+    }
+
+    /// The watchlist as the viewer sees it. See `WatchlistUnion`.
+    ///
+    /// Built on demand rather than published, for the same reason as
+    /// `titleIdentityResolver`: it is a value over state the shells already
+    /// observe. Take one per prepared-state pass and reuse it; never call this
+    /// from a SwiftUI `body`.
+    var universalWatchlistUnion: WatchlistUnion {
+        universalWatchlist.union(
+            profileID: profiles.activeProfileID,
+            nativeView: universalWatchlistNativeView,
+            aliasSnapshot: mediaAliasLedger.activeSnapshot,
+            enabledDestinationIDs: universalWatchlistDestinationIDs
+        )
     }
 
     func universalWatchlistMembership(_ item: MediaItem) -> Bool {
@@ -257,7 +314,13 @@ public extension UniversalWatchlistHost {
         // UUID when the index knows they are one title — so the heart on a card and
         // the heart on the page it opens can no longer disagree.
         guard let aliasID = titleIdentityResolver.aliasID(for: item) else { return false }
-        return universalWatchlist.activeSnapshot.contains(aliasID: aliasID)
+        // Through the LEDGER's redirect graph, which is the same map the union
+        // keyed itself by. Going through the watchlist snapshot's own table
+        // instead left a merged title with two ids and made the card disagree
+        // with the page it opens.
+        let resolved = mediaAliasLedger.activeSnapshot.resolvedAliasID(for: aliasID)
+            ?? aliasID
+        return universalWatchlistUnion.contains(aliasID: resolved)
     }
 
     func resolvedUniversalWatchlistItems(
@@ -270,6 +333,7 @@ public extension UniversalWatchlistHost {
         )
         return (try? universalWatchlist.presentationSnapshot(
             profileID: profiles.activeProfileID,
+            union: universalWatchlistUnion,
             aliasSnapshot: aliasSnapshot,
             currentItemsByAliasID: current,
             // Lets an entry with no live candidate still find its owned copy — a
@@ -381,7 +445,24 @@ public extension UniversalWatchlistHost {
         PlozzLog.app.info("Watchlist legacy seed count=\(entries.count)")
     }
 
-    func importUniversalNativeWatchlists() async {
+    /// Re-reads every enabled destination's own watchlist into the read-time
+    /// view, and reconciles what they hold against explicit intent.
+    ///
+    /// This used to be `importUniversalNativeWatchlists`, and it wrote what it
+    /// read into the profile's durable ledger as `.present` intents. That made a
+    /// server's contribution permanent: switching the server off left every
+    /// title it had supplied behind, because intent is deliberately
+    /// server-independent and nothing recorded where those titles had come from
+    /// in a way that could be undone. Now the entries land in
+    /// `universalWatchlistNativeView`, which the union reads over the
+    /// destinations that are enabled *right now* — so switching a server off
+    /// retracts its contribution for free.
+    ///
+    /// The reconciliation below is unchanged and still matters: it is how an
+    /// explicit ADD gets re-asserted on a server that lost it, and how an
+    /// explicit REMOVE is confirmed and then, if the server later adds the title
+    /// back, superseded.
+    func refreshNativeWatchlistView() async {
         guard let reconciler = universalWatchlistReconciler else { return }
         let profileID = profiles.activeProfileID
         let started = Date()
@@ -389,17 +470,16 @@ public extension UniversalWatchlistHost {
         // Belt to the caller's braces. Fetching is network work, and what comes
         // back reflects whatever credentials the destinations held when it
         // started; if the active profile moved underneath us in the meantime,
-        // these are somebody else's entries and must not be written here.
+        // these are somebody else's entries and must not be recorded here.
         // Ordering the switch is the real fix — this makes a mistake there
-        // fail closed instead of silently persisting a stranger's watchlist.
+        // fail closed instead of silently caching a stranger's watchlist.
         guard profiles.activeProfileID == profileID else {
-            PlozzLog.app.info("Watchlist import dropped — profile changed mid-fetch")
+            PlozzLog.app.info("Watchlist refresh dropped — profile changed mid-fetch")
             return
         }
         let successfulDestinationIDs = Set(
             report.successes.map(\.destinationID)
         )
-        var importedCount = 0
         var resolvedByDestination:
             [WatchlistDestinationID: [(MediaAliasID, WatchlistDestinationEntry)]] = [:]
         for read in report.successes {
@@ -429,12 +509,11 @@ public extension UniversalWatchlistHost {
                 aliasRecord: record
             ) else { continue }
             // Only what the person actually asked for may be WRITTEN OUT to a
-            // server. A `.nativeImport` intent is evidence that some server's
-            // list held this title, not a statement that the viewer wants it —
-            // and reasserting it pushed one server's list (often the account
-            // OWNER's, imported before anyone said who this profile is) into
-            // every other server the profile is bound to, where removing it in
-            // Plozz afterwards no longer takes it back out.
+            // server. Anything else is evidence that some server's list held
+            // this title, not a statement that the viewer wants it — and
+            // reasserting it pushed one server's list (often the account
+            // OWNER's) into every other server the profile is bound to, where
+            // removing it in Plozz afterwards no longer took it back out.
             if intent.origin == .local { targetsByAlias[intent.aliasID] = target }
             var destinationIDs = await reconciler.eligibleDestinationIDs(
                 for: target
@@ -462,27 +541,44 @@ public extension UniversalWatchlistHost {
             }
         }
 
+        var view = universalWatchlistNativeView
+        var supersededCount = 0
         for read in report.successes {
             let observations = (try? await reconciler.observeNativeBatch(
                 profileID: profileID,
                 destinationID: read.destinationID,
                 candidates: candidatesByDestination[read.destinationID] ?? []
             )) ?? [:]
-            let imports = resolvedByDestination[read.destinationID, default: []]
-                .map { aliasID, entry in
-                    WatchlistNativeImportCandidate(
-                        aliasID: aliasID,
-                        kind: entry.kind,
-                        presentation: entry.presentation,
-                        observedAfterConfirmedAbsence:
-                            observations[aliasID] == .nativeAddition
+            let entries = resolvedByDestination[read.destinationID, default: []]
+                .enumerated()
+                .compactMap { offset, resolved in
+                    NativeWatchlistEntry(
+                        aliasID: resolved.0,
+                        kind: resolved.1.kind,
+                        presentation: resolved.1.presentation,
+                        index: offset
                     )
                 }
-            importedCount += (try? universalWatchlist.importNativeBatch(
-                profileID: profileID,
+            // A successful read REPLACES what this destination held, empty
+            // included: the viewer clearing a server's watchlist is an answer,
+            // not a blip. Home learned the same lesson the expensive way.
+            view.applySuccess(
                 destinationID: read.destinationID,
-                candidates: imports
-            )) ?? 0
+                entries: entries
+            )
+            for (aliasID, observation) in observations
+            where observation == .nativeAddition {
+                // The removal was applied here and the server has since added
+                // the title back. Stop the tombstone suppressing it, rather than
+                // re-asserting it as intent — presence now comes from the native
+                // view, so switching this server off still takes it away.
+                if (try? universalWatchlist.markRemovalSuperseded(
+                    profileID: profileID,
+                    aliasID: aliasID
+                )) == true {
+                    supersededCount += 1
+                }
+            }
             let reassertTargets = observations.compactMap {
                 aliasID, observation in
                 observation == .reassertPresent
@@ -496,15 +592,100 @@ public extension UniversalWatchlistHost {
                 destinationID: read.destinationID
             )
         }
+        // A destination that could not be read keeps whatever it last told us,
+        // marked stale. Blanking the watchlist because one server is down for a
+        // moment is exactly the failure the cached-snapshot rules exist to stop.
+        for failure in report.failures {
+            view.applyFailure(destinationID: failure.destinationID)
+        }
+        // And one that is no longer enabled contributes nothing at all. This is
+        // the whole point: turning a server off retracts its titles, with
+        // nothing left behind in the ledger to undo.
+        view.retainOnly(destinationIDs: universalWatchlistDestinationIDs)
+        persistUniversalWatchlistNativeView(view)
+
         NotificationCenter.default.post(
             name: .universalWatchlistDidChange,
             object: nil
         )
         _ = await reconciler.drain(profileID: profileID)
         await universalWatchlistRetryScheduler?.reschedule()
+        // The aliases a native read just created have no provider bindings yet,
+        // and nothing else triggers the identity pass now that native entries
+        // aren't intents. Without this a title sits in the row unable to find
+        // its own library copy, and the page it opens can't tell it is on the
+        // watchlist at all.
+        await reconcileUniversalWatchlistIdentity(profileID: profileID)
+
+        let union = universalWatchlistUnion
         PlozzLog.app.info(
-            "Watchlist native import count=\(importedCount) failures=\(report.failures.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
+            "Watchlist native refresh destinations=\(view.bucketsByDestinationID.count) superseded=\(supersededCount) failures=\(report.failures.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))"
         )
+        // Counts only — no titles, ids or server names. `nativeOnly` is the half
+        // that used to be durable intent; if the row shows titles that a card
+        // then claims are not on the watchlist, this is the number to look at.
+        // How many union titles the ledger can actually IDENTIFY. A record with
+        // no strong external id can only ever match on title+year, which is why
+        // a film sitting in the library still renders as "not in your library".
+        let ledger = mediaAliasLedger.activeSnapshot
+        var weakOnly = 0
+        var noRecord = 0
+        var matchable = 0
+        for entry in union.orderedEntries {
+            guard let record = ledger.record(for: entry.aliasID) else {
+                noRecord += 1
+                continue
+            }
+            if record.strongEvidence.isEmpty { weakOnly += 1 } else { matchable += 1 }
+        }
+        let unionLine = "watchlist.union total=\(union.orderedEntries.count) explicit=\(union.orderedEntries.filter(\.isExplicit).count) nativeOnly=\(union.orderedEntries.filter { !$0.isExplicit }.count) strongID=\(matchable) weakOnly=\(weakOnly) noRecord=\(noRecord) stale=\(union.hasStaleDestinations)"
+        PlozzLog.app.info("Watchlist \(unionLine)")
+        // Mirrored through the fan-out diagnostics seam so `devicectl … --console`
+        // can stream it: `os_log` alone doesn't reach stdout, which is the only
+        // channel a remote driver can read on this toolchain.
+        FanoutDiagnostics.emit(unionLine)
+    }
+
+    /// Keeps the in-memory view and its on-disk copy in step.
+    ///
+    /// A write failure is logged and otherwise ignored on purpose: this is a
+    /// cache of what servers said, so the worst it costs is one refresh, and
+    /// refusing to update what is on screen because a file would not write
+    /// would be a strictly worse outcome.
+    func persistUniversalWatchlistNativeView(_ view: NativeWatchlistView) {
+        universalWatchlistNativeView = view
+        do {
+            try universalWatchlistNativeViewStore?.save(view)
+        } catch {
+            PlozzLog.app.error("Watchlist native view save failed")
+        }
+    }
+
+    /// Restores the last-known native lists so the watchlist paints immediately
+    /// on launch, instead of showing only explicit adds until the first network
+    /// read lands — and so it survives a launch with no connection at all.
+    ///
+    /// Buckets belonging to destinations this profile no longer reads are
+    /// dropped on the way in. Otherwise a server switched off while the app was
+    /// closed would come back on the next launch, which is the exact bug the
+    /// read-time view exists to fix.
+    func loadUniversalWatchlistNativeView(profileID: String) {
+        let store: (any NativeWatchlistViewStoring)?
+        if let directory = universalWatchlistStorageDirectory {
+            store = try? AtomicNativeWatchlistViewStore(
+                directoryURL: directory.appendingPathComponent(
+                    "NativeView",
+                    isDirectory: true
+                ),
+                profileID: profileID
+            )
+        } else {
+            store = InMemoryNativeWatchlistViewStore()
+        }
+        universalWatchlistNativeViewStore = store
+        var view = (try? store?.load()) ?? .empty
+        view.retainOnly(destinationIDs: universalWatchlistDestinationIDs)
+        universalWatchlistNativeView = view
     }
 
     func universalWatchlistIdentityDidUpdate() {
@@ -530,11 +711,24 @@ public extension UniversalWatchlistHost {
         let intents = Array(
             universalWatchlist.activeSnapshot.intentsByAliasID.values
         )
+        // Enrichment runs over EVERYTHING the viewer can see, not just what
+        // they explicitly asked for. A title that is on the watchlist only
+        // because a server lists it still has to be recognisable when it turns
+        // up somewhere else — that is what binds the alias to a provider item,
+        // and it is how the card in the row and the page it opens agree about
+        // whether the title is on the watchlist.
+        //
+        // Walking intents alone was correct while native entries WERE intents.
+        // Once they became a read-time view, native-only titles silently stopped
+        // being enriched and the detail page could no longer resolve them: the
+        // row showed the film, the page it opened offered to add it.
+        var aliasIDs = Set(intents.map(\.aliasID))
+        aliasIDs.formUnion(universalWatchlistUnion.orderedEntries.map(\.aliasID))
         let observedAt = Date()
         var enrichments: [MediaAliasEnrichment] = []
-        for intent in intents {
+        for aliasID in aliasIDs.sorted() {
             guard let record = mediaAliasLedger.activeSnapshot.record(
-                for: intent.aliasID
+                for: aliasID
             ) else { continue }
             let identities = record.strongEvidence.compactMap { evidence in
                 MediaItemIdentity.strongExternalNamespaces.first {
@@ -579,7 +773,7 @@ public extension UniversalWatchlistHost {
                     locallyValidatedBindings: bindings
                   ) else { continue }
             enrichments.append(MediaAliasEnrichment(
-                aliasID: intent.aliasID,
+                aliasID: aliasID,
                 evidence: evidence
             ))
         }
@@ -601,9 +795,13 @@ public extension UniversalWatchlistHost {
                 target: target
             ))
         }
+        // Keep the confirmations for everything on the watchlist, native
+        // entries included. Keying this on intents alone dropped what the
+        // reconciler knew about every native-only title, and a forgotten
+        // confirmation means the next pass re-sends the whole watchlist.
         await reconciler.forgetConfirmations(
             profileID: profileID,
-            keepingAliasIDs: Set(intents.map(\.aliasID))
+            keepingAliasIDs: aliasIDs
         )
         try? await reconciler.identityEvidenceChanged(
             profileID: profileID,
@@ -611,11 +809,12 @@ public extension UniversalWatchlistHost {
         )
         _ = await reconciler.drain(profileID: profileID)
         await universalWatchlistRetryScheduler?.reschedule()
-        if !changes.isEmpty {
-            PlozzLog.app.info(
-                "Watchlist late fan-out count=\(changes.count) aliases=\(enrichments.count)"
-            )
-        }
+        // `considered` must cover the native half too. When it equals the intent
+        // count while the union is bigger, native-only titles are going
+        // unenriched — which is what makes a card and the page it opens disagree.
+        let reconcileLine = "watchlist.identity considered=\(aliasIDs.count) intents=\(intents.count) enriched=\(enrichments.count) fanOut=\(changes.count)"
+        PlozzLog.app.info("Watchlist \(reconcileLine)")
+        FanoutDiagnostics.emit(reconcileLine)
     }
 
     func removeUniversalWatchlist(forProfileID profileID: String) {
@@ -634,7 +833,24 @@ public extension UniversalWatchlistHost {
                     profileID
                 )
             }
-            if self.universalWatchlistProfileID == profileID {
+            // The profile's cached view of what its servers held goes with it.
+            // It is not intent, so nothing is lost — but leaving one profile's
+            // reading of a server on disk under a deleted id is not something to
+            // do on purpose.
+            if let directory = universalWatchlistStorageDirectory,
+               let store = try? AtomicNativeWatchlistViewStore(
+                directoryURL: directory.appendingPathComponent(
+                    "NativeView",
+                    isDirectory: true
+                ),
+                profileID: profileID
+               ) {
+                try? store.destructiveRemove()
+            }
+            // Compared by prefix because the reconciler is keyed by profile PLUS
+            // the Plex identity and the account set, so the stored value is never
+            // equal to a bare profile id.
+            if self.universalWatchlistProfileID?.hasPrefix("\(profileID)#") == true {
                 self.universalWatchlistIdentityUpdateTask?.cancel()
                 self.universalWatchlistIdentityUpdateTask = nil
                 await self.universalWatchlistRetryScheduler?.cancel()
@@ -642,6 +858,9 @@ public extension UniversalWatchlistHost {
                 self.universalWatchlistProfileID = nil
                 self.universalWatchlistReconciler = nil
                 self.universalWatchlistMutationStore = nil
+                self.universalWatchlistNativeViewStore = nil
+                self.universalWatchlistNativeView = .empty
+                self.universalWatchlistDestinationIDs = []
             }
         }
     }
@@ -655,7 +874,15 @@ public extension UniversalWatchlistHost {
         // the previous identity's destination alive and went on reading the
         // previous person's watchlist. `plexIdentityGeneration` bumps on every
         // override change, which is exactly the event that invalidates them.
-        let scopeKey = "\(profileID)#\(plexWatchlistIdentityGeneration)"
+        //
+        // The accounts are in the key too, because switching a server off for a
+        // profile changes neither the profile nor the Plex identity. Without
+        // them the registry kept the switched-off destination, went on reading
+        // it, and went on showing its titles — which is precisely what the
+        // read-time view exists to stop.
+        let accountsKey = nativeWatchlistAccounts
+            .map(\.account.id).sorted().joined(separator: ",")
+        let scopeKey = "\(profileID)#\(plexWatchlistIdentityGeneration)#\(accountsKey)"
         guard universalWatchlistProfileID != scopeKey else { return }
         universalWatchlistIdentityUpdateTask?.cancel()
         universalWatchlistIdentityUpdateTask = nil
@@ -694,6 +921,11 @@ public extension UniversalWatchlistHost {
             }
         }
         destinations.append(contentsOf: trackerWatchlistDestinations)
+        // Which destinations may contribute to what the viewer sees. Taken from
+        // the destinations actually built, so it can never drift from the set
+        // that gets read — and narrowing it is exactly what makes switching a
+        // server off retract its titles.
+        universalWatchlistDestinationIDs = Set(destinations.map(\.id))
         let fileURL = universalWatchlistStorageDirectory?
             .appendingPathComponent("Mutations", isDirectory: true)
             .appendingPathComponent("\(profileID).json")
@@ -702,6 +934,7 @@ public extension UniversalWatchlistHost {
         } ?? InMemoryWatchlistMutationStateStore()
         let mutationStore = try DurableWatchlistMutationStore(store: stateStore)
         universalWatchlistMutationStore = mutationStore
+        loadUniversalWatchlistNativeView(profileID: profileID)
         universalWatchlistReconciler = WatchlistReconciler(
             registry: WatchlistDestinationRegistry(destinations),
             mutationStore: mutationStore

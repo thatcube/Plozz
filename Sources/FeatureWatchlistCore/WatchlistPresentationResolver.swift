@@ -27,33 +27,33 @@ public enum WatchlistPresentationResolver {
     ///     rebuild, over entries with no candidate only. A card body must never call
     ///     it (`tools/arch-guard.py` enforces that).
     public static func resolve(
-        snapshot: WatchlistSnapshot,
+        union: WatchlistUnion,
         aliasSnapshot: MediaAliasSnapshot,
         currentItemsByAliasID: [MediaAliasID: MediaItem],
         indexedSources: ((MediaItem) -> [MediaSourceRef])? = nil,
         capabilities: MediaCapabilities? = nil
     ) -> [WatchlistPresentationEntry] {
-        snapshot.orderedEntries.compactMap { intent in
-            let aliasID = snapshot.resolvedAliasID(for: intent.aliasID)
+        union.orderedEntries.compactMap { entry in
+            let aliasID = entry.aliasID
             if let item = currentItemsByAliasID[aliasID] {
                 var item = item
                 item.watchlistAliasID = aliasID
                 return WatchlistPresentationEntry(aliasID: aliasID, item: item)
             }
             let record = aliasSnapshot.record(for: aliasID)
-            let presentation = record?.presentation ?? intent.presentation
+            let presentation = record?.presentation ?? entry.presentation
             guard let presentation else { return nil }
             // Carry the record's own external ids onto the placeholder. Without them
             // nothing downstream can recognise the title — not the index, not a
             // detail page — so it could only ever stay a dead card.
             var providerIDs: [String: String] = [:]
-            for evidence in record?.strongEvidence ?? [] where evidence.kind == intent.kind {
+            for evidence in record?.strongEvidence ?? [] where evidence.kind == entry.kind {
                 providerIDs[evidence.namespace.canonicalKey] = evidence.value
             }
             let placeholder = MediaItem(
                 id: aliasID.description,
                 title: presentation.title,
-                kind: intent.kind,
+                kind: entry.kind,
                 watchlistAliasID: aliasID,
                 productionYear: presentation.year,
                 posterURL: presentation.artworkURL.flatMap(URL.init(string:)),

@@ -8,26 +8,6 @@ public enum WatchlistModelError: Error, Equatable, Sendable {
     case malformedRemoteRecord(String)
 }
 
-public struct WatchlistNativeImportCandidate: Sendable {
-    public let aliasID: MediaAliasID
-    public let kind: MediaItemKind
-    public let presentation: MediaAliasPresentation?
-    public let observedAfterConfirmedAbsence: Bool
-
-    public init(
-        aliasID: MediaAliasID,
-        kind: MediaItemKind,
-        presentation: MediaAliasPresentation? = nil,
-        observedAfterConfirmedAbsence: Bool = false
-    ) {
-        self.aliasID = aliasID
-        self.kind = kind
-        self.presentation = presentation
-        self.observedAfterConfirmedAbsence =
-            observedAfterConfirmedAbsence
-    }
-}
-
 public struct WatchlistRemoteApplyReport: Equatable, Sendable {
     public let appliedRecordNames: [String]
     public let rejectedRecordNames: [String]
@@ -205,122 +185,6 @@ public final class WatchlistModel {
         return intent
     }
 
-    /// Additive native import. Explicit Plozz removals stay suppressed until the
-    /// reconciler has observed an absence boundary for this destination.
-    @discardableResult
-    public func importNative(
-        profileID: String,
-        aliasID: MediaAliasID,
-        kind: MediaItemKind,
-        destinationID: WatchlistDestinationID,
-        presentation: MediaAliasPresentation? = nil,
-        observedAfterConfirmedAbsence: Bool = false,
-        at changedAt: Date = Date()
-    ) throws -> Bool {
-        try importNativeBatch(
-            profileID: profileID,
-            destinationID: destinationID,
-            candidates: [
-                WatchlistNativeImportCandidate(
-                    aliasID: aliasID,
-                    kind: kind,
-                    presentation: presentation,
-                    observedAfterConfirmedAbsence:
-                        observedAfterConfirmedAbsence
-                )
-            ],
-            markImportComplete: false,
-            at: changedAt
-        ) > 0
-    }
-
-    /// Applies one destination's additive import in memory and persists once.
-    @discardableResult
-    public func importNativeBatch(
-        profileID: String,
-        destinationID: WatchlistDestinationID,
-        candidates: [WatchlistNativeImportCandidate],
-        markImportComplete: Bool = true,
-        at changedAt: Date = Date()
-    ) throws -> Int {
-        try ensureHydrated(profileID)
-        var state = statesByProfile[profileID]!
-        prepareOrderingSpace(
-            in: &state,
-            additionalSlots: candidates.count
-        )
-        var byAlias = Dictionary(
-            uniqueKeysWithValues: state.intents.map { ($0.aliasID, $0) }
-        )
-        var importedCount = 0
-        var changed = false
-        var nextBackRank = nextBackOrderingRank(in: state)
-
-        for candidate in candidates {
-            guard candidate.kind == .movie || candidate.kind == .series else {
-                continue
-            }
-            let existing = byAlias[candidate.aliasID]
-            if existing?.desiredState == .absent,
-               existing?.metadata.lastExplicitRemovalAt != nil,
-               !candidate.observedAfterConfirmedAbsence {
-                continue
-            }
-            var sources = existing?.metadata.sourceDestinationIDs ?? []
-            sources.append(destinationID.rawValue)
-            let isReactivation = existing?.desiredState == .absent
-            let isNew = existing == nil
-            let intent = WatchlistIntent(
-                aliasID: candidate.aliasID,
-                kind: candidate.kind,
-                desiredState: .present,
-                rank: existing?.rank ?? allocateLegacyRank(in: &state),
-                orderingRank: isNew || isReactivation
-                    ? nextBackRank
-                    : existing?.orderingRank,
-                origin: isReactivation || existing == nil
-                    ? .nativeImport
-                    : existing!.origin,
-                changedAt: isReactivation || existing == nil
-                    ? changedAt
-                    : existing!.changedAt,
-                presentation: candidate.presentation ?? existing?.presentation,
-                metadata: WatchlistIntentMetadata(
-                    sourceDestinationIDs: sources,
-                    lastExplicitRemovalAt:
-                        existing?.metadata.lastExplicitRemovalAt,
-                    lastReconciledAt: isReactivation || existing == nil
-                        ? changedAt
-                        : existing?.metadata.lastReconciledAt
-                )
-            )!
-            if isNew || isReactivation { nextBackRank += 1 }
-            if intent != existing {
-                byAlias[candidate.aliasID] = intent
-                changed = true
-            }
-            if existing == nil || isReactivation { importedCount += 1 }
-        }
-
-        if markImportComplete,
-           !state.migration.hasCompletedNativeImport(
-            destinationID: destinationID.rawValue
-           ) {
-            var ids = state.migration.completedNativeImportDestinationIDs
-            ids.append(destinationID.rawValue)
-            state.migration = WatchlistMigrationMetadata(
-                legacyHomeSeedCompletedAt:
-                    state.migration.legacyHomeSeedCompletedAt,
-                completedNativeImportDestinationIDs: ids
-            )
-            changed = true
-        }
-        guard changed else { return importedCount }
-        state.intents = byAlias.values.sorted { $0.aliasID < $1.aliasID }
-        try persist(state, profileID: profileID)
-        return importedCount
-    }
-
     public func seedLegacyIfNeeded(
         profileID: String,
         entries: [(MediaAliasID, MediaItemKind, MediaAliasPresentation?)]
@@ -351,28 +215,68 @@ public final class WatchlistModel {
         try persist(state, profileID: profileID)
     }
 
-    public func markNativeImportComplete(
+    /// Drops the intents the old native IMPORT wrote, once per profile.
+    ///
+    /// The import used to write every native entry as a durable `.present`
+    /// intent, which conflated "server X's list holds this" with "the viewer
+    /// wants this" and so could not be undone: switching the server off left
+    /// everything it had contributed behind forever. Native lists are a
+    /// read-time view now, so these records are evidence sitting in an
+    /// intent-only store and have to go.
+    ///
+    /// Dropping them is self-healing. A server that is still enabled re-supplies
+    /// its titles through the union on the next refresh; one that is switched
+    /// off correctly stops — which is the behaviour that was missing.
+    ///
+    /// `.legacyHomeSeed` is deliberately left alone. It came from the old cached
+    /// Home row, not from a live server, so there may be no native source left to
+    /// restore it and dropping it would silently lose titles. It is already inert:
+    /// only `.local` intents are ever written back out to a server.
+    ///
+    /// No `.nativeImport` record can be a removal — `remove` always writes
+    /// `origin: .local` — so this cannot discard something the viewer deleted.
+    ///
+    /// - Returns: how many intents were dropped.
+    @discardableResult
+    public func retireNativeImports(
         profileID: String,
-        destinationID: WatchlistDestinationID,
         at date: Date = Date()
-    ) throws {
+    ) throws -> Int {
         try ensureHydrated(profileID)
         var state = statesByProfile[profileID]!
-        var ids = state.migration.completedNativeImportDestinationIDs
-        ids.append(destinationID.rawValue)
-        state.migration = WatchlistMigrationMetadata(
-            legacyHomeSeedCompletedAt:
-                state.migration.legacyHomeSeedCompletedAt,
-            completedNativeImportDestinationIDs: ids
-        )
-        for index in state.intents.indices {
-            if state.intents[index].metadata.sourceDestinationIDs.contains(
-                destinationID.rawValue
-            ) {
-                state.intents[index].metadata.lastReconciledAt = date
-            }
-        }
+        guard state.migration.nativeImportRetiredAt == nil else { return 0 }
+        let before = state.intents.count
+        state.intents.removeAll { $0.origin == .nativeImport }
+        state.migration.nativeImportRetiredAt = date
         try persist(state, profileID: profileID)
+        return before - state.intents.count
+    }
+
+    /// Marks an explicit removal as answered by a later native re-add.
+    ///
+    /// Called when the reconciler has confirmed the removal reached a
+    /// destination and that destination's list has since added the title back.
+    /// The tombstone stays — deleting it would let a peer re-deliver the old
+    /// `.absent` record and hide the title permanently — but it stops
+    /// suppressing, so the union shows the title on the evidence of the server
+    /// that holds it. Switching that server off therefore still takes it away.
+    @discardableResult
+    public func markRemovalSuperseded(
+        profileID: String,
+        aliasID: MediaAliasID,
+        at date: Date = Date()
+    ) throws -> Bool {
+        try ensureHydrated(profileID)
+        var state = statesByProfile[profileID]!
+        guard let index = state.intents.firstIndex(where: {
+            $0.aliasID == aliasID
+        }), state.intents[index].desiredState == .absent,
+            state.intents[index].metadata.suppressesNativePresence
+        else { return false }
+        state.intents[index].metadata.removalSupersededAt = date
+        state.intents[index].changedAt = date
+        try persist(state, profileID: profileID)
+        return true
     }
 
     public func migrationMetadata(
@@ -407,6 +311,7 @@ public final class WatchlistModel {
 
     public func presentationSnapshot(
         profileID: String,
+        union: WatchlistUnion,
         aliasSnapshot: MediaAliasSnapshot,
         currentItemsByAliasID: [MediaAliasID: MediaItem],
         indexedSources: ((MediaItem) -> [MediaSourceRef])? = nil,
@@ -414,11 +319,28 @@ public final class WatchlistModel {
     ) throws -> [WatchlistPresentationEntry] {
         try ensureHydrated(profileID)
         return WatchlistPresentationResolver.resolve(
-            snapshot: snapshotsByProfile[profileID] ?? .empty,
+            union: union,
             aliasSnapshot: aliasSnapshot,
             currentItemsByAliasID: currentItemsByAliasID,
             indexedSources: indexedSources,
             capabilities: capabilities
+        )
+    }
+
+    /// The watchlist as the viewer sees it: durable intent, plus what the
+    /// destinations they have switched ON currently hold, minus explicit
+    /// removals. See `WatchlistUnion`.
+    public func union(
+        profileID: String,
+        nativeView: NativeWatchlistView,
+        aliasSnapshot: MediaAliasSnapshot,
+        enabledDestinationIDs: Set<WatchlistDestinationID>
+    ) -> WatchlistUnion {
+        WatchlistUnion(
+            snapshot: snapshotsByProfile[profileID] ?? .empty,
+            nativeView: nativeView,
+            aliasSnapshot: aliasSnapshot,
+            enabledDestinationIDs: enabledDestinationIDs
         )
     }
 

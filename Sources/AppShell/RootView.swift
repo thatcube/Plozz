@@ -485,17 +485,18 @@ public struct RootView: View {
             ProfileAccessGateView(appState: appState)
         }
         // Turning a server ON for a profile asks the same question setup asks:
-        // who does this profile watch as there? Without it the watchlist import
-        // reads that server as the account owner and quietly pulls their list
-        // into, say, a child's profile.
+        // who does this profile watch as there? Without it the watchlist reads
+        // that server as the account owner and quietly shows their list in, say,
+        // a child's profile. Backing out declines rather than consenting.
         .fullScreenCover(item: Binding(
             get: { appState.profileFlow.pendingIdentityAccountID.map(PendingIdentityAccount.init(id:)) },
-            set: { if $0 == nil { appState.profileFlow.resolveIdentityPrompt(for: appState.profileFlow.pendingIdentityAccountID ?? "") } }
+            set: { if $0 == nil { appState.profileFlow.declineIdentityPrompt(for: appState.profileFlow.pendingIdentityAccountID ?? "") } }
         )) { pending in
             ProfileServerIdentityPromptView(
                 appState: appState,
                 accountID: pending.id,
-                onFinish: { appState.profileFlow.resolveIdentityPrompt(for: pending.id) }
+                onFinish: { appState.profileFlow.resolveIdentityPrompt(for: pending.id) },
+                onDecline: { appState.profileFlow.declineIdentityPrompt(for: pending.id) }
             )
         }
         // Resumes setup that was abandoned part-way — quit mid-flow, or synced

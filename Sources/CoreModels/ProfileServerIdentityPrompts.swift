@@ -60,9 +60,8 @@ extension Profile {
         return true
     }
 
-    /// Clears the question for `accountID` — answered, declined, or the server
-    /// was switched back off. Declining counts: the point is to ask once, not to
-    /// nag, and an unanswered question must not gate the import forever.
+    /// Clears the question for `accountID` — answered, or the server was
+    /// switched back off. See `declineAccountWatchlist` for backing out.
     @discardableResult
     public mutating func resolveAccountAwaitingIdentity(_ accountID: String) -> Bool {
         let pending = pendingIdentityAccountIDs
@@ -71,6 +70,37 @@ extension Profile {
         // Absence, not `[]`: the sync layer requires a record to round-trip
         // byte-identically, and an empty array is not the same bytes as no key.
         accountsAwaitingIdentity = remaining.isEmpty ? nil : remaining
+        return true
+    }
+
+    /// Records that nobody said who this profile is on `accountID`, so its own
+    /// watchlist must not be read.
+    ///
+    /// Backing out used to just clear the question, after which the server was
+    /// read as the account OWNER — the exact outcome the question exists to
+    /// prevent, reached by declining to answer it. Declining now means what it
+    /// says. The server stays usable for browsing and playback; only its
+    /// watchlist is left alone.
+    @discardableResult
+    public mutating func declineAccountWatchlist(_ accountID: String) -> Bool {
+        var changed = resolveAccountAwaitingIdentity(accountID)
+        var declined = declinedWatchlistAccountIDs
+        if !declined.contains(accountID) {
+            declined.append(accountID)
+            watchlistDeclinedAccountIDs = declined.sorted()
+            changed = true
+        }
+        return changed
+    }
+
+    /// Withdraws a decline — the profile chose an identity here, or the server
+    /// was switched off and on again, so the question is live once more.
+    @discardableResult
+    public mutating func clearWatchlistDecline(_ accountID: String) -> Bool {
+        let declined = declinedWatchlistAccountIDs
+        guard declined.contains(accountID) else { return false }
+        let remaining = declined.filter { $0 != accountID }
+        watchlistDeclinedAccountIDs = remaining.isEmpty ? nil : remaining
         return true
     }
 }
@@ -155,6 +185,10 @@ public extension ProfilesModel {
         else { return }
         var changed = false
         for accountID in accountIDs where !knownNonPlexAccountIDs.contains(accountID) {
+            // Switching a server on again is a fresh start: whatever was
+            // declined last time is being reconsidered, which is the only way
+            // back from a decline.
+            changed = profile.clearWatchlistDecline(accountID) || changed
             guard ProfileServerIdentityPolicy.shouldAsk(
                 provider: .plex,
                 hasExistingBinding: profile.homeUserBinding(forPlexAccount: accountID) != nil
@@ -162,6 +196,14 @@ public extension ProfilesModel {
             changed = profile.noteAccountAwaitingIdentity(accountID) || changed
         }
         if changed { update(profile) }
+    }
+
+    /// The accounts this profile has declined to read a watchlist from.
+    func declinedWatchlistAccountIDs(forProfile profileID: String) -> Set<String> {
+        Set(
+            profiles.first { $0.id == profileID }?
+                .declinedWatchlistAccountIDs ?? []
+        )
     }
 
     /// Records identity questions for a profile that has just ARRIVED over sync,

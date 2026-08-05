@@ -336,29 +336,41 @@ struct PlozziOSMyLibrariesSettingsView: View {
                             .plozzForeground(.secondary)
                     }
                 } else {
+                    // Checkmarks, not switches. The server above IS a switch —
+                    // one thing, on or off — while these are a multi-select
+                    // subset of it, which is what a checkmark means everywhere
+                    // else in the app (Customize Home, Theme, Display Size).
+                    // tvOS already drew them this way; a column of identical
+                    // switches here made "watch this server" and "show this
+                    // library" look like the same kind of decision.
                     ForEach(librariesForActiveIdentity(in: group)) { library in
-                        Toggle(
-                            library.title,
-                            isOn: Binding(
-                                get: {
-                                    appModel.settings.homeVisibility.isEnabled(
-                                        library.key
-                                    )
-                                },
-                                set: {
-                                    appModel.settings.homeVisibility.setEnabled(
-                                        $0,
-                                        for: library.key
-                                    )
-                                }
-                            )
-                        )
+                        libraryCheckRow(library)
                     }
                 }
             }
         } footer: {
             Text("Saved for \(appModel.profiles.activeProfile.name).")
         }
+    }
+
+    /// One library, as a checkmark child of its server's master switch.
+    private func libraryCheckRow(_ library: ProfileLibraryChoice) -> some View {
+        let isOn = appModel.settings.homeVisibility.isEnabled(library.key)
+        return Button {
+            appModel.settings.homeVisibility.setEnabled(!isOn, for: library.key)
+        } label: {
+            HStack {
+                Text(verbatim: library.title)
+                Spacer(minLength: 12)
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                    .font(.title3)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
     }
 
     @ViewBuilder

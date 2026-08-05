@@ -638,7 +638,32 @@ public extension UniversalWatchlistHost {
             }
             if record.strongEvidence.isEmpty { weakOnly += 1 } else { matchable += 1 }
         }
-        let unionLine = "watchlist.union total=\(union.orderedEntries.count) explicit=\(union.orderedEntries.filter(\.isExplicit).count) nativeOnly=\(union.orderedEntries.filter { !$0.isExplicit }.count) strongID=\(matchable) weakOnly=\(weakOnly) noRecord=\(noRecord) stale=\(union.hasStaleDestinations)"
+        // Does the identity index know a copy on one of the viewer's servers for
+        // each union title? This is the question the alias ledger does NOT answer
+        // — it says what a title IS, not which item on which server it is — and
+        // it is what decides "in your library" vs "request it".
+        let sourcesProvider = identityIndex.identitySourcesProvider
+        var indexedHit = 0
+        for entry in union.orderedEntries {
+            guard let record = ledger.record(for: entry.aliasID) else { continue }
+            var probe = MediaItem(
+                id: entry.aliasID.description,
+                title: record.presentation?.title ?? "",
+                kind: entry.kind,
+                productionYear: record.presentation?.year,
+                providerIDs: record.strongEvidence.reduce(into: [:]) {
+                    $0[$1.namespace.canonicalKey] = $1.value
+                },
+                availability: .unknown,
+                locallyValidatedPlayableSource: false
+            )
+            probe.watchlistAliasID = entry.aliasID
+            if !sourcesProvider(probe).filter({
+                $0.kind == nil || $0.kind == entry.kind
+            }).isEmpty { indexedHit += 1 }
+        }
+        let indexSnapshot = identityIndex.identitySnapshot
+        let unionLine = "watchlist.index ownedCopyFound=\(indexedHit)/\(union.orderedEntries.count) indexedIdentities=\(indexSnapshot.identityCount) indexedAccounts=\(indexSnapshot.indexedAccountIDs.count) | total=\(union.orderedEntries.count) explicit=\(union.orderedEntries.filter(\.isExplicit).count) nativeOnly=\(union.orderedEntries.filter { !$0.isExplicit }.count) strongID=\(matchable) weakOnly=\(weakOnly) noRecord=\(noRecord) stale=\(union.hasStaleDestinations)"
         PlozzLog.app.info("Watchlist \(unionLine)")
         // Mirrored through the fan-out diagnostics seam so `devicectl … --console`
         // can stream it: `os_log` alone doesn't reach stdout, which is the only
@@ -814,7 +839,21 @@ public extension UniversalWatchlistHost {
         // `considered` must cover the native half too. When it equals the intent
         // count while the union is bigger, native-only titles are going
         // unenriched — which is what makes a card and the page it opens disagree.
-        let reconcileLine = "watchlist.identity considered=\(aliasIDs.count) intents=\(intents.count) enriched=\(enrichments.count) fanOut=\(changes.count)"
+        // Tell the screens to re-resolve.
+        //
+        // The identity index warms in the background, well after the watchlist
+        // first paints — and until it does, the only copy of a watchlisted title
+        // on hand is the Plex Discover one, which says "not in your library" by
+        // construction. Enriching the aliases here is what finally makes the
+        // owned copy findable, but nothing was announcing it, so Home kept the
+        // items it had resolved at t=0 and every title stayed "request it" until
+        // something else happened to rebuild the row.
+        NotificationCenter.default.post(
+            name: .universalWatchlistDidChange,
+            object: nil
+        )
+        let indexSnapshot = identityIndex.identitySnapshot
+        let reconcileLine = "watchlist.identity considered=\(aliasIDs.count) intents=\(intents.count) enriched=\(enrichments.count) fanOut=\(changes.count) indexedIdentities=\(indexSnapshot.identityCount) indexedAccounts=\(indexSnapshot.indexedAccountIDs.count)"
         PlozzLog.app.info("Watchlist \(reconcileLine)")
         FanoutDiagnostics.emit(reconcileLine)
     }

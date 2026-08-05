@@ -2403,9 +2403,11 @@ private struct PlozziOSProfileIdentityHeader: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: appModel.profiles.activeProfile.name)
                         .font(.headline)
-                    Text("Switch Profile")
-                        .font(.subheadline)
-                        .foregroundStyle(.tint)
+                    Text(KidsProfileCopy.openProfiles(
+                        profileCount: appModel.profiles.profiles.count
+                    ))
+                    .font(.subheadline)
+                    .foregroundStyle(.tint)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")

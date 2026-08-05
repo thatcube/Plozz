@@ -1087,7 +1087,7 @@ public struct SettingsView: View {
                         }
                     }
                     Button(action: onSwitchProfile) {
-                        Text("Switch Profile")
+                        Text(KidsProfileCopy.openProfiles(profileCount: profiles.count))
                     }
                 }
             }

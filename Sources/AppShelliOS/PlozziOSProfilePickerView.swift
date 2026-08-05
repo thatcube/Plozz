@@ -19,14 +19,26 @@ struct PlozziOSProfilePickerView: View {
     let profiles: [Profile]
     let activeProfileID: String
     let onSelect: (Profile) -> Void
-    /// Adds a profile. Omitted at launch, where the roster isn't the point.
-    var onAddProfile: (() -> Void)?
-    /// Opens a profile's settings. Omitted at launch.
-    var onEditProfile: ((Profile) -> Void)?
+    /// Supplied when this picker is being used as the switcher rather than the
+    /// launch gate. Its presence is what turns on Add and Edit.
+    ///
+    /// The picker drives those flows through its OWN navigation stack instead of
+    /// handing them back to the caller. A second presentation from the same host
+    /// as this cover is the arrangement SwiftUI drops silently, and the caller
+    /// (the tab shell) already owns the Settings sheet.
+    var manager: PlozziOSAppModel?
     /// Closes the picker. `nil` at launch, where there's nothing to go back to.
     var onCancel: (() -> Void)?
 
     @State private var isEditing = false
+    @State private var route: Route?
+
+    /// What the picker has pushed on top of itself.
+    private enum Route: Hashable, Identifiable {
+        case add
+        case edit(profileID: String)
+        var id: Self { self }
+    }
 
     private let columns = [
         GridItem(.adaptive(minimum: 140, maximum: 220), spacing: 24)
@@ -37,11 +49,17 @@ struct PlozziOSProfilePickerView: View {
             ScrollView {
                 VStack(spacing: 32) {
                     VStack(spacing: 8) {
-                        Text(isEditing ? "Edit Profiles" : "Who’s watching?")
+                        // With a single profile there is nobody to choose
+                        // between, so the screen says what it can actually do.
+                        Text(isEditing
+                            ? "Edit Profiles"
+                            : (profiles.count > 1 ? "Who’s watching?" : "Profiles"))
                             .font(.largeTitle.bold())
                         Text(isEditing
                             ? "Choose a profile to change it."
-                            : "Choose a profile to continue.")
+                            : (profiles.count > 1
+                                ? "Choose a profile to continue."
+                                : "Add a profile, or change the one you have."))
                             .plozzForeground(.secondary)
                     }
                     .multilineTextAlignment(.center)
@@ -49,8 +67,8 @@ struct PlozziOSProfilePickerView: View {
                     LazyVGrid(columns: columns, spacing: 28) {
                         ForEach(profiles) { profile in
                             Button {
-                                if isEditing, let onEditProfile {
-                                    onEditProfile(profile)
+                                if isEditing, manager != nil {
+                                    route = .edit(profileID: profile.id)
                                 } else {
                                     onSelect(profile)
                                 }
@@ -63,16 +81,16 @@ struct PlozziOSProfilePickerView: View {
                                 ? "Opens this profile’s settings"
                                 : "Switches to this profile")
                             .contextMenu {
-                                if let onEditProfile {
+                                if manager != nil {
                                     Button("Edit Profile", systemImage: "pencil") {
-                                        onEditProfile(profile)
+                                        route = .edit(profileID: profile.id)
                                     }
                                 }
                             }
                         }
 
-                        if let onAddProfile, !isEditing {
-                            Button(action: onAddProfile) {
+                        if manager != nil, !isEditing {
+                            Button { route = .add } label: {
                                 addCard
                             }
                             .buttonStyle(.plain)
@@ -83,9 +101,9 @@ struct PlozziOSProfilePickerView: View {
 
                     // Full-size controls under the grid rather than a small
                     // toolbar button: they're as prominent as what they act on.
-                    if onEditProfile != nil || onCancel != nil {
+                    if manager != nil || onCancel != nil {
                         VStack(spacing: 12) {
-                            if onEditProfile != nil {
+                            if manager != nil {
                                 Button {
                                     withAnimation(.easeInOut(duration: 0.2)) { isEditing.toggle() }
                                 } label: {
@@ -113,6 +131,27 @@ struct PlozziOSProfilePickerView: View {
             }
             .background(.background)
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(item: $route) { route in
+                destination(for: route)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func destination(for route: Route) -> some View {
+        if let manager {
+            switch route {
+            case .add:
+                PlozziOSProfileEditorHost(appModel: manager) {
+                    self.route = nil
+                    // Close the whole picker: a brand-new profile owes its setup
+                    // pass, and that cover is presented by the root — which can't
+                    // while this one is up.
+                    onCancel?()
+                }
+            case let .edit(profileID):
+                PlozziOSProfileSettingsView(appModel: manager, profileID: profileID)
+            }
         }
     }
 

@@ -337,6 +337,26 @@ public enum KidsProfileCopy {
         comment: "Row opening the profile's own name, avatar and colour. Available to a Kids Profile, unlike the parental controls."
     )
 
+    /// Label for the control that opens the profile picker.
+    ///
+    /// "Switch Profile" is a promise there's someone to switch TO. With a single
+    /// profile the picker is still worth opening — you can add one or edit the
+    /// one you have — so the label says that instead of offering a switch that
+    /// can't happen.
+    public static func openProfiles(profileCount: Int) -> LocalizedStringResource {
+        profileCount > 1
+            ? LocalizedStringResource(
+                "settings.profiles.switch",
+                defaultValue: "Switch Profile",
+                comment: "Opens the profile picker when the household has more than one profile."
+            )
+            : LocalizedStringResource(
+                "settings.profiles.manage",
+                defaultValue: "Add or Edit Profiles",
+                comment: "Opens the profile picker when the household has only one profile, so there is nothing to switch to."
+            )
+    }
+
     public static let manageProfile = LocalizedStringResource(
         "settings.parentalControls.manageProfile",
         defaultValue: "Manage Profile",

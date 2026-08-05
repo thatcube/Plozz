@@ -521,8 +521,6 @@ private struct PlozziOSTabShell: View {
     /// it can raise aren't asked for from underneath the Settings sheet — the
     /// arrangement that fails silently.
     @State private var showingProfileSwitcher = false
-    /// A profile whose settings the switcher asked to open.
-    @State private var switcherEditingProfile: Profile?
 
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
@@ -622,25 +620,9 @@ private struct PlozziOSTabShell: View {
                     showingProfileSwitcher = false
                     appModel.selectProfile(profile.id)
                 },
-                onAddProfile: {
-                    showingProfileSwitcher = false
-                    showingSettings = true
-                },
-                onEditProfile: { profile in
-                    showingProfileSwitcher = false
-                    switcherEditingProfile = profile
-                },
+                manager: appModel,
                 onCancel: { showingProfileSwitcher = false }
             )
-        }
-        .sheet(item: $switcherEditingProfile) { profile in
-            NavigationStack {
-                PlozziOSProfileSettingsView(
-                    appModel: appModel,
-                    profileID: profile.id
-                )
-            }
-            .preferredColorScheme(settingsPresentationColorScheme)
         }
         .sheet(isPresented: $showingSettings, onDismiss: {
             appModel.noteSettingsPresented(false)

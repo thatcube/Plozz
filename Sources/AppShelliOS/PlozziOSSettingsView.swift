@@ -1113,6 +1113,12 @@ private struct PlozziOSProfilesView: View {
             }
 
             SettingsSectionGroup(isManaging ? "Manage Profiles" : "Who’s watching?") {
+                Button(isManaging ? "Done" : "Manage") {
+                    withAnimation(.easeInOut(duration: 0.2)) { isManaging.toggle() }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+            } content: {
                 // Tapping a face switches to it — unless you've said you're
                 // managing, in which case tapping opens that profile's settings.
                 //
@@ -1188,13 +1194,6 @@ private struct PlozziOSProfilesView: View {
         }
         .settingsPageSurface()
         .navigationTitle("Profiles")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(isManaging ? "Done" : "Manage") {
-                    withAnimation(.easeInOut(duration: 0.2)) { isManaging.toggle() }
-                }
-            }
-        }
         // One typed value, one push. Closure-based destinations inside this
         // ForEach were all being activated by the containing split/stack,
         // producing a back-stack containing every profile in list order.

@@ -79,9 +79,10 @@ struct ProfileServerIdentityPromptView: View {
                 )
                     .foregroundStyle(palette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
-                Button(action: onDecline) {
-                    Text("Continue", comment: "Button dismissing the who-are-you question when there is nobody to pick.")
-                }
+                // Plain shared key: "Continue" is used across the app, and
+                // attaching a comment specific to this screen would describe it
+                // wrongly everywhere else it appears.
+                Button("Continue", action: onDecline)
             }
         case let .loaded(list):
             VStack(spacing: 14) {

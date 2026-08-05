@@ -72761,8 +72761,230 @@
         }
       }
     },
+    "Couldn't load the users for this server. Its watchlist stays out of this profile until you pick someone — switch the server off and on again to try." : {
+      "comment" : "Shown when a server's user list can't be loaded, so nobody can be picked. Explains that the server's own watchlist won't be used here.",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "تعذّر تحميل مستخدمي هذا الخادم. ستبقى قائمة المشاهدة الخاصة به خارج هذا الملف الشخصي حتى تختار شخصًا — أوقف الخادم ثم شغّله مجددًا للمحاولة."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Потребителите на този сървър не можаха да се заредят. Неговият списък за гледане няма да се използва в този профил, докато не изберете човек — изключете и включете сървъра отново, за да опитате."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No s’han pogut carregar els usuaris d’aquest servidor. La seva llista es mantindrà fora d’aquest perfil fins que triïs algú: desactiva i torna a activar el servidor per provar-ho."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Uživatele tohoto serveru se nepodařilo načíst. Jeho seznam sledování zůstane mimo tento profil, dokud někoho nevyberete — zkuste to vypnutím a opětovným zapnutím serveru."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Brugerne på denne server kunne ikke indlæses. Dens ønskeliste holdes uden for denne profil, indtil du vælger nogen – slå serveren fra og til igen for at prøve."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Die Benutzer dieses Servers konnten nicht geladen werden. Seine Merkliste bleibt außerhalb dieses Profils, bis du jemanden auswählst – schalte den Server aus und wieder ein, um es zu versuchen."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Δεν ήταν δυνατή η φόρτωση των χρηστών αυτού του διακομιστή. Η λίστα του παραμένει εκτός αυτού του προφίλ μέχρι να επιλέξετε κάποιον — απενεργοποιήστε και ενεργοποιήστε ξανά τον διακομιστή για να δοκιμάσετε."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No se pudieron cargar los usuarios de este servidor. Su lista se quedará fuera de este perfil hasta que elijas a alguien: desactiva y vuelve a activar el servidor para intentarlo."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "بارگیری کاربران این سرور ممکن نشد. فهرست تماشای آن تا زمانی که کسی را انتخاب کنید از این نمایه بیرون می‌ماند — سرور را خاموش و دوباره روشن کنید تا دوباره تلاش شود."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tämän palvelimen käyttäjiä ei voitu ladata. Sen katselulista pysyy tämän profiilin ulkopuolella, kunnes valitset jonkun – kytke palvelin pois ja takaisin päälle yrittääksesi uudelleen."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Impossible de charger les utilisateurs de ce serveur. Sa liste restera en dehors de ce profil tant que vous n’aurez pas choisi quelqu’un : désactivez puis réactivez le serveur pour réessayer."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "לא ניתן היה לטעון את המשתמשים של שרת זה. רשימת הצפייה שלו תישאר מחוץ לפרופיל הזה עד שתבחר מישהו — כבה והפעל מחדש את השרת כדי לנסות."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "इस सर्वर के उपयोगकर्ता लोड नहीं हो सके। जब तक आप किसी को नहीं चुनते, इसकी वॉचलिस्ट इस प्रोफ़ाइल से बाहर रहेगी — फिर से प्रयास करने के लिए सर्वर को बंद करके चालू करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Korisnike ovog poslužitelja nije bilo moguće učitati. Njegov popis ostat će izvan ovog profila dok nekoga ne odaberete — isključite i ponovno uključite poslužitelj da pokušate."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "A kiszolgáló felhasználóit nem sikerült betölteni. A figyelőlistája kimarad ebből a profilból, amíg nem választasz valakit – kapcsold ki, majd be a kiszolgálót az újrapróbálkozáshoz."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pengguna server ini tidak dapat dimuat. Daftar tontonannya tidak akan masuk ke profil ini sampai Anda memilih seseorang — matikan lalu nyalakan lagi server untuk mencoba."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Non è stato possibile caricare gli utenti di questo server. La sua watchlist resterà fuori da questo profilo finché non scegli qualcuno: disattiva e riattiva il server per riprovare."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "このサーバーのユーザーを読み込めませんでした。誰かを選ぶまで、このサーバーのウォッチリストはこのプロファイルに取り込まれません。サーバーをオフにしてから再度オンにすると、もう一度試せます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "이 서버의 사용자를 불러오지 못했습니다. 누군가를 선택할 때까지 이 서버의 시청 목록은 이 프로필에 포함되지 않습니다. 서버를 껐다 켜면 다시 시도할 수 있습니다."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pengguna pelayan ini tidak dapat dimuatkan. Senarai tontonannya kekal di luar profil ini sehingga anda memilih seseorang — matikan dan hidupkan semula pelayan untuk mencuba."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Kunne ikke laste inn brukerne på denne serveren. Ønskelisten holdes utenfor denne profilen til du velger noen – slå serveren av og på igjen for å prøve."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "De gebruikers van deze server konden niet worden geladen. De kijklijst blijft buiten dit profiel totdat je iemand kiest — zet de server uit en weer aan om het te proberen."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nie udało się wczytać użytkowników tego serwera. Jego lista pozostanie poza tym profilem, dopóki kogoś nie wybierzesz — wyłącz i włącz serwer ponownie, aby spróbować."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Não foi possível carregar os usuários deste servidor. A lista dele ficará fora deste perfil até você escolher alguém — desative e ative o servidor novamente para tentar."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Utilizatorii acestui server nu au putut fi încărcați. Lista lui rămâne în afara acestui profil până când alegi pe cineva — oprește și pornește serverul din nou pentru a încerca."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Не удалось загрузить пользователей этого сервера. Его список останется вне этого профиля, пока вы не выберете кого-то — выключите и снова включите сервер, чтобы попробовать."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Používateľov tohto servera sa nepodarilo načítať. Jeho zoznam zostane mimo tohto profilu, kým niekoho nevyberiete — skúste to vypnutím a opätovným zapnutím servera."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Uporabnikov tega strežnika ni bilo mogoče naložiti. Njegov seznam ostane zunaj tega profila, dokler nekoga ne izberete — strežnik izklopite in znova vklopite, da poskusite."
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Korisnike ovog servera nije bilo moguće učitati. Njegova lista ostaje van ovog profila dok nekoga ne izaberete — isključite i ponovo uključite server da pokušate."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Det gick inte att läsa in användarna på den här servern. Dess bevakningslista hålls utanför den här profilen tills du väljer någon – stäng av och slå på servern igen för att försöka."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "โหลดผู้ใช้ของเซิร์ฟเวอร์นี้ไม่สำเร็จ รายการที่อยากดูของเซิร์ฟเวอร์จะไม่ถูกนำมาใช้ในโปรไฟล์นี้จนกว่าคุณจะเลือกใครสักคน — ปิดแล้วเปิดเซิร์ฟเวอร์อีกครั้งเพื่อลองใหม่"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bu sunucunun kullanıcıları yüklenemedi. Birini seçene kadar sunucunun izleme listesi bu profilin dışında kalır — yeniden denemek için sunucuyu kapatıp açın."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Не вдалося завантажити користувачів цього сервера. Його список залишиться поза цим профілем, доки ви когось не виберете — вимкніть і знову ввімкніть сервер, щоб спробувати."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Không thể tải người dùng của máy chủ này. Danh sách xem của nó sẽ nằm ngoài hồ sơ này cho đến khi bạn chọn một người — hãy tắt rồi bật lại máy chủ để thử."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "无法加载此服务器的用户。在你选择某个用户之前，该服务器的想看清单不会进入此配置文件——将服务器关闭再打开即可重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "無法載入此伺服器的使用者。在你選擇某位使用者之前，該伺服器的待看清單不會進入此設定檔——將伺服器關閉再開啟即可重試。"
+          }
+        }
+      }
+    },
     "Couldn't load the users for this server. You can set this later in Libraries." : {
       "comment" : "Error shown when the list of server users could not be fetched. 'Libraries' is the name of a settings screen.",
+      "extractionState" : "stale",
       "localizations" : {
         "ar" : {
           "stringUnit" : {
@@ -95695,6 +95917,227 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "不要自動開啟字幕。"
+          }
+        }
+      }
+    },
+    "Don't use this server's watchlist" : {
+      "comment" : "Button declining to pick a user, which leaves the server's own watchlist out of this profile.",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "لا تستخدم قائمة مشاهدة هذا الخادم"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Не използвай списъка за гледане на този сървър"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No facis servir la llista de reproducció d’aquest servidor"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nepoužívat seznam sledování tohoto serveru"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Brug ikke denne servers ønskeliste"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Merkliste dieses Servers nicht verwenden"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Να μη χρησιμοποιείται η λίστα παρακολούθησης αυτού του διακομιστή"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No usar la lista de este servidor"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "از فهرست تماشای این سرور استفاده نکن"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Älä käytä tämän palvelimen katselulistaa"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ne pas utiliser la liste de ce serveur"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "אל תשתמש ברשימת הצפייה של שרת זה"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "इस सर्वर की वॉचलिस्ट का उपयोग न करें"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ne koristi popis za gledanje ovog poslužitelja"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ne használd ennek a kiszolgálónak a figyelőlistáját"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Jangan gunakan daftar tontonan server ini"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Non usare la watchlist di questo server"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "このサーバーのウォッチリストを使わない"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "이 서버의 시청 목록 사용 안 함"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Jangan guna senarai tontonan pelayan ini"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ikke bruk ønskelisten til denne serveren"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Gebruik de kijklijst van deze server niet"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nie używaj listy do obejrzenia z tego serwera"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Não usar a lista deste servidor"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nu folosi lista de urmărit a acestui server"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Не использовать список этого сервера"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nepoužívať zoznam sledovania tohto servera"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ne uporabljaj seznama za ogled tega strežnika"
+          }
+        },
+        "sr-Latn" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ne koristi listu za gledanje ovog servera"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Använd inte den här serverns bevakningslista"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ไม่ต้องใช้รายการที่อยากดูของเซิร์ฟเวอร์นี้"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Bu sunucunun izleme listesini kullanma"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Не використовувати список перегляду цього сервера"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Không dùng danh sách xem của máy chủ này"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "不使用此服务器的想看清单"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "不使用此伺服器的待看清單"
           }
         }
       }
@@ -193511,12 +193954,6 @@
     "PIN %lld of %lld" : {
       "comment" : "Progress label while setting a PIN that must be entered twice. First %lld is the current step, second is the total number of steps.",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "PIN %1$lld of %2$lld"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -193557,6 +193994,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "PIN %1$lld από %2$lld"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "PIN %1$lld of %2$lld"
           }
         },
         "es" : {
@@ -193738,12 +194181,6 @@
     "PIN progress: %lld of %lld" : {
       "comment" : "Accessibility label for the PIN dots. First %lld is how many digits have been entered, second is the total digits required.",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "PIN progress: %1$lld of %2$lld"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -193784,6 +194221,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Πρόοδος PIN: %1$lld από %2$lld"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "PIN progress: %1$lld of %2$lld"
           }
         },
         "es" : {
@@ -387281,12 +387724,6 @@
       "comment" : "Shown under the Plex PIN pad when switching users failed for a reason other than a wrong PIN.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Couldn’t switch Plex user. Please try again."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -387327,6 +387764,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δεν ήταν δυνατή η αλλαγή χρήστη Plex. Δοκιμάστε ξανά."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Couldn’t switch Plex user. Please try again."
           }
         },
         "es" : {
@@ -388635,12 +389078,6 @@
       "comment" : "Shown under the PIN pad when the entered PIN is wrong.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Incorrect PIN. Try again."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -388681,6 +389118,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Λάθος PIN. Δοκιμάστε ξανά."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Incorrect PIN. Try again."
           }
         },
         "es" : {
@@ -390667,12 +391110,6 @@
       "comment" : "Tile on the profile picker that creates a new restricted profile, shown beside the ordinary Add Profile tile.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Add Kids Profile"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390713,6 +391150,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Προσθήκη παιδικού προφίλ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Add Kids Profile"
           }
         },
         "es" : {
@@ -390895,12 +391338,6 @@
       "comment" : "Explains what marking a profile as a Kids Profile does. The last sentence matters: there is no content filtering yet and the copy must not imply otherwise.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Hides shared settings, so servers and profiles can't be changed from it. Doesn't filter what can be watched."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -390941,6 +391378,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αποκρύπτει τις κοινόχρηστες ρυθμίσεις, ώστε οι διακομιστές και τα προφίλ να μην μπορούν να αλλάξουν. Δεν φιλτράρει τι μπορεί να παρακολουθηθεί."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Hides shared settings, so servers and profiles can't be changed from it. Doesn't filter what can be watched."
           }
         },
         "es" : {
@@ -391123,12 +391566,6 @@
       "comment" : "Warning under the Kids Profile row when no household Parental PIN exists. Points at the row directly, because a Kids Profile hides the household section where the PIN otherwise lives.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Not restricted yet — open Kids Profile to add a Parental PIN."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391169,6 +391606,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δεν είναι ακόμη περιορισμένο — ανοίξτε το Παιδικό προφίλ για να προσθέσετε ένα Γονικό PIN."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Not restricted yet — open Kids Profile to add a Parental PIN."
           }
         },
         "es" : {
@@ -391351,12 +391794,6 @@
       "comment" : "Toggle marking a profile as a child's, which hides the shared household settings while it's in use.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Kids Profile"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391397,6 +391834,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Παιδικό προφίλ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Kids Profile"
           }
         },
         "es" : {
@@ -391579,12 +392022,6 @@
       "comment" : "Confirming button that lifts a profile's Kids restriction.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Turn Off Kids Profile"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391625,6 +392062,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Απενεργοποίηση παιδικού προφίλ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Turn Off Kids Profile"
           }
         },
         "es" : {
@@ -391807,12 +392250,6 @@
       "comment" : "Confirming button that marks a profile as a child's.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Turn On Kids Profile"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -391853,6 +392290,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ενεργοποίηση παιδικού προφίλ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Turn On Kids Profile"
           }
         },
         "es" : {
@@ -392489,12 +392932,6 @@
       "comment" : "Row inside Parental Controls leading to this profile's own management page.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Manage Profile"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -392535,6 +392972,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Διαχείριση προφίλ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Manage Profile"
           }
         },
         "es" : {
@@ -392717,12 +393160,6 @@
       "comment" : "Subtitle of the Parental Controls group after the Parental PIN has been entered, making the limited duration clear.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Unlocked until you switch profiles"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -392763,6 +393200,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ξεκλείδωτο μέχρι να αλλάξετε προφίλ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Unlocked until you switch profiles"
           }
         },
         "es" : {
@@ -392945,12 +393388,6 @@
       "comment" : "Subtitle of the Manage Profile row. Lists what the page holds; must not repeat the row's own title.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Name, avatar, lock, and Kids Profile"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -392991,6 +393428,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Όνομα, avatar, κλείδωμα και Παιδικό προφίλ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Name, avatar, lock, and Kids Profile"
           }
         },
         "es" : {
@@ -393173,12 +393616,6 @@
       "comment" : "Heading for the group of settings on a Kids Profile that only a grown-up may change.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Parental Controls"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -393219,6 +393656,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Γονικός έλεγχος"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Parental Controls"
           }
         },
         "es" : {
@@ -393401,12 +393844,6 @@
       "comment" : "Action that replaces the household's existing Parental PIN.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Change Parental PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -393447,6 +393884,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αλλαγή Γονικού PIN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Change Parental PIN"
           }
         },
         "es" : {
@@ -393629,12 +394072,6 @@
       "comment" : "Title of the second step when creating a Parental PIN, confirming the digits match.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Enter it again"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -393675,6 +394112,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Εισάγετέ το ξανά"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter it again"
           }
         },
         "es" : {
@@ -393857,12 +394300,6 @@
       "comment" : "Action that sets the household's Parental PIN for the first time.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Create a Parental PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -393903,6 +394340,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δημιουργία Γονικού PIN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Create a Parental PIN"
           }
         },
         "es" : {
@@ -394085,12 +394528,6 @@
       "comment" : "Title of the PIN screen shown when leaving a Kids Profile or opening its restricted settings.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Enter the Parental PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -394131,6 +394568,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Εισαγωγή Γονικού PIN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter the Parental PIN"
           }
         },
         "es" : {
@@ -394313,12 +394756,6 @@
       "comment" : "Subtitle of the Parental PIN page. Must stay honest that a Kids Profile alone restricts nothing.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "One PIN for the household. Without it, Kids Profiles aren't restricted."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -394359,6 +394796,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ένα PIN για όλο το σπίτι. Χωρίς αυτό, τα Παιδικά προφίλ δεν είναι περιορισμένα."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "One PIN for the household. Without it, Kids Profiles aren't restricted."
           }
         },
         "es" : {
@@ -394541,12 +394984,6 @@
       "comment" : "Action that deletes the household's Parental PIN.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Remove Parental PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -394587,6 +395024,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αφαίρεση Γονικού PIN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Remove Parental PIN"
           }
         },
         "es" : {
@@ -394769,12 +395212,6 @@
       "comment" : "Shown when removing the household Parental PIN, clarifying that Kids Profiles are not turned off by it.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Kids Profiles stay on, but nothing will be locked."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -394815,6 +395252,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Τα Παιδικά προφίλ παραμένουν ενεργά, αλλά τίποτα δεν θα είναι κλειδωμένο."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Kids Profiles stay on, but nothing will be locked."
           }
         },
         "es" : {
@@ -394997,12 +395440,6 @@
       "comment" : "Title of the screen that collects a new household Parental PIN.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Create a Parental PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -395043,6 +395480,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δημιουργία Γονικού PIN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Create a Parental PIN"
           }
         },
         "es" : {
@@ -395225,12 +395668,6 @@
       "comment" : "The household PIN required to leave a Kids Profile or change its restricted settings.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Parental PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -395271,6 +395708,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Γονικό PIN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Parental PIN"
           }
         },
         "es" : {
@@ -395453,12 +395896,6 @@
       "comment" : "Row opening the profile's own name, avatar and colour. Available to a Kids Profile, unlike the parental controls.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Name & Avatar"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -395499,6 +395936,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Όνομα & Avatar"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Name & Avatar"
           }
         },
         "es" : {
@@ -395681,12 +396124,6 @@
       "comment" : "Heading for the second, confirming entry of a new PIN.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Enter your PIN again"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -395727,6 +396164,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Εισαγάγετε ξανά το PIN σας"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter your PIN again"
           }
         },
         "es" : {
@@ -395909,12 +396352,6 @@
       "comment" : "Button that starts setting a PIN on this profile. Short on purpose — it sits under a title that already says what's being locked.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Create PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -395955,6 +396392,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δημιουργία PIN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Create PIN"
           }
         },
         "es" : {
@@ -396137,12 +396580,6 @@
       "comment" : "Supporting line under the heading while choosing a new PIN, matching the wording on the preceding offer screen.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Enter a 4-digit PIN to lock this profile."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -396183,6 +396620,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Εισαγάγετε ένα 4ψήφιο PIN για να κλειδώσετε αυτό το προφίλ."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter a 4-digit PIN to lock this profile."
           }
         },
         "es" : {
@@ -396365,12 +396808,6 @@
       "comment" : "Heading on the screen where a new PIN is chosen.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Create a PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -396411,6 +396848,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δημιουργία PIN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Create a PIN"
           }
         },
         "es" : {
@@ -396593,12 +397036,6 @@
       "comment" : "Explains why a separate Plozz PIN can still be useful when the selected Plex user already requires a PIN.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "This user already has a Plex PIN. Add another to keep the profile locked if its Plex user changes."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -396639,6 +397076,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αυτός ο χρήστης έχει ήδη PIN Plex. Προσθέστε ένα ακόμη για να παραμείνει το προφίλ κλειδωμένο αν αλλάξει ο χρήστης Plex."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This user already has a Plex PIN. Add another to keep the profile locked if its Plex user changes."
           }
         },
         "es" : {
@@ -396821,12 +397264,6 @@
       "comment" : "Heading when adding a Plozz Profile Lock to a profile already protected by its selected Plex user's PIN.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Add a Profile PIN?"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -396867,6 +397304,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Προσθήκη PIN προφίλ;"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Add a Profile PIN?"
           }
         },
         "es" : {
@@ -397049,12 +397492,6 @@
       "comment" : "Button that removes the PIN so the profile opens without one.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Remove PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -397095,6 +397532,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αφαίρεση PIN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Remove PIN"
           }
         },
         "es" : {
@@ -397277,12 +397720,6 @@
       "comment" : "Caveat shown when a Profile Lock is set while iCloud Sync is off, meaning the user's other devices won't have the lock.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "iCloud Sync is off, so this lock only applies on this device."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -397323,6 +397760,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ο συγχρονισμός iCloud είναι απενεργοποιημένος — αυτό το κλείδωμα ισχύει μόνο σε αυτή τη συσκευή."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "iCloud Sync is off, so this lock only applies on this device."
           }
         },
         "es" : {
@@ -397505,12 +397948,6 @@
       "comment" : "Button that replaces the existing Profile Lock PIN with a new one.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Change PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -397551,6 +397988,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αλλαγή PIN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Change PIN"
           }
         },
         "es" : {
@@ -397733,12 +398176,6 @@
       "comment" : "Explains what turning on a Profile Lock does.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Require a PIN to open this profile."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -397779,6 +398216,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Απαιτείται PIN για το άνοιγμα αυτού του προφίλ."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Require a PIN to open this profile."
           }
         },
         "es" : {
@@ -397961,12 +398404,6 @@
       "comment" : "Button offering a way out when the user can't remember their Profile Lock PIN.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Forgot PIN?"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -398007,6 +398444,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ξεχάσατε το PIN;"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Forgot PIN?"
           }
         },
         "es" : {
@@ -398189,12 +398632,6 @@
       "comment" : "Explains how to recover from a forgotten Profile Lock PIN. There is no email reset because Plozz has no account of its own.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Removing the lock from another signed-in device, or signing out and setting Plozz up again, will clear it."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -398235,6 +398672,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Το κλείδωμα θα καταργηθεί αν το αφαιρέσετε από άλλη συσκευή όπου έχετε συνδεθεί ή αν αποσυνδεθείτε και ρυθμίσετε ξανά το Plozz."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Removing the lock from another signed-in device, or signing out and setting Plozz up again, will clear it."
           }
         },
         "es" : {
@@ -398417,12 +398860,6 @@
       "comment" : "Explains why a PIN is being asked for before adding a profile. Only shown for adding — editing a locked profile asks for that profile's own PIN, which needs no explanation.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Adding a profile needs the PIN from a locked profile."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -398463,6 +398900,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Η προσθήκη προφίλ απαιτεί το PIN ενός κλειδωμένου προφίλ."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Adding a profile needs the PIN from a locked profile."
           }
         },
         "es" : {
@@ -398645,12 +399088,6 @@
       "comment" : "Heading shown when a PIN is needed before adding or editing a profile.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Enter your PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -398691,6 +399128,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Εισαγάγετε το PIN σας"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter your PIN"
           }
         },
         "es" : {
@@ -398873,12 +399316,6 @@
       "comment" : "Error shown when the confirming PIN entry differs from the first.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Those PINs didn't match. Start again."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -398919,6 +399356,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Τα PIN δεν ταιριάζουν. Ξεκινήστε ξανά."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Those PINs didn't match. Start again."
           }
         },
         "es" : {
@@ -399101,12 +399544,6 @@
       "comment" : "Value shown on the Profile Lock row when no PIN is set.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Off"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -399147,6 +399584,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ανενεργό"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Off"
           }
         },
         "es" : {
@@ -399329,12 +399772,6 @@
       "comment" : "Brief explanation of what creating a Profile Lock does.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Add a 4-digit PIN to lock this profile."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -399375,6 +399812,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Προσθέστε ένα 4ψήφιο PIN για να κλειδώσετε αυτό το προφίλ."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Add a 4-digit PIN to lock this profile."
           }
         },
         "es" : {
@@ -399557,12 +400000,6 @@
       "comment" : "Body of the prompt offering a PIN on a newly created Kids Profile. Locking the child's own profile is the common misunderstanding, so this points the other way in one line.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Usually you lock the grown-ups' profiles instead."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -399603,6 +400040,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Συνήθως κλειδώνονται τα προφίλ των ενηλίκων."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Usually you lock the grown-ups' profiles instead."
           }
         },
         "es" : {
@@ -399785,12 +400228,6 @@
       "comment" : "Title of the optional PIN step shown after a profile is created.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Create a PIN?"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -399831,6 +400268,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δημιουργία PIN;"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Create a PIN?"
           }
         },
         "es" : {
@@ -400013,12 +400456,6 @@
       "comment" : "Value shown on the Profile Lock row when a PIN is set.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "On"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -400059,6 +400496,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ενεργό"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "On"
           }
         },
         "es" : {
@@ -400241,12 +400684,6 @@
       "comment" : "Second line on the Profile Lock row when the profile has no Plozz lock but does play as a PIN-protected Plex Home user.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "This user already has a Plex PIN."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -400287,6 +400724,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αυτός ο χρήστης έχει ήδη PIN Plex."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This user already has a Plex PIN."
           }
         },
         "es" : {
@@ -400469,12 +400912,6 @@
       "comment" : "Value shown when Plex asks for a PIN but the Plozz profile itself does not have a Profile Lock.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Plex PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -400515,6 +400952,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "PIN Plex"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Plex PIN"
           }
         },
         "es" : {
@@ -400697,12 +401140,6 @@
       "comment" : "Error shown when the proposed shared Profile Lock PIN is rejected by Plex.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "That isn’t this user’s Plex PIN."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -400743,6 +401180,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αυτό δεν είναι το PIN Plex αυτού του χρήστη."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "That isn’t this user’s Plex PIN."
           }
         },
         "es" : {
@@ -400925,12 +401368,6 @@
       "comment" : "Recovery choices when Plex PIN verification is unavailable.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Try again, or keep the Profile Lock PIN separate."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -400971,6 +401408,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δοκιμάστε ξανά ή κρατήστε το PIN προφίλ ξεχωριστό."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Try again, or keep the Profile Lock PIN separate."
           }
         },
         "es" : {
@@ -401153,12 +401596,6 @@
       "comment" : "Title shown when Plex cannot be reached while verifying a proposed shared PIN.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Couldn’t verify the Plex PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -401199,6 +401636,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Δεν ήταν δυνατή η επαλήθευση του PIN Plex"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Couldn’t verify the Plex PIN"
           }
         },
         "es" : {
@@ -401381,12 +401824,6 @@
       "comment" : "Settings row for an optional 4-digit PIN that must be entered to open this profile.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Profile Lock"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -401427,6 +401864,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Κλείδωμα προφίλ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Profile Lock"
           }
         },
         "es" : {
@@ -401609,12 +402052,6 @@
       "comment" : "Heading on the screen asking for a profile's PIN before opening it. No supporting line: the profile's name and avatar sit right beneath it, so anything else would just restate the obvious.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Enter your PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -401655,6 +402092,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Εισαγάγετε το PIN σας"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter your PIN"
           }
         },
         "es" : {
@@ -401837,12 +402280,6 @@
       "comment" : "Row and heading shown when someone opens a locked profile's settings. Its PIN is required before anything about it can be changed.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Enter PIN to Edit"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -401883,6 +402320,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Εισαγωγή PIN για επεξεργασία"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Enter PIN to Edit"
           }
         },
         "es" : {
@@ -402065,12 +402508,6 @@
       "comment" : "Second line under 'Enter PIN to Edit'.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "This profile is locked."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -402111,6 +402548,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αυτό το προφίλ είναι κλειδωμένο."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This profile is locked."
           }
         },
         "es" : {
@@ -402293,12 +402736,6 @@
       "comment" : "Asked after choosing a PIN, when this profile plays as a PIN-protected Plex Home user, so one PIN can open both.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Same as your Plex PIN?"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -402339,6 +402776,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ίδιο με το PIN Plex σας;"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Same as your Plex PIN?"
           }
         },
         "es" : {
@@ -402521,12 +402964,6 @@
       "comment" : "Explains what saying yes does — including that the PIN is sent to Plex, which the person should know before agreeing.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "If yes, Plozz can use one PIN entry for both."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -402567,6 +403004,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αν ναι, το Plozz μπορεί να χρησιμοποιήσει μία εισαγωγή PIN και για τα δύο."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "If yes, Plozz can use one PIN entry for both."
           }
         },
         "es" : {
@@ -402749,12 +403192,6 @@
       "comment" : "Declines forwarding the PIN to Plex; the Plex prompt will still appear separately.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "No, Keep Separate"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -402795,6 +403232,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Όχι, ξεχωριστά"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "No, Keep Separate"
           }
         },
         "es" : {
@@ -402977,12 +403420,6 @@
       "comment" : "Confirms that the Plozz PIN and the Plex PIN match, so Plozz may forward it.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Yes, Same PIN"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -403023,6 +403460,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Ναι, ίδιο PIN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Yes, Same PIN"
           }
         },
         "es" : {
@@ -403205,12 +403648,6 @@
       "comment" : "Opens the profile picker when the household has only one profile, so there is nothing to switch to.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Add or Edit Profiles"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -403251,6 +403688,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Προσθήκη ή επεξεργασία προφίλ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Add or Edit Profiles"
           }
         },
         "es" : {
@@ -403433,12 +403876,6 @@
       "comment" : "Opens the profile picker when the household has more than one profile.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Switch Profile"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -403479,6 +403916,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αλλαγή προφίλ"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Switch Profile"
           }
         },
         "es" : {
@@ -403661,12 +404104,6 @@
       "comment" : "Heading for the group of settings shared by every profile, as opposed to the section holding the current profile's own settings.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Everyone"
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -403707,6 +404144,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Όλοι"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Everyone"
           }
         },
         "es" : {
@@ -403889,12 +404332,6 @@
       "comment" : "Subtitle for the group of settings shared by every profile when iCloud Sync is off, so they stay on this one device. The placeholder is the device kind, e.g. 'Apple TV' or 'iPhone'.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Shared across every profile on this %@."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -403935,6 +404372,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Κοινόχρηστο σε όλα τα προφίλ σε αυτό το %@."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Shared across every profile on this %@."
           }
         },
         "es" : {
@@ -404117,12 +404560,6 @@
       "comment" : "Subtitle for the group of settings shared by every profile, explaining that they also follow the user to their other devices.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Shared across every profile, on all your devices."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -404163,6 +404600,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Κοινόχρηστο σε όλα τα προφίλ, σε όλες τις συσκευές σας."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Shared across every profile, on all your devices."
           }
         },
         "es" : {
@@ -404345,12 +404788,6 @@
       "comment" : "Subtitle under a profile's name in Settings when iCloud Sync is off, so the settings stay on this one device. The placeholder is the device kind, e.g. 'Apple TV' or 'iPhone'.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Saved to your profile on this %@."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -404391,6 +404828,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αποθηκευμένο στο προφίλ σας σε αυτό το %@."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Saved to your profile on this %@."
           }
         },
         "es" : {
@@ -404573,12 +405016,6 @@
       "comment" : "Subtitle under a profile's name in Settings, explaining that the settings below belong to this profile and follow the user to their other devices.",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Saved to your profile, on all your devices."
-          }
-        },
         "ar" : {
           "stringUnit" : {
             "state" : "needs_review",
@@ -404619,6 +405056,12 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "Αποθηκευμένο στο προφίλ σας, σε όλες τις συσκευές σας."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Saved to your profile, on all your devices."
           }
         },
         "es" : {

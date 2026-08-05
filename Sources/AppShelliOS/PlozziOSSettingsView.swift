@@ -234,6 +234,14 @@ private struct PlozziOSSettingsSplitView: View {
     /// open. View state, cleared when the profile changes, so unsealing once
     /// never becomes unsealing for good.
     @State private var isParentalUnlocked = false
+    /// Where to go once the Parental PIN is accepted.
+    ///
+    /// The detail pane is driven by `selection`, not a navigation stack, so the
+    /// unlock view's `dismiss()` does nothing here — it stayed on screen and let
+    /// you keep typing a PIN that had already worked. Remembering the row that
+    /// was tapped lets the unlock carry you INTO it, which is what someone
+    /// expects anyway.
+    @State private var parentalUnlockTarget: PlozziOSSettingsDestination?
     private var developerMode: DeveloperModeModel { .shared }
 
     var body: some View {
@@ -298,15 +306,15 @@ private struct PlozziOSSettingsSplitView: View {
                     // the meaning. Mirrors tvOS.
                     if showsParentalControlsSection {
                         SettingsSectionGroup(KidsProfileCopy.parentalControls) {
-                            settingsRow(
-                                isParentalSealed ? .grownUps : .myLibraries,
+                            sealableRow(
+                                .myLibraries,
                                 title: SettingsCopy.libraries,
-                                systemImage: isParentalSealed ? "lock.fill" : "rectangle.stack"
+                                systemImage: "rectangle.stack"
                             )
-                            settingsRow(
-                                isParentalSealed ? .grownUps : .manageProfile,
+                            sealableRow(
+                                .manageProfile,
                                 title: KidsProfileCopy.manageProfile,
-                                systemImage: isParentalSealed ? "lock.fill" : "person.crop.circle"
+                                systemImage: "person.crop.circle"
                             )
                         } footer: {
                             // See the tvOS twin: the lock says "sealed" already.
@@ -456,6 +464,33 @@ private struct PlozziOSSettingsSplitView: View {
         }
     }
 
+    /// A Parental Controls row: goes to `destination`, or to the PIN prompt while
+    /// sealed — remembering `destination` so the unlock lands there rather than
+    /// dumping you back on the list to tap the same row again.
+    private func sealableRow(
+        _ destination: PlozziOSSettingsDestination,
+        title: LocalizedStringResource,
+        systemImage: String
+    ) -> some View {
+        Button {
+            if isParentalSealed {
+                parentalUnlockTarget = destination
+                selection = .grownUps
+            } else {
+                selection = destination
+            }
+        } label: {
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: isParentalSealed ? "lock.fill" : systemImage)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func settingsRow(
         _ destination: PlozziOSSettingsDestination,
         title: LocalizedStringResource,
@@ -502,7 +537,13 @@ private struct PlozziOSSettingsSplitView: View {
                 onAddServer: onAddServer
             )
         case .grownUps:
-            PlozziOSGrownUpsUnlockView(appModel: appModel) { isParentalUnlocked = true }
+            PlozziOSGrownUpsUnlockView(appModel: appModel) {
+                isParentalUnlocked = true
+                // Carry on into the row that was tapped. Without this the pane
+                // would keep showing the PIN screen it just accepted.
+                selection = parentalUnlockTarget ?? .myLibraries
+                parentalUnlockTarget = nil
+            }
         case .parentalPIN:
             PlozziOSParentalPINSettingsView(appModel: appModel)
         case .profileAppearance:

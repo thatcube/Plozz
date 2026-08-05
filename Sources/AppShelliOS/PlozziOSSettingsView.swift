@@ -755,6 +755,16 @@ private struct PlozziOSSettingsCompactMenu: View {
             && appModel.profiles.parentalPIN != nil
     }
 
+    /// Re-seals when the profile changes or the PIN is replaced. The split view
+    /// does the same; without it this layout kept an unlock proved for a
+    /// different profile, or against a PIN that no longer exists.
+    private var resealTriggers: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: appModel.profiles.activeProfileID) { _, _ in isParentalUnlocked = false }
+            .onChange(of: appModel.profiles.parentalPIN) { _, _ in isParentalUnlocked = false }
+    }
+
     private var isParentalSealed: Bool {
         showsParentalControlsSection && !isParentalUnlocked
     }
@@ -772,6 +782,7 @@ private struct PlozziOSSettingsCompactMenu: View {
         ScrollView {
             LazyVStack(spacing: 18) {
                 // Live media-share scan/enrich progress. Renders nothing when idle.
+                resealTriggers
                 ShareScanStatusHeader(
                     status: appModel.shareScanStatus,
                     shareIDs: appModel.mediaShareAccountIDs
@@ -802,11 +813,9 @@ private struct PlozziOSSettingsCompactMenu: View {
                 // way in.
                 if showsParentalControlsSection {
                     NavigationLink {
-                        PlozziOSProfileEditorHost(
+                        PlozziOSProfileAppearancePage(
                             appModel: appModel,
-                            editingProfile: appModel.profiles.activeProfile,
-                            canDelete: false,
-                            onFinished: {}
+                            profileID: appModel.profiles.activeProfileID
                         )
                     } label: {
                         Label(KidsProfileCopy.nameAndAvatar, systemImage: "person.crop.circle")
@@ -1185,21 +1194,16 @@ private struct PlozziOSProfilesView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    // Deliberately no swipe-to-delete or context-menu delete.
+                    // Both called `removeProfile` directly, which skipped the
+                    // target profile's own PIN and its confirmation — so a locked
+                    // profile could be deleted from the outside without ever
+                    // opening it. Deletion lives on the profile's own page, where
+                    // `ProfileActionsList` seals it behind that lock, exactly as
+                    // tvOS does.
                     .contextMenu {
                         Button("Edit Profile", systemImage: "pencil") {
                             openSettings(for: profile)
-                        }
-                        if !appModel.profiles.isDefault(profile) {
-                            Button("Delete Profile", systemImage: "trash", role: .destructive) {
-                                appModel.removeProfile(profile.id)
-                            }
-                        }
-                    }
-                    .swipeActions {
-                        if !appModel.profiles.isDefault(profile) {
-                            Button("Delete", role: .destructive) {
-                                appModel.removeProfile(profile.id)
-                            }
                         }
                     }
                 }

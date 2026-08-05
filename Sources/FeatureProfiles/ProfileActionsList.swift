@@ -125,21 +125,25 @@ public struct ProfileActionsList: View {
 
     public var body: some View {
         Group {
-            if isSealed {
+            if unlocking {
+                // Rendered IN PLACE, not presented. Every host of this list is
+                // already inside a presentation — the picker's actions cover, the
+                // iOS Settings sheet, a tvOS navigation stack under RootView's
+                // stacked covers — and a modal asked for from a covered view is
+                // silently dropped, which would leave the unlock button dead.
+                PINEntryScaffold(
+                    title: ProfileLockCopy.unlockToEdit,
+                    name: Text(verbatim: profile.name),
+                    errorMessage: unlockError,
+                    onSubmit: submitUnlock,
+                    onCancel: { unlocking = false; unlockError = nil }
+                ) {
+                    ProfileAvatarView(profile: profile, size: PINLayout.badgeSize)
+                }
+            } else if isSealed {
                 sealedContent
             } else {
                 actions
-            }
-        }
-        .fullScreenCover(isPresented: $unlocking) {
-            PINEntryScaffold(
-                title: ProfileLockCopy.unlockToEdit,
-                name: Text(verbatim: profile.name),
-                errorMessage: unlockError,
-                onSubmit: submitUnlock,
-                onCancel: { unlocking = false; unlockError = nil }
-            ) {
-                ProfileAvatarView(profile: profile, size: PINLayout.badgeSize)
             }
         }
     }

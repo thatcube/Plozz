@@ -87,4 +87,34 @@ struct PlozziOSProfileEditorHost: View {
         }
     }
 }
+
+/// The profile's own name, avatar and colour as a PUSHED page that can dismiss
+/// itself.
+///
+/// `PlozziOSProfileEditorHost` reports completion through `onFinished`, which a
+/// navigation destination has no way to satisfy: the compact layout passed an
+/// empty closure, so Save persisted but never popped and Cancel did nothing at
+/// all. Owning `dismiss` here is what makes it work as a pushed page.
+struct PlozziOSProfileAppearancePage: View {
+    let appModel: PlozziOSAppModel
+    let profileID: String
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var profile: Profile? {
+        appModel.profiles.profiles.first(where: { $0.id == profileID })
+    }
+
+    var body: some View {
+        if let profile {
+            PlozziOSProfileEditorHost(
+                appModel: appModel,
+                editingProfile: profile,
+                // Deleting is a parental control; this page is not.
+                canDelete: false,
+                onFinished: { dismiss() }
+            )
+        }
+    }
+}
 #endif

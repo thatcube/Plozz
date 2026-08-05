@@ -419,12 +419,42 @@ public final class IdentityIndexModel {
     ///    stale, out-of-order fold from a concurrent warm task racing a fuller one.
     @MainActor
     private func publishWarmedSnapshot(_ snapshot: IdentityIndexSnapshot, generation: Int) -> Bool {
-        guard generation == identityWarmGeneration else { return false }
         let accountCount = snapshot.indexedAccountIDs.count
-        guard accountCount >= publishedIndexAccountCount else { return false }
+        // Both guards below protect against a STALE publish overwriting a good
+        // one. Neither is a reason to leave readers with NOTHING: an empty
+        // published snapshot means every lookup answers "I don't know", so a
+        // title sitting in the library resolves to no owned copy and renders as
+        // one to go and request. A superseded generation was silently dropping
+        // a fully-warmed index — the actor held thousands of identities while
+        // the snapshot readers actually use stayed empty for the whole session,
+        // because each launch trigger supersedes the wave before it.
+        //
+        // So: refuse a stale publish only when there is already something to
+        // protect. Publishing real data over emptiness can never be the wrong
+        // call, and the superseding wave republishes its own result moments
+        // later anyway.
+        let hasPublishedData = !identitySnapshot.indexedAccountIDs.isEmpty
+        let wouldFillEmptiness = !hasPublishedData && accountCount > 0
+        if !wouldFillEmptiness {
+            guard generation == identityWarmGeneration else {
+                FanoutDiagnostics.emit(
+                    "index.publish REJECTED superseded generation accounts=\(accountCount) identities=\(snapshot.identityCount)"
+                )
+                return false
+            }
+            guard accountCount >= publishedIndexAccountCount else {
+                FanoutDiagnostics.emit(
+                    "index.publish REJECTED shrinking accounts=\(accountCount) published=\(publishedIndexAccountCount)"
+                )
+                return false
+            }
+        }
         publishedIndexAccountCount = accountCount
         identitySnapshot = snapshot
         identitySnapshotStore.update(snapshot)
+        FanoutDiagnostics.emit(
+            "index.publish OK accounts=\(accountCount) identities=\(snapshot.identityCount)"
+        )
         return true
     }
 

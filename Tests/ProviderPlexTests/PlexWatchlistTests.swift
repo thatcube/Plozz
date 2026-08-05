@@ -165,6 +165,31 @@ final class PlexWatchlistTests: XCTestCase {
         XCTAssertEqual(item.providerIDs["PlexGuid"], "plex://movie/5d776b9a")
     }
 
+    /// The LIBRARY scan must ask for external ids too — it does so through the
+    /// shared `containerQuery` helper rather than at this call site, which is
+    /// exactly the kind of thing worth pinning: the identity index scans this
+    /// endpoint, and without ids every library item would be indexed by title
+    /// and year alone.
+    func testLibraryScanAsksForExternalIDs() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/sections/1/all", json: """
+        {"MediaContainer":{"size":0,"totalSize":0,"Metadata":[]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        _ = try? await provider.items(
+            in: "1",
+            kind: .movie,
+            page: PageRequest(startIndex: 0, limit: 10, sort: .default)
+        )
+
+        let query = stub.queryItems(forPathSuffix: "/library/sections/1/all")
+        XCTAssertEqual(
+            query?.first { $0.name == "includeGuids" }?.value,
+            "1"
+        )
+    }
+
     func testWatchlistWriteUsesDiscoverHost() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/actions/addToWatchlist", json: "{}")

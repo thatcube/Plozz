@@ -20,6 +20,11 @@ struct PlozziOSProfileSettingsView: View {
     let profileID: String
 
     @State private var showingEditor = false
+    /// PIN setups are pushed onto the settings stack, matching tvOS. iOS Settings
+    /// is itself a sheet, so a sheet-over-sheet here would be a presentation from
+    /// inside a presentation.
+    @State private var showingLockSetup = false
+    @State private var showingParentalSetup = false
 
     /// Read live so the page reflects a lock added or the profile renamed.
     private var profile: Profile? {
@@ -41,7 +46,16 @@ struct PlozziOSProfileSettingsView: View {
                         syncEnabled: SyncSetupFeatureFlag().isEnabled,
                         offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
                         hasParentalPIN: appModel.profiles.parentalPIN != nil,
+                        // Sealed only when this profile is BOTH a Kids Profile
+                        // and the one currently open: a grown-up editing a
+                        // child's profile from their own is exactly who should
+                        // be able to change it.
+                        restrictedActionsSealed: profile.isKids
+                            && appModel.profiles.activeProfileID == profileID
+                            && appModel.profiles.parentalPIN != nil,
                         onEditAppearance: { showingEditor = true },
+                        onEditLock: { showingLockSetup = true },
+                        onCreateParentalPIN: { showingParentalSetup = true },
                         onSetLock: { appModel.setLock($0, forProfile: profileID) },
                         onSetKids: { appModel.setKidsProfile($0, forProfile: profileID) },
                         onSetParentalPIN: { appModel.profiles.setParentalPIN($0) },
@@ -62,6 +76,32 @@ struct PlozziOSProfileSettingsView: View {
         .settingsPageSurface()
         .navigationTitle(Text(verbatim: profile?.name ?? ""))
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: $showingLockSetup) {
+            if let profile {
+                ProfileLockSetupView(
+                    profile: profile,
+                    offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
+                    syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                    validatePlexPIN: {
+                        await appModel.plexHomeUsers.validatePlexPIN($0, forProfile: profileID)
+                    },
+                    onComplete: { lock in
+                        appModel.setLock(lock, forProfile: profileID)
+                        showingLockSetup = false
+                    },
+                    onCancel: { showingLockSetup = false }
+                )
+            }
+        }
+        .navigationDestination(isPresented: $showingParentalSetup) {
+            ParentalPINSetupView(
+                onComplete: { pin in
+                    appModel.profiles.setParentalPIN(pin)
+                    showingParentalSetup = false
+                },
+                onCancel: { showingParentalSetup = false }
+            )
+        }
         .sheet(isPresented: $showingEditor) {
             NavigationStack {
                 PlozziOSProfileEditorHost(

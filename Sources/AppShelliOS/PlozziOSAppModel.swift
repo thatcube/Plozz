@@ -843,6 +843,11 @@ final class PlozziOSAppModel {
     /// A profile waiting on its PIN before it can be opened, or `nil`.
     /// `PlozziOSRootView` presents the PIN screen off this.
     private(set) var pendingLockedProfile: Profile?
+    /// A profile the household is trying to reach *out of* a Kids Profile, held
+    /// until the Parental PIN is entered.
+    private(set) var pendingParentalSwitch: Profile?
+    /// Message from the last failed Parental PIN attempt, or `nil`.
+    private(set) var parentalPINError: String?
     /// Message from the last failed unlock attempt.
     private(set) var profileLockError: String?
     /// Profiles unlocked during this app run, so hopping back and forth doesn't
@@ -1067,14 +1072,50 @@ final class PlozziOSAppModel {
     /// TV arrives here locked too; without this gate it would open with one tap
     /// and the lock would be worthless.
     func selectProfile(_ id: String) {
-        if let profile = profiles.profiles.first(where: { $0.id == id }),
-           profile.isLocked,
-           !unlockedProfileIDs.contains(id) {
-            profileLockError = nil
-            pendingLockedProfile = profile
+        guard let target = profiles.profiles.first(where: { $0.id == id }) else {
+            performSelectProfile(id)
             return
         }
-        performSelectProfile(id)
+        // May you leave? Walking out of a Kids Profile needs the household
+        // Parental PIN, and is checked before the target's own lock — same order
+        // as tvOS, from the same shared policy on `ProfilesModel`.
+        if profiles.requiresParentalPIN(switchingFrom: profiles.activeProfile, to: target) {
+            parentalPINError = nil
+            pendingParentalSwitch = target
+            return
+        }
+        continueSelect(target)
+    }
+
+    /// The switch past the parental gate, still subject to the target's own lock.
+    private func continueSelect(_ target: Profile) {
+        if target.isLocked, !unlockedProfileIDs.contains(target.id) {
+            profileLockError = nil
+            pendingLockedProfile = target
+            return
+        }
+        performSelectProfile(target.id)
+    }
+
+    /// Checks `pin` against the household Parental PIN and lets the held switch
+    /// continue. Deliberately not remembered for the run — see the tvOS twin.
+    @discardableResult
+    func submitParentalPIN(_ pin: String) -> Bool {
+        guard let target = pendingParentalSwitch else { return false }
+        guard profiles.matchesParentalPIN(pin) else {
+            parentalPINError = String(localized: "Incorrect PIN. Try again.")
+            return false
+        }
+        pendingParentalSwitch = nil
+        parentalPINError = nil
+        continueSelect(target)
+        return true
+    }
+
+    /// Abandons a held switch, leaving the child where they were.
+    func cancelParentalSwitch() {
+        pendingParentalSwitch = nil
+        parentalPINError = nil
     }
 
     /// Checks `pin` against the pending profile's lock, completing the held-back

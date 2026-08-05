@@ -155,6 +155,8 @@ private enum PlozziOSSettingsDestination: Hashable {
     case requests
     case servers
     case myLibraries
+    /// Parental PIN prompt unsealing a Kids Profile's restricted settings.
+    case grownUps
     case trackers
     case appearance
     case home
@@ -203,8 +205,20 @@ private struct PlozziOSSettingsSplitView: View {
     let onClose: () -> Void
     @State private var selection: PlozziOSSettingsDestination?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+
+    /// Whether this profile's escalation-capable settings are sealed right now.
+    /// Mirrors the tvOS rule exactly, from the same shared policy.
+    private var isParentalSealed: Bool {
+        appModel.profiles.activeProfile.isKids
+            && appModel.profiles.parentalPIN != nil
+            && !isParentalUnlocked
+    }
     @State private var confirmSignOutAll = false
     @State private var confirmEraseICloud = false
+    /// Whether the Parental PIN has been entered for the Kids Profile currently
+    /// open. View state, cleared when the profile changes, so unsealing once
+    /// never becomes unsealing for good.
+    @State private var isParentalUnlocked = false
     private var developerMode: DeveloperModeModel { .shared }
 
     var body: some View {
@@ -222,11 +236,23 @@ private struct PlozziOSSettingsSplitView: View {
                     // anyone actually opens Settings to change, where the device
                     // group is setup done once.
                     SettingsSectionGroup(verbatim: appModel.profiles.activeProfile.name) {
-                        settingsRow(
-                            .myLibraries,
-                            title: SettingsCopy.libraries,
-                            systemImage: "rectangle.stack"
-                        )
+                        // Sealed: one row standing in for everything a grown-up
+                        // may change. Same rule as tvOS — a Kids Profile with no
+                        // household Parental PIN seals nothing, because there'd
+                        // be no key and the child could switch profiles anyway.
+                        if isParentalSealed {
+                            settingsRow(
+                                .grownUps,
+                                title: KidsProfileCopy.grownUps,
+                                systemImage: "lock.fill"
+                            )
+                        } else {
+                            settingsRow(
+                                .myLibraries,
+                                title: SettingsCopy.libraries,
+                                systemImage: "rectangle.stack"
+                            )
+                        }
                         settingsRow(.trackers, title: "Trackers", systemImage: "link")
                         settingsRow(.appearance, title: "Appearance", systemImage: "paintpalette")
                         settingsRow(.home, title: "Customize Home", systemImage: "house")
@@ -344,6 +370,11 @@ private struct PlozziOSSettingsSplitView: View {
             .toolbar(removing: .sidebarToggle)
         }
         .navigationSplitViewStyle(.balanced)
+        // Switching profiles re-seals: an unlock proves who is standing there
+        // now, not who was standing there for a different profile.
+        .onChange(of: appModel.profiles.activeProfileID) { _, _ in
+            isParentalUnlocked = false
+        }
         .toolbar(removing: .sidebarToggle)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {
@@ -413,6 +444,8 @@ private struct PlozziOSSettingsSplitView: View {
                 appModel: appModel,
                 onAddServer: onAddServer
             )
+        case .grownUps:
+            PlozziOSGrownUpsUnlockView(appModel: appModel) { isParentalUnlocked = true }
         case .myLibraries:
             PlozziOSMyLibrariesSettingsView(
                 appModel: appModel,

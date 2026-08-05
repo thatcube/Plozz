@@ -62,7 +62,49 @@ public struct ProfileActionsSheet: View {
 
     @Environment(\.themePalette) private var palette
 
+    /// Which PIN setup, if any, is showing over the actions.
+    ///
+    /// Rendered IN PLACE rather than presented. This sheet is already a
+    /// full-screen modal, so a second modal on top would be a presentation from
+    /// inside a presentation — the arrangement that fails silently. Swapping the
+    /// content is the same trick the onboarding container uses.
+    private enum SetupStep: Identifiable {
+        case lock
+        case parental
+        var id: Self { self }
+    }
+
+    @State private var setupStep: SetupStep?
+
     public var body: some View {
+        switch setupStep {
+        case .lock:
+            ProfileLockSetupView(
+                profile: profile,
+                offersPlexPINReuse: offersPlexPINReuse,
+                syncEnabled: syncEnabled,
+                validatePlexPIN: validatePlexPIN,
+                onComplete: { lock in
+                    onSetLock(lock)
+                    setupStep = nil
+                },
+                onCancel: { setupStep = nil }
+            )
+        case .parental:
+            ParentalPINSetupView(
+                onComplete: { pin in
+                    onSetParentalPIN(pin)
+                    setupStep = nil
+                },
+                onCancel: { setupStep = nil }
+            )
+        case .none:
+            actionsContent
+        }
+    }
+
+    @ViewBuilder
+    private var actionsContent: some View {
         #if os(tvOS)
         // Content-sized: roomy fixed width, intrinsic height from the header and
         // action rows. No ScrollView, fixed height, or filler Spacer.
@@ -74,6 +116,8 @@ public struct ProfileActionsSheet: View {
                 offersPlexPINReuse: offersPlexPINReuse,
                 hasParentalPIN: hasParentalPIN,
                 onEditAppearance: onEditAppearance,
+                onEditLock: { setupStep = .lock },
+                onCreateParentalPIN: { setupStep = .parental },
                 onSetLock: onSetLock,
                 onSetKids: onSetKids,
                 onSetParentalPIN: onSetParentalPIN,
@@ -101,6 +145,8 @@ public struct ProfileActionsSheet: View {
                         offersPlexPINReuse: offersPlexPINReuse,
                         hasParentalPIN: hasParentalPIN,
                         onEditAppearance: onEditAppearance,
+                onEditLock: { setupStep = .lock },
+                onCreateParentalPIN: { setupStep = .parental },
                         onSetLock: onSetLock,
                         onSetKids: onSetKids,
                 onSetParentalPIN: onSetParentalPIN,

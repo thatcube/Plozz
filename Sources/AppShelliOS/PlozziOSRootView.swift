@@ -372,6 +372,7 @@ public struct PlozziOSRootView: View {
         Binding(
             get: {
                 if appModel.pendingLockedProfile != nil { return true }
+                if appModel.pendingParentalSwitch != nil { return true }
                 guard !showingSettings,
                       appModel.profileOnboardingStep != .libraries
                 else { return false }
@@ -380,6 +381,7 @@ public struct PlozziOSRootView: View {
             set: { presented in
                 if !presented {
                     appModel.cancelProfileLockPrompt()
+                    appModel.cancelParentalSwitch()
                     appModel.plexHomeUsers.dismissPlexPINIfPresented()
                 }
             }
@@ -781,7 +783,17 @@ private struct PlozziOSProfileAccessGateView: View {
         ZStack {
             AppBackground(palette: palette).ignoresSafeArea()
 
-            if let profile = appModel.pendingLockedProfile {
+            if let target = appModel.pendingParentalSwitch {
+                // First: may you leave the child's profile at all?
+                ParentalPINView(
+                    destination: target,
+                    errorMessage: appModel.parentalPINError,
+                    onSubmit: { appModel.submitParentalPIN($0) },
+                    onCancel: { appModel.cancelParentalSwitch() }
+                )
+                .id("parental-pin")
+                .transition(.opacity)
+            } else if let profile = appModel.pendingLockedProfile {
                 ProfileLockPINView(
                     profile: profile,
                     errorMessage: appModel.profileLockError,

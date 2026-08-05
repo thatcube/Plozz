@@ -27,6 +27,11 @@ struct ProfileSettingsDetailView: View {
     let syncEnabled: Bool
 
     @State private var showingEditor = false
+    /// PIN setups are PUSHED here, not presented: modals asked for from inside
+    /// the Settings tab are silently dropped when `RootView`'s stacked covers
+    /// contest the slot. Same reason Appearance above is a push.
+    @State private var showingLockSetup = false
+    @State private var showingParentalSetup = false
 
     /// Read live from the context so the page reflects edits made on it (a lock
     /// added, a rename) without needing its own copy to be invalidated.
@@ -61,6 +66,32 @@ struct ProfileSettingsDetailView: View {
         // on one host, and a contested slot silently drops the request (the
         // header's Edit button did nothing for exactly this reason). A push uses
         // the navigation stack this page already lives in.
+        .navigationDestination(isPresented: $showingLockSetup) {
+            if let profile {
+                ProfileLockSetupView(
+                    profile: profile,
+                    offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
+                    syncEnabled: syncEnabled,
+                    validatePlexPIN: { await context.validatePlexPIN($0, profileID) },
+                    onComplete: { lock in
+                        context.onSetProfileLock(profileID, lock)
+                        showingLockSetup = false
+                    },
+                    onCancel: { showingLockSetup = false }
+                )
+                .toolbar(.hidden, for: .tabBar)
+            }
+        }
+        .navigationDestination(isPresented: $showingParentalSetup) {
+            ParentalPINSetupView(
+                onComplete: { pin in
+                    context.onSetParentalPIN(pin)
+                    showingParentalSetup = false
+                },
+                onCancel: { showingParentalSetup = false }
+            )
+            .toolbar(.hidden, for: .tabBar)
+        }
         .navigationDestination(isPresented: $showingEditor) {
             if let profile {
                 ProfileEditorView(
@@ -96,10 +127,16 @@ struct ProfileSettingsDetailView: View {
                 syncEnabled: syncEnabled,
                 offersPlexPINReuse: profile.playsAsPINProtectedPlexUser,
                 hasParentalPIN: context.hasParentalPIN,
+                // Sealed only when this profile is BOTH a Kids Profile and the
+                // one currently open: a grown-up editing a child's profile from
+                // their own is exactly who should be able to change it.
                 restrictedActionsSealed: profile.isKids
+                    && context.activeProfile.id == profileID
                     && context.hasParentalPIN
                     && !context.isParentalUnlocked,
                 onEditAppearance: { showingEditor = true },
+                onEditLock: { showingLockSetup = true },
+                onCreateParentalPIN: { showingParentalSetup = true },
                 onSetLock: { context.onSetProfileLock(profileID, $0) },
                 onSetKids: { context.onSetKidsProfile(profileID, $0) },
                 onSetParentalPIN: context.onSetParentalPIN,

@@ -41,6 +41,17 @@ public struct ProfileActionsList: View {
     /// their own restrictions from inside.
     private let restrictedActionsSealed: Bool
     private let onEditAppearance: () -> Void
+    /// Asks the host to show the Profile Lock PIN setup.
+    ///
+    /// Presentation belongs to the host, exactly like `onEditAppearance`, because
+    /// the right mechanism differs by where this list is shown: the profile
+    /// picker can present a cover, but Settings has to PUSH — modals asked for
+    /// from inside the Settings tab are silently dropped when `RootView`'s
+    /// stacked covers contest the slot. Owning the presentation here would mean
+    /// picking one and being wrong half the time.
+    private let onEditLock: () -> Void
+    /// Asks the host to show the household Parental PIN setup. Same reasoning.
+    private let onCreateParentalPIN: () -> Void
     private let onSetLock: (ProfileLock?) -> Void
     private let onSetKids: (Bool) -> Void
     /// Sets the household's Parental PIN, offered from the Kids row when none
@@ -62,6 +73,8 @@ public struct ProfileActionsList: View {
         hasParentalPIN: Bool,
         restrictedActionsSealed: Bool = false,
         onEditAppearance: @escaping () -> Void,
+        onEditLock: @escaping () -> Void = {},
+        onCreateParentalPIN: @escaping () -> Void = {},
         onSetLock: @escaping (ProfileLock?) -> Void,
         onSetKids: @escaping (Bool) -> Void,
         onSetParentalPIN: @escaping (ParentalPIN?) -> Void = { _ in },
@@ -78,6 +91,8 @@ public struct ProfileActionsList: View {
         self.hasParentalPIN = hasParentalPIN
         self.restrictedActionsSealed = restrictedActionsSealed
         self.onEditAppearance = onEditAppearance
+        self.onEditLock = onEditLock
+        self.onCreateParentalPIN = onCreateParentalPIN
         self.onSetLock = onSetLock
         self.onSetKids = onSetKids
         self.onSetParentalPIN = onSetParentalPIN
@@ -90,10 +105,8 @@ public struct ProfileActionsList: View {
     @Environment(\.themePalette) private var palette
     @State private var unlocking = false
     @State private var unlockError: String?
-    @State private var settingPIN = false
     @State private var showingLockOptions = false
     @State private var showingKidsOptions = false
-    @State private var settingParentalPIN = false
     @State private var confirmDelete = false
     /// Immediate sheet-local unlock result. The app-level unlocked-id set is
     /// deliberately non-observable, so the Bool passed when this sheet opened
@@ -188,7 +201,7 @@ public struct ProfileActionsList: View {
                 if profile.isLocked {
                     showingLockOptions = true
                 } else {
-                    settingPIN = true
+                    onEditLock()
                 }
             }
 
@@ -227,34 +240,12 @@ public struct ProfileActionsList: View {
             }
             }
         }
-        .fullScreenCover(isPresented: $settingParentalPIN) {
-            ParentalPINSetupView(
-                onComplete: { pin in
-                    onSetParentalPIN(pin)
-                    settingParentalPIN = false
-                },
-                onCancel: { settingParentalPIN = false }
-            )
-        }
-        .fullScreenCover(isPresented: $settingPIN) {
-            ProfileLockSetupView(
-                profile: profile,
-                offersPlexPINReuse: offersPlexPINReuse,
-                syncEnabled: syncEnabled,
-                validatePlexPIN: validatePlexPIN,
-                onComplete: { lock in
-                    onSetLock(lock)
-                    settingPIN = false
-                },
-                onCancel: { settingPIN = false }
-            )
-        }
         .confirmationDialog(
             Text(ProfileLockCopy.title),
             isPresented: $showingLockOptions,
             titleVisibility: .visible
         ) {
-            Button(String(localized: ProfileLockCopy.editPIN)) { settingPIN = true }
+            Button(String(localized: ProfileLockCopy.editPIN)) { onEditLock() }
             Button(String(localized: ProfileLockCopy.delete), role: .destructive) { onSetLock(nil) }
             Button("Cancel", role: .cancel) {}
         }
@@ -268,7 +259,7 @@ public struct ProfileActionsList: View {
             // this profile can't follow.
             if !hasParentalPIN {
                 Button(String(localized: KidsProfileCopy.parentalPINCreate)) {
-                    settingParentalPIN = true
+                    onCreateParentalPIN()
                 }
             }
             if profile.isKids {

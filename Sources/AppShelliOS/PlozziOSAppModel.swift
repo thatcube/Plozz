@@ -1735,10 +1735,19 @@ final class PlozziOSAppModel {
             resolveIdentityPrompt(for: accountID)
         }
         if profiles.activeProfileID == profileID {
+            // The account set drives what's on screen, so this stays synchronous.
             reloadAccountsAndCrashContext()
-            identityIndex.reset()
-            identityIndex.warmIdentityIndex()
-            drainWatchOutbox()
+            // Everything else is bookkeeping, and it was running in the same
+            // turn as the toggle — blocking the main actor long enough that the
+            // switch's own animation dropped frames and the expanding card
+            // appeared to jump. Yield first so the UI settles, then catch up.
+            Task { @MainActor [weak self] in
+                await Task.yield()
+                guard let self else { return }
+                self.identityIndex.reset()
+                self.identityIndex.warmIdentityIndex()
+                self.drainWatchOutbox()
+            }
         }
     }
 

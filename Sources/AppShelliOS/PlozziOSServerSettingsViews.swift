@@ -351,13 +351,6 @@ struct PlozziOSMyLibrariesSettingsView: View {
         } footer: {
             Text("Saved for \(appModel.profiles.activeProfile.name).")
         }
-        // Switching a server on or off inserts or removes its identity and
-        // library rows, which changes this List row's height. SwiftUI animates
-        // that by laying the new content out at its final size and sliding the
-        // row into place, so the card visibly jumped up and then eased back down.
-        // The expansion is better instant: the switch itself still animates, and
-        // the content under it simply is where it belongs.
-        .transaction { $0.animation = nil }
     }
 
     /// One library, as a checkmark child of its server's master switch.

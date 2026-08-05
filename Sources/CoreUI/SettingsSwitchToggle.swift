@@ -80,6 +80,16 @@ private struct SettingsTouchSwitchIndicator: View {
         }
         .frame(width: trackWidth, height: trackHeight)
         .animation(.easeOut(duration: 0.18), value: isOn)
+        // Animate the KNOB, not the switch's place in the world.
+        //
+        // `.animation(_:value:)` animates every change this view makes in the
+        // same transaction — including its own position. Flipping a server on
+        // inserts rows and moves the card, so the switch interpolated from where
+        // it used to be while the label beside it moved instantly: the switch
+        // alone appeared to fly up and settle back down. `geometryGroup` makes
+        // the indicator take its position from its parent's layout in one step,
+        // leaving the knob and track free to animate inside it.
+        .geometryGroup()
     }
 }
 #endif
@@ -274,6 +284,9 @@ private struct SettingsSwitchIndicator: View {
             }
             .frame(width: trackWidth, height: trackHeight)
             .animation(.easeOut(duration: 0.18), value: isOn)
+            // See the touch indicator above: keeps the switch from animating its
+            // own position when the row it lives in moves.
+            .geometryGroup()
         }
     }
 }

@@ -70,6 +70,18 @@ public enum ProfileLockCopy {
         comment: "Supporting line under the heading while choosing a new PIN, matching the wording on the preceding offer screen."
     )
 
+    public static let createAlongsidePlexTitle = LocalizedStringResource(
+        "settings.profileLock.createAlongsidePlex.title",
+        defaultValue: "Add a Profile PIN?",
+        comment: "Heading when adding a Plozz Profile Lock to a profile already protected by its selected Plex user's PIN."
+    )
+
+    public static let createAlongsidePlexSubtitle = LocalizedStringResource(
+        "settings.profileLock.createAlongsidePlex.subtitle",
+        defaultValue: "This user already has a Plex PIN. Add another to keep the profile locked if its Plex user changes.",
+        comment: "Explains why a separate Plozz PIN can still be useful when the selected Plex user already requires a PIN."
+    )
+
     public static let confirm = LocalizedStringResource(
         "settings.profileLock.confirm",
         defaultValue: "Enter your PIN again",
@@ -84,25 +96,25 @@ public enum ProfileLockCopy {
 
     public static let usePlexPIN = LocalizedStringResource(
         "settings.profileLock.usePlexPIN",
-        defaultValue: "Use this for Plex too?",
+        defaultValue: "Same as your Plex PIN?",
         comment: "Asked after choosing a PIN, when this profile plays as a PIN-protected Plex Home user, so one PIN can open both."
     )
 
     public static let usePlexPINDetail = LocalizedStringResource(
         "settings.profileLock.usePlexPIN.detail",
-        defaultValue: "This profile plays as a Plex user that asks for its own PIN. If it's the same one, Plozz can send it to Plex for you so you're only asked once.",
+        defaultValue: "If yes, Plozz can use one PIN entry for both.",
         comment: "Explains what saying yes does — including that the PIN is sent to Plex, which the person should know before agreeing."
     )
 
     public static let usePlexPINYes = LocalizedStringResource(
         "settings.profileLock.usePlexPIN.yes",
-        defaultValue: "It's the Same PIN",
+        defaultValue: "Yes, Same PIN",
         comment: "Confirms that the Plozz PIN and the Plex PIN match, so Plozz may forward it."
     )
 
     public static let usePlexPINNo = LocalizedStringResource(
         "settings.profileLock.usePlexPIN.no",
-        defaultValue: "Keep Separate",
+        defaultValue: "No, Keep Separate",
         comment: "Declines forwarding the PIN to Plex; the Plex prompt will still appear separately."
     )
 

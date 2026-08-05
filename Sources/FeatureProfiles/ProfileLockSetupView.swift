@@ -49,8 +49,16 @@ public struct ProfileLockSetupView: View {
 
     public var body: some View {
         PINEntryScaffold(
-            title: isConfirming ? ProfileLockCopy.confirm : ProfileLockCopy.createTitle,
-            subtitle: isConfirming ? nil : ProfileLockCopy.createSubtitle,
+            title: isConfirming
+                ? ProfileLockCopy.confirm
+                : (offersPlexPINReuse
+                    ? ProfileLockCopy.createAlongsidePlexTitle
+                    : ProfileLockCopy.createTitle),
+            subtitle: isConfirming
+                ? nil
+                : (offersPlexPINReuse
+                    ? ProfileLockCopy.createAlongsidePlexSubtitle
+                    : ProfileLockCopy.createSubtitle),
             name: profile.name,
             errorMessage: errorMessage,
             footnote: syncEnabled ? nil : ProfileLockCopy.lockIsDeviceOnly,

@@ -1088,6 +1088,9 @@ private struct PlozziOSProfilesView: View {
     @State private var selectedProfileRoute: PlozziOSProfileSettingsRoute?
     /// Closes Settings, so a switch can raise its gates from the root.
     var onClose: () -> Void = {}
+    /// Whether the list is in "managing" mode, where tapping a profile opens its
+    /// settings instead of switching to it.
+    @State private var isManaging = false
 
     private var orderedProfiles: [Profile] { appModel.profiles.profilesByRecency }
 
@@ -1109,55 +1112,18 @@ private struct PlozziOSProfilesView: View {
                 Text("Profiles keep Home, settings, and downloads personal. Watch history belongs to the account each profile watches as.")
             }
 
-            SettingsSectionGroup("Who’s watching?") {
-                // Tapping a face SWITCHES to it; the trailing button edits.
+            SettingsSectionGroup(isManaging ? "Manage Profiles" : "Who’s watching?") {
+                // Tapping a face switches to it — unless you've said you're
+                // managing, in which case tapping opens that profile's settings.
                 //
-                // It used to be the other way round — the whole row opened the
-                // editor and switching hid in a small picker above — under a
-                // "Who's watching?" header, beside a checkmark marking the active
-                // profile. Every signal said switcher; the tap said editor.
+                // A mode rather than a per-row edit button: it's what Netflix,
+                // Disney+ and Hulu all do, so the gesture is already learned, and
+                // it keeps the common case (switching) free of chrome. An earlier
+                // version put an ⓘ on every row, which read as "information" and
+                // cluttered the list to serve the rarer action.
                 ForEach(orderedProfiles) { profile in
-                    HStack(spacing: 12) {
-                        Button {
-                            guard profile.id != appModel.profiles.activeProfileID else { return }
-                            // Close Settings first: the Parental PIN and profile
-                            // lock gates are presented from the root, and a cover
-                            // asked for from under an open sheet is the
-                            // arrangement that fails silently.
-                            onClose()
-                            appModel.selectProfile(profile.id)
-                        } label: {
-                            HStack {
-                                PlozziOSProfileAvatar(
-                                    profile: profile,
-                                    size: 34
-                                )
-                                Text(profile.name)
-                                Spacer()
-                                if profile.id
-                                    == appModel.profiles.activeProfileID {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(.tint)
-                                }
-                                // Glance the access state so the list answers
-                                // "who's locked?" without opening each one.
-                                if profile.isKids {
-                                    Image(systemName: "figure.and.child.holdinghands")
-                                        .plozzForeground(.secondary)
-                                }
-                                if profile.isLocked {
-                                    Image(systemName: "lock.fill")
-                                        .plozzForeground(.secondary)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-
-                        // Its own hit area, so editing never happens by accident
-                        // when someone meant to switch.
-                        Button {
+                    Button {
+                        if isManaging {
                             // One optional route owned by this page. A row cannot
                             // activate another row's destination, and there is no
                             // per-row NavigationLink state for SwiftUI's
@@ -1165,13 +1131,48 @@ private struct PlozziOSProfilesView: View {
                             selectedProfileRoute = PlozziOSProfileSettingsRoute(
                                 profileID: profile.id
                             )
-                        } label: {
-                            Image(systemName: "info.circle")
-                                .foregroundStyle(.tint)
+                        } else {
+                            guard profile.id != appModel.profiles.activeProfileID else { return }
+                            // Close Settings first: the Parental PIN and profile
+                            // lock gates are presented from the root, and a cover
+                            // asked for from under an open sheet is the
+                            // arrangement that fails silently.
+                            onClose()
+                            appModel.selectProfile(profile.id)
                         }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel(Text("Edit \(profile.name)"))
+                    } label: {
+                        HStack {
+                            PlozziOSProfileAvatar(
+                                profile: profile,
+                                size: 34
+                            )
+                            Text(profile.name)
+                            Spacer()
+                            if !isManaging,
+                               profile.id == appModel.profiles.activeProfileID {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.tint)
+                            }
+                            // Glance the access state so the list answers
+                            // "who's locked?" without opening each one.
+                            if profile.isKids {
+                                Image(systemName: "figure.and.child.holdinghands")
+                                    .plozzForeground(.secondary)
+                            }
+                            if profile.isLocked {
+                                Image(systemName: "lock.fill")
+                                    .plozzForeground(.secondary)
+                            }
+                            if isManaging {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .plozzForeground(.tertiary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .swipeActions {
                         if !appModel.profiles.isDefault(profile) {
                             Button("Delete", role: .destructive) {
@@ -1187,6 +1188,13 @@ private struct PlozziOSProfilesView: View {
         }
         .settingsPageSurface()
         .navigationTitle("Profiles")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(isManaging ? "Done" : "Manage") {
+                    withAnimation(.easeInOut(duration: 0.2)) { isManaging.toggle() }
+                }
+            }
+        }
         // One typed value, one push. Closure-based destinations inside this
         // ForEach were all being activated by the containing split/stack,
         // producing a back-stack containing every profile in list order.

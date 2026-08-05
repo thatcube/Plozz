@@ -705,19 +705,19 @@ public final class ProfilesModel {
             byID[p.id] = p
         }
         for p in incoming {
-            if p.id == ProfileStore.defaultProfileID, receiverConfigured, var local = byID[p.id] {
+            if p.id == ProfileStore.defaultProfileID, receiverConfigured, let local = byID[p.id] {
                 // Keep the receiver's own default, but NOT at the cost of the
                 // household Parental PIN: that rides this record and nothing else
                 // carries it, so skipping wholesale handed the receiver every Kids
                 // Profile with nothing enforcing them — silently, badge and all.
                 // Merged under the same revision rule the sync path uses.
-                let localRevision = local.effectiveParentalPINRevision
-                if let incomingRevision = p.effectiveParentalPINRevision,
-                   localRevision == nil || incomingRevision > localRevision! {
-                    local.parentalPIN = p.parentalPIN
-                    local.parentalPINRevision = incomingRevision
-                    byID[p.id] = local
-                }
+                // Resolved by the one shared rule rather than a second copy of
+                // it: everything else stays local, and only the PIN is offered.
+                var merged = local
+                merged.parentalPIN = p.parentalPIN
+                merged.parentalPINRevision = p.parentalPINRevision
+                merged.resolveSecurityFields(against: local)
+                byID[p.id] = merged
                 continue // otherwise don't clobber a configured receiver's own default
             }
             if byID[p.id] == nil { order.append(p.id) }
@@ -768,6 +768,9 @@ public final class ProfilesModel {
     /// reproduces the exact same canonical bytes (the round-trip invariant). The
     /// default profile is never deleted.
     public func applySyncedProfileDTOs(_ upserts: [String: ProfileSyncDTO], deletions: Set<String>) {
+        // Captured before the apply, so the fall-through below can tell whether
+        // the profile leaving was a restricted one.
+        let outgoingActive = activeProfile
         var byID: [String: Profile] = [:]
         var order: [String] = []
         for p in profiles {
@@ -792,7 +795,8 @@ public final class ProfilesModel {
         profiles = next
         store.saveProfiles(profiles)
         if !profiles.contains(where: { $0.id == activeProfileID }) {
-            activeProfileID = profiles.first?.id ?? ProfileStore.defaultProfileID
+            activeProfileID = fallbackProfile(leaving: outgoingActive)?.id
+                ?? ProfileStore.defaultProfileID
             store.setActiveProfileID(activeProfileID)
         }
         recomputeHouseholdDefaults()
@@ -856,14 +860,32 @@ public final class ProfilesModel {
         askProfileOnStartup = store.askProfileOnStartupOverride() ?? multi
     }
 
+
+    /// The profile to fall back to when `outgoing` stops existing.
+    ///
+    /// Prefers another Kids Profile when the one leaving was a Kids Profile and
+    /// the household enforces restrictions. The fall-through is written to disk
+    /// immediately, while the shells' in-memory parental hold is not — so a child
+    /// who force-quits after a synced deletion would relaunch straight into an
+    /// unrestricted profile. Keeping the DURABLE choice restricted closes that
+    /// without a second, persisted piece of state to keep in step.
+    private func fallbackProfile(leaving outgoing: Profile?) -> Profile? {
+        if let outgoing, outgoing.isKids, enforcesKidsRestrictions,
+           let sibling = profiles.first(where: { $0.isKids }) {
+            return sibling
+        }
+        return profiles.first
+    }
+
     /// Removes a profile. The default profile can't be removed; removing the
     /// active profile falls selection back to the first remaining profile.
     public func remove(_ id: String) {
         guard id != ProfileStore.defaultProfileID, id != profiles.first?.id else { return }
+        let outgoing = profiles.first { $0.id == id }
         profiles.removeAll { $0.id == id }
         store.saveProfiles(profiles)
         if activeProfileID == id {
-            activeProfileID = profiles.first?.id ?? ProfileStore.defaultProfileID
+            activeProfileID = fallbackProfile(leaving: outgoing)?.id ?? ProfileStore.defaultProfileID
             store.setActiveProfileID(activeProfileID)
         }
         recomputeHouseholdDefaults()

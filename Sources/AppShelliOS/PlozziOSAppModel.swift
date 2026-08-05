@@ -1274,20 +1274,27 @@ final class PlozziOSAppModel {
     }
 
     func performSelectProfile(_ id: String) {
-        // Reached only past both gates, so the hold has done its job. Cleared
-        // here rather than on PIN success so that switching into another Kids
-        // Profile (which needs no PIN) also releases it.
+        universalWatchlistRetryScheduler = nil
+        profiles.select(id)
+        // `select` NO-OPS for an id this device doesn't have — a peer can delete
+        // a profile between the picker rendering and the tap, which is exactly
+        // the fall-through case. Releasing the hold and lifting the forced picker
+        // on a switch that never happened would leave the child in the grown-up
+        // profile the gate exists to withhold, so everything below is conditional
+        // on the switch having actually landed.
+        guard profiles.activeProfileID == id else { return }
+        // Past both gates, so the hold has done its job. Released here rather
+        // than on PIN success so that switching into another Kids Profile (which
+        // needs no PIN) also releases it.
         gate.parentalFallThrough = nil
         // The launch picker is satisfied by an ACTUAL switch, never by the tap
         // that merely asked for one: tapping a locked profile only raises its
         // PIN, so marking completion at the tap let a cancel fall straight
         // through into the profile the lock was protecting.
         gate.didCompleteLaunchSelection = true
-        universalWatchlistRetryScheduler = nil
         // Reached only past the lock gate, so this is where the forced picker
         // lifts: a profile has been chosen and proved.
         mustChooseProfile = false
-        profiles.select(id)
         // Switching INTO a profile that never finished setup — abandoned here, or
         // created on another device and synced across — asks the question again
         // rather than leaving it permanently unable to import. Deferred by a

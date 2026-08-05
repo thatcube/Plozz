@@ -21,6 +21,9 @@ public struct PlozziOSRootView: View {
     @State private var showingAddServer = false
     @State private var addServerPresentationColorScheme: ColorScheme = .dark
     @State private var showingSettings = false
+    /// A pairing link that arrived while a sheet was open — see
+    /// `receivePairingURL`.
+    @State private var deferredPairingURL: URL?
     /// A synced server the user tapped "Set Up" on, used to pre-fill the Add Server
     /// sheet so they only have to sign in.
     @State private var serverSetupSeed: SyncedAccountDescriptor?
@@ -80,6 +83,7 @@ public struct PlozziOSRootView: View {
                     appModel: appModel,
                     onAddServer: showAddServer,
                     showingSettings: $showingSettings,
+                    deferredPairingURL: $deferredPairingURL,
                     systemColorScheme: systemColorScheme
                 )
             }
@@ -303,11 +307,11 @@ public struct PlozziOSRootView: View {
         }
         .installNightShiftOverlay(appModel.settings.nightShift)
         .onOpenURL { url in
-            appModel.handleIncomingURL(url)
+            receivePairingURL(url)
         }
         .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
             if let url = activity.webpageURL {
-                appModel.handleIncomingURL(url)
+                receivePairingURL(url)
             }
         }
         .sheet(item: pendingPairingBinding) { pairing in
@@ -425,6 +429,22 @@ public struct PlozziOSRootView: View {
         )
     }
 
+    /// Takes a pairing link, waiting for an open sheet to close first.
+    ///
+    /// A link can arrive while the app is already foreground with Settings or the
+    /// profile picker up. The pairing sheet lives on the root, and one requested
+    /// from under an open sheet is the arrangement SwiftUI drops — silently, and
+    /// with `pendingPairingInvite` left set so it is never re-requested, which
+    /// means the link simply does nothing until relaunch.
+    private func receivePairingURL(_ url: URL) {
+        guard showingSettings else {
+            appModel.handleIncomingURL(url)
+            return
+        }
+        deferredPairingURL = url
+        showingSettings = false
+    }
+
     private var pendingPairingBinding: Binding<PendingPairing?> {
         Binding(
             get: { appModel.pendingPairingInvite.map(PendingPairing.init(invite:)) },
@@ -538,9 +558,19 @@ private struct PlozziOSTabShell: View {
     /// this cover is dismissing is the same contested-slot case.
     @State private var pendingSwitchProfileID: String?
 
+    /// Raises a link parked by `PlozziOSRootView.receivePairingURL` now that the
+    /// sheet that was covering the root has actually gone.
+    private func consumeDeferredPairingURL() {
+        guard let url = deferredPairingURL else { return }
+        deferredPairingURL = nil
+        appModel.handleIncomingURL(url)
+    }
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     @Binding var showingSettings: Bool
+    /// A pairing link parked until this shell's sheets have closed — see
+    /// `PlozziOSRootView.receivePairingURL`.
+    @Binding var deferredPairingURL: URL?
     let systemColorScheme: ColorScheme
 
     var body: some View {
@@ -637,6 +667,7 @@ private struct PlozziOSTabShell: View {
                 pendingSwitchProfileID = nil
                 appModel.selectProfile(id)
             }
+            consumeDeferredPairingURL()
         }) {
             PlozziOSProfilePickerView(
                 profiles: appModel.profiles.profilesByRecency,
@@ -663,6 +694,7 @@ private struct PlozziOSTabShell: View {
                 pendingSwitchProfileID = nil
                 appModel.selectProfile(id)
             }
+            consumeDeferredPairingURL()
         }) {
             PlozziOSSettingsView(
                 appModel: appModel,

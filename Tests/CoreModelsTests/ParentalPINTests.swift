@@ -373,6 +373,70 @@ final class ParentalPINSyncTests: XCTestCase {
     }
 }
 
+/// Where the device LANDS when the profile it was in stops existing.
+///
+/// The shells hold the outgoing profile in memory to gate the fall-through, but
+/// the re-pointed selection is written to disk immediately — so a child who
+/// force-quits would relaunch past an in-memory-only guard. The durable choice
+/// therefore has to be safe on its own.
+@MainActor
+final class ParentalFallbackTests: XCTestCase {
+
+    private let fastIterations = 64
+
+    private func makeModel() -> ProfilesModel {
+        let suite = "ParentalFallbackTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return ProfilesModel(store: ProfileStore(defaults: defaults))
+    }
+
+    func testDeletingOneKidsProfileFallsBackToTheOtherKidsProfile() {
+        let model = makeModel()
+        model.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+        let first = model.add(name: "Kid A", isKidsProfile: true)
+        let second = model.add(name: "Kid B", isKidsProfile: true)
+        model.select(first.id)
+
+        model.remove(first.id)
+
+        XCTAssertEqual(
+            model.activeProfileID, second.id,
+            "A restricted profile must not fall through to a grown-up one"
+        )
+        XCTAssertTrue(model.enforcesKidsRestrictions)
+        XCTAssertTrue(model.managementRequiresParentalPIN)
+    }
+
+    /// Without a PIN nothing is enforced, so there's no reason to prefer a Kids
+    /// Profile — the ordinary "first remaining" behaviour stands.
+    func testWithoutAPINTheFallbackIsUnchanged() {
+        let model = makeModel()
+        let grownUp = model.profiles[0]
+        let kidA = model.add(name: "Kid A", isKidsProfile: true)
+        _ = model.add(name: "Kid B", isKidsProfile: true)
+        model.select(kidA.id)
+
+        model.remove(kidA.id)
+
+        XCTAssertEqual(model.activeProfileID, grownUp.id)
+    }
+
+    /// Leaving a grown-up profile is not a restricted transition.
+    func testDeletingAGrownUpProfileIsUnaffected() {
+        let model = makeModel()
+        let grownUp = model.profiles[0]
+        model.setParentalPIN(ParentalPIN.make(pin: "4821", iterations: fastIterations))
+        _ = model.add(name: "Kid", isKidsProfile: true)
+        let other = model.add(name: "Guest")
+        model.select(other.id)
+
+        model.remove(other.id)
+
+        XCTAssertEqual(model.activeProfileID, grownUp.id)
+    }
+}
+
 /// The ordering rule every revisioned field depends on. A tie on `counter` is
 /// the case that actually happens — two devices edit offline from the same
 /// baseline — and without a deterministic tiebreak they'd converge differently.

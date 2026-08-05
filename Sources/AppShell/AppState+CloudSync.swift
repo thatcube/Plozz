@@ -192,7 +192,7 @@ extension AppState {
         // credentials, and the receiver opens in a grown-up profile. That is a
         // grown-up decision, so it isn't offered from inside an enforced Kids
         // Profile.
-        guard !profilesModel.managementRequiresParentalPIN else { return }
+        guard !profileFlow.managementRequiresParentalPIN else { return }
         guard let offer = syncSetup.discoverRendezvousTargets().first(where: { offer in
             guard !dismissedSyncSetupOfferKeys.contains(Self.syncSetupOfferKey(offer)) else { return false }
             // A per-server request is only fulfillable if THIS device holds that
@@ -206,7 +206,7 @@ extension AppState {
     /// The user confirmed — push config + credentials to the offered device over the
     /// local pairing channel (pinned key ⇒ no SAS, no typing).
     public func confirmSyncSetupOffer() {
-        guard !profilesModel.managementRequiresParentalPIN else { return }
+        guard !profileFlow.managementRequiresParentalPIN else { return }
         guard let offer = cloudSyncUI.pendingSyncSetupOffer else { return }
         cloudSyncUI.pendingSyncSetupOffer = nil
         isAutoAdoptingSyncSetup = true

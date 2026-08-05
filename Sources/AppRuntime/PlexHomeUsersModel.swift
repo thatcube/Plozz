@@ -522,6 +522,50 @@ public final class PlexHomeUsersModel {
         prefilledPlexPIN = (profileID: profileID, pin: pin)
     }
 
+    /// Verifies that `pin` opens every PIN-protected Plex Home user bound to the
+    /// profile, without publishing any token or changing the active identity.
+    ///
+    /// Used while creating a Profile Lock so "same as Plex" is a verified fact,
+    /// not an unchecked promise discovered to be wrong at the next login.
+    public func validatePlexPIN(
+        _ pin: String,
+        forProfile profileID: String
+    ) async -> PlexPINValidationResult {
+        guard let profile = profilesModel.profiles.first(where: { $0.id == profileID })
+        else { return .unavailable }
+
+        let targets = accountsProviders.accounts.compactMap { account
+            -> (accountID: String, homeUserID: String)? in
+            guard account.server.provider == .plex,
+                  let binding = profile.homeUserBinding(
+                      forPlexAccount: account.id
+                  ),
+                  binding.requiresPIN == true
+            else { return nil }
+            return (account.id, binding.homeUserID)
+        }
+        guard !targets.isEmpty else { return .unavailable }
+
+        for target in targets {
+            guard let adminToken = accountsProviders.accountStore.token(
+                for: target.accountID
+            ) else { return .unavailable }
+            do {
+                _ = try await plexHomeUserSwitch(
+                    target.homeUserID,
+                    pin,
+                    adminToken,
+                    accountsProviders.deviceID
+                )
+            } catch AppError.unauthorized {
+                return .invalid
+            } catch {
+                return .unavailable
+            }
+        }
+        return .valid
+    }
+
     /// Takes the stashed PIN if it belongs to `profileID`, clearing it either way
     /// — including when it belonged to a different profile, since a stash that
     /// didn't match is stale by definition.

@@ -118,6 +118,24 @@ public enum ProfileLockCopy {
         comment: "Declines forwarding the PIN to Plex; the Plex prompt will still appear separately."
     )
 
+    public static let plexPINMismatch = LocalizedStringResource(
+        "settings.profileLock.plexPINMismatch",
+        defaultValue: "That isn’t this user’s Plex PIN.",
+        comment: "Error shown when the proposed shared Profile Lock PIN is rejected by Plex."
+    )
+
+    public static let plexPINUnavailableTitle = LocalizedStringResource(
+        "settings.profileLock.plexPINUnavailable.title",
+        defaultValue: "Couldn’t verify the Plex PIN",
+        comment: "Title shown when Plex cannot be reached while verifying a proposed shared PIN."
+    )
+
+    public static let plexPINUnavailableDetail = LocalizedStringResource(
+        "settings.profileLock.plexPINUnavailable.detail",
+        defaultValue: "Try again, or keep the Profile Lock PIN separate.",
+        comment: "Recovery choices when Plex PIN verification is unavailable."
+    )
+
     /// Shown on the lock row when Plex — not Plozz — is what's asking for a PIN.
     /// Without it the row reads a bare "Off" on a profile you demonstrably can't
     /// open without a code, which looks like a bug.

@@ -207,6 +207,12 @@ struct PlozziOSProfileOnboardingCover: View {
                     ProfileLockOfferView(
                         profile: profile,
                         syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                        validatePlexPIN: {
+                            await appModel.plexHomeUsers.validatePlexPIN(
+                                $0,
+                                forProfile: profile.id
+                            )
+                        },
                         onComplete: { lock in
                             appModel.setLock(lock, forProfile: profile.id)
                             appModel.advanceProfileOnboarding()

@@ -50,6 +50,12 @@ struct PlozziOSProfileSettingsView: View {
                         onEditAppearance: { showingEditor = true },
                         onSetLock: { appModel.setLock($0, forProfile: profileID) },
                         onSetKids: { appModel.setKidsProfile($0, forProfile: profileID) },
+                        validatePlexPIN: {
+                            await appModel.plexHomeUsers.validatePlexPIN(
+                                $0,
+                                forProfile: profileID
+                            )
+                        },
                         onDelete: canDelete ? { appModel.removeProfile(profileID) } : nil,
                         isUnlocked: appModel.isUnlockedThisRun(profileID),
                         onUnlock: { appModel.noteUnlocked(profileID) }

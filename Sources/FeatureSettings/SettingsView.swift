@@ -153,6 +153,7 @@ public struct SettingsView: View {
     private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
     private let onSetProfileLock: (String, ProfileLock?) -> Void
+    private let validatePlexPIN: (String, String) async -> PlexPINValidationResult
     private let onSetKidsProfile: (String, Bool) -> Void
     private let isProfileUnlocked: (String) -> Bool
     private let onProfileUnlocked: (String) -> Void
@@ -212,6 +213,8 @@ public struct SettingsView: View {
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void,
         onSetProfileLock: @escaping (String, ProfileLock?) -> Void = { _, _ in },
+        validatePlexPIN: @escaping (String, String) async
+            -> PlexPINValidationResult = { _, _ in .unavailable },
         onSetKidsProfile: @escaping (String, Bool) -> Void = { _, _ in },
         isProfileUnlocked: @escaping (String) -> Bool = { _ in true },
         onProfileUnlocked: @escaping (String) -> Void = { _ in },
@@ -276,6 +279,7 @@ public struct SettingsView: View {
         self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSelectPlexHomeUser = onSelectPlexHomeUser
         self.onSetProfileLock = onSetProfileLock
+        self.validatePlexPIN = validatePlexPIN
         self.onSetKidsProfile = onSetKidsProfile
         self.isProfileUnlocked = isProfileUnlocked
         self.onProfileUnlocked = onProfileUnlocked
@@ -336,6 +340,7 @@ public struct SettingsView: View {
             plexHomeUsersFetcher: plexHomeUsersFetcher,
             onSelectPlexHomeUser: onSelectPlexHomeUser,
             onSetProfileLock: onSetProfileLock,
+            validatePlexPIN: validatePlexPIN,
             onSetKidsProfile: onSetKidsProfile,
             isProfileUnlocked: isProfileUnlocked,
             onProfileUnlocked: onProfileUnlocked
@@ -431,6 +436,9 @@ public struct SettingsView: View {
                 },
                 onSetLock: { onSetProfileLock(activeProfile.id, $0) },
                 onSetKids: { onSetKidsProfile(activeProfile.id, $0) },
+                validatePlexPIN: {
+                    await validatePlexPIN($0, activeProfile.id)
+                },
                 onDelete: activeProfile.id == profiles.first?.id ? nil : {
                     onDeleteProfile(activeProfile.id)
                     showingProfileActions = false

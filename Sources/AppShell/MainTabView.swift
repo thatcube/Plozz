@@ -203,6 +203,9 @@ struct MainTabView: View {
     let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
     /// Sets or clears a profile's PIN gate. Defaulted so previews/tests can omit it.
     var onSetProfileLock: (String, ProfileLock?) -> Void = { _, _ in }
+    var validatePlexPIN: (String, String) async -> PlexPINValidationResult = {
+        _, _ in .unavailable
+    }
     /// Marks a profile as restricted (or lifts it).
     var onSetKidsProfile: (String, Bool) -> Void = { _, _ in }
     /// Whether a profile's PIN has been proved this run.
@@ -374,6 +377,7 @@ struct MainTabView: View {
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
                 onSelectPlexHomeUser: onSelectPlexHomeUser,
                 onSetProfileLock: onSetProfileLock,
+                validatePlexPIN: validatePlexPIN,
                 onSetKidsProfile: onSetKidsProfile,
                 isProfileUnlocked: isProfileUnlocked,
                 onProfileUnlocked: onProfileUnlocked,

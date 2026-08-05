@@ -95,6 +95,9 @@ struct ProfileSettingsDetailView: View {
                 onEditAppearance: { showingEditor = true },
                 onSetLock: { context.onSetProfileLock(profileID, $0) },
                 onSetKids: { context.onSetKidsProfile(profileID, $0) },
+                validatePlexPIN: {
+                    await context.validatePlexPIN($0, profileID)
+                },
                 onDelete: canDelete ? { context.onDeleteProfile(profileID) } : nil,
                 isUnlocked: context.isProfileUnlocked(profileID),
                 onUnlock: { context.onProfileUnlocked(profileID) }

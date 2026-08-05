@@ -21,6 +21,7 @@ public struct ProfileLockSetupView: View {
     private let offersPlexPINReuse: Bool
     /// Whether the lock will reach the user's other devices. Drives the caveat.
     private let syncEnabled: Bool
+    private let validatePlexPIN: (String) async -> PlexPINValidationResult
     private let onComplete: (ProfileLock) -> Void
     private let onCancel: () -> Void
 
@@ -28,12 +29,16 @@ public struct ProfileLockSetupView: View {
         profile: Profile,
         offersPlexPINReuse: Bool = false,
         syncEnabled: Bool = true,
+        validatePlexPIN: @escaping (String) async -> PlexPINValidationResult = {
+            _ in .unavailable
+        },
         onComplete: @escaping (ProfileLock) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.profile = profile
         self.offersPlexPINReuse = offersPlexPINReuse
         self.syncEnabled = syncEnabled
+        self.validatePlexPIN = validatePlexPIN
         self.onComplete = onComplete
         self.onCancel = onCancel
     }
@@ -44,6 +49,8 @@ public struct ProfileLockSetupView: View {
     @State private var errorMessage: String?
     /// A confirmed PIN waiting on the "share it with Plex?" question.
     @State private var pinAwaitingPlexChoice: String?
+    @State private var isValidatingPlexPIN = false
+    @State private var plexValidationUnavailable = false
 
     private var isConfirming: Bool { firstEntry != nil }
 
@@ -61,6 +68,7 @@ public struct ProfileLockSetupView: View {
                     : ProfileLockCopy.createSubtitle),
             name: profile.name,
             errorMessage: errorMessage,
+            isSubmitting: isValidatingPlexPIN,
             footnote: syncEnabled ? nil : ProfileLockCopy.lockIsDeviceOnly,
             onSubmit: submit,
             onCancel: onCancel
@@ -80,10 +88,25 @@ public struct ProfileLockSetupView: View {
             ),
             titleVisibility: .visible
         ) {
-            Button(String(localized: ProfileLockCopy.usePlexPINYes)) { finish(sharesWithPlex: true) }
+            Button(String(localized: ProfileLockCopy.usePlexPINYes)) {
+                verifyAndFinishSharedPIN()
+            }
             Button(String(localized: ProfileLockCopy.usePlexPINNo)) { finish(sharesWithPlex: false) }
         } message: {
             Text(ProfileLockCopy.usePlexPINDetail)
+        }
+        .alert(
+            Text(ProfileLockCopy.plexPINUnavailableTitle),
+            isPresented: $plexValidationUnavailable
+        ) {
+            Button("Try Again") { verifyAndFinishSharedPIN() }
+            Button("Keep Separate") { finish(sharesWithPlex: false) }
+            Button("Start Over", role: .cancel) {
+                pinAwaitingPlexChoice = nil
+                firstEntry = nil
+            }
+        } message: {
+            Text(ProfileLockCopy.plexPINUnavailableDetail)
         }
     }
 
@@ -98,6 +121,27 @@ public struct ProfileLockSetupView: View {
         }
         pinAwaitingPlexChoice = nil
         onComplete(lock)
+    }
+
+    private func verifyAndFinishSharedPIN() {
+        guard let pin = pinAwaitingPlexChoice else { return }
+        isValidatingPlexPIN = true
+        Task {
+            let result = await validatePlexPIN(pin)
+            isValidatingPlexPIN = false
+            switch result {
+            case .valid:
+                finish(sharesWithPlex: true)
+            case .invalid:
+                pinAwaitingPlexChoice = nil
+                firstEntry = nil
+                errorMessage = String(
+                    localized: ProfileLockCopy.plexPINMismatch
+                )
+            case .unavailable:
+                plexValidationUnavailable = true
+            }
+        }
     }
 
     private func submit(_ pin: String) {

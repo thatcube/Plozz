@@ -357,6 +357,12 @@ public struct RootView: View {
                         plexHomeUsersFetcher: { await appState.plexHomeUsers.plexHomeUsers(forAccountID: $0) },
                         onSelectPlexHomeUser: { appState.plexHomeUsers.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) },
                         onSetProfileLock: { appState.setLock($1, forProfile: $0) },
+                        validatePlexPIN: { pin, profileID in
+                            await appState.plexHomeUsers.validatePlexPIN(
+                                pin,
+                                forProfile: profileID
+                            )
+                        },
                         onSetKidsProfile: { appState.setKidsProfile($1, forProfile: $0) },
                         isProfileUnlocked: { appState.profileFlow.isUnlockedThisRun($0) },
                         onProfileUnlocked: { appState.profileFlow.noteUnlocked($0) },
@@ -496,6 +502,12 @@ public struct RootView: View {
             ProfileLockOfferView(
                 profile: profile,
                 syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                validatePlexPIN: {
+                    await appState.plexHomeUsers.validatePlexPIN(
+                        $0,
+                        forProfile: profile.id
+                    )
+                },
                 onComplete: { lock in
                     appState.setLock(lock, forProfile: profile.id)
                     appState.profileFlow.dismissLockOffer()
@@ -1045,6 +1057,12 @@ private struct ProfileSetupFlowView: View {
             ProfileLockOfferView(
                 profile: liveProfile,
                 syncEnabled: SyncSetupFeatureFlag().isEnabled,
+                validatePlexPIN: {
+                    await appState.plexHomeUsers.validatePlexPIN(
+                        $0,
+                        forProfile: profile.id
+                    )
+                },
                 onComplete: { lock in
                     appState.setLock(lock, forProfile: profile.id)
                     appState.finishProfileSetupFlow()

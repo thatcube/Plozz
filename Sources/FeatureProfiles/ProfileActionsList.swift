@@ -35,6 +35,7 @@ public struct ProfileActionsList: View {
     private let onEditAppearance: () -> Void
     private let onSetLock: (ProfileLock?) -> Void
     private let onSetKids: (Bool) -> Void
+    private let validatePlexPIN: (String) async -> PlexPINValidationResult
     /// `nil` for a profile that can't be deleted (the household default).
     private let onDelete: (() -> Void)?
     /// Whether this profile's PIN has already been proved during this app run.
@@ -51,6 +52,9 @@ public struct ProfileActionsList: View {
         onEditAppearance: @escaping () -> Void,
         onSetLock: @escaping (ProfileLock?) -> Void,
         onSetKids: @escaping (Bool) -> Void,
+        validatePlexPIN: @escaping (String) async -> PlexPINValidationResult = {
+            _ in .unavailable
+        },
         onDelete: (() -> Void)? = nil,
         isUnlocked: Bool = true,
         onUnlock: @escaping () -> Void = {}
@@ -62,6 +66,7 @@ public struct ProfileActionsList: View {
         self.onEditAppearance = onEditAppearance
         self.onSetLock = onSetLock
         self.onSetKids = onSetKids
+        self.validatePlexPIN = validatePlexPIN
         self.onDelete = onDelete
         self.isUnlocked = isUnlocked
         self.onUnlock = onUnlock
@@ -205,6 +210,7 @@ public struct ProfileActionsList: View {
                 profile: profile,
                 offersPlexPINReuse: offersPlexPINReuse,
                 syncEnabled: syncEnabled,
+                validatePlexPIN: validatePlexPIN,
                 onComplete: { lock in
                     onSetLock(lock)
                     settingPIN = false

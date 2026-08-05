@@ -21,6 +21,7 @@ public struct ProfileActionsSheet: View {
     private let onEditAppearance: () -> Void
     private let onSetLock: (ProfileLock?) -> Void
     private let onSetKids: (Bool) -> Void
+    private let validatePlexPIN: (String) async -> PlexPINValidationResult
     private let onDelete: (() -> Void)?
     private let isUnlocked: Bool
     private let onUnlock: () -> Void
@@ -34,6 +35,9 @@ public struct ProfileActionsSheet: View {
         onEditAppearance: @escaping () -> Void,
         onSetLock: @escaping (ProfileLock?) -> Void,
         onSetKids: @escaping (Bool) -> Void,
+        validatePlexPIN: @escaping (String) async -> PlexPINValidationResult = {
+            _ in .unavailable
+        },
         onDelete: (() -> Void)? = nil,
         isUnlocked: Bool = true,
         onUnlock: @escaping () -> Void = {},
@@ -46,6 +50,7 @@ public struct ProfileActionsSheet: View {
         self.onEditAppearance = onEditAppearance
         self.onSetLock = onSetLock
         self.onSetKids = onSetKids
+        self.validatePlexPIN = validatePlexPIN
         self.onDelete = onDelete
         self.isUnlocked = isUnlocked
         self.onUnlock = onUnlock
@@ -68,6 +73,7 @@ public struct ProfileActionsSheet: View {
                 onEditAppearance: onEditAppearance,
                 onSetLock: onSetLock,
                 onSetKids: onSetKids,
+                validatePlexPIN: validatePlexPIN,
                 onDelete: onDelete,
                 isUnlocked: isUnlocked,
                 onUnlock: onUnlock
@@ -93,6 +99,7 @@ public struct ProfileActionsSheet: View {
                         onEditAppearance: onEditAppearance,
                         onSetLock: onSetLock,
                         onSetKids: onSetKids,
+                        validatePlexPIN: validatePlexPIN,
                         onDelete: onDelete,
                         isUnlocked: isUnlocked,
                         onUnlock: onUnlock

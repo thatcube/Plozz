@@ -59,6 +59,7 @@ struct SettingsContext {
     /// does it, so a grown-up can lock their own profile from a child's device
     /// without switching into it first.
     let onSetProfileLock: (String, ProfileLock?) -> Void
+    let validatePlexPIN: (String, String) async -> PlexPINValidationResult
     /// Marks a profile as restricted (or lifts it).
     let onSetKidsProfile: (String, Bool) -> Void
     /// Whether a profile's PIN has already been proved this run, so a locked

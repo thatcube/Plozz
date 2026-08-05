@@ -114,6 +114,12 @@ struct ProfileSelectionView: View {
                     },
                     onSetLock: { appState.setLock($0, forProfile: profile.id) },
                     onSetKids: { appState.setKidsProfile($0, forProfile: profile.id) },
+                    validatePlexPIN: {
+                        await appState.plexHomeUsers.validatePlexPIN(
+                            $0,
+                            forProfile: profile.id
+                        )
+                    },
                     onDelete: profile.id == appState.profilesModel.profiles.first?.id ? nil : {
                         appState.profileFlow.removeProfile(id: profile.id)
                         actionsProfileID = nil

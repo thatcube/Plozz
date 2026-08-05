@@ -161,3 +161,13 @@ public struct ProfileLockRevision: Codable, Hashable, Sendable, Comparable {
         Self(counter: 0, nonce: lock.verifier)
     }
 }
+
+/// Result of checking a proposed Profile Lock PIN against the protected Plex Home
+/// user(s) the profile watches as.
+public enum PlexPINValidationResult: Equatable, Sendable {
+    case valid
+    case invalid
+    /// Plex could not be reached or the account credential was unavailable, so
+    /// the answer is unknown rather than false.
+    case unavailable
+}

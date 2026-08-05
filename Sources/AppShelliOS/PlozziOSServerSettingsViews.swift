@@ -11,6 +11,13 @@ struct PlozziOSServersSettingsView: View {
     let onAddServer: () -> Void
     @State private var selectedServerKey: String?
 
+    /// Server keys whose switch has been flipped but whose write hasn't landed.
+    @State private var pendingWatching: [String: Bool] = [:]
+
+    /// Slightly longer than the knob's 0.18s travel, so the commit lands after
+    /// the animation rather than during it.
+    private static let switchSettleMilliseconds = 220
+
     private var groups: [ServerAccountGroup] {
         serverGroups(from: appModel.accounts)
     }
@@ -228,6 +235,13 @@ struct PlozziOSMyLibrariesSettingsView: View {
     @State private var unreachableAccountIDs: Set<String> = []
     @State private var isLoading = false
 
+    /// Server keys whose switch has been flipped but whose write hasn't landed.
+    @State private var pendingWatching: [String: Bool] = [:]
+
+    /// Slightly longer than the knob's 0.18s travel, so the commit lands after
+    /// the animation rather than during it.
+    private static let switchSettleMilliseconds = 220
+
     private var groups: [ServerAccountGroup] {
         serverGroups(from: appModel.accounts)
     }
@@ -297,7 +311,7 @@ struct PlozziOSMyLibrariesSettingsView: View {
             Toggle(
                 isOn: Binding(
                     get: { isWatching(group) },
-                    set: { setWatching($0, group: group) }
+                    set: { setWatchingSmoothly($0, group: group) }
                 )
             ) {
                 HStack(spacing: 12) {
@@ -449,8 +463,35 @@ struct PlozziOSMyLibrariesSettingsView: View {
     }
 
     private func isWatching(_ group: ServerAccountGroup) -> Bool {
+        // The optimistic value wins while a write is in flight, so the switch
+        // reflects the tap immediately rather than waiting on the model.
+        if let pending = pendingWatching[group.serverKey] { return pending }
+        return isWatchingCommitted(group)
+    }
+
+    private func isWatchingCommitted(_ group: ServerAccountGroup) -> Bool {
         let active = appModel.activeAccountIDs(for: profileID)
         return group.accounts.contains { active.contains($0.id) }
+    }
+
+    /// Flips the switch now and commits once it has finished moving.
+    ///
+    /// `setAccount` re-scopes the profile, reloads the account set and rebuilds
+    /// the crash context, all on the main actor. Running that from the switch's
+    /// own action meant the work landed in the middle of the knob's 0.18s
+    /// animation and stalled it — the switch felt heavy and late even though the
+    /// tap had registered. Painting the new state from local state first makes the
+    /// control answer instantly; the rows below arrive a beat later, which is the
+    /// natural reading order anyway.
+    private func setWatchingSmoothly(_ enabled: Bool, group: ServerAccountGroup) {
+        let key = group.serverKey
+        pendingWatching[key] = enabled
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(Self.switchSettleMilliseconds))
+            setWatching(enabled, group: group)
+            // Only clear our own value: a second tap during the wait owns the key.
+            if pendingWatching[key] == enabled { pendingWatching[key] = nil }
+        }
     }
 
     private struct PlozziOSPlexIdentityAvatar: View {

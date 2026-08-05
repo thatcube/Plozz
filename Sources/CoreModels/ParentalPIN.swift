@@ -68,3 +68,21 @@ public struct ParentalPIN: Codable, Hashable, Sendable {
         return ProfileLock.constantTimeEquals(candidate, verifier)
     }
 }
+
+/// A profile switch held at a PIN gate — either the household Parental PIN or
+/// the target profile's own lock.
+///
+/// Target and error travel together because they're only meaningful together:
+/// an error with no pending switch can't be shown, and clearing one without the
+/// other is how a stale message ends up over the next prompt. Keeping them in one
+/// observable property also stops each gate widening this shell's observable
+/// fan-out by two.
+public struct ParentalSwitchRequest: Equatable, Sendable {
+    public var target: Profile
+    public var error: LocalizedStringResource?
+
+    public init(target: Profile, error: LocalizedStringResource? = nil) {
+        self.target = target
+        self.error = error
+    }
+}

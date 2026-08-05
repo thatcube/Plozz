@@ -175,6 +175,14 @@ TRACKED_MUTABLE_ALLOWLIST = {
     "UnifiedAddShareModel": 36,
     "PlayerViewModel": 28,
     "ItemDetailViewModel": 20,
+    # The iOS shell's composition root. tvOS split the equivalent surface out of
+    # `AppState` into facets (ProfileFlowModel et al.) and landed at 7; the iOS
+    # twin hasn't had that pass yet, so this is seeded at its TRUE count as a debt
+    # marker. Decreasing-only, like the rest: the parental-controls work that
+    # exposed this deliberately folded its own gate state into single values
+    # (`ParentalSwitchRequest`) so it added nothing here. Lower it by extracting a
+    # profile-flow facet.
+    "PlozziOSAppModel": 21,
 }
 
 # Soft, INFORMATIONAL thresholds (never fail CI) — used only to surface smells in

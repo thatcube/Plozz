@@ -842,14 +842,16 @@ final class PlozziOSAppModel {
 
     /// A profile waiting on its PIN before it can be opened, or `nil`.
     /// `PlozziOSRootView` presents the PIN screen off this.
-    private(set) var pendingLockedProfile: Profile?
-    /// A profile the household is trying to reach *out of* a Kids Profile, held
-    /// until the Parental PIN is entered.
-    private(set) var pendingParentalSwitch: Profile?
-    /// Message from the last failed Parental PIN attempt, or `nil`.
-    private(set) var parentalPINError: LocalizedStringResource?
+    private(set) var lockedSwitch: ParentalSwitchRequest?
+    /// A switch out of a Kids Profile, held until the Parental PIN is entered.
+    ///
+    /// The target and its error live in ONE observable property rather than two.
+    /// They're only ever meaningful together — an error without a pending switch
+    /// is nonsense — and this model is already over the observable-fan-out
+    /// ceiling, so a feature shouldn't widen it further than the idea needs.
+    private(set) var parentalSwitch: ParentalSwitchRequest?
     /// Message from the last failed unlock attempt.
-    private(set) var profileLockError: LocalizedStringResource?
+
     /// Profiles unlocked during this app run, so hopping back and forth doesn't
     /// re-ask. In-memory on purpose: a cold launch always re-asks.
     private var unlockedProfileIDs: Set<String> = []
@@ -1080,8 +1082,7 @@ final class PlozziOSAppModel {
         // Parental PIN, and is checked before the target's own lock — same order
         // as tvOS, from the same shared policy on `ProfilesModel`.
         if profiles.requiresParentalPIN(switchingFrom: profiles.activeProfile, to: target) {
-            parentalPINError = nil
-            pendingParentalSwitch = target
+            parentalSwitch = ParentalSwitchRequest(target: target)
             return
         }
         continueSelect(target)
@@ -1090,8 +1091,7 @@ final class PlozziOSAppModel {
     /// The switch past the parental gate, still subject to the target's own lock.
     private func continueSelect(_ target: Profile) {
         if target.isLocked, !unlockedProfileIDs.contains(target.id) {
-            profileLockError = nil
-            pendingLockedProfile = target
+            lockedSwitch = ParentalSwitchRequest(target: target)
             return
         }
         performSelectProfile(target.id)
@@ -1101,35 +1101,32 @@ final class PlozziOSAppModel {
     /// continue. Deliberately not remembered for the run — see the tvOS twin.
     @discardableResult
     func submitParentalPIN(_ pin: String) -> Bool {
-        guard let target = pendingParentalSwitch else { return false }
+        guard let target = parentalSwitch?.target else { return false }
         guard profiles.matchesParentalPIN(pin) else {
-            parentalPINError = ProfileLockCopy.incorrectPIN
+            parentalSwitch?.error = ProfileLockCopy.incorrectPIN
             return false
         }
-        pendingParentalSwitch = nil
-        parentalPINError = nil
+        parentalSwitch = nil
         continueSelect(target)
         return true
     }
 
     /// Abandons a held switch, leaving the child where they were.
     func cancelParentalSwitch() {
-        pendingParentalSwitch = nil
-        parentalPINError = nil
+        parentalSwitch = nil
     }
 
     /// Checks `pin` against the pending profile's lock, completing the held-back
     /// switch on a match.
     @discardableResult
     func submitProfileLockPIN(_ pin: String) -> Bool {
-        guard let profile = pendingLockedProfile, let lock = profile.lock else { return false }
+        guard let profile = lockedSwitch?.target, let lock = profile.lock else { return false }
         guard lock.matches(pin: pin) else {
-            profileLockError = ProfileLockCopy.incorrectPIN
+            lockedSwitch?.error = ProfileLockCopy.incorrectPIN
             return false
         }
         unlockedProfileIDs.insert(profile.id)
-        pendingLockedProfile = nil
-        profileLockError = nil
+        lockedSwitch = nil
         if lock.matchesPlexPIN {
             plexHomeUsers.prefillPlexPIN(pin, forProfile: profile.id)
         }
@@ -1139,8 +1136,7 @@ final class PlozziOSAppModel {
 
     /// Abandons a pending unlock, leaving the active profile untouched.
     func cancelProfileLockPrompt() {
-        pendingLockedProfile = nil
-        profileLockError = nil
+        lockedSwitch = nil
     }
 
     /// Sets or clears a profile's PIN gate, dropping any unlock credit the
@@ -1207,15 +1203,13 @@ final class PlozziOSAppModel {
     func enforceActiveProfileLock(leaving outgoing: Profile? = nil) -> Bool {
         if let outgoing,
            profiles.requiresParentalPIN(switchingFrom: outgoing, to: profiles.activeProfile) {
-            parentalPINError = nil
             mustChooseProfile = true
-            pendingParentalSwitch = profiles.activeProfile
+            parentalSwitch = ParentalSwitchRequest(target: profiles.activeProfile)
             return true
         }
         guard activeProfileNeedsUnlock else { return false }
-        profileLockError = nil
         mustChooseProfile = true
-        pendingLockedProfile = profiles.activeProfile
+        lockedSwitch = ParentalSwitchRequest(target: profiles.activeProfile)
         return true
     }
 

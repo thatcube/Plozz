@@ -378,8 +378,8 @@ public struct PlozziOSRootView: View {
     private var profileAccessGateBinding: Binding<Bool> {
         Binding(
             get: {
-                if appModel.pendingLockedProfile != nil { return true }
-                if appModel.pendingParentalSwitch != nil { return true }
+                if appModel.lockedSwitch != nil { return true }
+                if appModel.parentalSwitch != nil { return true }
                 guard !showingSettings,
                       appModel.profileOnboardingStep != .libraries
                 else { return false }
@@ -827,7 +827,7 @@ private struct PlozziOSProfileAccessGateView: View {
 
     init(appModel: PlozziOSAppModel) {
         self.appModel = appModel
-        let profile = appModel.pendingLockedProfile
+        let profile = appModel.lockedSwitch?.target
         _expectsTwoPINs = State(initialValue:
             profile?.isLocked == true
                 && profile?.lock?.matchesPlexPIN != true
@@ -839,20 +839,20 @@ private struct PlozziOSProfileAccessGateView: View {
         ZStack {
             AppBackground(palette: palette).ignoresSafeArea()
 
-            if let target = appModel.pendingParentalSwitch {
+            if let request = appModel.parentalSwitch {
                 // First: may you leave the child's profile at all?
                 ParentalPINView(
-                    destination: target,
-                    errorMessage: appModel.parentalPINError,
+                    destination: request.target,
+                    errorMessage: request.error,
                     onSubmit: { appModel.submitParentalPIN($0) },
                     onCancel: { appModel.cancelParentalSwitch() }
                 )
                 .id("parental-pin")
                 .transition(.opacity)
-            } else if let profile = appModel.pendingLockedProfile {
+            } else if let lockRequest = appModel.lockedSwitch {
                 ProfileLockPINView(
-                    profile: profile,
-                    errorMessage: appModel.profileLockError,
+                    profile: lockRequest.target,
+                    errorMessage: lockRequest.error,
                     isSyncEnabled: SyncSetupFeatureFlag().isEnabled,
                     sequenceStep: expectsTwoPINs
                         ? .init(current: 1, total: 2)
@@ -877,7 +877,7 @@ private struct PlozziOSProfileAccessGateView: View {
         }
         .animation(
             .easeInOut(duration: 0.2),
-            value: appModel.pendingLockedProfile?.id
+            value: appModel.lockedSwitch?.target.id
         )
     }
 }

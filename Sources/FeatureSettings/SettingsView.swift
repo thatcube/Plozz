@@ -430,9 +430,12 @@ public struct SettingsView: View {
                         parentalControlsSection
                     }
 
-                    if activeProfile.isKids {
-                        kidsProfileNote
-                    } else {
+                    // No household section on a Kids Profile. There used to be a
+                    // card here explaining its absence, but it was a second
+                    // "Kids Profile" heading that did nothing — and once
+                    // Parental Controls exists, a missing shared section needs no
+                    // caption.
+                    if !activeProfile.isKids {
                         everyoneSection
                     }
 
@@ -562,8 +565,8 @@ public struct SettingsView: View {
                     signedInStrip
                 }
 
-                navRow(KidsProfileCopy.title,
-                       icon: isParentalSealed ? "lock.fill" : "figure.and.child.holdinghands",
+                navRow(KidsProfileCopy.manageProfile,
+                       icon: isParentalSealed ? "lock.fill" : "person.crop.circle",
                        value: nil,
                        route: isParentalSealed
                            ? .grownUps
@@ -728,32 +731,6 @@ public struct SettingsView: View {
             .padding(.top, 16)
             .padding(.bottom, 16)
         }
-        .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
-    }
-
-    /// Stands in for the withheld shared section on a Kids Profile, so the page
-    /// doesn't just silently lose a card — a grown-up looking for Servers needs to
-    /// be told where it went rather than assuming the app is broken.
-    private var kidsProfileNote: some View {
-        HStack(spacing: 20) {
-            Image(systemName: "figure.and.child.holdinghands")
-                .font(.system(size: 34, weight: .regular))
-                .plozzForeground(.secondary)
-                .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
-                .background(Circle().fill(palette.fillSubtle))
-                .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(KidsProfileCopy.title)
-                    .font(Self.identityTitleFont)
-                Text(KidsProfileCopy.restrictedHere)
-                    .font(.subheadline)
-                    .plozzForeground(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(28)
         .plozzSurface(.raised, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
     }
 

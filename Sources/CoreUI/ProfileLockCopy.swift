@@ -328,10 +328,16 @@ public enum KidsProfileCopy {
         comment: "Subtitle of the Parental Controls group after the Parental PIN has been entered, making the limited duration clear."
     )
 
+    public static let manageProfile = LocalizedStringResource(
+        "settings.parentalControls.manageProfile",
+        defaultValue: "Manage Profile",
+        comment: "Row inside Parental Controls leading to this profile's own management page."
+    )
+
     public static let profileManagementDetail = LocalizedStringResource(
         "settings.parentalControls.profileDetail",
-        defaultValue: "Kids Profile, lock, and appearance",
-        comment: "Subtitle of the row leading to this profile's own management page from Parental Controls."
+        defaultValue: "Name, avatar, lock, and Kids Profile",
+        comment: "Subtitle of the Manage Profile row. Lists what the page holds; must not repeat the row's own title."
     )
 
     public static let addTile = LocalizedStringResource(

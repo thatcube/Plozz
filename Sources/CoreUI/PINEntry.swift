@@ -359,7 +359,11 @@ public struct PINProgressDots: View {
                     .strokeBorder(palette.secondaryText.opacity(0.75), lineWidth: 2)
                     .background(Circle().fill(filled ? palette.primaryText : .clear))
                     .frame(width: PINMetrics.dotSize, height: PINMetrics.dotSize)
-                    .animation(.easeOut(duration: 0.12), value: filled)
+                    // The dot is the payoff for a key press, so it pops rather
+                    // than cross-fades — the two together are what make the pad
+                    // feel connected to what you typed.
+                    .scaleEffect(filled ? 1.0 : 0.9)
+                    .animation(.spring(response: 0.26, dampingFraction: 0.55), value: filled)
             }
         }
         .accessibilityLabel("\(filledCount) of \(ProfileLock.pinLength) digits entered")
@@ -437,6 +441,41 @@ private struct PINKeyBody: View {
     @Environment(\.isFocused) private var isFocused
     @Environment(\.themePalette) private var palette
 
+    /// A press is latched rather than read straight from
+    /// `configuration.isPressed`.
+    ///
+    /// A tap — remote click or finger — can lift in well under 100ms, so the raw
+    /// flag is often true for a single frame. The pad registered those presses
+    /// correctly but drew a state nobody could perceive, which is exactly what
+    /// makes a working control feel dead. Latching guarantees a minimum on-screen
+    /// dwell, so every digit is *seen* to land.
+    @State private var showsPress = false
+    /// Pointer hover (iPad trackpad/mouse). tvOS does the same job with focus.
+    @State private var isHovering = false
+    /// Bumped once per press. Drives haptics, and tags the release so a stale
+    /// unlatch from a previous press can't cancel the current one during fast
+    /// typing.
+    @State private var pressCount = 0
+
+    /// Focus and hover are the same idea on their respective platforms: "this is
+    /// the key you're about to hit."
+    private var isHighlighted: Bool { isFocused || isHovering }
+
+    private var highlightScale: CGFloat {
+        if isFocused { return 1.06 }
+        if isHovering { return 1.04 }
+        return 1.0
+    }
+
+    /// Highlight and press compose rather than override, so a focused key still
+    /// visibly depresses instead of snapping back to its resting size.
+    private var scale: CGFloat { highlightScale * (showsPress ? 0.94 : 1.0) }
+
+    /// The wash flips polarity with the surface beneath it. A highlighted key is
+    /// already bright, so it darkens; a resting key is dark, so it lights up.
+    /// Either way the press reads as the key being pushed in.
+    private var pressWash: Color { isHighlighted ? .black : palette.primaryText }
+
     var body: some View {
         configuration.label
             .foregroundStyle(palette.primaryText)
@@ -446,12 +485,54 @@ private struct PINKeyBody: View {
             // same focus bloom, the same Reduce Transparency fallback, and the
             // same tvOS-26 treatment as every card in the app — and can't drift
             // from them.
-            .plozzGlassCard(cornerRadius: PINMetrics.keyDiameter / 2, isFocused: isFocused)
-            .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
-            .scaleEffect(isFocused ? 1.06 : 1.0)
-            .opacity(configuration.isPressed ? 0.9 : 1.0)
+            .plozzGlassCard(
+                cornerRadius: PINMetrics.keyDiameter / 2,
+                isFocused: isHighlighted
+            )
+            .overlay {
+                // A capsule matches the key at both widths: the delete key is
+                // wider, but the corner radius is driven by the shared height.
+                Capsule()
+                    .fill(pressWash)
+                    .opacity(showsPress ? 0.18 : 0)
+                    .allowsHitTesting(false)
+            }
+            .shadow(color: .black.opacity(isHighlighted ? 0.36 : 0), radius: 20, y: 10)
+            .scaleEffect(scale)
+            // One animation per driver, so a press curve can be snappy without
+            // dragging the slower focus bloom along with it.
             .animation(.easeOut(duration: 0.18), value: isFocused)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.14), value: isHovering)
+            .animation(.spring(response: 0.24, dampingFraction: 0.62), value: showsPress)
+            .onChange(of: configuration.isPressed) { _, pressed in
+                if pressed {
+                    pressCount += 1
+                    showsPress = true
+                } else {
+                    releasePress()
+                }
+            }
+            #if !os(tvOS)
+            .onHover { hovering in isHovering = hovering }
+            #endif
+            #if os(iOS)
+            // A glass key has no travel and no click, so touch is the only
+            // channel left to confirm a digit actually landed.
+            .sensoryFeedback(
+                .impact(flexibility: .soft, intensity: 0.7),
+                trigger: pressCount
+            )
+            #endif
+    }
+
+    private func releasePress() {
+        let token = pressCount
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(90))
+            // A newer press has taken over; leave the key depressed for it.
+            guard pressCount == token else { return }
+            showsPress = false
+        }
     }
 }
 

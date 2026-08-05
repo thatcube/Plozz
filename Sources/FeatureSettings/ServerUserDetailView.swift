@@ -25,6 +25,7 @@ struct ServerUserDetailView: View {
     }
 
     var body: some View {
+        let _ = revision
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 SettingsPageHeader(
@@ -44,6 +45,9 @@ struct ServerUserDetailView: View {
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
+        .task(id: group?.accounts.map(\.id)) {
+            normalizeSelection()
+        }
     }
 
     private func usersPanel(_ group: ServerAccountGroup) -> some View {
@@ -62,7 +66,7 @@ struct ServerUserDetailView: View {
                             Text(verbatim: account.userName)
                                 .font(.callout.weight(.medium))
                             Spacer(minLength: 12)
-                            if scope.isAccountIncludedInActiveProfile(account.id) {
+                            if account.id == selectedAccountID(in: group) {
                                 SettingsSelectionIndicator()
                             }
                         }
@@ -102,6 +106,30 @@ struct ServerUserDetailView: View {
             scope.onSetAccountIncluded(account.id, account.id == chosen.id)
         }
         revision += 1
+    }
+
+    /// Exactly one login represents a profile on a Jellyfin/Emby server.
+    ///
+    /// New profiles initially include the household account set, which may contain
+    /// several logins to one physical server. Raw membership therefore made every
+    /// row look selected until the user tapped one. Collapse that inherited set
+    /// immediately to the first current choice and persist the invariant.
+    private func normalizeSelection() {
+        guard let group else { return }
+        let included = group.accounts.filter {
+            scope.isAccountIncludedInActiveProfile($0.id)
+        }
+        let chosen = included.first ?? group.accounts.first
+        guard let chosen,
+              included.count != 1 || included.first?.id != chosen.id
+        else { return }
+        choose(chosen, in: group)
+    }
+
+    private func selectedAccountID(in group: ServerAccountGroup) -> String? {
+        group.accounts.first {
+            scope.isAccountIncludedInActiveProfile($0.id)
+        }?.id ?? group.accounts.first?.id
     }
 }
 #endif

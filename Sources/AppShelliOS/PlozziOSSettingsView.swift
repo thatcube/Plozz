@@ -157,6 +157,8 @@ private enum PlozziOSSettingsDestination: Hashable {
     case myLibraries
     /// Parental PIN prompt unsealing a Kids Profile's restricted settings.
     case grownUps
+    /// This profile's own management page, reached from Parental Controls.
+    case manageProfile
     case trackers
     case appearance
     case home
@@ -276,6 +278,11 @@ private struct PlozziOSSettingsSplitView: View {
                                 title: SettingsCopy.libraries,
                                 systemImage: isParentalSealed ? "lock.fill" : "rectangle.stack"
                             )
+                            settingsRow(
+                                isParentalSealed ? .grownUps : .manageProfile,
+                                title: KidsProfileCopy.manageProfile,
+                                systemImage: isParentalSealed ? "lock.fill" : "person.crop.circle"
+                            )
                         } footer: {
                             // See the tvOS twin: the lock says "sealed" already.
                             if !isParentalSealed {
@@ -284,13 +291,11 @@ private struct PlozziOSSettingsSplitView: View {
                         }
                     }
 
-                    // Withheld on a Kids Profile: every destructive control in the app
-                    // lives in here (remove server, delete profile, sign out of
-                    // everything), and a child's profile is deliberately left
-                    // unlocked, so otherwise the lock could simply be routed around.
-                    if appModel.profiles.activeProfile.isKids {
-                        PlozziOSKidsProfileNote()
-                    } else {
+                    // No household section on a Kids Profile. The card that used
+                    // to explain its absence was a second "Kids Profile" heading
+                    // that did nothing; once Parental Controls exists, a missing
+                    // shared section needs no caption. See the tvOS twin.
+                    if !appModel.profiles.activeProfile.isKids {
                         SettingsSectionGroup(deviceSettingsTitle) {
                             Button {
                                 selection = .profiles
@@ -465,6 +470,11 @@ private struct PlozziOSSettingsSplitView: View {
             )
         case .grownUps:
             PlozziOSGrownUpsUnlockView(appModel: appModel) { isParentalUnlocked = true }
+        case .manageProfile:
+            PlozziOSProfileSettingsView(
+                appModel: appModel,
+                profileID: appModel.profiles.activeProfileID
+            )
         case .myLibraries:
             PlozziOSMyLibrariesSettingsView(
                 appModel: appModel,
@@ -715,11 +725,8 @@ private struct PlozziOSSettingsCompactMenu: View {
 
                 // Withheld on a Kids Profile: every destructive control in the app
                 // lives in here (remove server, delete profile, sign out of
-                // everything), and a child's profile is deliberately left
-                // unlocked, so otherwise the lock could simply be routed around.
-                if appModel.profiles.activeProfile.isKids {
-                    PlozziOSKidsProfileNote()
-                } else {
+                // everything).
+                if !appModel.profiles.activeProfile.isKids {
                     SettingsSectionGroup(deviceSettingsTitle) {
                     NavigationLink {
                         PlozziOSProfilesView(appModel: appModel)

@@ -358,9 +358,4 @@ public enum KidsProfileCopy {
         comment: "Confirming button that lifts a profile's Kids restriction."
     )
 
-    public static let restrictedHere = LocalizedStringResource(
-        "settings.kidsProfile.restrictedHere",
-        defaultValue: "Shared settings are hidden on a Kids Profile. Switch to another profile to change them.",
-        comment: "Shown in Settings while a Kids Profile is active, explaining why the shared section isn't there."
-    )
 }

@@ -644,6 +644,9 @@ public extension UniversalWatchlistHost {
         // it is what decides "in your library" vs "request it".
         let sourcesProvider = identityIndex.identitySourcesProvider
         var indexedHit = 0
+        var kindMismatch = 0
+        var missMovie = 0
+        var missSeries = 0
         for entry in union.orderedEntries {
             guard let record = ledger.record(for: entry.aliasID) else { continue }
             var probe = MediaItem(
@@ -658,12 +661,27 @@ public extension UniversalWatchlistHost {
                 locallyValidatedPlayableSource: false
             )
             probe.watchlistAliasID = entry.aliasID
-            if !sourcesProvider(probe).filter({
+            let refs = sourcesProvider(probe)
+            if !refs.filter({
                 $0.kind == nil || $0.kind == entry.kind
-            }).isEmpty { indexedHit += 1 }
+            }).isEmpty {
+                indexedHit += 1
+            } else if !refs.isEmpty {
+                // The index knows this title but only under another KIND. TMDb
+                // and TVDb reuse one integer id space across movies and series,
+                // so the kind scope is load-bearing — a mismatch here means the
+                // watchlist and the library disagree about what the title is,
+                // not that the copy is missing.
+                kindMismatch += 1
+            } else {
+                switch entry.kind {
+                case .series: missSeries += 1
+                default: missMovie += 1
+                }
+            }
         }
         let indexSnapshot = identityIndex.identitySnapshot
-        let unionLine = "watchlist.index ownedCopyFound=\(indexedHit)/\(union.orderedEntries.count) indexedIdentities=\(indexSnapshot.identityCount) indexedAccounts=\(indexSnapshot.indexedAccountIDs.count) | total=\(union.orderedEntries.count) explicit=\(union.orderedEntries.filter(\.isExplicit).count) nativeOnly=\(union.orderedEntries.filter { !$0.isExplicit }.count) strongID=\(matchable) weakOnly=\(weakOnly) noRecord=\(noRecord) stale=\(union.hasStaleDestinations)"
+        let unionLine = "watchlist.index ownedCopyFound=\(indexedHit)/\(union.orderedEntries.count) missMovie=\(missMovie) missSeries=\(missSeries) kindMismatch=\(kindMismatch) indexedIdentities=\(indexSnapshot.identityCount) indexedAccounts=\(indexSnapshot.indexedAccountIDs.count) | total=\(union.orderedEntries.count) explicit=\(union.orderedEntries.filter(\.isExplicit).count) nativeOnly=\(union.orderedEntries.filter { !$0.isExplicit }.count) strongID=\(matchable) weakOnly=\(weakOnly) noRecord=\(noRecord) stale=\(union.hasStaleDestinations)"
         PlozzLog.app.info("Watchlist \(unionLine)")
         // Mirrored through the fan-out diagnostics seam so `devicectl … --console`
         // can stream it: `os_log` alone doesn't reach stdout, which is the only

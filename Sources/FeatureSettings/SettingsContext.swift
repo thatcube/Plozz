@@ -40,6 +40,15 @@ struct SettingsContext {
     /// Whether the household has a Parental PIN, which is what decides if a Kids
     /// Profile is enforced or merely simplified. See ``ParentalPIN``.
     var hasParentalPIN: Bool = false
+    /// Whether the Parental PIN has been entered, unsealing this Kids Profile's
+    /// restricted settings for now.
+    var isParentalUnlocked: Bool = false
+    /// Verifies a candidate Parental PIN.
+    var matchesParentalPIN: (String) -> Bool = { _ in false }
+    /// Records a successful Parental PIN entry.
+    var onParentalUnlock: () -> Void = {}
+    /// Sets or clears the household's Parental PIN.
+    var onSetParentalPIN: (ParentalPIN?) -> Void = { _ in }
     /// Signs in another user on an already-added server.
     let onAddUser: (MediaServer) -> Void
     let onRemoveAccount: (Account) -> Void
@@ -81,6 +90,12 @@ enum SettingsRoute: Hashable {
     case profile
     /// Per-profile settings page (Everyone › Profiles › <name>).
     case profileSettings(profileID: String)
+    /// The Parental PIN prompt that unseals a Kids Profile's restricted
+    /// settings. A pushed page, not a modal — modals asked for from inside the
+    /// Settings tab are unreliable (see the Edit button note in `SettingsView`).
+    case grownUps
+    /// The household's Parental PIN settings (Everyone › Parental PIN).
+    case parentalPIN
     case servers
     case myLibraries
     case appearance

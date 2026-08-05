@@ -448,7 +448,9 @@ public struct RootView: View {
         // So a hairline tuned against an SDR backdrop can compensate for SDR
         // white being mapped brighter once the panel switches to HDR.
         .environment(\.plozzHDRDisplayActive, glassPerformance.budget.contentIsHDR)
-        .environment(\.plozzHasParentalPIN, appState.profilesModel.parentalPIN != nil)
+        // Injected so deep settings screens can read household profile
+        // state without another argument on an already ~60-argument chain.
+        .environment(appState.profilesModel)
         .environment(glassPerformance)
         .environment(displayVeil)
         // Push the theme's effective scheme DOWN into the tree instead of forcing

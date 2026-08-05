@@ -32,6 +32,14 @@ public struct ProfileActionsList: View {
     /// Whether any *other* profile carries a lock — a Kids Profile only contains
     /// anyone if there's something locked to keep them out of.
     private let hasParentalPIN: Bool
+    /// Whether this profile's escalation-capable actions are sealed behind the
+    /// household Parental PIN.
+    ///
+    /// The caller decides, because only it knows whether the PIN has already been
+    /// entered on this screen. When sealed, only Appearance is offered: the Kids
+    /// flag, the profile's own lock and Delete are all ways a child could undo
+    /// their own restrictions from inside.
+    private let restrictedActionsSealed: Bool
     private let onEditAppearance: () -> Void
     private let onSetLock: (ProfileLock?) -> Void
     private let onSetKids: (Bool) -> Void
@@ -49,6 +57,7 @@ public struct ProfileActionsList: View {
         syncEnabled: Bool,
         offersPlexPINReuse: Bool = false,
         hasParentalPIN: Bool,
+        restrictedActionsSealed: Bool = false,
         onEditAppearance: @escaping () -> Void,
         onSetLock: @escaping (ProfileLock?) -> Void,
         onSetKids: @escaping (Bool) -> Void,
@@ -63,6 +72,7 @@ public struct ProfileActionsList: View {
         self.syncEnabled = syncEnabled
         self.offersPlexPINReuse = offersPlexPINReuse
         self.hasParentalPIN = hasParentalPIN
+        self.restrictedActionsSealed = restrictedActionsSealed
         self.onEditAppearance = onEditAppearance
         self.onSetLock = onSetLock
         self.onSetKids = onSetKids
@@ -151,6 +161,7 @@ public struct ProfileActionsList: View {
                 action: onEditAppearance
             )
 
+            if !restrictedActionsSealed {
             actionRow(
                 icon: profile.isLocked || offersPlexPINReuse
                     ? "lock.fill"
@@ -207,6 +218,7 @@ public struct ProfileActionsList: View {
                     Label("Delete Profile", systemImage: "trash")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            }
             }
         }
         .fullScreenCover(isPresented: $settingPIN) {

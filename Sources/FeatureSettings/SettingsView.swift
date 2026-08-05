@@ -154,7 +154,33 @@ public struct SettingsView: View {
     ///
     /// Read from the environment rather than passed in: this initializer already
     /// takes ~60 arguments and one more tipped the type-checker over.
-    @Environment(\.plozzHasParentalPIN) private var hasParentalPIN
+    /// Household profile state, injected at the root.
+    ///
+    /// Read from the environment rather than passed in: this initializer already
+    /// takes ~60 arguments and adding more tips the type-checker over. Optional
+    /// so previews and tests that don't inject it still render.
+    @Environment(ProfilesModel.self) private var profilesModel: ProfilesModel?
+
+    /// Whether the household has a Parental PIN — the switch between a Kids
+    /// Profile being enforced and merely simplified.
+    private var hasParentalPIN: Bool { profilesModel?.parentalPIN != nil }
+    /// Whether the Parental PIN has been entered for the Kids Profile currently
+    /// open.
+    ///
+    /// Deliberately view state, not persisted: it dies with this screen and is
+    /// cleared the moment the active profile changes, so unsealing the settings
+    /// once never turns into unsealing them for good.
+    @State private var isParentalUnlocked = false
+
+    /// Whether this profile's restricted settings are sealed right now.
+    ///
+    /// Restricted settings are the ones that would let a child escalate: which
+    /// libraries it sees, who it watches as, its Kids flag and its own lock. A
+    /// Kids Profile with no household Parental PIN seals nothing — there'd be no
+    /// key, and the child could switch profiles anyway.
+    private var isParentalSealed: Bool {
+        activeProfile.isKids && hasParentalPIN && !isParentalUnlocked
+    }
     private let onSetSyncEnabled: ((Bool) -> Void)?
     /// Live status summary line for the iCloud Sync page, and a manual sync action.
     private let syncStatusSummary: SyncStatusProvider?
@@ -346,6 +372,10 @@ public struct SettingsView: View {
             onDeleteProfile: onDeleteProfile,
             onAddAccount: onAddAccount,
             hasParentalPIN: hasParentalPIN,
+            isParentalUnlocked: isParentalUnlocked,
+            matchesParentalPIN: { [profilesModel] pin in profilesModel?.matchesParentalPIN(pin) ?? false },
+            onParentalUnlock: { isParentalUnlocked = true },
+            onSetParentalPIN: { [profilesModel] pin in profilesModel?.setParentalPIN(pin) },
             onAddUser: onAddUser,
             onRemoveAccount: onRemoveAccount,
             onRemoveAccountEverywhere: onRemoveAccountEverywhere,
@@ -421,6 +451,9 @@ public struct SettingsView: View {
             }
             .task { await reloadLibraries() }
             .onAppear { MainThreadStallProbe.context = "settings" }
+            // Switching profiles re-seals: an unlock proves who is standing
+            // there now, not who was standing there for a different profile.
+            .onChange(of: activeProfile.id) { _, _ in isParentalUnlocked = false }
         }
         .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
             Button("Sign Out", role: .destructive, action: onSignOutAll)
@@ -484,10 +517,24 @@ public struct SettingsView: View {
             // Per-profile "Your Libraries": who you watch as + what shows on THIS
             // profile's Home. The personal mirror of This Apple TV › Servers.
             // Its second line glances the household's server sign-ins.
-            navRow(SettingsCopy.libraries, icon: "rectangle.stack",
-                   value: nil,
-                   route: .myLibraries) {
-                signedInStrip
+            // Sealed: one row standing in for everything a grown-up may change,
+            // rather than a list of dead ends. Unsealing reveals the real rows in
+            // place, so nothing moves around.
+            if isParentalSealed {
+                navRow(KidsProfileCopy.grownUps, icon: "lock.fill",
+                       value: nil,
+                       route: .grownUps) {
+                    Text(KidsProfileCopy.grownUpsDetail)
+                        .font(.footnote)
+                        .settingsRowSecondary()
+                        .lineLimit(2)
+                }
+            } else {
+                navRow(SettingsCopy.libraries, icon: "rectangle.stack",
+                       value: nil,
+                       route: .myLibraries) {
+                    signedInStrip
+                }
             }
             navRow("Customize Home", icon: "house",
                    value: nil,
@@ -573,6 +620,12 @@ public struct SettingsView: View {
                 navRow("Profiles", icon: "person.2",
                        value: Text(verbatim: profiles.count.formatted()),
                        route: .profile)
+
+                // Household-level, so it sits here rather than on a profile —
+                // one PIN for everyone, not a property of any one person.
+                navRow(KidsProfileCopy.parentalPIN, icon: "figure.and.child.holdinghands",
+                       value: hasParentalPIN ? Text(ProfileLockCopy.on) : Text(ProfileLockCopy.off),
+                       route: .parentalPIN)
 
                 // Seerr is one shared admin connection powering the Home hero's
                 // trending row + requests for everyone on this Apple TV, so it's
@@ -866,6 +919,10 @@ public struct SettingsView: View {
             )
         case .servers:
             ServersAndLibrariesDetailView(context: context)
+        case .grownUps:
+            GrownUpsUnlockView(context: context)
+        case .parentalPIN:
+            ParentalPINDetailView(context: context)
         case let .profileSettings(profileID):
             ProfileSettingsDetailView(context: context, profileID: profileID, syncEnabled: syncEnabled)
         case .myLibraries:
@@ -959,10 +1016,15 @@ public struct SettingsView: View {
                 }
                 Spacer()
                 HStack(spacing: 12) {
-                    NavigationLink(
-                        value: SettingsRoute.profileSettings(profileID: activeProfile.id)
-                    ) {
-                        Label("Edit", systemImage: "pencil")
+                    // Hidden while sealed: this page carries the Kids flag, the
+                    // profile's lock and Delete. Appearance goes with it, which
+                    // is a small loss next to leaving an escalation route open.
+                    if !isParentalSealed {
+                        NavigationLink(
+                            value: SettingsRoute.profileSettings(profileID: activeProfile.id)
+                        ) {
+                            Label("Edit", systemImage: "pencil")
+                        }
                     }
                     Button(action: onSwitchProfile) {
                         Text("Switch Profile")

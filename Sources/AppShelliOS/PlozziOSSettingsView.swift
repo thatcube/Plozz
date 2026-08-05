@@ -16,6 +16,9 @@ struct PlozziOSSettingsView: View {
     @State private var addServerPresentationColorScheme: ColorScheme = .dark
     let appModel: PlozziOSAppModel
     let onClose: () -> Void
+    /// Opens the profile picker. Owned by the root, because the picker can raise
+    /// PIN gates that must not be asked for from under the Settings sheet.
+    var onSwitchProfile: () -> Void = {}
     let systemColorScheme: ColorScheme
 
     var body: some View {
@@ -25,14 +28,16 @@ struct PlozziOSSettingsView: View {
                     appModel: appModel,
                     onAddServer: showAddServer,
                     onAddUser: showAddUser(on:),
-                    onClose: onClose
+                    onClose: onClose,
+                    onSwitchProfile: onSwitchProfile
                 )
             } else {
                 NavigationStack {
                     PlozziOSSettingsCompactMenu(
                         appModel: appModel,
                         onAddServer: showAddServer,
-                        onAddUser: showAddUser(on:)
+                        onAddUser: showAddUser(on:),
+                        onSwitchProfile: onSwitchProfile
                     )
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
@@ -162,9 +167,6 @@ private enum PlozziOSSettingsDestination: Hashable {
     /// The profile's own name, avatar and colour. Deliberately outside Parental
     /// Controls — it can't escalate anything.
     case profileAppearance
-    /// Choosing a different profile. Always available, including from a Kids
-    /// Profile — the Parental PIN gate is the protection, not hiding the exit.
-    case switchProfile
     /// The household's Parental PIN.
     case parentalPIN
     case trackers
@@ -213,6 +215,7 @@ private struct PlozziOSSettingsSplitView: View {
     let onAddServer: () -> Void
     var onAddUser: (MediaServer) -> Void = { _ in }
     let onClose: () -> Void
+    var onSwitchProfile: () -> Void = {}
     @State private var selection: PlozziOSSettingsDestination?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
@@ -230,6 +233,15 @@ private struct PlozziOSSettingsSplitView: View {
         appModel.profiles.activeProfile.isKids
             && appModel.profiles.parentalPIN != nil
             && !isParentalUnlocked
+    }
+
+    private var profileIdentityHeader: some View {
+        SettingsSectionGroup {
+            PlozziOSProfileIdentityHeader(
+                appModel: appModel,
+                onSwitchProfile: onSwitchProfile
+            )
+        }
     }
     @State private var confirmSignOutAll = false
     @State private var confirmEraseICloud = false
@@ -261,17 +273,13 @@ private struct PlozziOSSettingsSplitView: View {
                     // The active profile's settings come FIRST: they are what
                     // anyone actually opens Settings to change, where the device
                     // group is setup done once.
+                    // Who you are, as the way to become someone else — the
+                    // avatar-in-the-corner convention every streaming app uses.
+                    // Always present, Kids Profile or not: hiding the exit was
+                    // never the protection, the Parental PIN gate is.
+                    profileIdentityHeader
+
                     SettingsSectionGroup(verbatim: appModel.profiles.activeProfile.name) {
-                        // Always here, Kids Profile or not. It used to live only
-                        // in the household group, which a Kids Profile hides —
-                        // leaving that profile with no way out on iOS.
-                        if appModel.profiles.profiles.count > 1 {
-                            settingsRow(
-                                .switchProfile,
-                                title: "Switch Profile",
-                                systemImage: "arrow.trianglehead.2.clockwise.rotate.90"
-                            )
-                        }
                         // On a Kids Profile, Libraries moves to its own
                         // parent-controlled group below — it's a parent's
                         // setting, and sitting it among the child's own
@@ -559,8 +567,6 @@ private struct PlozziOSSettingsSplitView: View {
             }
         case .parentalPIN:
             PlozziOSParentalPINSettingsView(appModel: appModel)
-        case .switchProfile:
-            PlozziOSSwitchProfileView(appModel: appModel, onClose: onClose)
         case .profileAppearance:
             PlozziOSProfileEditorHost(
                 appModel: appModel,
@@ -725,6 +731,7 @@ private struct PlozziOSSettingsCompactMenu: View {
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     var onAddUser: (MediaServer) -> Void = { _ in }
+    var onSwitchProfile: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
     @State private var confirmSignOutAll = false
     @State private var confirmEraseICloud = false
@@ -746,6 +753,15 @@ private struct PlozziOSSettingsCompactMenu: View {
         showsParentalControlsSection && !isParentalUnlocked
     }
 
+    private var profileIdentityHeader: some View {
+        SettingsSectionGroup {
+            PlozziOSProfileIdentityHeader(
+                appModel: appModel,
+                onSwitchProfile: onSwitchProfile
+            )
+        }
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 18) {
@@ -756,19 +772,10 @@ private struct PlozziOSSettingsCompactMenu: View {
                 )
 
                 // Profile first — see the compact layout above.
+                // See the split-view twin.
+                profileIdentityHeader
+
                 SettingsSectionGroup(verbatim: appModel.profiles.activeProfile.name) {
-                // See the split-view twin: always available, so a Kids Profile
-                // isn't a dead end.
-                if appModel.profiles.profiles.count > 1 {
-                    NavigationLink {
-                        PlozziOSSwitchProfileView(appModel: appModel) { dismiss() }
-                    } label: {
-                        Label(
-                            "Switch Profile",
-                            systemImage: "arrow.trianglehead.2.clockwise.rotate.90"
-                        )
-                    }
-                }
                 // On a Kids Profile this moves to the Parental Controls group
                 // below — see the split-view twin.
                 if !showsParentalControlsSection {
@@ -2379,4 +2386,37 @@ private struct PlozziOSLicenseBadges: View {
         .accessibilityLabel(licenses.map(\.label).joined(separator: ", "))
     }
 }
+
+/// The active profile's avatar and name, as a button that opens the picker.
+///
+/// Tapping who you are to become someone else is the convention every streaming
+/// app shares, and it puts switching at the top of Settings instead of several
+/// rows down inside a household section a Kids Profile can't even see.
+private struct PlozziOSProfileIdentityHeader: View {
+    let appModel: PlozziOSAppModel
+    let onSwitchProfile: () -> Void
+
+    var body: some View {
+        Button(action: onSwitchProfile) {
+            HStack(spacing: 14) {
+                PlozziOSProfileAvatar(profile: appModel.profiles.activeProfile, size: 52)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: appModel.profiles.activeProfile.name)
+                        .font(.headline)
+                    Text("Switch Profile")
+                        .font(.subheadline)
+                        .foregroundStyle(.tint)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .plozzForeground(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 #endif

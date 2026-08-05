@@ -516,6 +516,14 @@ private struct PlozziOSTabShell: View {
     private var sidebarGeometry
     @State private var settingsPresentationColorScheme: ColorScheme = .dark
     @State private var selectedDestination: PlozziOSDestination = .home
+    /// The profile picker opened deliberately (from Settings) rather than at
+    /// launch. Presented from the ROOT so the Parental PIN and profile-lock gates
+    /// it can raise aren't asked for from underneath the Settings sheet — the
+    /// arrangement that fails silently.
+    @State private var showingProfileSwitcher = false
+    /// A profile whose settings the switcher asked to open.
+    @State private var switcherEditingProfile: Profile?
+
     let appModel: PlozziOSAppModel
     let onAddServer: () -> Void
     @Binding var showingSettings: Bool
@@ -606,12 +614,45 @@ private struct PlozziOSTabShell: View {
             // when the sheet is actually gone.
             if presented { appModel.noteSettingsPresented(true) }
         }
+        .fullScreenCover(isPresented: $showingProfileSwitcher) {
+            PlozziOSProfilePickerView(
+                profiles: appModel.profiles.profilesByRecency,
+                activeProfileID: appModel.profiles.activeProfileID,
+                onSelect: { profile in
+                    showingProfileSwitcher = false
+                    appModel.selectProfile(profile.id)
+                },
+                onAddProfile: {
+                    showingProfileSwitcher = false
+                    showingSettings = true
+                },
+                onEditProfile: { profile in
+                    showingProfileSwitcher = false
+                    switcherEditingProfile = profile
+                },
+                onCancel: { showingProfileSwitcher = false }
+            )
+        }
+        .sheet(item: $switcherEditingProfile) { profile in
+            NavigationStack {
+                PlozziOSProfileSettingsView(
+                    appModel: appModel,
+                    profileID: profile.id
+                )
+            }
+            .preferredColorScheme(settingsPresentationColorScheme)
+        }
         .sheet(isPresented: $showingSettings, onDismiss: {
             appModel.noteSettingsPresented(false)
         }) {
             PlozziOSSettingsView(
                 appModel: appModel,
                 onClose: { showingSettings = false },
+                onSwitchProfile: {
+                    // Close first, then present: see `showingProfileSwitcher`.
+                    showingSettings = false
+                    showingProfileSwitcher = true
+                },
                 systemColorScheme: systemColorScheme
             )
             .preferredColorScheme(settingsPresentationColorScheme)

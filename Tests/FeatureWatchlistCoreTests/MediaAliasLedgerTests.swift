@@ -581,25 +581,6 @@ final class MediaAliasLedgerTests: XCTestCase {
             )
         }
 
-        @MainActor
-        func testRepeatedActivationDoesNotRepublishUnchangedSnapshot() async throws {
-            let model = MediaAliasLedgerModel()
-            try await model.activate(profileID: "p")
-            let changed = ObservationFlag()
-            withObservationTracking {
-                _ = model.snapshotsByProfile
-                _ = model.activeProfileID
-            } onChange: {
-                changed.mark()
-            }
-
-            try await model.activate(profileID: "p")
-
-            XCTAssertFalse(
-                changed.value,
-                "idempotent activation cannot re-arm the shell observation loop"
-            )
-        }
         let store = ControllableAliasStore(
             initialState: MediaAliasLedgerState(records: records)
         )
@@ -633,6 +614,26 @@ final class MediaAliasLedgerTests: XCTestCase {
             store.saveCount,
             1,
             "an identical identity publication performs no durable write"
+        )
+    }
+
+    @MainActor
+    func testRepeatedActivationDoesNotRepublishUnchangedSnapshot() async throws {
+        let model = MediaAliasLedgerModel()
+        try await model.activate(profileID: "p")
+        let changed = ObservationFlag()
+        withObservationTracking {
+            _ = model.snapshotsByProfile
+            _ = model.activeProfileID
+        } onChange: {
+            changed.mark()
+        }
+
+        try await model.activate(profileID: "p")
+
+        XCTAssertFalse(
+            changed.value,
+            "idempotent activation cannot re-arm the shell observation loop"
         )
     }
 

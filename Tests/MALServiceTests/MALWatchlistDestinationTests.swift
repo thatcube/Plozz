@@ -3,6 +3,7 @@ import CoreNetworking
 import Foundation
 import XCTest
 @testable import MALService
+@testable import TestSupportNetworking
 
 /// MyAnimeList's half of the universal watchlist.
 final class MALWatchlistDestinationTests: XCTestCase {

@@ -210,6 +210,23 @@ def select(graph: Graph, files: list[str]):
             if suite in graph.targets and graph.targets[suite].get("type") == "test":
                 suites.add(suite)
                 reasons.append(f"test  {f}: -> {suite}")
+            elif suite in graph.targets:
+                # A non-test target living under Tests/ — a shared test-support
+                # target (e.g. TestSupportNetworking, which holds the doubles that
+                # several suites need because SwiftPM cannot list one file in two
+                # targets). It is a real node in the graph, so the coverage map
+                # already knows exactly which suites reach it: select those rather
+                # than escalating a shared-double tweak to the whole matrix.
+                hits = cover.get(suite)
+                if hits:
+                    suites |= hits
+                    reasons.append(
+                        f"supp  {f}: test-support {suite} -> {', '.join(sorted(hits))}")
+                else:
+                    reasons.append(
+                        f"FULL  <- {f}: Tests/{suite} is a target no test target "
+                        f"depends on (unmapped) — running full to be safe")
+                    force_full = True
             else:
                 reasons.append(
                     f"FULL  <- {f}: Tests/{suite} is not a known test target")

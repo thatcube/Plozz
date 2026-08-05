@@ -3,6 +3,7 @@ import CoreNetworking
 import Foundation
 import XCTest
 @testable import SimklService
+@testable import TestSupportNetworking
 
 /// Simkl's half of the universal watchlist. These pin the translation between
 /// Plozz's identity vocabulary and Simkl's payloads — the part that has to be

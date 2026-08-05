@@ -1,5 +1,6 @@
 import XCTest
 @testable import MediaTransportHTTP
+@testable import TestSupportNetworking
 
 /// Coverage for the `stat` (Depth:0, self-entry-preserving) and bounded
 /// whole-file `GET` surface added for the WebDAV media-transport adapter, plus

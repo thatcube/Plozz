@@ -2,6 +2,7 @@ import XCTest
 import CoreModels
 import CoreNetworking
 @testable import TraktService
+@testable import TestSupportNetworking
 
 private let traktBaseURL = URL(string: "https://api.trakt.tv")!
 

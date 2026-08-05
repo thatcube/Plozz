@@ -41,13 +41,19 @@ final class SeekScrubCoordinatorTests: XCTestCase {
 
     private func waitUntil(
         timeout: TimeInterval = 3,
+        file: StaticString = #filePath,
+        line: UInt = #line,
         _ condition: @escaping @MainActor () -> Bool
     ) async {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if condition() { return }
-            try? await Task.sleep(nanoseconds: 5_000_000)
+            try? await Task.sleep(nanoseconds: 1_000_000)
         }
+        // Returning silently on timeout would leave the following assertions to
+        // report some confusing downstream symptom instead of "the thing I waited
+        // for never happened", and would do it `timeout` seconds later.
+        XCTFail("condition never became true within \(timeout)s", file: file, line: line)
     }
 
     // MARK: End-guard clamp (network-file EOF-fault guard)

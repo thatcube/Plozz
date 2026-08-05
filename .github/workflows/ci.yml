@@ -31,6 +31,12 @@ jobs:
       - name: Architecture layering guard
         run: python3 tools/arch-guard.py
 
+      # A `func testX` nested inside another function compiles and reads like a
+      # real test, but XCTest never runs it. This guard fails the build on any
+      # such unreachable test; see tools/test-hygiene.py.
+      - name: Test hygiene guard
+        run: python3 tools/test-hygiene.py
+
       # Localization regressions: brand names leaking into the catalog, copy
       # concatenated with `+` (which the extractor skips entirely, so the string
       # can never be translated), and migrated APIs reverting to `String`.

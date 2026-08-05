@@ -3,6 +3,7 @@ import CoreNetworking
 import Foundation
 import XCTest
 @testable import AniListService
+@testable import TestSupportNetworking
 
 /// AniList's half of the universal watchlist. The behaviour that matters most
 /// here is what it DECLINES: this destination must be silent about everything

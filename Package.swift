@@ -733,6 +733,23 @@ let package = Package(
             ]
         ),
 
+        // MARK: Test support (not a test target — shared doubles only)
+        //
+        // Test doubles that several suites need. SwiftPM cannot list one file in
+        // two targets, so a shared double has to live in a target of its own;
+        // otherwise it gets copy-pasted, which is exactly what happened here:
+        // `RecordingHTTPClient` existed as four byte-identical copies (Trakt,
+        // Simkl, AniList, MAL) and `StubURLProtocol` as two (HTTP, WebDAV), and
+        // three of the four had already drifted to name the wrong service.
+        // Consumers use `@testable import TestSupportNetworking`, so nothing here
+        // needs to be `public`.
+        .target(
+            name: "TestSupportNetworking",
+            dependencies: ["CoreModels", "CoreNetworking"],
+            path: "Tests/TestSupportNetworking",
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
+
         // MARK: Tests (pure logic, no UI required)
         .testTarget(
             name: "CoreModelsTests",
@@ -796,19 +813,19 @@ let package = Package(
         ),
         .testTarget(
             name: "TraktServiceTests",
-            dependencies: ["TraktService", "CoreModels", "CoreNetworking"]
+            dependencies: ["TraktService", "CoreModels", "CoreNetworking", "TestSupportNetworking"]
         ),
         .testTarget(
             name: "SimklServiceTests",
-            dependencies: ["SimklService", "CoreModels", "CoreNetworking"]
+            dependencies: ["SimklService", "CoreModels", "CoreNetworking", "TestSupportNetworking"]
         ),
         .testTarget(
             name: "AniListServiceTests",
-            dependencies: ["AniListService", "CoreModels", "CoreNetworking"]
+            dependencies: ["AniListService", "CoreModels", "CoreNetworking", "TestSupportNetworking"]
         ),
         .testTarget(
             name: "MALServiceTests",
-            dependencies: ["MALService", "CoreModels", "CoreNetworking"]
+            dependencies: ["MALService", "CoreModels", "CoreNetworking", "TestSupportNetworking"]
         ),
         .testTarget(
             name: "SeerServiceTests",
@@ -863,7 +880,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MediaTransportHTTPTests",
-            dependencies: ["MediaTransportHTTP", "MediaTransportCore"],
+            dependencies: ["MediaTransportHTTP", "MediaTransportCore", "TestSupportNetworking"],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
         .testTarget(
@@ -882,6 +899,7 @@ let package = Package(
                 "MediaTransportCore",
                 "MediaTransportHTTP",
                 "MediaTransportWebDAV",
+                "TestSupportNetworking",
             ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),

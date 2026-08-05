@@ -110,6 +110,61 @@ final class PlexWatchlistTests: XCTestCase {
         XCTAssertEqual(host, "discover.provider.plex.tv")
     }
 
+    /// Regression: the watchlist read must ASK for external ids.
+    ///
+    /// Without `includeGuids=1` Plex returns only its own `plex://` guid, which
+    /// identifies a title inside Plex and nowhere else. Every watchlisted title
+    /// then arrived with no evidence of what it IS and could only be matched on
+    /// title+year — so a watchlisted film couldn't be recognised as the copy
+    /// already in the library ("not in your library — request it"), and its
+    /// detail page couldn't tell it was on the watchlist at all.
+    func testWatchlistReadAsksForExternalIDs() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/sections/watchlist/all", json: """
+        {"MediaContainer":{"size":0,"Metadata":[]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        _ = try await provider.watchlist()
+
+        let query = stub.queryItems(forPathSuffix: "/library/sections/watchlist/all")
+        XCTAssertEqual(
+            query?.first { $0.name == "includeGuids" }?.value,
+            "1"
+        )
+        // `includeFields` is an ALLOW-LIST: asking Plex to inline `Guid` while
+        // omitting it from the whitelist silently drops it again.
+        let fields = query?.first { $0.name == "includeFields" }?.value ?? ""
+        XCTAssertTrue(
+            fields.split(separator: ",").contains("Guid"),
+            "includeFields must name Guid, or includeGuids is dropped: \(fields)"
+        )
+    }
+
+    /// The external ids Plex returns have to reach the mapped item, or the
+    /// watchlist entry still can't say what the title is.
+    func testWatchlistCarriesExternalIDsOntoItems() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/sections/watchlist/all", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"g1","type":"movie","title":"Dune","year":2021,
+           "guid":"plex://movie/5d776b9a",
+           "Guid":[{"id":"imdb://tt1160419"},{"id":"tmdb://438631"}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.watchlist()
+
+        // Through the same accessor `PlexWatchlistDestination` uses to build the
+        // entry's external ids — asserting the raw dictionary keys would pass on
+        // a value the destination can't actually reach.
+        let item = try XCTUnwrap(items.first)
+        XCTAssertEqual(item.providerID(.imdb), "tt1160419")
+        XCTAssertEqual(item.providerID(.tmdb), "438631")
+        XCTAssertEqual(item.providerIDs["PlexGuid"], "plex://movie/5d776b9a")
+    }
+
     func testWatchlistWriteUsesDiscoverHost() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/actions/addToWatchlist", json: "{}")

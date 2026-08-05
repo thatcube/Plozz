@@ -112,6 +112,33 @@ final class WatchlistUnionTests: XCTestCase {
         XCTAssertFalse(cleared.hasStaleDestinations)
     }
 
+    /// Switching "watching as" must not show one person the other's watchlist.
+    ///
+    /// A Plex destination is `plex.<accountID>` whatever Home user the profile
+    /// plays as, so the previous person's entries sit under the same key — and a
+    /// failed read deliberately KEEPS what it has, which would have made that
+    /// stick indefinitely rather than for a moment.
+    func testEntriesReadAsAnotherIdentityAreDropped() {
+        var stored = NativeWatchlistView(identityScope: "p#1")
+        stored.applySuccess(
+            destinationID: plex,
+            entries: [
+                NativeWatchlistEntry(
+                    aliasID: MediaAliasID(),
+                    kind: .movie,
+                    index: 0
+                )!
+            ]
+        )
+
+        let sameIdentity = stored.scoped(to: "p#1")
+        let switchedIdentity = stored.scoped(to: "p#2")
+
+        XCTAssertEqual(sameIdentity.bucket(for: plex)?.entries.count, 1)
+        XCTAssertNil(switchedIdentity.bucket(for: plex))
+        XCTAssertEqual(switchedIdentity.identityScope, "p#2")
+    }
+
     /// A destination that has never been read successfully gets no bucket at
     /// all. Inventing an empty one would claim knowledge we don't have.
     func testFailureBeforeAnySuccessfulReadRecordsNothing() {
@@ -155,6 +182,116 @@ final class WatchlistUnionTests: XCTestCase {
 
         XCTAssertEqual(union.orderedEntries.map(\.aliasID), [owned, other])
         XCTAssertEqual(union.orderedEntries.map(\.isExplicit), [true, false])
+    }
+}
+
+/// Picking the right COPY of a correctly identified title.
+///
+/// The alias ledger answers "what title is this?"; it does not answer "and which
+/// item on your servers is it?". The watchlist row's own items come from Plex
+/// Discover and carry "not in your library" by construction, so matching one by
+/// alias and handing it straight back shows a film you own as something to
+/// request. Right title, wrong copy.
+@MainActor
+final class WatchlistPresentationRetargetTests: XCTestCase {
+    func testDiscoveryCandidateIsUpgradedToTheOwnedLibraryCopy() throws {
+        let aliasID = MediaAliasID()
+        let union = WatchlistUnion(
+            snapshot: WatchlistSnapshot(intents: [
+                WatchlistIntent(
+                    aliasID: aliasID,
+                    kind: .movie,
+                    desiredState: .present,
+                    rank: 0,
+                    origin: .local,
+                    presentation: MediaAliasPresentation(
+                        title: "The Unhealer",
+                        year: 2020
+                    )
+                )!
+            ]),
+            nativeView: .empty,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: []
+        )
+        // What a Plex watchlist row actually offers: the Discover copy.
+        var discovery = MediaItem(
+            id: "discover-1",
+            title: "The Unhealer",
+            kind: .movie,
+            providerIDs: ["Imdb": "tt9204204"],
+            availability: .unknown,
+            locallyValidatedPlayableSource: false
+        )
+        discovery.sourceAccountID = "plex-account"
+        let owned = MediaSourceRef(
+            accountID: "plex-account",
+            itemID: "library-rating-key",
+            kind: .movie,
+            providerKind: .plex
+        )
+
+        let resolved = WatchlistPresentationResolver.resolve(
+            union: union,
+            aliasSnapshot: .empty,
+            currentItemsByAliasID: [aliasID: discovery],
+            indexedSources: { _ in [owned] }
+        )
+
+        let item = try XCTUnwrap(resolved.first?.item)
+        XCTAssertTrue(
+            item.locallyValidatedPlayableSource,
+            "A watchlisted film sitting in the library must not render as one to request"
+        )
+        XCTAssertNil(item.availability)
+    }
+
+    /// The upgrade must never invent a match. Retargeting on title+year alone
+    /// wouldn't just mislabel a card, it would route playback to another work.
+    func testCandidateWithoutAStrongIDIsLeftAlone() throws {
+        let aliasID = MediaAliasID()
+        let union = WatchlistUnion(
+            snapshot: WatchlistSnapshot(intents: [
+                WatchlistIntent(
+                    aliasID: aliasID,
+                    kind: .movie,
+                    desiredState: .present,
+                    rank: 0,
+                    origin: .local,
+                    presentation: MediaAliasPresentation(title: "Ambiguous", year: 2020)
+                )!
+            ]),
+            nativeView: .empty,
+            aliasSnapshot: .empty,
+            enabledDestinationIDs: []
+        )
+        let discovery = MediaItem(
+            id: "discover-2",
+            title: "Ambiguous",
+            kind: .movie,
+            availability: .unknown,
+            locallyValidatedPlayableSource: false
+        )
+
+        let resolved = WatchlistPresentationResolver.resolve(
+            union: union,
+            aliasSnapshot: .empty,
+            currentItemsByAliasID: [aliasID: discovery],
+            indexedSources: { _ in
+                [
+                    MediaSourceRef(
+                        accountID: "a",
+                        itemID: "wrong-film",
+                        kind: .movie,
+                        providerKind: .plex
+                    )
+                ]
+            }
+        )
+
+        let item = try XCTUnwrap(resolved.first?.item)
+        XCTAssertFalse(item.locallyValidatedPlayableSource)
+        XCTAssertEqual(item.availability, .unknown)
     }
 }
 

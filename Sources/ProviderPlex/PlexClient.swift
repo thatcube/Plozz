@@ -809,7 +809,24 @@ public struct PlexClient: Sendable {
             path: "/library/sections/watchlist/all",
             queryItems: [
                 URLQueryItem(name: "X-Plex-Token", value: plexTVToken),
-                URLQueryItem(name: "includeFields", value: "title,type,year,thumb,art,guid,ratingKey")
+                // `includeGuids=1` inlines each entry's external ids
+                // (imdb/tmdb/tvdb). Without it Plex returns only its own
+                // `plex://` guid, which identifies a title inside Plex and
+                // nowhere else — so every watchlisted title arrived with no
+                // evidence of WHAT it is and could only ever be matched on
+                // title+year. The universal watchlist then couldn't tell that a
+                // watchlisted film was the copy sitting in the library ("not in
+                // your library — request it"), and a detail page couldn't tell
+                // the title was on the watchlist at all.
+                URLQueryItem(name: "includeGuids", value: "1"),
+                // `Guid` has to be in the field whitelist too, or the parameter
+                // above is silently dropped: `includeFields` is an allow-list,
+                // and it did not name the very field it was asking Plex to
+                // inline.
+                URLQueryItem(
+                    name: "includeFields",
+                    value: "title,type,year,thumb,art,guid,Guid,ratingKey"
+                )
             ],
             headers: plexTVHeaders
         )

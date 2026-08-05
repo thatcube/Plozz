@@ -36,7 +36,23 @@ public enum WatchlistPresentationResolver {
         union.orderedEntries.compactMap { entry in
             let aliasID = entry.aliasID
             if let item = currentItemsByAliasID[aliasID] {
-                var item = item
+                // A live candidate is not automatically a LIBRARY candidate. The
+                // watchlist row's own items are Plex Discover copies, which say
+                // "not in your library" by construction — so returning the match
+                // as-is made a film that is sitting in the library render as
+                // something to go and request. Retargeting was only ever tried on
+                // the placeholder path below, which this match skipped.
+                //
+                // `retargetedToOwnedLibraryCopy` returns nil for an ordinary
+                // library item (it is already pointed at its own server) and
+                // refuses to act without a strong external id, so this can only
+                // ever upgrade a discovery row to a copy the index vouched for.
+                var item = indexedSources.flatMap {
+                    item.retargetedToOwnedLibraryCopy(
+                        indexedSources: $0,
+                        capabilities: capabilities
+                    )
+                } ?? item
                 item.watchlistAliasID = aliasID
                 return WatchlistPresentationEntry(aliasID: aliasID, item: item)
             }

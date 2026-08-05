@@ -669,7 +669,7 @@ public extension UniversalWatchlistHost {
     /// dropped on the way in. Otherwise a server switched off while the app was
     /// closed would come back on the next launch, which is the exact bug the
     /// read-time view exists to fix.
-    func loadUniversalWatchlistNativeView(profileID: String) {
+    func loadUniversalWatchlistNativeView(profileID: String, scope: String) {
         let store: (any NativeWatchlistViewStoring)?
         if let directory = universalWatchlistStorageDirectory {
             store = try? AtomicNativeWatchlistViewStore(
@@ -683,7 +683,9 @@ public extension UniversalWatchlistHost {
             store = InMemoryNativeWatchlistViewStore()
         }
         universalWatchlistNativeViewStore = store
-        var view = (try? store?.load()) ?? .empty
+        // Scoped BEFORE anything reads it: entries read as a different Plex
+        // identity are somebody else's and must not be shown here even once.
+        var view = ((try? store?.load()) ?? .empty).scoped(to: scope)
         view.retainOnly(destinationIDs: universalWatchlistDestinationIDs)
         universalWatchlistNativeView = view
     }
@@ -934,7 +936,7 @@ public extension UniversalWatchlistHost {
         } ?? InMemoryWatchlistMutationStateStore()
         let mutationStore = try DurableWatchlistMutationStore(store: stateStore)
         universalWatchlistMutationStore = mutationStore
-        loadUniversalWatchlistNativeView(profileID: profileID)
+        loadUniversalWatchlistNativeView(profileID: profileID, scope: scopeKey)
         universalWatchlistReconciler = WatchlistReconciler(
             registry: WatchlistDestinationRegistry(destinations),
             mutationStore: mutationStore

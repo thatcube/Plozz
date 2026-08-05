@@ -61,13 +61,37 @@ public struct NativeWatchlistView: Codable, Hashable, Sendable {
 
     public var version: Int
     public var bucketsByDestinationID: [String: NativeWatchlistBucket]
+    /// Who these entries were read AS.
+    ///
+    /// A Plex destination is identified by its account, not by the Home user the
+    /// profile plays as — the id is `plex.<accountID>` either way. So switching
+    /// "watching as" leaves the previous person's entries sitting under the same
+    /// key, and because a failed read deliberately keeps what it has, a switch
+    /// followed by an unreachable server would go on showing one child their
+    /// sibling's watchlist indefinitely. Stamping the identity makes that
+    /// detectable: entries read as somebody else are dropped, not kept.
+    public var identityScope: String?
 
     public init(
         version: Int = currentVersion,
-        bucketsByDestinationID: [String: NativeWatchlistBucket] = [:]
+        bucketsByDestinationID: [String: NativeWatchlistBucket] = [:],
+        identityScope: String? = nil
     ) {
         self.version = version
         self.bucketsByDestinationID = bucketsByDestinationID
+        self.identityScope = identityScope
+    }
+
+    /// Keeps the cached entries only if they were read as the CURRENT identity.
+    ///
+    /// Returns an empty view stamped with `scope` otherwise. Losing the cache is
+    /// the right trade: it costs one refresh, where the alternative is showing
+    /// somebody else's watchlist.
+    public func scoped(to scope: String) -> Self {
+        guard identityScope == scope else {
+            return NativeWatchlistView(identityScope: scope)
+        }
+        return self
     }
 
     public static let empty = Self()

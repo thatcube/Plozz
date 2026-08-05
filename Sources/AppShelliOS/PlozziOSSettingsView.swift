@@ -1088,9 +1088,6 @@ private struct PlozziOSProfilesView: View {
     @State private var selectedProfileRoute: PlozziOSProfileSettingsRoute?
     /// Closes Settings, so a switch can raise its gates from the root.
     var onClose: () -> Void = {}
-    /// Whether the list is in "managing" mode, where tapping a profile opens its
-    /// settings instead of switching to it.
-    @State private var isManaging = false
 
     private var orderedProfiles: [Profile] { appModel.profiles.profilesByRecency }
 
@@ -1112,40 +1109,25 @@ private struct PlozziOSProfilesView: View {
                 Text("Profiles keep Home, settings, and downloads personal. Watch history belongs to the account each profile watches as.")
             }
 
-            SettingsSectionGroup(isManaging ? "Manage Profiles" : "Who’s watching?") {
-                Button(isManaging ? "Done" : "Manage") {
-                    withAnimation(.easeInOut(duration: 0.2)) { isManaging.toggle() }
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.tint)
-            } content: {
-                // Tapping a face switches to it — unless you've said you're
-                // managing, in which case tapping opens that profile's settings.
+            SettingsSectionGroup("Who’s watching?") {
+                // Every row here switches. Editing is its own row at the end.
                 //
-                // A mode rather than a per-row edit button: it's what Netflix,
-                // Disney+ and Hulu all do, so the gesture is already learned, and
-                // it keeps the common case (switching) free of chrome. An earlier
-                // version put an ⓘ on every row, which read as "information" and
-                // cluttered the list to serve the rarer action.
+                // Two earlier attempts put editing ON these rows — an ⓘ button
+                // per row, then a Manage MODE toggled from the header. The icon
+                // read as "information" and cluttered the common case; the mode
+                // needed its control in a footnote-sized uppercase header, where
+                // it was both tiny and anchored to a title that changed with the
+                // mode. A row is full-size, obvious, and already this screen's
+                // vocabulary.
                 ForEach(orderedProfiles) { profile in
                     Button {
-                        if isManaging {
-                            // One optional route owned by this page. A row cannot
-                            // activate another row's destination, and there is no
-                            // per-row NavigationLink state for SwiftUI's
-                            // split-view reconciliation to accidentally stack.
-                            selectedProfileRoute = PlozziOSProfileSettingsRoute(
-                                profileID: profile.id
-                            )
-                        } else {
-                            guard profile.id != appModel.profiles.activeProfileID else { return }
-                            // Close Settings first: the Parental PIN and profile
-                            // lock gates are presented from the root, and a cover
-                            // asked for from under an open sheet is the
-                            // arrangement that fails silently.
-                            onClose()
-                            appModel.selectProfile(profile.id)
-                        }
+                        guard profile.id != appModel.profiles.activeProfileID else { return }
+                        // Close Settings first: the Parental PIN and profile lock
+                        // gates are presented from the root, and a cover asked for
+                        // from under an open sheet is the arrangement that fails
+                        // silently.
+                        onClose()
+                        appModel.selectProfile(profile.id)
                     } label: {
                         HStack {
                             PlozziOSProfileAvatar(
@@ -1154,8 +1136,7 @@ private struct PlozziOSProfilesView: View {
                             )
                             Text(profile.name)
                             Spacer()
-                            if !isManaging,
-                               profile.id == appModel.profiles.activeProfileID {
+                            if profile.id == appModel.profiles.activeProfileID {
                                 Image(systemName: "checkmark")
                                     .foregroundStyle(.tint)
                             }
@@ -1168,11 +1149,6 @@ private struct PlozziOSProfilesView: View {
                             if profile.isLocked {
                                 Image(systemName: "lock.fill")
                                     .plozzForeground(.secondary)
-                            }
-                            if isManaging {
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                                    .plozzForeground(.tertiary)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1189,6 +1165,11 @@ private struct PlozziOSProfilesView: View {
                 }
                 Button("Add Profile", systemImage: "person.badge.plus") {
                     showingAddProfile = true
+                }
+                NavigationLink {
+                    PlozziOSManageProfilesView(appModel: appModel)
+                } label: {
+                    Label("Manage Profiles", systemImage: "slider.horizontal.3")
                 }
             }
         }
@@ -1247,7 +1228,8 @@ private struct PlozziOSProfilesView: View {
     }
 }
 
-private struct PlozziOSProfileSettingsRoute: Hashable {
+/// Identifies which profile a management page should open.
+struct PlozziOSProfileSettingsRoute: Hashable {
     let profileID: String
 }
 

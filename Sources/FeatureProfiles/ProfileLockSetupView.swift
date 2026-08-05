@@ -47,8 +47,12 @@ public struct ProfileLockSetupView: View {
     /// between the two entries and never persisted.
     @State private var firstEntry: String?
     @State private var errorMessage: String?
-    /// A confirmed PIN waiting on the "share it with Plex?" question.
-    @State private var pinAwaitingPlexChoice: String?
+    /// Confirmed PIN data and dialog visibility are deliberately separate.
+    /// SwiftUI clears a presentation binding as a dialog dismisses; using that
+    /// same optional as the PIN storage erased the PIN during async Plex
+    /// validation, then falsely reported that the two local entries did not match.
+    @State private var confirmedPIN: String?
+    @State private var showingPlexChoice = false
     @State private var isValidatingPlexPIN = false
     @State private var plexValidationUnavailable = false
 
@@ -82,16 +86,17 @@ public struct ProfileLockSetupView: View {
         // plays as a PIN-protected Plex user.
         .confirmationDialog(
             Text(ProfileLockCopy.usePlexPIN),
-            isPresented: Binding(
-                get: { pinAwaitingPlexChoice != nil },
-                set: { if !$0 { pinAwaitingPlexChoice = nil } }
-            ),
+            isPresented: $showingPlexChoice,
             titleVisibility: .visible
         ) {
             Button(String(localized: ProfileLockCopy.usePlexPINYes)) {
                 verifyAndFinishSharedPIN()
             }
             Button(String(localized: ProfileLockCopy.usePlexPINNo)) { finish(sharesWithPlex: false) }
+            Button("Start Over", role: .cancel) {
+                confirmedPIN = nil
+                firstEntry = nil
+            }
         } message: {
             Text(ProfileLockCopy.usePlexPINDetail)
         }
@@ -102,7 +107,7 @@ public struct ProfileLockSetupView: View {
             Button("Try Again") { verifyAndFinishSharedPIN() }
             Button("Keep Separate") { finish(sharesWithPlex: false) }
             Button("Start Over", role: .cancel) {
-                pinAwaitingPlexChoice = nil
+                confirmedPIN = nil
                 firstEntry = nil
             }
         } message: {
@@ -112,19 +117,21 @@ public struct ProfileLockSetupView: View {
 
     /// Builds the lock from the confirmed PIN once the Plex question is settled.
     private func finish(sharesWithPlex: Bool) {
-        guard let pin = pinAwaitingPlexChoice,
+        guard let pin = confirmedPIN,
               let lock = ProfileLock.make(pin: pin, matchesPlexPIN: sharesWithPlex) else {
-            pinAwaitingPlexChoice = nil
+            confirmedPIN = nil
             errorMessage = String(localized: ProfileLockCopy.mismatch)
             firstEntry = nil
             return
         }
-        pinAwaitingPlexChoice = nil
+        confirmedPIN = nil
+        showingPlexChoice = false
         onComplete(lock)
     }
 
     private func verifyAndFinishSharedPIN() {
-        guard let pin = pinAwaitingPlexChoice else { return }
+        guard let pin = confirmedPIN else { return }
+        showingPlexChoice = false
         isValidatingPlexPIN = true
         Task {
             let result = await validatePlexPIN(pin)
@@ -133,7 +140,7 @@ public struct ProfileLockSetupView: View {
             case .valid:
                 finish(sharesWithPlex: true)
             case .invalid:
-                pinAwaitingPlexChoice = nil
+                confirmedPIN = nil
                 firstEntry = nil
                 errorMessage = String(
                     localized: ProfileLockCopy.plexPINMismatch
@@ -166,7 +173,8 @@ public struct ProfileLockSetupView: View {
             onComplete(lock)
             return
         }
-        pinAwaitingPlexChoice = pin
+        confirmedPIN = pin
+        showingPlexChoice = true
     }
 }
 #endif

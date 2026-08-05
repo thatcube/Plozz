@@ -459,6 +459,23 @@ public final class ProfilesModel {
         self.legacyLocalParentalPIN = store.parentalPIN()
         // Intentionally does *not* persist a defaulted selection: leaving it
         // unstored is what lets a fresh Apple TV system user get the picker.
+        migrateLocalParentalPINIfNeeded()
+    }
+
+    /// Moves a Parental PIN written by a build that kept it device-local onto the
+    /// synced anchor, so it starts reaching the household's other devices.
+    ///
+    /// Without this the PIN would sit in local storage forever and only sync if
+    /// someone happened to set it again — the household would look protected on
+    /// one device and be wide open on the rest, which is the worst of both.
+    private func migrateLocalParentalPINIfNeeded() {
+        guard let local = legacyLocalParentalPIN,
+              var anchor = profiles.first,
+              anchor.parentalPIN == nil else { return }
+        anchor.replaceParentalPIN(with: local)
+        update(anchor)
+        legacyLocalParentalPIN = nil
+        store.setParentalPIN(nil)
     }
 
     /// The currently-selected profile (falls back to the first profile).

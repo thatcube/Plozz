@@ -262,12 +262,23 @@ private struct PlozziOSSettingsSplitView: View {
                                 systemImage: "rectangle.stack"
                             )
                         }
-                        // Only when Parental Controls has taken the management
-                        // page away, so this doesn't duplicate the row inside it.
+                        // With a PIN, the management page moves into Parental
+                        // Controls and only the harmless half stays here. Without
+                        // one there's nothing to seal — and iOS has no header
+                        // Edit button like tvOS, so leaving it out entirely made
+                        // profile management unreachable from a Kids Profile,
+                        // including the offer to create the PIN in the first
+                        // place.
                         if showsParentalControlsSection {
                             settingsRow(
                                 .profileAppearance,
                                 title: KidsProfileCopy.nameAndAvatar,
+                                systemImage: "person.crop.circle"
+                            )
+                        } else if appModel.profiles.activeProfile.isKids {
+                            settingsRow(
+                                .manageProfile,
+                                title: KidsProfileCopy.manageProfile,
                                 systemImage: "person.crop.circle"
                             )
                         }
@@ -706,6 +717,8 @@ private struct PlozziOSSettingsCompactMenu: View {
                         )
                     }
                 }
+                // See the split-view twin for why the no-PIN case still needs a
+                // way in.
                 if showsParentalControlsSection {
                     NavigationLink {
                         PlozziOSProfileEditorHost(
@@ -716,6 +729,15 @@ private struct PlozziOSSettingsCompactMenu: View {
                         )
                     } label: {
                         Label(KidsProfileCopy.nameAndAvatar, systemImage: "person.crop.circle")
+                    }
+                } else if appModel.profiles.activeProfile.isKids {
+                    NavigationLink {
+                        PlozziOSProfileSettingsView(
+                            appModel: appModel,
+                            profileID: appModel.profiles.activeProfileID
+                        )
+                    } label: {
+                        Label(KidsProfileCopy.manageProfile, systemImage: "person.crop.circle")
                     }
                 }
                 NavigationLink {

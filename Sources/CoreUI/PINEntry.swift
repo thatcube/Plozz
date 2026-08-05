@@ -44,6 +44,19 @@ enum PINMetrics {
     /// Width of the delete key: it spans the two trailing columns of the bottom
     /// row, so it lines up with the grid rather than floating.
     static var deleteKeyWidth: CGFloat { keyDiameter * 2 + keySpacing }
+
+    /// Intrinsic width of the 3-column dial pad.
+    static var padWidth: CGFloat { keyDiameter * 3 + keySpacing * 2 }
+
+    #if os(tvOS)
+    /// Fixed width for the prose column, rather than letting it absorb every
+    /// spare point. See the layout note in ``PINEntryScaffold``.
+    static let proseColumnWidth: CGFloat = 720
+    /// The real, honest gap between prose and pad.
+    static let columnGap: CGFloat = 120
+    /// Prose + gap + pad, centered on screen as one unit.
+    static var compositionWidth: CGFloat { proseColumnWidth + columnGap + padWidth }
+    #endif
 }
 
 /// Position inside a chained PIN gate. Omitted for ordinary one-PIN flows.
@@ -133,22 +146,25 @@ public struct PINEntryScaffold<Badge: View>: View {
             AppBackground(palette: palette).ignoresSafeArea()
 
             #if os(tvOS)
-            // Prose on the left, pad on the right. Splitting them lets the pad sit
-            // at a comfortable reach without squeezing the title, and stops the
-            // eye reading and aiming in the same column.
-            HStack(alignment: .center, spacing: 80) {
+            // Prose on the left, pad on the right, and the PAIR centered on
+            // screen as one composition — the same scheme the wide iOS layout
+            // below uses.
+            //
+            // The prose column is sized explicitly instead of absorbing all the
+            // slack. When it was greedy, the pad landed near 75% of the screen
+            // and had to be dragged back with a hand-tuned `.offset`, which
+            // moved pixels without moving layout: the declared spacing became
+            // fiction, the pad rendered inside the prose's reserved column, and
+            // any change to padding or key size silently shifted it again.
+            // Sizing both columns makes the gap a real number.
+            HStack(alignment: .center, spacing: PINMetrics.columnGap) {
                 prose(centered: false)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(width: PINMetrics.proseColumnWidth, alignment: .leading)
                 padColumn
-                    // The equal two-column layout puts the pad near 75% of the
-                    // screen width. That's mathematically centered in its half,
-                    // but visually too close to the right edge for the main
-                    // control. Pull it toward the screen center while preserving
-                    // the generous gap from the prose.
-                    .offset(x: -190)
             }
-            .padding(.horizontal, PINMetrics.horizontalPadding)
+            .frame(maxWidth: PINMetrics.compositionWidth, maxHeight: .infinity)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, PINMetrics.horizontalPadding)
             #else
             GeometryReader { proxy in
                 if usesTwoColumnLayout(proxy.size) {

@@ -56,7 +56,12 @@ struct ProfileSettingsDetailView: View {
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
-        .sheet(isPresented: $showingEditor) {
+        // Pushed, not presented. Modals requested from inside the Settings tab
+        // are unreliable — `RootView` stacks several `fullScreenCover` modifiers
+        // on one host, and a contested slot silently drops the request (the
+        // header's Edit button did nothing for exactly this reason). A push uses
+        // the navigation stack this page already lives in.
+        .navigationDestination(isPresented: $showingEditor) {
             if let profile {
                 ProfileEditorView(
                     editingProfile: profile,
@@ -70,6 +75,7 @@ struct ProfileSettingsDetailView: View {
                     onLiveChange: { context.onUpdateProfileCosmetics($0) },
                     onCancel: { showingEditor = false }
                 )
+                .toolbar(.hidden, for: .tabBar)
             }
         }
     }

@@ -48,33 +48,21 @@ public struct SettingsView: View {
     /// build. `showDeveloperUnlockedAlert` confirms the unlock.
     private var developerMode: DeveloperModeModel { .shared }
     @State private var showDeveloperUnlockedAlert = false
-    /// Presents the profile editor sheet for the active profile (Edit button in
-    /// the profile header). Mirrors the editor flow in ``ProfileDetailView``.
-    /// Presents the active profile's actions sheet — the same one the picker's
-    /// per-tile Edit opens. Held as a flag rather than a `Profile` so the sheet
-    /// re-reads the live profile and reflects a lock set from inside it.
-    /// Which page of the profile Edit flow is showing.
+    /// The profile header's Edit button **pushes** the profile settings page
+    /// rather than presenting a modal.
     ///
-    /// One `.sheet` modifier drives both, deliberately. This used to be a
-    /// `.sheet(isPresented:)` for the actions and a second `.sheet(item:)` for
-    /// the appearance editor, stacked on the same view — SwiftUI honours only
-    /// one sheet modifier per view, so the header's Edit button drove the losing
-    /// one and did nothing most of the time.
+    /// It used to present a sheet, then a full-screen cover, and neither
+    /// appeared. Console tracing showed the button firing, the state being set
+    /// and held, the view never rebuilt, and SwiftUI building the modal's
+    /// content but never presenting it. The cause is above this view: `RootView`
+    /// stacks six `fullScreenCover` modifiers on one view, and a modal requested
+    /// from deep inside that host gets dropped when the slot is contested.
     ///
-    /// Held as a case rather than a `Profile` so the sheet re-reads the live
-    /// profile and reflects a lock set from inside it.
-    private enum ProfileSheet: Identifiable {
-        case actions
-        case appearance
-
-        var id: Self { self }
-    }
-
-    @State private var profileSheet: ProfileSheet?
-    /// Set when the actions sheet asks for the appearance editor. The editor is
-    /// presented from `onDismiss` rather than immediately, because asking for a
-    /// new presentation in the same turn as a dismissal drops it.
-    @State private var opensAppearanceOnDismiss = false
+    /// Pushing avoids the contested host entirely and reuses
+    /// ``ProfileSettingsDetailView``, which already shows the very same
+    /// `ProfileActionsList` — so there is one implementation of "what can I do
+    /// to this profile", not two. It's also the more native shape for a settings
+    /// drill-down on tvOS.
 
     /// Focus scope for the Settings root list. Turning profiles off pops the
     /// stack back here, and we `resetFocus` into this scope so focus lands on
@@ -438,62 +426,6 @@ public struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Deletes the whole household — every profile and server — from iCloud (all your devices), wipes this Apple TV to first-run, and turns iCloud Sync OFF here. Use to test a clean cold start (e.g. set up only on this Apple TV, then fresh-install another device). Re-enable Sync when done.")
-        }
-        // Edit opens the same actions sheet as the picker: appearance, lock,
-        // Kids Profile, delete. No PIN gate here — you are already *inside* this
-        // profile, so its lock has been satisfied by definition.
-        .sheet(item: $profileSheet) {
-            // Chained, not stacked: the appearance editor is presented only once
-            // the actions sheet has actually gone.
-            if opensAppearanceOnDismiss {
-                opensAppearanceOnDismiss = false
-                profileSheet = .appearance
-            }
-        } content: { sheet in
-            switch sheet {
-            case .actions:
-                ProfileActionsSheet(
-                    profile: activeProfile,
-                    syncEnabled: syncEnabled,
-                    offersPlexPINReuse: activeProfile.playsAsPINProtectedPlexUser,
-                    householdHasOtherLock: profiles.contains {
-                        $0.id != activeProfile.id && $0.isLocked
-                    },
-                    onEditAppearance: {
-                        opensAppearanceOnDismiss = true
-                        profileSheet = nil
-                    },
-                    onSetLock: { onSetProfileLock(activeProfile.id, $0) },
-                    onSetKids: { onSetKidsProfile(activeProfile.id, $0) },
-                    validatePlexPIN: {
-                        await validatePlexPIN($0, activeProfile.id)
-                    },
-                    onDelete: activeProfile.id == profiles.first?.id ? nil : {
-                        onDeleteProfile(activeProfile.id)
-                        profileSheet = nil
-                    },
-                    isUnlocked: isProfileUnlocked(activeProfile.id),
-                    onUnlock: { onProfileUnlocked(activeProfile.id) },
-                    onClose: { profileSheet = nil }
-                )
-            case .appearance:
-                ProfileEditorView(
-                    editingProfile: activeProfile,
-                    canDelete: activeProfile.id != profiles.first?.id,
-                    photoSourceAccounts: accounts,
-                    plexHomeUsersFetcher: plexHomeUsersFetcher,
-                    onSave: { draft in
-                        onSaveProfile(draft)
-                        profileSheet = nil
-                    },
-                    onLiveChange: { onUpdateProfileCosmetics($0) },
-                    onDelete: {
-                        onDeleteProfile(activeProfile.id)
-                        profileSheet = nil
-                    },
-                    onCancel: { profileSheet = nil }
-                )
-            }
         }
     }
 
@@ -1020,9 +952,9 @@ public struct SettingsView: View {
                 }
                 Spacer()
                 HStack(spacing: 12) {
-                    Button {
-                        profileSheet = .actions
-                    } label: {
+                    NavigationLink(
+                        value: SettingsRoute.profileSettings(profileID: activeProfile.id)
+                    ) {
                         Label("Edit", systemImage: "pencil")
                     }
                     Button(action: onSwitchProfile) {

@@ -224,8 +224,24 @@ public final class HomeViewModel {
                     cached.watchlist = resolved
                 }
             }
-            self.state = .loaded(cached)
-            self.isShowingCachedSnapshot = true
+            // With NO servers to watch, every SERVER-derived row in the snapshot
+            // belongs to a library this profile no longer sees. Repainting them
+            // is what made turning every server off appear to do nothing —
+            // Settings showed them all off while Home kept the old library, and
+            // `save` refuses to overwrite good content with an empty aggregate,
+            // so it came back on every launch. The universal watchlist is the
+            // user's own and survives: it isn't a server's to take away.
+            if accounts.isEmpty {
+                cached.continueWatching = []
+                cached.latest = []
+                cached.libraries = []
+                cached.librarySections = []
+                contentStore.clear()
+            }
+            if !cached.isEmpty {
+                self.state = .loaded(cached)
+                self.isShowingCachedSnapshot = true
+            }
         }
     }
 
@@ -397,7 +413,15 @@ public final class HomeViewModel {
         // the exact flash the cached snapshot exists to prevent. A genuine
         // visibility change still reloads; other triggers (post-play resume reload)
         // still refresh.
-        if content.isEmpty, !showLoadingState, case .loaded = state {
+        // "Empty" means two different things and this rule can't tell them apart
+        // on its own: a fetch that FAILED, versus a profile that watches nothing.
+        // Only the first is worth papering over — treating the second as a blip
+        // is what kept a switched-off server's library on screen. With no sources
+        // the emptiness IS the answer, so fall through and let it stand (which
+        // also republishes the Top Shelf, rather than leaving it on the old rows).
+        if content.isEmpty, accounts.isEmpty {
+            contentStore.clear()
+        } else if content.isEmpty, !showLoadingState, case .loaded = state {
             PlozzLog.boot("HomeVM.load KEEP-CACHED silent-empty vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue))")
             lastLoadedVisibility = visibility
             // The live sources were unavailable. Reveal the cached row rather than

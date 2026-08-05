@@ -23,6 +23,15 @@ final class HomeViewModelSnapshotHydrationTests: XCTestCase {
         )
     }
 
+    /// A view model for a profile that watches NO servers.
+    private func makeSourcelessViewModel(contentStore: HomeContentStoring) -> HomeViewModel {
+        HomeViewModel(
+            accounts: [],
+            layoutStore: InMemoryHomeLayoutStore(),
+            contentStore: contentStore
+        )
+    }
+
     private func snapshot(cwIDs: [String]) -> HomeViewModel.Content {
         HomeViewModel.Content(
             continueWatching: cwIDs.map { MediaItem(id: $0, title: "Cached \($0)", kind: .movie) }
@@ -140,5 +149,60 @@ final class HomeViewModelSnapshotHydrationTests: XCTestCase {
         await vm.loadIfNeeded(for: .default)
 
         XCTAssertEqual(store.load()?.continueWatching.map(\.id), ["freshA"], "Fresh content is cached for next launch")
+    }
+
+    // MARK: Watching nothing
+
+    /// Turning every server off left the previous library on screen: the cached
+    /// snapshot was hydrated at init regardless of whether the profile still had
+    /// anything to aggregate, and it survived relaunches because `save` refuses
+    /// to overwrite good content with an empty one.
+    func testAProfileWithNoServersDoesNotPaintTheCachedSnapshot() {
+        let store = InMemoryHomeContentStore(snapshot(cwIDs: ["cachedA"]))
+        let vm = makeSourcelessViewModel(contentStore: store)
+
+        XCTAssertNil(loadedContent(vm), "A profile watching nothing must not repaint an old library")
+        XCTAssertNil(store.load(), "and the stale snapshot must not survive to the next launch")
+    }
+
+    /// The other half: an empty aggregate from a profile with no sources is the
+    /// ANSWER, not a failed fetch, so the keep-cached rule must stand aside.
+    func testLoadingWithNoServersEndsEmptyRatherThanKeepingContent() async {
+        let store = InMemoryHomeContentStore()
+        let vm = makeSourcelessViewModel(contentStore: store)
+        await vm.load(showLoadingState: false)
+
+        guard case .empty = vm.state else {
+            return XCTFail("Expected .empty for a profile that watches nothing, got \(vm.state)")
+        }
+        XCTAssertNil(store.load())
+    }
+
+    /// The fix strips SERVER-derived rows, not everything: the universal
+    /// watchlist is the user's own and isn't a server's to take away.
+    func testAProfileWithNoServersKeepsItsUniversalWatchlist() {
+        var snapshot = self.snapshot(cwIDs: ["cachedA"])
+        snapshot.watchlist = [MediaItem(id: "wl", title: "Watchlisted", kind: .movie)]
+        let vm = makeSourcelessViewModel(contentStore: InMemoryHomeContentStore(snapshot))
+
+        XCTAssertEqual(loadedContent(vm)?.watchlist.map(\.id), ["wl"])
+        XCTAssertEqual(
+            loadedContent(vm)?.continueWatching, [],
+            "but the switched-off server's rows must be gone"
+        )
+    }
+
+    /// Guards the fix from over-reaching: a profile that DOES have a server and
+    /// gets a transient empty (server briefly unreachable) must still keep what
+    /// is on screen, which is what the cached snapshot exists for.
+    func testATransientEmptyStillKeepsCachedContentWhenAServerExists() async {
+        let store = InMemoryHomeContentStore(snapshot(cwIDs: ["cachedA"]))
+        let vm = makeViewModel(provider: FakeMediaProvider(allItems: []), contentStore: store)
+        await vm.load(showLoadingState: false)
+
+        XCTAssertEqual(
+            loadedContent(vm)?.continueWatching.map(\.id), ["cachedA"],
+            "An unreachable server must not blank a good snapshot"
+        )
     }
 }

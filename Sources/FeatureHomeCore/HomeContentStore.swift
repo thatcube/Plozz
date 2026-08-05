@@ -37,6 +37,14 @@ public protocol HomeContentStoring: Sendable {
     /// sources and are not part of ``HomeViewModel/Content``.
     func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]?
     func saveHero(_ items: [MediaItem], for key: HomeHeroCacheKey)
+    /// Discards the snapshot entirely.
+    ///
+    /// `save` deliberately refuses to overwrite good content with an empty
+    /// aggregate, because an empty usually means a server was briefly
+    /// unreachable. When the profile has NO sources to aggregate that reasoning
+    /// inverts: the emptiness is the answer, and a snapshot of servers the
+    /// profile no longer watches would otherwise be repainted at every launch.
+    func clear()
 }
 
 /// Settings that determine whether a cached Featured bucket is reusable.
@@ -187,6 +195,15 @@ public final class HomeContentStore: HomeContentStoring, @unchecked Sendable {
         return stored.content.isEmpty ? nil : stored.content
     }
 
+    public func clear() {
+        guard let fileURL else { return }
+        Self.lock.lock()
+        Self.memo[fileURL.path] = .some(nil)
+        Self.lock.unlock()
+        try? FileManager.default.removeItem(at: fileURL)
+        if let heroFileURL { try? FileManager.default.removeItem(at: heroFileURL) }
+    }
+
     public func save(_ content: HomeViewModel.Content) {
         guard let fileURL else { return }
         let stored = Stored(content: content.bounded(perRow: maxItemsPerRow), savedAt: Date())
@@ -306,6 +323,12 @@ public final class InMemoryHomeContentStore: HomeContentStoring, @unchecked Send
         self.content = content
     }
 
+    public func clear() {
+        lock.lock(); defer { lock.unlock() }
+        content = nil
+        hero = nil
+    }
+
     public func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]? {
         lock.lock(); defer { lock.unlock() }
         guard hero?.key == key else { return nil }
@@ -326,4 +349,5 @@ public final class NoOpHomeContentStore: HomeContentStoring, @unchecked Sendable
     public func save(_ content: HomeViewModel.Content) {}
     public func loadHero(for key: HomeHeroCacheKey) -> [MediaItem]? { nil }
     public func saveHero(_ items: [MediaItem], for key: HomeHeroCacheKey) {}
+    public func clear() {}
 }

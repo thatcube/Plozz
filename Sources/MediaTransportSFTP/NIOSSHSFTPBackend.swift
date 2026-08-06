@@ -30,6 +30,12 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, Sendable {
     /// compiler cannot check, and this is the checked spelling of it.
     private struct State {
         var connection: Connection?
+        /// A handshake is in flight. Reserved BEFORE the first suspension so a
+        /// second `connect` can be refused: `connection` stays nil for the whole
+        /// handshake, so checking it alone let two callers both pass, both
+        /// complete, and the loser's channel and event-loop group leak — never
+        /// installed, so never shut down, and invisible to `shutdown()`.
+        var isConnecting = false
         var lastCapturedHostKeyFingerprint: [UInt8]?
         var isClosed = false
         var nextRequestID: UInt32 = 0
@@ -61,12 +67,22 @@ final class NIOSSHSFTPBackend: SFTPTransportBackend, Sendable {
         credential: SFTPMediaTransportCredential,
         hostKeyPolicy: SFTPHostKeyPolicy
     ) async throws {
-        // Decided under the lock; the throw happens after it is released, so no
+        // Claim the slot under the lock, and throw after releasing it, so no
         // error path can leave the lock held or block a cooperative thread.
-        let alreadyConnected = state.withLock { $0.connection != nil || $0.isClosed }
-        guard !alreadyConnected else {
+        let claimed = state.withLock { state -> Bool in
+            guard state.connection == nil, !state.isClosed, !state.isConnecting else {
+                return false
+            }
+            state.isConnecting = true
+            return true
+        }
+        guard claimed else {
             throw MediaTransportError.invalidInput(reason: "SFTP backend already connected")
         }
+        // Released on every exit from here on, including the throwing ones —
+        // otherwise a failed handshake would wedge the backend into a state
+        // where no later connect can ever claim the slot.
+        defer { state.withLock { $0.isConnecting = false } }
 
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let authDelegate = SFTPUserAuthenticationDelegate(credential: credential)

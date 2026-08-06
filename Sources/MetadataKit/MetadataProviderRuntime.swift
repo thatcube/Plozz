@@ -50,9 +50,21 @@ public final class ProviderBreakerRegistry: Sendable {
 
     /// The stable breaker for `key`, creating and caching one on first use.
     public func breaker(for key: ProviderBreakerKey) -> ProviderCircuitBreaker {
-        breakers.withLock { breakers in
+        // Fast path under the lock; construction OUTSIDE it.
+        //
+        // `makeBreaker` is caller-supplied, and `Mutex` is not recursive — a
+        // factory that reached back into this registry while it held the lock
+        // would deadlock outright. Nothing production does that today, but the
+        // initializer takes an arbitrary closure, so the API allows it and the
+        // cost of not allowing it is one extra lock acquisition on first use.
+        if let existing = breakers.withLock({ $0[key] }) { return existing }
+        let created = makeBreaker()
+        // Re-check on install: another caller may have vended one for this key
+        // while the factory ran, and two callers must never end up holding
+        // different breakers for the same key — the whole point of a breaker is
+        // that everyone shares its trip state.
+        return breakers.withLock { breakers in
             if let existing = breakers[key] { return existing }
-            let created = makeBreaker()
             breakers[key] = created
             return created
         }

@@ -58,7 +58,14 @@ struct ProfileServerIdentityPromptView: View {
                 .font(.system(size: 44, weight: .bold))
                 .foregroundStyle(palette.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("This profile will watch — and keep its watchlist — as whoever you pick.")
+            // Says what actually happens, in both directions: their watchlist is
+            // what gets shown, and anything saved here is saved to it. The old
+            // wording ("keep its watchlist") implied the profile had a separate
+            // list being kept in sync with theirs, which was never the case.
+            Text(
+                "Plozz will play as this person here, show their watchlist, and save to it.",
+                comment: "Explains that picking a server user makes Plozz act as them: their watchlist is displayed, and watchlist changes are written to it."
+            )
                 .font(.subheadline)
                 .foregroundStyle(palette.secondaryText)
         }
